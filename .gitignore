@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# Playwright MCP test artifacts (screenshots, snapshots, console logs)
+.playwright-mcp/
+goldfinch-*.png
+
+# Machine-local Claude Code settings (permissions/prefs)
+.claude/settings.local.json

@@ -1,0 +1,16 @@
+{
+  "name": "goldfinch",
+  "version": "0.1.0",
+  "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
+  "main": "src/main/main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}
