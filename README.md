@@ -5,6 +5,22 @@ essentials **plus an expandable media panel** that catalogs every image, video,
 audio file, and embed on the current page so you can preview, play, or download
 each one independently.
 
+## Download
+
+Grab the latest installer from the
+**[Releases page »](https://github.com/msieurthenardier/goldfinch/releases/latest)**,
+or download v0.1.0 directly:
+
+| Platform | Installer |
+|----------|-----------|
+| **Windows** | [Goldfinch Setup 0.1.0.exe](https://github.com/msieurthenardier/goldfinch/releases/download/v0.1.0/Goldfinch.Setup.0.1.0.exe) |
+| **macOS** (Apple Silicon) | [Goldfinch-0.1.0-arm64.dmg](https://github.com/msieurthenardier/goldfinch/releases/download/v0.1.0/Goldfinch-0.1.0-arm64.dmg) · [.zip](https://github.com/msieurthenardier/goldfinch/releases/download/v0.1.0/Goldfinch-0.1.0-arm64-mac.zip) |
+| **Linux** | [Goldfinch-0.1.0.AppImage](https://github.com/msieurthenardier/goldfinch/releases/download/v0.1.0/Goldfinch-0.1.0.AppImage) · [.deb](https://github.com/msieurthenardier/goldfinch/releases/download/v0.1.0/goldfinch_0.1.0_amd64.deb) |
+
+> Builds are currently **unsigned**, so the first launch shows a Gatekeeper
+> (macOS) / SmartScreen (Windows) warning — allow it through to run. macOS
+> builds are Apple Silicon only for now.
+
 ## Features
 
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
@@ -12,14 +28,18 @@ each one independently.
   favicons, popups opened as new tabs.
 - **Media panel** (toggle with the *Media* button or `Ctrl+M`):
   - Scans the live DOM for `<img>`, `srcset`/`<picture>`, CSS background images,
-    `og:image`, `<video>`, `<audio>`, and known video/audio embeds (YouTube,
-    Vimeo, SoundCloud, Spotify, Twitch, …).
+    `og:image`, `<video>`, `<audio>`, direct file links (e.g. `.mp3` anchors on
+    music blogs), and known embeds (YouTube, Vimeo, SoundCloud, Spotify, Twitch).
   - Re-scans automatically as pages lazy-load more media.
   - Filter by type (images / video / audio / embeds).
-  - **Play / View** any item in an in-app lightbox player.
+  - **Pop out** any item: images open in a zoomable/pannable lightbox viewer;
+    video/audio open full-size in a new tab.
+  - **Inline video** plays right in its card.
+  - **Docked music player** — old-school play/pause, prev/next, seek bar and
+    LCD time; the page's audio list becomes the playlist.
   - **Download** any item individually — using the page's own session so
-    cookies/referer/auth are preserved — with progress toasts and *Show in
-    folder*.
+    cookies/referer/auth are preserved — or **Download all** in the current
+    filter into a folder (one prompt, silent concurrency-capped batch).
 
 ## Run
 
