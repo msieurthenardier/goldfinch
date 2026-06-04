@@ -172,3 +172,50 @@ if (document.documentElement) {
 
 // Allow the UI to force a refresh.
 ipcRenderer.on('rescan-media', () => send());
+
+// ---------------------------------------------------------------------------
+// Privacy: fingerprinting detection. The webview runs this preload in the
+// page's MAIN world (contextIsolation=no), so we can wrap the fingerprinting-
+// prone APIs directly — CSP-immune and reliable, unlike injecting a script.
+// ---------------------------------------------------------------------------
+const fpCounts = { canvas: 0, webgl: 0, audio: 0 };
+let fpTimer = null;
+function bumpFp(kind) {
+  fpCounts[kind]++;
+  if (fpTimer) return;
+  fpTimer = setTimeout(() => {
+    fpTimer = null;
+    try { ipcRenderer.sendToHost('privacy-fp', fpCounts); } catch (e) {}
+  }, 500);
+}
+
+(function installFingerprintHooks() {
+  try {
+    const c2d = window.CanvasRenderingContext2D && window.CanvasRenderingContext2D.prototype;
+    if (c2d && c2d.getImageData) {
+      const gid = c2d.getImageData;
+      c2d.getImageData = function () { bumpFp('canvas'); return gid.apply(this, arguments); };
+    }
+    const cv = window.HTMLCanvasElement && window.HTMLCanvasElement.prototype;
+    if (cv) {
+      ['toDataURL', 'toBlob'].forEach((m) => {
+        if (!cv[m]) return;
+        const orig = cv[m];
+        cv[m] = function () { bumpFp('canvas'); return orig.apply(this, arguments); };
+      });
+    }
+    [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach((GL) => {
+      if (!GL || !GL.prototype.getParameter) return;
+      const gp = GL.prototype.getParameter;
+      GL.prototype.getParameter = function (p) {
+        if (p === 37445 || p === 37446) bumpFp('webgl'); // UNMASKED_VENDOR / RENDERER
+        return gp.apply(this, arguments);
+      };
+    });
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC && AC.prototype && AC.prototype.createAnalyser) {
+      const ca = AC.prototype.createAnalyser;
+      AC.prototype.createAnalyser = function () { bumpFp('audio'); return ca.apply(this, arguments); };
+    }
+  } catch (e) { /* ignore */ }
+})();
