@@ -3,14 +3,55 @@
   "version": "0.1.0",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
-  "author": "",
+  "author": "msieurthenardier <msieurthenardier@gmail.com>",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
-    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*"
+    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.goldfinch.browser",
+    "productName": "Goldfinch",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "maintainer": "msieurthenardier <msieurthenardier@gmail.com>"
+    }
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }
