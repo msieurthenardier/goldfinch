@@ -1,0 +1,28 @@
+# Keeps dependencies current so the project never silently drifts a major
+# version behind again (the 01-maintenance mission's recurrence-prevention goal).
+#
+# Minor/patch bumps are grouped into a single weekly PR to reduce noise.
+# MAJOR bumps (notably `electron`/`electron-builder`) arrive as their own PRs:
+# before merging an Electron major, run the behavior tests against the upgraded
+# app — `/behavior-test core-browsing-shields` (Shields/webRequest regression)
+# and `/behavior-test tab-scheme-guard` (F1 hostile-URL guard) — they are the
+# manual runtime gate for an upgrade (CI's gates are type/unit/lint/audit only).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
