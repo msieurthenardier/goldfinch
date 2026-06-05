@@ -80,3 +80,33 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
+
+  # After a release is published, point the README's download links at the new
+  # version and commit it back to main.
+  update-readme:
+    name: Update README download links
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Regenerate download section for ${{ github.ref_name }}
+        run: node scripts/update-readme.mjs "${GITHUB_REF_NAME#v}"
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "README already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update download links for ${GITHUB_REF_NAME}"
+          git push origin HEAD:main
