@@ -9,12 +9,12 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULTS = {
-  enabled: true,   // master switch
-  block: true,     // cancel requests to known trackers
-  strip: true,     // strip tracking params + trim Referer
-  isolate: true,   // strip third-party Cookie / Set-Cookie
-  farble: true,    // fingerprint noise + navigator spoofing (preload)
-  pausedSites: []  // registrable domains where shields are off
+  enabled: true, // master switch
+  block: true, // cancel requests to known trackers
+  strip: true, // strip tracking params + trim Referer
+  isolate: true, // strip third-party Cookie / Set-Cookie
+  farble: true, // fingerprint noise + navigator spoofing (preload)
+  pausedSites: [] // registrable domains where shields are off
 };
 
 let config = { ...DEFAULTS };
@@ -26,15 +26,23 @@ function load() {
     if (fs.existsSync(configPath)) {
       config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) };
     }
-  } catch { /* defaults */ }
+  } catch {
+    /* defaults */
+  }
   return config;
 }
 
 function save() {
-  try { if (configPath) fs.writeFileSync(configPath, JSON.stringify(config, null, 2)); } catch { /* ignore */ }
+  try {
+    if (configPath) fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch {
+    /* ignore */
+  }
 }
 
-function get() { return config; }
+function get() {
+  return config;
+}
 
 function set(patch) {
   config = { ...config, ...patch };
@@ -42,7 +50,9 @@ function set(patch) {
   return config;
 }
 
-function isPaused(site) { return !!site && config.pausedSites.includes(site); }
+function isPaused(site) {
+  return !!site && config.pausedSites.includes(site);
+}
 
 function setPaused(site, paused) {
   const s = new Set(config.pausedSites);
@@ -61,17 +71,51 @@ function active(strategy, site) {
 // --- tracking parameter stripping ---------------------------------------
 
 const TRACKING_PARAMS = new Set([
-  'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid', 'gad_source',
-  'fbclid', 'msclkid', 'yclid', 'twclid', 'ttclid', 'igshid', 'igsh',
-  'mc_eid', 'mc_cid', 'mkt_tok', 'vero_id', 'vero_conv', '_openstat',
-  'oly_anon_id', 'oly_enc_id', 'wickedid', 'li_fat_id', 'rb_clickid',
-  's_cid', 'icid', 'ir_clickid', '_hsenc', '_hsmi', 'ml_subscriber',
-  'ml_subscriber_hash', 'guccounter', 'guce_referrer', 'guce_referrer_sig'
+  'gclid',
+  'gclsrc',
+  'dclid',
+  'gbraid',
+  'wbraid',
+  'gad_source',
+  'fbclid',
+  'msclkid',
+  'yclid',
+  'twclid',
+  'ttclid',
+  'igshid',
+  'igsh',
+  'mc_eid',
+  'mc_cid',
+  'mkt_tok',
+  'vero_id',
+  'vero_conv',
+  '_openstat',
+  'oly_anon_id',
+  'oly_enc_id',
+  'wickedid',
+  'li_fat_id',
+  'rb_clickid',
+  's_cid',
+  'icid',
+  'ir_clickid',
+  '_hsenc',
+  '_hsmi',
+  'ml_subscriber',
+  'ml_subscriber_hash',
+  'guccounter',
+  'guce_referrer',
+  'guce_referrer_sig'
 ]);
 
 function isTrackingParam(key) {
   const k = key.toLowerCase();
-  return TRACKING_PARAMS.has(k) || k.startsWith('utm_') || k.startsWith('hsa_') || k.startsWith('pk_') || k.startsWith('mtm_');
+  return (
+    TRACKING_PARAMS.has(k) ||
+    k.startsWith('utm_') ||
+    k.startsWith('hsa_') ||
+    k.startsWith('pk_') ||
+    k.startsWith('mtm_')
+  );
 }
 
 // Returns a cleaned URL string if any tracking params were removed, else null.

@@ -3,7 +3,9 @@
 **Slug**: `tab-scheme-guard`
 **Status**: draft
 **Created**: 2026-06-05
-**Last Run**: never
+**Last Run**: 2026-06-05-16-29-17 (partial — 5 pass / 0 fail / 1 inconclusive; see runs/2026-06-05-16-29-17.md)
+
+> **Step 6 (media-open file:) needs refinement before promotion to `active`.** The first run found this vector structurally unreachable: `file:` media is never cataloged by the media panel (the crafted `<video src=file://>` errors and never enters the catalog), so there is no media-open path to exercise. The genuinely-hostile vectors (window.open + in-page `window.location`) passed live. Refine Step 6 to a reachable case (e.g. a crafted dangerous-scheme item via the http(s) media-open path, which shares the same `createTab` guard), then re-run to promote.
 
 ## Intent
 

@@ -9,7 +9,9 @@ Goldfinch — an Electron desktop browser with a media panel (scan/play/download
 - `npm start` — run the app
 - `npm run dev:debug` — run with remote debugging on `:9222` (`--no-sandbox`, WSL/headless friendly)
 - `npm run dist` — build installers (electron-builder); `npm run pack` for an unpacked `--dir` build
-- `npm test` — runs `node --test` over `test/unit/**`. Unit suite covers the pure security helpers (`src/shared/url-safety.js`, `src/main/download-path.js`, `jars.js` validation). No linter yet. **For real-environment / UI behavior, drive the running app over CDP**: start `dev:debug`, then connect to `http://127.0.0.1:9222` and `Runtime.evaluate` against the page target (the renderer) or the `webview` target (page content). The Playwright MCP can also attach via `.mcp.json`. See `tests/behavior/` for behavior-test specs.
+- `npm test` — runs `node --test` over `test/unit/**`. Unit suite covers the pure security/privacy helpers (`src/shared/url-safety.js`, `src/main/download-path.js`, `jars.js` validation + `isSafeColor`, `trackers.js`, `shields.js`). **For real-environment / UI behavior, drive the running app over CDP**: start `dev:debug`, then connect to `http://127.0.0.1:9222` and `Runtime.evaluate` against the page target (the renderer) or the `webview` target (page content). The Playwright MCP can also attach via `.mcp.json`. See `tests/behavior/` for behavior-test specs.
+- `npm run lint` — ESLint over the whole repo (`eslint.config.mjs`; flat config).
+- `npm run typecheck` — `tsc --noEmit -p jsconfig.json`; checks all `// @ts-check` files.
 
 ## Architecture
 
@@ -25,6 +27,32 @@ Key cross-cutting facts:
 - **`asar:false`** in the build config so the webview preload loads from disk in packaged apps.
 - Per-tab privacy/shield data flows: main aggregates → `privacy-net` IPC → renderer; preload fingerprint counts → `sendToHost` → renderer. Farble config is fetched **synchronously at page load** (`shields-farble`), so toggling farble needs a reload.
 - Persisted state lives in `userData`: `shields.json`, `containers.json` (not in the repo).
+
+## Patterns
+
+### `src/shared/` dual-export predicate
+
+Pure predicate modules in `src/shared/` export themselves for both execution contexts in a single file. Example: `url-safety.js` defines `isSafeTabUrl` and `isSafePosterUrl`, then at the bottom:
+
+```js
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { isSafeTabUrl, isSafePosterUrl }; // main process + test runner (require)
+} else {
+  globalThis.isSafeTabUrl = isSafeTabUrl;             // renderer (nodeIntegration:false, loaded via <script>)
+  globalThis.isSafePosterUrl = isSafePosterUrl;
+}
+```
+
+The renderer loads the file via `<script src="...url-safety.js">`, which sets the functions as globals. The main process and unit tests use `require()`. The unit tests therefore run against the exact same code the app uses — no stubs or duplicates.
+
+### Two-point hostile-URL security boundary
+
+Hostile URL injection is blocked at two independent enforcement points, both using `isSafeTabUrl`:
+
+1. **`createTab` gate** (`src/renderer/renderer.js`) — rejects any URL that isn't `http:`, `https:`, or `about:blank` before a `<webview>` is created.
+2. **`will-navigate` guard** (`src/main/main.js`) — `contents.on('will-navigate', …)` calls `e.preventDefault()` on the same predicate, blocking navigation that bypasses the renderer gate (e.g. via `window.open` or `<a target=_blank>`).
+
+The shared predicate ensures both gates stay in sync automatically.
 
 ## Release / CI
 

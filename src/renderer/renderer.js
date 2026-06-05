@@ -5,50 +5,66 @@
 const HOMEPAGE = 'https://www.google.com';
 
 const els = {
-  tabs: document.getElementById('tabs'),
-  newTab: document.getElementById('new-tab'),
-  newTabMenu: document.getElementById('new-tab-menu'),
-  containerMenu: document.getElementById('container-menu'),
-  webviews: document.getElementById('webviews'),
-  back: document.getElementById('back'),
-  forward: document.getElementById('forward'),
-  reload: document.getElementById('reload'),
-  address: document.getElementById('address'),
-  toggleMedia: document.getElementById('toggle-media'),
-  mediaCount: document.getElementById('media-count'),
-  panel: document.getElementById('media-panel'),
-  mediaList: document.getElementById('media-list'),
-  mediaEmpty: document.getElementById('media-empty'),
-  mediaClose: document.getElementById('media-close'),
-  mediaRescan: document.getElementById('media-rescan'),
-  mediaDownloadSelected: document.getElementById('media-download-selected'),
-  filters: document.querySelectorAll('.filter'),
-  toasts: document.getElementById('toasts'),
-  lightbox: document.getElementById('lightbox'),
-  lightboxStage: document.getElementById('lightbox-stage'),
-  lightboxCaption: document.getElementById('lightbox-caption'),
-  lightboxZoomLevel: document.getElementById('lightbox-zoom-level'),
-  lightboxClose: document.getElementById('lightbox-close'),
-  lightboxZoomIn: document.getElementById('lightbox-zoom-in'),
-  lightboxZoomOut: document.getElementById('lightbox-zoom-out'),
-  lightboxZoomReset: document.getElementById('lightbox-zoom-reset'),
-  togglePrivacy: document.getElementById('toggle-privacy'),
-  privacyCount: document.getElementById('privacy-count'),
-  privacyPanel: document.getElementById('privacy-panel'),
-  privacyBody: document.getElementById('privacy-body'),
-  privacyClose: document.getElementById('privacy-close'),
-  privacyRefresh: document.getElementById('privacy-refresh'),
-  player: document.getElementById('player'),
-  playerAudio: document.getElementById('player-audio'),
-  playerTitle: document.getElementById('player-title'),
-  playerProgress: document.getElementById('player-progress'),
-  playerSeek: document.getElementById('player-seek'),
-  playerCur: document.getElementById('player-cur'),
-  playerDur: document.getElementById('player-dur'),
-  playerPlay: document.getElementById('player-play'),
-  playerPrev: document.getElementById('player-prev'),
-  playerNext: document.getElementById('player-next')
+  tabs: /** @type {HTMLElement} */ (document.getElementById('tabs')),
+  newTab: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab')),
+  newTabMenu: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab-menu')),
+  containerMenu: /** @type {HTMLElement} */ (document.getElementById('container-menu')),
+  webviews: /** @type {HTMLElement} */ (document.getElementById('webviews')),
+  back: /** @type {HTMLButtonElement} */ (document.getElementById('back')),
+  forward: /** @type {HTMLButtonElement} */ (document.getElementById('forward')),
+  reload: /** @type {HTMLButtonElement} */ (document.getElementById('reload')),
+  address: /** @type {HTMLInputElement} */ (document.getElementById('address')),
+  toggleMedia: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-media')),
+  mediaCount: /** @type {HTMLElement} */ (document.getElementById('media-count')),
+  panel: /** @type {HTMLElement} */ (document.getElementById('media-panel')),
+  mediaList: /** @type {HTMLElement} */ (document.getElementById('media-list')),
+  mediaEmpty: /** @type {HTMLElement} */ (document.getElementById('media-empty')),
+  mediaClose: /** @type {HTMLButtonElement} */ (document.getElementById('media-close')),
+  mediaRescan: /** @type {HTMLButtonElement} */ (document.getElementById('media-rescan')),
+  mediaDownloadSelected: /** @type {HTMLButtonElement} */ (document.getElementById('media-download-selected')),
+  filters: /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.filter')),
+  toasts: /** @type {HTMLElement} */ (document.getElementById('toasts')),
+  lightbox: /** @type {HTMLElement} */ (document.getElementById('lightbox')),
+  lightboxStage: /** @type {HTMLElement} */ (document.getElementById('lightbox-stage')),
+  lightboxCaption: /** @type {HTMLElement} */ (document.getElementById('lightbox-caption')),
+  lightboxZoomLevel: /** @type {HTMLElement} */ (document.getElementById('lightbox-zoom-level')),
+  lightboxClose: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-close')),
+  lightboxZoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-in')),
+  lightboxZoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-out')),
+  lightboxZoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-reset')),
+  togglePrivacy: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-privacy')),
+  privacyCount: /** @type {HTMLElement} */ (document.getElementById('privacy-count')),
+  privacyPanel: /** @type {HTMLElement} */ (document.getElementById('privacy-panel')),
+  privacyBody: /** @type {HTMLElement} */ (document.getElementById('privacy-body')),
+  privacyClose: /** @type {HTMLButtonElement} */ (document.getElementById('privacy-close')),
+  privacyRefresh: /** @type {HTMLButtonElement} */ (document.getElementById('privacy-refresh')),
+  player: /** @type {HTMLElement} */ (document.getElementById('player')),
+  playerAudio: /** @type {HTMLAudioElement} */ (document.getElementById('player-audio')),
+  playerTitle: /** @type {HTMLElement} */ (document.getElementById('player-title')),
+  playerProgress: /** @type {HTMLElement} */ (document.getElementById('player-progress')),
+  playerSeek: /** @type {HTMLElement} */ (document.getElementById('player-seek')),
+  playerCur: /** @type {HTMLElement} */ (document.getElementById('player-cur')),
+  playerDur: /** @type {HTMLElement} */ (document.getElementById('player-dur')),
+  playerPlay: /** @type {HTMLButtonElement} */ (document.getElementById('player-play')),
+  playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
+  playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next'))
 };
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   webview: Electron.WebviewTag,
+ *   title: string,
+ *   url: string,
+ *   favicon: string | null,
+ *   media: any[],
+ *   selected: Set<string>,
+ *   wcId: number | null,
+ *   privacy: { net: any, fp: { canvas: number, webgl: number, audio: number }, permissions: any[], cookies: any },
+ *   container: { id: string, name: string, color: string, partition: string, burner?: boolean },
+ *   btn?: HTMLElement
+ * }} Tab
+ */
 
 /** @type {Map<string, Tab>} */
 const tabs = new Map();
@@ -60,7 +76,9 @@ let tabSeq = 0;
 
 const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
 let containers = [DEFAULT_CONTAINER];
-window.goldfinch.jarsList().then((list) => { if (list && list.length) containers = list; });
+window.goldfinch.jarsList().then((list) => {
+  if (list && list.length) containers = list;
+});
 
 function makeBurner() {
   const n = Math.floor(Math.random() * 1e9);
@@ -74,13 +92,19 @@ function openContainerMenu() {
     const item = document.createElement('button');
     item.className = 'cm-item';
     item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
-    item.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, c); });
+    item.addEventListener('click', () => {
+      closeContainerMenu();
+      createTab(HOMEPAGE, c);
+    });
     m.appendChild(item);
   }
   const burner = document.createElement('button');
   burner.className = 'cm-item';
   burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
-  burner.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, makeBurner()); });
+  burner.addEventListener('click', () => {
+    closeContainerMenu();
+    createTab(HOMEPAGE, makeBurner());
+  });
   m.appendChild(burner);
 
   const add = document.createElement('button');
@@ -90,7 +114,9 @@ function openContainerMenu() {
   m.appendChild(add);
   m.classList.remove('hidden');
 }
-function closeContainerMenu() { els.containerMenu.classList.add('hidden'); }
+function closeContainerMenu() {
+  els.containerMenu.classList.add('hidden');
+}
 
 async function addContainer() {
   const name = window.prompt('New container name:');
@@ -108,7 +134,7 @@ function createTab(url = HOMEPAGE, container = null) {
   const id = `tab-${++tabSeq}`;
   const jar = container || DEFAULT_CONTAINER;
 
-  const webview = document.createElement('webview');
+  const webview = /** @type {Electron.WebviewTag} */ (document.createElement('webview'));
   webview.setAttribute('src', url);
   webview.setAttribute('preload', window.goldfinch.webviewPreloadPath);
   webview.setAttribute('allowpopups', '');
@@ -116,7 +142,18 @@ function createTab(url = HOMEPAGE, container = null) {
   webview.classList.add('hidden');
   els.webviews.appendChild(webview);
 
-  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], selected: new Set(), wcId: null, privacy: blankPrivacy(), container: jar };
+  const tab = {
+    id,
+    webview,
+    title: 'New tab',
+    url,
+    favicon: null,
+    media: [],
+    selected: new Set(),
+    wcId: null,
+    privacy: blankPrivacy(),
+    container: jar
+  };
   tabs.set(id, tab);
 
   // Tab button in the strip.
@@ -124,10 +161,16 @@ function createTab(url = HOMEPAGE, container = null) {
   btn.className = 'tab';
   btn.dataset.id = id;
   // Colored dot for non-default jars.
-  const dot = jar.id === 'default' ? '' : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
+  const dot =
+    jar.id === 'default'
+      ? ''
+      : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
   btn.innerHTML = `${dot}<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
   btn.addEventListener('click', (e) => {
-    if (e.target.classList.contains('tab-close')) { closeTab(id); return; }
+    if (/** @type {HTMLElement} */ (e.target).classList.contains('tab-close')) {
+      closeTab(id);
+      return;
+    }
     activateTab(id);
   });
   els.tabs.appendChild(btn);
@@ -168,7 +211,9 @@ function activateTab(id) {
   updateNavButtons();
 }
 
-function activeTab() { return tabs.get(activeTabId) || null; }
+function activeTab() {
+  return tabs.get(activeTabId) || null;
+}
 
 /* ----------------------------------------------------------- webview wiring */
 
@@ -176,12 +221,20 @@ function wireWebview(tab) {
   const wv = tab.webview;
 
   wv.addEventListener('dom-ready', () => {
-    try { tab.wcId = wv.getWebContentsId(); } catch { /* not ready */ }
+    try {
+      tab.wcId = wv.getWebContentsId();
+    } catch {
+      /* not ready */
+    }
     updateNavButtons();
   });
 
-  wv.addEventListener('did-start-loading', () => { if (tab.id === activeTabId) els.reload.textContent = '✕'; });
-  wv.addEventListener('did-stop-loading', () => { if (tab.id === activeTabId) els.reload.textContent = '⟳'; });
+  wv.addEventListener('did-start-loading', () => {
+    if (tab.id === activeTabId) els.reload.textContent = '✕';
+  });
+  wv.addEventListener('did-stop-loading', () => {
+    if (tab.id === activeTabId) els.reload.textContent = '⟳';
+  });
 
   wv.addEventListener('page-title-updated', (e) => {
     tab.title = e.title;
@@ -200,17 +253,26 @@ function wireWebview(tab) {
 
   const onNav = () => {
     tab.url = wv.getURL();
-    if (tab.id === activeTabId) { els.address.value = tab.url; updateNavButtons(); }
+    if (tab.id === activeTabId) {
+      els.address.value = tab.url;
+      updateNavButtons();
+    }
     // Reset media + selection + privacy on full navigation; preload/main re-populate.
     tab.media = [];
     tab.selected.clear();
     tab.privacy = blankPrivacy();
-    if (tab.id === activeTabId) { renderMedia(); renderPrivacy(); }
+    if (tab.id === activeTabId) {
+      renderMedia();
+      renderPrivacy();
+    }
   };
   wv.addEventListener('did-navigate', onNav);
   wv.addEventListener('did-navigate-in-page', () => {
     tab.url = wv.getURL();
-    if (tab.id === activeTabId) { els.address.value = tab.url; updateNavButtons(); }
+    if (tab.id === activeTabId) {
+      els.address.value = tab.url;
+      updateNavButtons();
+    }
   });
 
   // Media catalog + privacy signals streamed up from the webview preload.
@@ -232,8 +294,14 @@ function wireWebview(tab) {
 function updateNavButtons() {
   const tab = activeTab();
   const wv = tab && tab.webview;
-  let canBack = false, canFwd = false;
-  try { canBack = wv && wv.canGoBack(); canFwd = wv && wv.canGoForward(); } catch { /* not ready */ }
+  let canBack = false,
+    canFwd = false;
+  try {
+    canBack = wv && wv.canGoBack();
+    canFwd = wv && wv.canGoForward();
+  } catch {
+    /* not ready */
+  }
   els.back.disabled = !canBack;
   els.forward.disabled = !canFwd;
 }
@@ -256,13 +324,32 @@ function toUrl(input) {
 }
 
 els.address.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { navigate(els.address.value); els.address.blur(); }
+  if (e.key === 'Enter') {
+    navigate(els.address.value);
+    els.address.blur();
+  }
 });
-els.back.addEventListener('click', () => { const t = activeTab(); try { t.webview.goBack(); } catch {} });
-els.forward.addEventListener('click', () => { const t = activeTab(); try { t.webview.goForward(); } catch {} });
+els.back.addEventListener('click', () => {
+  const t = activeTab();
+  try {
+    t.webview.goBack();
+  } catch {
+    /* webview not ready */
+  }
+});
+els.forward.addEventListener('click', () => {
+  const t = activeTab();
+  try {
+    t.webview.goForward();
+  } catch {
+    /* webview not ready */
+  }
+});
 els.reload.addEventListener('click', () => {
-  const t = activeTab(); if (!t) return;
-  if (els.reload.textContent === '✕') t.webview.stop(); else t.webview.reload();
+  const t = activeTab();
+  if (!t) return;
+  if (els.reload.textContent === '✕') t.webview.stop();
+  else t.webview.reload();
 });
 els.newTab.addEventListener('click', () => createTab());
 els.newTabMenu.addEventListener('click', (e) => {
@@ -284,15 +371,23 @@ els.toggleMedia.addEventListener('click', () => togglePanel());
 els.mediaClose.addEventListener('click', () => togglePanel(false));
 els.mediaRescan.addEventListener('click', () => {
   const t = activeTab();
-  if (t && t.wcId != null) { try { t.webview.send('rescan-media'); } catch {} }
+  if (t && t.wcId != null) {
+    try {
+      t.webview.send('rescan-media');
+    } catch {
+      /* webview not ready */
+    }
+  }
 });
 
-els.filters.forEach((f) => f.addEventListener('click', () => {
-  els.filters.forEach((x) => x.classList.remove('active'));
-  f.classList.add('active');
-  activeFilter = f.dataset.filter;
-  renderMedia();
-}));
+els.filters.forEach((f) =>
+  f.addEventListener('click', () => {
+    els.filters.forEach((x) => x.classList.remove('active'));
+    f.classList.add('active');
+    activeFilter = f.dataset.filter;
+    renderMedia();
+  })
+);
 
 // Items currently shown in the panel, honoring the active filter.
 function visibleItems() {
@@ -331,7 +426,8 @@ function mediaCard(item, tab) {
     if (cb.checked) card.classList.add('selected');
     pick.addEventListener('click', (e) => e.stopPropagation());
     cb.addEventListener('change', () => {
-      if (cb.checked) tab.selected.add(item.url); else tab.selected.delete(item.url);
+      if (cb.checked) tab.selected.add(item.url);
+      else tab.selected.delete(item.url);
       card.classList.toggle('selected', cb.checked);
       updateDownloadSelected();
     });
@@ -342,8 +438,6 @@ function mediaCard(item, tab) {
   badge.textContent = item.type;
   pick.appendChild(badge);
   thumb.appendChild(pick);
-
-  const isAV = item.type === 'video' || item.type === 'audio';
 
   if (item.type === 'image') {
     const img = document.createElement('img');
@@ -362,7 +456,8 @@ function mediaCard(item, tab) {
     thumb.title = 'Play in player';
     thumb.addEventListener('click', () => playAudio(item));
     if (player.url === item.url) card.classList.add('playing');
-  } else { // embed
+  } else {
+    // embed
     thumb.insertAdjacentHTML('beforeend', `<span class="play-glyph">⧉</span>`);
     thumb.title = 'Open in new tab';
     thumb.addEventListener('click', () => popout(item));
@@ -374,7 +469,8 @@ function mediaCard(item, tab) {
   const dims = item.width && item.height ? `${item.width}×${item.height}` : '';
   const primary = item.label || item.name;
   const secondary = item.label && item.name !== item.label ? item.name : dims;
-  meta.innerHTML = `<div class="media-name">${escapeHtml(primary)}</div>` +
+  meta.innerHTML =
+    `<div class="media-name">${escapeHtml(primary)}</div>` +
     (secondary ? `<div class="media-dims">${escapeHtml(secondary)}</div>` : '');
   card.appendChild(meta);
 
@@ -386,7 +482,9 @@ function mediaCard(item, tab) {
   else if (item.type === 'video') actions.appendChild(iconBtn('▶', 'Play here', () => playInline(item, thumb)));
 
   // Every item gets a pop-out: images -> zoomable viewer, AV -> full-size tab.
-  actions.appendChild(iconBtn('↗', item.type === 'image' ? 'Open in viewer' : 'Pop out to new tab', () => popout(item)));
+  actions.appendChild(
+    iconBtn('↗', item.type === 'image' ? 'Open in viewer' : 'Pop out to new tab', () => popout(item))
+  );
 
   // Download (everything except non-fetchable embeds).
   if (item.type !== 'embed') {
@@ -403,7 +501,10 @@ function iconBtn(glyph, title, onClick) {
   b.className = 'icon-action';
   b.textContent = glyph;
   b.title = title;
-  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick();
+  });
   return b;
 }
 
@@ -425,7 +526,10 @@ function playInline(item, thumb) {
 
 // Pop a media item out of the panel into its best full view.
 function popout(item) {
-  if (item.type === 'image') { openLightbox(item); return; }
+  if (item.type === 'image') {
+    openLightbox(item);
+    return;
+  }
   createTab(item.url); // video / audio / embed open full-size as a real tab
 }
 
@@ -448,7 +552,9 @@ function centerImage() {
   applyZoom();
 }
 
-function resetZoom() { centerImage(); }
+function resetZoom() {
+  centerImage();
+}
 
 function setScale(next, originX, originY) {
   const stage = els.lightboxStage.getBoundingClientRect();
@@ -457,8 +563,8 @@ function setScale(next, originX, originY) {
   const prev = zoom.scale;
   next = Math.min(8, Math.max(0.2, next));
   // Keep the point under the cursor stationary while zooming.
-  zoom.tx = cx - ((cx - zoom.tx) * (next / prev));
-  zoom.ty = cy - ((cy - zoom.ty) * (next / prev));
+  zoom.tx = cx - (cx - zoom.tx) * (next / prev);
+  zoom.ty = cy - (cy - zoom.ty) * (next / prev);
   zoom.scale = next;
   applyZoom();
 }
@@ -490,15 +596,21 @@ els.lightboxZoomOut.addEventListener('click', () => setScale(zoom.scale / 1.25))
 els.lightboxZoomReset.addEventListener('click', resetZoom);
 
 // Close when clicking the dimmed backdrop (but not the image or toolbar).
-els.lightbox.addEventListener('click', (e) => { if (e.target === els.lightbox || e.target === els.lightboxStage) closeLightbox(); });
+els.lightbox.addEventListener('click', (e) => {
+  if (e.target === els.lightbox || e.target === els.lightboxStage) closeLightbox();
+});
 
 // Wheel to zoom toward the cursor.
-els.lightboxStage.addEventListener('wheel', (e) => {
-  if (!zoom.img) return;
-  e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-  setScale(zoom.scale * factor, e.clientX, e.clientY);
-}, { passive: false });
+els.lightboxStage.addEventListener(
+  'wheel',
+  (e) => {
+    if (!zoom.img) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setScale(zoom.scale * factor, e.clientX, e.clientY);
+  },
+  { passive: false }
+);
 
 // Double-click toggles fit / 2x.
 els.lightboxStage.addEventListener('dblclick', (e) => {
@@ -545,7 +657,20 @@ async function downloadItem(item, tab) {
 
 /* ------------------------------------------------------- download selected */
 
-const bulk = { active: false, queue: [], inFlight: 0, max: 4, done: 0, ok: 0, fail: 0, total: 0, dir: null, tab: null, urls: new Set(), toastEl: null };
+const bulk = {
+  active: false,
+  queue: [],
+  inFlight: 0,
+  max: 4,
+  done: 0,
+  ok: 0,
+  fail: 0,
+  total: 0,
+  dir: null,
+  tab: null,
+  urls: new Set(),
+  toastEl: null
+};
 
 // Downloadable items currently selected in the active tab.
 function selectedItems() {
@@ -561,7 +686,10 @@ function updateDownloadSelected() {
 }
 
 async function downloadSelected() {
-  if (bulk.active) { toast('Already downloading', `Batch in progress (${bulk.done}/${bulk.total}).`); return; }
+  if (bulk.active) {
+    toast('Already downloading', `Batch in progress (${bulk.done}/${bulk.total}).`);
+    return;
+  }
   const tab = activeTab();
   const items = selectedItems();
   if (!items.length) return;
@@ -570,7 +698,18 @@ async function downloadSelected() {
   const dir = await window.goldfinch.chooseDownloadDir();
   if (!dir) return;
 
-  Object.assign(bulk, { active: true, queue: items.slice(), inFlight: 0, done: 0, ok: 0, fail: 0, total: items.length, dir, tab, urls: new Set() });
+  Object.assign(bulk, {
+    active: true,
+    queue: items.slice(),
+    inFlight: 0,
+    done: 0,
+    ok: 0,
+    fail: 0,
+    total: items.length,
+    dir,
+    tab,
+    urls: new Set()
+  });
   bulk.toastEl = persistentToast(`Downloading 0/${bulk.total}…`, dir);
   bulkPump();
 }
@@ -580,12 +719,16 @@ function bulkPump() {
     const item = bulk.queue.shift();
     bulk.inFlight++;
     bulk.urls.add(item.url);
-    window.goldfinch.downloadMedia({
-      webContentsId: bulk.tab && bulk.tab.wcId,
-      url: item.url,
-      suggestedName: item.name,
-      saveDir: bulk.dir
-    }).then((res) => { if (!res || !res.ok) bulkComplete(item.url, false); });
+    window.goldfinch
+      .downloadMedia({
+        webContentsId: bulk.tab && bulk.tab.wcId,
+        url: item.url,
+        suggestedName: item.name,
+        saveDir: bulk.dir
+      })
+      .then((res) => {
+        if (!res || !res.ok) bulkComplete(item.url, false);
+      });
   }
 }
 
@@ -633,7 +776,10 @@ function currentAudioItems() {
 function playAudio(item) {
   player.list = currentAudioItems();
   player.index = player.list.findIndex((m) => m.url === item.url);
-  if (player.index < 0) { player.list = [item]; player.index = 0; }
+  if (player.index < 0) {
+    player.list = [item];
+    player.index = 0;
+  }
   loadCurrent();
 }
 
@@ -652,16 +798,28 @@ function loadCurrent() {
 
 function highlightPlaying() {
   document.querySelectorAll('.media-card').forEach((c) => {
-    c.classList.toggle('playing', c.dataset.url === player.url);
+    const card = /** @type {HTMLElement} */ (c);
+    card.classList.toggle('playing', card.dataset.url === player.url);
   });
 }
 
 function togglePlay() {
   if (!pa.src) return;
-  if (pa.paused) pa.play().catch(() => {}); else pa.pause();
+  if (pa.paused) pa.play().catch(() => {});
+  else pa.pause();
 }
-function playPrev() { if (player.index > 0) { player.index--; loadCurrent(); } }
-function playNext() { if (player.index < player.list.length - 1) { player.index++; loadCurrent(); } }
+function playPrev() {
+  if (player.index > 0) {
+    player.index--;
+    loadCurrent();
+  }
+}
+function playNext() {
+  if (player.index < player.list.length - 1) {
+    player.index++;
+    loadCurrent();
+  }
+}
 
 function fmtTime(s) {
   if (!isFinite(s) || s < 0) return '0:00';
@@ -682,10 +840,18 @@ pa.addEventListener('timeupdate', () => {
   els.playerProgress.style.width = `${ratio * 100}%`;
   els.playerCur.textContent = fmtTime(pa.currentTime);
 });
-pa.addEventListener('loadedmetadata', () => { els.playerDur.textContent = fmtTime(pa.duration); });
-pa.addEventListener('play', () => { els.playerPlay.textContent = '▮▮'; });
-pa.addEventListener('pause', () => { els.playerPlay.textContent = '▶'; });
-pa.addEventListener('ended', () => { if (player.index < player.list.length - 1) playNext(); });
+pa.addEventListener('loadedmetadata', () => {
+  els.playerDur.textContent = fmtTime(pa.duration);
+});
+pa.addEventListener('play', () => {
+  els.playerPlay.textContent = '▮▮';
+});
+pa.addEventListener('pause', () => {
+  els.playerPlay.textContent = '▶';
+});
+pa.addEventListener('ended', () => {
+  if (player.index < player.list.length - 1) playNext();
+});
 
 /* --------------------------------------------------------- privacy panel */
 
@@ -710,14 +876,17 @@ function togglePrivacy(force) {
   els.togglePrivacy.classList.toggle('active', show);
   if (show) {
     togglePanel(false); // close the media panel
-    fetchCookies();     // cookies are fetched on demand
+    fetchCookies(); // cookies are fetched on demand
     renderPrivacy();
   }
 }
 
 els.togglePrivacy.addEventListener('click', () => togglePrivacy());
 els.privacyClose.addEventListener('click', () => togglePrivacy(false));
-els.privacyRefresh.addEventListener('click', () => { fetchCookies(); renderPrivacy(); });
+els.privacyRefresh.addEventListener('click', () => {
+  fetchCookies();
+  renderPrivacy();
+});
 
 window.goldfinch.onPrivacyNet((d) => {
   const tab = findTabByWcId(d.webContentsId);
@@ -742,7 +911,9 @@ async function fetchCookies() {
   try {
     tab.privacy.cookies = await window.goldfinch.privacyCookies({ webContentsId: tab.wcId, url: tab.url });
     if (tab.id === activeTabId) renderPrivacy();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 async function clearCookies(scope) {
@@ -757,7 +928,7 @@ async function clearStorage() {
   const tab = activeTab();
   if (!tab) return;
   const res = await window.goldfinch.privacyClearStorage({ url: tab.url });
-  toast(res.ok ? 'Site storage cleared' : 'Clear failed', res.ok ? res.origin : (res.error || ''));
+  toast(res.ok ? 'Site storage cleared' : 'Clear failed', res.ok ? res.origin : res.error || '');
 }
 
 function updatePrivacyBadge() {
@@ -770,13 +941,24 @@ function updatePrivacyBadge() {
 /* ---- Shields config (active protection toggles) ---- */
 
 let shieldsConfig = null;
-window.goldfinch.shieldsGet().then((c) => { shieldsConfig = c; renderPrivacy(); });
-window.goldfinch.onShieldsChanged((c) => { shieldsConfig = c; renderPrivacy(); });
+window.goldfinch.shieldsGet().then((c) => {
+  shieldsConfig = c;
+  renderPrivacy();
+});
+window.goldfinch.onShieldsChanged((c) => {
+  shieldsConfig = c;
+  renderPrivacy();
+});
 
 function currentSite() {
   const tab = activeTab();
   if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
-  try { const h = new URL(tab.url).hostname.split('.'); return h.length <= 2 ? h.join('.') : h.slice(-2).join('.'); } catch { return ''; }
+  try {
+    const h = new URL(tab.url).hostname.split('.');
+    return h.length <= 2 ? h.join('.') : h.slice(-2).join('.');
+  } catch {
+    return '';
+  }
 }
 
 async function setShield(key, value) {
@@ -858,7 +1040,10 @@ function pShields() {
   const reload = document.createElement('button');
   reload.className = 'text-btn small';
   reload.textContent = 'Reload to apply';
-  reload.addEventListener('click', () => { const t = activeTab(); if (t) t.webview.reload(); });
+  reload.addEventListener('click', () => {
+    const t = activeTab();
+    if (t) t.webview.reload();
+  });
   foot.appendChild(reload);
   s.appendChild(foot);
 
@@ -879,7 +1064,8 @@ function pJar() {
   const c = (tab && tab.container) || DEFAULT_CONTAINER;
   const s = document.createElement('div');
   s.className = 'privacy-section';
-  s.innerHTML = `<div class="ps-title">Jar</div>` +
+  s.innerHTML =
+    `<div class="ps-title">Jar</div>` +
     `<div class="ps-main"><span class="cm-dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
   const row = document.createElement('div');
   row.className = 'privacy-buttons';
@@ -922,15 +1108,18 @@ function renderPrivacy() {
 
   // Connection
   const secure = tab && /^https:/i.test(tab.url || '');
-  body.appendChild(pSection('Connection', secure ? 'ok' : 'bad',
-    secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
-    net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''));
+  body.appendChild(
+    pSection(
+      'Connection',
+      secure ? 'ok' : 'bad',
+      secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
+      net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''
+    )
+  );
 
   // Trackers — blocked vs allowed
   const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0, blocked: 0, allowed: 0 };
-  const tLabel = trk.count
-    ? `${trk.blocked} blocked · ${trk.allowed} allowed`
-    : 'no trackers detected';
+  const tLabel = trk.count ? `${trk.blocked} blocked · ${trk.allowed} allowed` : 'no trackers detected';
   const tSec = pBigStat('Trackers', trk.count, tLabel);
   for (const cat of ['ads', 'analytics', 'social', 'other']) {
     if (trk[cat] && trk[cat].length) tSec.appendChild(pGroupStatus(cat, trk[cat]));
@@ -940,7 +1129,8 @@ function renderPrivacy() {
   // Third-party domains
   const tpCount = net ? net.thirdPartyCount : 0;
   const tpSec = pBigStat('Third-party domains', tpCount, 'distinct domains contacted');
-  if (net && net.thirdPartyList.length) tpSec.appendChild(pList(net.thirdPartyList.map((x) => `${x.domain} (${x.count})`)));
+  if (net && net.thirdPartyList.length)
+    tpSec.appendChild(pList(net.thirdPartyList.map((x) => `${x.domain} (${x.count})`)));
   body.appendChild(tpSec);
 
   // Cookies + storage
@@ -952,7 +1142,8 @@ function renderPrivacy() {
   cBtns.appendChild(pButton('Clear all cookies', () => clearCookies('all')));
   cBtns.appendChild(pButton('Clear site storage', clearStorage));
   cSec.appendChild(cBtns);
-  if (ck && ck.list.length) cSec.appendChild(pList(ck.list.slice(0, 50).map((c) => `[${c.third ? '3rd' : '1st'}] ${c.name} — ${c.domain}`)));
+  if (ck && ck.list.length)
+    cSec.appendChild(pList(ck.list.slice(0, 50).map((c) => `[${c.third ? '3rd' : '1st'}] ${c.name} — ${c.domain}`)));
   body.appendChild(cSec);
 
   // Fingerprinting
@@ -960,43 +1151,43 @@ function renderPrivacy() {
   const fpTotal = fp.canvas + fp.webgl + fp.audio;
   const fpSec = pBigStat('Fingerprinting', fpTotal, fpTotal ? 'fingerprinting API calls' : 'none detected');
   if (fpTotal) {
-    fpSec.appendChild(pList([
-      fp.canvas ? `Canvas reads: ${fp.canvas}` : null,
-      fp.webgl ? `WebGL GPU probe: ${fp.webgl}` : null,
-      fp.audio ? `AudioContext: ${fp.audio}` : null
-    ].filter(Boolean)));
+    fpSec.appendChild(
+      pList(
+        [
+          fp.canvas ? `Canvas reads: ${fp.canvas}` : null,
+          fp.webgl ? `WebGL GPU probe: ${fp.webgl}` : null,
+          fp.audio ? `AudioContext: ${fp.audio}` : null
+        ].filter(Boolean)
+      )
+    );
   }
   body.appendChild(fpSec);
 
   // Permissions
   const perms = p ? p.permissions : [];
   const permSec = pSection('Permissions', '', perms.length ? `${perms.length} requested` : 'none requested', '');
-  if (perms.length) permSec.appendChild(pList(perms.map((x) => `${x.granted ? 'granted' : 'denied'} — ${x.permission}`)));
+  if (perms.length)
+    permSec.appendChild(pList(perms.map((x) => `${x.granted ? 'granted' : 'denied'} — ${x.permission}`)));
   body.appendChild(permSec);
 }
 
 function pSection(title, tone, main, sub) {
   const s = document.createElement('div');
   s.className = 'privacy-section';
-  s.innerHTML = `<div class="ps-title">${escapeHtml(title)}</div>` +
-    `<div class="ps-main ${tone || ''}">${escapeHtml(main)}</div>` + (sub ? `<div class="ps-sub warn">${escapeHtml(sub)}</div>` : '');
+  s.innerHTML =
+    `<div class="ps-title">${escapeHtml(title)}</div>` +
+    `<div class="ps-main ${tone || ''}">${escapeHtml(main)}</div>` +
+    (sub ? `<div class="ps-sub warn">${escapeHtml(sub)}</div>` : '');
   return s;
 }
 function pBigStat(title, num, label) {
   const s = document.createElement('div');
   s.className = 'privacy-section';
-  s.innerHTML = `<div class="ps-title">${escapeHtml(title)}</div>` +
+  s.innerHTML =
+    `<div class="ps-title">${escapeHtml(title)}</div>` +
     `<div class="ps-big ${num ? 'hot' : ''}">${num}</div><div class="ps-sub">${escapeHtml(label)}</div>`;
   return s;
 }
-function pGroup(cat, domains) {
-  const d = document.createElement('div');
-  d.className = 'ps-group';
-  d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${domains.length})</div>`;
-  d.appendChild(pList(domains));
-  return d;
-}
-
 // Tracker list with a blocked/allowed status tag per domain.
 function pGroupStatus(cat, entries) {
   const d = document.createElement('div');
@@ -1007,7 +1198,8 @@ function pGroupStatus(cat, entries) {
   for (const e of entries) {
     const item = document.createElement('div');
     item.className = 'ps-item status';
-    item.innerHTML = `<span class="tag ${e.blocked ? 'blk' : 'allow'}">${e.blocked ? 'blocked' : 'allowed'}</span>` +
+    item.innerHTML =
+      `<span class="tag ${e.blocked ? 'blk' : 'allow'}">${e.blocked ? 'blocked' : 'allowed'}</span>` +
       `<span class="dom${e.blocked ? ' struck' : ''}">${escapeHtml(e.domain)}</span>`;
     list.appendChild(item);
   }
@@ -1066,7 +1258,10 @@ window.goldfinch.onDownloadProgress((d) => {
 });
 
 window.goldfinch.onDownloadDone((d) => {
-  if (bulk.active && bulk.urls.has(d.url)) { bulkComplete(d.url, d.state === 'completed'); return; }
+  if (bulk.active && bulk.urls.has(d.url)) {
+    bulkComplete(d.url, d.state === 'completed');
+    return;
+  }
   const el = toastEls.get(d.url);
   toastEls.delete(d.url);
   if (el) el.remove();
@@ -1088,19 +1283,36 @@ window.goldfinch.onOpenTab((url) => createTab(url));
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
-  if (e.key === 't') { e.preventDefault(); createTab(); }
-  else if (e.key === 'w') { e.preventDefault(); if (activeTabId) closeTab(activeTabId); }
-  else if (e.key === 'l') { e.preventDefault(); els.address.focus(); els.address.select(); }
-  else if (e.key === 'm') { e.preventDefault(); togglePanel(); }
-  else if (e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); togglePrivacy(); }
-  else if (e.key === 'r') { e.preventDefault(); const t = activeTab(); if (t) t.webview.reload(); }
+  if (e.key === 't') {
+    e.preventDefault();
+    createTab();
+  } else if (e.key === 'w') {
+    e.preventDefault();
+    if (activeTabId) closeTab(activeTabId);
+  } else if (e.key === 'l') {
+    e.preventDefault();
+    els.address.focus();
+    els.address.select();
+  } else if (e.key === 'm') {
+    e.preventDefault();
+    togglePanel();
+  } else if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+    e.preventDefault();
+    togglePrivacy();
+  } else if (e.key === 'r') {
+    e.preventDefault();
+    const t = activeTab();
+    if (t) t.webview.reload();
+  }
 });
 
 /* ------------------------------------------------------------------- helpers */
 
 function escapeHtml(s) {
   return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
 

@@ -1,110 +1,118 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' https: http: blob:;" />
-  <title>Goldfinch</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <!-- Tab strip -->
-  <div id="tabstrip">
-    <div id="tabs"></div>
-    <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">+</button>
-    <button id="new-tab-menu" class="icon-btn" title="New tab in a jar / container">▾</button>
-  </div>
-  <div id="container-menu" class="hidden"></div>
-
-  <!-- Toolbar -->
-  <div id="toolbar">
-    <img id="brand" src="assets/goldfinch_color.png" alt="Goldfinch" title="Goldfinch" />
-    <button id="back" class="icon-btn" title="Back">◀</button>
-    <button id="forward" class="icon-btn" title="Forward">▶</button>
-    <button id="reload" class="icon-btn" title="Reload">⟳</button>
-    <div id="address-wrap">
-      <input id="address" type="text" spellcheck="false"
-             placeholder="Search or enter address" autocomplete="off" />
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: blob:; media-src 'self' https: http: blob:;"
+    />
+    <title>Goldfinch</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Tab strip -->
+    <div id="tabstrip">
+      <div id="tabs"></div>
+      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">+</button>
+      <button id="new-tab-menu" class="icon-btn" title="New tab in a jar / container">▾</button>
     </div>
-    <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)">
-      <span id="media-count">Media</span>
-    </button>
-    <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)">
-      <span id="privacy-count">Shield</span>
-    </button>
-  </div>
+    <div id="container-menu" class="hidden"></div>
 
-  <!-- Main area: web content + media panel -->
-  <div id="main">
-    <div id="webviews"></div>
-
-    <aside id="media-panel" class="collapsed">
-      <div id="media-panel-header">
-        <span>Media on this page</span>
-        <div class="panel-actions">
-          <button id="media-download-selected" class="text-btn small" title="Download the selected media to a folder" disabled>Download selected</button>
-          <button id="media-rescan" class="text-btn small" title="Rescan">Rescan</button>
-          <button id="media-close" class="icon-btn" title="Close">✕</button>
-        </div>
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <img id="brand" src="assets/goldfinch_color.png" alt="Goldfinch" title="Goldfinch" />
+      <button id="back" class="icon-btn" title="Back">◀</button>
+      <button id="forward" class="icon-btn" title="Forward">▶</button>
+      <button id="reload" class="icon-btn" title="Reload">⟳</button>
+      <div id="address-wrap">
+        <input id="address" type="text" spellcheck="false" placeholder="Search or enter address" autocomplete="off" />
       </div>
-      <div id="media-filters">
-        <button class="filter active" data-filter="all">All</button>
-        <button class="filter" data-filter="image">Images</button>
-        <button class="filter" data-filter="video">Video</button>
-        <button class="filter" data-filter="audio">Audio</button>
-        <button class="filter" data-filter="embed">Embeds</button>
-      </div>
-      <div id="media-list"></div>
-      <div id="media-empty" class="hidden">No media found on this page yet.</div>
+      <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)">
+        <span id="media-count">Media</span>
+      </button>
+      <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)">
+        <span id="privacy-count">Shield</span>
+      </button>
+    </div>
 
-      <!-- Docked old-school music player -->
-      <div id="player" class="hidden">
-        <div id="player-title">—</div>
-        <div id="player-seek" title="Seek"><div id="player-progress"></div></div>
-        <div id="player-bar">
-          <span id="player-cur" class="lcd">0:00</span>
-          <div id="player-controls">
-            <button id="player-prev" title="Previous">◀◀</button>
-            <button id="player-play" title="Play / Pause">▶</button>
-            <button id="player-next" title="Next">▶▶</button>
+    <!-- Main area: web content + media panel -->
+    <div id="main">
+      <div id="webviews"></div>
+
+      <aside id="media-panel" class="collapsed">
+        <div id="media-panel-header">
+          <span>Media on this page</span>
+          <div class="panel-actions">
+            <button
+              id="media-download-selected"
+              class="text-btn small"
+              title="Download the selected media to a folder"
+              disabled
+            >
+              Download selected
+            </button>
+            <button id="media-rescan" class="text-btn small" title="Rescan">Rescan</button>
+            <button id="media-close" class="icon-btn" title="Close">✕</button>
           </div>
-          <span id="player-dur" class="lcd">0:00</span>
         </div>
-        <audio id="player-audio"></audio>
-      </div>
-    </aside>
-
-    <aside id="privacy-panel" class="collapsed">
-      <div id="privacy-header">
-        <span>Privacy on this page</span>
-        <div class="panel-actions">
-          <button id="privacy-refresh" class="text-btn small" title="Refresh">Refresh</button>
-          <button id="privacy-close" class="icon-btn" title="Close">✕</button>
+        <div id="media-filters">
+          <button class="filter active" data-filter="all">All</button>
+          <button class="filter" data-filter="image">Images</button>
+          <button class="filter" data-filter="video">Video</button>
+          <button class="filter" data-filter="audio">Audio</button>
+          <button class="filter" data-filter="embed">Embeds</button>
         </div>
-      </div>
-      <div id="privacy-body"></div>
-    </aside>
-  </div>
+        <div id="media-list"></div>
+        <div id="media-empty" class="hidden">No media found on this page yet.</div>
 
-  <!-- Download toasts -->
-  <div id="toasts"></div>
+        <!-- Docked old-school music player -->
+        <div id="player" class="hidden">
+          <div id="player-title">—</div>
+          <div id="player-seek" title="Seek"><div id="player-progress"></div></div>
+          <div id="player-bar">
+            <span id="player-cur" class="lcd">0:00</span>
+            <div id="player-controls">
+              <button id="player-prev" title="Previous">◀◀</button>
+              <button id="player-play" title="Play / Pause">▶</button>
+              <button id="player-next" title="Next">▶▶</button>
+            </div>
+            <span id="player-dur" class="lcd">0:00</span>
+          </div>
+          <audio id="player-audio"></audio>
+        </div>
+      </aside>
 
-  <!-- Image lightbox with zoom + pan -->
-  <div id="lightbox" class="hidden">
-    <div id="lightbox-toolbar">
-      <span id="lightbox-caption"></span>
-      <div class="lightbox-zoom">
-        <button id="lightbox-zoom-out" class="icon-btn" title="Zoom out (-)">−</button>
-        <span id="lightbox-zoom-level">100%</span>
-        <button id="lightbox-zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
-        <button id="lightbox-zoom-reset" class="text-btn small" title="Reset (0)">Fit</button>
-        <button id="lightbox-close" class="icon-btn" title="Close (Esc)">✕</button>
-      </div>
+      <aside id="privacy-panel" class="collapsed">
+        <div id="privacy-header">
+          <span>Privacy on this page</span>
+          <div class="panel-actions">
+            <button id="privacy-refresh" class="text-btn small" title="Refresh">Refresh</button>
+            <button id="privacy-close" class="icon-btn" title="Close">✕</button>
+          </div>
+        </div>
+        <div id="privacy-body"></div>
+      </aside>
     </div>
-    <div id="lightbox-stage"></div>
-  </div>
 
-  <script src="../shared/url-safety.js"></script>
-  <script src="renderer.js"></script>
-</body>
+    <!-- Download toasts -->
+    <div id="toasts"></div>
+
+    <!-- Image lightbox with zoom + pan -->
+    <div id="lightbox" class="hidden">
+      <div id="lightbox-toolbar">
+        <span id="lightbox-caption"></span>
+        <div class="lightbox-zoom">
+          <button id="lightbox-zoom-out" class="icon-btn" title="Zoom out (-)">−</button>
+          <span id="lightbox-zoom-level">100%</span>
+          <button id="lightbox-zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
+          <button id="lightbox-zoom-reset" class="text-btn small" title="Reset (0)">Fit</button>
+          <button id="lightbox-close" class="icon-btn" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="lightbox-stage"></div>
+    </div>
+
+    <script src="../shared/url-safety.js"></script>
+    <script src="renderer.js"></script>
+  </body>
 </html>

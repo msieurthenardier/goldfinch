@@ -80,6 +80,7 @@ function isSafePosterUrl(url) {
 // which runs with nodeIntegration:false and cannot require()).
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { isSafeTabUrl, isSafePosterUrl };
+} else {
+  /** @type {any} */ (globalThis).isSafeTabUrl = isSafeTabUrl;
+  /** @type {any} */ (globalThis).isSafePosterUrl = isSafePosterUrl;
 }
-(typeof globalThis !== 'undefined' ? globalThis : window).isSafeTabUrl = isSafeTabUrl;
-globalThis.isSafePosterUrl = isSafePosterUrl;
