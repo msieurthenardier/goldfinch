@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 // Shields: active privacy protection config + URL/cookie policy helpers.

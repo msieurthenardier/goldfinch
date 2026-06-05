@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 // Cookie jars / container identities. Each container is an isolated Electron

@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell } = require('electron');

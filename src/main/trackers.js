@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 // Lightweight tracker classification: a curated list of well-known tracker

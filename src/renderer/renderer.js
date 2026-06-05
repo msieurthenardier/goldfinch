@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 /* Goldfinch browser UI controller: tabs, navigation, and the media panel. */

@@ -1,4 +1,3 @@
-// @ts-check
 'use strict';
 
 // Injected into every page rendered in a <webview> tab. Walks the DOM,
