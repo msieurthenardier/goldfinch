@@ -1,13 +1,13 @@
 # Flight: CI/CD Supply-Chain Hardening
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-06-05 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] F17 — least-privilege top-level `permissions:` on both workflows
-- [ ] F18 — third-party actions SHA-pinned (non-GitHub action prioritized)
-- [ ] F19 — release job restricted to semver `v*` tags with gating
-- [ ] F16 — README auto-update no longer pushes to `main` unreviewed → **accepted as-is** (see Design Decisions); to be recorded as an acknowledged tradeoff, not actioned
+- [x] F17 — least-privilege top-level `permissions:` on both workflows
+- [x] F18 — third-party actions SHA-pinned (non-GitHub action prioritized)
+- [x] F19 — release job restricted to semver `v*` tags with gating
+- [x] F16 — README auto-update **accepted as-is** (operator decision; recorded as an acknowledged tradeoff, not actioned — see Design Decisions)
 
 > **Reconnaissance** (full report in [flight-log.md](flight-log.md)): all four source findings verified against current `main`. F17/F19 confirmed-live; F18 **scoped down** — the SHA-pinning half is live but the "add Dependabot for github-actions" half is **already satisfied** by `.github/dependabot.yml` (committed in Flight 3); F16 **retired by operator decision** as an accepted tradeoff. Two Flight-3 carry-forwards folded in: an audit-gate triage policy (CI surface) and a `farbling-correctness` behavior-test draft (off-surface, folded in by request).
 
@@ -89,7 +89,7 @@ Code changes are confined to `.github/workflows/build.yml` and `.github/workflow
 - [x] Both workflows declare top-level `permissions: contents: read` (F17); all 8 `uses:` SHA-pinned (F18); audit-gate triage policy documented
 - [x] `release` gated to validated semver `v*` (F19); `update-readme` runs only for stable semver; `update-readme.mjs` regex anchored
 - [x] `farbling-correctness` draft spec written
-- [ ] Live `v0.0.0-ci-test` exercises the gated publish path (and `vtest` is rejected); test tag + release + artifacts cleaned up
+- [x] Live `v0.0.0-ci-test` exercises the gated publish path (and `vtest` is rejected); test tag + release + artifacts cleaned up
 
 ### Adaptation Criteria
 
@@ -108,7 +108,7 @@ Code changes are confined to `.github/workflows/build.yml` and `.github/workflow
 - [x] `workflow-token-permissions` - F17: top-level `contents: read` on both workflows; retain per-job writes
 - [x] `sha-pin-actions` - F18: pin all 8 `uses:` to 40-char SHAs (prioritize the non-GitHub action) + document npm-audit triage policy at the `ci.yml` audit step (bundled — shared `ci.yml`/workflow surface)
 - [x] `release-gating` - F19: strict-semver gate + validation step; positive stable-semver gate on `update-readme`; anchor `update-readme.mjs` regex
-- [ ] `verify-release-pipeline` - live `v0.0.0-ci-test` exercise + invalid-tag (`vtest`) rejection + non-optional cleanup (integration/verify leg)
+- [x] `verify-release-pipeline` - live `v0.0.0-ci-test` exercise + invalid-tag (`vtest`) rejection + non-optional cleanup (integration/verify leg)
 
 > `farbling-correctness` behavior spec is authored as a flight artifact during planning (`tests/behavior/farbling-correctness.md`); its run/promotion is deferred (recommended before the next Electron major). Optional HAT/alignment leg omitted — the `verify-release-pipeline` leg already provides hands-on confirmation; add one if desired.
 
@@ -117,10 +117,10 @@ Code changes are confined to `.github/workflows/build.yml` and `.github/workflow
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (both workflow files + audit-policy doc + `update-readme.mjs` anchor + farbling draft spec)
-- [ ] A live `v0.0.0-ci-test` tag exercised the gated publish path successfully; an invalid `vtest` was rejected; **test tag + release + uploaded artifacts deleted** (both tags)
-- [ ] Mission criteria F17/F18/F19 checked off; **F16 recorded as accepted tradeoff** (not "met by change")
+- [x] All legs completed
+- [ ] Code merged (PR #16 draft → marked ready for review; merges after review)
+- [x] A live `v0.0.0-ci-test` tag exercised the gated publish path successfully; an invalid `vtest` was rejected; **test tag + release + uploaded artifacts deleted** (both tags)
+- [x] Mission criteria F17/F18/F19 checked off; **F16 recorded as accepted tradeoff** (not "met by change")
 
 ### Verification
 Both workflows declare top-level least-privilege `permissions:`; every `uses:` resolves to a 40-char commit SHA with a version comment; the `release` job fires only on strictly-validated semver `v*` tags and rejects `v`-prefixed non-semver tags; `update-readme` runs only for stable releases (skips prereleases). Confirmed live by pushing `v0.0.0-ci-test` (built + published as a prerelease, no README push to `main`) and `vtest` (release rejected), both cleaned up afterward. The npm-audit triage policy is documented at the CI audit step, and a draft `farbling-correctness` behavior spec exists for pre-upgrade fingerprint-farbling verification.

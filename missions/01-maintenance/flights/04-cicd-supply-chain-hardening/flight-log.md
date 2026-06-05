@@ -96,9 +96,48 @@ Implemented F19 release gating: strict-semver validation + stable/prerelease cla
 
 Workflows + the one permitted script-line touch only; no other application source changed. Commit deferred to flight-level review.
 
+### Leg 04 — verify-release-pipeline (status: completed, 2026-06-05)
+
+Live operator-confirmed verification of the hardened release pipeline against the committed feature-branch HEAD (`b467bb3`). Operator gave explicit go for the outward-facing live-tag test.
+
+**Baseline before test:** `origin/main` HEAD `a4e6dae` (v0.4.0 README commit); latest release `v0.4.0`.
+
+**Evidence:**
+- **PR CI (free pre-check):** `ci.yml` on PR #16 → `success` (30s). Confirms the SHA-pinned actions resolve under top-level `contents: read` and the least-privilege scope doesn't break the PR build-check. (F17+F18 live-validated.)
+- **Valid prerelease `v0.0.0-ci-test`** (pushed on `b467bb3`, build run `27037766766` → success):
+  - `Validate semver tag and classify stability` passed; classified prerelease.
+  - GitHub release created: `isPrerelease=true`, `isDraft=false`, **5 installer assets** (electron-builder built cleanly with the prerelease version string — resolves the Reviewer's `package.json`-naming carry-forward concern: no disruption).
+  - **`latest` pointer unchanged** — `v0.4.0` remained "Latest"; the prerelease did not steal it.
+  - **`update-readme` job → skipped** (stable-only gate held); `origin/main` HEAD still `a4e6dae` — no bogus README commit pushed. (F19 stable-gate live-validated.)
+- **Invalid tag `vtest`** (pushed on `b467bb3`, build run `27037944773` → failure):
+  - All 3 `Build` jobs failed at `Set version from tag` (`npm version test` → invalid version); `Publish release` → **skipped**; `Update README` → **skipped**; `gh release view vtest` → **not found**. Nothing published. (F19 rejection path live-validated — caught by the build job's `npm version`, exactly as leg-03 designed.)
+- **Cleanup (mandatory) — complete:** `gh release delete v0.0.0-ci-test --yes --cleanup-tag` (release + 5 assets + tag); `git push origin :refs/tags/vtest`; local tags deleted. Confirmed: `gh release view v0.0.0-ci-test` → not found; `git ls-remote --tags origin` → no test tags; `v0.4.0` is Latest again; `origin/main` still `a4e6dae`.
+
+All four acceptance criteria met. No repo files changed by this leg (only transient remote tags/releases, now deleted).
+
 ---
 
 ## Decisions
+
+---
+
+## Deviations
+
+---
+
+## Anomalies
+
+### Pinned actions run on Node.js 20 (deprecation horizon)
+**Observed:** The `v0.0.0-ci-test` build run emitted GitHub annotations that the pinned action versions (`actions/checkout@…#v4.3.1`, `actions/setup-node@…#v4.4.0`, `actions/upload-artifact@…#v4.6.2`, `actions/download-artifact@…#v4.3.0`, `softprops/action-gh-release@…#v2.6.2`) run on **Node.js 20**, which GitHub force-migrates to Node 24 on **2026-06-16** (11 days out) and removes 2026-09-16.
+**Severity:** cosmetic (the run succeeded; no failure).
+**Resolution:** Not addressed in this flight (pinning the *current* majors' latest stable was the F18 deliverable). The already-configured Dependabot `github-actions` ecosystem will surface the Node-24 major bumps (checkout v5 / setup-node v5 / upload-artifact v5) as PRs. **Carry-forward for the next maintenance pass / flight debrief:** accept those Dependabot major-bump PRs to clear the Node-20 deprecation before the forced cutover.
+
+### Minor infra notice
+`windows-latest` runners redirect to `windows-2025-vs2026` by 2026-06-15 (GitHub-side image change). Informational; no action.
+
+---
+
+## Session Notes
 
 ---
 
