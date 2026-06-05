@@ -176,23 +176,41 @@ function blankAgg(firstParty) {
     secure: true,
     total: 0,
     mixedContent: 0,
+    blocked: 0,         // tracker requests cancelled
+    stripped: 0,        // URLs cleaned of tracking params
+    cookiesBlocked: 0,  // third-party Cookie headers dropped
     thirdPartyDomains: {}, // domain -> count
-    trackers: { ads: [], analytics: [], social: [], other: [] }
+    // each category: { domain -> { blocked } }
+    trackers: { ads: {}, analytics: {}, social: {}, other: {} }
   };
 }
 
 function serializeAgg(a) {
-  const tCount = a.trackers.ads.length + a.trackers.analytics.length + a.trackers.social.length + a.trackers.other.length;
+  const cats = ['ads', 'analytics', 'social', 'other'];
+  let count = 0, blockedT = 0;
+  const trackers = { count: 0, blocked: 0, allowed: 0 };
+  for (const cat of cats) {
+    trackers[cat] = Object.entries(a.trackers[cat]).map(([domain, v]) => {
+      count++; if (v.blocked) blockedT++;
+      return { domain, blocked: v.blocked };
+    });
+  }
+  trackers.count = count;
+  trackers.blocked = blockedT;
+  trackers.allowed = count - blockedT;
   return {
     firstParty: a.firstParty,
     secure: a.secure,
     total: a.total,
     mixedContent: a.mixedContent,
+    blocked: a.blocked,
+    stripped: a.stripped,
+    cookiesBlocked: a.cookiesBlocked,
     thirdPartyCount: Object.keys(a.thirdPartyDomains).length,
     thirdPartyList: Object.entries(a.thirdPartyDomains)
       .map(([domain, count]) => ({ domain, count }))
       .sort((x, y) => y.count - x.count).slice(0, 200),
-    trackers: { ...a.trackers, count: tCount }
+    trackers
   };
 }
 
@@ -207,7 +225,8 @@ function schedulePrivacySend(id) {
   }, 350));
 }
 
-function recordRequest(details) {
+// action: 'allow' | 'block' | 'strip'
+function recordRequest(details, action) {
   const id = details.webContentsId;
   if (id == null) return;
 
@@ -223,13 +242,16 @@ function recordRequest(details) {
   let agg = privacyByTab.get(id);
   if (!agg) { agg = blankAgg(''); privacyByTab.set(id, agg); }
   agg.total++;
+  if (action === 'block') agg.blocked++;
+  if (action === 'strip') agg.stripped++;
   if (agg.secure && details.url.startsWith('http:')) agg.mixedContent++;
 
   const c = classify(details.url, agg.firstParty);
   if (c.thirdParty && c.domain) {
     agg.thirdPartyDomains[c.domain] = (agg.thirdPartyDomains[c.domain] || 0) + 1;
-    if (c.tracker && agg.trackers[c.tracker] && !agg.trackers[c.tracker].includes(c.domain)) {
-      agg.trackers[c.tracker].push(c.domain);
+    if (c.tracker && agg.trackers[c.tracker]) {
+      const entry = agg.trackers[c.tracker][c.domain] || (agg.trackers[c.tracker][c.domain] = { blocked: false });
+      if (action === 'block') entry.blocked = true;
     }
   }
   schedulePrivacySend(id);
@@ -249,20 +271,22 @@ function applyShields(ses) {
   ses.__goldfinchShields = true;
 
   ses.webRequest.onBeforeRequest((details, cb) => {
-    try { recordRequest(details); } catch { /* never break traffic */ }
     const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    let action = 'allow';
+    let response = {};
 
     // Block known trackers (never the top-level document).
     if (details.resourceType !== 'mainFrame' && shields.active('block', fp)) {
       const c = classify(details.url, fp);
-      if (c.thirdParty && c.tracker) { cb({ cancel: true }); return; }
+      if (c.thirdParty && c.tracker) { action = 'block'; response = { cancel: true }; }
     }
     // Strip tracking params (redirect to the clean URL).
-    if (shields.active('strip', fp)) {
+    if (action === 'allow' && shields.active('strip', fp)) {
       const clean = shields.stripUrl(details.url);
-      if (clean && clean !== details.url) { cb({ redirectURL: clean }); return; }
+      if (clean && clean !== details.url) { action = 'strip'; response = { redirectURL: clean }; }
     }
-    cb({});
+    try { recordRequest(details, action); } catch { /* never break traffic */ }
+    cb(response);
   });
 
   ses.webRequest.onBeforeSendHeaders((details, cb) => {
@@ -271,8 +295,12 @@ function applyShields(ses) {
     if (shields.active('strip', fp) && headers.Referer) {
       try { headers.Referer = new URL(headers.Referer).origin + '/'; } catch { delete headers.Referer; }
     }
-    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame') {
-      if (classify(details.url, fp).thirdParty) delete headers.Cookie;
+    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && headers.Cookie) {
+      if (classify(details.url, fp).thirdParty) {
+        delete headers.Cookie;
+        const agg = privacyByTab.get(details.webContentsId);
+        if (agg) { agg.cookiesBlocked++; schedulePrivacySend(details.webContentsId); }
+      }
     }
     cb({ requestHeaders: headers });
   });

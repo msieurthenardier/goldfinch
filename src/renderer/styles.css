@@ -342,3 +342,14 @@ body { display: flex; flex-direction: column; }
 .cm-item.add { color: var(--fg-dim); border-top: 1px solid var(--border); margin-top: 4px; }
 .cm-item em { color: var(--fg-dim); font-style: normal; font-size: 10px; }
 .cm-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+
+/* ---------- Shields effect counts + blocked/allowed status ---------- */
+.shield-lbl { flex: 1; }
+.shield-count { font-size: 10px; color: var(--accent); white-space: nowrap; }
+.shield-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.ps-item.status { display: flex; align-items: center; gap: 8px; }
+.tag { font-size: 9px; text-transform: uppercase; letter-spacing: .4px; padding: 1px 5px; border-radius: 3px; flex: none; }
+.tag.blk { background: #1f3d2a; color: #6dff8f; }
+.tag.allow { background: #3d2f1f; color: #ffb454; }
+.dom { word-break: break-all; }
+.dom.struck { text-decoration: line-through; color: var(--fg-dim); }

@@ -775,11 +775,28 @@ function pShields() {
   head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v)));
   s.appendChild(head);
 
+  const net = (activeTab() && activeTab().privacy.net) || {};
+  const EFFECT = {
+    block: [net.blocked, 'blocked'],
+    strip: [net.stripped, 'cleaned'],
+    isolate: [net.cookiesBlocked, 'cookies']
+  };
+
   const dim = !cfg.enabled || paused;
   for (const [key, label] of SHIELD_ROWS) {
     const row = document.createElement('div');
     row.className = 'shield-row' + (dim ? ' dim' : '');
-    row.innerHTML = `<span>${label}</span>`;
+    const lbl = document.createElement('span');
+    lbl.className = 'shield-lbl';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const eff = EFFECT[key];
+    if (cfg[key] && !dim && eff && eff[0]) {
+      const c = document.createElement('span');
+      c.className = 'shield-count';
+      c.textContent = `${eff[0]} ${eff[1]}`;
+      row.appendChild(c);
+    }
     row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v)));
     s.appendChild(row);
   }
@@ -795,6 +812,17 @@ function pShields() {
     pauseRow.appendChild(btn);
     s.appendChild(pauseRow);
   }
+
+  // Network shields only affect NEW requests, so changes show after a reload.
+  const foot = document.createElement('div');
+  foot.className = 'shield-foot';
+  const reload = document.createElement('button');
+  reload.className = 'text-btn small';
+  reload.textContent = 'Reload to apply';
+  reload.addEventListener('click', () => { const t = activeTab(); if (t) t.webview.reload(); });
+  foot.appendChild(reload);
+  s.appendChild(foot);
+
   return s;
 }
 
@@ -859,11 +887,14 @@ function renderPrivacy() {
     secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
     net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''));
 
-  // Trackers
-  const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0 };
-  const tSec = pBigStat('Trackers', trk.count, trk.count === 1 ? 'tracker detected' : 'trackers detected');
+  // Trackers — blocked vs allowed
+  const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0, blocked: 0, allowed: 0 };
+  const tLabel = trk.count
+    ? `${trk.blocked} blocked · ${trk.allowed} allowed`
+    : 'no trackers detected';
+  const tSec = pBigStat('Trackers', trk.count, tLabel);
   for (const cat of ['ads', 'analytics', 'social', 'other']) {
-    if (trk[cat] && trk[cat].length) tSec.appendChild(pGroup(cat, trk[cat]));
+    if (trk[cat] && trk[cat].length) tSec.appendChild(pGroupStatus(cat, trk[cat]));
   }
   body.appendChild(tSec);
 
@@ -924,6 +955,24 @@ function pGroup(cat, domains) {
   d.className = 'ps-group';
   d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${domains.length})</div>`;
   d.appendChild(pList(domains));
+  return d;
+}
+
+// Tracker list with a blocked/allowed status tag per domain.
+function pGroupStatus(cat, entries) {
+  const d = document.createElement('div');
+  d.className = 'ps-group';
+  d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${entries.length})</div>`;
+  const list = document.createElement('div');
+  list.className = 'ps-list';
+  for (const e of entries) {
+    const item = document.createElement('div');
+    item.className = 'ps-item status';
+    item.innerHTML = `<span class="tag ${e.blocked ? 'blk' : 'allow'}">${e.blocked ? 'blocked' : 'allowed'}</span>` +
+      `<span class="dom${e.blocked ? ' struck' : ''}">${escapeHtml(e.domain)}</span>`;
+    list.appendChild(item);
+  }
+  d.appendChild(list);
   return d;
 }
 function pList(items) {
