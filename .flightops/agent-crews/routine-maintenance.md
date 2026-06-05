@@ -16,7 +16,7 @@ for severity assessment and roundtable moderation.
 
 ### Security Reviewer
 - **Context**: {target-project}/
-- **Model**: Sonnet
+- **Model**: Opus
 - **Role**: Performs focused manual security review of authentication flows,
   injection surfaces, secrets handling, CORS/CSP configuration, and data
   exposure risks. Goes deeper than the Inspector's Category 1 automated checks
