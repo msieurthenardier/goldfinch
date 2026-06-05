@@ -121,7 +121,6 @@ body { display: flex; flex-direction: column; }
 }
 #media-panel.collapsed {
   width: 0;
-  margin-right: calc(var(--panel-w) * -1);
   overflow: hidden;
   border-left: none;
 }
@@ -262,3 +261,47 @@ body { display: flex; flex-direction: column; }
 }
 
 .hidden { display: none !important; }
+
+/* ---------- Privacy panel ---------- */
+#privacy-panel {
+  width: var(--panel-w);
+  flex: none;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: width .18s ease, margin-right .18s ease;
+}
+#privacy-panel.collapsed {
+  width: 0;
+  overflow: hidden;
+  border-left: none;
+}
+#privacy-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--border);
+}
+#privacy-body { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+.privacy-section {
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+}
+.ps-title { font-size: 12px; font-weight: 600; color: var(--fg); display: flex; align-items: center; gap: 7px; }
+.ps-icon { font-size: 14px; }
+.ps-main { font-size: 13px; color: var(--fg); margin-top: 6px; }
+.ps-sub { font-size: 11px; color: var(--fg-dim); margin-top: 3px; }
+.ps-big { font-size: 26px; font-weight: 700; color: var(--fg-dim); margin-top: 4px; line-height: 1.1; }
+.ps-big.hot { color: var(--accent); }
+.ps-group { margin-top: 8px; }
+.ps-cat { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg-dim); margin-bottom: 4px; }
+.ps-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 170px; overflow-y: auto; }
+.ps-item { font-size: 11px; color: var(--fg); word-break: break-all; background: var(--bg-2); border-radius: 4px; padding: 3px 7px; }
+.privacy-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* Shield toolbar button turns red when trackers are present. */
+#toggle-privacy.alert { background: #c0392b; border-color: #c0392b; color: #fff; }
+
+/* privacy status tones */
+.ps-main.ok { color: #6dff8f; }
+.ps-main.bad { color: #ff6b6b; }
+.ps-sub.warn { color: #ffb454; }

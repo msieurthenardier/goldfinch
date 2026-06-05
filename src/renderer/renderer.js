@@ -30,6 +30,12 @@ const els = {
   lightboxZoomIn: document.getElementById('lightbox-zoom-in'),
   lightboxZoomOut: document.getElementById('lightbox-zoom-out'),
   lightboxZoomReset: document.getElementById('lightbox-zoom-reset'),
+  togglePrivacy: document.getElementById('toggle-privacy'),
+  privacyCount: document.getElementById('privacy-count'),
+  privacyPanel: document.getElementById('privacy-panel'),
+  privacyBody: document.getElementById('privacy-body'),
+  privacyClose: document.getElementById('privacy-close'),
+  privacyRefresh: document.getElementById('privacy-refresh'),
   player: document.getElementById('player'),
   playerAudio: document.getElementById('player-audio'),
   playerTitle: document.getElementById('player-title'),
@@ -61,7 +67,7 @@ function createTab(url = HOMEPAGE) {
   webview.classList.add('hidden');
   els.webviews.appendChild(webview);
 
-  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null };
+  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy() };
   tabs.set(id, tab);
 
   // Tab button in the strip.
@@ -107,6 +113,7 @@ function activateTab(id) {
   }
   els.address.value = tab.url || '';
   renderMedia();
+  renderPrivacy();
   updateNavButtons();
 }
 
@@ -143,9 +150,10 @@ function wireWebview(tab) {
   const onNav = () => {
     tab.url = wv.getURL();
     if (tab.id === activeTabId) { els.address.value = tab.url; updateNavButtons(); }
-    // Reset media on full navigation; the preload will re-populate.
+    // Reset media + privacy on full navigation; preload/main re-populate.
     tab.media = [];
-    if (tab.id === activeTabId) renderMedia();
+    tab.privacy = blankPrivacy();
+    if (tab.id === activeTabId) { renderMedia(); renderPrivacy(); }
   };
   wv.addEventListener('did-navigate', onNav);
   wv.addEventListener('did-navigate-in-page', () => {
@@ -153,11 +161,14 @@ function wireWebview(tab) {
     if (tab.id === activeTabId) { els.address.value = tab.url; updateNavButtons(); }
   });
 
-  // Media catalog streamed up from the webview preload.
+  // Media catalog + privacy signals streamed up from the webview preload.
   wv.addEventListener('ipc-message', (e) => {
     if (e.channel === 'media-list') {
       tab.media = e.args[0] || [];
       if (tab.id === activeTabId) renderMedia();
+    } else if (e.channel === 'privacy-fp') {
+      tab.privacy.fp = e.args[0] || tab.privacy.fp;
+      if (tab.id === activeTabId) renderPrivacy();
     }
   });
 
@@ -210,6 +221,7 @@ function togglePanel(force) {
   const show = force != null ? force : collapsed;
   els.panel.classList.toggle('collapsed', !show);
   els.toggleMedia.classList.toggle('active', show);
+  if (show) closePrivacyPanel(); // only one right-side panel at a time
 }
 els.toggleMedia.addEventListener('click', () => togglePanel());
 els.mediaClose.addEventListener('click', () => togglePanel(false));
@@ -583,6 +595,182 @@ pa.addEventListener('play', () => { els.playerPlay.textContent = '▮▮'; });
 pa.addEventListener('pause', () => { els.playerPlay.textContent = '▶'; });
 pa.addEventListener('ended', () => { if (player.index < player.list.length - 1) playNext(); });
 
+/* --------------------------------------------------------- privacy panel */
+
+function blankPrivacy() {
+  return { net: null, fp: { canvas: 0, webgl: 0, audio: 0 }, permissions: [], cookies: null };
+}
+
+function findTabByWcId(id) {
+  for (const t of tabs.values()) if (t.wcId === id) return t;
+  return null;
+}
+
+function closePrivacyPanel() {
+  els.privacyPanel.classList.add('collapsed');
+  els.togglePrivacy.classList.remove('active');
+}
+
+function togglePrivacy(force) {
+  const collapsed = els.privacyPanel.classList.contains('collapsed');
+  const show = force != null ? force : collapsed;
+  els.privacyPanel.classList.toggle('collapsed', !show);
+  els.togglePrivacy.classList.toggle('active', show);
+  if (show) {
+    togglePanel(false); // close the media panel
+    fetchCookies();     // cookies are fetched on demand
+    renderPrivacy();
+  }
+}
+
+els.togglePrivacy.addEventListener('click', () => togglePrivacy());
+els.privacyClose.addEventListener('click', () => togglePrivacy(false));
+els.privacyRefresh.addEventListener('click', () => { fetchCookies(); renderPrivacy(); });
+
+window.goldfinch.onPrivacyNet((d) => {
+  const tab = findTabByWcId(d.webContentsId);
+  if (!tab) return;
+  tab.privacy.net = d.agg;
+  if (tab.id === activeTabId) renderPrivacy();
+  updatePrivacyBadge();
+});
+
+window.goldfinch.onPrivacyPermission((d) => {
+  const tab = findTabByWcId(d.webContentsId);
+  if (!tab) return;
+  const existing = tab.privacy.permissions.find((p) => p.permission === d.permission);
+  if (existing) existing.granted = d.granted;
+  else tab.privacy.permissions.push({ permission: d.permission, granted: d.granted });
+  if (tab.id === activeTabId) renderPrivacy();
+});
+
+async function fetchCookies() {
+  const tab = activeTab();
+  if (!tab || tab.wcId == null) return;
+  try {
+    tab.privacy.cookies = await window.goldfinch.privacyCookies({ webContentsId: tab.wcId, url: tab.url });
+    if (tab.id === activeTabId) renderPrivacy();
+  } catch { /* ignore */ }
+}
+
+async function clearCookies(scope) {
+  const tab = activeTab();
+  if (!tab) return;
+  const res = await window.goldfinch.privacyClearCookies({ webContentsId: tab.wcId, scope, url: tab.url });
+  toast('Cookies cleared', `${res.removed} cookie(s) removed`);
+  fetchCookies();
+}
+
+async function clearStorage() {
+  const tab = activeTab();
+  if (!tab) return;
+  const res = await window.goldfinch.privacyClearStorage({ url: tab.url });
+  toast(res.ok ? 'Site storage cleared' : 'Clear failed', res.ok ? res.origin : (res.error || ''));
+}
+
+function updatePrivacyBadge() {
+  const tab = activeTab();
+  const n = tab && tab.privacy.net ? tab.privacy.net.trackers.count : 0;
+  els.privacyCount.textContent = n ? `Shield (${n})` : 'Shield';
+  els.togglePrivacy.classList.toggle('alert', n > 0);
+}
+
+function renderPrivacy() {
+  updatePrivacyBadge();
+  if (els.privacyPanel.classList.contains('collapsed')) return;
+  const tab = activeTab();
+  const p = tab ? tab.privacy : null;
+  const net = p && p.net;
+  const body = els.privacyBody;
+  body.innerHTML = '';
+
+  // Connection
+  const secure = tab && /^https:/i.test(tab.url || '');
+  body.appendChild(pSection('Connection', secure ? 'ok' : 'bad',
+    secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
+    net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''));
+
+  // Trackers
+  const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0 };
+  const tSec = pBigStat('Trackers', trk.count, trk.count === 1 ? 'tracker detected' : 'trackers detected');
+  for (const cat of ['ads', 'analytics', 'social', 'other']) {
+    if (trk[cat] && trk[cat].length) tSec.appendChild(pGroup(cat, trk[cat]));
+  }
+  body.appendChild(tSec);
+
+  // Third-party domains
+  const tpCount = net ? net.thirdPartyCount : 0;
+  const tpSec = pBigStat('Third-party domains', tpCount, 'distinct domains contacted');
+  if (net && net.thirdPartyList.length) tpSec.appendChild(pList(net.thirdPartyList.map((x) => `${x.domain} (${x.count})`)));
+  body.appendChild(tpSec);
+
+  // Cookies + storage
+  const ck = p && p.cookies;
+  const cSec = pSection('Cookies', '', ck ? `${ck.first} first-party · ${ck.third} third-party` : 'Loading…', '');
+  const cBtns = document.createElement('div');
+  cBtns.className = 'privacy-buttons';
+  cBtns.appendChild(pButton('Clear third-party', () => clearCookies('third')));
+  cBtns.appendChild(pButton('Clear all cookies', () => clearCookies('all')));
+  cBtns.appendChild(pButton('Clear site storage', clearStorage));
+  cSec.appendChild(cBtns);
+  if (ck && ck.list.length) cSec.appendChild(pList(ck.list.slice(0, 50).map((c) => `[${c.third ? '3rd' : '1st'}] ${c.name} — ${c.domain}`)));
+  body.appendChild(cSec);
+
+  // Fingerprinting
+  const fp = p ? p.fp : { canvas: 0, webgl: 0, audio: 0 };
+  const fpTotal = fp.canvas + fp.webgl + fp.audio;
+  const fpSec = pBigStat('Fingerprinting', fpTotal, fpTotal ? 'fingerprinting API calls' : 'none detected');
+  if (fpTotal) {
+    fpSec.appendChild(pList([
+      fp.canvas ? `Canvas reads: ${fp.canvas}` : null,
+      fp.webgl ? `WebGL GPU probe: ${fp.webgl}` : null,
+      fp.audio ? `AudioContext: ${fp.audio}` : null
+    ].filter(Boolean)));
+  }
+  body.appendChild(fpSec);
+
+  // Permissions
+  const perms = p ? p.permissions : [];
+  const permSec = pSection('Permissions', '', perms.length ? `${perms.length} requested` : 'none requested', '');
+  if (perms.length) permSec.appendChild(pList(perms.map((x) => `${x.granted ? 'granted' : 'denied'} — ${x.permission}`)));
+  body.appendChild(permSec);
+}
+
+function pSection(title, tone, main, sub) {
+  const s = document.createElement('div');
+  s.className = 'privacy-section';
+  s.innerHTML = `<div class="ps-title">${escapeHtml(title)}</div>` +
+    `<div class="ps-main ${tone || ''}">${escapeHtml(main)}</div>` + (sub ? `<div class="ps-sub warn">${escapeHtml(sub)}</div>` : '');
+  return s;
+}
+function pBigStat(title, num, label) {
+  const s = document.createElement('div');
+  s.className = 'privacy-section';
+  s.innerHTML = `<div class="ps-title">${escapeHtml(title)}</div>` +
+    `<div class="ps-big ${num ? 'hot' : ''}">${num}</div><div class="ps-sub">${escapeHtml(label)}</div>`;
+  return s;
+}
+function pGroup(cat, domains) {
+  const d = document.createElement('div');
+  d.className = 'ps-group';
+  d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${domains.length})</div>`;
+  d.appendChild(pList(domains));
+  return d;
+}
+function pList(items) {
+  const l = document.createElement('div');
+  l.className = 'ps-list';
+  l.innerHTML = items.map((i) => `<div class="ps-item">${escapeHtml(i)}</div>`).join('');
+  return l;
+}
+function pButton(label, fn) {
+  const b = document.createElement('button');
+  b.className = 'text-btn small';
+  b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+
 /* ------------------------------------------------------------------- toasts */
 
 const toastEls = new Map(); // url -> element
@@ -647,6 +835,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'w') { e.preventDefault(); if (activeTabId) closeTab(activeTabId); }
   else if (e.key === 'l') { e.preventDefault(); els.address.focus(); els.address.select(); }
   else if (e.key === 'm') { e.preventDefault(); togglePanel(); }
+  else if (e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); togglePrivacy(); }
   else if (e.key === 'r') { e.preventDefault(); const t = activeTab(); if (t) t.webview.reload(); }
 });
 

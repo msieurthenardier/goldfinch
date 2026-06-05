@@ -26,6 +26,9 @@
     <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)">
       <span id="media-count">Media</span>
     </button>
+    <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)">
+      <span id="privacy-count">Shield</span>
+    </button>
   </div>
 
   <!-- Main area: web content + media panel -->
@@ -66,6 +69,17 @@
         </div>
         <audio id="player-audio"></audio>
       </div>
+    </aside>
+
+    <aside id="privacy-panel" class="collapsed">
+      <div id="privacy-header">
+        <span>Privacy on this page</span>
+        <div class="panel-actions">
+          <button id="privacy-refresh" class="text-btn small" title="Refresh">Refresh</button>
+          <button id="privacy-close" class="icon-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="privacy-body"></div>
     </aside>
   </div>
 
