@@ -6,6 +6,8 @@ const fs = require('fs');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
+const { isSafeTabUrl } = require('../shared/url-safety');
+const { sanitizeFilename, isWithinDir } = require('./download-path');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -59,6 +61,9 @@ app.on('web-contents-created', (_event, contents) => {
       if (mainWindow) mainWindow.webContents.send('open-tab', url);
       return { action: 'deny' };
     });
+    contents.on('will-navigate', (e, url) => {
+      if (!isSafeTabUrl(url)) e.preventDefault();
+    });
   }
 });
 
@@ -68,11 +73,16 @@ app.on('web-contents-created', (_event, contents) => {
 // originating webview by its webContents id.
 // ---------------------------------------------------------------------------
 const pendingDownloads = new Map(); // url -> { suggestedName }
+const approvedDownloadDirs = new Set(); // session-scoped; populated by choose-download-dir
 
 ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedName, saveDir }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   const downloader = wc || (mainWindow && mainWindow.webContents);
   if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
+
+  if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
+    return { ok: false, error: 'Download directory not approved.' };
+  }
 
   pendingDownloads.set(url, { suggestedName, saveDir });
   try {
@@ -86,7 +96,7 @@ ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedN
 
 // Build a non-colliding path inside dir for filename, sanitizing the name.
 function uniquePath(dir, filename) {
-  const safe = String(filename).replace(/[\/\\:*?"<>|]/g, '_').slice(0, 180) || 'download';
+  const safe = sanitizeFilename(filename);
   const ext = path.extname(safe);
   const base = path.basename(safe, ext);
   let candidate = path.join(dir, safe);
@@ -94,6 +104,10 @@ function uniquePath(dir, filename) {
   while (fs.existsSync(candidate)) {
     candidate = path.join(dir, `${base} (${n})${ext}`);
     n++;
+  }
+  if (!isWithinDir(dir, candidate)) {
+    console.warn('[uniquePath] candidate escaped dir, falling back:', candidate);
+    candidate = path.join(dir, 'download');
   }
   return candidate;
 }
@@ -103,7 +117,10 @@ ipcMain.handle('choose-download-dir', async () => {
     title: 'Choose a folder to download all media into',
     properties: ['openDirectory', 'createDirectory']
   });
-  return res.canceled || !res.filePaths.length ? null : res.filePaths[0];
+  if (res.canceled || !res.filePaths.length) return null;
+  const chosen = res.filePaths[0];
+  approvedDownloadDirs.add(path.resolve(chosen));
+  return chosen;
 });
 
 function wireDownloadHandler(sess) {
@@ -151,10 +168,6 @@ function wireDownloadHandler(sess) {
 
 ipcMain.handle('show-item-in-folder', (_event, savePath) => {
   if (savePath) shell.showItemInFolder(savePath);
-});
-
-ipcMain.handle('open-external', (_event, url) => {
-  if (url) shell.openExternal(url);
 });
 
 // ---------------------------------------------------------------------------

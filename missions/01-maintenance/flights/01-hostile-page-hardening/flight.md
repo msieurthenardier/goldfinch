@@ -1,15 +1,15 @@
 # Flight: Harden the Hostile-Page Security Boundary
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-06-05 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] F1 — page-originated URLs scheme-filtered before a webview `src` (verified by behavior test `tab-scheme-guard`)
-- [ ] F3 — `open-external` capability removed (was unused)
-- [ ] F4 — `download-media` `saveDir` asserted within a dialog-approved root
-- [ ] F5 — download filenames reject leading-dot / reserved names; containment asserted
-- [ ] F6 — `poster` sanitized before `backgroundImage`
-- [ ] F7 — `containers.json` shape-validated on load
+- [x] F1 — page-originated URLs scheme-filtered before a webview `src` (verified by behavior test `tab-scheme-guard`)
+- [x] F3 — `open-external` capability removed (was unused)
+- [x] F4 — `download-media` `saveDir` asserted within a dialog-approved root
+- [x] F5 — download filenames reject leading-dot / reserved names; containment asserted
+- [x] F6 — `poster` sanitized before `backgroundImage`
+- [x] F7 — `containers.json` shape-validated on load
 
 ---
 
@@ -70,11 +70,11 @@ One finding maps to one leg. Evidence is from the recon pass (flight log); each 
 - **F7 — `containers.json` validation (Advisory).** `jars.load()` (`jars.js:21-30`) assigns a parsed array wholesale. **Fix:** validate **per entry** (not all-or-nothing) — keep entries where `id` is a non-empty string and `partition` matches the expected `persist:` prefix, de-duplicate ids, coerce `name`/`color` to safe strings; **drop only the malformed entries, preserving valid user-created containers**; merge the `DEFAULTS` floor in only if no valid `default`-id entry survives. Extract the pure validator and unit-test the per-entry behavior (mixed valid/invalid input keeps the valid, drops the invalid, never wipes user containers wholesale).
 
 ### Checkpoints
-- [ ] F1 guard landed at **both** points (`createTab` gate + main `will-navigate` guard) sharing `isSafeTabUrl`; unit tests green under `npm test`; behavior spec referenced
-- [ ] Download hardening (F4 session approved-set + F5 final-path containment) landed; filename-sanitizer unit-tested
-- [ ] `poster` sink scheme-allowlisted (F6)
-- [ ] `open-external` removed (F3); no dangling references
-- [ ] `containers.json` per-entry validator landed and unit-tested, user containers preserved (F7)
+- [x] F1 guard landed at **both** points (`createTab` gate + main `will-navigate` guard) sharing `isSafeTabUrl`; unit tests green under `npm test`; behavior spec referenced
+- [x] Download hardening (F4 session approved-set + F5 final-path containment) landed; filename-sanitizer unit-tested
+- [x] `poster` sink scheme-allowlisted (F6)
+- [x] `open-external` removed (F3); no dangling references
+- [x] `containers.json` per-entry validator landed and unit-tested, user containers preserved (F7)
 
 ### Adaptation Criteria
 
@@ -91,22 +91,22 @@ One finding maps to one leg. Evidence is from the recon pass (flight log); each 
 
 > Tentative — planned one at a time during execution. F1 first (highest priority; also bootstraps the test runner the later legs reuse).
 
-- [ ] `tab-scheme-guard` - F1: `isSafeTabUrl` dual-export helper (`src/shared/`) wired at **both** enforcement points — `createTab` gate (window.open & media-open) + main `will-navigate` guard (in-page nav) + `node --test` bootstrap + unit tests; references behavior spec `tab-scheme-guard`
-- [ ] `download-path-hardening` - F4 + F5: session approved-dir Set + `uniquePath` leading-dot/reserved-name guard + final-path containment assert + sanitizer unit test
-- [ ] `poster-css-sanitize` - F6: scheme-allowlist the `poster` background (no `CSS.escape`/`escapeHtml`)
-- [ ] `remove-open-external` - F3: delete handler + bridge line
-- [ ] `containers-json-validation` - F7: per-entry validator (extracted + unit-tested), preserves valid user containers, DEFAULTS as floor
+- [x] `tab-scheme-guard` - F1: `isSafeTabUrl` dual-export helper (`src/shared/`) wired at **both** enforcement points — `createTab` gate (window.open & media-open) + main `will-navigate` guard (in-page nav) + `node --test` bootstrap + unit tests; references behavior spec `tab-scheme-guard`
+- [x] `download-path-hardening` - F4 + F5: session approved-dir Set + `uniquePath` leading-dot/reserved-name guard + final-path containment assert + sanitizer unit test
+- [x] `poster-css-sanitize` - F6: scheme-allowlist the `poster` background (no `CSS.escape`/`escapeHtml`)
+- [x] `remove-open-external` - F3: delete handler + bridge line
+- [x] `containers-json-validation` - F7: per-entry validator (extracted + unit-tested), preserves valid user containers, DEFAULTS as floor
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] `npm test` green (isSafeTabUrl, filename sanitizer, containers validator)
-- [ ] Behavior spec `tab-scheme-guard` reviewed (promote `draft` → `active` when first run passes)
-- [ ] CLAUDE.md updated if the security-boundary description changed (e.g. the new `createTab` guard / `src/shared/` pattern)
+- [x] `npm test` green (isSafeTabUrl, filename sanitizer, containers validator)
+- [x] Behavior spec `tab-scheme-guard` reviewed (promote `draft` → `active` when first run passes)
+- [x] CLAUDE.md updated if the security-boundary description changed (e.g. the new `createTab` guard / `src/shared/` pattern)
 
 ### Verification
 - **Automated (unit, `node --test`):** `isSafeTabUrl` accepts only `http`/`https`/`about:blank`; the filename sanitizer rejects `..`/leading-dot/reserved names and enforces final-path containment; the `containers.json` validator drops only malformed entries while preserving valid user containers.

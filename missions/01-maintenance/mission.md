@@ -12,12 +12,12 @@ Goldfinch was just onboarded to Flight Control and received a cold-baseline main
 
 ## Success Criteria
 
-- [ ] **F1** — Page-originated `window.open()` URLs are scheme-filtered before reaching a webview `src`; `file:`/`data:`/`javascript:` are rejected (verified by a behavior test)
-- [ ] **F3** — `open-external` validates scheme (or is removed while unused)
-- [ ] **F4** — `download-media` `saveDir` is asserted within a dialog-approved root
-- [ ] **F5** — Download filenames reject leading-dot / Windows-reserved names; path containment asserted
-- [ ] **F6** — Video `poster` is sanitized before use in `backgroundImage`
-- [ ] **F7** — `containers.json` is shape-validated on load (partition prefix, id dedupe, safe coercion)
+- [x] **F1** — Page-originated `window.open()` URLs are scheme-filtered before reaching a webview `src`; `file:`/`data:`/`javascript:` are rejected (verified by a behavior test)
+- [x] **F3** — `open-external` validates scheme (or is removed while unused)
+- [x] **F4** — `download-media` `saveDir` is asserted within a dialog-approved root
+- [x] **F5** — Download filenames reject leading-dot / Windows-reserved names; path containment asserted
+- [x] **F6** — Video `poster` is sanitized before use in `backgroundImage`
+- [x] **F7** — `containers.json` is shape-validated on load (partition prefix, id dedupe, safe coercion)
 - [ ] **F8** — A test runner is configured and unit tests cover `registrableDomain`, `classify`, `stripUrl`, `isTrackingParam`, `active`
 - [ ] **F9** — `package.json` declares an `engines.node` floor aligned with CI
 - [ ] **F10** — ESLint (and formatter) is configured with a lint script
@@ -62,7 +62,7 @@ None yet — populated as flights surface mission-level blockers.
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses.
 
-- [ ] Flight 1: Harden the hostile-page security boundary (F1, F3–F7)
+- [x] Flight 1: Harden the hostile-page security boundary (F1, F3–F7)
 - [ ] Flight 2: Quality & hygiene floor — tests, lint, types, README, branches (F8, F12, F9, F10, F11, F13)
 - [ ] Flight 3: Dependency currency — Electron major upgrade (F2, F21)
 - [ ] Flight 4: CI/CD supply-chain hardening (F17, F16, F18, F19)

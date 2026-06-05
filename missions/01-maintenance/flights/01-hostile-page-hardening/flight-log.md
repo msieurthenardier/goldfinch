@@ -56,6 +56,84 @@ Implication: the scheme guard belongs in `createTab` (covers both vectors + any 
 
 ## Leg Progress
 
+### tab-scheme-guard — landed (2026-06-05)
+
+**Status**: landed
+
+**Changes made:**
+- `src/shared/url-safety.js` (new) — `isSafeTabUrl(url)` pure predicate with WHATWG URL parser; allows `http:`, `https:`, `about:blank` (case-insensitive via `href.toLowerCase()`); dual-export (CommonJS `module.exports` + `globalThis` global).
+- `src/renderer/index.html` — added `<script src="../shared/url-safety.js"></script>` immediately before `renderer.js` script tag.
+- `src/renderer/renderer.js` — added `if (!isSafeTabUrl(url)) return null;` as first statement of `createTab` (before `++tabSeq` and DOM creation), covering all 9 call sites including `onOpenTab` and media-open.
+- `src/main/main.js` — added `require('../shared/url-safety')` import; added `contents.on('will-navigate', (e, url) => { if (!isSafeTabUrl(url)) e.preventDefault(); })` in the `web-contents-created` webview branch alongside existing `setWindowOpenHandler`.
+- `package.json` — added `"test": "node --test"` to scripts (no `engines` field added — deferred to Flight 2 scope).
+- `test/unit/url-safety.test.js` (new) — 26 test cases covering all allow/reject cases: `http:`, `https:`, `about:blank`/`ABOUT:BLANK`/`About:Blank`, whitespace-padded safe URLs, `file:`/`FILE:`, `data:`, `javascript:`, `blob:`, `chrome:`, `about:config`, empty/whitespace, null, undefined, number, object, array, malformed, protocol-relative.
+
+**Test result**: `npm test` → 26 pass, 0 fail, exit 0.
+
+**Notes/deviations**: None. Implementation follows the leg spec exactly. The `about:blank` case-insensitivity is handled by `parsed.href.toLowerCase() === 'about:blank'` as specified (WHATWG parser does not normalize the `about:` pathname case). The `closeTab` zero-tabs fallback `createTab()` defaults to `HOMEPAGE` (http/https), so the guard is safe there too.
+
+### download-path-hardening — landed (2026-06-05)
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/download-path.js` (new) — pure CommonJS helpers: `sanitizeFilename(name)` (strips path separators, leading/trailing dots, `..`, prefixes Windows reserved device names with `_`, caps at 180 chars, falls back to `'download'`); `isWithinDir(dir, candidate)` (strict containment check using `path.resolve` + `path.sep`, rejects equal-to-dir and sibling-prefix paths).
+- `src/main/main.js` — added `require('./download-path')` import; added module-scoped `const approvedDownloadDirs = new Set()`; `choose-download-dir` now calls `approvedDownloadDirs.add(path.resolve(chosen))` before returning the chosen path; `download-media` rejects with `{ ok: false, error: 'Download directory not approved.' }` before `pendingDownloads.set` when `saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))`; `uniquePath` uses `sanitizeFilename(filename)` as the single choke point and asserts `isWithinDir(dir, candidate)` after the dedup loop, falling back to `path.join(dir, 'download')` with a `console.warn` on violation.
+- `test/unit/download-path.test.js` (new) — 29 test cases covering: path separator stripping, traversal (`../../etc/passwd`), leading-dot (`.bashrc`), trailing-dot (`NUL.`), reserved names (`CON`, `con`, `con.txt`, `LPT1`, `NUL`, `PRN`), trailing-dot reserved (`NUL.`→`_NUL`), empty/all-dots/whitespace, null/undefined, very long name, normal filename, falsy suggestedName, `isWithinDir` containment (accept file in dir, reject dir itself, reject parent, reject sibling prefix `/foo/bar` vs `/foo/bar-evil`, reject traversal, accept nested), and dedup suffix staying within dir.
+
+**Test result**: `npm test` → 55 pass (29 new download-path + 26 url-safety), 0 fail, exit 0.
+
+**Notes/deviations**: None. Implementation follows the leg spec exactly. The `approvedDownloadDirs` check fires before both `pendingDownloads.set` and `downloader.downloadURL(url)`, ensuring no orphaned map entries and that `will-download` never fires for a rejected URL. The `uniquePath` containment check is post-loop as specified — dedup suffixes are covered.
+
+---
+
+### poster-css-sanitize — landed (2026-06-05)
+
+**Status**: landed
+
+**Changes made:**
+- `src/shared/url-safety.js` — added `isSafePosterUrl(url)`: allows `http:`/`https:`/`blob:` only (data: dropped after design review — opaque `data:` paths can carry literal `"`/`)` past `new URL()` and break out of `url("…")`), and additionally rejects any value whose normalized `href` contains `"` or `)` (belt-and-suspenders). Dual-exported (`module.exports` + `globalThis.isSafePosterUrl`).
+- `src/renderer/renderer.js` — gated the poster CSS sink (`:356`): `backgroundImage` is set only when `isSafePosterUrl(item.poster)` is true; the `'none'` reset (constant) left untouched.
+- `test/unit/url-safety.test.js` — extended with 23 `isSafePosterUrl` cases (allow http/https/blob incl. uppercase; reject data:, data:/http: with injected quotes, javascript/file/vbscript, empty/non-string/null/malformed).
+
+**Test result**: part of the integrated suite — **96 pass, 0 fail** (verified by Flight Director after all parallel legs).
+
+**Notes/deviations**: Design review (Sonnet) caught a HIGH issue — scheme-allowlist alone is insufficient for `data:`; incorporated by dropping `data:` and adding the `"`/`)` reject. Implemented in parallel with legs 4 & 5 (disjoint files). Out-of-scope note: image-type `img.src = item.url` (`renderer.js:351`) is an `<img src>`, not a CSS sink — flagged for a possible future leg.
+
+---
+
+### remove-open-external — landed (2026-06-05)
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/main.js` — deleted the `ipcMain.handle('open-external', …)` block (the unconstrained `shell.openExternal`). `shell` import retained (still used by `show-item-in-folder`).
+- `src/preload/chrome-preload.js` — deleted the `openExternal` contextBridge line. Object literal remains valid.
+
+**Test result**: no test impact; `grep -rn "open-external\|openExternal" src/` → **zero matches** (verified by Flight Director).
+
+**Notes/deviations**: None. Design review confirmed no caller anywhere in the repo. Implemented in parallel with legs 3 & 5.
+
+---
+
+### containers-json-validation — landed (2026-06-05)
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/jars.js` — added pure exported `validateContainers(saved)`: drops non-object/bad-id/bad-partition entries; reserves `persist:goldfinch` for `default`; de-dupes by BOTH `id` and `partition` (two Sets, first wins) — the partition-dedup is the key isolation guarantee; rebuilds objects field-by-field (no spread → no `__proto__`/key leakage); caps `name` at 24 chars; prepends a cloned `default` floor if none survives. `load()` routes the parsed array through it (`[]` sentinel → keep DEFAULTS); try/catch→DEFAULTS preserved.
+- `test/unit/jars.test.js` (new) — 31 cases incl. the critical "two distinct ids sharing one partition → only first kept" and "non-default entry aliasing `persist:goldfinch` dropped".
+
+**Test result**: part of the integrated suite — **96 pass, 0 fail**.
+
+**Notes/deviations**: Design review (Sonnet) caught a HIGH issue — id-dedup alone does NOT prevent partition collisions (the actual isolation break F7 targets); incorporated a partition-uniqueness pass + `persist:goldfinch` reservation. Minor test-expectation correction: `String(undefined)` → `'undefined'` (non-empty), so the `'Jar'` fallback fires only on empty-string names (matches existing `add()` semantics) — implementation unchanged. Implemented in parallel with legs 3 & 4.
+
+---
+
+### Flight Director — all legs landed
+
+All 5 autonomous legs implemented and uncommitted. Integrated `npm test` → **96 pass, 0 fail**. Legs 3–5 ran concurrently (disjoint file sets; flight-log/flight.md writes reserved to the Flight Director to avoid races). Proceeding to Phase 2d: single flight-level code review over all uncommitted changes, then commit + PR.
+
 ---
 
 ## Decisions

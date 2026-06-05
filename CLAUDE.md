@@ -9,7 +9,7 @@ Goldfinch — an Electron desktop browser with a media panel (scan/play/download
 - `npm start` — run the app
 - `npm run dev:debug` — run with remote debugging on `:9222` (`--no-sandbox`, WSL/headless friendly)
 - `npm run dist` — build installers (electron-builder); `npm run pack` for an unpacked `--dir` build
-- No test suite and no linter. **Verify changes by driving the running app over CDP**: start `dev:debug`, then connect to `http://127.0.0.1:9222` and `Runtime.evaluate` against the page target (the renderer) or the `webview` target (page content). The Playwright MCP can also attach via `.mcp.json`.
+- `npm test` — runs `node --test` over `test/unit/**`. Unit suite covers the pure security helpers (`src/shared/url-safety.js`, `src/main/download-path.js`, `jars.js` validation). No linter yet. **For real-environment / UI behavior, drive the running app over CDP**: start `dev:debug`, then connect to `http://127.0.0.1:9222` and `Runtime.evaluate` against the page target (the renderer) or the `webview` target (page content). The Playwright MCP can also attach via `.mcp.json`. See `tests/behavior/` for behavior-test specs.
 
 ## Architecture
 
