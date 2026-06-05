@@ -36,6 +36,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # On a v* tag, the tag is the source of truth for the release version:
+      # sync package.json so installer names/metadata match without a manual bump.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
       - name: Build ${{ matrix.platform }} installers
         run: npx electron-builder --${{ matrix.platform }} --publish never
         env:

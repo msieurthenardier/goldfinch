@@ -776,10 +776,12 @@ function pShields() {
   s.appendChild(head);
 
   const net = (activeTab() && activeTab().privacy.net) || {};
+  // Counts are distinct DOMAINS so they line up with the lists below
+  // (block -> Trackers "N blocked", isolate/strip -> distinct domains affected).
   const EFFECT = {
-    block: [net.blocked, 'blocked'],
+    block: [(net.trackers && net.trackers.blocked) || 0, 'blocked'],
     strip: [net.stripped, 'cleaned'],
-    isolate: [net.cookiesBlocked, 'cookies']
+    isolate: [net.cookiesBlocked, 'isolated']
   };
 
   const dim = !cfg.enabled || paused;
