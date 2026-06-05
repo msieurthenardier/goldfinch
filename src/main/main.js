@@ -313,6 +313,27 @@ ipcMain.handle('shields-pause', (_e, { site, paused }) => {
   return cfg;
 });
 
+// Per-jar fingerprint seed. Stable for a session so a site sees a consistent
+// (but fake) fingerprint; different per jar = a different "persona". Rerolled
+// by New Identity (stage 3).
+const farbleSeeds = new WeakMap();
+function seedForSession(ses) {
+  let s = farbleSeeds.get(ses);
+  if (s == null) { s = Math.floor(Math.random() * 0xffffffff) >>> 0; farbleSeeds.set(ses, s); }
+  return s;
+}
+function rerollSeed(ses) { farbleSeeds.set(ses, Math.floor(Math.random() * 0xffffffff) >>> 0); }
+
+// The webview preload asks (synchronously, at document-start) whether to farble
+// and with which seed.
+ipcMain.on('shields-farble', (event, url) => {
+  const site = registrableDomain(hostnameOf(url || ''));
+  event.returnValue = {
+    farble: shields.active('farble', site),
+    seed: seedForSession(event.sender.session)
+  };
+});
+
 ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
   const ses = wc ? wc.session : session.fromPartition(PAGE_PARTITION);

@@ -189,33 +189,97 @@ function bumpFp(kind) {
   }, 500);
 }
 
+// Ask main (synchronously, before page scripts run) whether to farble and with
+// which per-jar seed.
+let FARBLE = false;
+let SEED = 0;
+try {
+  const cfg = ipcRenderer.sendSync('shields-farble', location.href);
+  FARBLE = !!(cfg && cfg.farble);
+  SEED = (cfg && cfg.seed) >>> 0;
+} catch (e) { /* shields off */ }
+
+// Deterministic per-(seed,index) hash so noise is STABLE within a session (a
+// site re-reading the same canvas gets the same fake result — randomizing every
+// read would be both detectable and self-defeating).
+function h32(a, b) {
+  let h = (a ^ b) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 2246822507) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function farbleImageData(d) {
+  for (let i = 0; i < d.length; i += 4) {
+    const hv = h32(SEED, i);
+    if ((hv & 7) === 0) {            // perturb ~1/8 of pixels by +/-1
+      const ch = i + (hv % 3);
+      const v = d[ch] + ((hv & 8) ? 1 : -1);
+      d[ch] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+  }
+}
+
 (function installFingerprintHooks() {
   try {
-    const c2d = window.CanvasRenderingContext2D && window.CanvasRenderingContext2D.prototype;
-    if (c2d && c2d.getImageData) {
-      const gid = c2d.getImageData;
-      c2d.getImageData = function () { bumpFp('canvas'); return gid.apply(this, arguments); };
+    const c2dProto = window.CanvasRenderingContext2D && window.CanvasRenderingContext2D.prototype;
+    const origGID = c2dProto && c2dProto.getImageData;
+
+    if (c2dProto && origGID) {
+      c2dProto.getImageData = function () {
+        bumpFp('canvas');
+        const img = origGID.apply(this, arguments);
+        if (FARBLE) farbleImageData(img.data);
+        return img;
+      };
     }
+
     const cv = window.HTMLCanvasElement && window.HTMLCanvasElement.prototype;
     if (cv) {
+      const noiseCanvas = (canvas) => {
+        if (!FARBLE || !origGID) return;
+        try {
+          const ctx = canvas.getContext('2d');
+          if (!ctx || !canvas.width || !canvas.height) return;
+          const img = origGID.call(ctx, 0, 0, canvas.width, canvas.height);
+          farbleImageData(img.data);
+          ctx.putImageData(img, 0, 0);
+        } catch (e) { /* webgl canvas etc. */ }
+      };
       ['toDataURL', 'toBlob'].forEach((m) => {
         if (!cv[m]) return;
         const orig = cv[m];
-        cv[m] = function () { bumpFp('canvas'); return orig.apply(this, arguments); };
+        cv[m] = function () { bumpFp('canvas'); noiseCanvas(this); return orig.apply(this, arguments); };
       });
     }
+
     [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach((GL) => {
       if (!GL || !GL.prototype.getParameter) return;
       const gp = GL.prototype.getParameter;
       GL.prototype.getParameter = function (p) {
-        if (p === 37445 || p === 37446) bumpFp('webgl'); // UNMASKED_VENDOR / RENDERER
+        if (p === 37445 || p === 37446) {
+          bumpFp('webgl');
+          if (FARBLE) return p === 37445 ? 'Google Inc.' : 'ANGLE (Generic GPU)'; // generic vendor/renderer
+        }
         return gp.apply(this, arguments);
       };
     });
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC && AC.prototype && AC.prototype.createAnalyser) {
-      const ca = AC.prototype.createAnalyser;
-      AC.prototype.createAnalyser = function () { bumpFp('audio'); return ca.apply(this, arguments); };
+
+    const AN = window.AnalyserNode && window.AnalyserNode.prototype;
+    if (AN && AN.getFloatFrequencyData) {
+      const gffd = AN.getFloatFrequencyData;
+      AN.getFloatFrequencyData = function (arr) {
+        bumpFp('audio');
+        gffd.apply(this, arguments);
+        if (FARBLE && arr && arr.length) {
+          for (let i = 0; i < arr.length; i++) arr[i] += (h32(SEED, i) / 4294967296 - 0.5) * 0.0002;
+        }
+      };
+    }
+
+    // Reduce entropy: report common, fixed device values instead of the real ones.
+    if (FARBLE) {
+      try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true }); } catch (e) {}
+      try { Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true }); } catch (e) {}
     }
   } catch (e) { /* ignore */ }
 })();
