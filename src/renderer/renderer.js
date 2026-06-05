@@ -104,6 +104,7 @@ async function addContainer() {
 /* ------------------------------------------------------------------ tabs */
 
 function createTab(url = HOMEPAGE, container = null) {
+  if (!isSafeTabUrl(url)) return null;
   const id = `tab-${++tabSeq}`;
   const jar = container || DEFAULT_CONTAINER;
 
@@ -352,7 +353,7 @@ function mediaCard(item, tab) {
     thumb.title = 'Open in viewer';
     thumb.addEventListener('click', () => openLightbox(item));
   } else if (item.type === 'video') {
-    if (item.poster) thumb.style.backgroundImage = `url("${item.poster}")`;
+    if (isSafePosterUrl(item.poster)) thumb.style.backgroundImage = `url("${item.poster}")`;
     thumb.insertAdjacentHTML('beforeend', `<span class="play-glyph">▶</span>`);
     thumb.title = 'Play here';
     thumb.addEventListener('click', () => playInline(item, thumb));

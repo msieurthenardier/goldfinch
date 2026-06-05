@@ -18,12 +18,50 @@ const DEFAULTS = [
 let containers = DEFAULTS.map((c) => ({ ...c }));
 let storePath = null;
 
+function validateContainers(saved) {
+  if (!Array.isArray(saved)) return [];
+
+  const seenId = new Set();
+  const seenPartition = new Set();
+  const kept = [];
+
+  for (const entry of saved) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const { id, partition, name, color } = entry;
+    if (typeof id !== 'string' || !id) continue;
+    if (typeof partition !== 'string' || !/^persist:/.test(partition)) continue;
+    // Reserve the default session: a non-default entry must not alias persist:goldfinch
+    if (id !== 'default' && partition === 'persist:goldfinch') continue;
+    // De-dupe by id and by partition (first occurrence wins for both)
+    if (seenId.has(id) || seenPartition.has(partition)) continue;
+    seenId.add(id);
+    seenPartition.add(partition);
+    // Build a new object field-by-field — never spread the parsed entry
+    kept.push({
+      id,
+      name: String(name).slice(0, 24) || 'Jar',
+      color: typeof color === 'string' ? color : '#b06ef5',
+      partition,
+    });
+  }
+
+  // Default floor: ensure a valid 'default' entry always exists (prepend so its
+  // partition wins any future dedup ordering — canonical persist:goldfinch first).
+  if (!kept.some((c) => c.id === 'default')) {
+    const def = DEFAULTS.find((c) => c.id === 'default');
+    kept.unshift({ ...def });
+  }
+
+  return kept;
+}
+
 function load() {
   try {
     storePath = path.join(app.getPath('userData'), 'containers.json');
     if (fs.existsSync(storePath)) {
       const saved = JSON.parse(fs.readFileSync(storePath, 'utf8'));
-      if (Array.isArray(saved) && saved.length) containers = saved;
+      const validated = validateContainers(saved);
+      if (validated.length) containers = validated;
     }
   } catch { /* defaults */ }
   return containers;
@@ -50,4 +88,4 @@ function add(name, color) {
   return container;
 }
 
-module.exports = { load, list, add };
+module.exports = { load, list, add, validateContainers };

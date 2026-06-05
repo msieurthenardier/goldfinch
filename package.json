@@ -10,7 +10,8 @@
     "dev": "electron . --enable-logging",
     "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node --test"
   },
   "build": {
     "appId": "com.goldfinch.browser",

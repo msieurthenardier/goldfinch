@@ -10,7 +10,6 @@ contextBridge.exposeInMainWorld('goldfinch', {
   downloadMedia: (payload) => ipcRenderer.invoke('download-media', payload),
   chooseDownloadDir: () => ipcRenderer.invoke('choose-download-dir'),
   showItemInFolder: (savePath) => ipcRenderer.invoke('show-item-in-folder', savePath),
-  openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
   // --- privacy ---
   onPrivacyNet: (cb) => ipcRenderer.on('privacy-net', (_e, data) => cb(data)),
