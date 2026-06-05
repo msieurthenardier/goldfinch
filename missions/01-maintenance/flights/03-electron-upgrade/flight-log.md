@@ -50,9 +50,64 @@ Changes are AC/observability tightening + the sendSync addition (core design con
 
 ## Leg Progress
 
+### Leg 1: moduleResolution-bundler (2026-06-05)
+
+**Status**: landed
+
+**Change**: `jsconfig.json` `compilerOptions.moduleResolution` switched from `"node"` to `"bundler"`; `"ignoreDeprecations": "6.0"` line removed. JSON validity preserved (trailing comma on `"types"` line removed along with the deleted property).
+
+**Gate results**:
+- `npm run typecheck` → exit 0, 0 errors (no output)
+- `npm test` → 147 pass, 0 fail, 0 skip
+- `npm run lint` → exit 0 (no output)
+
+**Deviations**: None. Pre-verified combo (`moduleResolution:"bundler"` + `module:"commonjs"` + `noEmit:true` + `checkJs:true`) produced 0 errors exactly as the Architect confirmed.
+
+---
+
+### Leg 2: electron-upgrade (2026-06-05)
+
+**Status**: landed
+
+**Dep versions installed**:
+- `electron`: `^42.3.3` → resolved `42.3.3`
+- `electron-builder`: `^26.8.1` → resolved `26.8.1`
+- `npm install` completed in ~14s, 0 vulnerabilities, no required peer deps (eb26 peer deps non-issue with `identity:null` + `nsis`).
+
+**Typecheck fixes**: None. `npm run typecheck` produced 0 errors immediately after the bump — the Electron 42 bundled types are fully compatible with the existing `Electron.WebviewTag` casts in `renderer.js`, `session-augments.d.ts`, and `renderer-globals.d.ts`. No annotation changes were required.
+
+**sendSync Decision: KEEP IT (no migration).**
+`ipcRenderer.sendSync('shields-farble', location.href)` at `webview-preload.js:231` ran without any deprecation warning on Electron 42. The full launch log was inspected — no `sendSync`, `farble`, or IPC deprecation messages appeared. The farble handshake returns config synchronously at document-start as designed. Since `sendSync` works silently (not even a warning, let alone removed), the document-start timing guarantee is intact and no migration is needed. Keeping `sendSync` is the correct choice.
+
+**Runtime fixes**: None. The app launched cleanly on E42. CDP check confirmed:
+- Renderer `page` target at `file:///…/src/renderer/index.html` (type: page)
+- Initial webview at `https://www.google.com/` loaded (type: webview)
+- `createTab('https://example.com/')` via `Runtime.evaluate` on the renderer page created a second webview that navigated to `https://example.com/` (title: "Example Domain") — core navigation confirmed working.
+
+Launch log warnings (cosmetic, pre-existing, all carry "This warning will not show up once the app is packaged"):
+- Sandbox/GPU sandbox warnings (OS-level, WSL environment, always present)
+- `allowpopups` security advisory (pre-existing; popups are intentional)
+- CSP `unsafe-eval` advisory (pre-existing; no CSP set on the renderer)
+No `sendToHost` deprecation — confirmed non-issue as the Architect noted.
+
+**Audit checkpoint**: `npm audit --audit-level=high` → **0 highs, 0 vulnerabilities** (as predicted: Electron CVEs cleared by E42; tar chain cleared by eb26/`@electron/rebuild@4`/`tar@7.x`).
+
+**Builder check**: `npx electron-builder --linux --dir` → exit 0. electron-builder 26.8.1 packaged Electron 42.3.3 cleanly. Native dependencies installed, packaging completed to `dist/linux-unpacked`. Expected advisory logged: "asar usage is disabled" (intentional; `asar:false` is required for the webview preload to load from disk in packaged builds).
+
+**Gate results**:
+- `npm run typecheck` → exit 0, 0 errors
+- `npm test` → 147 pass, 0 fail, 0 skip
+- `npm run lint` → exit 0 (no output)
+- `npm audit --audit-level=high` → 0 vulnerabilities
+- `node -e "require('./node_modules/electron/package.json').version"` → `42.3.3`
+
+**Deviations**: None. Upgrade was entirely clean — no type errors, no runtime breakage, no sendSync migration, no peer deps required.
+
 ---
 
 ## Decisions
+
+**Leg 2 — sendSync KEEP decision (2026-06-05)**: `ipcRenderer.sendSync('shields-farble', ...)` runs silently on Electron 42 with no deprecation warning and returns the farble config correctly. The document-start timing guarantee is preserved. No migration to async `invoke` was performed — doing so would arrive too late relative to page script execution and degrade the fingerprint farble security property. Decision: keep `sendSync` as-is.
 
 ---
 
@@ -64,4 +119,35 @@ Changes are AC/observability tightening + the sendSync addition (core design con
 
 ---
 
+### Leg 4: ci-gates-and-audit (2026-06-05)
+
+**Status**: landed
+
+**Change**: Inserted four named steps into `.github/workflows/ci.yml` between "Install dependencies" (`npm ci`) and "Package (no installers)" (`npx electron-builder --linux --dir`):
+- Unit tests → `npm test`
+- Type check → `npm run typecheck`
+- Lint → `npm run lint`
+- Dependency audit → `npm audit --audit-level=high`
+
+YAML validated via `python3 yaml.safe_load` — parses clean. Existing structure (triggers, concurrency, setup-node node 20 + npm cache, package step) unchanged.
+
+**Local gate results**:
+- `npm test` → 147 pass, 0 fail, 0 skip
+- `npm run typecheck` → exit 0, 0 errors
+- `npm run lint` → exit 0 (no output)
+- `npm audit --audit-level=high` → "found 0 vulnerabilities"
+
+**Deviations**: None.
+
+---
+
 ## Session Notes
+
+### Leg 3: verify-upgrade-behavior — completed (2026-06-05) — Flight-Director-run
+
+Built the `core-browsing-shields` HTTP fixture; launched the **E42** app (`dev:debug`, Electron 42.3.3 confirmed via CDP); served both fixtures; ran two behavior tests via consolidated Witnessed (Executor `abbb…` drove raw CDP, Validator `a725…` judged).
+
+- **`core-browsing-shields`: PASS 5/5** (run log `tests/behavior/core-browsing-shields/runs/2026-06-05-17-43-36.md`) — clean launch on E42, navigation/render (example.com), **tracking-param strip** (`?utm_source=test&q=keep` → `?q=keep`), **tracker block** (privacy panel: "ANALYTICS (1) / BLOCKED / google-analytics.com"), multi-tab (4 webviews). → spec promoted **`draft → active`**.
+- **`tab-scheme-guard`: key F1 vectors PASS 4/4** (run log `…/tab-scheme-guard/runs/2026-06-05-17-43-36.md`) — in-page `will-navigate` file: blocked, `window.open` file: blocked, https control opens. **F1 holds on E42.** Spec stays `draft` (this re-run exercised the key vectors, not the full spec; Step-6 refinement still pending — mission Known Issue).
+- **Net runtime verdict**: the 9-major Electron upgrade did **not** regress core browsing, the Shields/`webRequest` privacy pipeline, or the F1 hostile-URL guard. Combined with Leg 2's zero-code-change result, the upgrade is clean end-to-end.
+- Background app + fixture servers stopped (TaskStop).

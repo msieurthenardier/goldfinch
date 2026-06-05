@@ -1,8 +1,9 @@
 # Behavior Test: Core browsing + Shields survive the Electron upgrade
 
 **Slug**: `core-browsing-shields`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-05
+**Last Run**: 2026-06-05-17-43-36 (pass — 5/5; on Electron 42.3.3; see runs/2026-06-05-17-43-36.md)
 
 ## Intent
 

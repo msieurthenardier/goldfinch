@@ -24,8 +24,8 @@ Goldfinch was just onboarded to Flight Control and received a cold-baseline main
 - [x] **F11** — `@ts-check` + `jsconfig.json` enabled on IPC-boundary modules; stray `Tab` JSDoc fixed
 - [x] **F12** — README documents the Shields/containers/privacy feature set and the `Ctrl+Shift+P` shortcut; architecture table lists `shields.js`/`jars.js`/`trackers.js`
 - [x] **F13** — The six stale squash-merged remote branches are deleted
-- [ ] **F2** — Electron is upgraded to a current major; webview/session behavior re-verified
-- [ ] **F21** — CI runs a dependency-audit step
+- [x] **F2** — Electron is upgraded to a current major; webview/session behavior re-verified
+- [x] **F21** — CI runs a dependency-audit step
 - [ ] **F17** — Both workflows declare least-privilege top-level `permissions:`
 - [ ] **F16** — The README auto-update no longer pushes to `main` unreviewed
 - [ ] **F18** — Third-party actions are SHA-pinned (non-GitHub action prioritized)
@@ -58,7 +58,7 @@ N/A — findings are concrete; design decisions are deferred to each flight.
 
 - [x] **Container `color` is an unescaped HTML-attribute injection sink** — discovered in Flight 1 debrief. `validateContainers` (F7, `jars.js`) coerces `color` to a string but does **not** validate its format, and the renderer interpolates it unescaped into `style="background:${c.color}"` at `renderer.js:76, 127, 883` (while `name` is `escapeHtml`'d). A tampered `containers.json` color (e.g. `#000"><img src=x onerror=…>`) could break out of the attribute into HTML in the privileged chrome renderer. Same threat tier as F7 (requires local file tamper, second-order), but an incomplete fix. **Fast-follow**: in `validateContainers`, accept `color` only if it matches a safe pattern (e.g. `/^#[0-9a-fA-F]{3,8}$/` or a known CSS color keyword), else fall back to the default color. Affects the F7 surface; fold into Flight 2 or a micro-leg. — fixed in Flight 2 (container-color-validation leg).
 - [ ] **`tab-scheme-guard` behavior spec — Step 6 (media-open `file:`) is structurally unreachable** — discovered in the Flight 2 live run (2026-06-05). `file:` media is never cataloged by the media panel (the crafted `<video src=file://>` errors and never enters the catalog), so there's no media-open path to exercise. The other vectors (window.open + in-page `will-navigate`) passed live, so F1 is verified for the real hostile-page surface. **Follow-up**: refine Step 6 to a reachable case (a crafted dangerous item via the http(s) media-open path, which shares the same `createTab` guard), then re-run and promote the spec `draft → active`.
-- [ ] **`jsconfig.json` uses `moduleResolution:"node"` + `ignoreDeprecations:"6.0"`** — TypeScript 6 hard-deprecates the `"node"` (node10) resolution; the Flight 2 typecheck setup suppressed it. Low-risk debt (typecheck passes clean), but the durable fix is `moduleResolution:"bundler"` for this ES2022/Electron-33 checker setup. Switch in a future tooling pass.
+- [x] **`jsconfig.json` uses `moduleResolution:"node"` + `ignoreDeprecations:"6.0"`** — TypeScript 6 hard-deprecates the `"node"` (node10) resolution; the Flight 2 typecheck setup suppressed it. Low-risk debt (typecheck passes clean), but the durable fix is `moduleResolution:"bundler"` for this ES2022/Electron-33 checker setup. — **fixed in Flight 3 (moduleResolution-bundler leg)**: switched to `"bundler"`, dropped `ignoreDeprecations`; typecheck stays 0 errors.
 
 ## Flights
 
@@ -66,6 +66,6 @@ N/A — findings are concrete; design decisions are deferred to each flight.
 
 - [x] Flight 1: Harden the hostile-page security boundary (F1, F3–F7)
 - [x] Flight 2: Quality & hygiene floor — tests, lint, types, README, branches (F8, F12, F9, F10, F11, F13)
-- [ ] Flight 3: Dependency currency — Electron major upgrade (F2, F21)
+- [x] Flight 3: Dependency currency — Electron major upgrade (F2, F21)
 - [ ] Flight 4: CI/CD supply-chain hardening (F17, F16, F18, F19)
 - [ ] Flight 5: Accessibility — keyboard & screen-reader baseline (F22, F23, F24)

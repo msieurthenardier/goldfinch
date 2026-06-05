@@ -1,13 +1,13 @@
 # Flight: Dependency Currency — Electron Major Upgrade
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-06-05 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] F2 — Electron upgraded to a current major; webview/session behavior re-verified
-- [ ] F21 — CI runs a dependency-audit step
-- [ ] Carry-forward — `jsconfig` `moduleResolution` → `"bundler"` (drop `ignoreDeprecations`)
-- [ ] Carry-forward (pulled from Flight 4) — `ci.yml` enforces the test/typecheck/lint quality gates
+- [x] F2 — Electron upgraded to a current major; webview/session behavior re-verified
+- [x] F21 — CI runs a dependency-audit step
+- [x] Carry-forward — `jsconfig` `moduleResolution` → `"bundler"` (drop `ignoreDeprecations`)
+- [x] Carry-forward (pulled from Flight 4) — `ci.yml` enforces the test/typecheck/lint quality gates
 
 ## Pre-Flight
 
@@ -42,8 +42,8 @@ Bring the shipped Electron runtime current — **33.4.11 → 42.3.3** (9 majors)
 
 ### Prerequisites
 - [x] Flights 1 & 2 merged to `main`; quality gates (`npm test` 147, `npm run lint`, `npm run typecheck`) green on `main` (recon).
-- [ ] The behavior-test runtime needs the GUI app to launch via `dev:debug` (:9222) + a served HTTP fixture for `core-browsing-shields`. WSLg present (proven in Flight 2). Verified at leg time.
-- [ ] Network access for `npm install electron@42` (large download) and for the behavior test's `example.com` / tracker-domain requests.
+- [x] The behavior-test runtime needs the GUI app to launch via `dev:debug` (:9222) + a served HTTP fixture for `core-browsing-shields`. WSLg present (proven in Flight 2). Verified at leg time.
+- [x] Network access for `npm install electron@42` (large download) and for the behavior test's `example.com` / tracker-domain requests.
 
 ### Pre-Flight Checklist
 - [x] All open questions resolved
@@ -68,10 +68,10 @@ Four legs, dependency-ordered: fix the resolution debt → bump → verify runti
 - **Leg 4 — `ci-gates-and-audit` (F21 + pulled-forward gates).** Edit `.github/workflows/ci.yml`: after `npm ci`, add `npm test` → `npm run typecheck` → `npm run lint` → `npm audit --audit-level=high` (F21), then the existing `electron-builder --linux --dir`. **Audit policy**: the Leg 2 checkpoint verifies `npm audit --audit-level=high` is 0 highs post-bump — only wire the `high` gate in if so; if any highs remain (unexpected transitive deps), gate on `--audit-level=critical` instead, document the residual highs, and file a follow-up. Acceptance: a CI run on the PR passes all new steps (the gates are fast, deterministic, no GUI).
 
 ### Checkpoints
-- [ ] `moduleResolution:"bundler"`; typecheck still 0 errors (Leg 1)
-- [ ] Electron 42 + builder 26 installed; typecheck/test/lint green; app launches (Leg 2)
-- [ ] `core-browsing-shields` + `tab-scheme-guard` behavior tests pass on the upgraded app (Leg 3)
-- [ ] `ci.yml` runs test/typecheck/lint/audit; PR CI green (Leg 4)
+- [x] `moduleResolution:"bundler"`; typecheck still 0 errors (Leg 1)
+- [x] Electron 42 + builder 26 installed; typecheck/test/lint green; app launches (Leg 2)
+- [x] `core-browsing-shields` + `tab-scheme-guard` behavior tests pass on the upgraded app (Leg 3)
+- [x] `ci.yml` runs test/typecheck/lint/audit; PR CI green (Leg 4)
 
 ### Adaptation Criteria
 
@@ -88,19 +88,19 @@ Four legs, dependency-ordered: fix the resolution debt → bump → verify runti
 
 > Tentative — planned one at a time during execution. Dependency-ordered.
 
-- [ ] `moduleResolution-bundler` - jsconfig debt fix (pre-bump); typecheck stays 0 errors
-- [ ] `electron-upgrade` - F2: bump electron 33→42 + electron-builder 25→26; typecheck-fix + runtime-fix (may sub-split)
-- [ ] `verify-upgrade-behavior` - build fixture + run `core-browsing-shields` & `tab-scheme-guard`; promote the new spec `active`
-- [ ] `ci-gates-and-audit` - F21 audit + test/typecheck/lint gates in `ci.yml`
+- [x] `moduleResolution-bundler` - jsconfig debt fix (pre-bump); typecheck stays 0 errors
+- [x] `electron-upgrade` - F2: bump electron 33→42 + electron-builder 25→26; typecheck-fix + runtime-fix (may sub-split)
+- [x] `verify-upgrade-behavior` - build fixture + run `core-browsing-shields` & `tab-scheme-guard`; promote the new spec `active`
+- [x] `ci-gates-and-audit` - F21 audit + test/typecheck/lint gates in `ci.yml`
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] `npm run typecheck`/`test`/`lint` green; `npm audit` reviewed
-- [ ] Behavior tests `core-browsing-shields` + `tab-scheme-guard` passing on E42; `core-browsing-shields` promoted `active`
-- [ ] CLAUDE.md/README updated if the Electron version or dev commands changed materially
+- [x] `npm run typecheck`/`test`/`lint` green; `npm audit` reviewed
+- [x] Behavior tests `core-browsing-shields` + `tab-scheme-guard` passing on E42; `core-browsing-shields` promoted `active`
+- [x] CLAUDE.md/README updated if the Electron version or dev commands changed materially
 
 ### Verification
 - **Type-level**: `npm run typecheck` clean on Electron 42 types (the WebviewTag/Session/IPC regression net).

@@ -6,11 +6,10 @@
     "target": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "strict": false,
     "skipLibCheck": true,
-    "types": ["node"],
-    "ignoreDeprecations": "6.0"
+    "types": ["node"]
   },
   "include": ["src/**/*.js", "src/**/*.d.ts"]
 }

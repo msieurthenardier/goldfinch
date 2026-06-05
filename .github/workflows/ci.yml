@@ -30,5 +30,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Unit tests
+        run: npm test
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
       - name: Package (no installers)
         run: npx electron-builder --linux --dir
