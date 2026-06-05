@@ -11,7 +11,7 @@
     "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "test": "node --test 'test/unit/*.test.js'",
+    "test": "node --test test/unit/*.test.js",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write ."
