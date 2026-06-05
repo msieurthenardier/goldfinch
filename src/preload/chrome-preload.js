@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   shieldsPause: (payload) => ipcRenderer.invoke('shields-pause', payload),
   onShieldsChanged: (cb) => ipcRenderer.on('shields-changed', (_e, cfg) => cb(cfg)),
 
+  // --- cookie jars / identities ---
+  jarsList: () => ipcRenderer.invoke('jars-list'),
+  jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),
+  identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
+
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),

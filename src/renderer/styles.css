@@ -323,3 +323,22 @@ body { display: flex; flex-direction: column; }
   border-radius: 50%; background: #fff; transition: left .15s;
 }
 .switch.on::after { left: 18px; }
+
+/* ---------- Jars / containers ---------- */
+.tab-jar { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+#new-tab-menu { font-size: 11px; width: 22px; }
+#container-menu {
+  position: absolute; top: 36px; right: 8px; z-index: 60;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px; min-width: 210px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.cm-title { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg-dim); padding: 4px 8px; }
+.cm-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; border: none; color: var(--fg); padding: 7px 8px;
+  border-radius: 6px; cursor: pointer; font-size: 12px;
+}
+.cm-item:hover { background: var(--bg); }
+.cm-item.add { color: var(--fg-dim); border-top: 1px solid var(--border); margin-top: 4px; }
+.cm-item em { color: var(--fg-dim); font-style: normal; font-size: 10px; }
+.cm-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }

@@ -7,6 +7,8 @@ const HOMEPAGE = 'https://www.google.com';
 const els = {
   tabs: document.getElementById('tabs'),
   newTab: document.getElementById('new-tab'),
+  newTabMenu: document.getElementById('new-tab-menu'),
+  containerMenu: document.getElementById('container-menu'),
   webviews: document.getElementById('webviews'),
   back: document.getElementById('back'),
   forward: document.getElementById('forward'),
@@ -54,27 +56,75 @@ let activeTabId = null;
 let activeFilter = 'all';
 let tabSeq = 0;
 
+/* ----------------------------------------------------- jars / containers */
+
+const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
+let containers = [DEFAULT_CONTAINER];
+window.goldfinch.jarsList().then((list) => { if (list && list.length) containers = list; });
+
+function makeBurner() {
+  const n = Math.floor(Math.random() * 1e9);
+  return { id: `burner-${n}`, name: 'Burner', color: '#ff8c42', partition: `burner:${n}`, burner: true };
+}
+
+function openContainerMenu() {
+  const m = els.containerMenu;
+  m.innerHTML = '<div class="cm-title">Open new tab in…</div>';
+  for (const c of containers) {
+    const item = document.createElement('button');
+    item.className = 'cm-item';
+    item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
+    item.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, c); });
+    m.appendChild(item);
+  }
+  const burner = document.createElement('button');
+  burner.className = 'cm-item';
+  burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
+  burner.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, makeBurner()); });
+  m.appendChild(burner);
+
+  const add = document.createElement('button');
+  add.className = 'cm-item add';
+  add.textContent = '+ New container…';
+  add.addEventListener('click', addContainer);
+  m.appendChild(add);
+  m.classList.remove('hidden');
+}
+function closeContainerMenu() { els.containerMenu.classList.add('hidden'); }
+
+async function addContainer() {
+  const name = window.prompt('New container name:');
+  if (!name) return;
+  const c = await window.goldfinch.jarsAdd({ name });
+  containers.push(c);
+  closeContainerMenu();
+  createTab(HOMEPAGE, c);
+}
+
 /* ------------------------------------------------------------------ tabs */
 
-function createTab(url = HOMEPAGE) {
+function createTab(url = HOMEPAGE, container = null) {
   const id = `tab-${++tabSeq}`;
+  const jar = container || DEFAULT_CONTAINER;
 
   const webview = document.createElement('webview');
   webview.setAttribute('src', url);
   webview.setAttribute('preload', window.goldfinch.webviewPreloadPath);
   webview.setAttribute('allowpopups', '');
-  webview.setAttribute('partition', 'persist:goldfinch');
+  webview.setAttribute('partition', jar.partition);
   webview.classList.add('hidden');
   els.webviews.appendChild(webview);
 
-  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy() };
+  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy(), container: jar };
   tabs.set(id, tab);
 
   // Tab button in the strip.
   const btn = document.createElement('div');
   btn.className = 'tab';
   btn.dataset.id = id;
-  btn.innerHTML = `<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
+  // Colored dot for non-default jars.
+  const dot = jar.id === 'default' ? '' : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
+  btn.innerHTML = `${dot}<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
   btn.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-close')) { closeTab(id); return; }
     activateTab(id);
@@ -213,6 +263,11 @@ els.reload.addEventListener('click', () => {
   if (els.reload.textContent === '✕') t.webview.stop(); else t.webview.reload();
 });
 els.newTab.addEventListener('click', () => createTab());
+els.newTabMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  els.containerMenu.classList.contains('hidden') ? openContainerMenu() : closeContainerMenu();
+});
+document.addEventListener('click', () => closeContainerMenu());
 
 /* --------------------------------------------------------------- media panel */
 
@@ -752,6 +807,37 @@ function toggle(on, onChange) {
   return t;
 }
 
+function pJar() {
+  const tab = activeTab();
+  const c = (tab && tab.container) || DEFAULT_CONTAINER;
+  const s = document.createElement('div');
+  s.className = 'privacy-section';
+  s.innerHTML = `<div class="ps-title">Jar</div>` +
+    `<div class="ps-main"><span class="cm-dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
+  const row = document.createElement('div');
+  row.className = 'privacy-buttons';
+  const btn = document.createElement('button');
+  btn.className = 'text-btn small';
+  btn.textContent = 'New identity';
+  btn.title = 'Wipe this jar (cookies + storage) and reroll the fingerprint';
+  btn.addEventListener('click', newIdentity);
+  row.appendChild(btn);
+  s.appendChild(row);
+  return s;
+}
+
+async function newIdentity() {
+  const tab = activeTab();
+  if (!tab) return;
+  const res = await window.goldfinch.identityNew({ partition: tab.container.partition });
+  if (res && res.ok) {
+    toast('New identity', 'Jar wiped + fingerprint rerolled');
+    tab.webview.reload();
+  } else {
+    toast('New identity failed', (res && res.error) || '');
+  }
+}
+
 function renderPrivacy() {
   updatePrivacyBadge();
   if (els.privacyPanel.classList.contains('collapsed')) return;
@@ -763,6 +849,9 @@ function renderPrivacy() {
 
   // Shields controls
   body.appendChild(pShields());
+
+  // Jar / identity
+  body.appendChild(pJar());
 
   // Connection
   const secure = tab && /^https:/i.test(tab.url || '');

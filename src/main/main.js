@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
+const jars = require('./jars');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -334,6 +335,25 @@ ipcMain.on('shields-farble', (event, url) => {
   };
 });
 
+// --- cookie jars / container identities ---
+ipcMain.handle('jars-list', () => jars.list());
+ipcMain.handle('jars-add', (_e, { name, color }) => jars.add(name, color));
+
+// New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
+// so the site can no longer link you to who you just were.
+ipcMain.handle('identity-new', async (_e, { partition }) => {
+  if (!partition) return { ok: false };
+  const ses = session.fromPartition(partition);
+  try {
+    await ses.clearStorageData();
+    await ses.clearCache();
+    rerollSeed(ses);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
+
 ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
   const ses = wc ? wc.session : session.fromPartition(PAGE_PARTITION);
@@ -386,6 +406,7 @@ app.on('session-created', (ses) => {
 
 app.whenReady().then(() => {
   shields.load();
+  jars.load();
   // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
   applyShields(session.defaultSession);
