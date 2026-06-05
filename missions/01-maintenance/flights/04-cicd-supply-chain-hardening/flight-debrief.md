@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-05
 **Flight**: [CI/CD Supply-Chain Hardening](flight.md)
-**Status**: landed
+**Status**: completed
 **Duration**: 2026-06-05 (single session)
 **Legs Completed**: 4 of 4
 
