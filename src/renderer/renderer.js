@@ -7,6 +7,8 @@ const HOMEPAGE = 'https://www.google.com';
 const els = {
   tabs: document.getElementById('tabs'),
   newTab: document.getElementById('new-tab'),
+  newTabMenu: document.getElementById('new-tab-menu'),
+  containerMenu: document.getElementById('container-menu'),
   webviews: document.getElementById('webviews'),
   back: document.getElementById('back'),
   forward: document.getElementById('forward'),
@@ -54,27 +56,75 @@ let activeTabId = null;
 let activeFilter = 'all';
 let tabSeq = 0;
 
+/* ----------------------------------------------------- jars / containers */
+
+const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
+let containers = [DEFAULT_CONTAINER];
+window.goldfinch.jarsList().then((list) => { if (list && list.length) containers = list; });
+
+function makeBurner() {
+  const n = Math.floor(Math.random() * 1e9);
+  return { id: `burner-${n}`, name: 'Burner', color: '#ff8c42', partition: `burner:${n}`, burner: true };
+}
+
+function openContainerMenu() {
+  const m = els.containerMenu;
+  m.innerHTML = '<div class="cm-title">Open new tab in…</div>';
+  for (const c of containers) {
+    const item = document.createElement('button');
+    item.className = 'cm-item';
+    item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
+    item.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, c); });
+    m.appendChild(item);
+  }
+  const burner = document.createElement('button');
+  burner.className = 'cm-item';
+  burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
+  burner.addEventListener('click', () => { closeContainerMenu(); createTab(HOMEPAGE, makeBurner()); });
+  m.appendChild(burner);
+
+  const add = document.createElement('button');
+  add.className = 'cm-item add';
+  add.textContent = '+ New container…';
+  add.addEventListener('click', addContainer);
+  m.appendChild(add);
+  m.classList.remove('hidden');
+}
+function closeContainerMenu() { els.containerMenu.classList.add('hidden'); }
+
+async function addContainer() {
+  const name = window.prompt('New container name:');
+  if (!name) return;
+  const c = await window.goldfinch.jarsAdd({ name });
+  containers.push(c);
+  closeContainerMenu();
+  createTab(HOMEPAGE, c);
+}
+
 /* ------------------------------------------------------------------ tabs */
 
-function createTab(url = HOMEPAGE) {
+function createTab(url = HOMEPAGE, container = null) {
   const id = `tab-${++tabSeq}`;
+  const jar = container || DEFAULT_CONTAINER;
 
   const webview = document.createElement('webview');
   webview.setAttribute('src', url);
   webview.setAttribute('preload', window.goldfinch.webviewPreloadPath);
   webview.setAttribute('allowpopups', '');
-  webview.setAttribute('partition', 'persist:goldfinch');
+  webview.setAttribute('partition', jar.partition);
   webview.classList.add('hidden');
   els.webviews.appendChild(webview);
 
-  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy() };
+  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy(), container: jar };
   tabs.set(id, tab);
 
   // Tab button in the strip.
   const btn = document.createElement('div');
   btn.className = 'tab';
   btn.dataset.id = id;
-  btn.innerHTML = `<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
+  // Colored dot for non-default jars.
+  const dot = jar.id === 'default' ? '' : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
+  btn.innerHTML = `${dot}<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
   btn.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-close')) { closeTab(id); return; }
     activateTab(id);
@@ -213,6 +263,11 @@ els.reload.addEventListener('click', () => {
   if (els.reload.textContent === '✕') t.webview.stop(); else t.webview.reload();
 });
 els.newTab.addEventListener('click', () => createTab());
+els.newTabMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  els.containerMenu.classList.contains('hidden') ? openContainerMenu() : closeContainerMenu();
+});
+document.addEventListener('click', () => closeContainerMenu());
 
 /* --------------------------------------------------------------- media panel */
 
@@ -675,6 +730,142 @@ function updatePrivacyBadge() {
   els.togglePrivacy.classList.toggle('alert', n > 0);
 }
 
+/* ---- Shields config (active protection toggles) ---- */
+
+let shieldsConfig = null;
+window.goldfinch.shieldsGet().then((c) => { shieldsConfig = c; renderPrivacy(); });
+window.goldfinch.onShieldsChanged((c) => { shieldsConfig = c; renderPrivacy(); });
+
+function currentSite() {
+  const tab = activeTab();
+  if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
+  try { const h = new URL(tab.url).hostname.split('.'); return h.length <= 2 ? h.join('.') : h.slice(-2).join('.'); } catch { return ''; }
+}
+
+async function setShield(key, value) {
+  shieldsConfig = await window.goldfinch.shieldsSet({ [key]: value });
+  renderPrivacy();
+}
+
+async function toggleSitePause() {
+  const site = currentSite();
+  if (!site) return;
+  const paused = shieldsConfig && shieldsConfig.pausedSites.includes(site);
+  shieldsConfig = await window.goldfinch.shieldsPause({ site, paused: !paused });
+  renderPrivacy();
+}
+
+const SHIELD_ROWS = [
+  ['block', 'Block trackers'],
+  ['strip', 'Strip tracking params'],
+  ['isolate', 'Isolate 3rd-party cookies'],
+  ['farble', 'Farble fingerprint']
+];
+
+function pShields() {
+  const s = document.createElement('div');
+  s.className = 'privacy-section shields';
+  const cfg = shieldsConfig || {};
+  const site = currentSite();
+  const paused = cfg.pausedSites && cfg.pausedSites.includes(site);
+
+  const head = document.createElement('div');
+  head.className = 'shields-head';
+  head.innerHTML = '<div class="ps-title">Shields</div>';
+  head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v)));
+  s.appendChild(head);
+
+  const net = (activeTab() && activeTab().privacy.net) || {};
+  const EFFECT = {
+    block: [net.blocked, 'blocked'],
+    strip: [net.stripped, 'cleaned'],
+    isolate: [net.cookiesBlocked, 'cookies']
+  };
+
+  const dim = !cfg.enabled || paused;
+  for (const [key, label] of SHIELD_ROWS) {
+    const row = document.createElement('div');
+    row.className = 'shield-row' + (dim ? ' dim' : '');
+    const lbl = document.createElement('span');
+    lbl.className = 'shield-lbl';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const eff = EFFECT[key];
+    if (cfg[key] && !dim && eff && eff[0]) {
+      const c = document.createElement('span');
+      c.className = 'shield-count';
+      c.textContent = `${eff[0]} ${eff[1]}`;
+      row.appendChild(c);
+    }
+    row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v)));
+    s.appendChild(row);
+  }
+
+  if (site) {
+    const pauseRow = document.createElement('div');
+    pauseRow.className = 'shield-row pause';
+    pauseRow.innerHTML = `<span>${paused ? 'Shields paused on' : 'Active on'} ${escapeHtml(site)}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'text-btn small';
+    btn.textContent = paused ? 'Resume here' : 'Pause on this site';
+    btn.addEventListener('click', toggleSitePause);
+    pauseRow.appendChild(btn);
+    s.appendChild(pauseRow);
+  }
+
+  // Network shields only affect NEW requests, so changes show after a reload.
+  const foot = document.createElement('div');
+  foot.className = 'shield-foot';
+  const reload = document.createElement('button');
+  reload.className = 'text-btn small';
+  reload.textContent = 'Reload to apply';
+  reload.addEventListener('click', () => { const t = activeTab(); if (t) t.webview.reload(); });
+  foot.appendChild(reload);
+  s.appendChild(foot);
+
+  return s;
+}
+
+function toggle(on, onChange) {
+  const t = document.createElement('button');
+  t.className = 'switch' + (on ? ' on' : '');
+  t.setAttribute('role', 'switch');
+  t.setAttribute('aria-checked', String(on));
+  t.addEventListener('click', () => onChange(!on));
+  return t;
+}
+
+function pJar() {
+  const tab = activeTab();
+  const c = (tab && tab.container) || DEFAULT_CONTAINER;
+  const s = document.createElement('div');
+  s.className = 'privacy-section';
+  s.innerHTML = `<div class="ps-title">Jar</div>` +
+    `<div class="ps-main"><span class="cm-dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
+  const row = document.createElement('div');
+  row.className = 'privacy-buttons';
+  const btn = document.createElement('button');
+  btn.className = 'text-btn small';
+  btn.textContent = 'New identity';
+  btn.title = 'Wipe this jar (cookies + storage) and reroll the fingerprint';
+  btn.addEventListener('click', newIdentity);
+  row.appendChild(btn);
+  s.appendChild(row);
+  return s;
+}
+
+async function newIdentity() {
+  const tab = activeTab();
+  if (!tab) return;
+  const res = await window.goldfinch.identityNew({ partition: tab.container.partition });
+  if (res && res.ok) {
+    toast('New identity', 'Jar wiped + fingerprint rerolled');
+    tab.webview.reload();
+  } else {
+    toast('New identity failed', (res && res.error) || '');
+  }
+}
+
 function renderPrivacy() {
   updatePrivacyBadge();
   if (els.privacyPanel.classList.contains('collapsed')) return;
@@ -684,17 +875,26 @@ function renderPrivacy() {
   const body = els.privacyBody;
   body.innerHTML = '';
 
+  // Shields controls
+  body.appendChild(pShields());
+
+  // Jar / identity
+  body.appendChild(pJar());
+
   // Connection
   const secure = tab && /^https:/i.test(tab.url || '');
   body.appendChild(pSection('Connection', secure ? 'ok' : 'bad',
     secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
     net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''));
 
-  // Trackers
-  const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0 };
-  const tSec = pBigStat('Trackers', trk.count, trk.count === 1 ? 'tracker detected' : 'trackers detected');
+  // Trackers — blocked vs allowed
+  const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0, blocked: 0, allowed: 0 };
+  const tLabel = trk.count
+    ? `${trk.blocked} blocked · ${trk.allowed} allowed`
+    : 'no trackers detected';
+  const tSec = pBigStat('Trackers', trk.count, tLabel);
   for (const cat of ['ads', 'analytics', 'social', 'other']) {
-    if (trk[cat] && trk[cat].length) tSec.appendChild(pGroup(cat, trk[cat]));
+    if (trk[cat] && trk[cat].length) tSec.appendChild(pGroupStatus(cat, trk[cat]));
   }
   body.appendChild(tSec);
 
@@ -755,6 +955,24 @@ function pGroup(cat, domains) {
   d.className = 'ps-group';
   d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${domains.length})</div>`;
   d.appendChild(pList(domains));
+  return d;
+}
+
+// Tracker list with a blocked/allowed status tag per domain.
+function pGroupStatus(cat, entries) {
+  const d = document.createElement('div');
+  d.className = 'ps-group';
+  d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${entries.length})</div>`;
+  const list = document.createElement('div');
+  list.className = 'ps-list';
+  for (const e of entries) {
+    const item = document.createElement('div');
+    item.className = 'ps-item status';
+    item.innerHTML = `<span class="tag ${e.blocked ? 'blk' : 'allow'}">${e.blocked ? 'blocked' : 'allowed'}</span>` +
+      `<span class="dom${e.blocked ? ' struck' : ''}">${escapeHtml(e.domain)}</span>`;
+    list.appendChild(item);
+  }
+  d.appendChild(list);
   return d;
 }
 function pList(items) {

@@ -4,6 +4,8 @@ const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell } = req
 const path = require('path');
 const fs = require('fs');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
+const shields = require('./shields');
+const jars = require('./jars');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -104,6 +106,8 @@ ipcMain.handle('choose-download-dir', async () => {
 });
 
 function wireDownloadHandler(sess) {
+  if (sess.__goldfinchDownloads) return; // wire each session once
+  sess.__goldfinchDownloads = true;
   sess.on('will-download', (_event, item) => {
     const url = item.getURL();
     const meta = pendingDownloads.get(url);
@@ -172,23 +176,41 @@ function blankAgg(firstParty) {
     secure: true,
     total: 0,
     mixedContent: 0,
+    blocked: 0,         // tracker requests cancelled
+    stripped: 0,        // URLs cleaned of tracking params
+    cookiesBlocked: 0,  // third-party Cookie headers dropped
     thirdPartyDomains: {}, // domain -> count
-    trackers: { ads: [], analytics: [], social: [], other: [] }
+    // each category: { domain -> { blocked } }
+    trackers: { ads: {}, analytics: {}, social: {}, other: {} }
   };
 }
 
 function serializeAgg(a) {
-  const tCount = a.trackers.ads.length + a.trackers.analytics.length + a.trackers.social.length + a.trackers.other.length;
+  const cats = ['ads', 'analytics', 'social', 'other'];
+  let count = 0, blockedT = 0;
+  const trackers = { count: 0, blocked: 0, allowed: 0 };
+  for (const cat of cats) {
+    trackers[cat] = Object.entries(a.trackers[cat]).map(([domain, v]) => {
+      count++; if (v.blocked) blockedT++;
+      return { domain, blocked: v.blocked };
+    });
+  }
+  trackers.count = count;
+  trackers.blocked = blockedT;
+  trackers.allowed = count - blockedT;
   return {
     firstParty: a.firstParty,
     secure: a.secure,
     total: a.total,
     mixedContent: a.mixedContent,
+    blocked: a.blocked,
+    stripped: a.stripped,
+    cookiesBlocked: a.cookiesBlocked,
     thirdPartyCount: Object.keys(a.thirdPartyDomains).length,
     thirdPartyList: Object.entries(a.thirdPartyDomains)
       .map(([domain, count]) => ({ domain, count }))
       .sort((x, y) => y.count - x.count).slice(0, 200),
-    trackers: { ...a.trackers, count: tCount }
+    trackers
   };
 }
 
@@ -203,7 +225,8 @@ function schedulePrivacySend(id) {
   }, 350));
 }
 
-function recordRequest(details) {
+// action: 'allow' | 'block' | 'strip'
+function recordRequest(details, action) {
   const id = details.webContentsId;
   if (id == null) return;
 
@@ -219,22 +242,78 @@ function recordRequest(details) {
   let agg = privacyByTab.get(id);
   if (!agg) { agg = blankAgg(''); privacyByTab.set(id, agg); }
   agg.total++;
+  if (action === 'block') agg.blocked++;
+  if (action === 'strip') agg.stripped++;
   if (agg.secure && details.url.startsWith('http:')) agg.mixedContent++;
 
   const c = classify(details.url, agg.firstParty);
   if (c.thirdParty && c.domain) {
     agg.thirdPartyDomains[c.domain] = (agg.thirdPartyDomains[c.domain] || 0) + 1;
-    if (c.tracker && agg.trackers[c.tracker] && !agg.trackers[c.tracker].includes(c.domain)) {
-      agg.trackers[c.tracker].push(c.domain);
+    if (c.tracker && agg.trackers[c.tracker]) {
+      const entry = agg.trackers[c.tracker][c.domain] || (agg.trackers[c.tracker][c.domain] = { blocked: false });
+      if (action === 'block') entry.blocked = true;
     }
   }
   schedulePrivacySend(id);
 }
 
-function setupPrivacy(ses) {
+// First-party registrable domain for a tab (from its privacy aggregate).
+function tabFirstParty(id) {
+  const agg = privacyByTab.get(id);
+  return agg ? agg.firstParty : '';
+}
+
+// Applied to EVERY session/jar (via app.on('session-created')). One handler per
+// webRequest event: it both records privacy data (observe) and enforces the
+// active Shields (block / strip / isolate).
+function applyShields(ses) {
+  if (ses.__goldfinchShields) return; // wire each session once
+  ses.__goldfinchShields = true;
+
   ses.webRequest.onBeforeRequest((details, cb) => {
-    try { recordRequest(details); } catch { /* never block traffic */ }
-    cb({}); // observe-only: never cancel
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    let action = 'allow';
+    let response = {};
+
+    // Block known trackers (never the top-level document).
+    if (details.resourceType !== 'mainFrame' && shields.active('block', fp)) {
+      const c = classify(details.url, fp);
+      if (c.thirdParty && c.tracker) { action = 'block'; response = { cancel: true }; }
+    }
+    // Strip tracking params (redirect to the clean URL).
+    if (action === 'allow' && shields.active('strip', fp)) {
+      const clean = shields.stripUrl(details.url);
+      if (clean && clean !== details.url) { action = 'strip'; response = { redirectURL: clean }; }
+    }
+    try { recordRequest(details, action); } catch { /* never break traffic */ }
+    cb(response);
+  });
+
+  ses.webRequest.onBeforeSendHeaders((details, cb) => {
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    const headers = details.requestHeaders;
+    if (shields.active('strip', fp) && headers.Referer) {
+      try { headers.Referer = new URL(headers.Referer).origin + '/'; } catch { delete headers.Referer; }
+    }
+    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && headers.Cookie) {
+      if (classify(details.url, fp).thirdParty) {
+        delete headers.Cookie;
+        const agg = privacyByTab.get(details.webContentsId);
+        if (agg) { agg.cookiesBlocked++; schedulePrivacySend(details.webContentsId); }
+      }
+    }
+    cb({ requestHeaders: headers });
+  });
+
+  ses.webRequest.onHeadersReceived((details, cb) => {
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    const headers = details.responseHeaders || {};
+    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && classify(details.url, fp).thirdParty) {
+      for (const k of Object.keys(headers)) {
+        if (k.toLowerCase() === 'set-cookie') delete headers[k];
+      }
+    }
+    cb({ responseHeaders: headers });
   });
 
   // Sensitive permissions are denied by default (Electron otherwise grants
@@ -249,6 +328,59 @@ function setupPrivacy(ses) {
   });
   ses.setPermissionCheckHandler((_wc, permission) => !SENSITIVE_PERMISSIONS.has(permission));
 }
+
+// Shields config IPC.
+ipcMain.handle('shields-get', () => shields.get());
+ipcMain.handle('shields-set', (_e, patch) => {
+  const cfg = shields.set(patch || {});
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  return cfg;
+});
+ipcMain.handle('shields-pause', (_e, { site, paused }) => {
+  const cfg = shields.setPaused(site, paused);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  return cfg;
+});
+
+// Per-jar fingerprint seed. Stable for a session so a site sees a consistent
+// (but fake) fingerprint; different per jar = a different "persona". Rerolled
+// by New Identity (stage 3).
+const farbleSeeds = new WeakMap();
+function seedForSession(ses) {
+  let s = farbleSeeds.get(ses);
+  if (s == null) { s = Math.floor(Math.random() * 0xffffffff) >>> 0; farbleSeeds.set(ses, s); }
+  return s;
+}
+function rerollSeed(ses) { farbleSeeds.set(ses, Math.floor(Math.random() * 0xffffffff) >>> 0); }
+
+// The webview preload asks (synchronously, at document-start) whether to farble
+// and with which seed.
+ipcMain.on('shields-farble', (event, url) => {
+  const site = registrableDomain(hostnameOf(url || ''));
+  event.returnValue = {
+    farble: shields.active('farble', site),
+    seed: seedForSession(event.sender.session)
+  };
+});
+
+// --- cookie jars / container identities ---
+ipcMain.handle('jars-list', () => jars.list());
+ipcMain.handle('jars-add', (_e, { name, color }) => jars.add(name, color));
+
+// New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
+// so the site can no longer link you to who you just were.
+ipcMain.handle('identity-new', async (_e, { partition }) => {
+  if (!partition) return { ok: false };
+  const ses = session.fromPartition(partition);
+  try {
+    await ses.clearStorageData();
+    await ses.clearCache();
+    rerollSeed(ses);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) };
+  }
+});
 
 ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
@@ -292,13 +424,23 @@ ipcMain.handle('privacy-clear-storage', async (_e, { url }) => {
   }
 });
 
+// Apply Shields + downloads to EVERY jar the app ever creates. This is the
+// keystone for the multi-jar model: containers, burners and per-site jars all
+// inherit protection automatically.
+app.on('session-created', (ses) => {
+  applyShields(ses);
+  wireDownloadHandler(ses);
+});
+
 app.whenReady().then(() => {
-  // Downloads can be initiated from the main window (default session) OR from a
-  // <webview> tab, which runs in the "persist:goldfinch" partition — a separate
-  // session. Wire both so our save logic (dialog / silent saveDir) always runs.
+  shields.load();
+  jars.load();
+  // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
-  wireDownloadHandler(session.fromPartition(PAGE_PARTITION));
-  setupPrivacy(session.fromPartition(PAGE_PARTITION));
+  applyShields(session.defaultSession);
+  const pageSession = session.fromPartition(PAGE_PARTITION);
+  wireDownloadHandler(pageSession);
+  applyShields(pageSession);
   createWindow();
 
   app.on('activate', () => {
