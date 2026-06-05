@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell } = req
 const path = require('path');
 const fs = require('fs');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
+const shields = require('./shields');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -104,6 +105,8 @@ ipcMain.handle('choose-download-dir', async () => {
 });
 
 function wireDownloadHandler(sess) {
+  if (sess.__goldfinchDownloads) return; // wire each session once
+  sess.__goldfinchDownloads = true;
   sess.on('will-download', (_event, item) => {
     const url = item.getURL();
     const meta = pendingDownloads.get(url);
@@ -231,10 +234,57 @@ function recordRequest(details) {
   schedulePrivacySend(id);
 }
 
-function setupPrivacy(ses) {
+// First-party registrable domain for a tab (from its privacy aggregate).
+function tabFirstParty(id) {
+  const agg = privacyByTab.get(id);
+  return agg ? agg.firstParty : '';
+}
+
+// Applied to EVERY session/jar (via app.on('session-created')). One handler per
+// webRequest event: it both records privacy data (observe) and enforces the
+// active Shields (block / strip / isolate).
+function applyShields(ses) {
+  if (ses.__goldfinchShields) return; // wire each session once
+  ses.__goldfinchShields = true;
+
   ses.webRequest.onBeforeRequest((details, cb) => {
-    try { recordRequest(details); } catch { /* never block traffic */ }
-    cb({}); // observe-only: never cancel
+    try { recordRequest(details); } catch { /* never break traffic */ }
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+
+    // Block known trackers (never the top-level document).
+    if (details.resourceType !== 'mainFrame' && shields.active('block', fp)) {
+      const c = classify(details.url, fp);
+      if (c.thirdParty && c.tracker) { cb({ cancel: true }); return; }
+    }
+    // Strip tracking params (redirect to the clean URL).
+    if (shields.active('strip', fp)) {
+      const clean = shields.stripUrl(details.url);
+      if (clean && clean !== details.url) { cb({ redirectURL: clean }); return; }
+    }
+    cb({});
+  });
+
+  ses.webRequest.onBeforeSendHeaders((details, cb) => {
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    const headers = details.requestHeaders;
+    if (shields.active('strip', fp) && headers.Referer) {
+      try { headers.Referer = new URL(headers.Referer).origin + '/'; } catch { delete headers.Referer; }
+    }
+    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame') {
+      if (classify(details.url, fp).thirdParty) delete headers.Cookie;
+    }
+    cb({ requestHeaders: headers });
+  });
+
+  ses.webRequest.onHeadersReceived((details, cb) => {
+    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
+    const headers = details.responseHeaders || {};
+    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && classify(details.url, fp).thirdParty) {
+      for (const k of Object.keys(headers)) {
+        if (k.toLowerCase() === 'set-cookie') delete headers[k];
+      }
+    }
+    cb({ responseHeaders: headers });
   });
 
   // Sensitive permissions are denied by default (Electron otherwise grants
@@ -249,6 +299,19 @@ function setupPrivacy(ses) {
   });
   ses.setPermissionCheckHandler((_wc, permission) => !SENSITIVE_PERMISSIONS.has(permission));
 }
+
+// Shields config IPC.
+ipcMain.handle('shields-get', () => shields.get());
+ipcMain.handle('shields-set', (_e, patch) => {
+  const cfg = shields.set(patch || {});
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  return cfg;
+});
+ipcMain.handle('shields-pause', (_e, { site, paused }) => {
+  const cfg = shields.setPaused(site, paused);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  return cfg;
+});
 
 ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
@@ -292,13 +355,22 @@ ipcMain.handle('privacy-clear-storage', async (_e, { url }) => {
   }
 });
 
+// Apply Shields + downloads to EVERY jar the app ever creates. This is the
+// keystone for the multi-jar model: containers, burners and per-site jars all
+// inherit protection automatically.
+app.on('session-created', (ses) => {
+  applyShields(ses);
+  wireDownloadHandler(ses);
+});
+
 app.whenReady().then(() => {
-  // Downloads can be initiated from the main window (default session) OR from a
-  // <webview> tab, which runs in the "persist:goldfinch" partition — a separate
-  // session. Wire both so our save logic (dialog / silent saveDir) always runs.
+  shields.load();
+  // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
-  wireDownloadHandler(session.fromPartition(PAGE_PARTITION));
-  setupPrivacy(session.fromPartition(PAGE_PARTITION));
+  applyShields(session.defaultSession);
+  const pageSession = session.fromPartition(PAGE_PARTITION);
+  wireDownloadHandler(pageSession);
+  applyShields(pageSession);
   createWindow();
 
   app.on('activate', () => {

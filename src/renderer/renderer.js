@@ -675,6 +675,83 @@ function updatePrivacyBadge() {
   els.togglePrivacy.classList.toggle('alert', n > 0);
 }
 
+/* ---- Shields config (active protection toggles) ---- */
+
+let shieldsConfig = null;
+window.goldfinch.shieldsGet().then((c) => { shieldsConfig = c; renderPrivacy(); });
+window.goldfinch.onShieldsChanged((c) => { shieldsConfig = c; renderPrivacy(); });
+
+function currentSite() {
+  const tab = activeTab();
+  if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
+  try { const h = new URL(tab.url).hostname.split('.'); return h.length <= 2 ? h.join('.') : h.slice(-2).join('.'); } catch { return ''; }
+}
+
+async function setShield(key, value) {
+  shieldsConfig = await window.goldfinch.shieldsSet({ [key]: value });
+  renderPrivacy();
+}
+
+async function toggleSitePause() {
+  const site = currentSite();
+  if (!site) return;
+  const paused = shieldsConfig && shieldsConfig.pausedSites.includes(site);
+  shieldsConfig = await window.goldfinch.shieldsPause({ site, paused: !paused });
+  renderPrivacy();
+}
+
+const SHIELD_ROWS = [
+  ['block', 'Block trackers'],
+  ['strip', 'Strip tracking params'],
+  ['isolate', 'Isolate 3rd-party cookies'],
+  ['farble', 'Farble fingerprint']
+];
+
+function pShields() {
+  const s = document.createElement('div');
+  s.className = 'privacy-section shields';
+  const cfg = shieldsConfig || {};
+  const site = currentSite();
+  const paused = cfg.pausedSites && cfg.pausedSites.includes(site);
+
+  const head = document.createElement('div');
+  head.className = 'shields-head';
+  head.innerHTML = '<div class="ps-title">Shields</div>';
+  head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v)));
+  s.appendChild(head);
+
+  const dim = !cfg.enabled || paused;
+  for (const [key, label] of SHIELD_ROWS) {
+    const row = document.createElement('div');
+    row.className = 'shield-row' + (dim ? ' dim' : '');
+    row.innerHTML = `<span>${label}</span>`;
+    row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v)));
+    s.appendChild(row);
+  }
+
+  if (site) {
+    const pauseRow = document.createElement('div');
+    pauseRow.className = 'shield-row pause';
+    pauseRow.innerHTML = `<span>${paused ? 'Shields paused on' : 'Active on'} ${escapeHtml(site)}</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'text-btn small';
+    btn.textContent = paused ? 'Resume here' : 'Pause on this site';
+    btn.addEventListener('click', toggleSitePause);
+    pauseRow.appendChild(btn);
+    s.appendChild(pauseRow);
+  }
+  return s;
+}
+
+function toggle(on, onChange) {
+  const t = document.createElement('button');
+  t.className = 'switch' + (on ? ' on' : '');
+  t.setAttribute('role', 'switch');
+  t.setAttribute('aria-checked', String(on));
+  t.addEventListener('click', () => onChange(!on));
+  return t;
+}
+
 function renderPrivacy() {
   updatePrivacyBadge();
   if (els.privacyPanel.classList.contains('collapsed')) return;
@@ -683,6 +760,9 @@ function renderPrivacy() {
   const net = p && p.net;
   const body = els.privacyBody;
   body.innerHTML = '';
+
+  // Shields controls
+  body.appendChild(pShields());
 
   // Connection
   const secure = tab && /^https:/i.test(tab.url || '');
