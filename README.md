@@ -32,6 +32,38 @@ or download **v0.3.0** directly:
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
   bar with search-or-URL detection, persistent session (stays logged in),
   favicons, popups opened as new tabs.
+- **Privacy & Shields** (toggle individual strategies in the Shield panel):
+  - **Tracker & ad blocking** (`block`) — cancels requests to known tracker and
+    ad domains (analytics, ads, social pixels, and other categories) classified
+    by `trackers.js`.
+  - **Tracking-parameter stripping** (`strip`) — removes UTM, `fbclid`, `gclid`,
+    and 30+ other ad-click parameters from outgoing URLs; also trims the
+    `Referer` header to origin only.
+  - **Third-party cookie isolation** (`isolate`) — strips `Cookie` headers and
+    drops `Set-Cookie` response headers for all cross-site (third-party) requests.
+  - **Fingerprint farbling** (`farble`) — injects per-session noise into Canvas,
+    WebGL, and AudioContext APIs via the webview preload, and spoofs navigator
+    properties.
+  - **Per-site pause** — Shields can be suspended for individual sites; the
+    paused-sites list persists across restarts.
+  - Shields apply automatically to every container and burner tab via
+    `app.on('session-created')` — no per-jar configuration needed.
+- **Containers / cookie jars** (click the `▾` next-to-new-tab button):
+  - Four built-in isolated containers — **Default**, **Personal**, **Work**, and
+    **Banking** — each backed by its own Electron session partition (separate
+    cookies, storage, cache, and farble seed).
+  - **Ephemeral burner tabs** — non-persistent partition that evaporates when the
+    tab is closed; leaves no cookies or storage behind.
+  - **User-created jars** — add custom containers with a name and color; each
+    gets a permanent isolated partition.
+  - **New Identity** (in the Shield panel → Jar section) — wipes the current
+    jar's cookies and storage, rerolls its fingerprint seed, and reloads the
+    page so the site cannot link the new session to the old one.
+- **Privacy panel** (toggle with the *Shield* button or `Ctrl+Shift+P`):
+  displays live per-tab privacy stats — tracker counts (blocked/allowed by
+  category), third-party domains contacted, cookie inventory with clear actions,
+  fingerprinting API call counts, and permission requests. Also shows the
+  active Shields toggles and the current jar.
 - **Media panel** (toggle with the *Media* button or `Ctrl+M`):
   - Scans the live DOM for `<img>`, `srcset`/`<picture>`, CSS background images,
     `og:image`, `<video>`, `<audio>`, direct file links (e.g. `.mp3` anchors on
@@ -59,22 +91,26 @@ npm start
 
 ## Keyboard shortcuts
 
-| Shortcut | Action            |
-|----------|-------------------|
-| `Ctrl+T` | New tab           |
-| `Ctrl+W` | Close tab         |
-| `Ctrl+L` | Focus address bar |
-| `Ctrl+M` | Toggle media panel|
-| `Ctrl+R` | Reload            |
+| Shortcut        | Action              |
+|-----------------|---------------------|
+| `Ctrl+T`        | New tab             |
+| `Ctrl+W`        | Close tab           |
+| `Ctrl+L`        | Focus address bar   |
+| `Ctrl+M`        | Toggle media panel  |
+| `Ctrl+Shift+P`  | Toggle privacy panel|
+| `Ctrl+R`        | Reload              |
 
 ## Architecture
 
 | File | Role |
 |------|------|
-| `src/main/main.js` | Electron main process: window, downloads, popup-to-tab. |
+| `src/main/main.js` | Electron main process: window, downloads, popup-to-tab, privacy monitor, IPC. |
+| `src/main/shields.js` | Persisted Shields config (block/strip/isolate/farble/pausedSites) + URL/cookie policy helpers. |
+| `src/main/jars.js` | Container/jar definitions and isolated session partitions; CRUD for user-created jars. |
+| `src/main/trackers.js` | Registrable-domain (eTLD+1) extraction and tracker classification by category. |
 | `src/preload/chrome-preload.js` | Safe `window.goldfinch` API bridge for the UI. |
 | `src/preload/webview-preload.js` | Injected into every page; scans the DOM for media. |
-| `src/renderer/*` | The browser UI: tabs, toolbar, media panel, lightbox. |
+| `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox. |
 
 Each tab is a `<webview>` running real Chromium. The media scanner preload is
 force-injected into every page and streams its catalog to the UI via

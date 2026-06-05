@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // Cookie jars / container identities. Each container is an isolated Electron
@@ -7,6 +8,16 @@
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+
+// Injection-safe color validator.
+// HEX: 3/4/6/8 hex digits — 4 and 8 are CSS4 RGBA shorthand (e.g. #abc8, #11223344).
+// KEYWORD: letters-only (≤20 chars) — covers all CSS color keywords (red, rebeccapurple, etc.)
+// and cannot contain injection characters (parens, semicolons, quotes, angle brackets, spaces).
+const HEX = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+const KEYWORD = /^[a-zA-Z]{1,20}$/;
+function isSafeColor(c) {
+  return typeof c === 'string' && (HEX.test(c) || KEYWORD.test(c));
+}
 
 const DEFAULTS = [
   { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' },
@@ -40,8 +51,8 @@ function validateContainers(saved) {
     kept.push({
       id,
       name: String(name).slice(0, 24) || 'Jar',
-      color: typeof color === 'string' ? color : '#b06ef5',
-      partition,
+      color: isSafeColor(color) ? color : '#b06ef5',
+      partition
     });
   }
 
@@ -63,18 +74,32 @@ function load() {
       const validated = validateContainers(saved);
       if (validated.length) containers = validated;
     }
-  } catch { /* defaults */ }
+  } catch {
+    /* defaults */
+  }
   return containers;
 }
 
 function save() {
-  try { if (storePath) fs.writeFileSync(storePath, JSON.stringify(containers, null, 2)); } catch { /* ignore */ }
+  try {
+    if (storePath) fs.writeFileSync(storePath, JSON.stringify(containers, null, 2));
+  } catch {
+    /* ignore */
+  }
 }
 
-function list() { return containers; }
+function list() {
+  return containers;
+}
 
 function slug(name) {
-  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'jar';
+  return (
+    String(name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 24) || 'jar'
+  );
 }
 
 function add(name, color) {
@@ -82,10 +107,15 @@ function add(name, color) {
   let id = base;
   let n = 1;
   while (containers.some((c) => c.id === id)) id = `${base}-${n++}`;
-  const container = { id, name: String(name).slice(0, 24) || 'Jar', color: color || '#b06ef5', partition: `persist:container:${id}` };
+  const container = {
+    id,
+    name: String(name).slice(0, 24) || 'Jar',
+    color: isSafeColor(color) ? color : '#b06ef5',
+    partition: `persist:container:${id}`
+  };
   containers.push(container);
   save();
   return container;
 }
 
-module.exports = { load, list, add, validateContainers };
+module.exports = { load, list, add, validateContainers, isSafeColor };

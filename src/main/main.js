@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell } = require('electron');
@@ -176,9 +177,18 @@ ipcMain.handle('show-item-in-folder', (_event, savePath) => {
 // requests. Aggregated per tab and streamed to the renderer.
 // ---------------------------------------------------------------------------
 const SENSITIVE_PERMISSIONS = new Set([
-  'media', 'geolocation', 'notifications', 'midi', 'midiSysex',
-  'clipboard-read', 'hid', 'serial', 'usb', 'bluetooth',
-  'idle-detection', 'display-capture'
+  'media',
+  'geolocation',
+  'notifications',
+  'midi',
+  'midiSysex',
+  'clipboard-read',
+  'hid',
+  'serial',
+  'usb',
+  'bluetooth',
+  'idle-detection',
+  'display-capture'
 ]);
 
 const privacyByTab = new Map(); // webContentsId -> aggregate
@@ -190,8 +200,8 @@ function blankAgg(firstParty) {
     secure: true,
     total: 0,
     mixedContent: 0,
-    blocked: 0,             // tracker requests cancelled (raw)
-    strippedDomains: {},    // distinct domains whose URLs were cleaned
+    blocked: 0, // tracker requests cancelled (raw)
+    strippedDomains: {}, // distinct domains whose URLs were cleaned
     cookieBlockedDomains: {}, // distinct third-party domains whose cookies were dropped
     thirdPartyDomains: {}, // domain -> count
     // each category: { domain -> { blocked } }
@@ -201,11 +211,13 @@ function blankAgg(firstParty) {
 
 function serializeAgg(a) {
   const cats = ['ads', 'analytics', 'social', 'other'];
-  let count = 0, blockedT = 0;
+  let count = 0,
+    blockedT = 0;
   const trackers = { count: 0, blocked: 0, allowed: 0 };
   for (const cat of cats) {
     trackers[cat] = Object.entries(a.trackers[cat]).map(([domain, v]) => {
-      count++; if (v.blocked) blockedT++;
+      count++;
+      if (v.blocked) blockedT++;
       return { domain, blocked: v.blocked };
     });
   }
@@ -218,25 +230,29 @@ function serializeAgg(a) {
     total: a.total,
     mixedContent: a.mixedContent,
     blocked: a.blocked, // raw request count (kept for reference)
-    stripped: Object.keys(a.strippedDomains).length,      // distinct domains
+    stripped: Object.keys(a.strippedDomains).length, // distinct domains
     cookiesBlocked: Object.keys(a.cookieBlockedDomains).length, // distinct domains
     thirdPartyCount: Object.keys(a.thirdPartyDomains).length,
     thirdPartyList: Object.entries(a.thirdPartyDomains)
       .map(([domain, count]) => ({ domain, count }))
-      .sort((x, y) => y.count - x.count).slice(0, 200),
+      .sort((x, y) => y.count - x.count)
+      .slice(0, 200),
     trackers
   };
 }
 
 function schedulePrivacySend(id) {
   if (privacySendTimers.has(id)) return;
-  privacySendTimers.set(id, setTimeout(() => {
-    privacySendTimers.delete(id);
-    const agg = privacyByTab.get(id);
-    if (agg && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
-    }
-  }, 350));
+  privacySendTimers.set(
+    id,
+    setTimeout(() => {
+      privacySendTimers.delete(id);
+      const agg = privacyByTab.get(id);
+      if (agg && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
+      }
+    }, 350)
+  );
 }
 
 // action: 'allow' | 'block' | 'strip'
@@ -254,7 +270,10 @@ function recordRequest(details, action) {
   }
 
   let agg = privacyByTab.get(id);
-  if (!agg) { agg = blankAgg(''); privacyByTab.set(id, agg); }
+  if (!agg) {
+    agg = blankAgg('');
+    privacyByTab.set(id, agg);
+  }
   agg.total++;
   if (action === 'block') agg.blocked++;
   if (action === 'strip') agg.strippedDomains[registrableDomain(hostnameOf(details.url))] = 1;
@@ -292,14 +311,24 @@ function applyShields(ses) {
     // Block known trackers (never the top-level document).
     if (details.resourceType !== 'mainFrame' && shields.active('block', fp)) {
       const c = classify(details.url, fp);
-      if (c.thirdParty && c.tracker) { action = 'block'; response = { cancel: true }; }
+      if (c.thirdParty && c.tracker) {
+        action = 'block';
+        response = { cancel: true };
+      }
     }
     // Strip tracking params (redirect to the clean URL).
     if (action === 'allow' && shields.active('strip', fp)) {
       const clean = shields.stripUrl(details.url);
-      if (clean && clean !== details.url) { action = 'strip'; response = { redirectURL: clean }; }
+      if (clean && clean !== details.url) {
+        action = 'strip';
+        response = { redirectURL: clean };
+      }
     }
-    try { recordRequest(details, action); } catch { /* never break traffic */ }
+    try {
+      recordRequest(details, action);
+    } catch {
+      /* never break traffic */
+    }
     cb(response);
   });
 
@@ -307,14 +336,21 @@ function applyShields(ses) {
     const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
     const headers = details.requestHeaders;
     if (shields.active('strip', fp) && headers.Referer) {
-      try { headers.Referer = new URL(headers.Referer).origin + '/'; } catch { delete headers.Referer; }
+      try {
+        headers.Referer = new URL(headers.Referer).origin + '/';
+      } catch {
+        delete headers.Referer;
+      }
     }
     if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && headers.Cookie) {
       const c = classify(details.url, fp);
       if (c.thirdParty) {
         delete headers.Cookie;
         const agg = privacyByTab.get(details.webContentsId);
-        if (agg && c.domain) { agg.cookieBlockedDomains[c.domain] = 1; schedulePrivacySend(details.webContentsId); }
+        if (agg && c.domain) {
+          agg.cookieBlockedDomains[c.domain] = 1;
+          schedulePrivacySend(details.webContentsId);
+        }
       }
     }
     cb({ requestHeaders: headers });
@@ -363,10 +399,15 @@ ipcMain.handle('shields-pause', (_e, { site, paused }) => {
 const farbleSeeds = new WeakMap();
 function seedForSession(ses) {
   let s = farbleSeeds.get(ses);
-  if (s == null) { s = Math.floor(Math.random() * 0xffffffff) >>> 0; farbleSeeds.set(ses, s); }
+  if (s == null) {
+    s = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    farbleSeeds.set(ses, s);
+  }
   return s;
 }
-function rerollSeed(ses) { farbleSeeds.set(ses, Math.floor(Math.random() * 0xffffffff) >>> 0); }
+function rerollSeed(ses) {
+  farbleSeeds.set(ses, Math.floor(Math.random() * 0xffffffff) >>> 0);
+}
 
 // The webview preload asks (synchronously, at document-start) whether to farble
 // and with which seed.
@@ -402,13 +443,16 @@ ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const ses = wc ? wc.session : session.fromPartition(PAGE_PARTITION);
   const fp = registrableDomain(hostnameOf(url || (wc && wc.getURL()) || ''));
   const all = await ses.cookies.get({});
-  let first = 0, third = 0;
-  const list = all.map((ck) => {
-    const d = registrableDomain(ck.domain.replace(/^\./, ''));
-    const isThird = !!fp && d !== fp;
-    isThird ? third++ : first++;
-    return { name: ck.name, domain: ck.domain, third: isThird, secure: ck.secure, session: !ck.expirationDate };
-  }).sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
+  let first = 0,
+    third = 0;
+  const list = all
+    .map((ck) => {
+      const d = registrableDomain(ck.domain.replace(/^\./, ''));
+      const isThird = !!fp && d !== fp;
+      isThird ? third++ : first++;
+      return { name: ck.name, domain: ck.domain, third: isThird, secure: ck.secure, session: !ck.expirationDate };
+    })
+    .sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
   return { firstParty: fp, first, third, total: all.length, list: list.slice(0, 300) };
 });
 
@@ -423,7 +467,12 @@ ipcMain.handle('privacy-clear-cookies', async (_e, { webContentsId, scope, url }
     if (scope === 'all' || (scope === 'third' && isThird)) {
       const host = ck.domain.replace(/^\./, '');
       const proto = ck.secure ? 'https' : 'http';
-      try { await ses.cookies.remove(`${proto}://${host}${ck.path || '/'}`, ck.name); removed++; } catch { /* skip */ }
+      try {
+        await ses.cookies.remove(`${proto}://${host}${ck.path || '/'}`, ck.name);
+        removed++;
+      } catch {
+        /* skip */
+      }
     }
   }
   return { removed };

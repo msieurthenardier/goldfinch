@@ -1,0 +1,108 @@
+<!--
+  DELIBERATELY-HOSTILE TEST FIXTURE — do not deploy or link from production.
+  This page is used by the tab-scheme-guard behavior test to exercise every
+  hostile-URL vector against the running Goldfinch app over a safe HTTP origin.
+  It lives under tests/behavior/fixtures/ which is excluded from linting/prettier.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tab Scheme Guard Trigger Page</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 640px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #111;
+      color: #e0e0e0;
+    }
+    h1 { color: #f90; margin-bottom: 0.25rem; }
+    .marker { color: #0f0; font-size: 0.85rem; margin-bottom: 2rem; }
+    section { margin-bottom: 1.5rem; }
+    h2 { color: #aaa; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+    button {
+      display: block;
+      margin-bottom: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: #222;
+      color: #ccc;
+      border: 1px solid #555;
+      cursor: pointer;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+    button:hover { background: #333; border-color: #f90; }
+    #open-control { border-color: #0a0; color: #0f0; }
+    video { display: block; width: 320px; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+
+  <h1>TAB SCHEME GUARD TRIGGER PAGE</h1>
+  <div class="marker">trigger-page-loaded</div>
+
+  <section>
+    <h2>Hostile window.open() vectors</h2>
+
+    <!-- Vector 1: file: scheme via window.open -->
+    <button id="open-file" onclick="window.open('file:///etc/passwd')">
+      open file:///etc/passwd (file: scheme)
+    </button>
+
+    <!-- Vector 2: javascript: scheme via window.open -->
+    <button id="open-javascript">
+      open javascript:document.title=&quot;pwned&quot; (javascript: scheme)
+    </button>
+
+    <!-- Vector 3: data: scheme via window.open -->
+    <button id="open-data" onclick="window.open('data:text/html,<h1>injected</h1>')">
+      open data:text/html,&lt;h1&gt;injected&lt;/h1&gt; (data: scheme)
+    </button>
+  </section>
+
+  <section>
+    <h2>In-page self-navigation vector</h2>
+
+    <!-- Vector 4: file: scheme via window.location self-navigation -->
+    <button id="nav-file" onclick="window.location = 'file:///etc/passwd'">
+      navigate self to file:///etc/passwd (will-navigate guard)
+    </button>
+  </section>
+
+  <section>
+    <h2>Media-panel open-as-tab vector</h2>
+
+    <!-- Vector 5: crafted media element with file: src so Goldfinch media panel
+         catalogs a file:-scheme item the Executor can attempt to "open as tab" -->
+    <video id="evil-media"
+           src="file:///etc/passwd"
+           controls
+           poster="file:///etc/passwd">
+      Your browser does not support the video element.
+    </video>
+    <a id="evil-media-link" href="file:///etc/passwd">file:///etc/passwd (anchor fallback)</a>
+  </section>
+
+  <section>
+    <h2>Control — legitimate https: window.open (must NOT be blocked)</h2>
+
+    <!-- Vector 6 / control: safe https: URL — guard must allow this through -->
+    <button id="open-control" onclick="window.open('https://example.com/')">
+      open https://example.com/ (control — should open)
+    </button>
+  </section>
+
+  <script>
+    // Wire up the javascript: button here to avoid HTML attribute quoting issues.
+    document.getElementById('open-javascript').addEventListener('click', function () {
+      window.open('javascript:document.title="pwned"');
+    });
+
+    console.log('tab-scheme-guard fixture loaded');
+  </script>
+
+</body>
+</html>

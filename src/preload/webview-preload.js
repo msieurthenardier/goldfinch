@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // Injected into every page rendered in a <webview> tab. Walks the DOM,
@@ -24,7 +25,7 @@ function bestFromSrcset(srcset) {
     const tokens = part.trim().split(/\s+/);
     const url = tokens[0];
     const desc = tokens[1] || '';
-    const w = desc.endsWith('w') ? parseInt(desc) : (desc.endsWith('x') ? parseFloat(desc) * 1000 : 0);
+    const w = desc.endsWith('w') ? parseInt(desc) : desc.endsWith('x') ? parseFloat(desc) * 1000 : 0;
     if (url && w > bestW) {
       bestW = w;
       best = url;
@@ -35,9 +36,31 @@ function bestFromSrcset(srcset) {
 
 // Extension -> media type, for direct file links (e.g. <a href="song.mp3">).
 const EXT_TYPE = {
-  jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image', avif: 'image', tiff: 'image',
-  mp4: 'video', webm: 'video', mov: 'video', m4v: 'video', ogv: 'video', mkv: 'video', avi: 'video',
-  mp3: 'audio', wav: 'audio', ogg: 'audio', oga: 'audio', m4a: 'audio', flac: 'audio', aac: 'audio', opus: 'audio', wma: 'audio'
+  jpg: 'image',
+  jpeg: 'image',
+  png: 'image',
+  gif: 'image',
+  webp: 'image',
+  bmp: 'image',
+  svg: 'image',
+  avif: 'image',
+  tiff: 'image',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  m4v: 'video',
+  ogv: 'video',
+  mkv: 'video',
+  avi: 'video',
+  mp3: 'audio',
+  wav: 'audio',
+  ogg: 'audio',
+  oga: 'audio',
+  m4a: 'audio',
+  flac: 'audio',
+  aac: 'audio',
+  opus: 'audio',
+  wma: 'audio'
 };
 
 function classifyByExt(url) {
@@ -123,7 +146,7 @@ function collect() {
 
   // --- direct file links: <a href="...mp3 / .mp4 / .jpg"> ---
   // Many sites (music blogs, galleries) expose media purely as anchor links.
-  for (const a of document.querySelectorAll('a[href]')) {
+  for (const a of /** @type {NodeListOf<HTMLAnchorElement>} */ (document.querySelectorAll('a[href]'))) {
     const type = classifyByExt(a.href);
     if (type) {
       const label = (a.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
@@ -133,11 +156,12 @@ function collect() {
 
   // --- meta images (og:image / twitter:image) ---
   for (const sel of ['meta[property="og:image"]', 'meta[name="twitter:image"]', 'meta[property="og:image:url"]']) {
-    for (const meta of document.querySelectorAll(sel)) add('image', meta.content);
+    for (const meta of /** @type {NodeListOf<HTMLMetaElement>} */ (document.querySelectorAll(sel)))
+      add('image', meta.content);
   }
 
   // --- embeds (YouTube/Vimeo iframes etc.) — can't fetch, but offer to open ---
-  for (const f of document.querySelectorAll('iframe[src]')) {
+  for (const f of /** @type {NodeListOf<HTMLIFrameElement>} */ (document.querySelectorAll('iframe[src]'))) {
     const src = f.src || '';
     if (/youtube|youtu\.be|vimeo|dailymotion|soundcloud|spotify|twitch/i.test(src)) {
       add('embed', src, { allowBlob: false });
@@ -156,6 +180,7 @@ function send() {
 }
 
 // Debounced rescan on DOM mutation (sites lazy-load media constantly).
+/** @type {ReturnType<typeof setTimeout> | null} */
 let timer = null;
 function scheduleScan(delay = 400) {
   clearTimeout(timer);
@@ -167,7 +192,12 @@ window.addEventListener('load', () => scheduleScan(300));
 
 const observer = new MutationObserver(() => scheduleScan(600));
 if (document.documentElement) {
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'poster'] });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['src', 'srcset', 'style', 'poster']
+  });
 }
 
 // Allow the UI to force a refresh.
@@ -179,13 +209,18 @@ ipcRenderer.on('rescan-media', () => send());
 // prone APIs directly — CSP-immune and reliable, unlike injecting a script.
 // ---------------------------------------------------------------------------
 const fpCounts = { canvas: 0, webgl: 0, audio: 0 };
+/** @type {ReturnType<typeof setTimeout> | null} */
 let fpTimer = null;
 function bumpFp(kind) {
   fpCounts[kind]++;
   if (fpTimer) return;
   fpTimer = setTimeout(() => {
     fpTimer = null;
-    try { ipcRenderer.sendToHost('privacy-fp', fpCounts); } catch (e) {}
+    try {
+      ipcRenderer.sendToHost('privacy-fp', fpCounts);
+    } catch {
+      /* ipc unavailable */
+    }
   }, 500);
 }
 
@@ -197,7 +232,9 @@ try {
   const cfg = ipcRenderer.sendSync('shields-farble', location.href);
   FARBLE = !!(cfg && cfg.farble);
   SEED = (cfg && cfg.seed) >>> 0;
-} catch (e) { /* shields off */ }
+} catch {
+  /* shields off */
+}
 
 // Deterministic per-(seed,index) hash so noise is STABLE within a session (a
 // site re-reading the same canvas gets the same fake result — randomizing every
@@ -211,9 +248,10 @@ function h32(a, b) {
 function farbleImageData(d) {
   for (let i = 0; i < d.length; i += 4) {
     const hv = h32(SEED, i);
-    if ((hv & 7) === 0) {            // perturb ~1/8 of pixels by +/-1
+    if ((hv & 7) === 0) {
+      // perturb ~1/8 of pixels by +/-1
       const ch = i + (hv % 3);
-      const v = d[ch] + ((hv & 8) ? 1 : -1);
+      const v = d[ch] + (hv & 8 ? 1 : -1);
       d[ch] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
   }
@@ -243,12 +281,18 @@ function farbleImageData(d) {
           const img = origGID.call(ctx, 0, 0, canvas.width, canvas.height);
           farbleImageData(img.data);
           ctx.putImageData(img, 0, 0);
-        } catch (e) { /* webgl canvas etc. */ }
+        } catch {
+          /* webgl canvas etc. */
+        }
       };
       ['toDataURL', 'toBlob'].forEach((m) => {
         if (!cv[m]) return;
         const orig = cv[m];
-        cv[m] = function () { bumpFp('canvas'); noiseCanvas(this); return orig.apply(this, arguments); };
+        cv[m] = function () {
+          bumpFp('canvas');
+          noiseCanvas(this);
+          return orig.apply(this, arguments);
+        };
       });
     }
 
@@ -278,8 +322,18 @@ function farbleImageData(d) {
 
     // Reduce entropy: report common, fixed device values instead of the real ones.
     if (FARBLE) {
-      try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true }); } catch (e) {}
-      try { Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true }); } catch (e) {}
+      try {
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
+      } catch {
+        /* already defined */
+      }
+      try {
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
+      } catch {
+        /* already defined */
+      }
     }
-  } catch (e) { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 })();

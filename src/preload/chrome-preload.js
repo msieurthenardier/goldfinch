@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // Preload for the browser UI (the renderer that draws toolbar, tabs, media panel).

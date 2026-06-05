@@ -2,26 +2,9 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const Module = require('module');
-const path = require('path');
 
-// ---------------------------------------------------------------------------
-// Stub out 'electron' before requiring jars.js so the module loads cleanly in
-// a plain Node environment (no Electron runtime available during unit tests).
-// ---------------------------------------------------------------------------
-const electronStub = { app: { getPath: () => '/tmp/goldfinch-test-userdata' } };
-const electronResolved = require.resolve('electron');
-Module._cache[electronResolved] = {
-  id: electronResolved,
-  filename: electronResolved,
-  loaded: true,
-  exports: electronStub,
-  parent: null,
-  children: [],
-  paths: [],
-};
-
-const { validateContainers } = require('../../src/main/jars');
+require('../helpers/electron-stub');
+const { validateContainers, isSafeColor } = require('../../src/main/jars');
 
 // Helpers
 const validDefault = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
@@ -50,7 +33,7 @@ test('mixed valid and invalid: valid entries are kept, invalid dropped', () => {
     null,
     'string',
     42,
-    validPersonal,
+    validPersonal
   ];
   const result = validateContainers(input);
   assert.ok(result.some((c) => c.id === 'default'));
@@ -63,19 +46,13 @@ test('mixed valid and invalid: valid entries are kept, invalid dropped', () => {
 // Missing / non-string partition dropped
 // ---------------------------------------------------------------------------
 test('entry with missing partition is dropped', () => {
-  const input = [
-    validDefault,
-    { id: 'no-partition', name: 'No partition' },
-  ];
+  const input = [validDefault, { id: 'no-partition', name: 'No partition' }];
   const result = validateContainers(input);
   assert.ok(!result.some((c) => c.id === 'no-partition'));
 });
 
 test('entry with non-string partition (number) is dropped', () => {
-  const input = [
-    validDefault,
-    { id: 'num-partition', name: 'Num', partition: 12345 },
-  ];
+  const input = [validDefault, { id: 'num-partition', name: 'Num', partition: 12345 }];
   const result = validateContainers(input);
   assert.ok(!result.some((c) => c.id === 'num-partition'));
 });
@@ -87,7 +64,7 @@ test('entry with partition not starting with persist: is dropped', () => {
   const input = [
     validDefault,
     { id: 'bad-prefix', name: 'Bad', partition: 'session:evil' },
-    { id: 'also-bad', name: 'Also bad', partition: 'goldfinch' },
+    { id: 'also-bad', name: 'Also bad', partition: 'goldfinch' }
   ];
   const result = validateContainers(input);
   assert.ok(!result.some((c) => c.id === 'bad-prefix'));
@@ -101,7 +78,7 @@ test('duplicate ids: first occurrence wins', () => {
   const input = [
     validDefault,
     { id: 'dup', name: 'First', color: '#111111', partition: 'persist:container:dup-a' },
-    { id: 'dup', name: 'Second', color: '#222222', partition: 'persist:container:dup-b' },
+    { id: 'dup', name: 'Second', color: '#222222', partition: 'persist:container:dup-b' }
   ];
   const result = validateContainers(input);
   const dups = result.filter((c) => c.id === 'dup');
@@ -116,7 +93,7 @@ test('two distinct ids sharing one partition: only first is kept', () => {
   const input = [
     validDefault,
     { id: 'alice', name: 'Alice', color: '#aaaaaa', partition: 'persist:container:shared' },
-    { id: 'bob', name: 'Bob', color: '#bbbbbb', partition: 'persist:container:shared' },
+    { id: 'bob', name: 'Bob', color: '#bbbbbb', partition: 'persist:container:shared' }
   ];
   const result = validateContainers(input);
   // Only one entry with that partition must survive
@@ -131,10 +108,7 @@ test('two distinct ids sharing one partition: only first is kept', () => {
 // Non-default entry with partition 'persist:goldfinch' dropped
 // ---------------------------------------------------------------------------
 test('non-default entry with partition persist:goldfinch is dropped', () => {
-  const input = [
-    validDefault,
-    { id: 'hijack', name: 'Hijack', color: '#ff0000', partition: 'persist:goldfinch' },
-  ];
+  const input = [validDefault, { id: 'hijack', name: 'Hijack', color: '#ff0000', partition: 'persist:goldfinch' }];
   const result = validateContainers(input);
   assert.ok(!result.some((c) => c.id === 'hijack'));
   // The real default should still be present
@@ -145,12 +119,12 @@ test('non-default entry with partition persist:goldfinch is dropped', () => {
 // Missing default gets the cloned floor
 // ---------------------------------------------------------------------------
 test('when no valid default entry, floor default is prepended', () => {
-  const input = [
-    validPersonal,
-    validWork,
-  ];
+  const input = [validPersonal, validWork];
   const result = validateContainers(input);
-  assert.ok(result.some((c) => c.id === 'default'), 'floor default must be present');
+  assert.ok(
+    result.some((c) => c.id === 'default'),
+    'floor default must be present'
+  );
   // Floor entry should be first
   assert.equal(result[0].id, 'default');
   assert.equal(result[0].partition, 'persist:goldfinch');
@@ -187,7 +161,9 @@ test('non-array input returns empty array', () => {
 test('__proto__ entry does not pollute the resulting object', () => {
   // JSON.parse makes __proto__ a literal own-property, not a prototype chain attack.
   // The rebuild (field-by-field) must not leak it.
-  const poisonedEntry = JSON.parse('{"id":"safe","partition":"persist:container:safe","name":"Safe","color":"#ffffff","__proto__":{"polluted":true}}');
+  const poisonedEntry = JSON.parse(
+    '{"id":"safe","partition":"persist:container:safe","name":"Safe","color":"#ffffff","__proto__":{"polluted":true}}'
+  );
   const result = validateContainers([validDefault, poisonedEntry]);
   const safe = result.find((c) => c.id === 'safe');
   assert.ok(safe, 'valid entry with extra __proto__ key should be kept');
@@ -203,10 +179,7 @@ test('__proto__ entry does not pollute the resulting object', () => {
 // ---------------------------------------------------------------------------
 test('name longer than 24 chars is truncated to 24', () => {
   const longName = 'A'.repeat(30);
-  const input = [
-    validDefault,
-    { id: 'long-name', name: longName, partition: 'persist:container:long-name' },
-  ];
+  const input = [validDefault, { id: 'long-name', name: longName, partition: 'persist:container:long-name' }];
   const result = validateContainers(input);
   const entry = result.find((c) => c.id === 'long-name');
   assert.ok(entry);
@@ -219,7 +192,7 @@ test('name longer than 24 chars is truncated to 24', () => {
 test('non-string name is coerced with String()', () => {
   const input = [
     validDefault,
-    { id: 'num-name', name: 12345, color: '#aabbcc', partition: 'persist:container:num-name' },
+    { id: 'num-name', name: 12345, color: '#aabbcc', partition: 'persist:container:num-name' }
   ];
   const result = validateContainers(input);
   const entry = result.find((c) => c.id === 'num-name');
@@ -232,10 +205,7 @@ test('undefined name is coerced to string (String(undefined) = "undefined")', ()
   // String(undefined) = 'undefined' which is truthy, so || 'Jar' does NOT fire.
   // This mirrors the same logic in add() — the 'Jar' fallback only kicks in for
   // values that coerce to an empty string (e.g. empty string itself).
-  const input = [
-    validDefault,
-    { id: 'no-name', partition: 'persist:container:no-name' },
-  ];
+  const input = [validDefault, { id: 'no-name', partition: 'persist:container:no-name' }];
   const result = validateContainers(input);
   const entry = result.find((c) => c.id === 'no-name');
   assert.ok(entry);
@@ -243,10 +213,7 @@ test('undefined name is coerced to string (String(undefined) = "undefined")', ()
 });
 
 test('empty-string name falls back to Jar', () => {
-  const input = [
-    validDefault,
-    { id: 'empty-name', name: '', partition: 'persist:container:empty-name' },
-  ];
+  const input = [validDefault, { id: 'empty-name', name: '', partition: 'persist:container:empty-name' }];
   const result = validateContainers(input);
   const entry = result.find((c) => c.id === 'empty-name');
   assert.ok(entry);
@@ -258,7 +225,7 @@ test('non-string color falls back to default color', () => {
     validDefault,
     { id: 'bad-color', name: 'BadColor', color: 42, partition: 'persist:container:bad-color' },
     { id: 'null-color', name: 'NullColor', color: null, partition: 'persist:container:null-color' },
-    { id: 'obj-color', name: 'ObjColor', color: { hex: '#fff' }, partition: 'persist:container:obj-color' },
+    { id: 'obj-color', name: 'ObjColor', color: { hex: '#fff' }, partition: 'persist:container:obj-color' }
   ];
   const result = validateContainers(input);
   ['bad-color', 'null-color', 'obj-color'].forEach((id) => {
@@ -268,13 +235,116 @@ test('non-string color falls back to default color', () => {
   });
 });
 
-test('string color is kept as-is', () => {
+test('valid hex color string is kept', () => {
   const input = [
     validDefault,
-    { id: 'str-color', name: 'StrColor', color: '#ff0000', partition: 'persist:container:str-color' },
+    { id: 'str-color', name: 'StrColor', color: '#ff0000', partition: 'persist:container:str-color' }
   ];
   const result = validateContainers(input);
   const entry = result.find((c) => c.id === 'str-color');
   assert.ok(entry);
   assert.equal(entry.color, '#ff0000');
+});
+
+// ---------------------------------------------------------------------------
+// isSafeColor — accepted values
+// ---------------------------------------------------------------------------
+test('isSafeColor accepts 6-digit hex (#9aa0ac)', () => {
+  assert.equal(isSafeColor('#9aa0ac'), true);
+});
+
+test('isSafeColor accepts 3-digit hex (#abc)', () => {
+  assert.equal(isSafeColor('#abc'), true);
+});
+
+test('isSafeColor accepts 4-digit hex CSS4 RGBA shorthand (#abcd)', () => {
+  assert.equal(isSafeColor('#abcd'), true);
+});
+
+test('isSafeColor accepts 8-digit hex CSS4 RGBA (#11223344)', () => {
+  assert.equal(isSafeColor('#11223344'), true);
+});
+
+test('isSafeColor accepts lowercase CSS color keyword (red)', () => {
+  assert.equal(isSafeColor('red'), true);
+});
+
+test('isSafeColor accepts mixed-case CSS color keyword (RebeccaPurple)', () => {
+  assert.equal(isSafeColor('RebeccaPurple'), true);
+});
+
+// ---------------------------------------------------------------------------
+// isSafeColor — rejected values
+// ---------------------------------------------------------------------------
+test('isSafeColor rejects url() function notation', () => {
+  assert.equal(isSafeColor('url(x)'), false);
+});
+
+test('isSafeColor rejects value with semicolon (red;)', () => {
+  assert.equal(isSafeColor('red;'), false);
+});
+
+test('isSafeColor rejects injection payload (#000"><img>)', () => {
+  assert.equal(isSafeColor('#000"><img>'), false);
+});
+
+test('isSafeColor rejects value with double-quote (red")', () => {
+  assert.equal(isSafeColor('red"'), false);
+});
+
+test('isSafeColor rejects rgb() function notation (rgb(0,0,0))', () => {
+  assert.equal(isSafeColor('rgb(0,0,0)'), false);
+});
+
+test('isSafeColor rejects 2-digit hex (#12)', () => {
+  assert.equal(isSafeColor('#12'), false);
+});
+
+test('isSafeColor rejects 7-digit hex (#1234567)', () => {
+  assert.equal(isSafeColor('#1234567'), false);
+});
+
+test('isSafeColor rejects hex with non-hex chars (#xyz)', () => {
+  assert.equal(isSafeColor('#xyz'), false);
+});
+
+test("isSafeColor rejects empty string ('')", () => {
+  assert.equal(isSafeColor(''), false);
+});
+
+test("isSafeColor rejects string with leading whitespace ('  red')", () => {
+  assert.equal(isSafeColor('  red'), false);
+});
+
+test('isSafeColor rejects non-string number (123)', () => {
+  assert.equal(isSafeColor(123), false);
+});
+
+test('isSafeColor rejects non-string null', () => {
+  assert.equal(isSafeColor(null), false);
+});
+
+test("isSafeColor rejects keyword with space ('a b')", () => {
+  assert.equal(isSafeColor('a b'), false);
+});
+
+// ---------------------------------------------------------------------------
+// validateContainers — injection payload in color falls back to default
+// ---------------------------------------------------------------------------
+test('validateContainers: injection payload color falls back to default; other fields preserved', () => {
+  const input = [
+    validDefault,
+    {
+      id: 'poisoned',
+      name: 'PoisonedColor',
+      color: '#000"><img src=x onerror=alert(1)>',
+      partition: 'persist:container:poisoned'
+    }
+  ];
+  const result = validateContainers(input);
+  const entry = result.find((c) => c.id === 'poisoned');
+  assert.ok(entry, 'container with injection color should still be kept');
+  assert.equal(entry.color, '#b06ef5', 'injection payload color should fall back to default');
+  assert.equal(entry.name, 'PoisonedColor', 'name should be preserved');
+  assert.equal(entry.partition, 'persist:container:poisoned', 'partition should be preserved');
 });

@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // Lightweight tracker classification: a curated list of well-known tracker
@@ -6,9 +7,28 @@
 
 // Common two-level public suffixes so "bbc.co.uk" -> "bbc.co.uk", not "co.uk".
 const MULTI_SUFFIX = new Set([
-  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'me.uk', 'co.jp', 'or.jp', 'ne.jp',
-  'com.au', 'net.au', 'org.au', 'co.nz', 'co.in', 'co.za', 'co.kr',
-  'com.br', 'com.cn', 'com.mx', 'com.tr', 'com.tw', 'com.hk', 'com.sg'
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'gov.uk',
+  'me.uk',
+  'co.jp',
+  'or.jp',
+  'ne.jp',
+  'com.au',
+  'net.au',
+  'org.au',
+  'co.nz',
+  'co.in',
+  'co.za',
+  'co.kr',
+  'com.br',
+  'com.cn',
+  'com.mx',
+  'com.tr',
+  'com.tw',
+  'com.hk',
+  'com.sg'
 ]);
 
 function registrableDomain(hostname) {
@@ -21,7 +41,11 @@ function registrableDomain(hostname) {
 }
 
 function hostnameOf(url) {
-  try { return new URL(url).hostname; } catch { return ''; }
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
 }
 
 // Registrable domain -> category. Categories: ads, analytics, social, other.
