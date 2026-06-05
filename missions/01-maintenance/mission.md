@@ -56,7 +56,7 @@ N/A — findings are concrete; design decisions are deferred to each flight.
 
 ## Known Issues
 
-None yet — populated as flights surface mission-level blockers.
+- [ ] **Container `color` is an unescaped HTML-attribute injection sink** — discovered in Flight 1 debrief. `validateContainers` (F7, `jars.js`) coerces `color` to a string but does **not** validate its format, and the renderer interpolates it unescaped into `style="background:${c.color}"` at `renderer.js:76, 127, 883` (while `name` is `escapeHtml`'d). A tampered `containers.json` color (e.g. `#000"><img src=x onerror=…>`) could break out of the attribute into HTML in the privileged chrome renderer. Same threat tier as F7 (requires local file tamper, second-order), but an incomplete fix. **Fast-follow**: in `validateContainers`, accept `color` only if it matches a safe pattern (e.g. `/^#[0-9a-fA-F]{3,8}$/` or a known CSS color keyword), else fall back to the default color. Affects the F7 surface; fold into Flight 2 or a micro-leg.
 
 ## Flights
 
