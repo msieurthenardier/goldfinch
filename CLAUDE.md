@@ -32,3 +32,13 @@ Key cross-cutting facts:
 - `ci.yml`: lightweight Linux build-check on PRs.
 - Cutting a release: bump `package.json`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 - App icon: `build/icon.png`. Note `goldfinch-*.png` at repo root and `.claude/settings.local.json` are gitignored.
+
+## Flight Operations
+
+This project uses [Flight Control](https://github.com/msieurthenardier/mission-control).
+
+**Before any mission/flight/leg work, read these files in order:**
+1. `.flightops/README.md` — What the flightops directory contains
+2. `.flightops/FLIGHT_OPERATIONS.md` — **The workflow you MUST follow**
+3. `.flightops/ARTIFACTS.md` — Where all artifacts are stored
+4. `.flightops/agent-crews/` — Project crew definitions for each phase (read the relevant crew file)
