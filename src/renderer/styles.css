@@ -353,3 +353,6 @@ body { display: flex; flex-direction: column; }
 .tag.allow { background: #3d2f1f; color: #ffb454; }
 .dom { word-break: break-all; }
 .dom.struck { text-decoration: line-through; color: var(--fg-dim); }
+
+/* ---------- Brand mark ---------- */
+#brand { width: 22px; height: 22px; flex: none; margin: 0 4px 0 2px; -webkit-user-drag: none; user-select: none; }

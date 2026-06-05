@@ -19,6 +19,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#1e1f25',
     title: 'Goldfinch',
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
