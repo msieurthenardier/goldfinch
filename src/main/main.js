@@ -176,9 +176,9 @@ function blankAgg(firstParty) {
     secure: true,
     total: 0,
     mixedContent: 0,
-    blocked: 0,         // tracker requests cancelled
-    stripped: 0,        // URLs cleaned of tracking params
-    cookiesBlocked: 0,  // third-party Cookie headers dropped
+    blocked: 0,             // tracker requests cancelled (raw)
+    strippedDomains: {},    // distinct domains whose URLs were cleaned
+    cookieBlockedDomains: {}, // distinct third-party domains whose cookies were dropped
     thirdPartyDomains: {}, // domain -> count
     // each category: { domain -> { blocked } }
     trackers: { ads: {}, analytics: {}, social: {}, other: {} }
@@ -203,9 +203,9 @@ function serializeAgg(a) {
     secure: a.secure,
     total: a.total,
     mixedContent: a.mixedContent,
-    blocked: a.blocked,
-    stripped: a.stripped,
-    cookiesBlocked: a.cookiesBlocked,
+    blocked: a.blocked, // raw request count (kept for reference)
+    stripped: Object.keys(a.strippedDomains).length,      // distinct domains
+    cookiesBlocked: Object.keys(a.cookieBlockedDomains).length, // distinct domains
     thirdPartyCount: Object.keys(a.thirdPartyDomains).length,
     thirdPartyList: Object.entries(a.thirdPartyDomains)
       .map(([domain, count]) => ({ domain, count }))
@@ -243,7 +243,7 @@ function recordRequest(details, action) {
   if (!agg) { agg = blankAgg(''); privacyByTab.set(id, agg); }
   agg.total++;
   if (action === 'block') agg.blocked++;
-  if (action === 'strip') agg.stripped++;
+  if (action === 'strip') agg.strippedDomains[registrableDomain(hostnameOf(details.url))] = 1;
   if (agg.secure && details.url.startsWith('http:')) agg.mixedContent++;
 
   const c = classify(details.url, agg.firstParty);
@@ -296,10 +296,11 @@ function applyShields(ses) {
       try { headers.Referer = new URL(headers.Referer).origin + '/'; } catch { delete headers.Referer; }
     }
     if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && headers.Cookie) {
-      if (classify(details.url, fp).thirdParty) {
+      const c = classify(details.url, fp);
+      if (c.thirdParty) {
         delete headers.Cookie;
         const agg = privacyByTab.get(details.webContentsId);
-        if (agg) { agg.cookiesBlocked++; schedulePrivacySend(details.webContentsId); }
+        if (agg && c.domain) { agg.cookieBlockedDomains[c.domain] = 1; schedulePrivacySend(details.webContentsId); }
       }
     }
     cb({ requestHeaders: headers });
