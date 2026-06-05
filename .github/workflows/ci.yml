@@ -13,16 +13,19 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-check:
     name: Build check (linux)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
@@ -39,6 +42,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Audit-gate triage policy: a high here is actionable ONLY by updating the
+      # offending dependency — never by lowering --audit-level or deleting this step.
+      # Distinguish a high in the dev-only tree (e.g. electron-builder's transitive
+      # chain: tar/cacache/node-gyp — build-time only, not shipped) from a high in
+      # runtime `electron` itself (shipped, hostile-content-reachable). Both are fixed
+      # by bumping the dep (Dependabot surfaces these); the gate stays at high.
       - name: Dependency audit
         run: npm audit --audit-level=high
 
