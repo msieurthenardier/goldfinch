@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const version = (process.argv[2] || '').replace(/^v/, '').trim();
-if (!/^\d+\.\d+\.\d+/.test(version)) {
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
   console.error('usage: update-readme.mjs <version>  (e.g. 0.2.0)');
   process.exit(1);
 }

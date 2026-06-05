@@ -26,10 +26,10 @@ Goldfinch was just onboarded to Flight Control and received a cold-baseline main
 - [x] **F13** — The six stale squash-merged remote branches are deleted
 - [x] **F2** — Electron is upgraded to a current major; webview/session behavior re-verified
 - [x] **F21** — CI runs a dependency-audit step
-- [ ] **F17** — Both workflows declare least-privilege top-level `permissions:`
-- [ ] **F16** — The README auto-update no longer pushes to `main` unreviewed
-- [ ] **F18** — Third-party actions are SHA-pinned (non-GitHub action prioritized)
-- [ ] **F19** — Release job is restricted to semver `v*` tags with appropriate gating
+- [x] **F17** — Both workflows declare least-privilege top-level `permissions:`
+- [x] **F16** — README auto-update push to `main` **accepted as-is** (Flight 4 operator decision — an automated post-release docs commit by `github-actions[bot]` is a sanctioned exception even under branch protection; recorded as a tradeoff, not a code change)
+- [x] **F18** — Third-party actions are SHA-pinned (non-GitHub action prioritized)
+- [x] **F19** — Release job is restricted to semver `v*` tags with appropriate gating
 - [ ] **F22** — Tabs are keyboard-operable with correct ARIA roles/state (verified by a behavior test)
 - [ ] **F23** — Icon-only chrome controls have accessible names and a visible focus indicator
 - [ ] **F24** — Remaining WCAG AA gaps addressed (reduced-motion, live regions, focus management, labels/landmarks, color+icon state, contrast)
@@ -67,5 +67,5 @@ N/A — findings are concrete; design decisions are deferred to each flight.
 - [x] Flight 1: Harden the hostile-page security boundary (F1, F3–F7)
 - [x] Flight 2: Quality & hygiene floor — tests, lint, types, README, branches (F8, F12, F9, F10, F11, F13)
 - [x] Flight 3: Dependency currency — Electron major upgrade (F2, F21)
-- [ ] Flight 4: CI/CD supply-chain hardening (F17, F16, F18, F19)
+- [x] Flight 4: CI/CD supply-chain hardening (F17, F16, F18, F19)
 - [ ] Flight 5: Accessibility — keyboard & screen-reader baseline (F22, F23, F24)
