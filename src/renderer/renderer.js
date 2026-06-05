@@ -21,7 +21,7 @@ const els = {
   mediaEmpty: document.getElementById('media-empty'),
   mediaClose: document.getElementById('media-close'),
   mediaRescan: document.getElementById('media-rescan'),
-  mediaDownloadAll: document.getElementById('media-download-all'),
+  mediaDownloadSelected: document.getElementById('media-download-selected'),
   filters: document.querySelectorAll('.filter'),
   toasts: document.getElementById('toasts'),
   lightbox: document.getElementById('lightbox'),
@@ -115,7 +115,7 @@ function createTab(url = HOMEPAGE, container = null) {
   webview.classList.add('hidden');
   els.webviews.appendChild(webview);
 
-  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], wcId: null, privacy: blankPrivacy(), container: jar };
+  const tab = { id, webview, title: 'New tab', url, favicon: null, media: [], selected: new Set(), wcId: null, privacy: blankPrivacy(), container: jar };
   tabs.set(id, tab);
 
   // Tab button in the strip.
@@ -200,8 +200,9 @@ function wireWebview(tab) {
   const onNav = () => {
     tab.url = wv.getURL();
     if (tab.id === activeTabId) { els.address.value = tab.url; updateNavButtons(); }
-    // Reset media + privacy on full navigation; preload/main re-populate.
+    // Reset media + selection + privacy on full navigation; preload/main re-populate.
     tab.media = [];
+    tab.selected.clear();
     tab.privacy = blankPrivacy();
     if (tab.id === activeTabId) { renderMedia(); renderPrivacy(); }
   };
@@ -308,6 +309,7 @@ function renderMedia() {
   els.mediaEmpty.classList.toggle('hidden', filtered.length > 0);
 
   for (const item of filtered) els.mediaList.appendChild(mediaCard(item, tab));
+  updateDownloadSelected();
 }
 
 function mediaCard(item, tab) {
@@ -317,7 +319,28 @@ function mediaCard(item, tab) {
 
   const thumb = document.createElement('div');
   thumb.className = 'media-thumb';
-  thumb.innerHTML = `<span class="badge">${item.type}</span>`;
+
+  // Top-left overlay: selection checkbox (downloadable items only) + type badge.
+  const pick = document.createElement('label');
+  pick.className = 'media-pick';
+  if (item.type !== 'embed') {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = tab.selected.has(item.url);
+    if (cb.checked) card.classList.add('selected');
+    pick.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => {
+      if (cb.checked) tab.selected.add(item.url); else tab.selected.delete(item.url);
+      card.classList.toggle('selected', cb.checked);
+      updateDownloadSelected();
+    });
+    pick.appendChild(cb);
+  }
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.textContent = item.type;
+  pick.appendChild(badge);
+  thumb.appendChild(pick);
 
   const isAV = item.type === 'video' || item.type === 'audio';
 
@@ -390,7 +413,7 @@ function playInline(item, thumb) {
   thumb.style.cursor = 'default';
   thumb.style.backgroundImage = 'none';
   thumb.classList.add(item.type === 'audio' ? 'audio-live' : 'video-live');
-  thumb.innerHTML = `<span class="badge">${item.type}</span>`;
+  thumb.innerHTML = `<label class="media-pick"><span class="badge">${item.type}</span></label>`;
   const player = document.createElement(item.type === 'video' ? 'video' : 'audio');
   player.src = item.url;
   player.controls = true;
@@ -519,15 +542,28 @@ async function downloadItem(item, tab) {
   if (!res || !res.ok) toast('Download failed', res && res.error ? res.error : 'Unknown error');
 }
 
-/* ------------------------------------------------------- download all */
+/* ------------------------------------------------------- download selected */
 
 const bulk = { active: false, queue: [], inFlight: 0, max: 4, done: 0, ok: 0, fail: 0, total: 0, dir: null, tab: null, urls: new Set(), toastEl: null };
 
-async function downloadAll() {
+// Downloadable items currently selected in the active tab.
+function selectedItems() {
+  const tab = activeTab();
+  if (!tab) return [];
+  return tab.media.filter((i) => i.type !== 'embed' && tab.selected.has(i.url));
+}
+
+function updateDownloadSelected() {
+  const n = selectedItems().length;
+  els.mediaDownloadSelected.disabled = n === 0;
+  els.mediaDownloadSelected.textContent = n ? `Download selected (${n})` : 'Download selected';
+}
+
+async function downloadSelected() {
   if (bulk.active) { toast('Already downloading', `Batch in progress (${bulk.done}/${bulk.total}).`); return; }
   const tab = activeTab();
-  const items = visibleItems().filter((i) => i.type !== 'embed');
-  if (!items.length) { toast('Nothing to download', 'No downloadable media in this view.'); return; }
+  const items = selectedItems();
+  if (!items.length) return;
   if (items.length > 30 && !window.confirm(`Download ${items.length} files into a folder?`)) return;
 
   const dir = await window.goldfinch.chooseDownloadDir();
@@ -580,7 +616,7 @@ function bulkFinish() {
   bulk.toastEl = null;
 }
 
-els.mediaDownloadAll.addEventListener('click', downloadAll);
+els.mediaDownloadSelected.addEventListener('click', downloadSelected);
 
 /* --------------------------------------------------- docked music player */
 
