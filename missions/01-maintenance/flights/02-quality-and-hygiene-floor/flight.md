@@ -1,6 +1,6 @@
 # Flight: Quality & Hygiene Floor
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Codebase Health — 2026-06-05 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
