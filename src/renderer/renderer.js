@@ -19,6 +19,7 @@ const els = {
   panel: /** @type {HTMLElement} */ (document.getElementById('media-panel')),
   mediaList: /** @type {HTMLElement} */ (document.getElementById('media-list')),
   mediaEmpty: /** @type {HTMLElement} */ (document.getElementById('media-empty')),
+  mediaStatus: /** @type {HTMLElement} */ (document.getElementById('media-status')),
   mediaClose: /** @type {HTMLButtonElement} */ (document.getElementById('media-close')),
   mediaRescan: /** @type {HTMLButtonElement} */ (document.getElementById('media-rescan')),
   mediaDownloadSelected: /** @type {HTMLButtonElement} */ (document.getElementById('media-download-selected')),
@@ -113,10 +114,21 @@ function openContainerMenu() {
   add.addEventListener('click', addContainer);
   m.appendChild(add);
   m.classList.remove('hidden');
+  els.newTabMenu.setAttribute('aria-expanded', 'true');
+  const first = /** @type {HTMLElement|null} */ (m.querySelector('.cm-item'));
+  if (first) first.focus();
 }
 function closeContainerMenu() {
   els.containerMenu.classList.add('hidden');
+  els.newTabMenu.setAttribute('aria-expanded', 'false');
 }
+// Non-modal: Escape closes the container menu and restores focus to its trigger.
+els.containerMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeContainerMenu();
+    els.newTabMenu.focus();
+  }
+});
 
 async function addContainer() {
   const name = window.prompt('New container name:');
@@ -135,6 +147,7 @@ function createTab(url = HOMEPAGE, container = null) {
   const jar = container || DEFAULT_CONTAINER;
 
   const webview = /** @type {Electron.WebviewTag} */ (document.createElement('webview'));
+  webview.id = `webview-${id}`;
   webview.setAttribute('src', url);
   webview.setAttribute('preload', window.goldfinch.webviewPreloadPath);
   webview.setAttribute('allowpopups', '');
@@ -160,14 +173,20 @@ function createTab(url = HOMEPAGE, container = null) {
   const btn = document.createElement('div');
   btn.className = 'tab';
   btn.dataset.id = id;
+  btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-selected', 'false');
+  btn.tabIndex = -1;
+  btn.setAttribute('aria-controls', `webview-${id}`);
+  btn.setAttribute('aria-keyshortcuts', 'Delete');
+  btn.setAttribute('aria-label', 'New tab');
   // Colored dot for non-default jars.
   const dot =
     jar.id === 'default'
       ? ''
       : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
-  btn.innerHTML = `${dot}<img class="tab-fav hidden" /><span class="tab-title">New tab</span><span class="tab-close">✕</span>`;
+  btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;
   btn.addEventListener('click', (e) => {
-    if (/** @type {HTMLElement} */ (e.target).classList.contains('tab-close')) {
+    if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
       closeTab(id);
       return;
     }
@@ -204,6 +223,8 @@ function activateTab(id) {
     const isActive = t.id === id;
     t.webview.classList.toggle('hidden', !isActive);
     t.btn.classList.toggle('active', isActive);
+    t.btn.setAttribute('aria-selected', String(isActive));
+    t.btn.tabIndex = isActive ? 0 : -1;
   }
   els.address.value = tab.url || '';
   renderMedia();
@@ -230,16 +251,28 @@ function wireWebview(tab) {
   });
 
   wv.addEventListener('did-start-loading', () => {
-    if (tab.id === activeTabId) els.reload.textContent = '✕';
+    if (tab.id === activeTabId) {
+      els.reload.textContent = '✕';
+      els.reload.setAttribute('aria-label', 'Stop');
+      els.reload.title = 'Stop';
+    }
   });
   wv.addEventListener('did-stop-loading', () => {
-    if (tab.id === activeTabId) els.reload.textContent = '⟳';
+    if (tab.id === activeTabId) {
+      els.reload.textContent = '⟳';
+      els.reload.setAttribute('aria-label', 'Reload');
+      els.reload.title = 'Reload';
+    }
   });
 
   wv.addEventListener('page-title-updated', (e) => {
     tab.title = e.title;
     tab.btn.querySelector('.tab-title').textContent = e.title || tab.url;
     tab.btn.title = e.title || '';
+    const name = e.title || tab.url;
+    tab.btn.setAttribute('aria-label', name);
+    const close = /** @type {HTMLButtonElement|null} */ (tab.btn.querySelector('.tab-close'));
+    if (close) close.setAttribute('aria-label', `Close tab: ${name}`);
   });
 
   wv.addEventListener('page-favicon-updated', (e) => {
@@ -358,6 +391,35 @@ els.newTabMenu.addEventListener('click', (e) => {
 });
 document.addEventListener('click', () => closeContainerMenu());
 
+function focusTab(id) {
+  const t = tabs.get(id);
+  if (t && t.btn) /** @type {HTMLElement} */ (t.btn).focus();
+}
+els.tabs.addEventListener('keydown', (e) => {
+  const ids = [...tabs.keys()];
+  if (!ids.length) return;
+  // Cast the closest() RESULT (Element|null) to HTMLElement so `.dataset` typechecks —
+  // `.closest()` returns Element regardless of receiver, and `.dataset` is HTMLElement-only.
+  const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || activeTabId;
+  const idx = Math.max(0, ids.indexOf(cur));
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    const next = ids[(idx + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length];
+    activateTab(next);
+    focusTab(next);
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    const next = e.key === 'Home' ? ids[0] : ids[ids.length - 1];
+    activateTab(next);
+    focusTab(next);
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    closeTab(cur);
+    const now = activeTab();
+    if (now && now.btn) focusTab(now.id);
+  }
+});
+
 /* --------------------------------------------------------------- media panel */
 
 function togglePanel(force) {
@@ -365,10 +427,25 @@ function togglePanel(force) {
   const show = force != null ? force : collapsed;
   els.panel.classList.toggle('collapsed', !show);
   els.toggleMedia.classList.toggle('active', show);
-  if (show) closePrivacyPanel(); // only one right-side panel at a time
+  els.toggleMedia.setAttribute('aria-expanded', String(show));
+  if (show) {
+    closePrivacyPanel(); // only one right-side panel at a time
+    els.mediaClose.focus(); // only move focus when actually opening
+  } else if (els.panel.contains(document.activeElement)) {
+    // Closing while focus is inside the (now zero-width) panel would strand it:
+    // restore focus to the toggle. Guard avoids stealing focus on programmatic
+    // closes where focus isn't in the panel (e.g. opening the privacy panel).
+    els.toggleMedia.focus();
+  }
 }
 els.toggleMedia.addEventListener('click', () => togglePanel());
 els.mediaClose.addEventListener('click', () => togglePanel(false));
+// Non-modal: Escape closes the media panel; togglePanel restores focus to the toggle.
+els.panel.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    togglePanel(false);
+  }
+});
 els.mediaRescan.addEventListener('click', () => {
   const t = activeTab();
   if (t && t.wcId != null) {
@@ -382,8 +459,12 @@ els.mediaRescan.addEventListener('click', () => {
 
 els.filters.forEach((f) =>
   f.addEventListener('click', () => {
-    els.filters.forEach((x) => x.classList.remove('active'));
-    f.classList.add('active');
+    els.filters.forEach((x) => {
+      const isActive = x === f;
+      x.classList.toggle('active', isActive);
+      // Non-color cue (WCAG 1.4.1): expose the active filter to AT via aria-pressed.
+      x.setAttribute('aria-pressed', String(isActive));
+    });
     activeFilter = f.dataset.filter;
     renderMedia();
   })
@@ -403,6 +484,9 @@ function renderMedia() {
   els.mediaCount.textContent = media.length ? `Media (${media.length})` : 'Media';
   els.mediaList.innerHTML = '';
   els.mediaEmpty.classList.toggle('hidden', filtered.length > 0);
+  els.mediaStatus.textContent = filtered.length
+    ? `${filtered.length} media item${filtered.length === 1 ? '' : 's'}`
+    : 'No media on this page';
 
   for (const item of filtered) els.mediaList.appendChild(mediaCard(item, tab));
   updateDownloadSelected();
@@ -422,6 +506,9 @@ function mediaCard(item, tab) {
   if (item.type !== 'embed') {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    // Unique, descriptive name per item (the wrapping <label> only carries the
+    // type badge, so this gives AT a distinguishable name for each checkbox).
+    cb.setAttribute('aria-label', `Select ${item.label || item.name}`);
     cb.checked = tab.selected.has(item.url);
     if (cb.checked) card.classList.add('selected');
     pick.addEventListener('click', (e) => e.stopPropagation());
@@ -501,6 +588,7 @@ function iconBtn(glyph, title, onClick) {
   b.className = 'icon-action';
   b.textContent = glyph;
   b.title = title;
+  b.setAttribute('aria-label', title);
   b.addEventListener('click', (e) => {
     e.stopPropagation();
     onClick();
@@ -569,7 +657,11 @@ function setScale(next, originX, originY) {
   applyZoom();
 }
 
+/** @type {HTMLElement|null} */
+let lbReturnFocus = null;
+
 function openLightbox(item) {
+  lbReturnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
   els.lightboxStage.innerHTML = '';
   const img = document.createElement('img');
   img.src = item.url;
@@ -579,6 +671,7 @@ function openLightbox(item) {
   zoom.img = img;
   els.lightboxCaption.textContent = item.label || item.name;
   els.lightbox.classList.remove('hidden');
+  els.lightboxClose.focus(); // move focus into the modal dialog
   // Center once the image has real dimensions (lightbox must be visible first).
   if (img.complete && img.naturalWidth) centerImage();
   img.addEventListener('load', centerImage, { once: true });
@@ -588,6 +681,8 @@ function closeLightbox() {
   els.lightbox.classList.add('hidden');
   els.lightboxStage.innerHTML = '';
   zoom.img = null;
+  if (lbReturnFocus) lbReturnFocus.focus(); // restore focus to the opener
+  lbReturnFocus = null;
 }
 
 els.lightboxClose.addEventListener('click', closeLightbox);
@@ -637,13 +732,38 @@ window.addEventListener('mouseup', () => {
   els.lightboxStage.classList.remove('grabbing');
 });
 
-// Esc closes; +/- zoom; 0 resets.
+// Esc closes; +/- zoom; 0 resets; Tab traps focus within the modal dialog.
 document.addEventListener('keydown', (e) => {
   if (els.lightbox.classList.contains('hidden')) return;
   if (e.key === 'Escape') closeLightbox();
   else if (e.key === '+' || e.key === '=') setScale(zoom.scale * 1.25);
   else if (e.key === '-') setScale(zoom.scale / 1.25);
   else if (e.key === '0') resetZoom();
+  else if (e.key === 'Tab') {
+    const f = /** @type {NodeListOf<HTMLElement>} */ (els.lightbox.querySelectorAll('button'));
+    if (!f.length) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    const active = document.activeElement;
+    let idx = -1;
+    for (let i = 0; i < f.length; i++) {
+      if (f[i] === active) {
+        idx = i;
+        break;
+      }
+    }
+    // Focus left the button set (e.g. blurred to the image/backdrop) — pull it back in.
+    if (idx === -1) {
+      (e.shiftKey ? last : first).focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && active === last) {
+      first.focus();
+      e.preventDefault();
+    } else if (e.shiftKey && active === first) {
+      last.focus();
+      e.preventDefault();
+    }
+  }
 });
 
 async function downloadItem(item, tab) {
@@ -867,6 +987,9 @@ function findTabByWcId(id) {
 function closePrivacyPanel() {
   els.privacyPanel.classList.add('collapsed');
   els.togglePrivacy.classList.remove('active');
+  // Opening the media panel calls this directly, so sync aria-expanded here too
+  // or the privacy toggle would keep a stale "true" after being collapsed.
+  els.togglePrivacy.setAttribute('aria-expanded', 'false');
 }
 
 function togglePrivacy(force) {
@@ -874,15 +997,27 @@ function togglePrivacy(force) {
   const show = force != null ? force : collapsed;
   els.privacyPanel.classList.toggle('collapsed', !show);
   els.togglePrivacy.classList.toggle('active', show);
+  els.togglePrivacy.setAttribute('aria-expanded', String(show));
   if (show) {
     togglePanel(false); // close the media panel
     fetchCookies(); // cookies are fetched on demand
     renderPrivacy();
+    els.privacyClose.focus(); // only move focus when actually opening
+  } else if (els.privacyPanel.contains(document.activeElement)) {
+    // Closing while focus is inside the (now zero-width) panel would strand it:
+    // restore focus to the toggle. Guard avoids stealing focus on programmatic closes.
+    els.togglePrivacy.focus();
   }
 }
 
 els.togglePrivacy.addEventListener('click', () => togglePrivacy());
 els.privacyClose.addEventListener('click', () => togglePrivacy(false));
+// Non-modal: Escape closes the privacy panel; togglePrivacy restores focus to the toggle.
+els.privacyPanel.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    togglePrivacy(false);
+  }
+});
 els.privacyRefresh.addEventListener('click', () => {
   fetchCookies();
   renderPrivacy();
@@ -934,6 +1069,9 @@ async function clearStorage() {
 function updatePrivacyBadge() {
   const tab = activeTab();
   const n = tab && tab.privacy.net ? tab.privacy.net.trackers.count : 0;
+  // The "(N)" count is the non-color cue (WCAG 1.4.1): the red `.alert` styling
+  // is reinforced by the visible tracker count so state isn't conveyed by color
+  // alone.
   els.privacyCount.textContent = n ? `Shield (${n})` : 'Shield';
   els.togglePrivacy.classList.toggle('alert', n > 0);
 }
@@ -991,7 +1129,7 @@ function pShields() {
   const head = document.createElement('div');
   head.className = 'shields-head';
   head.innerHTML = '<div class="ps-title">Shields</div>';
-  head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v)));
+  head.appendChild(toggle(!!cfg.enabled, (v) => setShield('enabled', v), 'Shields'));
   s.appendChild(head);
 
   const net = (activeTab() && activeTab().privacy.net) || {};
@@ -1018,7 +1156,7 @@ function pShields() {
       c.textContent = `${eff[0]} ${eff[1]}`;
       row.appendChild(c);
     }
-    row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v)));
+    row.appendChild(toggle(!!cfg[key], (v) => setShield(key, v), label));
     s.appendChild(row);
   }
 
@@ -1050,11 +1188,12 @@ function pShields() {
   return s;
 }
 
-function toggle(on, onChange) {
+function toggle(on, onChange, label) {
   const t = document.createElement('button');
   t.className = 'switch' + (on ? ' on' : '');
   t.setAttribute('role', 'switch');
   t.setAttribute('aria-checked', String(on));
+  if (label) t.setAttribute('aria-label', label);
   t.addEventListener('click', () => onChange(!on));
   return t;
 }
