@@ -4,6 +4,16 @@
  */
 
 interface GoldfinchBridge {
+  // --- platform ---
+  platform: string;
+
+  // --- window controls ---
+  windowMinimize(): void;
+  windowToggleMaximize(): void;
+  windowClose(): void;
+  windowIsMaximized(): Promise<boolean>;
+  onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
+
   // --- downloads ---
   downloadMedia(payload: any): Promise<any>;
   chooseDownloadDir(): Promise<string | null>;

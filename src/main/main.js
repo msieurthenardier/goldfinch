@@ -14,6 +14,11 @@ const PAGE_PARTITION = 'persist:goldfinch';
 let mainWindow = null;
 
 function createWindow() {
+  const isMac = process.platform === 'darwin';
+  /** @type {Electron.BrowserWindowConstructorOptions} */
+  const frameOpts = isMac
+    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } } // mac inset — recheck on a mac (open question)
+    : { frame: false };
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -22,6 +27,7 @@ function createWindow() {
     backgroundColor: '#1e1f25',
     title: 'Goldfinch',
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    ...frameOpts,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
@@ -46,6 +52,11 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Forward maximize state to the renderer so the custom window controls can
+  // sync their label/icon/data-state (DD7 read path).
+  mainWindow.on('maximize', () => mainWindow.webContents.send('window-maximized-change', true));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-maximized-change', false));
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +428,17 @@ ipcMain.on('shields-farble', (event, url) => {
     seed: seedForSession(event.sender.session)
   };
 });
+
+// --- window controls (custom frameless min/max/close, win+linux) ---
+ipcMain.on('window-minimize', () => mainWindow && mainWindow.minimize());
+ipcMain.on('window-toggle-maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+// DD6: close() → 'closed' → 'window-all-closed' → app.quit() (non-darwin); NOT app.quit() directly.
+ipcMain.on('window-close', () => mainWindow && mainWindow.close());
+ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximized()));
 
 // --- cookie jars / container identities ---
 ipcMain.handle('jars-list', () => jars.list());

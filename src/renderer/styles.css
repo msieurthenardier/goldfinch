@@ -43,6 +43,37 @@ body {
   gap: 4px;
   padding: 6px 6px 0 6px;
   background: var(--bg);
+  -webkit-app-region: drag; /* frameless: the strip background moves the window */
+}
+#newtab-pill,
+.tab {
+  -webkit-app-region: no-drag; /* keep the pill and tabs clickable */
+}
+#window-controls {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  width: 138px; /* three controls @46px (leg 5); refinement of the flight's "~200px" reserve —
+                   remaining headroom for a future Settings entry comes in a later flight */
+}
+/* macOS: native traffic lights sit top-left; inset the strip so the pill clears them,
+   and drop the custom right zone (mac uses native controls). Defaults — recheck on a mac. */
+html.platform-darwin #tabstrip {
+  padding-left: 78px;
+}
+html.platform-darwin #window-controls {
+  display: none;
+}
+/* Custom min/max/close controls. Reuse .icon-btn for color/cursor/focus-ring;
+   only the overrides below are new. Three @46px buttons fill the 138px reserve. */
+.win-ctrl {
+  -webkit-app-region: no-drag; /* clickable inside the #tabstrip drag region */
+  width: 46px;
+  border-radius: 0;
+}
+.win-ctrl.win-close:hover {
+  background: #e81123; /* Windows-style destructive close hover */
+  color: #fff;
 }
 #tabs {
   display: flex;
@@ -51,12 +82,45 @@ body {
   flex: 1;
   scrollbar-width: thin;
 }
+/* Leading golden pill grouping the two new-tab buttons (+ / ▾). */
+#newtab-pill {
+  display: flex;
+  align-items: center;
+  flex: none;
+  align-self: center;
+  background: var(--accent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+/* Pill buttons sit on the gold fill: dark glyphs, transparent bg so the pill shows. */
+#newtab-pill .icon-btn {
+  color: var(--accent-fg);
+  border-radius: 0;
+  height: 26px;
+}
+#newtab-pill .icon-btn:hover {
+  background: rgba(0, 0, 0, 0.12); /* darken on gold — the global white-overlay hover is faint here */
+}
+/* Internal divider between + and ▾ (DD1: visual grouping, two focus stops). */
+#newtab-pill #new-tab-menu {
+  border-left: 1px solid var(--accent-fg);
+}
+/* The global .icon-btn:focus-visible ring is var(--accent) (gold). On the gold pill that ring
+   is gold-on-gold and effectively invisible, so the pill buttons override it with the dark
+   accent-fg, which clears WCAG 1.4.11 3:1 non-text contrast against the gold fill. (Same
+   id/scoped-specificity carve-out idea as #address:focus-visible below.) */
+#newtab-pill .icon-btn:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
 .tab {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 120px;
-  max-width: 220px;
+  flex: 1 1 0; /* share #tabs width: grow to fill, shrink to the floor */
+  min-width: 88px; /* floor — favicon + jar dot + ellipsized title + close stay visible (tune at HAT) */
+  max-width: 240px; /* cap so a handful of tabs don't stretch absurdly wide */
+  overflow: hidden; /* hard guarantee: content never spills past the tab slot at the floor */
   padding: 7px 10px;
   background: var(--bg-2);
   border-radius: 8px 8px 0 0;
@@ -75,6 +139,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0; /* allow the title flex item to shrink below content width so ellipsis engages */
 }
 .tab .tab-fav {
   width: 14px;
@@ -834,7 +899,7 @@ a:focus-visible {
 #container-menu {
   position: absolute;
   top: 36px;
-  right: 8px;
+  left: 6px;
   z-index: 60;
   background: var(--bg-3);
   border: 1px solid var(--border);

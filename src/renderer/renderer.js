@@ -5,9 +5,13 @@
 const HOMEPAGE = 'https://www.google.com';
 
 const els = {
+  tabstrip: /** @type {HTMLElement} */ (document.getElementById('tabstrip')),
   tabs: /** @type {HTMLElement} */ (document.getElementById('tabs')),
   newTab: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab')),
   newTabMenu: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab-menu')),
+  winMin: /** @type {HTMLButtonElement} */ (document.getElementById('win-min')),
+  winMax: /** @type {HTMLButtonElement} */ (document.getElementById('win-max')),
+  winClose: /** @type {HTMLButtonElement} */ (document.getElementById('win-close')),
   containerMenu: /** @type {HTMLElement} */ (document.getElementById('container-menu')),
   webviews: /** @type {HTMLElement} */ (document.getElementById('webviews')),
   back: /** @type {HTMLButtonElement} */ (document.getElementById('back')),
@@ -50,6 +54,11 @@ const els = {
   playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
   playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next'))
 };
+
+// Tag <html> with the OS platform so window-chrome CSS can branch (mac native
+// traffic lights vs. win/linux custom controls). Optional-chained so a non-preload
+// load path never aborts init at the top level.
+document.documentElement.classList.add(`platform-${window.goldfinch?.platform ?? 'unknown'}`);
 
 /**
  * @typedef {{
@@ -187,6 +196,7 @@ function createTab(url = HOMEPAGE, container = null) {
   btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;
   btn.addEventListener('click', (e) => {
     if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
+      if (tabs.size > 1) freezeTabWidths(); // DD5: defer reflow on pointer-close (not last tab)
       closeTab(id);
       return;
     }
@@ -235,6 +245,22 @@ function activateTab(id) {
 function activeTab() {
   return tabs.get(activeTabId) || null;
 }
+
+let widthsFrozen = false;
+// Deferred resize-on-close (DD5): freeze remaining tabs' rendered widths so a pointer-close
+// doesn't reflow the strip out from under the cursor. Released on #tabstrip mouseleave.
+function freezeTabWidths() {
+  for (const t of tabs.values()) {
+    t.btn.style.flex = `0 0 ${t.btn.getBoundingClientRect().width}px`;
+  }
+  widthsFrozen = true;
+}
+function releaseTabWidths() {
+  if (!widthsFrozen) return;
+  for (const t of tabs.values()) t.btn.style.flex = '';
+  widthsFrozen = false;
+}
+els.tabstrip.addEventListener('mouseleave', releaseTabWidths);
 
 /* ----------------------------------------------------------- webview wiring */
 
@@ -391,6 +417,19 @@ els.newTabMenu.addEventListener('click', (e) => {
 });
 document.addEventListener('click', () => closeContainerMenu());
 
+// --- custom window controls (win+linux frameless; hidden on macOS) ---
+els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
+els.winMax.addEventListener('click', () => window.goldfinch.windowToggleMaximize());
+els.winClose.addEventListener('click', () => window.goldfinch.windowClose());
+function setMaximized(isMax) {
+  els.winMax.setAttribute('data-state', isMax ? 'maximized' : 'normal');
+  els.winMax.setAttribute('aria-label', isMax ? 'Restore' : 'Maximize');
+  els.winMax.title = isMax ? 'Restore' : 'Maximize';
+  els.winMax.textContent = isMax ? '❐' : '□';
+}
+window.goldfinch.windowIsMaximized().then(setMaximized);
+window.goldfinch.onWindowMaximizedChange(setMaximized);
+
 function focusTab(id) {
   const t = tabs.get(id);
   if (t && t.btn) /** @type {HTMLElement} */ (t.btn).focus();
@@ -414,6 +453,7 @@ els.tabs.addEventListener('keydown', (e) => {
     focusTab(next);
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
+    releaseTabWidths(); // keyboard close always reflows immediately (DD5) — clears any active freeze
     closeTab(cur);
     const now = activeTab();
     if (now && now.btn) focusTab(now.id);

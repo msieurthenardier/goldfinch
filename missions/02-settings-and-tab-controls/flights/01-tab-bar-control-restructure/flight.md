@@ -261,15 +261,15 @@ the chrome preload bridge (window-control IPC + maximize-state events), and the 
 
 > **Note:** Tentative; legs are created one at a time as the flight progresses.
 
-- [ ] `unified-pill-control` - Move `+`/`▾` into a leading golden pill; divider; contrast-safe
+- [x] `unified-pill-control` - Move `+`/`▾` into a leading golden pill; divider; contrast-safe
   focus ring; re-anchor container menu. Preserve IDs/handlers/aria. (SC1, SC8)
-- [ ] `responsive-tab-sizing` - Flex shrink/grow with a usable floor + ellipsized title; scroll
+- [x] `responsive-tab-sizing` - Flex shrink/grow with a usable floor + ellipsized title; scroll
   only past the floor; remove the always-on scrollbar.
-- [ ] `deferred-resize-on-close` - Freeze tab widths on pointer-close; release on `mouseleave`;
+- [x] `deferred-resize-on-close` - Freeze tab widths on pointer-close; release on `mouseleave`;
   keyboard close reflows immediately. (depends on `responsive-tab-sizing`)
-- [ ] `frameless-window-shell` - `process.platform` frame branch (frame:false win/linux;
+- [x] `frameless-window-shell` - `process.platform` frame branch (frame:false win/linux;
   titleBarStyle hidden + trafficLightPosition mac); reserved right zone + drag/no-drag regions. (SC8)
-- [ ] `custom-window-controls` - Min/maximize-restore/close buttons (win/linux) + IPC bridge +
+- [x] `custom-window-controls` - Min/maximize-restore/close buttons (win/linux) + IPC bridge +
   maximize-state sync (the behavior-test read path); mac native traffic lights. (depends on
   `frameless-window-shell`; lands with it) (SC8)
 - [ ] `verify-integration` - Run both new behavior tests; re-run `tab-keyboard-operability`

@@ -12,18 +12,27 @@
   <body>
     <!-- Tab strip -->
     <div id="tabstrip">
+      <div id="newtab-pill">
+        <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+        <button
+          id="new-tab-menu"
+          class="icon-btn"
+          title="New tab in a jar / container"
+          aria-label="New tab in a container"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >
+          ▾
+        </button>
+      </div>
       <div id="tabs" role="tablist" aria-label="Open tabs"></div>
-      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
-      <button
-        id="new-tab-menu"
-        class="icon-btn"
-        title="New tab in a jar / container"
-        aria-label="New tab in a container"
-        aria-haspopup="menu"
-        aria-expanded="false"
-      >
-        ▾
-      </button>
+      <div id="window-controls">
+        <button id="win-min" class="icon-btn win-ctrl" title="Minimize" aria-label="Minimize">—</button>
+        <button id="win-max" class="icon-btn win-ctrl" title="Maximize" aria-label="Maximize" data-state="normal">
+          □
+        </button>
+        <button id="win-close" class="icon-btn win-ctrl win-close" title="Close" aria-label="Close">✕</button>
+      </div>
     </div>
     <div id="container-menu" class="hidden"></div>
 
