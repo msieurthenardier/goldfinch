@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>a11y media fixture</title>
+  </head>
+  <body>
+    <h1>Accessibility media fixture</h1>
+    <p>
+      A page carrying one image, one audio clip, and one video so Goldfinch's media panel
+      catalogs an image / audio / video card (and the docked player, media-pick checkboxes,
+      and image lightbox render) for the <code>npm run a11y</code> axe sweep. Assets are
+      same-directory local files referenced over HTTP — the media panel never catalogs
+      <code>file://</code> sources, and there is deliberately <strong>no</strong>
+      <code>&lt;iframe&gt;</code> embed (only youtube/vimeo-style embeds are cataloged).
+    </p>
+
+    <h2>Image</h2>
+    <img src="bird.png" alt="Goldfinch test swatch" width="32" height="32" />
+
+    <h2>Audio</h2>
+    <audio src="tone.wav" controls></audio>
+
+    <h2>Video</h2>
+    <video src="clip.webm" controls width="160" height="120"></video>
+  </body>
+</html>

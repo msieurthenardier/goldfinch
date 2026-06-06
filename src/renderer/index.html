@@ -12,25 +12,41 @@
   <body>
     <!-- Tab strip -->
     <div id="tabstrip">
-      <div id="tabs"></div>
-      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">+</button>
-      <button id="new-tab-menu" class="icon-btn" title="New tab in a jar / container">▾</button>
+      <div id="tabs" role="tablist" aria-label="Open tabs"></div>
+      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+      <button
+        id="new-tab-menu"
+        class="icon-btn"
+        title="New tab in a jar / container"
+        aria-label="New tab in a container"
+        aria-haspopup="menu"
+        aria-expanded="false"
+      >
+        ▾
+      </button>
     </div>
     <div id="container-menu" class="hidden"></div>
 
     <!-- Toolbar -->
     <div id="toolbar">
       <img id="brand" src="assets/goldfinch_color.png" alt="Goldfinch" title="Goldfinch" />
-      <button id="back" class="icon-btn" title="Back">◀</button>
-      <button id="forward" class="icon-btn" title="Forward">▶</button>
-      <button id="reload" class="icon-btn" title="Reload">⟳</button>
+      <button id="back" class="icon-btn" title="Back" aria-label="Back">◀</button>
+      <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">▶</button>
+      <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">⟳</button>
       <div id="address-wrap">
-        <input id="address" type="text" spellcheck="false" placeholder="Search or enter address" autocomplete="off" />
+        <input
+          id="address"
+          type="text"
+          spellcheck="false"
+          placeholder="Search or enter address"
+          autocomplete="off"
+          aria-label="Address and search bar"
+        />
       </div>
-      <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)">
+      <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)" aria-expanded="false">
         <span id="media-count">Media</span>
       </button>
-      <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)">
+      <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)" aria-expanded="false">
         <span id="privacy-count">Shield</span>
       </button>
     </div>
@@ -39,9 +55,9 @@
     <div id="main">
       <div id="webviews"></div>
 
-      <aside id="media-panel" class="collapsed">
+      <aside id="media-panel" class="collapsed" aria-label="Media panel">
         <div id="media-panel-header">
-          <span>Media on this page</span>
+          <h2>Media on this page</h2>
           <div class="panel-actions">
             <button
               id="media-download-selected"
@@ -52,15 +68,15 @@
               Download selected
             </button>
             <button id="media-rescan" class="text-btn small" title="Rescan">Rescan</button>
-            <button id="media-close" class="icon-btn" title="Close">✕</button>
+            <button id="media-close" class="icon-btn" title="Close" aria-label="Close media panel">✕</button>
           </div>
         </div>
         <div id="media-filters">
-          <button class="filter active" data-filter="all">All</button>
-          <button class="filter" data-filter="image">Images</button>
-          <button class="filter" data-filter="video">Video</button>
-          <button class="filter" data-filter="audio">Audio</button>
-          <button class="filter" data-filter="embed">Embeds</button>
+          <button class="filter active" data-filter="all" aria-pressed="true">All</button>
+          <button class="filter" data-filter="image" aria-pressed="false">Images</button>
+          <button class="filter" data-filter="video" aria-pressed="false">Video</button>
+          <button class="filter" data-filter="audio" aria-pressed="false">Audio</button>
+          <button class="filter" data-filter="embed" aria-pressed="false">Embeds</button>
         </div>
         <div id="media-list"></div>
         <div id="media-empty" class="hidden">No media found on this page yet.</div>
@@ -72,9 +88,9 @@
           <div id="player-bar">
             <span id="player-cur" class="lcd">0:00</span>
             <div id="player-controls">
-              <button id="player-prev" title="Previous">◀◀</button>
-              <button id="player-play" title="Play / Pause">▶</button>
-              <button id="player-next" title="Next">▶▶</button>
+              <button id="player-prev" title="Previous" aria-label="Previous track">◀◀</button>
+              <button id="player-play" title="Play / Pause" aria-label="Play / pause">▶</button>
+              <button id="player-next" title="Next" aria-label="Next track">▶▶</button>
             </div>
             <span id="player-dur" class="lcd">0:00</span>
           </div>
@@ -82,12 +98,12 @@
         </div>
       </aside>
 
-      <aside id="privacy-panel" class="collapsed">
+      <aside id="privacy-panel" class="collapsed" aria-label="Privacy panel">
         <div id="privacy-header">
-          <span>Privacy on this page</span>
+          <h2>Privacy on this page</h2>
           <div class="panel-actions">
             <button id="privacy-refresh" class="text-btn small" title="Refresh">Refresh</button>
-            <button id="privacy-close" class="icon-btn" title="Close">✕</button>
+            <button id="privacy-close" class="icon-btn" title="Close" aria-label="Close privacy panel">✕</button>
           </div>
         </div>
         <div id="privacy-body"></div>
@@ -95,18 +111,20 @@
     </div>
 
     <!-- Download toasts -->
-    <div id="toasts"></div>
+    <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+    <!-- Visually-hidden live region for media-panel status announcements -->
+    <div id="media-status" class="sr-only" role="status" aria-live="polite"></div>
 
     <!-- Image lightbox with zoom + pan -->
-    <div id="lightbox" class="hidden">
+    <div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Image viewer">
       <div id="lightbox-toolbar">
         <span id="lightbox-caption"></span>
         <div class="lightbox-zoom">
-          <button id="lightbox-zoom-out" class="icon-btn" title="Zoom out (-)">−</button>
+          <button id="lightbox-zoom-out" class="icon-btn" title="Zoom out (-)" aria-label="Zoom out">−</button>
           <span id="lightbox-zoom-level">100%</span>
-          <button id="lightbox-zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
+          <button id="lightbox-zoom-in" class="icon-btn" title="Zoom in (+)" aria-label="Zoom in">+</button>
           <button id="lightbox-zoom-reset" class="text-btn small" title="Reset (0)">Fit</button>
-          <button id="lightbox-close" class="icon-btn" title="Close (Esc)">✕</button>
+          <button id="lightbox-close" class="icon-btn" title="Close (Esc)" aria-label="Close image viewer">✕</button>
         </div>
       </div>
       <div id="lightbox-stage"></div>
