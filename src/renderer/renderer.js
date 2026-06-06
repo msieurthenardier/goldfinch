@@ -530,6 +530,7 @@ function mediaCard(item, tab) {
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.src = item.url;
+    img.alt = item.label || item.name || '';
     thumb.appendChild(img);
     thumb.title = 'Open in viewer';
     thumb.addEventListener('click', () => openLightbox(item));
@@ -665,6 +666,7 @@ function openLightbox(item) {
   els.lightboxStage.innerHTML = '';
   const img = document.createElement('img');
   img.src = item.url;
+  img.alt = item.label || item.name || '';
   img.className = 'lightbox-img';
   img.draggable = false;
   els.lightboxStage.appendChild(img);

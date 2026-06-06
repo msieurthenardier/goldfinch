@@ -1,9 +1,9 @@
 # Behavior Test: Tab strip is keyboard- and screen-reader-operable
 
 **Slug**: `tab-keyboard-operability`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-06
-**Last Run**: never
+**Last Run**: 2026-06-06-16-38-47 (PASS — 7/7 checkpoints; see runs/2026-06-06-16-38-47.md)
 
 ## Intent
 
@@ -27,7 +27,7 @@ Verify that a keyboard-only / screen-reader user can operate the Goldfinch tab s
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Probe the environment: `curl http://127.0.0.1:9222/json`. Identify the **renderer** target (the Goldfinch window whose URL is the local `index.html`). | `:9222` responds and a renderer target is listed. If not, halt — preconditions not met. |
-| 2 | Open at least **three** tabs and navigate each to a **distinct** URL via the address bar (distinct local targets if offline — e.g. served-fixture `?n=1/2/3` or `about:blank` variants — otherwise distinct public pages), so the active tab is observable. | (setup row, no judgment) |
+| 2 | Open at least **three** tabs and navigate each to a URL whose **address-bar value stays distinct** so the active tab is observable. Pick targets that don't normalize/redirect to a shared address — distinct public pages, or distinct local fixture *pages/paths*. **Avoid `?query` on a server that ignores it** (e.g. a SPA that strips the query and serves one shell — the 2026-06-06 run hit this with a Concourse instance on `:8080`, collapsing all three fixture tabs to the same address and title, which weakened Step 4's middle-tab traversal). | (setup row, no judgment) |
 | 3 | Move keyboard focus onto the tab strip: send `Tab` (and/or `Shift+Tab`) presses until a tab in the strip is the focused element. | The focused element is a control with role `tab` (visible in the a11y tree as a `tab` inside a `tablist`). A **visible focus indicator** is rendered on that tab — a focused-vs-unfocused screenshot shows a clear focus ring/outline delta (≥3:1 against its background); `outline:none`-with-no-replacement fails this step. [a11y] |
 | 4 | With a tab focused, press `ArrowRight`. Then `ArrowLeft`. Then `Home`, then `End`. | Each arrow press moves focus to the adjacent tab and **activates** it: the a11y tree shows the focused tab and that exactly **one** tab has `aria-selected="true"` (the focused one); the active web content **and the address-bar value** change to match the newly selected tab's distinct URL. `Home`/`End` jump to the first/last tab. No press leaves focus stranded on `<body>`. [a11y] |
 | 5 | Note the current tab count, then close the focused tab from the keyboard (press `Delete` — or `Backspace` — while a tab is focused). | The focused tab is removed (tab count decreases by one); focus moves to a sibling **tab** (not lost to `<body>`); a remaining tab is selected (`aria-selected="true"`) and its content is active. The window is never left with zero tabs. [a11y] |

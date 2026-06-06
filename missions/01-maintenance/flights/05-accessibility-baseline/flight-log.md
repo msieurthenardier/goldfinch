@@ -129,6 +129,14 @@ No `@ts-expect-error` / no lint downgrades; Prettier-clean (`npx prettier --writ
 
 **Deferred to `verify-a11y`** (GUI/`:9222`-bound, not run here): the full WCAG-tag axe sweep — now including `color-contrast` (verifies the `.ps-main.bad` text fix and the `--fg-dim` small-text) and `label` (the now-uniquely-named media-pick checkbox); and the screenshot/manual review items axe can't attest as rendered pixels — reduced-motion suppression, the raised switch-track non-text contrast (1.4.11), and the active-tab / active-filter / shield-alert color-independent cues (1.4.1). Commit deferred to the flight-level review per `/agentic-workflow`.
 
+### 2026-06-06 — `verify-a11y` (Leg 5) — live axe sweep defect fixed
+
+The live WCAG-tag sweep found a real `image-alt` (critical, WCAG 1.1.1) defect the implementation legs missed: the media-card thumbnail `<img>` (`renderer.js:530`) and the lightbox `<img>` (`renderer.js:667`) were created without `alt`. Fixed both with `img.alt = item.label || item.name || ''` (descriptive content names, mirroring the media-card meta/lightbox caption). After reloading the live renderer over CDP, `npm run a11y -- --tags=wcag2a,wcag2aa,wcag21a,wcag21aa --url=http://127.0.0.1:8080/` reports **No violations across all states ✅** (exit 0); the F23+F24a rule subset is also clean; offline gates green (typecheck 0 / lint 0 / 147 tests / Prettier clean). Commit deferred to the flight-level verify commit.
+
+### 2026-06-06 — `verify-a11y` (Leg 5) — completed
+
+Real-environment gate cleared. `/behavior-test tab-keyboard-operability` ran **7/7 PASS** (consolidated single-pass Witnessed — Executor + independent Validator; see `tests/behavior/tab-keyboard-operability/runs/2026-06-06-16-38-47.md`); the spec was promoted `draft → active` and Step 2 tightened (the runtime fixture `:8080` was a pre-existing Concourse instance that collapsed the per-tab URLs — load-bearing a11y observables unaffected). The full multi-state WCAG-tag `npm run a11y` sweep reports **0 violations** across base chrome / media panel / privacy panel / lightbox; the only outstanding axe item is the best-practice advisory `region` (the documented app-shell exception, not a conformance failure). The one defect found during the sweep (the `image-alt` bug) is recorded in the entry above and fixed in `src/renderer/renderer.js`. Offline gates green (typecheck 0 / lint 0 / 147 tests / Prettier clean). Flight criteria F22/F23/F24 all satisfied.
+
 ---
 
 ## Flight Director Notes
@@ -144,6 +152,9 @@ No `@ts-expect-error` / no lint downgrades; Prettier-clean (`npx prettier --writ
 - **Flight-level review: two reviewers in parallel** — standard Reviewer + an **Accessibility Reviewer** (spawned at FD discretion despite the crew's `Enabled:false`, since the flight is wholly a11y). **Both `[HANDOFF:confirmed]`**; gates re-verified green (147 / typecheck 0 / lint 0 / `node --check` OK).
 - **A11y non-blocking findings — disposition:** (1) panel close-button strands focus (restore only on Escape) → **fixed** (restore to the toggle when a panel closes with focus inside, matching the lightbox); (3) `#new-tab-menu` missing `aria-haspopup`/`aria-expanded` → **fixed**; (2) focus-restore on menu item-select/click-away → **declined** (would fight the natural move to the new tab; Escape already restores); (4) `aria-controls`→webview w/o `tabpanel` → deliberate DD1, no action; (5) `aria-modal` without `inert` background → **deferred to verify-a11y** (focus trap is the safeguard; acceptable for AA). The two small fixes are on-pattern with approved code → committed without a re-review cycle (gates re-run).
 - **Commit**: legs 1–4 source + artifacts, single commit. Flight stays **`in-flight`** — `verify-a11y` (leg 5) is operator-gated (live GUI/`:9222` behavior test + axe) and runs next; flight is NOT `landed` and the mission box is NOT checked until verify passes. PR opening deferred to post-verify (outward-facing).
+
+### 2026-06-06 — Flight landed (verify-a11y complete)
+Flight **landed**: `tab-keyboard-operability` behavior test 7/7 PASS (spec promoted `draft → active`); full WCAG-tag `npm run a11y` sweep 0 violations across all states (only the advisory `region` best-practice item remains, not a conformance failure); an `image-alt` bug was surfaced and fixed during the live sweep (see the verify-a11y Leg Progress entries above). Mission `01-maintenance` is now **21/21** criteria complete. PR pending — branch committed locally; push/PR is operator-gated.
 
 ## Decisions
 

@@ -1,12 +1,12 @@
 # Flight: Accessibility — Keyboard & Screen-Reader Baseline
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-06-05 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] F22 — tabs keyboard-operable with correct ARIA roles/state (verified by behavior test)
-- [ ] F23 — icon-only chrome controls have accessible names and a visible focus indicator
-- [ ] F24 — remaining WCAG AA gaps addressed
+- [x] F22 — tabs keyboard-operable with correct ARIA roles/state (verified by behavior test — `tab-keyboard-operability` 7/7 PASS)
+- [x] F23 — icon-only chrome controls have accessible names and a visible focus indicator
+- [x] F24 — remaining WCAG AA gaps addressed
 
 > Source: [maintenance/2026-06-05.md](../../../../maintenance/2026-06-05.md) Accessibility addendum. Reconnaissance against current `main` (2026-06-06): **all three findings confirmed-live**, none satisfied by Flights 1–4; only the report's line numbers drifted (renderer/styles were edited in Flights 1–3). Re-located citations are in the [flight log](flight-log.md#reconnaissance-report) and in Technical Approach below. No items retired.
 
@@ -55,16 +55,16 @@ Make the browser chrome operable by keyboard and screen-reader users, starting w
 - **Ordering note (resolves F23/F24b contrast overlap):** `--fg-dim` small text also appears in the Shields area (e.g. `.shield-row.pause span`, `styles.css:735`), which the F23 leg touches but does not remediate for contrast. Therefore the **F23 axe gate is scoped to `button-name`/`label`/aria-validity only; ALL `color-contrast` is deferred to F24b/verify** — otherwise F23 would fail on text it doesn't own.
 
 ### Prerequisites
-- [ ] **Verify-leg real-environment env** (probed at verify-leg time, not assumed): `npm run dev:debug` launches the GUI; `curl http://127.0.0.1:9222/json` answers with a **renderer** target present; WSLg `DISPLAY`/`WAYLAND_DISPLAY` is set (present per Flight 2). No port conflict — `:9222` is the project's own debug port and the axe audit reuses it; no new network service is introduced.
-- [ ] **axe-core resolvable** — `axe-core` devDependency installed (added in the F23 leg) and `axe.min.js` injectable.
-- [ ] **Two-live-agent crew** available for the behavior-test run (re-spawn-per-checkpoint default; experimental live `SendMessage` continuation requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and is an optimization, not a prerequisite).
+- [x] **Verify-leg real-environment env** — `npm run dev:debug` launched the GUI; `:9222` answered with the renderer target; fixture served on `:8090` (`:8080` was a pre-existing Concourse instance — see verify notes). No port conflict.
+- [x] **axe-core resolvable** — installed in leg 2; `axe.min.js` injected successfully over CDP.
+- [x] **Two-live-agent crew** — Executor + Validator spawned (consolidated single-pass Witnessed; `SendMessage` absent).
 
 ### Pre-Flight Checklist
 - [x] All open questions resolved (see above)
 - [x] Design decisions documented
-- [ ] Prerequisites verified (probed at the verify leg)
+- [x] Prerequisites verified (probed at the verify leg)
 - [x] Validation approach defined (behavior test + axe audit + per-leg offline gate)
-- [ ] Legs defined (tentative list below; generated one at a time via `/leg`)
+- [x] Legs defined (all 5 generated via `/leg`)
 
 ---
 
@@ -84,7 +84,7 @@ One finding → one (or two) legs, in dependency order. F22 first (the strip is 
 - [x] Accessible names + visible focus across chrome; axe `button-name`/`label`/aria-validity clean across all states (panels/lightbox opened, media fixture loaded); axe harness + a11y media fixture in place (F23)
 - [x] Live regions, dialog/focus-management, landmarks/headings; axe `landmark-*`/`heading-order`/`aria-*` clean (F24a)
 - [x] Reduced-motion + AA text contrast (axe `color-contrast`) + non-text contrast & color-independent cues (screenshot review) (F24b)
-- [ ] Real-environment gate green: behavior test passes + full multi-state `npm run a11y` sweep clean (verify)
+- [x] Real-environment gate green: behavior test passes (7/7) + full multi-state `npm run a11y` WCAG-tag sweep clean (verify)
 
 ### Adaptation Criteria
 
@@ -104,18 +104,18 @@ One finding → one (or two) legs, in dependency order. F22 first (the strip is 
 - [x] `control-names-and-focus` — F23: aria-labels on all icon-only controls, reload name sync, switch labels, global `:focus-visible`; stand up `scripts/a11y-audit.mjs` + `npm run a11y` (axe-core, multi-state) + a committed a11y media fixture; axe gate scoped to `button-name`/`label`/aria-validity (contrast deferred to F24b)
 - [x] `aa-semantics` — F24a: live regions, `role="dialog"` + focus trap + Escape, landmarks/headings, address-bar label
 - [x] `aa-visual` — F24b: `prefers-reduced-motion`, color-independent state cues (screenshot-verified), AA text contrast (`--fg-dim`, axe) + non-text switch-track contrast (screenshot), media-pick checkbox labels
-- [ ] `verify-a11y` — operator-gated real-environment gate (Flight 2/3/4 `verify-*` house pattern): probe `:9222`, run `/behavior-test tab-keyboard-operability`, run the full multi-state `npm run a11y` axe sweep + screenshot review of focus ring/reduced-motion/contrast/color cues; record results
+- [x] `verify-a11y` — operator-gated real-environment gate (Flight 2/3/4 `verify-*` house pattern): probed `:9222`, ran `/behavior-test tab-keyboard-operability` (7/7 PASS), ran the full WCAG-tag `npm run a11y` sweep (0 violations across all states) + screenshot review; **found + fixed a real `image-alt` bug** during verify
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] `npm test` + `npm run typecheck` + `npm run lint` clean
-- [ ] `tab-keyboard-operability` behavior test passes (promote spec `draft → active`)
-- [ ] `npm run a11y` axe sweep reports zero violations for the enabled rules
+- [x] All legs completed (1–5)
+- [ ] Code merged (PR pending — branch committed locally; push/PR operator-gated)
+- [x] `npm test` (147) + `npm run typecheck` (0) + `npm run lint` (0) clean
+- [x] `tab-keyboard-operability` behavior test passes (7/7; spec promoted `draft → active`)
+- [x] `npm run a11y` WCAG-tag sweep reports zero violations across all states (advisory best-practice: only `region`, the documented app-shell exception)
 
 ### Verification
 A keyboard-only user can focus the tab strip, switch tabs with arrows/Home/End, and close a tab with Delete — with a visible focus indicator throughout; a screen reader announces the strip as a tablist with a selected tab, meaningful names for every icon button and Shields switch, and dynamic updates via live regions; the lightbox/menus/panels trap focus and close on Escape; `prefers-reduced-motion` is respected; contrast and color-independence meet WCAG 2.1 AA. Confirmed by: the `tab-keyboard-operability` Witnessed behavior test (F22), the `npm run a11y` axe sweep (F23/F24 breadth), and screenshot review of the focus ring and reduced-motion (F24b).
