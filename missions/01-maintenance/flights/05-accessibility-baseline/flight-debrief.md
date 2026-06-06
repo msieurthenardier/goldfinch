@@ -76,7 +76,7 @@ All Pre-Flight, Checkpoint, and Post-Flight items met except "Code merged" (PR #
 - [ ] Doc follow-up: README tab-nav keys + Accessibility note (fold into the next docs touch or `/mission-debrief` actions).
 - [ ] Add the three reusable patterns to CLAUDE.md.
 - [ ] Harden the axe harness (readiness polling; consider a renderer test-driver seam) — opportunistic, when a future flight touches `scripts/`.
-- [ ] (Carry-forward from Flight 4, deadline-bearing) Accept the Dependabot `github-actions` Node-24 major-bump PRs **before 2026-06-16**; smoke-test a release on the new action majors.
+- [x] ~~(Carry-forward from Flight 4, deadline-bearing) Accept the Dependabot `github-actions` Node-24 major-bump PRs **before 2026-06-16**; smoke-test a release on the new action majors.~~ **Already done** (verified 2026-06-06, before this debrief shipped): merged as PR #17 (`45a4644 build(deps): bump github-actions to Node-24 majors`) — both workflows now on `checkout@v6`/`setup-node@v6`/`upload-artifact@v7`/`download-artifact@v8`/`action-gh-release@v3`, no v4-era pins remain. **Smoke-tested live** by the v0.4.1 release (build run `27062318615` success, `update-readme` fired) — the feared upload/download-artifact breaking change did not materialize. The item was stale within a day (recon-drift); no further action.
 - [ ] Filter the lightbox focus-trap button query to visible/enabled controls before any conditionally-hidden control is added.
 
 ## Skill Effectiveness Notes
