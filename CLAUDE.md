@@ -56,10 +56,22 @@ The shared predicate ensures both gates stay in sync automatically.
 
 ## Release / CI
 
-- `.github/workflows/build.yml`: pushing a `v*` tag builds Win/macOS/Linux installers, publishes a Release, and **auto-commits updated README download links** to `main` (`scripts/update-readme.mjs`, between `<!-- DOWNLOADS:START/END -->` markers). The **git tag is the source of truth for the version** — it syncs `package.json` at build time.
-- `ci.yml`: lightweight Linux build-check on PRs.
-- Cutting a release: bump `package.json`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
-- App icon: `build/icon.png`. Note `goldfinch-*.png` at repo root and `.claude/settings.local.json` are gitignored.
+The two workflows are **supply-chain hardened** (mission `01-maintenance`, Flight 4). Preserve these invariants when editing them:
+
+- **All `uses:` are pinned to full commit SHAs** with a trailing `# vX.Y.Z` comment — never mutable `@vN` tags. When bumping an action, **including accepting a Dependabot PR**, resolve the new version's commit SHA and pin to that (Dependabot proposes mutable tags; applying them verbatim un-pins the action and regresses the hardening). Dependabot (`.github/dependabot.yml`) surfaces both npm and github-actions updates as PRs.
+- **Least privilege**: both workflows set top-level `permissions: contents: read`; only the `release` and `update-readme` jobs escalate to `contents: write` per-job. Don't widen the top-level scope.
+- **`ci.yml`**: lightweight Linux build-check on PRs — `npm ci → test → typecheck → lint → npm audit --audit-level=high → package`. A high in a *dev-only* dep is fixed by bumping the dep, never by lowering the gate (triage policy is commented at the audit step).
+
+### Cutting a release (`build.yml`, triggered on `v*` tag push)
+
+1. Bump `package.json` (`npm version patch --no-git-tag-version`) in a `release: vX.Y.Z` commit on `main`.
+2. `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
+
+What the tag triggers — and the gating to know:
+- **Strict semver is enforced.** The `release` job validates `vMAJOR.MINOR.PATCH[-prerelease][+build]` and refuses to publish a non-semver `v*` tag (`vtest`, `v1`, …). A malformed tag also fails earlier at the build job's `npm version` step. The **git tag is the source of truth for the version** — it syncs `package.json` at build time.
+- **Stable vs prerelease.** A prerelease tag (`v1.2.3-rc.1`) publishes as a GitHub **prerelease** (does *not* move `latest`) and **does not touch `main`**. Only a **stable** tag runs the `update-readme` job, which regenerates the README download links (`scripts/update-readme.mjs`, between `<!-- DOWNLOADS:START/END -->`) and commits them to `main` as `github-actions[bot]`.
+- **Recovery / rollback**: `gh release delete vX.Y.Z --yes --cleanup-tag` (removes the release, its assets, and the tag), then fix and re-tag.
+- **App icon**: `build/icon.png`. `goldfinch-*.png` at repo root and `.claude/settings.local.json` are gitignored.
 
 ## Flight Operations
 
