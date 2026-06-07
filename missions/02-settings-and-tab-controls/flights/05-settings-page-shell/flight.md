@@ -1,6 +1,6 @@
 # Flight: Settings Page Shell + Address-Bar Chips
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
@@ -301,17 +301,18 @@ verify. The shell + serving are independent of the chip/popup/lock and could spl
 - [x] `docs` - Settings shell + subresource serving + chips + internal-tab lock in README/CLAUDE.md.
 - [x] `verify-integration` - `settings-shell` behavior test (12/12); a11y (chrome + guest) clean; menu/tab +
   `tab-scheme-guard` regressions intact; offline gates 182/182; DD2 CSP spike PASS. (SC6, SC8)
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT: shell, chips, popup, lock.
+- [x] `hat-and-alignment` *(optional)* - Guided HAT: shell, chips, popup, lock. Operator-confirmed; 3 fixes
+  inline (Shields internal-tab Connection + Cookies-race; semantic green/red address-bar lock).
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] All legs completed (8/8)
+- [ ] Code merged (draft PR #30, base `flight/4`; ready-for-review — merges after #29)
+- [x] Tests passing (offline 182/182; live `settings-shell` 12/12; a11y chrome+guest clean)
+- [x] Documentation updated (README + CLAUDE.md — leg 6)
 
 ### Verification
 

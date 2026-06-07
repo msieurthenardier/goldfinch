@@ -1,6 +1,6 @@
 # Leg: menucontroller-keyboard-hoist
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Settings Page Shell + Address-Bar Chips](../flight.md)
 
 ## Objective

@@ -580,6 +580,7 @@ function updateAddressChip(tab) {
   if (!url || url === 'about:blank') {
     // Neutral default: new/blank tab — web state with generic label
     chip.removeAttribute('data-state');
+    chip.removeAttribute('data-secure');
     chip.setAttribute('aria-label', 'Site information');
     els.address.readOnly = false;
     return;
@@ -587,6 +588,7 @@ function updateAddressChip(tab) {
 
   if (isInternalPageUrl(url)) {
     chip.setAttribute('data-state', 'internal');
+    chip.removeAttribute('data-secure');
     chip.setAttribute('aria-label', 'Secure Goldfinch page');
     els.address.readOnly = true;
     return;
@@ -599,12 +601,17 @@ function updateAddressChip(tab) {
   } catch {
     // Unparseable URL — fall back to neutral default
     chip.removeAttribute('data-state');
+    chip.removeAttribute('data-secure');
     chip.setAttribute('aria-label', 'Site information');
     els.address.readOnly = false;
     return;
   }
+  const secure = /^https:/i.test(url);
   chip.setAttribute('data-state', 'web');
-  chip.setAttribute('aria-label', host ? `Site information, ${host}` : 'Site information');
+  chip.setAttribute('data-secure', secure ? 'true' : 'false');
+  chip.setAttribute('aria-label', host
+    ? (secure ? `Site information, ${host}` : `Site information, ${host}, not secure`)
+    : 'Site information');
   els.address.readOnly = false;
 }
 
@@ -636,6 +643,12 @@ function wireWebview(tab) {
       /* not ready */
     }
     updateNavButtons();
+    // If the Shields panel was opened before this webview's dom-ready, tab.wcId was
+    // null when fetchCookies() first ran (it early-returns on null wcId), leaving the
+    // Cookies section stuck on "Loading…". Now that wcId is set, fetch them.
+    if (tab.id === activeTabId && !els.privacyPanel.classList.contains('collapsed')) {
+      fetchCookies();
+    }
   });
 
   wv.addEventListener('did-start-loading', () => {
@@ -1666,12 +1679,13 @@ function renderPrivacy() {
   body.appendChild(pJar());
 
   // Connection
-  const secure = tab && /^https:/i.test(tab.url || '');
+  const internal = !!(tab && isInternalPageUrl(tab.url || ''));
+  const secure = internal || (tab && /^https:/i.test(tab.url || ''));
   body.appendChild(
     pSection(
       'Connection',
       secure ? 'ok' : 'bad',
-      secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
+      internal ? 'Secure — Goldfinch page' : secure ? 'Secure — HTTPS' : 'Not secure — HTTP',
       net && net.mixedContent ? `${net.mixedContent} insecure (mixed-content) request(s)` : ''
     )
   );

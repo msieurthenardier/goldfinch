@@ -393,6 +393,22 @@ a:focus-visible {
   color: var(--fg-dim);
 }
 
+/* Secure HTTPS web tab: green closed lock */
+.addr-chip[data-state='web'][data-secure='true'] {
+  color: #6dff8f;
+}
+
+/* Insecure HTTP web tab: red broken/open lock.
+   The ::after shackle is shifted right and rotated to read as ajar/broken —
+   a distinct SHAPE from the closed shackle, so security state is not color-alone. */
+.addr-chip[data-state='web'][data-secure='false'] {
+  color: #ff6b6b;
+}
+.addr-chip[data-state='web'][data-secure='false']::after {
+  transform: translateX(2px) rotate(30deg);
+  border-bottom: none;
+}
+
 /* Internal state: a simple diamond/secure mark to distinguish from the web lock */
 .addr-chip[data-state='internal']::before {
   width: 9px;

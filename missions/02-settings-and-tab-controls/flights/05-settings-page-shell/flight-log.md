@@ -293,6 +293,30 @@ rather than model judgment. See the run log's Orchestrator Notes for the deviati
 
 ---
 
+### 2026-06-07 — `hat-and-alignment` — COMPLETED (operator-confirmed)
+
+**Status**: completed
+
+Guided HAT with the operator on the live app (`:9222`). Shell/chips/popup/lock accepted. Three issues
+surfaced and fixed inline + re-verified live (each: reload-from-disk → CDP read/screenshot → operator
+confirm; offline gates stayed 182/182):
+
+1. **Shields "Connection" → "Not secure — HTTP" on internal tabs** (contradicted flight 5's chip). Fixed in
+   `renderer.js`: the privacy-panel Connection block special-cases `isInternalPageUrl` → "Secure — Goldfinch
+   page". Scope-adjacent (Shields) but justified — flight 5's chip *introduced* the contradiction.
+2. **Shields "Cookies" stuck on "Loading…"** — pre-existing race (`fetchCookies` early-returns on null
+   `tab.wcId` before `dom-ready`, never retried). Operator chose fix-in-flight. Fixed in `renderer.js`: the
+   `dom-ready` handler re-runs `fetchCookies()` when the Shields panel is open on the active tab.
+3. **Semantic address-bar lock** (operator alignment; in scope — flight defers chip glyphs to HAT). Green
+   closed lock = HTTPS, red broken lock = HTTP; `updateAddressChip` sets `data-secure` + a security-aware
+   `aria-label` ("…, not secure"); `styles.css` colors + breaks the shackle. Not color-alone (shape + label
+   also differentiate — WCAG 1.4.1). Verified: google → `secure=true` green; neverssl → `secure=false` red
+   broken + "not secure" label (screenshot confirmed).
+
+**Flight lands.** All 8 legs complete; SC6 + SC8 verified.
+
+---
+
 ## Decisions
 
 ### Per-leg design review skipped for the docs leg (leg 6)
@@ -340,6 +364,23 @@ semantically a search/address landmark; it now wraps both the chip and the input
 → 0 NEW), then persisted to source, reloaded-from-disk, and re-audited: **chrome a11y No NEW violations**.
 `#address` already carries `aria-label="Address and search bar"`, which serves as the landmark's accessible
 name (no duplicate label added). Offline gates stayed green (182/182). Fixed in the leg-7 commit.
+
+### Shields "Connection" showed "Not secure — HTTP" on internal tabs (FIXED, HAT)
+**Observed**: opening the Shields panel on a `goldfinch://settings` tab showed Connection = "Not secure —
+HTTP" — the panel's `secure = /^https:/i.test(tab.url)` check doesn't recognize the internal scheme.
+Contradicted flight 5's chip ("Secure Goldfinch page") for the same tab.
+**Severity**: degraded (misleading security signal; flight-5-introduced contradiction via the new chip).
+**Resolution**: privacy-panel Connection block special-cases `isInternalPageUrl` → "Secure — Goldfinch
+page" (`renderer.js`). `goldfinch://` is registered `{ secure: true }`. Fixed + re-verified live in the HAT.
+
+### Shields "Cookies" stuck on "Loading…" (FIXED, HAT) — pre-existing race
+**Observed**: the Shields Cookies section hung on "Loading…" on the Settings tab. Root cause:
+`fetchCookies()` early-returns when `tab.wcId` is null (set only on the webview `dom-ready`) and nothing
+re-triggers it once `wcId` arrives. Pre-existing (not flight-5-introduced); the new Settings tab makes it
+easy to hit. The IPC + fetch logic themselves work (a direct call populated `{first:0, third:0}`).
+**Severity**: degraded (Shields cookies unusable on a tab opened around its `dom-ready`).
+**Resolution**: the `dom-ready` handler re-runs `fetchCookies()` when the Shields panel is open on the
+active tab (`renderer.js`) — closes the race for all tabs. Operator elected fix-in-flight. Re-verified live.
 
 ### Settings shell stub doesn't visibly scroll (by design — not a defect)
 **Observed**: with placeholder content, all five sections fit the viewport (`scrollY` stays `0`), so

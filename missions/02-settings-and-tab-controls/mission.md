@@ -78,9 +78,11 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
   rejected (*behavior-test-backed — extends the `tab-scheme-guard` spec*). **Verified Flight 4:
   `tab-scheme-guard` 13/13 live; all four spoof vectors rejected; trusted kebab→Settings opens +
   reloads `goldfinch://settings`. (Surface is a stub — SC6/SC7 enrich/wire it in Flights 5/6.)**
-- [ ] **SC6** — The settings surface presents a modern-browser-style layout — persistent
+- [x] **SC6** — The settings surface presents a modern-browser-style layout — persistent
   section navigation plus titled sections — recognizable as a settings area, with placeholder
-  content wherever controls are not yet wired.
+  content wherever controls are not yet wired. **Verified Flight 5: `goldfinch://settings` shell —
+  sticky section-nav + 5 titled sections + placeholder; `settings-shell` behavior test 12/12 live; guest
+  a11y clean.**
 - [ ] **SC7** — The privacy/Shields controls (already persisted) and the default/home page are
   operable from the settings surface, and changes persist and take effect consistently with the
   existing panels. Promoting the home page to a real setting includes the minimal persistence it
@@ -173,7 +175,13 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   stands.)*
 
 - **Internal tab is freely web-navigable → harden the internal bridge before Flight 6 wires real IPC**
-  — discovered in Flight 4 verify-integration. The settings tab is a first-class tab (Option A), so its
+  — discovered in Flight 4 verify-integration. **Flight 5 update: the UX half is discharged** — the
+  internal-tab **navigation lock** (a web URL typed in a `goldfinch://` tab opens a new normal tab; the
+  internal tab stays put; its address bar is read-only) and the **address-bar identity chip** ("Secure
+  Goldfinch page") both landed + were live-verified (see `flights/05-settings-page-shell/`). **The
+  security-critical bridge origin-check (the "must" bullet below) remains OPEN for Flight 6** — the lock is
+  UX-only and does not stop a programmatic/cross-context navigation from reaching privileged IPC once it
+  exists. The settings tab is a first-class tab (Option A), so its
   address bar / programmatic `navigate()` can load an arbitrary http page **into the privileged
   `goldfinch-internal` session** (webPreferences are fixed at webview attach, so the http page inherits
   `contextIsolation:true` + the internal preload + access to the `goldfinch://` handler). **Inert in
@@ -193,9 +201,11 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
     `<webview>` in the correct session/preload — closest to Chrome's swap) **or** lock internal tabs so
     they don't free-browse (read-only/special address bar on `goldfinch://`; a web navigation opens a
     new normal tab instead — simplest, and you don't browse the web *from* a settings page anyway).
-  - **(UX, Flight 5) Address-bar internal-page identity indicator** — a `goldfinch://`/internal chip
-    (à la Chrome's "Chrome" chip) for legibility + anti-spoofing, so web content can't fake a settings
-    page. See `flights/04-internal-page-scheme/flight-log.md` (Anomalies).
+  - **(UX, Flight 5 — DONE) Address-bar internal-page identity indicator** — the `goldfinch://`/internal
+    chip (à la Chrome's "Chrome" chip) for legibility + anti-spoofing landed + verified in Flight 5;
+    paired with the internal-tab navigation lock (also Flight 5). See
+    `flights/05-settings-page-shell/flight-log.md`. (Original ref:
+    `flights/04-internal-page-scheme/flight-log.md` Anomalies.)
 
 ## Flights
 
@@ -231,7 +241,7 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   `frame-ancestors 'none'` confirmed, a11y baseline pinned. The two design reviews caught a synchronous
   `session-created` exclusion bug and a New-Identity data-loss trap before any code shipped. Latent
   internal-tab web-navigability finding carried to Flight 5/6 — see Known Issues.)*
-- [ ] **Flight 5: Settings page shell + address-bar chips** — build the stub `goldfinch://settings`
+- [x] **Flight 5: Settings page shell + address-bar chips** — build the stub `goldfinch://settings`
   page with modern-browser chrome (persistent section nav + titled sections) and placeholder content;
   accessible. (SC6, SC8) *(Scope expanded at planning by operator: also adds the **address-bar chips**
   (internal-page identity chip + web-page site-info chip), a **site-info popup** (summarizing existing
