@@ -3,7 +3,7 @@
 **Slug**: `kebab-menu`
 **Status**: active
 **Created**: 2026-06-06
-**Last Run**: 2026-06-07-09-56-42
+**Last Run**: 2026-06-07-10-42-52
 
 ## Intent
 
@@ -73,6 +73,8 @@ and harmless when chosen.
 | 8 | **Settings is present but inert:** open the menu, focus/select the **Settings** item (`Enter` or click). Read the tab count and the active tab's URL afterward. | Selecting Settings **closes the menu** and **does nothing else** — tab count is unchanged from Step 1, no new tab opened, no navigation occurred (Settings is a placeholder until the internal-page mechanism lands in a later flight). No error/crash. |
 | 9 | **Focus-ring visibility:** move keyboard focus to the kebab button (via `Tab`); capture a focused screenshot and an unfocused screenshot of the button. | While focused, the kebab button shows a **visible focus indicator** against the dark toolbar background — a focused-vs-unfocused screenshot shows a clear ring/outline delta, NOT `outline:none` and NOT an invisible ring. [a11y] |
 | 10 | **Exit item present (do NOT commit):** open the menu and confirm the **Exit** item is focusable/selectable, but **do not activate it** (activation quits the app and ends the run). Read its accessible name and that it is keyboard-reachable. | The Exit item is present, has accessible name "Exit", and is reachable/focusable by keyboard. Its quit behavior (SC4) is verified **manually**, outside this test. [a11y] |
+| 11 | **Menu mutual exclusion:** open the container (`▾`) menu (trusted click on `#new-tab-menu`); confirm it is open. Then open the kebab menu (trusted click on `#kebab`). Read both menus' open state. Then, with the kebab menu open, open the container menu again and re-read both. *(Note: the container menu is built dynamically and has no `role="menu"`; read its open-state authoritatively from `#new-tab-menu`'s `aria-expanded`, and the kebab's from `#kebab`'s `aria-expanded`/`#kebab-menu` `.hidden`.)* | Opening the kebab **closes the open container menu** (`#new-tab-menu` `aria-expanded="false"`, kebab open); and conversely, opening the container menu **closes the open kebab menu** (kebab `aria-expanded="false"`/hidden, container open). The two menus are never open simultaneously. |
+| 12 | **Tab closes the kebab menu + restores focus:** open the kebab menu (focus is on the first item), then press trusted `Tab`. Read the menu's open state, `aria-expanded`, and `document.activeElement`. (Optionally repeat with `Shift+Tab`.) | `Tab` (and `Shift+Tab`) **closes the kebab menu** (`aria-expanded="false"`, hidden) and **restores focus to the kebab trigger** (`document.activeElement` is `#kebab`), not stranded on a now-hidden menuitem or `<body>`. [a11y] |
 
 **Row conventions:** one row = one checkpoint. `[a11y]` flags accessibility-relevant checks for the
 optional Accessibility Validator.
@@ -88,5 +90,8 @@ optional Accessibility Validator.
 
 ## Variants (optional)
 
-- Could parametrize Step 5 to also assert `Tab`/`Shift+Tab` behavior within the open menu if the APG
-  implementation chooses to support it (APG menus typically use arrows, not Tab, for item movement).
+- Could parametrize Step 5 across a future menu with >2 items to exercise multi-step roving + wrap
+  more thoroughly (with two items, ArrowDown/ArrowUp/Home/End cover the space).
+
+> Note: `Tab`/`Shift+Tab` closing the menu is now a first-class checkpoint (Step 12), and menu
+> mutual-exclusion is Step 11 — both added after the operator's HAT pass.

@@ -72,7 +72,7 @@ The flight delivered every objective. A kebab (⋮) overflow menu was added as t
 5. **Keep macOS on the mac-HAT backlog explicitly** — the entire frameless path (Flight 1) *and* this flight's `app-quit` darwin behavior are verified only on Linux/WSL; an `app.quit()` macOS regression would be invisible to every Linux verify run. Clear both deferrals in one mac HAT before any macOS build.
 
 ## Action Items
-- [ ] Add mutual-exclusion + Tab-closes checkpoints to `tests/behavior/kebab-menu.md` (Rec 1)
+- [x] Add mutual-exclusion + Tab-closes checkpoints to `tests/behavior/kebab-menu.md` (Rec 1) — **done**: spec now 12 checkpoints; re-run `2026-06-07-10-42-52` **12/12 pass** (both new checkpoints verified)
 - [ ] Pin the a11y baseline + reconcile mission Known-Issues a11y entry (Rec 2; suggest Flight 4 owns it)
 - [ ] Replace the line-number reference in the `app-quit` comment with a symbol/DD reference; fix the leg-skill guidance that prescribed it (Rec 3)
 - [ ] Track "extract shared APG menu helper" as a precondition for the next menu-adding flight (Rec 4)
