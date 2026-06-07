@@ -11,6 +11,7 @@ interface GoldfinchBridge {
   windowMinimize(): void;
   windowToggleMaximize(): void;
   windowClose(): void;
+  appQuit(): void;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
 

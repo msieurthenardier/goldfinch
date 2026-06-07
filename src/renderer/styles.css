@@ -992,6 +992,19 @@ a:focus-visible {
   min-width: 210px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
+/* Kebab (overflow) menu — reuses the container-menu chrome, but is anchored
+   dynamically to the kebab button's rect (top/right set inline by
+   positionKebabMenu()); right-aligned so it never overflows the viewport. */
+#kebab-menu {
+  position: absolute;
+  z-index: 60;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
 .cm-title {
   font-size: 10px;
   text-transform: uppercase;

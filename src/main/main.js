@@ -440,6 +440,10 @@ ipcMain.on('window-toggle-maximize', () => {
 ipcMain.on('window-close', () => mainWindow && mainWindow.close());
 ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximized()));
 
+// Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
+// (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
+ipcMain.on('app-quit', () => app.quit());
+
 // --- cookie jars / container identities ---
 ipcMain.handle('jars-list', () => jars.list());
 ipcMain.handle('jars-add', (_e, { name, color }) => jars.add(name, color));
