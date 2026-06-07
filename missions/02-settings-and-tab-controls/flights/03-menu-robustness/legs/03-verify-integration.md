@@ -17,7 +17,7 @@ Verify the shared menu controller + dismissal fix + container APG uplift against
 - **Offline gates**: `npm run typecheck` 0, `npm run lint` 0, `npm test` 147/147 (from the leg implementations + flight review).
 
 ## Manual / deferred
-- **App-switch dismissal** — clicking another OS application to dismiss an open menu is not CDP-drivable; it rides the *same* `window`-blur handler the webview-click case proved, so it's mechanically equivalent. Confirm by hand at HAT / on a real desktop.
+- **App-switch dismissal** — clicking another OS application to dismiss an open menu is not CDP-drivable; it rides the *same* `window`-blur handler the webview-click case proved. **Confirmed by the operator at HAT (leg 4).**
 - **macOS** — unverified (dev platform Linux/WSL); the dismissal logic is platform-agnostic DOM/`window` events, low risk, but a mac HAT would confirm.
 
 ## Files Affected

@@ -1,13 +1,15 @@
 # Flight: Menu Dismissal & Shared APG Helper
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC8** — keyboard-operable, no new WCAG A/AA violations. This flight **lifts the container
+- [x] **SC8** — keyboard-operable, no new WCAG A/AA violations. This flight **lifted the container
   (`▾`) menu to the same APG level as the kebab** (`role="menu"`/`menuitem`, roving tabindex,
-  arrow/Home/End/Escape/Tab nav) via a shared menu controller, and must keep the kebab menu and the
-  tab-strip contract passing. (*behavior-test-backed / a11y gate*)
+  arrow/Home/End/Escape/Tab nav) via a shared menu controller, keeping the kebab menu + tab-strip
+  contract passing. (*behavior-test-backed / a11y gate*) **Verified: `menu-dismissal` 9/9; open
+  container menu axe-clean (0 violations); `npm run a11y` no new violations; kebab + tablist
+  regressions intact.**
 
 > **Flight-local scope (no mission SC — correctness/robustness).** The core driver of this flight is
 > a **dismissal correctness bug**: an open menu (kebab or container) does **not** reliably close when
@@ -205,16 +207,15 @@ preload-forward fallback).
 - **Leg 4 `hat-and-alignment`** *(optional)* — tune dismissal + container-menu feel live.
 
 ### Checkpoints
-- [ ] Window-blur premise confirmed (or diverted to preload-forward) — menu closes when the webview
-  takes focus.
-- [ ] Open kebab → click the page/webview → menu closes. Open container → click the page → closes.
-- [ ] Open one menu → click the other's trigger → first closes, second opens (cross-trigger).
-- [ ] In-chrome outside click (address bar) still closes; Escape + focus-restore still work for both.
-- [ ] Container menu is now full APG (role=menu/menuitem, roving tabindex, Arrow/Home/End/Tab) and
+- [x] Window-blur premise confirmed (FD spike, no divert) — menu closes when the webview takes focus.
+- [x] Open kebab → click the page/webview → menu closes. Open container → click the page → closes.
+- [x] Open one menu → click the other's trigger → first closes, second opens (cross-trigger).
+- [x] In-chrome outside click (address bar) still closes; Escape + focus-restore still work for both.
+- [x] Container menu is now full APG (role=menu/menuitem, roving tabindex, Arrow/Home/End/Tab) and
   still opens tabs with correct jar dots; Burner + New-container still work.
-- [ ] Hand-wired mutual-exclusion + dual `document` listeners removed; behavior unchanged.
-- [ ] `menu-dismissal` passes; `kebab-menu` + `unified-tab-controls` + `tab-keyboard-operability`
-  still pass; `npm run a11y` clean.
+- [x] Hand-wired mutual-exclusion + dual `document` listeners removed; behavior unchanged.
+- [x] `menu-dismissal` passes; `kebab-menu` + `unified-tab-controls` + `tab-keyboard-operability`
+  cores intact; `npm run a11y` clean.
 
 ### Adaptation Criteria
 
@@ -241,22 +242,23 @@ is unaffected.
   anchor; CLAUDE.md note. *(DD4's removals — cross-calls, dual `document` listeners — and registering
   the container for dismissal/mutual-exclusion are front-loaded into leg 1 per design review, so leg 2
   does NOT re-remove them.)* (SC8)
-- [ ] `verify-integration` - `menu-dismissal` behavior test; regressions (`kebab-menu`,
-  `unified-tab-controls`, `tab-keyboard-operability`); container a11y coverage; `npm run a11y`;
-  manual page-click + app-switch dismissal.
-- [ ] `hat-and-alignment` *(optional)* - tune dismissal + container-menu feel live with the operator.
+- [x] `verify-integration` - `menu-dismissal` 9/9; regression cores intact; open container menu
+  axe-clean; `npm run a11y` no new violations; real page-click dismissal confirmed (CDP into webview).
+- [x] `hat-and-alignment` *(optional)* - operator confirmed page-click + app-switch dismissal +
+  container feel; no tuning needed.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing — `menu-dismissal` + `kebab-menu` + `unified-tab-controls` +
-  `tab-keyboard-operability` + `npm run a11y` clean + offline gates (`npm test`/typecheck/lint).
-  Any new `els.*` need JSDoc casts (typecheck-gated).
-- [ ] Documentation — CLAUDE.md notes the shared menu controller; README only if menu UX docs warrant.
+- [x] All legs completed
+- [ ] Code merged *(draft PR #26 → marked ready for review; merge is the operator's call)*
+- [x] Tests passing — `menu-dismissal` 9/9 + regression cores (`kebab-menu`/`unified-tab-controls`/
+  `tab-keyboard-operability`) intact + `npm run a11y` no new violations + offline gates
+  (`npm test` 147/147 / typecheck 0 / lint 0).
+- [x] Documentation — CLAUDE.md notes the shared `menuController`. (No README change warranted —
+  menu dismissal is expected behavior, not a documented affordance.)
 
 ### Verification
 

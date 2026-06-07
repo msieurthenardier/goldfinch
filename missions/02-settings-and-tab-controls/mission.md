@@ -183,13 +183,13 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   internal-page mechanism lands in Flight 4+) and Exit; wire Exit to quit the app via a dedicated
   `app-quit` IPC (terminates on all platforms). (SC3, SC4, SC8) *(landed 2026-06-07; `kebab-menu`
   behavior test 10/10, Exit quit verified, a11y clean)*
-- [ ] **Flight 3: Menu dismissal & shared APG helper** — fix the dismissal bug where open menus don't
+- [x] **Flight 3: Menu dismissal & shared APG helper** — fix the dismissal bug where open menus don't
   close on page/`<webview>` clicks or the other menu's trigger; route both the kebab and container
   (`▾`) menus through a shared APG menu controller (window-blur + in-chrome outside-dismiss +
   mutual-exclusion + roving/arrow-nav), lifting the container menu to the kebab's a11y level and
   removing Flight 2's hand-wired mutual-exclusion. (SC8; flight-local dismissal correctness)
-  *(Inserted after Flight 2's HAT/debrief surfaced the dismissal bug + the parallel-menus debt;
-  pushes the original scheme/settings flights down by one.)*
+  *(landed 2026-06-07; `menu-dismissal` 9/9, container menu axe-clean, regressions intact, page-click +
+  app-switch dismissal HAT-confirmed)*
 - [ ] **Flight 4: Internal page scheme (`goldfinch://`)** — register the privileged internal
   scheme (`{ standard, secure }`) and serve bundled assets via `protocol.handle` on a dedicated
   internal session; open internal pages only through a trusted embedder path; keep `will-navigate`
