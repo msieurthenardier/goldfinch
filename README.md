@@ -32,6 +32,14 @@ or download **v0.4.3** directly:
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
   bar with search-or-URL detection, persistent session (stays logged in),
   favicons, popups opened as new tabs.
+- **Frameless window**: Goldfinch runs in a custom frameless window —
+  minimize / maximize-restore / close controls live at the right end of the tab
+  bar on Windows and Linux; macOS keeps its native traffic-light controls.
+- **Overflow menu** (the **⋮** button at the right end of the toolbar row):
+  opens a menu with **Settings** (a placeholder for now — not yet functional,
+  coming in a later release) and **Exit** (quits Goldfinch). Keyboard-operable:
+  focus the button and press `Enter`, `Space`, or `↓` to open, arrow keys to
+  move between items, and `Esc` to close.
 - **Privacy & Shields** (toggle individual strategies in the Shield panel):
   - **Tracker & ad blocking** (`block`) — cancels requests to known tracker and
     ad domains (analytics, ads, social pixels, and other categories) classified
@@ -99,6 +107,10 @@ npm start
 | `Ctrl+M`        | Toggle media panel  |
 | `Ctrl+Shift+P`  | Toggle privacy panel|
 | `Ctrl+R`        | Reload              |
+| `←` / `→`       | Move between tabs (when a tab is focused) |
+| `Home` / `End`  | First / last tab    |
+| `Delete` / `Backspace` | Close the focused tab |
+| `Esc`           | Close an open menu / panel |
 
 ## Architecture
 

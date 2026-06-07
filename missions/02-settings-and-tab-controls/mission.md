@@ -6,14 +6,13 @@
 
 Goldfinch gains a first-class **Settings area that lives in its own tab**, reminiscent of
 modern browsers (persistent section navigation + titled sections), reached through a
-**kebab (⋮) menu placed in the tab bar** — a deliberate departure from Chrome-style browsers
-that hang their overflow menu off the address-bar row. Reaching this also reshapes the
+**kebab (⋮) menu in the toolbar row, to the right of the Shield button**. Reaching this also reshapes the
 tab-strip controls: the **New Tab** (`+`) and **container/jar picker** (`▾`) buttons are
 unified into a single **golden, pill-shaped control** (`( + | ▾ )`) left-aligned with the
 open tabs. In the same move Goldfinch **sheds the standard OS window frame** for its own
 chrome — window controls and draggable space live in a **reserved right-side zone of the tab
 bar** (custom minimize/maximize/close on Windows/Linux; native traffic lights retained on
-macOS), which also leaves room for the Settings entry point. The Settings surface ships as a
+macOS). The Settings surface ships as a
 stub — modern chrome with placeholder content — but already wires through a few real controls
 (Shields and the default page), proving the internal-page plumbing end to end.
 
@@ -63,11 +62,15 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
 - [x] **SC2** — Opening a plain new tab and opening a new tab in a specific container are both
   still operable from the unified control, by mouse and by keyboard, preserving prior behavior
   (*behavior-test-backed*).
-- [ ] **SC3** — A kebab/overflow menu is present in the tab bar — distinct from the
-  address/toolbar row — and exposes exactly two actions to begin with: open **Settings** and
-  **Exit** (*behavior-test-backed*).
-- [ ] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting the
+- [x] **SC3** — A kebab/overflow menu is present in the **toolbar row, to the right of the
+  Shield button**, and exposes exactly two actions to begin with: open **Settings** and
+  **Exit** (*behavior-test-backed*). *(Placement amended at Flight 2 planning, by operator
+  decision, from the original tab-bar placement; the "departure from address-bar-row menus"
+  framing was dropped — see `flights/02-kebab-menu/`.)*
+- [x] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting the
   app tears down the test harness, so this is checked by hand, not by behavior test*).
+  *(Verified Flight 2: trusted Exit click → `app.quit()` → clean termination, Windows/Linux;
+  macOS deferred to a mac HAT.)*
 - [ ] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
   address, reloadable like any other tab, while web-page content **cannot navigate to, open,
   embed, or spoof** the internal scheme — page-originated attempts (`window.open('goldfinch://…')`,
@@ -88,7 +91,7 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
   the tab bar's reserved right-side zone on Windows/Linux, with the **native traffic-light
   controls retained** (inset into that zone) on macOS. The window stays **movable** (a drag region
   in the reserved zone) and **resizable**, and the reserved zone leaves space for forthcoming
-  controls (e.g. the Settings entry point). (*Maximize/restore state is behavior-test-backed via an
+  controls. (*Maximize/restore state is behavior-test-backed via an
   observable read path; window **drag** and **close/quit** are manually verified — dragging can't
   be driven over CDP and closing tears down the test harness.*)
 
@@ -139,8 +142,8 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
 - [ ] Internal-page bridge shape — a dedicated internal-page preload exposing a minimal
   `ipcRenderer` surface (the settings doc can use neither the media webview-preload nor the chrome
   `window.goldfinch`) — confirmed at flight design.
-- [ ] Whether **Exit** confirms before quitting when tabs are open (nice-to-have; default is a
-  plain quit).
+- [x] Whether **Exit** confirms before quitting when tabs are open → **No, plain quit**
+  (resolved at Flight 2 planning; the nice-to-have confirm dialog is not built).
 - [ ] macOS `trafficLightPosition` inset for the frameless window — confirmed on a mac (dev
   platform is Linux/WSL). Flagged `needs-human-recheck` for the mac build.
 - [ ] Frameless resizability/snapping on the dev compositor (WSLg) with `frame: false` — verified
@@ -175,8 +178,11 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   controls (native traffic lights on macOS) in a reserved, draggable right-side zone.
   (SC1, SC2, SC8, SC9) *(Heaviest flight; the frameless window-chrome legs may split into a
   follow-on flight if frameless resize proves unstable on the dev platform.)*
-- [ ] **Flight 2: Tab-bar kebab menu** — add the ⋮ menu button to the tab bar with the APG
-  menu-button pattern; two items, Settings and Exit; wire Exit to quit the app. (SC3, SC4, SC8)
+- [x] **Flight 2: Kebab menu** — add the ⋮ menu button to the **toolbar row (right of the Shield
+  button)** with the APG menu-button pattern; two items, Settings (inert placeholder until the
+  internal-page mechanism lands in Flight 3+) and Exit; wire Exit to quit the app via a dedicated
+  `app-quit` IPC (terminates on all platforms). (SC3, SC4, SC8) *(landed 2026-06-07; `kebab-menu`
+  behavior test 10/10, Exit quit verified, a11y clean)*
 - [ ] **Flight 3: Internal page scheme (`goldfinch://`)** — register the privileged internal
   scheme (`{ standard, secure }`) and serve bundled assets via `protocol.handle` on a dedicated
   internal session; open internal pages only through a trusted embedder path; keep `will-navigate`

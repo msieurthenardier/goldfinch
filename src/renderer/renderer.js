@@ -52,7 +52,9 @@ const els = {
   playerDur: /** @type {HTMLElement} */ (document.getElementById('player-dur')),
   playerPlay: /** @type {HTMLButtonElement} */ (document.getElementById('player-play')),
   playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
-  playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next'))
+  playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next')),
+  kebab: /** @type {HTMLButtonElement} */ (document.getElementById('kebab')),
+  kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -96,6 +98,7 @@ function makeBurner() {
 }
 
 function openContainerMenu() {
+  closeKebabMenu(); // mutual exclusion: opening one menu dismisses the other
   const m = els.containerMenu;
   m.innerHTML = '<div class="cm-title">Open new tab in…</div>';
   for (const c of containers) {
@@ -149,6 +152,92 @@ async function addContainer() {
   closeContainerMenu();
   createTab(HOMEPAGE, c);
 }
+
+/* ------------------------------------------------------- kebab (overflow) menu */
+// APG menu-button: role="menu" popup with two static role="menuitem" items
+// (Settings, Exit) + roving tabindex + arrow-nav. Reuses the container menu's
+// open/close/focus-restore discipline (e.stopPropagation on the trigger ahead of
+// the global outside-close), but layers on the full APG roles/keyboard nav.
+
+/** @returns {HTMLElement[]} */
+function kebabItems() {
+  return /** @type {HTMLElement[]} */ ([...els.kebabMenu.querySelectorAll('[role="menuitem"]')]);
+}
+/** @param {HTMLElement[]} items @param {number} i */
+function focusItem(items, i) {
+  const n = ((i % items.length) + items.length) % items.length; // wrap, handles negatives
+  items.forEach((el, j) => (el.tabIndex = j === n ? 0 : -1)); // roving tabindex
+  items[n].focus();
+}
+function positionKebabMenu() {
+  const r = els.kebab.getBoundingClientRect();
+  els.kebabMenu.style.top = r.bottom + 4 + 'px';
+  els.kebabMenu.style.right = window.innerWidth - r.right + 'px';
+  els.kebabMenu.style.left = 'auto';
+}
+/** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
+function openKebabMenu(startIndex = 0) {
+  closeContainerMenu(); // mutual exclusion: opening one menu dismisses the other
+  els.kebabMenu.classList.remove('hidden');
+  positionKebabMenu();
+  els.kebab.setAttribute('aria-expanded', 'true');
+  const items = kebabItems();
+  focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+}
+function closeKebabMenu() {
+  els.kebabMenu.classList.add('hidden');
+  els.kebab.setAttribute('aria-expanded', 'false');
+}
+
+// Activation: native click on the focused <button> menuitem fires these.
+els.kebabMenu.querySelector('#kebab-settings')?.addEventListener('click', () => {
+  closeKebabMenu();
+  // TODO(Flight 3+): open goldfinch://settings once the internal-page path exists
+});
+els.kebabMenu.querySelector('#kebab-exit')?.addEventListener('click', () => {
+  closeKebabMenu();
+  window.goldfinch.appQuit();
+});
+
+els.kebab.addEventListener('click', (e) => {
+  e.stopPropagation(); // don't let the global outside-close re-close it
+  els.kebabMenu.classList.contains('hidden') ? openKebabMenu() : closeKebabMenu();
+});
+els.kebab.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    openKebabMenu(0); // open → first item
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    openKebabMenu(-1); // open → last item (APG menu-button)
+  }
+});
+els.kebabMenu.addEventListener('keydown', (e) => {
+  const items = kebabItems();
+  const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeKebabMenu();
+    els.kebab.focus();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    closeKebabMenu();
+    els.kebab.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    focusItem(items, idx + 1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    focusItem(items, idx - 1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    focusItem(items, 0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    focusItem(items, items.length - 1);
+  }
+});
+document.addEventListener('click', () => closeKebabMenu()); // outside-click closes
 
 /* ------------------------------------------------------------------ tabs */
 
