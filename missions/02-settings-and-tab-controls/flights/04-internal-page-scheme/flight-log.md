@@ -3,11 +3,12 @@
 **Flight**: [Internal Page Scheme (`goldfinch://`)](flight.md)
 
 ## Summary
-Flight `in-flight` (started 2026-06-07). Executing via `/agentic-workflow`. Branch
-`flight/4-internal-page-scheme`. **Code legs 1–5 landed + committed** (`40ddb16`) + draft **PR #29**;
-offline gates green (typecheck 0, lint 0, test 161/161), independent review confirmed. **Remaining:
-live legs 6 (`verify-integration`) + 7 (`hat-and-alignment`)** — require a running GUI Electron app, run
-with the operator. Flight stays `in-flight` until live verification promotes it. Execution notes below.
+Flight **`landed`** (2026-06-07). Executed via `/agentic-workflow`. Branch `flight/4-internal-page-scheme`,
+**PR #29** (marked ready for review). **7/7 legs completed**: 5 code (1 batched review + commit, `40ddb16`)
++ `verify-integration` (live, `6be762b`) + `hat-and-alignment` (operator-approved). Offline gates green
+(typecheck 0, lint 0, test 161/161); live `tab-scheme-guard` **13/13**; `npm run a11y` no new violations.
+**SC5 + SC8 verified.** Settings is a "coming soon" **stub** — SC6/SC7 land in Flights 5/6. One latent
+finding (internal tab web-navigability) carried to Flight 5/6 (Known Issues / Anomalies). Notes below.
 
 ---
 

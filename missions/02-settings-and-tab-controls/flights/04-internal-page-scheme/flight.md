@@ -1,18 +1,22 @@
 # Flight: Internal Page Scheme (`goldfinch://`)
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
+- [x] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
   address, reloadable like any other tab, while web-page content **cannot navigate to, open, embed,
   or spoof** the internal scheme — page-originated attempts (`window.open('goldfinch://…')`,
   `location = 'goldfinch://…'`, `<iframe src="goldfinch://…">`, cross-origin `fetch`) are all
-  rejected (*behavior-test-backed — extends the `tab-scheme-guard` spec*).
-- [ ] **SC8** — The new internal-page surface is keyboard-operable and introduces no new WCAG A/AA
+  rejected (*behavior-test-backed — extends the `tab-scheme-guard` spec*). **Verified: `tab-scheme-guard`
+  13/13 live (run 2026-06-07-19-40-28); all four `goldfinch://` spoof vectors rejected; trusted
+  kebab→Settings opens + reloads the stub.** *(Note: the settings surface is a "coming soon" **stub** this
+  flight — SC6/SC7 enrich/wire it in Flights 5/6; SC5's plumbing + boundary is what's satisfied here.)*
+- [x] **SC8** — The new internal-page surface is keyboard-operable and introduces no new WCAG A/AA
   violations under the project's accessibility gate. This flight also **pins the a11y baseline** the
   gate has lacked since Flight 1 (thrice-flagged), so "no new violations" becomes a real,
-  CI-able assertion rather than a manual node-by-node judgment.
+  CI-able assertion rather than a manual node-by-node judgment. **Verified: `npm run a11y` "No NEW
+  violations" vs the pinned `ACCEPTED`; settings stub a11y-clean via the guest-target mode.**
 
 > **What this flight does and does NOT advance.** Flight 4 builds the *plumbing* — the privileged
 > `goldfinch://` scheme, its dedicated session + serving, the trusted embedder path, the boundary
@@ -421,17 +425,19 @@ as soon as serving works (end of the serving leg) and gates the boundary leg's g
 - [x] `verify-integration` - Apparatus prep + probe; run extended `tab-scheme-guard` (positive + 4
   spoof), promote to `active`; regressions; `npm run a11y` vs pinned baseline; offline gates; manual
   checks. (SC5, SC8) *(2026-06-07 live: behavior test 13/13, spike resolved, CSP confirmed, a11y clean)*
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT: open Settings, feel, reload, fix live, land.
+- [x] `hat-and-alignment` *(optional)* - Guided HAT: operator opened Settings, confirmed render + reload,
+  approved landing; Chrome-model hardening input captured for Flight 5/6.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] All legs completed (7/7: 5 code + verify-integration + HAT)
+- [ ] Code merged *(PR #29 marked ready for review; merge is the operator's call)*
+- [x] Tests passing — offline `npm test` 161/161, typecheck 0, lint 0; live `tab-scheme-guard` 13/13;
+  `npm run a11y` no new violations
+- [x] Documentation updated — README + CLAUDE.md document the scheme + four-gate model + a11y baseline
 
 ### Verification
 

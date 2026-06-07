@@ -1,6 +1,6 @@
 # Leg: pin-a11y-baseline
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Internal Page Scheme (`goldfinch://`)](../flight.md)
 
 ## Objective

@@ -1,6 +1,6 @@
 # Leg: boundary-hardening
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Internal Page Scheme (`goldfinch://`)](../flight.md)
 
 ## Objective
