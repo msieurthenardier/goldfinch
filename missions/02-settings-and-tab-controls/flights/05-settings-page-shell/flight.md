@@ -299,8 +299,8 @@ verify. The shell + serving are independent of the chip/popup/lock and could spl
 - [x] `site-info-popup` - `menuController` popup from the web chip (origin/connection/`tab.privacy`
   summary + "Site settings →" → Shields); internal chip static note. (flight-local)
 - [x] `docs` - Settings shell + subresource serving + chips + internal-tab lock in README/CLAUDE.md.
-- [ ] `verify-integration` - `settings-shell` behavior test; a11y (chrome + guest); menu/tab +
-  `tab-scheme-guard` regressions; offline gates. (SC6, SC8)
+- [x] `verify-integration` - `settings-shell` behavior test (12/12); a11y (chrome + guest) clean; menu/tab +
+  `tab-scheme-guard` regressions intact; offline gates 182/182; DD2 CSP spike PASS. (SC6, SC8)
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: shell, chips, popup, lock.
 
 ---

@@ -1,9 +1,9 @@
 # Behavior Test: Settings page shell + address-bar chips
 
 **Slug**: `settings-shell`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-07
-**Last Run**: never
+**Last Run**: 2026-06-07-18-07-42 (pass — 12/12; see `settings-shell/runs/`)
 
 ## Intent
 Verify that `goldfinch://settings` presents a **recognizable, accessible settings shell** (persistent

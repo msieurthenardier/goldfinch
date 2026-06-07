@@ -255,6 +255,44 @@ verification (which runs the app on `:9222`).
 
 ---
 
+### 2026-06-07 — `verify-integration` — LANDED (live, Flight-Director-driven)
+
+**Status**: landed
+
+**What ran** (app launched in-harness via `npm run dev:debug` on CDP `:9222` — the harness CAN launch the
+GUI; driven via `scripts/cdp-driver.mjs` + a node-CDP attach to the `goldfinch://settings` guest, which
+surfaces as `type: webview` in the flat `/json` list; the `chrome-devtools` MCP was NOT used):
+
+- **Offline gates (integrated)**: `npm run lint` / `npm run typecheck` clean; `npm test` **182/182**.
+- **`settings-shell` behavior test**: **12/12 PASS** — run log at
+  `tests/behavior/settings-shell/runs/2026-06-07-18-07-42.md`; spec promoted `draft → active`. Covers the
+  shell DOM (5 nav ↔ 5 sections, h1, sticky labelled nav), keyboard/anchor nav + chip coherence, the
+  internal/web chips, the site-info popup (origin/connection/`0`-trackers-graceful/"Site settings →" →
+  Shields), the internal-tab lock (count +1, settings tab unchanged), and Escape/outside-click/
+  mutual-exclusion dismissal.
+- **DD2 CSP-subresource spike — CONFIRMED PASS** (see Deviations, now resolved): `settings.css` applied
+  (`body` computed bg `rgb(30,31,37)`) and `settings.js` executed (scroll-spy set `aria-current`), both
+  served same-origin under the **unchanged** `INTERNAL_CSP`. No fallback needed.
+- **a11y (SC8)**: `npm run a11y` (chrome) and `npm run a11y -- --target=goldfinch://settings` (guest) both
+  **No NEW violations** vs the pinned `ACCEPTED` baseline — after the `role="search"` fix (see Anomalies).
+- **Regressions (live spot-checks)**: kebab + container menu keyboard contract intact after the leg-1 hoist
+  (open-to-first/last, Arrow/Home/End, Escape + focus-return) → `kebab-menu` / `unified-tab-controls` /
+  `tab-keyboard-operability` / `menu-dismissal` core. `tab-scheme-guard` core invariant: a web origin's
+  `window.open('goldfinch://…')` + `<iframe src="goldfinch://…">` created **no** internal tab and caused no
+  web-tab navigation (internal tab count unchanged) — boundary survives the leg-2 serving + leg-4 lock.
+  Full 13-vector `tab-scheme-guard` not re-run (flight 5 left `isSafeTabUrl` / `will-navigate` / the
+  trusted-embedder path / internal CSP untouched — reviewer-confirmed; covered by `url-safety.test.js` +
+  flight-4's 13/13).
+
+**SC6 + SC8 verified.** One a11y regression found and fixed mid-leg (Anomalies). `role="search"` source fix
+applied (`index.html`), reloaded-from-disk, chrome a11y re-confirmed clean.
+
+**Note on apparatus**: this leg was Flight-Director-driven (cdp-driver + node-CDP), not the two-live-agent
+Witnessed crew — every verdict cites a raw machine-read value (DOM/computed-style/partition/ARIA/audit exit)
+rather than model judgment. See the run log's Orchestrator Notes for the deviation + compensating control.
+
+---
+
 ## Decisions
 
 ### Per-leg design review skipped for the docs leg (leg 6)
@@ -283,12 +321,33 @@ verification** (which runs the app on `:9222` regardless). Leg 3 proceeds on the
 `goldfinch://` subresource on a `{standard, secure}` scheme is exactly what `'self'` covers — and DD2's
 fallback (per-page `style-src 'self'; script-src 'self'`, no `'unsafe-inline'`) is cheap if the live check
 ever fails. Recorded so leg 3's reliance on served CSS is a known, accepted prior, not an oversight.
+**RESOLVED at leg 7 (2026-06-07)**: live spike **PASSED** — `settings.css` applied + `settings.js` executed
+under the unchanged `INTERNAL_CSP`; no fallback needed. The architectural prior held.
 
 ---
 
 ## Anomalies
 
-_(none yet)_
+### `region` a11y regression on `#address` — the chip exposed an un-landmarked address bar (FIXED)
+**Observed**: at leg-7 chrome a11y, **4 NEW** axe `region` violations ("All page content should be contained
+by landmarks") on `#address`, in all four audit states (base-chrome / media-panel / privacy-panel /
+lightbox). DD4 had assumed `#address-wrap` was already in the pinned `ACCEPTED` baseline; it was not (the
+baseline only accepts `#tabs` / `#brand`). Adding the `#address-chip` button inside `#address-wrap` (leg 4)
+surfaced the wrap's contents as un-landmarked.
+**Severity**: degraded (new WCAG A/AA region findings — would fail SC8's "no new violations" gate).
+**Resolution**: added `role="search"` to `#address-wrap` in `src/renderer/index.html` (the address bar is
+semantically a search/address landmark; it now wraps both the chip and the input). Validated live (DOM patch
+→ 0 NEW), then persisted to source, reloaded-from-disk, and re-audited: **chrome a11y No NEW violations**.
+`#address` already carries `aria-label="Address and search bar"`, which serves as the landmark's accessible
+name (no duplicate label added). Offline gates stayed green (182/182). Fixed in the leg-7 commit.
+
+### Settings shell stub doesn't visibly scroll (by design — not a defect)
+**Observed**: with placeholder content, all five sections fit the viewport (`scrollY` stays `0`), so
+activating a nav anchor doesn't visibly scroll and the scroll-spy reports the topmost section.
+**Severity**: cosmetic.
+**Resolution**: not a defect — this is DD1's documented "all sections render at once (fine for a stub)"
+trade-off. Flight-6's real controls will grow the content and engage scrolling. Noted in the run log so a
+future runner doesn't read no-scroll as a failure.
 
 ---
 
