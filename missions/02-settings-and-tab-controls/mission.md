@@ -168,7 +168,7 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
 > one at a time as work progresses. This list will evolve based on discoveries during
 > implementation.
 
-- [ ] **Flight 1: Tab-bar control restructure & frameless chrome** — unify `+` and `▾` into the
+- [x] **Flight 1: Tab-bar control restructure & frameless chrome** — unify `+` and `▾` into the
   golden, pill-shaped `( + | ▾ )` control leading the tabs; make tabs shrink/grow to fit with a
   deferred resize-on-close (*flight-local — no mission SC*); preserve new-tab/container behavior
   and keyboard/AT operability; and go **frameless** — remove the OS frame for custom window

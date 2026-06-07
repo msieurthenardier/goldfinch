@@ -1,6 +1,6 @@
 # Flight: Tab-Bar Control Restructure
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
