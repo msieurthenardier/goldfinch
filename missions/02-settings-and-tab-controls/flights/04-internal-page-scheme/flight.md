@@ -418,9 +418,9 @@ as soon as serving works (end of the serving leg) and gates the boundary leg's g
   session-only; extend the `tab-scheme-guard` fixture with the four `goldfinch://` spoof vectors. (SC5)
 - [x] `docs` - Document the scheme, internal session/CSP, trusted path, and internal-page bridge in
   README/CLAUDE.md (symbols/DD ids, no line numbers).
-- [ ] `verify-integration` - Apparatus prep + probe; run extended `tab-scheme-guard` (positive + 4
+- [x] `verify-integration` - Apparatus prep + probe; run extended `tab-scheme-guard` (positive + 4
   spoof), promote to `active`; regressions; `npm run a11y` vs pinned baseline; offline gates; manual
-  checks. (SC5, SC8)
+  checks. (SC5, SC8) *(2026-06-07 live: behavior test 13/13, spike resolved, CSP confirmed, a11y clean)*
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: open Settings, feel, reload, fix live, land.
 
 ---

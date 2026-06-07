@@ -89,28 +89,31 @@ function fail(msg) {
 // (with `state` as an optional tiebreak — when set, the entry only matches that
 // UI state). Curated + reviewed in the PR — never auto-dumped.
 //
-// VERIFY-LEG6: every entry below is SEEDED from the Flight 1–3 debriefs + the
-// mission Known Issues, NOT yet reconciled against a real `npm run a11y` run
-// (that needs the live GUI the autonomous harness can't launch). Leg 6
-// (verify-integration) runs the live gate, confirms/adjusts these selectors to
-// match the actual axe targets, reconciles the mission Known-Issue text, and
-// drops the VERIFY-LEG6 markers. Stale seeds are harmless: an entry that matches
-// nothing simply never suppresses anything (we do not fail on unused entries).
+// Reconciled against the live `npm run a11y` run on 2026-06-07 (Flight 4, leg
+// verify-integration). The 5 structural app-shell entries were CONFIRMED present
+// in the live run (16 matching nodes across base-chrome/media-panel/privacy-panel/
+// lightbox). The 2 scrollable-region-focusable entries did NOT fire in the gate's
+// states — they only trigger when the scroll region actually overflows, which the
+// gate's empty privacy/lightbox states don't; they are kept PRE-ACCEPTED (mission
+// Known Issue stands) so they don't surface as NEW if a future overflow state is
+// audited. Curated + reviewed in the PR — never auto-dumped. Unused entries are
+// harmless (an entry that matches nothing never suppresses anything).
 const ACCEPTED = [
-  // ~8 moderate structural app-shell findings (Flight 2 debrief): the browser
-  // chrome is an app shell, not a document, so it has landmark/heading/region
-  // advisories that are accepted exceptions (cf. the committed nested-interactive
-  // disable). Region targets confirmed against src/renderer/index.html ids.
-  { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception (VERIFY-LEG6)' },
-  { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception (VERIFY-LEG6)' },
-  { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception (VERIFY-LEG6)' },
-  { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception (VERIFY-LEG6)' },
-  { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception (VERIFY-LEG6)' },
-  // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issues:
-  // a scroll container that isn't keyboard-focusable. Selectors are best-effort
-  // (the privacy-panel body + the lightbox scroll stage) pending leg-6 reconcile.
-  { id: 'scrollable-region-focusable', selector: '#privacy-body', state: 'privacy-panel', reason: 'privacy-panel scroll body not keyboard-focusable; mission Known Issue (VERIFY-LEG6)' },
-  { id: 'scrollable-region-focusable', selector: '#lightbox-stage', state: 'lightbox', reason: 'lightbox scroll stage not keyboard-focusable; mission Known Issue (VERIFY-LEG6)' }
+  // ~8 moderate structural app-shell findings: the browser chrome is an app shell,
+  // not a document, so it has landmark/heading/region advisories that are accepted
+  // exceptions (cf. the committed nested-interactive disable). Confirmed live
+  // 2026-06-07; targets verified against src/renderer/index.html ids.
+  { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
+  { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
+  { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
+  // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a
+  // scroll container that isn't keyboard-focusable. Not reproduced by the gate's
+  // current (no-overflow) privacy-panel/lightbox states as of 2026-06-07; kept
+  // pre-accepted so a future overflow-state audit doesn't flag them as NEW.
+  { id: 'scrollable-region-focusable', selector: '#privacy-body', state: 'privacy-panel', reason: 'privacy-panel scroll body not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' },
+  { id: 'scrollable-region-focusable', selector: '#lightbox-stage', state: 'lightbox', reason: 'lightbox scroll stage not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' }
 ];
 
 // ---------- pick the renderer target ----------

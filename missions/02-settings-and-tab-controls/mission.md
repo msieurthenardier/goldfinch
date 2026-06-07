@@ -164,6 +164,24 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   verify-integration a11y sweep but **confirmed pre-existing** (identical on the pre-flight build);
   not introduced by Flight 1, which touched neither component. Tracked here for a future a11y /
   panels touch-up — fix: give `#privacy-body` + the lightbox scroll container `tabindex="0"`.
+  *(Flight 4 update: the a11y gate is now baseline-pinned — `scripts/a11y-audit.mjs` diffs against a
+  curated `ACCEPTED` allowlist. The live 2026-06-07 run did NOT reproduce these two (they only fire
+  when the scroll region overflows, which the gate's empty states don't); they are kept **pre-accepted**
+  in the allowlist so a future overflow-state audit won't flag them as NEW. The underlying fix still
+  stands.)*
+
+- **Internal tab is freely web-navigable → harden the internal bridge before Flight 6 wires real IPC**
+  — discovered in Flight 4 verify-integration. The settings tab is a first-class tab (Option A), so its
+  address bar / programmatic `navigate()` can load an arbitrary http page **into the privileged
+  `goldfinch-internal` session** (webPreferences are fixed at webview attach, so the http page inherits
+  `contextIsolation:true` + the internal preload + access to the `goldfinch://` handler). **Inert in
+  Flight 4** (the bridge exposes only `{version:1}`; entry requires a *trusted, chrome-initiated*
+  navigation — not web-reachable; all SC5 gates verified 13/13). **But Flight 6 adds real
+  home-page/Shields IPC to the internal bridge** — at which point web content in the internal tab could
+  call privileged IPC. Fix in Flight 5/6: constrain internal-tab navigation (no free web navigation /
+  locked address bar for internal tabs) **and/or** have the internal preload bridge refuse every
+  privileged call unless `location.origin` is `goldfinch://…` (origin-check — the more robust gate). See
+  `flights/04-internal-page-scheme/flight-log.md` (Anomalies).
 
 ## Flights
 

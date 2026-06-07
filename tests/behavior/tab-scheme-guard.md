@@ -1,11 +1,16 @@
 # Behavior Test: Tab URL scheme guard rejects hostile schemes
 
 **Slug**: `tab-scheme-guard`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-05
-**Last Run**: 2026-06-05-16-29-17 (partial — 5 pass / 0 fail / 1 inconclusive; see runs/2026-06-05-16-29-17.md)
+**Last Run**: 2026-06-07-19-40-28 (pass — 13 / 13; see runs/2026-06-07-19-40-28.md). Prior: 2026-06-05-16-29-17 (partial 5/0/1).
 
-> **Step 6 (media-open file:) needs refinement before promotion to `active`.** The first run found this vector structurally unreachable: `file:` media is never cataloged by the media panel (the crafted `<video src=file://>` errors and never enters the catalog), so there is no media-open path to exercise. The genuinely-hostile vectors (window.open + in-page `window.location`) passed live. Refine Step 6 to a reachable case (e.g. a crafted dangerous-scheme item via the http(s) media-open path, which shares the same `createTab` guard), then re-run to promote.
+> **Promoted `draft → active` on the 2026-06-07 run (Flight 4, leg `verify-integration`).** That run
+> extended the spec to the internal-scheme boundary (steps 8–13) and resolved the prior Step-6
+> inconclusive: the `file:` media vector **is** reachable after all (the media panel catalogs the
+> crafted `<video src=file://>` item and exposes a clickable "Pop out to new tab" action) — it is
+> **blocked at the destination** (`popout()` routes through `createTab` on the untrusted branch, whose
+> `isSafeTabUrl` gate rejects `file:`), i.e. **reachable-but-guarded**, not structurally unreachable.
 
 ## Intent
 
@@ -32,7 +37,7 @@ Verify that a hostile web page cannot cause Goldfinch to load a dangerous-scheme
 | 1 | Probe the environment: `curl` the devtools endpoint `http://127.0.0.1:9222/json` and the trigger page URL. | Both respond (devtools lists targets incl. a Goldfinch window; trigger page returns HTTP 200). If either fails, halt — preconditions not met. |
 | 2 | In the running app, open a tab and navigate it to the HTTP trigger page. Wait for it to load. | The trigger page is rendered in the active tab; the address bar shows the `http://127.0.0.1:PORT/...` URL. |
 | 3 | On the trigger page, invoke `window.open('file:///etc/passwd')` (click the corresponding button). | No tab renders the contents of `/etc/passwd`; no `<webview>` has a `file:` URL; the address bar never shows a `file://` URL. (A blocked attempt may leave no new tab, or a blank/homepage tab — but never local file content.) |
-| 4 | Invoke `window.open('javascript:document.title="pwned"')` and then `window.open('data:text/html,<h1>injected</h1>')` from the trigger page. | Neither is loaded into a tab: no tab renders "injected"; no tab's title becomes "pwned"; no `<webview>` carries a `javascript:` or `data:` URL. |
+| 4 | Invoke `window.open('javascript:document.title="pwned"')` and then `window.open('data:text/html,<h1>injected</h1>')` from the trigger page. | Neither is loaded into a tab: no tab renders "injected"; no tab's title becomes "pwned"; no `<webview>` carries a `javascript:` or `data:` URL. *(Note: `window.open` of a blocked scheme may still spawn a **blank `about:blank`** tab — that is acceptable here; the criteria forbid the dangerous URL/content, not a neutralized blank popup. The `file:`/`goldfinch:` `window.open` vectors create no tab at all.)* |
 | 5 | **In-page self-navigation:** on the trigger page, set `window.location = 'file:///etc/passwd'` (the page navigates *itself*, not via `window.open`). | The active tab does NOT render `/etc/passwd` and the webview's current URL is not `file://` (the main-process `will-navigate` guard prevented it). Positive anchor: the webview remains on the original `http://127.0.0.1:PORT/...` trigger-page URL (navigation was cancelled, not merely redirected elsewhere). This is the vector the `createTab` gate alone would miss. |
 | 6 | Open the media panel for the trigger page, locate the crafted media item whose source is `file:///etc/passwd`, and use its "open as tab" action. | The media item does not open a tab displaying local file contents; no `<webview>` navigates to the `file:` URL. (Media-open vector is closed by the same `createTab` guard.) |
 | 7 | Control / no-over-block: from the trigger page, invoke `window.open('https://example.com/')`. | A new tab DOES open and renders example.com; the address bar shows `https://example.com/`. Confirms the guard rejects only dangerous schemes and does not break legitimate `window.open` navigation. |

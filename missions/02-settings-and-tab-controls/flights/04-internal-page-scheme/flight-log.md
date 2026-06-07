@@ -4,7 +4,10 @@
 
 ## Summary
 Flight `in-flight` (started 2026-06-07). Executing via `/agentic-workflow`. Branch
-`flight/4-internal-page-scheme`. Execution notes, decisions, deviations, and anomalies appended below.
+`flight/4-internal-page-scheme`. **Code legs 1–5 landed + committed** (`40ddb16`) + draft **PR #29**;
+offline gates green (typecheck 0, lint 0, test 161/161), independent review confirmed. **Remaining:
+live legs 6 (`verify-integration`) + 7 (`hat-and-alignment`)** — require a running GUI Electron app, run
+with the operator. Flight stays `in-flight` until live verification promotes it. Execution notes below.
 
 ---
 
@@ -162,6 +165,48 @@ Flight `in-flight` (started 2026-06-07). Executing via `/agentic-workflow`. Bran
 
 ---
 
+### verify-integration
+
+**Status**: landed (2026-06-07; live verification against `npm run dev:debug` on `:9222`)
+
+The FD launched the live GUI (Electron 42.3.3 under WSLg, CDP `:9222`) and ran the live verification.
+Apparatus discipline held throughout: committed `scripts/cdp-driver.mjs` + `curl`/node-CDP, **never the
+`chrome-devtools` MCP** (DD8).
+
+- **`tab-scheme-guard` behavior test → 13/13 PASS** (run `tests/behavior/tab-scheme-guard/runs/2026-06-07-19-40-28.md`),
+  spec promoted **`draft → active`**. Witnessed: single-pass Executor (a2f1c463…) + independent
+  Validator (a902fc96…). All four `goldfinch://` spoof vectors rejected (window.open at
+  `createTab`/`isSafeTabUrl`; self-nav at session-aware `will-navigate`; iframe blank; fetch rejects);
+  legacy file:/js:/data: vectors rejected; the trusted kebab→Settings positive opened
+  `goldfinch://settings` on `goldfinch-internal` and rendered the stub; app-reload re-rendered.
+- **`will-navigate` spike (DD4) — RESOLVED**: the internal tab's **initial load AND app reload** both
+  succeed (steps 12–13) — the page renders directly at `goldfinch://settings` with no blocking
+  `about:blank` interaction; the trusted `navigate()`/`loadURL` path is programmatic and confirmed to
+  bypass `will-navigate` (a web→internal address-bar `navigate()` loads without the guard firing).
+  Net: the session-aware allow-branch is **belt-and-suspenders** as the Architect predicted; the code
+  is correct either way. (Aside: a raw CDP `Page.reload` on the guest detaches the `<webview>` element —
+  a harness artifact, NOT product behavior; the app's `webview.reload()` is stable.)
+- **CSP read-back (DD3) — CONFIRMED**: the served `goldfinch://settings/` response carries `status 200`,
+  `Content-Type: text/html; charset=utf-8`, and `Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'`
+  (read off `Network.responseReceived` over CDP). The `frame-ancestors 'none'` genuinely shipped —
+  validating the Response-headers approach over the `onHeadersReceived` trap.
+- **Internal preload isolation — CONFIRMED**: in the guest, `window.goldfinchInternal.version === 1`
+  while `window.goldfinch` and `require` are **undefined** (`contextIsolation: true` working; no chrome
+  bridge / Node leak).
+- **a11y — CONFIRMED + reconciled**: `npm run a11y` (chrome baseline) → "No NEW violations" against the
+  pinned `ACCEPTED` (16 accepted nodes: region ×3 across 4 states + landmark-one-main + page-has-heading-one).
+  Guest-target mode `npm run a11y -- --target=goldfinch://settings` → settings stub **a11y-clean**.
+  **Leg-1 flagged assumption RESOLVED**: webview guests DO appear in the flat CDP `/json` list, so the
+  guest-axe `find` works (no `Target.getTargets` needed). **Seed reconcile**: dropped the `VERIFY-LEG6`
+  markers from the 5 confirmed structural entries; the 2 `scrollable-region-focusable` seeds did not
+  reproduce (they need scroll-overflow content the gate's empty states lack) — kept pre-accepted with a
+  reconciled reason; mission Known-Issue annotated.
+- **Reconcile edits (fix-forward, this leg)**: `scripts/a11y-audit.mjs` (ACCEPTED reasons/header),
+  `mission.md` (Known-Issue a11y note), `tests/behavior/tab-scheme-guard.md` (status→active, Last Run,
+  Step-4/Step-6 spec-quality flags from the Validator). Lint + a11y re-checked green.
+
+---
+
 ## Decisions
 Runtime decisions not in the original plan.
 
@@ -217,7 +262,34 @@ _(none yet)_
 ## Anomalies
 Unexpected issues encountered.
 
-_(none yet)_
+### Internal tab is freely navigable to web URLs → web content can run in the privileged internal session
+**Observed**: during the live a11y run, `scripts/a11y-audit.mjs` called the chrome `navigate('http://127.0.0.1:8000/')`
+on the **active** tab, which happened to be the open Settings tab. The internal-partition webview
+(`goldfinch-internal`) loaded the http fixture — `loadURL` is programmatic and bypasses `will-navigate`
+(the spike's prediction, confirmed). Because `will-attach-webview` fixes `contextIsolation:true` + the
+internal preload at **attach** time (not per-navigation), that http page then ran **in the internal
+session, with the internal preload bridge, and with access to the `goldfinch://` handler** (which is
+registered on that session).
+**Severity**: degraded — **latent / inert this flight**. The internal bridge currently exposes only
+`{ version: 1 }`, so there is nothing sensitive to reach, and the only way into the internal session is
+a **trusted, chrome-initiated** navigation (address bar / programmatic) of an already-open Settings tab
+— **not web-reachable** (a hostile page still cannot open or navigate into the internal session; all
+Flight-4 SC5 gates hold, verified 13/13). So this is NOT a Flight-4 boundary break.
+**Why it matters later**: **Flight 6 populates the internal bridge with real home-page/Shields IPC.** At
+that point an http page that ends up in the internal tab (via chrome-initiated navigation) could call
+privileged internal IPC and reach `goldfinch://`. Carried forward as a mission Known Issue / Flight-5/6
+design input (see mission `## Known Issues`).
+**Resolution**: not fixed in Flight 4 (out of scope; inert). Recommended Flight-5/6 hardening: either
+constrain the internal tab's navigation (treat internal tabs specially — no free web navigation / lock
+the address bar), or have the internal preload bridge **refuse to operate unless `location.origin` is
+`goldfinch://…`** (origin-check every privileged IPC). The latter is the more robust gate.
+
+### Stray `about:blank` tab from blocked `window.open` (behavior-test Step 4)
+**Observed**: `window.open('javascript:…')` / `window.open('data:…')` spawn a blank `about:blank` tab
+(no dangerous content; payload neutralized). The `file:`/`goldfinch:` `window.open` vectors create no
+tab at all.
+**Severity**: cosmetic. The spec's criteria permit a neutralized blank popup (they forbid the dangerous
+URL/content). Folded into the `tab-scheme-guard` spec as a Step-4 note. No action.
 
 ---
 
