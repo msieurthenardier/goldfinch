@@ -44,6 +44,7 @@
       <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
       <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
     </div>
+    <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
 
     <!-- Toolbar -->
     <div id="toolbar">
@@ -52,6 +53,7 @@
       <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">▶</button>
       <button id="reload" class="icon-btn" title="Reload" aria-label="Reload">⟳</button>
       <div id="address-wrap">
+        <button id="address-chip" class="addr-chip" type="button" aria-label="Site information" aria-haspopup="dialog"></button>
         <input
           id="address"
           type="text"

@@ -288,17 +288,17 @@ verify. The shell + serving are independent of the chip/popup/lock and could spl
 
 > **Note:** Tentative; legs are created one at a time as the flight progresses.
 
-- [ ] `menucontroller-keyboard-hoist` - Hoist the APG keydown into `menuController`; reconcile container +
+- [x] `menucontroller-keyboard-hoist` - Hoist the APG keydown into `menuController`; reconcile container +
   kebab; regress menu/tab suites. (SC8)
-- [ ] `serve-internal-subresources` - Per-host path allowlist + content-type by extension in
+- [x] `serve-internal-subresources` - Per-host path allowlist + content-type by extension in
   `handleInternal`; traversal-proof; CSP unchanged.
-- [ ] `settings-shell` - Sidenav + 5 titled sections + placeholder; `settings.css` (+ optional
+- [x] `settings-shell` - Sidenav + 5 titled sections + placeholder; `settings.css` (+ optional
   `settings.js`); accessible. (SC6, SC8)
-- [ ] `address-bar-chips-and-lock` - Internal + web chips reflecting the active tab; lock internal-tab
+- [x] `address-bar-chips-and-lock` - Internal + web chips reflecting the active tab; lock internal-tab
   navigation (web URL → new normal tab). (flight-local)
-- [ ] `site-info-popup` - `menuController` popup from the web chip (origin/connection/`tab.privacy`
+- [x] `site-info-popup` - `menuController` popup from the web chip (origin/connection/`tab.privacy`
   summary + "Site settings →" → Shields); internal chip static note. (flight-local)
-- [ ] `docs` - Settings shell + subresource serving + chips + internal-tab lock in README/CLAUDE.md.
+- [x] `docs` - Settings shell + subresource serving + chips + internal-tab lock in README/CLAUDE.md.
 - [ ] `verify-integration` - `settings-shell` behavior test; a11y (chrome + guest); menu/tab +
   `tab-scheme-guard` regressions; offline gates. (SC6, SC8)
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: shell, chips, popup, lock.

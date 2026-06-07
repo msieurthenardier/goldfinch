@@ -54,7 +54,9 @@ const els = {
   playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
   playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next')),
   kebab: /** @type {HTMLButtonElement} */ (document.getElementById('kebab')),
-  kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu'))
+  kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu')),
+  addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
+  siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -96,6 +98,7 @@ let tabSeq = 0;
  * @typedef {{
  *   trigger: HTMLElement,
  *   menu: HTMLElement,
+ *   items?: () => HTMLElement[],
  *   onOpen?: (startIndex?: number) => void,
  *   onClose?: () => void
  * }} MenuEntry
@@ -123,6 +126,56 @@ const menuController = (() => {
   /** @param {MenuEntry} entry @returns {MenuEntry} */
   function register(entry) {
     entries.push(entry);
+
+    // Controller-level trigger keydown: Enter/Space/ArrowDown → open to first item;
+    // ArrowUp → open to last item (APG menu-button). preventDefault suppresses the
+    // synthetic click so the menu opens exactly once.
+    entry.trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        openEntry(entry, 0);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        openEntry(entry, -1);
+      }
+    });
+
+    // Controller-level menu keydown: full APG roving-tabindex contract.
+    // Guard `if (!entry.items) return` so a non-menu popup consumer (e.g. the
+    // site-info popup in leg 5) can register without an items-getter and the
+    // roving/arrow contract simply no-ops for it.
+    entry.menu.addEventListener('keydown', (e) => {
+      if (!entry.items) return;
+      const items = entry.items();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeEntry(entry);
+        entry.trigger.focus();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        closeEntry(entry);
+        entry.trigger.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
+      } else {
+        // Arrow/Home/End require items; guard before calling focusItem (wrap formula
+        // NaN-s on an empty list — cheap safety net even though an open menu always has items).
+        if (!items.length) return;
+        const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          focusItem(items, idx + 1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          focusItem(items, idx - 1);
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          focusItem(items, 0);
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          focusItem(items, items.length - 1);
+        }
+      }
+    });
+
     return entry;
   }
   return {
@@ -177,6 +230,7 @@ function containerItems() {
 const containerEntry = menuController.register({
   trigger: els.newTabMenu,
   menu: els.containerMenu,
+  items: containerItems,
   /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
   onOpen(startIndex = 0) {
     const m = els.containerMenu;
@@ -228,45 +282,6 @@ const containerEntry = menuController.register({
 function closeContainerMenu() {
   menuController.close(containerEntry);
 }
-// ▾ trigger keydown — mirrors the kebab trigger: open to first (Enter/Space/ArrowDown)
-// or last (ArrowUp). preventDefault suppresses the synthetic click so it opens exactly once.
-els.newTabMenu.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-    e.preventDefault();
-    menuController.open(containerEntry, 0); // open → first item
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    menuController.open(containerEntry, -1); // open → last item (APG menu-button)
-  }
-});
-// Full APG menu keydown (mirrors the kebab): Escape/Tab close + restore focus to the
-// trigger; ArrowDown/Up wrap via the shared focusItem; Home/End jump to first/last.
-els.containerMenu.addEventListener('keydown', (e) => {
-  const items = containerItems();
-  const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    closeContainerMenu();
-    els.newTabMenu.focus();
-  } else if (e.key === 'Tab') {
-    e.preventDefault();
-    closeContainerMenu();
-    els.newTabMenu.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    focusItem(items, idx + 1);
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    focusItem(items, idx - 1);
-  } else if (e.key === 'Home') {
-    e.preventDefault();
-    focusItem(items, 0);
-  } else if (e.key === 'End') {
-    e.preventDefault();
-    focusItem(items, items.length - 1);
-  }
-});
-
 async function addContainer() {
   const name = window.prompt('New container name:');
   if (!name) return;
@@ -279,9 +294,8 @@ async function addContainer() {
 /* ------------------------------------------------------- kebab (overflow) menu */
 // APG menu-button: role="menu" popup with two static role="menuitem" items
 // (Settings, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
-// exclusion are owned by the shared menuController; this menu keeps its own per-entry
-// keydown listener on els.kebabMenu for the full APG roles/keyboard nav (kept local
-// so registering the container doesn't accidentally uplift its keyboard before leg 2).
+// exclusion and the APG keyboard contract (trigger keydown + menu keydown) are all
+// owned by the shared menuController (hoisted in leg 1, DD7).
 
 /** @returns {HTMLElement[]} */
 function kebabItems() {
@@ -305,6 +319,7 @@ function positionKebabMenu() {
 const kebabEntry = menuController.register({
   trigger: els.kebab,
   menu: els.kebabMenu,
+  items: kebabItems,
   /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
   onOpen(startIndex = 0) {
     els.kebabMenu.classList.remove('hidden');
@@ -338,38 +353,98 @@ els.kebab.addEventListener('click', () => {
   if (menuController.current === kebabEntry) menuController.close(kebabEntry);
   else menuController.open(kebabEntry, 0);
 });
-els.kebab.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-    e.preventDefault();
-    menuController.open(kebabEntry, 0); // open → first item
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    menuController.open(kebabEntry, -1); // open → last item (APG menu-button)
+
+/* ------------------------------------------------------- site-info popup */
+// Registered with menuController WITHOUT an items getter — the controller's roving
+// keydown early-returns on !entry.items, so it no-ops for this popup. The popup
+// supplies its own keydown (Escape + Tab → close + return focus to chip). DD5/DD7.
+
+function positionSiteInfoPopup() {
+  const r = els.addressChip.getBoundingClientRect();
+  els.siteInfoPopup.style.top = r.bottom + 4 + 'px';
+  els.siteInfoPopup.style.left = r.left + 'px';
+  els.siteInfoPopup.style.right = 'auto';
+}
+
+/** @param {Tab|null} tab */
+function buildSiteInfo(tab) {
+  const popup = els.siteInfoPopup;
+  if (!tab || isInternalTab(tab) || isInternalPageUrl(tab.url)) {
+    // Internal tab — static secure-page note; no site data, no "Site settings" link.
+    popup.innerHTML =
+      '<div class="si-section">' +
+      '<div class="si-row si-secure">You\'re viewing a secure Goldfinch page.</div>' +
+      '</div>';
+    return;
+  }
+
+  // Web tab — build origin/connection/privacy summary.
+  let host;
+  try {
+    host = new URL(tab.url).host;
+  } catch {
+    host = '—';
+  }
+  const connection = /^https:/i.test(tab.url || '') ? 'HTTPS' : 'HTTP';
+  const trackers = tab.privacy?.net?.trackers?.blocked ?? 0;
+  const permissions = tab.privacy?.permissions?.length ?? 0;
+
+  popup.innerHTML =
+    '<div class="si-section">' +
+    '<div class="si-row si-host">' + escapeHtml(host) + '</div>' +
+    '<div class="si-row"><span class="si-label">Connection</span><span class="si-value">' + escapeHtml(connection) + '</span></div>' +
+    '<div class="si-row"><span class="si-label">Trackers blocked</span><span class="si-value">' + trackers + '</span></div>' +
+    '<div class="si-row"><span class="si-label">Permissions</span><span class="si-value">' + permissions + '</span></div>' +
+    '</div>' +
+    '<div class="si-actions">' +
+    '<button class="text-btn small si-settings-btn">Site settings →</button>' +
+    '</div>';
+
+  const settingsBtn = /** @type {HTMLButtonElement|null} */ (popup.querySelector('.si-settings-btn'));
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      closeSiteInfo();
+      togglePrivacy(true);
+    });
+  }
+}
+
+const siteInfoEntry = menuController.register({
+  trigger: els.addressChip,
+  menu: els.siteInfoPopup,
+  onOpen() {
+    buildSiteInfo(activeTab());
+    els.siteInfoPopup.classList.remove('hidden');
+    positionSiteInfoPopup();
+    // Focus the "Site settings →" button if present (web state), else the container (internal).
+    const btn = /** @type {HTMLElement|null} */ (els.siteInfoPopup.querySelector('button, a'));
+    (btn || els.siteInfoPopup).focus();
+  },
+  onClose() {
+    els.siteInfoPopup.classList.add('hidden');
   }
 });
-els.kebabMenu.addEventListener('keydown', (e) => {
-  const items = kebabItems();
-  const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-  if (e.key === 'Escape') {
+
+// Thin public wrapper — delegates to the controller. Distinct from onClose above.
+function closeSiteInfo() {
+  menuController.close(siteInfoEntry);
+}
+
+// Chip click: toggle the popup (mirrors the kebab click pattern).
+// This is the click handler leg 4 intentionally left off.
+els.addressChip.addEventListener('click', () => {
+  if (menuController.current === siteInfoEntry) menuController.close(siteInfoEntry);
+  else menuController.open(siteInfoEntry);
+});
+
+// Popup keydown: Escape or Tab → close + return focus to chip.
+// IMPORTANT: the controller's menu-keydown early-returns on !entry.items, so it will NOT
+// handle Escape/Tab for this popup — this listener is the ONLY thing that does it.
+els.siteInfoPopup.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' || e.key === 'Tab') {
     e.preventDefault();
-    closeKebabMenu();
-    els.kebab.focus();
-  } else if (e.key === 'Tab') {
-    e.preventDefault();
-    closeKebabMenu();
-    els.kebab.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    focusItem(items, idx + 1);
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    focusItem(items, idx - 1);
-  } else if (e.key === 'Home') {
-    e.preventDefault();
-    focusItem(items, 0);
-  } else if (e.key === 'End') {
-    e.preventDefault();
-    focusItem(items, items.length - 1);
+    closeSiteInfo();
+    els.addressChip.focus();
   }
 });
 
@@ -474,6 +549,7 @@ function activateTab(id) {
     t.btn.tabIndex = isActive ? 0 : -1;
   }
   els.address.value = tab.url || '';
+  updateAddressChip(tab);
   renderMedia();
   renderPrivacy();
   updateNavButtons();
@@ -481,6 +557,55 @@ function activateTab(id) {
 
 function activeTab() {
   return tabs.get(activeTabId) || null;
+}
+
+/** @param {Tab|null} tab @returns {boolean} */
+function isInternalTab(tab) {
+  return !!(
+    tab &&
+    tab.container &&
+    (tab.container.id === 'internal' || tab.container.partition === window.goldfinch.internalPartition)
+  );
+}
+
+/**
+ * Update the address-bar chip and read-only state from the given tab.
+ * Called from every address-sync site (activateTab, onNav, did-navigate-in-page).
+ * @param {Tab|null} tab
+ */
+function updateAddressChip(tab) {
+  const chip = els.addressChip;
+  const url = tab && tab.url;
+
+  if (!url || url === 'about:blank') {
+    // Neutral default: new/blank tab — web state with generic label
+    chip.removeAttribute('data-state');
+    chip.setAttribute('aria-label', 'Site information');
+    els.address.readOnly = false;
+    return;
+  }
+
+  if (isInternalPageUrl(url)) {
+    chip.setAttribute('data-state', 'internal');
+    chip.setAttribute('aria-label', 'Secure Goldfinch page');
+    els.address.readOnly = true;
+    return;
+  }
+
+  // Web tab: parse the host for the label; guard against unparseable URLs
+  let host;
+  try {
+    host = new URL(url).host;
+  } catch {
+    // Unparseable URL — fall back to neutral default
+    chip.removeAttribute('data-state');
+    chip.setAttribute('aria-label', 'Site information');
+    els.address.readOnly = false;
+    return;
+  }
+  chip.setAttribute('data-state', 'web');
+  chip.setAttribute('aria-label', host ? `Site information, ${host}` : 'Site information');
+  els.address.readOnly = false;
 }
 
 let widthsFrozen = false;
@@ -551,6 +676,7 @@ function wireWebview(tab) {
     tab.url = wv.getURL();
     if (tab.id === activeTabId) {
       els.address.value = tab.url;
+      updateAddressChip(tab);
       updateNavButtons();
     }
     // Reset media + selection + privacy on full navigation; preload/main re-populate.
@@ -567,6 +693,7 @@ function wireWebview(tab) {
     tab.url = wv.getURL();
     if (tab.id === activeTabId) {
       els.address.value = tab.url;
+      updateAddressChip(tab);
       updateNavButtons();
     }
   });
@@ -608,6 +735,19 @@ function navigate(input) {
   const tab = activeTab();
   if (!tab) return;
   const url = toUrl(input);
+  // Internal-tab navigation lock (DD6): after toUrl resolution, check whether the
+  // active tab is an internal (goldfinch://) tab. If so, reroute any web URL to a
+  // new normal tab and leave the internal tab untouched. The address bar is readOnly,
+  // so real user entry here is belt-and-suspenders (the bar's readOnly prevents
+  // direct user input, but navigate() could theoretically be invoked programmatically).
+  if (isInternalTab(tab)) {
+    if (!isInternalPageUrl(url)) {
+      createTab(url); // open web URL in a NEW normal tab (untrusted/web branch)
+    }
+    // Whether the URL was internal (belt-and-suspenders no-op) or web (rerouted above),
+    // never free-navigate the internal tab via the address bar.
+    return;
+  }
   tab.webview.loadURL(url).catch(() => tab.webview.setAttribute('src', url));
 }
 
