@@ -36,10 +36,11 @@ or download **v0.4.5** directly:
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.
 - **Overflow menu** (the **⋮** button at the right end of the toolbar row):
-  opens a menu with **Settings** (a placeholder for now — not yet functional,
-  coming in a later release) and **Exit** (quits Goldfinch). Keyboard-operable:
-  focus the button and press `Enter`, `Space`, or `↓` to open, arrow keys to
-  move between items, and `Esc` to close.
+  opens a menu with **Settings** (opens the internal settings page in a new
+  tab — a "coming soon" stub for now; the wired controls land in a later
+  release) and **Exit** (quits Goldfinch). Keyboard-operable: focus the button
+  and press `Enter`, `Space`, or `↓` to open, arrow keys to move between items,
+  and `Esc` to close.
 - **Privacy & Shields** (toggle individual strategies in the Shield panel):
   - **Tracker & ad blocking** (`block`) — cancels requests to known tracker and
     ad domains (analytics, ads, social pixels, and other categories) classified
@@ -122,8 +123,27 @@ npm start
 | `src/main/trackers.js` | Registrable-domain (eTLD+1) extraction and tracker classification by category. |
 | `src/preload/chrome-preload.js` | Safe `window.goldfinch` API bridge for the UI. |
 | `src/preload/webview-preload.js` | Injected into every page; scans the DOM for media. |
+| `src/preload/internal-preload.js` | Minimal, context-isolated bridge for trusted `goldfinch://` internal pages (the Settings page). |
+| `src/shared/internal-page.js` | Single source of truth for the internal `goldfinch-internal` session partition string. |
+| `src/renderer/pages/settings.html` | The internal Settings page — a "coming soon" stub today. |
 | `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox. |
 
 Each tab is a `<webview>` running real Chromium. The media scanner preload is
 force-injected into every page and streams its catalog to the UI via
 `ipcRenderer.sendToHost`.
+
+### Internal pages (`goldfinch://`)
+
+Goldfinch's own chrome pages (currently just **Settings**) are served from a
+privileged `goldfinch://` URL scheme rather than from web origins. The scheme is
+registered as `standard` + `secure` at module load, and its pages are served from
+a dedicated in-memory internal session (the `goldfinch-internal` partition) via
+`protocol.handle`. Each response carries a strict Content-Security-Policy
+(`frame-ancestors 'none'`, `default-src 'self'`) so the pages can't be embedded or
+run inline script. Today the scheme serves a single stub — `goldfinch://settings`
+("coming soon"); the real settings UI arrives in a later release.
+
+Internal pages are **trusted local chrome, not web content**, and are reachable
+only through Goldfinch's own UI (the kebab → **Settings**). Untrusted web content
+cannot navigate to, open, embed, or `fetch` the `goldfinch://` scheme. See
+`CLAUDE.md` for the security model.

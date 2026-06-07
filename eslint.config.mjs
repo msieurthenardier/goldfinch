@@ -5,7 +5,7 @@ export default [
   { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs'] }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
-    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'src/preload/internal-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
@@ -23,7 +23,7 @@ export default [
     files: ['src/renderer/**/*.js'], // plain browser script + injected globals
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly' }
+      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly' }
     }
   },
   eslintConfigPrettier // last — Prettier owns formatting

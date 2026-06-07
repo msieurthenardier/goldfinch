@@ -4,6 +4,7 @@
 // Exposes a minimal, audited surface to the renderer via contextBridge.
 
 const { contextBridge, ipcRenderer } = require('electron');
+const { INTERNAL_PARTITION } = require('../shared/internal-page');
 
 contextBridge.exposeInMainWorld('goldfinch', {
   // --- platform ---
@@ -47,5 +48,14 @@ contextBridge.exposeInMainWorld('goldfinch', {
 
   // Absolute path to the webview preload, so the renderer can set it on
   // <webview webpreferences> / preload attribute.
-  webviewPreloadPath: `file://${require('path').join(__dirname, 'webview-preload.js')}`
+  webviewPreloadPath: `file://${require('path').join(__dirname, 'webview-preload.js')}`,
+
+  // Absolute path to the TRUSTED internal-page preload, set on the Settings webview's
+  // preload attribute (distinct surface from webviewPreloadPath; runs context-isolated).
+  internalPreloadPath: `file://${require('path').join(__dirname, 'internal-preload.js')}`,
+
+  // The internal partition string (single source of truth, src/shared/internal-page.js),
+  // set as the trusted webview's `partition` attribute so it matches the main-process
+  // internal session byte-for-byte.
+  internalPartition: INTERNAL_PARTITION
 });
