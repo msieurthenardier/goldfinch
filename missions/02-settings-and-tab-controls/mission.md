@@ -231,9 +231,16 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   `frame-ancestors 'none'` confirmed, a11y baseline pinned. The two design reviews caught a synchronous
   `session-created` exclusion bug and a New-Identity data-loss trap before any code shipped. Latent
   internal-tab web-navigability finding carried to Flight 5/6 — see Known Issues.)*
-- [ ] **Flight 5: Settings page shell** — build the stub `goldfinch://settings` page with
-  modern-browser chrome (persistent section nav + titled sections) and placeholder content;
-  accessible. (SC6, SC8)
+- [ ] **Flight 5: Settings page shell + address-bar chips** — build the stub `goldfinch://settings`
+  page with modern-browser chrome (persistent section nav + titled sections) and placeholder content;
+  accessible. (SC6, SC8) *(Scope expanded at planning by operator: also adds the **address-bar chips**
+  (internal-page identity chip + web-page site-info chip), a **site-info popup** (summarizing existing
+  per-tab data, linking into Shields), and an **internal-tab navigation lock** — flight-local additions
+  that partially discharge the Flight-4 internal-page identity-chip / web-navigability Known Issue (UX
+  half; the security bridge origin-check stays Flight 6). Requires extending the internal protocol
+  handler to serve CSS/JS subresources, and hoisting the shared `menuController` keyboard contract
+  before the popup becomes menu #3. May split into Flight 5 (shell) + 5b (chips/popup/lock) if it
+  balloons.)*
 - [ ] **Flight 6: Wire existing controls** — surface the Shields toggles into the settings page
   via the internal-page bridge (reusing `shields-get`/`shields-set`); promote `HOMEPAGE` to a real
   persisted, editable home-page setting (minimal store + get/set IPC, read at tab creation). Both
