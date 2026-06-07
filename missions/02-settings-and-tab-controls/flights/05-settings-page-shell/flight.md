@@ -1,6 +1,6 @@
 # Flight: Settings Page Shell + Address-Bar Chips
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
