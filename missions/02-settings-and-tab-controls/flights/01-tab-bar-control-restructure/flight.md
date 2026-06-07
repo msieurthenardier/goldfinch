@@ -1,20 +1,27 @@
 # Flight: Tab-Bar Control Restructure
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC1** — New Tab and container/jar picker presented as a single unified
-  pill-shaped golden control, left-aligned/adjacent to the open tabs.
-- [ ] **SC2** — Opening a plain new tab and a new tab in a specific container both still
+- [x] **SC1** — New Tab and container/jar picker presented as a single unified
+  pill-shaped golden control, adjacent to the open tabs. *(Verified: pill hugs the right of the
+  tabs — `unified-tab-controls` Step 2. Note: the operator clarified at HAT that "adjacent" means
+  immediately right of the tabs, not leading the strip — see flight-log Deviations.)*
+- [x] **SC2** — Opening a plain new tab and a new tab in a specific container both still
   operable from the unified control, by mouse and keyboard, preserving prior behavior
-  (*behavior-test-backed*).
-- [ ] **SC8** — New tab-bar controls (and the new window chrome) are keyboard-operable and
+  (*behavior-test-backed*). *(Verified: `unified-tab-controls` 8/8.)*
+- [x] **SC8** — New tab-bar controls (and the new window chrome) are keyboard-operable and
   introduce no new WCAG A/AA violations under `npm run a11y` (*behavior-test / a11y gate*).
-- [ ] **SC9** — The application window is **frameless**: custom minimize/maximize-restore/close
+  *(Verified: keyboard ops in `unified-tab-controls` + `tab-keyboard-operability`; a11y — 0 new
+  violations from this flight's surfaces, the 2 reported are pre-existing, confirmed against the
+  pre-flight build.)*
+- [x] **SC9** — The application window is **frameless**: custom minimize/maximize-restore/close
   controls in the tab bar's reserved right-side zone (Windows/Linux), native traffic lights
   retained on macOS; window stays movable (drag region) and resizable. (*Maximize state
   behavior-test-backed via an observable read path; drag + close/quit manually verified.*)
+  *(Verified: maximize read path in `responsive-tab-strip` Step 7 — works on WSLg; drag + minimize
+  + close-quits + resize spike manually confirmed; macOS traffic-light inset deferred to a mac.)*
 
 > **Flight-local scope (no mission SC — by decision).** Two behaviors the operator added during
 > planning are first-class flight objectives but are **not** traced to a mission success criterion
@@ -272,9 +279,9 @@ the chrome preload bridge (window-control IPC + maximize-state events), and the 
 - [x] `custom-window-controls` - Min/maximize-restore/close buttons (win/linux) + IPC bridge +
   maximize-state sync (the behavior-test read path); mac native traffic lights. (depends on
   `frameless-window-shell`; lands with it) (SC8)
-- [ ] `verify-integration` - Run both new behavior tests; re-run `tab-keyboard-operability`
+- [x] `verify-integration` - Run both new behavior tests; re-run `tab-keyboard-operability`
   regression; `npm run a11y`; manual drag/close/minimize checks.
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT session: tune the pill, frameless chrome, and
+- [x] `hat-and-alignment` *(optional)* - Guided HAT session: tune the pill, frameless chrome, and
   tab shrink/close feel live with the operator until satisfied.
 
 ---

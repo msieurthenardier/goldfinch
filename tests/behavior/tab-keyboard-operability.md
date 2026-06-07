@@ -3,7 +3,7 @@
 **Slug**: `tab-keyboard-operability`
 **Status**: active
 **Created**: 2026-06-06
-**Last Run**: 2026-06-06-16-38-47 (PASS — 7/7 checkpoints; see runs/2026-06-06-16-38-47.md)
+**Last Run**: 2026-06-07-01-14-27
 
 ## Intent
 

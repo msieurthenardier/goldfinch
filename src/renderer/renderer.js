@@ -123,6 +123,8 @@ function openContainerMenu() {
   add.addEventListener('click', addContainer);
   m.appendChild(add);
   m.classList.remove('hidden');
+  // Anchor the menu under the pill's ▾ trigger; the pill now moves with the tab count.
+  m.style.left = els.newTabMenu.getBoundingClientRect().left + 'px';
   els.newTabMenu.setAttribute('aria-expanded', 'true');
   const first = /** @type {HTMLElement|null} */ (m.querySelector('.cm-item'));
   if (first) first.focus();
@@ -425,7 +427,8 @@ function setMaximized(isMax) {
   els.winMax.setAttribute('data-state', isMax ? 'maximized' : 'normal');
   els.winMax.setAttribute('aria-label', isMax ? 'Restore' : 'Maximize');
   els.winMax.title = isMax ? 'Restore' : 'Maximize';
-  els.winMax.textContent = isMax ? '❐' : '□';
+  // Icon is drawn in CSS keyed off data-state (normal=square, maximized=restore pair);
+  // no textContent so the CSS pseudo-element glyphs aren't clobbered.
 }
 window.goldfinch.windowIsMaximized().then(setMaximized);
 window.goldfinch.onWindowMaximizedChange(setMaximized);

@@ -1,14 +1,16 @@
 # Behavior Test: Unified tab-bar control — new tab & container, mouse + keyboard
 
 **Slug**: `unified-tab-controls`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-06
-**Last Run**: never
+**Last Run**: 2026-06-07-00-30-09
 
 ## Intent
 
-Verify that the unified golden pill (`( + | ▾ )`) leading the tab strip still performs both of
-its actions — opening a plain new tab, and opening a new tab in a chosen container/jar — by
+Verify that the unified golden pill (`( + | ▾ )`) — positioned **immediately to the right of the
+open tabs** (adjacent/hugging them, left-aligned in the strip; a draggable region and the window
+controls sit further right) — still performs both of its actions — opening a plain new tab, and
+opening a new tab in a chosen container/jar — by
 **mouse and by keyboard**, preserving the behavior that previously lived in the two trailing
 `#new-tab` / `#new-tab-menu` buttons, and that the pill carries a **visible keyboard focus
 indicator against its golden background**. This needs a behavior test rather than a unit test
@@ -52,7 +54,7 @@ synthetic events faithfully model "a user can actually open these tabs and see w
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Probe: `curl http://127.0.0.1:9222/json`. Identify the **renderer** target (Goldfinch window whose URL is the local `index.html`). Note the current tab count. | `:9222` responds and a renderer target is listed. Tab count is recorded. If `:9222` is dead or only guest targets exist, halt — preconditions not met. |
-| 2 | Inspect the leading control region of the tab strip (before the tabs). | A single **pill-shaped control with the golden (`--accent`) background** sits at the **leading** edge of the strip (before the tabs, not trailing them). It contains two operable controls: a **new-tab** button (accessible name ≈ "New tab") and a **container/menu** button (accessible name ≈ "New tab in a container", `aria-haspopup="menu"`, `aria-expanded="false"`). [a11y] |
+| 2 | Inspect the control region **immediately to the right of the open tabs** (between the tabs and the draggable region / window controls). | A single **pill-shaped control with the golden (`--accent`) background** sits **immediately to the right of the open tabs** (adjacent/hugging them, left-aligned in the strip — not at the far-right window-controls end). It contains two operable controls: a **new-tab** button (accessible name ≈ "New tab") and a **container/menu** button (accessible name ≈ "New tab in a container", `aria-haspopup="menu"`, `aria-expanded="false"`). [a11y] |
 | 3 | **Mouse — new tab:** click the `+` (new-tab) control. | Tab count increases by exactly one; the new tab becomes active. The new tab has **no** jar dot (default container). |
 | 4 | **Mouse — container tab:** click the `▾` (container) control; in the menu that opens, click a **named container** entry (not the default). | The `▾` control's `aria-expanded` was `true` while the menu was open; choosing a container opens a new tab whose strip button shows a **jar dot** (`.tab-jar`) matching that container's color. Tab count increased by one. |
 | 5 | **Keyboard — new tab:** move focus to the `+` control via `Tab`/`Shift+Tab` (trusted key events). Confirm focus, then activate with `Enter` (and/or `Space`). | While focused, the `+` control shows a **visible focus indicator that contrasts against the golden fill** — a focused-vs-unfocused screenshot shows a clear ring/outline delta (≥3:1 against the gold), NOT a gold-on-gold (invisible) ring and NOT `outline:none`. Activation opens one new tab. [a11y] |

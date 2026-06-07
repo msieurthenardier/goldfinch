@@ -57,10 +57,10 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
 
 ## Success Criteria
 
-- [ ] **SC1** — The New Tab and container/jar picker actions are presented as a single
+- [x] **SC1** — The New Tab and container/jar picker actions are presented as a single
   unified pill-shaped control with the brand accent (golden) background, positioned
   left-aligned/adjacent to the open tabs rather than trailing them.
-- [ ] **SC2** — Opening a plain new tab and opening a new tab in a specific container are both
+- [x] **SC2** — Opening a plain new tab and opening a new tab in a specific container are both
   still operable from the unified control, by mouse and by keyboard, preserving prior behavior
   (*behavior-test-backed*).
 - [ ] **SC3** — A kebab/overflow menu is present in the tab bar — distinct from the
@@ -80,10 +80,10 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
   operable from the settings surface, and changes persist and take effect consistently with the
   existing panels. Promoting the home page to a real setting includes the minimal persistence it
   needs (it is hardcoded today) (*behavior-test-backed*).
-- [ ] **SC8** — The new tab-bar controls, kebab menu, and settings surface are keyboard-operable
+- [x] **SC8** — The new tab-bar controls, kebab menu, and settings surface are keyboard-operable
   and introduce no new WCAG A/AA violations under the project's accessibility gate
   (*behavior-test-backed / a11y gate*).
-- [ ] **SC9** — The application window is **frameless**: Goldfinch removes the standard OS window
+- [x] **SC9** — The application window is **frameless**: Goldfinch removes the standard OS window
   frame and supplies its own chrome — custom **minimize / maximize-restore / close** controls in
   the tab bar's reserved right-side zone on Windows/Linux, with the **native traffic-light
   controls retained** (inset into that zone) on macOS. The window stays **movable** (a drag region
@@ -148,7 +148,19 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
 
 ## Known Issues
 
-_None yet — populated as flights surface blockers._
+- **Tab-overflow handling needs a dedicated "many-tabs" pass** (surfaced during Flight 1
+  verify-integration HAT; deferred by operator decision). Two issues to fix when that work is
+  taken up in earnest: (a) the `#tabs` horizontal `overflow-x:auto` scrollbar isn't reliably
+  grabbable in the frameless chrome — and is slated to be **replaced by left/right arrow scroll
+  controllers** flanking the tabs; (b) the **active tab can scroll off-screen** with many tabs
+  (no scroll-into-view on activate/close). Neither blocks Flight 1; both are tracked here as
+  cross-flight scope for a future tab-overflow flight. See
+  `flights/01-tab-bar-control-restructure/flight-log.md` (Anomalies) for detail.
+- **Pre-existing a11y: 2 `scrollable-region-focusable` (WCAG 2.1.1, serious)** in the privacy
+  panel and lightbox scroll regions (lacking keyboard access). Surfaced by Flight 1's
+  verify-integration a11y sweep but **confirmed pre-existing** (identical on the pre-flight build);
+  not introduced by Flight 1, which touched neither component. Tracked here for a future a11y /
+  panels touch-up — fix: give `#privacy-body` + the lightbox scroll container `tabindex="0"`.
 
 ## Flights
 

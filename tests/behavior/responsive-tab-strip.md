@@ -1,9 +1,9 @@
 # Behavior Test: Responsive tab sizing, deferred resize-on-close, and maximize state
 
 **Slug**: `responsive-tab-strip`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-06
-**Last Run**: never
+**Last Run**: 2026-06-07-00-44-37
 
 ## Intent
 

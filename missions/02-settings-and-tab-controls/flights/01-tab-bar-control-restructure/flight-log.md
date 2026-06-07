@@ -11,11 +11,17 @@ Code review and commit are deferred to a single pass after the last autonomous l
 
 **Build phase complete (2026-06-06).** All 5 build legs implemented, single flight-level review
 passed (`[HANDOFF:confirmed]` — no blocking issues), and committed on
-`flight/01-tab-bar-control-restructure`. Build legs promoted `landed → completed`. **Flight remains
-`in-flight`**: `verify-integration` (the two behavior tests + `tab-keyboard-operability` regression
-+ `npm run a11y` + manual drag/close/minimize + the WSLg frameless **resize spike** / divert
-decision) is deferred to a later live session per operator decision, as is the optional HAT leg.
-The behavior-test-backed mission SCs stay unchecked until that live verification.
+`flight/01-tab-bar-control-restructure`. Build legs promoted `landed → completed`.
+
+**Flight LANDED (2026-06-07).** verify-integration ran live: HAT alignment (leg 07) tuned the
+chrome with the operator; all three behavior tests passed 8/8 (`unified-tab-controls`,
+`responsive-tab-strip`, `tab-keyboard-operability` regression); `npm run a11y` clean for this
+flight's surfaces (the 2 reported `scrollable-region-focusable` are pre-existing, confirmed against
+the pre-flight build); manual drag/minimize/close-quits/maximize all verified; the WSLg
+frameless **resize spike passed → divert trigger did NOT fire** (legs 4–5 stayed in this flight).
+Mission SC1/SC2/SC8/SC9 checked off. Flight status `in-flight → landed`. The `/flight-debrief`
+(separate step) will transition it to `completed`. Two WSLg open questions resolved positive
+(maximize works; frameless resizes); macOS `trafficLightPosition` inset remains deferred to a mac.
 
 ---
 
@@ -264,13 +270,55 @@ _Runtime decisions not in the original plan will be recorded here._
 
 ## Deviations
 
-_Departures from the planned approach will be recorded here._
+- **2026-06-06 — verify-integration HAT: pill placement corrected (leg-1 framing pivot).** During
+  the live manual review the operator clarified the intended tab-strip layout. Leg 1 placed the pill
+  **leading** the strip (before `#tabs`), interpreting DD1/SC1's "left-aligned/adjacent to the open
+  tabs" as "first child." The operator's actual intent — and the better reading of SC1's "adjacent
+  to the open tabs, rather than trailing them" — is the pill **immediately after the tabs, hugging
+  the last tab** (left portion of the bar, not pushed to the far right). Corrected to:
+  `[tabs][pill — hugging tabs][flex drag spacer][window-controls flush right]`. Original leg-1
+  framing preserved in its artifact as the as-built record; this entry is the live spec going
+  forward (per `/agentic-workflow` mid-execution scope-change handling — not rewriting the leg/
+  flight body in place). Net effect on SC1: still satisfied (pill is adjacent to the tabs).
+- **2026-06-06 — window controls flush-right + drag slack relocated.** Leg 4/5 left a gap to the
+  **right** of the min/max/close controls (the `#tabstrip` right padding) and relied on `#tabs
+  { flex:1 }` for the move area. Operator wants the controls **flush to the top-right corner** with
+  the draggable slack **between the pill and the controls**. Implemented via a dedicated flex
+  spacer + zeroed right padding; `#tabs` no longer `flex:1` (tabs size to content so the pill can
+  hug them; responsive shrink/scroll-when-crowded preserved). Container menu re-anchored to the
+  pill's now-movable position dynamically. Touches legs 1, 2, 4 — applied as a follow-up commit
+  (no amend) during verify-integration HAT.
+- **Divert trigger did NOT fire.** Resize + drag confirmed working on WSLg by the operator; snap/
+  tile deferred to the Windows installer build. Legs 4–5 stay in this flight (no Flight 1b split).
 
 ---
 
 ## Anomalies
 
-_Unexpected issues encountered during execution will be recorded here._
+- **2026-06-06 — verify-integration HAT, deferred to future "many-tabs" work (operator decision).**
+  Two tab-overflow issues surfaced while stress-testing with many tabs. Both are **out of scope for
+  this flight** and explicitly deferred — the operator plans to tackle the many-tabs problem in
+  earnest in a later flight (replacing the horizontal scrollbar with left/right arrow scroll
+  controllers flanking the tabs):
+  1. **Overflow scrollbar isn't usable.** When tabs overflow and `#tabs` shows its `overflow-x:auto`
+     scrollbar, the thumb can't be reliably grabbed/clicked (thin native scrollbar in the frameless
+     chrome / drag-region interaction). Moot once the scrollbar is replaced by arrow controllers.
+  2. **Active tab can scroll off-screen.** With many tabs, activating/closing doesn't scroll the
+     active tab into view, so it can sit off the visible edge of `#tabs`. A future fix would
+     `scrollIntoView` the active tab (and is naturally addressed by the arrow-controller redesign).
+  These do not block this flight's acceptance (the tab-strip restructure, responsive sizing,
+  deferred-close, and frameless chrome all verify); recorded for the future many-tabs flight.
+- **2026-06-06 — pre-existing a11y: 2 `scrollable-region-focusable` (WCAG 2.1.1, serious), NOT
+  introduced by this flight.** The verify-integration `npm run a11y` sweep (WCAG A/AA tag set, with
+  the a11y-media fixture on `:8000`) reported 2 violations — `[privacy-panel]` and `[lightbox]`
+  scrollable regions lacking keyboard access. **Confirmed pre-existing** by running the identical
+  gate against the pre-flight build (`3fdd5a2`, mission-01's verified state) in a throwaway
+  worktree on `:9223` — it produces the SAME 2 violations. This flight's diff does not touch
+  privacy-panel, lightbox, or their scroll containers (verified). Mission-01's recorded "0" was
+  measured against a different fixture/environment. **SC8 holds for this flight** (zero new
+  violations; the pill/reserved-zone/window-controls surfaces contribute none). Suggested future
+  fix (a future a11y or panels touch-up, not this flight): give `#privacy-body` and the lightbox
+  scroll container `tabindex="0"` (or a focusable child) so the scroll region is keyboard-operable.
 
 ---
 
