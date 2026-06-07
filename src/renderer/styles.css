@@ -39,10 +39,11 @@ body {
 
 /* Frameless-window edge: a 1px muted-gold border so the window doesn't fade into
    the desktop. Applied to body (the full-viewport, box-sizing:border-box element)
-   so all four sides sit inside 100vh without overflow/scrollbars. Scoped to NOT
-   macOS — mac keeps its native rounded window + traffic lights, where a square
-   1px border would clash with the rounded corners (mac is deferred). */
-html:not(.platform-darwin) body {
+   so all four sides sit inside 100vh without overflow/scrollbars. Scoped to Linux
+   ONLY: macOS keeps its native rounded window + traffic lights (a square 1px border
+   would clash with the rounded corners), and Windows already draws its own thin
+   rounded window border, against which the gold border looks wrong (operator HAT). */
+html.platform-linux body {
   border: 1px solid var(--accent-muted);
 }
 
