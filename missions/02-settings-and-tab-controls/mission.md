@@ -180,20 +180,27 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   follow-on flight if frameless resize proves unstable on the dev platform.)*
 - [x] **Flight 2: Kebab menu** — add the ⋮ menu button to the **toolbar row (right of the Shield
   button)** with the APG menu-button pattern; two items, Settings (inert placeholder until the
-  internal-page mechanism lands in Flight 3+) and Exit; wire Exit to quit the app via a dedicated
+  internal-page mechanism lands in Flight 4+) and Exit; wire Exit to quit the app via a dedicated
   `app-quit` IPC (terminates on all platforms). (SC3, SC4, SC8) *(landed 2026-06-07; `kebab-menu`
   behavior test 10/10, Exit quit verified, a11y clean)*
-- [ ] **Flight 3: Internal page scheme (`goldfinch://`)** — register the privileged internal
+- [x] **Flight 3: Menu dismissal & shared APG helper** — fix the dismissal bug where open menus don't
+  close on page/`<webview>` clicks or the other menu's trigger; route both the kebab and container
+  (`▾`) menus through a shared APG menu controller (window-blur + in-chrome outside-dismiss +
+  mutual-exclusion + roving/arrow-nav), lifting the container menu to the kebab's a11y level and
+  removing Flight 2's hand-wired mutual-exclusion. (SC8; flight-local dismissal correctness)
+  *(landed 2026-06-07; `menu-dismissal` 9/9, container menu axe-clean, regressions intact, page-click +
+  app-switch dismissal HAT-confirmed)*
+- [ ] **Flight 4: Internal page scheme (`goldfinch://`)** — register the privileged internal
   scheme (`{ standard, secure }`) and serve bundled assets via `protocol.handle` on a dedicated
   internal session; open internal pages only through a trusted embedder path; keep `will-navigate`
   rejecting the scheme from web origins; add a dedicated internal-page preload bridge; extend the
   `tab-scheme-guard` behavior test to cover `goldfinch://` spoof/embed vectors. (SC5)
   *(May split during flight design into "scheme registration + serving" and "boundary hardening +
   spoof test" — risk is concentrated here.)*
-- [ ] **Flight 4: Settings page shell** — build the stub `goldfinch://settings` page with
+- [ ] **Flight 5: Settings page shell** — build the stub `goldfinch://settings` page with
   modern-browser chrome (persistent section nav + titled sections) and placeholder content;
   accessible. (SC6, SC8)
-- [ ] **Flight 5: Wire existing controls** — surface the Shields toggles into the settings page
+- [ ] **Flight 6: Wire existing controls** — surface the Shields toggles into the settings page
   via the internal-page bridge (reusing `shields-get`/`shields-set`); promote `HOMEPAGE` to a real
   persisted, editable home-page setting (minimal store + get/set IPC, read at tab creation). Both
   persist and take live effect, matching the existing panels. (SC7, SC8)

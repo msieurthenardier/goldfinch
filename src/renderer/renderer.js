@@ -84,6 +84,76 @@ let activeTabId = null;
 let activeFilter = 'all';
 let tabSeq = 0;
 
+/* ------------------------------------------------------- shared menu controller */
+// One in-file controller owns open/close + mutual-exclusion + outside-dismiss for
+// every dropdown menu (kebab overflow, container picker). Each menu registers an
+// entry whose `onOpen`/`onClose` are its RAW show/hide bodies — never the public
+// `closeX` wrapper (the wrapper delegates back into the controller, so reusing it
+// as `onClose` would recurse: close → onClose → closeX → close → …). The public
+// wrapper and the raw `onClose` are deliberately two distinct functions.
+
+/**
+ * @typedef {{
+ *   trigger: HTMLElement,
+ *   menu: HTMLElement,
+ *   onOpen?: (startIndex?: number) => void,
+ *   onClose?: () => void
+ * }} MenuEntry
+ */
+
+const menuController = (() => {
+  /** @type {MenuEntry[]} */
+  const entries = [];
+  /** @type {MenuEntry|null} */
+  let open = null; // currently-open entry or null
+  /** @param {MenuEntry} entry @param {number} [startIndex] */
+  function openEntry(entry, startIndex = 0) {
+    closeAll(); // mutual-exclusion: opening one menu dismisses any other
+    entry.onOpen?.(startIndex); // menu-specific: build items, show, position, focus, aria
+    open = entry;
+  }
+  /** @param {MenuEntry} entry */
+  function closeEntry(entry) {
+    entry.onClose?.(); // raw hide body — NOT the public wrapper (avoids recursion)
+    if (open === entry) open = null;
+  }
+  function closeAll() {
+    if (open) closeEntry(open);
+  }
+  /** @param {MenuEntry} entry @returns {MenuEntry} */
+  function register(entry) {
+    entries.push(entry);
+    return entry;
+  }
+  return {
+    register,
+    open: openEntry,
+    close: closeEntry,
+    closeAll,
+    get current() {
+      return open;
+    }
+  };
+})();
+
+// Target-aware outside-dismiss for all registered menus. pointerdown fires before
+// focus shifts, and the menu-dismissal CDP clicks dispatch pointerdown→click, so
+// this catches in-chrome clicks (address bar, neutral chrome). A click inside the
+// open menu or on its own trigger is ignored (item handlers / the trigger's own
+// toggle do their thing); a click on the OTHER trigger is handled by that trigger's
+// open() (which closeAll()s first). Outside-dismiss does NOT restore focus to the
+// trigger — only Escape/Tab do that.
+document.addEventListener('pointerdown', (e) => {
+  const cur = menuController.current;
+  if (!cur) return;
+  const t = /** @type {Node} */ (e.target);
+  if (cur.menu.contains(t) || cur.trigger.contains(t)) return;
+  menuController.closeAll();
+});
+// Page/webview clicks (a separate web-contents the chrome document can't see) and
+// app-switch both fire window blur → close any open menu (DD1, spike-confirmed).
+window.addEventListener('blur', () => menuController.closeAll());
+
 /* ----------------------------------------------------- jars / containers */
 
 const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
@@ -97,50 +167,103 @@ function makeBurner() {
   return { id: `burner-${n}`, name: 'Burner', color: '#ff8c42', partition: `burner:${n}`, burner: true };
 }
 
-function openContainerMenu() {
-  closeKebabMenu(); // mutual exclusion: opening one menu dismisses the other
-  const m = els.containerMenu;
-  m.innerHTML = '<div class="cm-title">Open new tab in…</div>';
-  for (const c of containers) {
-    const item = document.createElement('button');
-    item.className = 'cm-item';
-    item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
-    item.addEventListener('click', () => {
+/** @returns {HTMLElement[]} */
+function containerItems() {
+  return /** @type {HTMLElement[]} */ ([...els.containerMenu.querySelectorAll('[role="menuitem"]')]);
+}
+// Container picker registered with the controller (open/close/dismissal/mutual-
+// exclusion). `onOpen(startIndex)` builds + shows + anchors + applies roving/focus;
+// `onClose` is the raw hide body. Full APG roles/keyboard nav (mirrors the kebab).
+const containerEntry = menuController.register({
+  trigger: els.newTabMenu,
+  menu: els.containerMenu,
+  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
+  onOpen(startIndex = 0) {
+    const m = els.containerMenu;
+    // role="presentation" on the non-item header so role="menu" doesn't trip
+    // axe aria-required-children (only .cm-item buttons are role="menuitem").
+    m.innerHTML = '<div class="cm-title" role="presentation">Open new tab in…</div>';
+    for (const c of containers) {
+      const item = document.createElement('button');
+      item.className = 'cm-item';
+      item.setAttribute('role', 'menuitem');
+      item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
+      item.addEventListener('click', () => {
+        closeContainerMenu();
+        createTab(HOMEPAGE, c);
+      });
+      m.appendChild(item);
+    }
+    const burner = document.createElement('button');
+    burner.className = 'cm-item';
+    burner.setAttribute('role', 'menuitem');
+    burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
+    burner.addEventListener('click', () => {
       closeContainerMenu();
-      createTab(HOMEPAGE, c);
+      createTab(HOMEPAGE, makeBurner());
     });
-    m.appendChild(item);
-  }
-  const burner = document.createElement('button');
-  burner.className = 'cm-item';
-  burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
-  burner.addEventListener('click', () => {
-    closeContainerMenu();
-    createTab(HOMEPAGE, makeBurner());
-  });
-  m.appendChild(burner);
+    m.appendChild(burner);
 
-  const add = document.createElement('button');
-  add.className = 'cm-item add';
-  add.textContent = '+ New container…';
-  add.addEventListener('click', addContainer);
-  m.appendChild(add);
-  m.classList.remove('hidden');
-  // Anchor the menu under the pill's ▾ trigger; the pill now moves with the tab count.
-  m.style.left = els.newTabMenu.getBoundingClientRect().left + 'px';
-  els.newTabMenu.setAttribute('aria-expanded', 'true');
-  const first = /** @type {HTMLElement|null} */ (m.querySelector('.cm-item'));
-  if (first) first.focus();
-}
+    const add = document.createElement('button');
+    add.className = 'cm-item add';
+    add.setAttribute('role', 'menuitem');
+    add.textContent = '+ New container…';
+    add.addEventListener('click', addContainer);
+    m.appendChild(add);
+    m.classList.remove('hidden');
+    // Anchor the menu under the pill's ▾ trigger; the pill now moves with the tab count.
+    m.style.left = els.newTabMenu.getBoundingClientRect().left + 'px';
+    els.newTabMenu.setAttribute('aria-expanded', 'true');
+    // Apply roving tabindex + focus via the shared helper (items rebuilt every open).
+    const items = containerItems();
+    focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+  },
+  onClose() {
+    els.containerMenu.classList.add('hidden');
+    els.newTabMenu.setAttribute('aria-expanded', 'false');
+  }
+});
+// Thin public wrapper — delegates to the controller. DISTINCT from `onClose` above
+// (the raw hide body); never let these two collapse into one or `close` recurses.
 function closeContainerMenu() {
-  els.containerMenu.classList.add('hidden');
-  els.newTabMenu.setAttribute('aria-expanded', 'false');
+  menuController.close(containerEntry);
 }
-// Non-modal: Escape closes the container menu and restores focus to its trigger.
+// ▾ trigger keydown — mirrors the kebab trigger: open to first (Enter/Space/ArrowDown)
+// or last (ArrowUp). preventDefault suppresses the synthetic click so it opens exactly once.
+els.newTabMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    menuController.open(containerEntry, 0); // open → first item
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    menuController.open(containerEntry, -1); // open → last item (APG menu-button)
+  }
+});
+// Full APG menu keydown (mirrors the kebab): Escape/Tab close + restore focus to the
+// trigger; ArrowDown/Up wrap via the shared focusItem; Home/End jump to first/last.
 els.containerMenu.addEventListener('keydown', (e) => {
+  const items = containerItems();
+  const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
   if (e.key === 'Escape') {
+    e.preventDefault();
     closeContainerMenu();
     els.newTabMenu.focus();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    closeContainerMenu();
+    els.newTabMenu.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    focusItem(items, idx + 1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    focusItem(items, idx - 1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    focusItem(items, 0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    focusItem(items, items.length - 1);
   }
 });
 
@@ -155,9 +278,10 @@ async function addContainer() {
 
 /* ------------------------------------------------------- kebab (overflow) menu */
 // APG menu-button: role="menu" popup with two static role="menuitem" items
-// (Settings, Exit) + roving tabindex + arrow-nav. Reuses the container menu's
-// open/close/focus-restore discipline (e.stopPropagation on the trigger ahead of
-// the global outside-close), but layers on the full APG roles/keyboard nav.
+// (Settings, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
+// exclusion are owned by the shared menuController; this menu keeps its own per-entry
+// keydown listener on els.kebabMenu for the full APG roles/keyboard nav (kept local
+// so registering the container doesn't accidentally uplift its keyboard before leg 2).
 
 /** @returns {HTMLElement[]} */
 function kebabItems() {
@@ -175,18 +299,28 @@ function positionKebabMenu() {
   els.kebabMenu.style.right = window.innerWidth - r.right + 'px';
   els.kebabMenu.style.left = 'auto';
 }
-/** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
-function openKebabMenu(startIndex = 0) {
-  closeContainerMenu(); // mutual exclusion: opening one menu dismisses the other
-  els.kebabMenu.classList.remove('hidden');
-  positionKebabMenu();
-  els.kebab.setAttribute('aria-expanded', 'true');
-  const items = kebabItems();
-  focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
-}
+// Kebab registered with the controller. `onOpen(startIndex)` is the raw show body
+// (show, position, aria, focus an item); `onClose` is the raw hide body. The public
+// `closeKebabMenu` below is a DISTINCT thin wrapper (delegates to the controller).
+const kebabEntry = menuController.register({
+  trigger: els.kebab,
+  menu: els.kebabMenu,
+  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
+  onOpen(startIndex = 0) {
+    els.kebabMenu.classList.remove('hidden');
+    positionKebabMenu();
+    els.kebab.setAttribute('aria-expanded', 'true');
+    const items = kebabItems();
+    focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+  },
+  onClose() {
+    els.kebabMenu.classList.add('hidden');
+    els.kebab.setAttribute('aria-expanded', 'false');
+  }
+});
+// Thin public wrapper — delegates to the controller. DISTINCT from `onClose` above.
 function closeKebabMenu() {
-  els.kebabMenu.classList.add('hidden');
-  els.kebab.setAttribute('aria-expanded', 'false');
+  menuController.close(kebabEntry);
 }
 
 // Activation: native click on the focused <button> menuitem fires these.
@@ -199,17 +333,18 @@ els.kebabMenu.querySelector('#kebab-exit')?.addEventListener('click', () => {
   window.goldfinch.appQuit();
 });
 
-els.kebab.addEventListener('click', (e) => {
-  e.stopPropagation(); // don't let the global outside-close re-close it
-  els.kebabMenu.classList.contains('hidden') ? openKebabMenu() : closeKebabMenu();
+els.kebab.addEventListener('click', () => {
+  // Toggle off the controller's current (single source of truth), not the DOM class.
+  if (menuController.current === kebabEntry) menuController.close(kebabEntry);
+  else menuController.open(kebabEntry, 0);
 });
 els.kebab.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
     e.preventDefault();
-    openKebabMenu(0); // open → first item
+    menuController.open(kebabEntry, 0); // open → first item
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
-    openKebabMenu(-1); // open → last item (APG menu-button)
+    menuController.open(kebabEntry, -1); // open → last item (APG menu-button)
   }
 });
 els.kebabMenu.addEventListener('keydown', (e) => {
@@ -237,7 +372,6 @@ els.kebabMenu.addEventListener('keydown', (e) => {
     focusItem(items, items.length - 1);
   }
 });
-document.addEventListener('click', () => closeKebabMenu()); // outside-click closes
 
 /* ------------------------------------------------------------------ tabs */
 
@@ -502,11 +636,11 @@ els.reload.addEventListener('click', () => {
   else t.webview.reload();
 });
 els.newTab.addEventListener('click', () => createTab());
-els.newTabMenu.addEventListener('click', (e) => {
-  e.stopPropagation();
-  els.containerMenu.classList.contains('hidden') ? openContainerMenu() : closeContainerMenu();
+els.newTabMenu.addEventListener('click', () => {
+  // Toggle off the controller's current (single source of truth), not the DOM class.
+  if (menuController.current === containerEntry) menuController.close(containerEntry);
+  else menuController.open(containerEntry);
 });
-document.addEventListener('click', () => closeContainerMenu());
 
 // --- custom window controls (win+linux frameless; hidden on macOS) ---
 els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
