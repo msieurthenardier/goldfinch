@@ -5,6 +5,7 @@
   --fg: #e6e7ea;
   --fg-dim: #9a9ca6;
   --accent: #f5c518;
+  --accent-muted: #7a6a1f; /* dim/desaturated brand gold — frameless-window border (tune live) */
   --accent-fg: #1e1f25;
   --border: #3a3c46;
   --panel-w: 360px;
@@ -36,27 +37,172 @@ body {
   flex-direction: column;
 }
 
+/* Frameless-window edge: a 1px muted-gold border so the window doesn't fade into
+   the desktop. Applied to body (the full-viewport, box-sizing:border-box element)
+   so all four sides sit inside 100vh without overflow/scrollbars. Scoped to NOT
+   macOS — mac keeps its native rounded window + traffic lights, where a square
+   1px border would clash with the rounded corners (mac is deferred). */
+html:not(.platform-darwin) body {
+  border: 1px solid var(--accent-muted);
+}
+
 /* ---------- Tab strip ---------- */
 #tabstrip {
   display: flex;
   align-items: stretch;
   gap: 4px;
-  padding: 6px 6px 0 6px;
+  padding: 6px 0 0 6px; /* zero right padding so #window-controls reach the corner */
   background: var(--bg);
+  -webkit-app-region: drag; /* frameless: the strip background moves the window */
+}
+#newtab-pill,
+.tab {
+  -webkit-app-region: no-drag; /* keep the pill and tabs clickable */
+}
+#window-controls {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  /* No fixed width — the zone sizes to its three @46px controls (138px). The
+     #tabstrip-drag spacer (flex:1) before it keeps the controls flush to the
+     right edge regardless of button count/width. */
+}
+/* macOS: native traffic lights sit top-left; inset the strip so the pill clears them,
+   and drop the custom right zone (mac uses native controls). Defaults — recheck on a mac. */
+html.platform-darwin #tabstrip {
+  padding-left: 78px;
+}
+html.platform-darwin #window-controls {
+  display: none;
+}
+/* Custom min/max/close controls. Reuse .icon-btn for color/cursor/focus-ring;
+   only the overrides below are new. Three @46px buttons total 138px and size
+   the zone. The width rule is id-scoped (1,1,0) so it beats .icon-btn's
+   width:32px (0,1,0), which would otherwise win on source order. */
+#window-controls .win-ctrl {
+  width: 46px;
+}
+.win-ctrl {
+  -webkit-app-region: no-drag; /* clickable inside the #tabstrip drag region */
+  border-radius: 0;
+}
+.win-ctrl.win-close:hover {
+  background: #e81123; /* Windows-style destructive close hover */
+  color: #fff;
+}
+/* CSS-drawn window-control icons (pseudo-elements + borders) so the glyphs render
+   identically on Linux and Windows, independent of font glyph support. They use
+   currentColor, so they inherit the button color and turn white on the red close hover. */
+.win-ctrl {
+  position: relative;
+}
+#win-min::before,
+#win-max::before,
+#win-max::after,
+#win-close::before,
+#win-close::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+}
+/* minimize: horizontal line */
+#win-min::before {
+  width: 10px;
+  height: 0;
+  border-top: 1px solid currentColor;
+  transform: translate(-50%, -50%);
+}
+/* maximize (normal state): single hollow square */
+#win-max[data-state='normal']::before {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  transform: translate(-50%, -50%);
+}
+/* restore (maximized state): two overlapping squares; the front (::after) gets a bg
+   fill to occlude the back one. The normal single-square ::before is scoped to
+   data-state='normal', so it does not render here. */
+#win-max[data-state='maximized']::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  transform: translate(-30%, -70%);
+}
+#win-max[data-state='maximized']::after {
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  background: var(--bg);
+  transform: translate(-70%, -30%);
+}
+/* close: X (two crossed lines) */
+#win-close::before,
+#win-close::after {
+  width: 12px;
+  height: 0;
+  border-top: 1px solid currentColor;
+}
+#win-close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+#win-close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 #tabs {
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  flex: 1;
+  flex: 0 1 auto; /* size to tabs' content; can shrink below content so its own scroll engages */
+  min-width: 0;
   scrollbar-width: thin;
+}
+/* Flexible drag spacer: absorbs the slack between the pill and the window controls,
+   and inherits the #tabstrip drag region so it becomes the window-move area. */
+#tabstrip-drag {
+  flex: 1;
+  min-width: 56px; /* always-present grab area: #tabs (flex:0 1, min-width:0, overflow-x:auto) yields and scrolls so this drag handle is never collapsed by many tabs */
+}
+/* Leading golden pill grouping the two new-tab buttons (+ / ▾). */
+#newtab-pill {
+  display: flex;
+  align-items: center;
+  flex: none;
+  align-self: center;
+  background: var(--accent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+/* Pill buttons sit on the gold fill: dark glyphs, transparent bg so the pill shows. */
+#newtab-pill .icon-btn {
+  color: var(--accent-fg);
+  border-radius: 0;
+  height: 26px;
+}
+#newtab-pill .icon-btn:hover {
+  background: rgba(0, 0, 0, 0.12); /* darken on gold — the global white-overlay hover is faint here */
+}
+/* Internal divider between + and ▾ (DD1: visual grouping, two focus stops). */
+#newtab-pill #new-tab-menu {
+  border-left: 1px solid var(--accent-fg);
+}
+/* The global .icon-btn:focus-visible ring is var(--accent) (gold). On the gold pill that ring
+   is gold-on-gold and effectively invisible, so the pill buttons override it with the dark
+   accent-fg, which clears WCAG 1.4.11 3:1 non-text contrast against the gold fill. (Same
+   id/scoped-specificity carve-out idea as #address:focus-visible below.) */
+#newtab-pill .icon-btn:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 120px;
-  max-width: 220px;
+  flex: 0 1 240px; /* Chrome-matched preferred width, no grow (so the pill hugs the tabs), shrinks to the floor */
+  width: 240px; /* drive the flex base size: overflow:hidden makes the content-size the text width, so #tabs would auto-size narrow without an explicit width */
+  min-width: 88px; /* floor — favicon + jar dot + ellipsized title + close stay visible (tune at HAT) */
+  max-width: 240px; /* cap so a handful of tabs don't stretch absurdly wide */
+  overflow: hidden; /* hard guarantee: content never spills past the tab slot at the floor */
   padding: 7px 10px;
   background: var(--bg-2);
   border-radius: 8px 8px 0 0;
@@ -75,6 +221,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0; /* allow the title flex item to shrink below content width so ellipsis engages */
 }
 .tab .tab-fav {
   width: 14px;
@@ -834,7 +981,9 @@ a:focus-visible {
 #container-menu {
   position: absolute;
   top: 36px;
-  right: 8px;
+  /* left is set inline by openContainerMenu() — the pill now moves with the tab count,
+     so the menu is anchored under the ▾ trigger dynamically. This is the fallback. */
+  left: 6px;
   z-index: 60;
   background: var(--bg-3);
   border: 1px solid var(--border);
