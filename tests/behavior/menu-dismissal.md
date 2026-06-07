@@ -1,9 +1,9 @@
 # Behavior Test: Menu dismissal — both menus close on any outside interaction
 
 **Slug**: `menu-dismissal`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-07
-**Last Run**: never
+**Last Run**: 2026-06-07-11-58-01
 
 ## Intent
 
@@ -27,6 +27,10 @@ SC8-adjacent for the container menu's APG uplift.)
 - **At least one tab with a loaded `<webview>`** exists (the default homepage tab satisfies this) — the
   page-click / webview-focus dismissal path needs a real guest to focus.
 - Input delivered as **trusted events** (CDP `Input.dispatch*`), not synthetic `dispatchEvent`.
+- **Re-query trigger coordinates before each click — do NOT cache.** The `▾` container trigger (and the
+  pill) shift right as tabs are added (the pill hugs the tab strip), so a cached click coordinate from an
+  earlier step can miss the trigger (and may hit the adjacent `+` button, spawning a stray tab). Read the
+  trigger's `getBoundingClientRect()` immediately before clicking it.
 - **Active precondition probe** (Step 1): `:9222` answers, a renderer target and a webview guest are
   both present.
 

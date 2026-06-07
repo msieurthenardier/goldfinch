@@ -141,6 +141,24 @@ createTab-on-select, inline-left anchor, and leg-1 dismissal/mutual-exclusion (u
 
 ---
 
+### verify-integration (leg 3)
+**Status**: completed (Flight-Director-driven, live `:9222`)
+- **`menu-dismissal` behavior test PASS 9/9** (Witnessed; run log `2026-06-07-11-58-01`; spec → `active`):
+  page/webview-click dismissal (window-blur) both menus, cross-trigger, in-chrome click, Escape+focus-restore,
+  container full APG, container selection preserved, container trigger Space/ArrowUp open-once.
+- **Open container menu axe-clean** (targeted axe: role=menu, 6 menuitems, 0 violations — `.cm-title`
+  role=presentation satisfies aria-required-children). SC8 confirmed for the container.
+- **`npm run a11y`**: no new violations (identical to Flight-2 baseline; none menu-attributable).
+- **Regression smoke**: kebab (controller-driven) APG open/wrap/Escape+restore/Settings-inert ✓; tablist
+  role/roving/ArrowRight ✓; container-opens-jar-tab ✓ (menu-dismissal Step 8).
+- **Real page-click dismissal** (bonus): a real trusted CDP click into the webview region dismissed the
+  open kebab (focus→webview) — the real pointer path works, beyond the focus() witness.
+- **Offline gates**: typecheck 0, lint 0, test 147/147.
+- **Deferred manual**: app-switch dismissal (same window-blur handler as the proven webview-click; not
+  CDP-drivable) + macOS — confirm at HAT.
+
+---
+
 ## Decisions
 
 _Runtime decisions not in the original plan will be recorded here._
