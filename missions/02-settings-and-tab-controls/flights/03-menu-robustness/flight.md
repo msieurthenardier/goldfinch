@@ -1,6 +1,6 @@
 # Flight: Menu Dismissal & Shared APG Helper
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
