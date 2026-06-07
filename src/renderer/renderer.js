@@ -98,6 +98,7 @@ function makeBurner() {
 }
 
 function openContainerMenu() {
+  closeKebabMenu(); // mutual exclusion: opening one menu dismisses the other
   const m = els.containerMenu;
   m.innerHTML = '<div class="cm-title">Open new tab in…</div>';
   for (const c of containers) {
@@ -176,6 +177,7 @@ function positionKebabMenu() {
 }
 /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
 function openKebabMenu(startIndex = 0) {
+  closeContainerMenu(); // mutual exclusion: opening one menu dismisses the other
   els.kebabMenu.classList.remove('hidden');
   positionKebabMenu();
   els.kebab.setAttribute('aria-expanded', 'true');
@@ -217,6 +219,10 @@ els.kebabMenu.addEventListener('keydown', (e) => {
     e.preventDefault();
     closeKebabMenu();
     els.kebab.focus();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    closeKebabMenu();
+    els.kebab.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     focusItem(items, idx + 1);

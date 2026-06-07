@@ -1,6 +1,6 @@
 # Leg: verify-integration
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Kebab Menu](../flight.md)
 
 ## Objective

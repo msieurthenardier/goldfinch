@@ -62,13 +62,15 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
 - [x] **SC2** — Opening a plain new tab and opening a new tab in a specific container are both
   still operable from the unified control, by mouse and by keyboard, preserving prior behavior
   (*behavior-test-backed*).
-- [ ] **SC3** — A kebab/overflow menu is present in the **toolbar row, to the right of the
+- [x] **SC3** — A kebab/overflow menu is present in the **toolbar row, to the right of the
   Shield button**, and exposes exactly two actions to begin with: open **Settings** and
   **Exit** (*behavior-test-backed*). *(Placement amended at Flight 2 planning, by operator
   decision, from the original tab-bar placement; the "departure from address-bar-row menus"
   framing was dropped — see `flights/02-kebab-menu/`.)*
-- [ ] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting the
+- [x] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting the
   app tears down the test harness, so this is checked by hand, not by behavior test*).
+  *(Verified Flight 2: trusted Exit click → `app.quit()` → clean termination, Windows/Linux;
+  macOS deferred to a mac HAT.)*
 - [ ] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
   address, reloadable like any other tab, while web-page content **cannot navigate to, open,
   embed, or spoof** the internal scheme — page-originated attempts (`window.open('goldfinch://…')`,
@@ -176,10 +178,11 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   controls (native traffic lights on macOS) in a reserved, draggable right-side zone.
   (SC1, SC2, SC8, SC9) *(Heaviest flight; the frameless window-chrome legs may split into a
   follow-on flight if frameless resize proves unstable on the dev platform.)*
-- [ ] **Flight 2: Kebab menu** — add the ⋮ menu button to the **toolbar row (right of the Shield
+- [x] **Flight 2: Kebab menu** — add the ⋮ menu button to the **toolbar row (right of the Shield
   button)** with the APG menu-button pattern; two items, Settings (inert placeholder until the
   internal-page mechanism lands in Flight 3+) and Exit; wire Exit to quit the app via a dedicated
-  `app-quit` IPC (terminates on all platforms). (SC3, SC4, SC8)
+  `app-quit` IPC (terminates on all platforms). (SC3, SC4, SC8) *(landed 2026-06-07; `kebab-menu`
+  behavior test 10/10, Exit quit verified, a11y clean)*
 - [ ] **Flight 3: Internal page scheme (`goldfinch://`)** — register the privileged internal
   scheme (`{ standard, secure }`) and serve bundled assets via `protocol.handle` on a dedicated
   internal session; open internal pages only through a trusted embedder path; keep `will-navigate`

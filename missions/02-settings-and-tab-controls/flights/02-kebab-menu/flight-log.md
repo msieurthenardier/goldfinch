@@ -4,8 +4,13 @@
 
 ## Summary
 
-Flight is `in-flight` — design reviewed by the Architect (approve-with-changes; all issues
-incorporated), operator-approved. Executing via `/agentic-workflow` (Flight Director orchestration).
+Flight **landed** 2026-06-07. Kebab (⋮) overflow menu added to the toolbar row (right of Shield)
+with two items — Settings (inert placeholder) and Exit (all-platform `app-quit`). Executed via
+`/agentic-workflow`: 5 legs (3 autonomous build/docs + verify-integration + HAT), single flight
+review (Reviewer: confirmed), committed, then live-verified. **SC3, SC4, SC8 verified and checked.**
+`kebab-menu` behavior test PASS 10/10 (`active`); regressions intact; a11y 0 kebab-attributable;
+Exit-quits confirmed. HAT added menu mutual-exclusion + Tab-closes (re-verified live). Draft PR #23
+→ ready for review.
 
 ---
 
@@ -149,6 +154,29 @@ incorporated), operator-approved. Executing via `/agentic-workflow` (Flight Dire
 - **Scope**: single file, additive. No behavior test run here (live GUI app required, Flight-Director
   -driven). Leg stays `ready` until the live verification run completes.
 
+#### Live verification (against `npm run dev:debug` on `:9222`)
+- **`/behavior-test kebab-menu`** → **PASS 10/10** (Witnessed; single-pass Executor + independent
+  Validator; trusted CDP via `scripts/cdp-driver.mjs`, never chrome-devtools MCP). Run log:
+  `tests/behavior/kebab-menu/runs/2026-06-07-09-56-42.md`. Spec promoted `draft → active`. Verifies
+  **SC3** (kebab right of Shield, exactly Settings+Exit) and **SC8** (keyboard/ARIA/focus-ring;
+  APG roving nav wraps both directions, focus-into-menu on open, focus-restore on Escape,
+  outside-click close, inert Settings). The leg-4 `ArrowDown`/`ArrowUp` apparatus prep was exercised.
+- **`npm run a11y`** → no *new* violations from the kebab (**SC8** a11y). The audit reports 8 moderate
+  structural findings (`region`/`landmark-one-main`/`page-has-heading-one`) across base-chrome +
+  panels; node-target extraction confirmed the `region` rule flags only `#tabs`, `#brand`,
+  `#address-wrap` — **none is `#kebab`/`#kebab-menu`**; the other two are document-level. All
+  pre-existing/structural, kebab-attributable = 0. *(Note: current output no longer shows the mission
+  Known-Issues "2 scrollable-region-focusable" — a11y baseline drift; Flight-1's "pin the a11y
+  baseline" action item is still open. Not kebab-caused — flag for debrief.)*
+- **Regressions (targeted smoke via trusted CDP; full Witnessed re-runs offered)** — `unified-tab-controls`
+  core: container menu opens (6 items), Escape closes + restores focus to the ▾ trigger ✓.
+  `tab-keyboard-operability` core: `role=tablist` with one `aria-selected`/one roving `tabindex=0`;
+  adding a tab + `ArrowRight` moves focus and keeps exactly one roving `tabindex=0` ✓. Consistent with
+  the additive-only diff (no tab-strip/tablist/container-menu code touched). *(Smoke note: the a11y
+  audit dirties app state — panels/fixture — so a hard-reload was needed before the regression smoke.)*
+- **Remaining**: manual **Exit-quits** check (SC4) — destructive (kills the app); run last, after the
+  optional HAT.
+
 ---
 
 ### Flight review + commit (deferred-commit model)
@@ -169,6 +197,20 @@ incorporated), operator-approved. Executing via `/agentic-workflow` (Flight Dire
 - **Remaining work needs the live GUI app**: leg 4 (behavior test `kebab-menu` + `tab-keyboard-operability`
   + `unified-tab-controls` regressions + `npm run a11y` + manual Exit-quits) and leg 5 (HAT) require
   `npm run dev:debug` on `:9222` — operator-coordinated.
+
+### hat-and-alignment (leg 5)
+- Two operator-requested (HAT) behavior tweaks to the kebab menu, both in `src/renderer/renderer.js`,
+  addressing the two non-blocking review notes from the flight review:
+  - **Mutual exclusion** — `openKebabMenu()` now calls `closeContainerMenu()` at its start, and
+    `openContainerMenu()` now calls `closeKebabMenu()` at its start. Opening either menu dismisses the
+    other. Both close functions are idempotent (just add `hidden` + set `aria-expanded="false"`), so the
+    calls are safe when the other menu is already closed.
+  - **Tab closes the kebab menu** — added a `Tab` branch to the `els.kebabMenu` keydown handler:
+    `e.preventDefault()` → `closeKebabMenu()` → `els.kebab.focus()`. Covers both Tab and Shift+Tab
+    (shift is a modifier under `e.key === 'Tab'`). Container menu keyboard behavior left unchanged
+    (out of scope); APG arrow nav / Escape / outside-click / Settings/Exit handlers untouched.
+- Gates (app left live on `:9222`, not relaunched): `npm run typecheck` 0 errors, `npm run lint`
+  0 problems, `npm test` 147/147 pass.
 
 ---
 

@@ -1,17 +1,21 @@
 # Flight: Kebab Menu
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC3** — A kebab/overflow menu is present in the **toolbar row, to the right of the Shield
+- [x] **SC3** — A kebab/overflow menu is present in the **toolbar row, to the right of the Shield
   button**, exposing exactly two actions to begin with: open **Settings** and **Exit**
   (*behavior-test-backed* — `kebab-menu`). *(Placement amended at this flight's planning from the
-  mission's original tab-bar placement; mission Outcome + SC3 updated accordingly.)*
-- [ ] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting tears
-  down the test harness, so this is checked by hand, not by behavior test*).
-- [ ] **SC8** — The kebab button and its menu are keyboard-operable and introduce no new WCAG A/AA
-  violations under `npm run a11y` (*behavior-test-backed / a11y gate*).
+  mission's original tab-bar placement; mission Outcome + SC3 updated accordingly.)* **Verified:
+  `kebab-menu` behavior test PASS 10/10 (run 2026-06-07-09-56-42).**
+- [x] **SC4** — Choosing **Exit** terminates the application (*manually verified — quitting tears
+  down the test harness, so this is checked by hand, not by behavior test*). **Verified: trusted Exit
+  click → app.quit() → clean termination (dev process exit 0, `:9222` dead, no procs left;
+  Windows/Linux — macOS deferred to a mac HAT).**
+- [x] **SC8** — The kebab button and its menu are keyboard-operable and introduce no new WCAG A/AA
+  violations under `npm run a11y` (*behavior-test-backed / a11y gate*). **Verified: `kebab-menu`
+  behavior test (APG keyboard) PASS; `npm run a11y` shows 0 kebab-attributable violations.**
 
 > **Out of scope for this flight (deferred to later flights).** The **Settings** item is present,
 > focusable, and selectable (which is what SC3 requires) but its click is an **inert placeholder**:
@@ -276,26 +280,24 @@ IPC across the three files that already carry the window-control IPC (`main.js`,
   mirror; wire the Exit item to `window.goldfinch.appQuit()`. (SC4) *(code done + reviewed; SC4 verified manually in leg 4)*
 - [x] `docs-shortcuts` - Document the kebab + bring the README keyboard-shortcuts table current
   (kebab keys + carry-forward tab-nav + window-control keys from Flight 1).
-- [ ] `verify-integration` - Apparatus prep DONE (`ArrowDown`/`ArrowUp` added to `cdp-driver.mjs` KEYS);
-  remaining: run the `kebab-menu` behavior test; regression `tab-keyboard-operability` + `unified-tab-controls`;
-  run the `kebab-menu` behavior test; regression `tab-keyboard-operability` + `unified-tab-controls`;
-  `npm run a11y` (no *new* violations vs the 2 known pre-existing); manual Exit-quits; offline gates.
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT session: tune the kebab glyph, menu feel, and
-  keyboard flow live with the operator until satisfied.
+- [x] `verify-integration` - Apparatus prep done; `kebab-menu` behavior test PASS 10/10; regressions
+  (`tab-keyboard-operability` + `unified-tab-controls` cores) intact; `npm run a11y` 0 kebab-attributable;
+  manual Exit-quits confirmed; offline gates green.
+- [x] `hat-and-alignment` *(optional)* - HAT: feel approved; fixed the 2 reviewer notes (menu mutual
+  exclusion + Tab-closes-menu) and re-verified live.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing — `kebab-menu` behavior test + `tab-keyboard-operability` +
-  `unified-tab-controls` regressions + `npm run a11y` clean + offline gates
-  (`npm test`/`typecheck`/`lint`). **New `els.*` entries + the `appQuit` bridge/d.ts mirror need the
-  matching JSDoc casts or `npm run typecheck` fails** (Flight-1 recurring lesson).
-- [ ] Documentation updated — README keyboard-shortcuts table current (kebab + tab-nav + window
-  controls); CLAUDE.md updated only if the kebab's architecture/discoverability warrants a note.
+- [x] All legs completed
+- [ ] Code merged *(draft PR #23 → marked ready for review; merge is the operator's call)*
+- [x] Tests passing — `kebab-menu` behavior test 10/10 + `tab-keyboard-operability` +
+  `unified-tab-controls` regression cores intact + `npm run a11y` (0 kebab-attributable) + offline gates
+  (`npm test` 147/147 / typecheck 0 / lint 0).
+- [x] Documentation updated — README keyboard-shortcuts table current (kebab + tab-nav + window
+  controls); CLAUDE.md renderer/IPC note added.
 
 ### Verification
 

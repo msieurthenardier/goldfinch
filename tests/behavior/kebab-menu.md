@@ -1,9 +1,9 @@
 # Behavior Test: Kebab (⋮) overflow menu — presence, two items, APG keyboard operation
 
 **Slug**: `kebab-menu`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-06
-**Last Run**: never
+**Last Run**: 2026-06-07-09-56-42
 
 ## Intent
 
