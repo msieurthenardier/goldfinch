@@ -233,15 +233,15 @@ the foundations; the two wirings are independent of each other and could paralle
 
 ### Legs
 > **Note:** Tentative; legs are created one at a time as the flight progresses.
-- [ ] `settings-store` - Durable/secure schema-versioned store (`settings-store.js`); atomic; validated;
+- [x] `settings-store` - Durable/secure schema-versioned store (`settings-store.js`); atomic; validated;
   repair; pluggable serialization; unit-tested. (foundation; DD1/DD6)
-- [ ] `internal-bridge-secured` - Origin-checked internal channels (main-side sender verification) + preload
+- [x] `internal-bridge-secured` - Origin-checked internal channels (main-side sender verification) + preload
   guard; first read consumer. (HARD PREREQUISITE; DD2)
-- [ ] `home-page-setting` - Promote `HOMEPAGE` to the live store value + broadcast; editable, validated
+- [x] `home-page-setting` - Promote `HOMEPAGE` to the live store value + broadcast; editable, validated
   control in settings. (SC7; DD4)
-- [ ] `shields-in-settings` - Global Shields toggles in settings via the bridge; `shields-changed` reaches
+- [x] `shields-in-settings` - Global Shields toggles in settings via the bridge; `shields-changed` reaches
   the guest too (two-way sync). (SC7, SC8; DD3)
-- [ ] `docs` - Settings store + bridge security model + home-page setting + Shields-in-settings in
+- [x] `docs` - Settings store + bridge security model + home-page setting + Shields-in-settings in
   README/CLAUDE.md.
 - [ ] `verify-integration` - `settings-controls` + security assertion; a11y (chrome + guest); tab-scheme-guard
   / settings-shell / menu+tab regressions; offline gates. (SC7, SC8)

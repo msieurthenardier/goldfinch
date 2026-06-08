@@ -5,8 +5,16 @@ export default [
   { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs'] }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
-    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'src/preload/internal-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
+    rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
+  },
+  {
+    // internal-preload.js runs in a sandbox:true + contextIsolation:true preload context:
+    // it can require('electron') (contextBridge/ipcRenderer) AND has browser globals
+    // (location, window, etc.) available at preload inject time.
+    files: ['src/preload/internal-preload.js'],
+    languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
   {

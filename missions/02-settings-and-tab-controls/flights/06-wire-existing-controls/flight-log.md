@@ -65,7 +65,12 @@ pin-system / site-info surface Flight 7 owns.
 
 ## Decisions
 
-_(none yet)_
+### Per-leg design review skipped for the docs leg (leg 5)
+**Context**: Legs 1–4 each got a Developer design-review pass. Leg 5 is **docs-only** (`README.md` /
+`CLAUDE.md`) — no acceptance criteria to cross-reference against codebase state. Same call as Flight 5.
+**Decision**: folded leg 5's review into the **flight-level Reviewer pass** (reviews the whole uncommitted
+diff, docs included).
+**Impact**: one fewer round-trip; doc accuracy still adversarially checked before commit.
 
 ---
 
@@ -84,3 +89,168 @@ _(none yet)_
 ## Session Notes
 
 _(none yet)_
+
+---
+
+## Leg Progress
+
+### 2026-06-07 — `settings-store` — LANDED
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/settings-store.js` (new) — Electron-free, durable, schema-versioned settings store.
+  Exports `{ DEFAULTS, load, get, getAll, set }`. Module-scoped `dir`/`config`/`codec`; `load(userDataPath,
+  opts?)` injects the path and pluggable `{ serialize, deserialize }` codec (defaulting to
+  `JSON.stringify`/`JSON.parse`). `save()` writes atomically via temp file + `renameSync` (beside the target
+  in `dir`, not `os.tmpdir()`, ensuring same-filesystem rename). `set(key, value)` validates before mutating,
+  throws `Error` for set-before-load and `TypeError` for unknown keys / invalid values. `getAll()` returns a
+  shallow copy. Per-key `VALIDATORS` map: `homePage` requires `isSafeTabUrl(v)` AND not `about:blank`.
+  Save errors propagate; load errors fall back to defaults (never throws).
+- `src/main/main.js` — added `const settings = require('./settings-store'); settings.load(app.getPath('userData'));`
+  in `whenReady`, next to `shields.load()`. No behavior change; no reader yet (legs 2+).
+- `test/unit/settings-store.test.js` (new) — 14 tests using `node:test` + `node:assert/strict`, real temp
+  dirs (`fs.mkdtempSync`), no Electron stub. Covers: defaults on first load; set→persist→reload round-trip;
+  atomic write produces valid JSON; corrupt-file repair → defaults (no throw); bad-field repair keeps valid
+  siblings; `set` throws on `javascript:` / `goldfinch://` / `about:blank` and accepts `https://` (prior
+  value kept on reject); unknown-key throws; set-before-load throws a clear error; `getAll()` returns a copy;
+  version field present; custom-serializer round-trip.
+
+**Offline gates:**
+- `npm run lint` — green
+- `npm run typecheck` — green
+- `npm test` — **196/196 pass** (182 existing + 14 new settings-store tests)
+
+### 2026-06-07 — `internal-bridge-secured` — LANDED
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/internal-ipc.js` (new) — Electron-free pure predicate + guarded-registration wrapper.
+  Exports `{ INTERNAL_ORIGIN, isTrustedInternalSender, registerInternalHandler }`. `INTERNAL_ORIGIN =
+  'goldfinch://settings'` (comment explains Chromium serialization vs. Node's misleading `'null'` output).
+  `isTrustedInternalSender(origin, isInternalSession)` returns true only on exact origin match AND
+  `isInternalSession === true` (strict, not truthy). `registerInternalHandler(ipcMain, channel, handler)`
+  extracts `event.senderFrame?.origin` (null-safe) and the `event.sender.session.__goldfinchInternal` flag
+  (full session path), throws 'forbidden: non-internal sender for …' on any mismatch.
+- `src/main/main.js` — hoisted `const settings = require('./settings-store')` and
+  `const { registerInternalHandler } = require('./internal-ipc')` to module scope (keeping `settings.load()`
+  call inside `whenReady`). Registered `internal-settings-get` and `internal-settings-set` channels via the
+  wrapper, backed by the settings store. Added a comment at the `shields-get`/`shields-set`/`shields-pause`
+  handlers noting they are intentionally NOT behind the internal-sender guard (trust domain = file:// chrome).
+- `src/preload/internal-preload.js` — replaced inert `{ version: 1 }` stub with the full origin-guarded
+  bridge. When `location.origin === 'goldfinch://settings'` exposes `window.goldfinchInternal`:
+  `{ version, settingsGet(key), settingsSet(key, value), onSettingsChanged(cb), onShieldsChanged(cb) }`.
+  When origin does NOT match, exposes NOTHING — not even `version`.
+- `eslint.config.mjs` — added a separate rule block for `internal-preload.js` with both `node` and `browser`
+  globals (the sandbox:true + contextIsolation:true preload has `location` available; this was the only change
+  needed to satisfy lint).
+- `test/unit/internal-ipc.test.js` (new) — 14 tests using `node:test` + `node:assert/strict`, Electron-free.
+  Predicate matrix: 8 cases covering the exact-match pass, false/truthy session fail, wrong/trailing-slash
+  origin fail, null/undefined origin fail. Wrapper tests: 6 cases — trusted event forwards (returns value,
+  forwards args); wrong origin rejects; null senderFrame rejects; missing session flag rejects; marker-on-sender
+  (not session) rejects (catches `event.sender.__goldfinchInternal` extraction bug).
+
+**Offline gates:**
+- `npm run lint` — green
+- `npm run typecheck` — green
+- `npm test` — **210/210 pass** (196 + 14 new internal-ipc tests)
+
+**Note:** Live round-trip (settingsGet/settingsSet from goldfinch://settings guest) and non-internal sender
+rejection are deferred to leg 6 (need the running app). This leg proves the predicate offline + the wiring
+by code-correctness.
+
+### 2026-06-07 — `home-page-setting` — LANDED
+
+**Status**: landed
+
+**Changes made:**
+- `src/renderer/renderer.js` — Added `let homePageCache = HOMEPAGE` and `function currentHomePage()` cache
+  accessor next to the `HOMEPAGE` const. Changed `createTab` signature default from `url = HOMEPAGE` to
+  `url = currentHomePage()`. Changed the three explicit `createTab(HOMEPAGE, ...)` call sites (container
+  item click, burner click, `addContainer`) to `createTab(currentHomePage(), ...)`. Replaced the synchronous
+  boot `createTab(HOMEPAGE)` with a race-safe async call:
+  `window.goldfinch.settingsGet('homePage').then((url) => createTab(url || HOMEPAGE)).catch(() => createTab(HOMEPAGE))`.
+  Added `window.goldfinch.onSettingsChanged(...)` subscription next to `onShieldsChanged` to keep
+  `homePageCache` live on broadcast.
+- `src/preload/chrome-preload.js` — Added `settingsGet(key)` (invoke `settings-get`) and
+  `onSettingsChanged(cb)` (on `settings-changed`) to the `window.goldfinch` surface.
+- `src/main/main.js` — Added `ipcMain.handle('settings-get', ...)` chrome-trusted channel (comment:
+  same trust domain as `shields-get`, file:// chrome). Added `broadcastToChromeAndInternal(channel,
+  payload)` helper with JSDoc describing its two-audience contract (chrome renderer sent separately
+  because the `__goldfinchInternal` filter excludes it; leg 4 reuses for `shields-changed`). Modified the
+  existing leg-2 `registerInternalHandler(ipcMain, 'internal-settings-set', ...)` lambda to broadcast
+  `settings-changed` via the helper after a successful `settings.set()`.
+- `src/renderer/pages/settings.html` — Replaced `#startup` placeholder `<p>` with a `<label>` +
+  `<input id="home-page-input" type="url">` + `<button id="home-page-save">` + empty
+  `<p id="home-page-status" role="status">`. No inline handlers (CSP-compliant).
+- `src/renderer/pages/settings.js` — Added a home-page controller IIFE after the scroll-spy IIFE.
+  Guards `if (!window.goldfinchInternal) return`. On load: populates the input via `settingsGet('homePage')`.
+  Save button: calls `settingsSet('homePage', input.value)`, shows "Saved" on success or
+  "Not saved: <message>" on rejection. Subscribes `onSettingsChanged` to reflect external changes.
+- `src/renderer/renderer-globals.d.ts` — Added `settingsGet`/`onSettingsChanged` to `GoldfinchBridge`;
+  added `GoldfinchInternalBridge` interface; added `goldfinchInternal?: GoldfinchInternalBridge` to
+  `Window` interface.
+- `src/main/session-augments.d.ts` — Added `__goldfinchInternal?: boolean` to the `Session` augment
+  (used `@type {any}` cast at the one access site that tsc could not resolve via the augment module).
+
+**Offline gates:**
+- `npm run lint` — green
+- `npm run typecheck` — green
+- `npm test` — **210/210 pass** (no new unit tests; store + predicate already covered; renderer/settings/IPC
+  behavior verified live in leg 6)
+
+**Note:** Live take-effect (new tab opens to persisted home), persist-to-settings.json, validation error
+display, and chrome+guest sync are all deferred to leg 6 (need the running app).
+
+### 2026-06-07 — `shields-in-settings` — LANDED
+
+**Status**: landed
+
+**Changes made:**
+- `src/main/main.js` — Replaced chrome-only `mainWindow.webContents.send('shields-changed', cfg)` in the
+  existing `shields-set` and `shields-pause` handlers with `broadcastToChromeAndInternal('shields-changed', cfg)`
+  so panel toggles now reach both the chrome renderer and any internal guest (the settings page). Added
+  `internal-shields-get` and `internal-shields-set` channels via `registerInternalHandler` (origin-locked),
+  backed by `shields.get()` / `shields.set()`; the set handler broadcasts `shields-changed` after every write.
+- `src/preload/internal-preload.js` — Added `shieldsGet: () => ipcRenderer.invoke('internal-shields-get')` and
+  `shieldsSet: (patch) => ipcRenderer.invoke('internal-shields-set', patch)` to the `window.goldfinchInternal`
+  bridge (inside the `location.origin === 'goldfinch://settings'` guard, next to the settings methods).
+  `onShieldsChanged` (leg 2) unchanged.
+- `src/renderer/pages/settings.html` — Replaced the `#privacy` placeholder `<p>` with a `<fieldset>` grouping
+  five labelled checkboxes: `shield-enabled` (Shields), `shield-block` (Block trackers), `shield-strip` (Strip
+  tracking params), `shield-isolate` (Isolate 3rd-party cookies), `shield-farble` (Farble fingerprint). Added
+  a note `<p>Per-site exceptions are managed from the Shields panel.</p>`. No inline handlers (CSP).
+- `src/renderer/pages/settings.js` — Added a shields controller IIFE (after the home-page controller). Guards
+  on `!window.goldfinchInternal`. `KEYS = ['enabled','block','strip','isolate','farble']`; `applyConfig(cfg)`
+  assigns `.checked` directly (never `.click()` / `.dispatchEvent`, which would echo-loop). On load:
+  `shieldsGet().then(applyConfig)`. Each checkbox `change` → `shieldsSet({ [key]: el.checked })`.
+  `onShieldsChanged(applyConfig)` re-syncs on panel→settings direction.
+- `src/renderer/renderer-globals.d.ts` — Added `shieldsGet()` and `shieldsSet(patch)` to the
+  `GoldfinchInternalBridge` interface (required to satisfy typecheck).
+
+**Offline gates:**
+- `npm run lint` — green
+- `npm run typecheck` — green
+- `npm test` — **210/210 pass** (no new unit tests; shields store is already covered; wiring verified live in leg 6)
+
+**Note:** Live two-way sync (settings ↔ panel), persistence to `shields.json`, and guest a11y sweep are
+deferred to leg 6 (need the running app).
+
+### 2026-06-07 — `docs` — LANDED
+
+**Status**: landed
+
+**Changes made:**
+- `CLAUDE.md` — Four areas updated:
+  - **Architecture section**: updated the `src/main/` bullet to reference `settings-store.js` and `internal-ipc.js`; updated the preload bullet to describe the full `window.goldfinchInternal` bridge surface and its `location.origin` defense-in-depth guard.
+  - **New "Settings store" pattern section**: documents `settings-store.js` — Electron-free injected path, atomic temp+rename persistence, schema-versioned `DEFAULTS`, per-key `VALIDATORS` (including `homePage` excluding `about:blank`), pluggable `{ serialize, deserialize }` seam (DD6 / future safeStorage), safe-default repair, `userData/settings.json` location, and that it is the canonical home for app preferences. Also documents `homePageCache`/`currentHomePage()`, the `settings-get` chrome read channel (intentionally not behind `registerInternalHandler`), and the `broadcastToChromeAndInternal` two-audience fan-out (chrome + internal guests) for `settings-changed` and `shields-changed`.
+  - **New "Internal-bridge security model" pattern section**: documents `registerInternalHandler` as the authoritative boundary (`event.senderFrame.origin === 'goldfinch://settings'` + `__goldfinchInternal === true` strict check; null senderFrame → reject); the Node-vs-Blink `INTERNAL_ORIGIN` gotcha; the preload `location.origin` guard as defense-in-depth only; the two separate trust domains (`internal-*` channels origin-locked vs chrome `shields-*`/`settings-get` on the `file://` trust domain); and that the Flight-4/5 "internal-bridge Known Issue" is now **closed**.
+  - **Internal-tab navigation lock note**: updated to reflect that the origin-check **landed** in Flight 6 — the nav lock is the UX half, `registerInternalHandler` is the security half; both now present. Removed the "Flight-6 TODO" framing.
+- `README.md` — Three areas updated:
+  - **Overflow menu feature bullet**: replaced "controls are placeholder stubs until a later release" with a description of the working Privacy & Shields toggles and editable Home page, noting both are persisted and synced with the panel.
+  - **Architecture table**: added rows for `src/main/settings-store.js` and `src/main/internal-ipc.js`; updated the `settings.html` row from "coming soon stub" to "wired and persisted."
+  - **Internal pages prose section**: extended to describe the working Privacy & Shields checkboxes (global toggles, two-way sync, per-site pause stays in panel) and the Home page field (persisted to `settings.json`, invalid URLs rejected); noted that privileged IPC is gated at the main process by `registerInternalHandler`.
+
+**Offline gates:**
+- `npm run lint` — green (docs only; no source changes)

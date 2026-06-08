@@ -11,6 +11,8 @@ const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
+const settings = require('./settings-store');
+const { registerInternalHandler } = require('./internal-ipc');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -492,16 +494,62 @@ function applyShields(ses) {
   ses.setPermissionCheckHandler((_wc, permission) => !SENSITIVE_PERMISSIONS.has(permission));
 }
 
-// Shields config IPC.
+// Settings read channel. INTENTIONALLY NOT behind the internal-sender guard — trust domain
+// is the file:// chrome (window.goldfinch surface in chrome-preload.js), same as shields-get.
+// Web webviews have no ipcRenderer.invoke, so only the chrome + internal guest can reach IPC.
+ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
+
+/**
+ * Broadcast a channel+payload to both audiences that need settings/shields change events:
+ *  1. The chrome renderer (`mainWindow.webContents`, a file:// BrowserWindow) — sent separately
+ *     because the __goldfinchInternal filter below intentionally excludes it (it is not an
+ *     internal-session webContents).
+ *  2. Every webContents whose session carries __goldfinchInternal === true (the settings guest
+ *     and any other future goldfinch:// internal pages).
+ * Leg 4 reuses this helper for the shields-changed broadcast to the settings guest.
+ * @param {string} channel
+ * @param {unknown} payload
+ */
+function broadcastToChromeAndInternal(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
+      wc.send(channel, payload);
+    }
+  }
+}
+
+// Shields config IPC. INTENTIONALLY NOT behind the internal-sender guard — their trust
+// domain is the file:// chrome (window.goldfinch surface in chrome-preload.js), not the
+// goldfinch:// internal session. Do not "close" these channels with registerInternalHandler.
 ipcMain.handle('shields-get', () => shields.get());
 ipcMain.handle('shields-set', (_e, patch) => {
   const cfg = shields.set(patch || {});
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  broadcastToChromeAndInternal('shields-changed', cfg);
   return cfg;
 });
 ipcMain.handle('shields-pause', (_e, { site, paused }) => {
   const cfg = shields.setPaused(site, paused);
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('shields-changed', cfg);
+  broadcastToChromeAndInternal('shields-changed', cfg);
+  return cfg;
+});
+
+// Internal-session-only settings IPC. These channels are guarded by registerInternalHandler:
+// the wrapper verifies that event.senderFrame.origin === 'goldfinch://settings' AND the
+// sender's session carries __goldfinchInternal === true before forwarding to the handler.
+// A non-trusted sender gets a rejected invoke (the throw propagates as a promise rejection).
+registerInternalHandler(ipcMain, 'internal-settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
+registerInternalHandler(ipcMain, 'internal-settings-set', (_e, key, value) => {
+  const cfg = settings.set(key, value);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return cfg;
+});
+registerInternalHandler(ipcMain, 'internal-shields-get', () => shields.get());
+registerInternalHandler(ipcMain, 'internal-shields-set', (_e, patch) => {
+  const cfg = shields.set(patch || {});
+  broadcastToChromeAndInternal('shields-changed', cfg);
   return cfg;
 });
 
@@ -634,6 +682,7 @@ app.on('session-created', (ses) => {
 
 app.whenReady().then(() => {
   shields.load();
+  settings.load(app.getPath('userData'));
   jars.load();
   // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);

@@ -3,6 +3,8 @@
 /* Goldfinch browser UI controller: tabs, navigation, and the media panel. */
 
 const HOMEPAGE = 'https://www.google.com';
+let homePageCache = HOMEPAGE;
+function currentHomePage() { return homePageCache || HOMEPAGE; }
 
 const els = {
   tabstrip: /** @type {HTMLElement} */ (document.getElementById('tabstrip')),
@@ -244,7 +246,7 @@ const containerEntry = menuController.register({
       item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
       item.addEventListener('click', () => {
         closeContainerMenu();
-        createTab(HOMEPAGE, c);
+        createTab(currentHomePage(), c);
       });
       m.appendChild(item);
     }
@@ -254,7 +256,7 @@ const containerEntry = menuController.register({
     burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
     burner.addEventListener('click', () => {
       closeContainerMenu();
-      createTab(HOMEPAGE, makeBurner());
+      createTab(currentHomePage(), makeBurner());
     });
     m.appendChild(burner);
 
@@ -288,7 +290,7 @@ async function addContainer() {
   const c = await window.goldfinch.jarsAdd({ name });
   containers.push(c);
   closeContainerMenu();
-  createTab(HOMEPAGE, c);
+  createTab(currentHomePage(), c);
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
@@ -450,7 +452,7 @@ els.siteInfoPopup.addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------------------------ tabs */
 
-function createTab(url = HOMEPAGE, container = null, { trusted = false } = {}) {
+function createTab(url = currentHomePage(), container = null, { trusted = false } = {}) {
   // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
   // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
   // so web content reaching here via onOpenTab can never select the internal branch.
@@ -1520,6 +1522,9 @@ window.goldfinch.onShieldsChanged((c) => {
   shieldsConfig = c;
   renderPrivacy();
 });
+window.goldfinch.onSettingsChanged((all) => {
+  if (all && all.homePage !== undefined) homePageCache = all.homePage || HOMEPAGE;
+});
 
 function currentSite() {
   const tab = activeTab();
@@ -1890,4 +1895,4 @@ function escapeHtml(s) {
 }
 
 /* ------------------------------------------------------------------- boot */
-createTab(HOMEPAGE);
+window.goldfinch.settingsGet('homePage').then((url) => createTab(url || HOMEPAGE)).catch(() => createTab(HOMEPAGE));

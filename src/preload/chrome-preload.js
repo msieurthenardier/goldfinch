@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   privacyClearCookies: (payload) => ipcRenderer.invoke('privacy-clear-cookies', payload),
   privacyClearStorage: (payload) => ipcRenderer.invoke('privacy-clear-storage', payload),
 
+  // --- settings (chrome-trusted; read + subscribe only — writing is the settings page's job) ---
+  settingsGet: (key) => ipcRenderer.invoke('settings-get', key),
+  onSettingsChanged: (cb) => ipcRenderer.on('settings-changed', (_e, all) => cb(all)),
+
   // --- shields ---
   shieldsGet: () => ipcRenderer.invoke('shields-get'),
   shieldsSet: (patch) => ipcRenderer.invoke('shields-set', patch),
