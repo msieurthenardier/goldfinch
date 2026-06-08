@@ -24,16 +24,30 @@ const { isSafeTabUrl } = require('../shared/url-safety');
 // Schema defaults
 // ---------------------------------------------------------------------------
 
-/** @type {{ version: number, homePage: string }} */
+/** @type {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
 const DEFAULTS = {
   version: 1,
-  homePage: 'https://www.google.com'
+  homePage: 'https://www.google.com',
+  toolbarPins: { media: true, shields: true }
 };
+
+// ---------------------------------------------------------------------------
+// Fresh defaults: returns a deep copy of DEFAULTS so config.toolbarPins is
+// never the DEFAULTS.toolbarPins reference (shared-reference hazard guard).
+// ---------------------------------------------------------------------------
+
+/** @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
+function freshDefaults() {
+  return { ...DEFAULTS, toolbarPins: { ...DEFAULTS.toolbarPins } };
+}
 
 // ---------------------------------------------------------------------------
 // Per-key validators
 // Keys without a validator are accepted as-is if the stored value's typeof
 // matches the default's typeof (type-compatibility check in merge-with-repair).
+// NOTE: typeof null === 'object' and typeof [] === 'object', so any object-typed
+// key MUST have an explicit validator — the typeof fallback would wrongly accept
+// null and arrays.
 // ---------------------------------------------------------------------------
 
 /** @type {Record<string, (v: unknown) => boolean>} */
@@ -43,7 +57,29 @@ const VALIDATORS = {
   homePage: (v) =>
     typeof v === 'string' &&
     isSafeTabUrl(v) &&
-    v.trim().toLowerCase() !== 'about:blank'
+    v.trim().toLowerCase() !== 'about:blank',
+
+  // toolbarPins: an object of booleans — lenient on which keys are present
+  // (forward-compat: a future 3rd pinnable item in DEFAULTS is filled by the
+  // normalizer even if the stored map lacks it). Rejects null, arrays, and
+  // non-boolean values.
+  toolbarPins: (v) =>
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'boolean')
+};
+
+// ---------------------------------------------------------------------------
+// Per-key normalizers (applied after validation in load + set)
+// ---------------------------------------------------------------------------
+
+/** @type {Record<string, (v: any) => any>} */
+const NORMALIZERS = {
+  // Deep-merge onto defaults: stored {media:false} → {media:false, shields:true}
+  // (forward-compat: a future 3rd item in DEFAULTS.toolbarPins defaults to
+  // pinned for existing files that lack it — no consumer needs to spread defaults).
+  toolbarPins: (v) => ({ ...DEFAULTS.toolbarPins, ...v })
 };
 
 // ---------------------------------------------------------------------------
@@ -53,8 +89,8 @@ const VALIDATORS = {
 /** @type {string | null} */
 let dir = null;
 
-/** @type {{ version: number, homePage: string }} */
-let config = { ...DEFAULTS };
+/** @type {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
+let config = freshDefaults();
 
 const defaultSerialize = (/** @type {object} */ c) => JSON.stringify(c, null, 2);
 const defaultDeserialize = (/** @type {string} */ s) => JSON.parse(s);
@@ -72,7 +108,7 @@ let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
  *
  * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
  * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
- * @returns {{ version: number, homePage: string }}
+ * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
  */
 function load(userDataPath, opts = {}) {
   dir = userDataPath;
@@ -90,31 +126,35 @@ function load(userDataPath, opts = {}) {
       // Merge-with-repair: start from a fresh copy of DEFAULTS, then for each
       // known key, take the stored value only if it passes validation (or, for
       // keys without a validator, only if the typeof matches the default).
-      const merged = /** @type {any} */ ({ ...DEFAULTS });
+      const merged = /** @type {any} */ (freshDefaults());
       for (const key of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
         if (Object.prototype.hasOwnProperty.call(stored, key)) {
           const val = stored[key];
           if (VALIDATORS[key]) {
             if (VALIDATORS[key](val)) {
-              merged[key] = val;
+              // Apply normalizer to the validated value (e.g. deep-merge toolbarPins
+              // onto defaults for forward-compat — a future 3rd item fills in here).
+              merged[key] = NORMALIZERS[key] ? NORMALIZERS[key](val) : val;
             }
             // else: keep the default (repair)
           } else {
-            // No validator: accept if type-compatible with the default
+            // No validator: accept if type-compatible with the default.
+            // NOTE: typeof null === 'object' — object-typed keys must have an explicit
+            // validator (see VALIDATORS above) to avoid accepting null/arrays here.
             if (typeof val === typeof DEFAULTS[key]) {
-              merged[key] = val;
+              merged[key] = NORMALIZERS[key] ? NORMALIZERS[key](val) : val;
             }
           }
         }
       }
       config = merged;
     } else {
-      config = { ...DEFAULTS };
+      config = freshDefaults();
     }
   } catch {
     // Any error (corrupt JSON, read error, etc.) → fall back to defaults.
     // load() MUST NEVER THROW — the app must still boot.
-    config = { ...DEFAULTS };
+    config = freshDefaults();
   }
 
   return config;
@@ -150,10 +190,10 @@ function get(key) {
 }
 
 /**
- * @returns {{ version: number, homePage: string }}
+ * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
  */
 function getAll() {
-  return { ...config };
+  return { ...config, toolbarPins: { ...config.toolbarPins } };
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +215,7 @@ function getAll() {
  *
  * @param {string} key
  * @param {unknown} value
- * @returns {{ version: number, homePage: string }}
+ * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
  */
 function set(key, value) {
   if (dir === null) {
@@ -187,7 +227,9 @@ function set(key, value) {
   if (VALIDATORS[key] && !VALIDATORS[key](value)) {
     throw new TypeError('invalid value for "' + key + '"');
   }
-  config = { ...config, [key]: value };
+  // Normalize after validation (e.g. partial toolbarPins → full map).
+  const v = NORMALIZERS[key] ? NORMALIZERS[key](value) : value;
+  config = { ...config, [key]: v };
   save(); // propagates on error
   return config;
 }

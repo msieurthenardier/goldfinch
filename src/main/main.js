@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, webContents, dialog, shell, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -593,6 +593,23 @@ ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximi
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
 ipcMain.on('app-quit', () => app.quit());
+
+// Right-click a pinned toolbar icon → native "Unpin {item}" context menu.
+// Writes via `settings.set` + `broadcastToChromeAndInternal` (DD7). Chrome-trusted one-way
+// send (same trust domain as window-minimize/app-quit — no origin-check needed).
+ipcMain.on('toolbar-context-menu', (_e, item) => {
+  if (!mainWindow) return;
+  if (item !== 'media' && item !== 'shields') return;
+  const label = 'Unpin ' + (item === 'media' ? 'Media' : 'Shields');
+  const menu = Menu.buildFromTemplate([
+    { label, click: () => {
+      const pins = { ...settings.get('toolbarPins'), [item]: false };
+      settings.set('toolbarPins', pins);
+      broadcastToChromeAndInternal('settings-changed', settings.getAll());
+    } }
+  ]);
+  menu.popup({ window: mainWindow });
+});
 
 // --- cookie jars / container identities ---
 ipcMain.handle('jars-list', () => jars.list());

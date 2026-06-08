@@ -213,8 +213,8 @@ The internal-preload unsubscribe fix rides with the settings-controls leg (same 
   "Site settings →".
 
 ### Checkpoints
-- [ ] `toolbarPins` persists/validates/merges-forward; unit tests green.
-- [ ] Pinned → icon+badge in the toolbar; unpinned → removed; Ctrl+M / Ctrl+Shift+P still work when unpinned.
+- [x] `toolbarPins` persists/validates/merges-forward; unit tests green.
+- [x] Pinned → icon+badge in the toolbar; unpinned → removed; Ctrl+M / Ctrl+Shift+P still work when unpinned.
 - [ ] Right-click a pinned icon → native "Unpin {item}" menu → the item unpins (toolbar hides + the Appearance
   pin reflects via the broadcast). (HAT-verified — native menu not CDP-drivable.)
 - [ ] Appearance pin-icon toggles set `toolbarPins`; toolbar reflects live (two-way).
@@ -232,17 +232,17 @@ The internal-preload unsubscribe fix rides with the settings-controls leg (same 
 
 ### Legs
 > **Note:** Tentative; legs are created one at a time as the flight progresses.
-- [ ] `pin-state` - `toolbarPins` in the settings store (object-of-booleans, lenient, merge-on-read);
+- [x] `pin-state` - `toolbarPins` in the settings store (object-of-booleans, lenient, merge-on-read);
   unit-tested. (DD1)
-- [ ] `toolbar-icons-and-pin-apply` - icon + count-badge Media/Shield buttons; chrome show/hide per pin;
+- [x] `toolbar-icons-and-pin-apply` - icon + count-badge Media/Shield buttons; chrome show/hide per pin;
   shortcuts stay active; + `isInternalTab` comment. (DD2)
-- [ ] `toolbar-context-unpin` - right-click a pinned icon → native "Unpin {item}" menu (renderer contextmenu
+- [x] `toolbar-context-unpin` - right-click a pinned icon → native "Unpin {item}" menu (renderer contextmenu
   → main Menu + store write + broadcast). (DD7)
-- [ ] `settings-pin-controls` - Appearance **pin-icon toggle buttons** (`aria-pressed`; filled/outline) via
+- [x] `settings-pin-controls` - Appearance **pin-icon toggle buttons** (`aria-pressed`; filled/outline) via
   the bridge (two-way); + internal-preload `off…` cleanup methods. (DD3)
-- [ ] `site-settings-rewire` - "Site settings →" → `goldfinch://settings#privacy`; + `buildSiteInfo`
+- [x] `site-settings-rewire` - "Site settings →" → `goldfinch://settings#privacy`; + `buildSiteInfo`
   defensive escaping. (DD4)
-- [ ] `docs` - pin system + `toolbarPins` + "Site settings →" destination in README/CLAUDE.md.
+- [x] `docs` - pin system + `toolbarPins` + "Site settings →" destination in README/CLAUDE.md.
 - [ ] `verify-integration` - `toolbar-pins` behavior test; a11y (chrome + guest); regressions. (SC8)
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: pin/unpin, icon+badge, "Site settings →".
 

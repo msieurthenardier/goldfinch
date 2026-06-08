@@ -107,10 +107,13 @@
   });
 
   // Keep the input in sync when settings change from another surface (e.g. future chrome UI).
-  window.goldfinchInternal.onSettingsChanged((all) => {
+  // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
+  // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
+  const hSettings = window.goldfinchInternal.onSettingsChanged((all) => {
     if (!input) return;
     if (all && all.homePage) input.value = all.homePage;
   });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
 })();
 
 /* ---- shields controller ---- */
@@ -149,5 +152,56 @@
   }
 
   // Re-sync when the panel (or another surface) fires shields-changed.
-  window.goldfinchInternal.onShieldsChanged(applyConfig);
+  // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
+  // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
+  const hShields = window.goldfinchInternal.onShieldsChanged(applyConfig);
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offShieldsChanged(hShields), { once: true });
+})();
+
+/* ---- appearance pins controller ---- */
+
+(function () {
+  // Guard: only run when the internal bridge is present (goldfinch://settings origin).
+  if (!window.goldfinchInternal) return;
+
+  const btns = {
+    media: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-media')),
+    shields: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-shields'))
+  };
+  if (!btns.media || !btns.shields) return;
+
+  /** @type {{ media: boolean, shields: boolean }} */
+  let current = { media: true, shields: true };
+
+  /**
+   * Apply a toolbarPins object to the toggle buttons: sets aria-pressed on each
+   * and caches the value for use by the click handler's spread.
+   * @param {{ media: boolean, shields: boolean }} pins
+   */
+  function apply(pins) {
+    current = pins;
+    for (const k of /** @type {Array<'media'|'shields'>} */ (['media', 'shields'])) {
+      btns[k].setAttribute('aria-pressed', String(!!pins[k]));
+    }
+  }
+
+  // Populate from the persisted toolbarPins on load.
+  window.goldfinchInternal.settingsGet('toolbarPins').then(apply).catch(() => {});
+
+  // Click handler: flip the pin for the clicked key, write the full map.
+  for (const k of /** @type {Array<'media'|'shields'>} */ (['media', 'shields'])) {
+    btns[k].addEventListener('click', () => {
+      window.goldfinchInternal.settingsSet('toolbarPins', { ...current, [k]: !current[k] })
+        .then(apply)
+        .catch(() => {});
+    });
+  }
+
+  // Two-way sync: a right-click Unpin (leg 3) or another surface change re-syncs here.
+  // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
+  // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
+  const h = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && all.toolbarPins) apply(all.toolbarPins);
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();

@@ -18,6 +18,41 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Only expose the bridge when this preload is running in the genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
 if (location.origin === 'goldfinch://settings') {
+  // DD5: listener-handle map — lets on() return a numeric handle and off(h) remove
+  // the exact wrapper, preventing accumulation across guest reloads (electronmon
+  // reloads the goldfinch://settings guest; without off/pagehide cleanup, each reload
+  // would leave an extra ipcRenderer listener permanently registered in the preload).
+  // contextBridge cannot return a function, but it CAN return a number, so handles
+  // are the right cross-boundary currency.
+  let nextHandle = 1;
+  const listeners = new Map();
+
+  /**
+   * Register a wrapper for channel and return a numeric handle.
+   * @param {string} channel
+   * @param {(x: any) => void} cb
+   * @returns {number}
+   */
+  function on(channel, cb) {
+    const wrapper = (_e, x) => cb(x);
+    const h = nextHandle++;
+    listeners.set(h, { channel, wrapper });
+    ipcRenderer.on(channel, wrapper);
+    return h;
+  }
+
+  /**
+   * Remove the listener registered under handle h.
+   * @param {number} h
+   */
+  function off(h) {
+    const e = listeners.get(h);
+    if (e) {
+      ipcRenderer.removeListener(e.channel, e.wrapper);
+      listeners.delete(h);
+    }
+  }
+
   contextBridge.exposeInMainWorld('goldfinchInternal', {
     version: 1,
 
@@ -38,11 +73,20 @@ if (location.origin === 'goldfinch://settings') {
     settingsSet: (key, value) => ipcRenderer.invoke('internal-settings-set', key, value),
 
     /**
-     * Subscribe to settings-changed broadcasts (emitted by legs 3+).
+     * Subscribe to settings-changed broadcasts.
      * cb receives the full updated config object.
+     * Returns a numeric handle for use with offSettingsChanged.
      * @param {(all: object) => void} cb
+     * @returns {number}
      */
-    onSettingsChanged: (cb) => ipcRenderer.on('settings-changed', (_e, all) => cb(all)),
+    onSettingsChanged: (cb) => on('settings-changed', cb),
+
+    /**
+     * Unsubscribe the settings-changed listener registered under handle h.
+     * Call from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offSettingsChanged: (h) => off(h),
 
     /**
      * Read the current global Shields config.
@@ -59,11 +103,20 @@ if (location.origin === 'goldfinch://settings') {
     shieldsSet: (patch) => ipcRenderer.invoke('internal-shields-set', patch),
 
     /**
-     * Subscribe to shields-changed broadcasts (emitted by leg 4+).
+     * Subscribe to shields-changed broadcasts.
      * cb receives the updated shields config object.
+     * Returns a numeric handle for use with offShieldsChanged.
      * @param {(cfg: object) => void} cb
+     * @returns {number}
      */
-    onShieldsChanged: (cb) => ipcRenderer.on('shields-changed', (_e, cfg) => cb(cfg))
+    onShieldsChanged: (cb) => on('shields-changed', cb),
+
+    /**
+     * Unsubscribe the shields-changed listener registered under handle h.
+     * Call from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offShieldsChanged: (h) => off(h)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

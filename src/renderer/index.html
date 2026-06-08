@@ -63,11 +63,13 @@
           aria-label="Address and search bar"
         />
       </div>
-      <button id="toggle-media" class="text-btn" title="Toggle media panel (Ctrl+M)" aria-expanded="false">
-        <span id="media-count">Media</span>
+      <button id="toggle-media" class="icon-btn" title="Toggle media panel (Ctrl+M)" aria-label="Media" aria-expanded="false">
+        <span class="tb-glyph" aria-hidden="true">▤</span>
+        <span id="media-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
-      <button id="toggle-privacy" class="text-btn" title="Toggle privacy panel (Ctrl+Shift+P)" aria-expanded="false">
-        <span id="privacy-count">Shield</span>
+      <button id="toggle-privacy" class="icon-btn" title="Toggle privacy panel (Ctrl+Shift+P)" aria-label="Shields" aria-expanded="false">
+        <span class="tb-glyph" aria-hidden="true">◈</span>
+        <span id="privacy-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
       <button
         id="kebab"

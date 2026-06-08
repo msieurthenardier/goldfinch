@@ -50,8 +50,9 @@ or download **v0.4.8** directly:
   (labeled "Secure Goldfinch page") and makes the address bar **read-only** — you
   can't type a URL into an internal tab. On an `http(s)` tab it shows a site-info
   chip (labeled with the host) that opens a **site-info popup** (origin, connection
-  type, trackers blocked, permission count, and a "Site settings →" link into the
-  Shields panel). On a blank new tab no chip state is shown.
+  type, trackers blocked, permission count, and a **"Site settings →"** link that
+  opens the Settings page's **Privacy & Shields** section). On a blank new tab no
+  chip state is shown.
 - **Internal-tab navigation lock**: if a web URL is entered while a
   `goldfinch://` tab is active (e.g. via a keyboard shortcut or programmatic
   call), Goldfinch opens it in a **new normal tab** rather than navigating the
@@ -83,12 +84,20 @@ or download **v0.4.8** directly:
   - **New Identity** (in the Shield panel → Jar section) — wipes the current
     jar's cookies and storage, rerolls its fingerprint seed, and reloads the
     page so the site cannot link the new session to the old one.
-- **Privacy panel** (toggle with the *Shield* button or `Ctrl+Shift+P`):
+- **Pinnable toolbar icons** — the Media and Shields toolbar buttons are now icon
+  buttons (with a count badge) that can be pinned or unpinned:
+  - **Pinned** (the default): the icon appears in the toolbar. Click it to open
+    the panel; right-click it to get an **Unpin** menu item.
+  - **Unpinned**: the icon is removed from the toolbar. The panel can still be
+    opened with its keyboard shortcut (`Ctrl+M` / `Ctrl+Shift+P`). To restore the
+    icon, go to **Settings → Appearance** and toggle the pin button for that item.
+  - Pin state is persisted across restarts.
+- **Privacy panel** (toggle with the *Shields* icon or `Ctrl+Shift+P`):
   displays live per-tab privacy stats — tracker counts (blocked/allowed by
   category), third-party domains contacted, cookie inventory with clear actions,
   fingerprinting API call counts, and permission requests. Also shows the
   active Shields toggles and the current jar.
-- **Media panel** (toggle with the *Media* button or `Ctrl+M`):
+- **Media panel** (toggle with the *Media* icon or `Ctrl+M`):
   - Scans the live DOM for `<img>`, `srcset`/`<picture>`, CSS background images,
     `og:image`, `<video>`, `<audio>`, direct file links (e.g. `.mp3` anchors on
     music blogs), and known embeds (YouTube, Vimeo, SoundCloud, Spotify, Twitch).
@@ -166,15 +175,20 @@ the same handler under an explicit per-host path allowlist — the handler never
 builds a file path from the URL (traversal is structurally impossible), and
 content-type is derived from the allowlist entry's extension, never from the URL.
 
-**Privacy & Shields** and **On startup** sections have working, persisted controls:
+**Appearance**, **Privacy & Shields**, and **On startup** sections have working,
+persisted controls:
+- **Appearance** — pin-icon toggle buttons for the Media and Shields toolbar items.
+  Click the pushpin for an item to pin (show in toolbar) or unpin (remove from
+  toolbar) it. Changes are persisted immediately and reflected live in the toolbar.
+  The keyboard shortcuts (`Ctrl+M` / `Ctrl+Shift+P`) work regardless of pin state.
 - **Privacy & Shields** — five global Shields checkboxes (Shields on/off, block
   trackers, strip tracking params, isolate third-party cookies, farble fingerprint)
   that read from and write to `shields.json` via the origin-checked internal bridge.
   Changes stay in sync with the slide-out Shields panel in both directions. Per-site
   pause is panel-only (it needs a current site, which the settings page doesn't have).
 - **On startup** — an editable Home page field that reads from and writes to
-  `settings.json` (the new durable settings store). New tabs open to the persisted
-  URL; invalid URLs are rejected with an error message.
+  `settings.json` (the durable settings store). New tabs open to the persisted URL;
+  invalid URLs are rejected with an error message.
 
 Internal pages are **trusted local chrome, not web content**, and are reachable
 only through Goldfinch's own UI (the kebab → **Settings**). Untrusted web content

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('goldfinch', {
   windowToggleMaximize: () => ipcRenderer.send('window-toggle-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),
   appQuit: () => ipcRenderer.send('app-quit'),
+  toolbarContextMenu: (item) => ipcRenderer.send('toolbar-context-menu', item),
   windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   onWindowMaximizedChange: (cb) => ipcRenderer.on('window-maximized-change', (_e, isMax) => cb(isMax)),
 
