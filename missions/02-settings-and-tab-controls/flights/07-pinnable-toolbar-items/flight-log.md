@@ -70,6 +70,15 @@ explicit styling criteria + a pre-HAT screenshot check (the Flight-6 HAT lesson)
 
 ## Decisions
 
+### DD2 override — toolbar icons are inline SVG (Lucide), not Unicode/CSS glyphs (HAT, leg 8)
+DD2 originally constrained the toolbar icons to Unicode/CSS glyphs (a conservative CSP call). At the HAT the
+operator asked for proper industry-standard SVG icons (clapperboard for Media, a literal shield for Shields)
+and a clearer pushpin for the Appearance toggles. Inline `<svg>` **markup** is CSP-safe (it is not a loaded
+resource) under both the chrome `index.html` CSP and the guest `INTERNAL_CSP` — confirmed live. Implemented
+with **Lucide** (ISC) inline path data; `stroke="currentColor"` so the existing color rules (incl. the Shield
+`.alert` red + the pin's pinned-gold/unpinned-grey) still drive them. Operator: "looks good." DD2's no-SVG
+clause is superseded for the toolbar; the original rationale is preserved here as the prior framing.
+
 ### Per-leg design review skipped for the docs leg (leg 6)
 Docs-only (`README.md`/`CLAUDE.md`) — no codebase cross-reference for a design review to add. Folded into the
 flight-level Reviewer pass (reviews the whole uncommitted diff, docs included). Same call as flights 5–6.

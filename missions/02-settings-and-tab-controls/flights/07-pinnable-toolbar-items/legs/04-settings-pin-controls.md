@@ -1,6 +1,6 @@
 # Leg: settings-pin-controls
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Pinnable Toolbar Items (Media + Shields)](../flight.md)
 
 ## Objective

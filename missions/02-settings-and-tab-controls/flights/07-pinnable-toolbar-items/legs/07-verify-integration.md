@@ -1,6 +1,6 @@
 # Leg: verify-integration
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Pinnable Toolbar Items (Media + Shields)](../flight.md)
 
 ## Objective

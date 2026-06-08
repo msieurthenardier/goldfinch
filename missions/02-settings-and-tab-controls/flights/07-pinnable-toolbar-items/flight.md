@@ -1,6 +1,6 @@
 # Flight: Pinnable Toolbar Items (Media + Shields)
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
@@ -245,17 +245,18 @@ The internal-preload unsubscribe fix rides with the settings-controls leg (same 
 - [x] `docs` - pin system + `toolbarPins` + "Site settings →" destination in README/CLAUDE.md.
 - [x] `verify-integration` - `toolbar-pins` behavior test (FD-driven); a11y (chrome + guest) clean; offline
   gates green; found + fixed a pin-toggle two-way-sync bug. (SC8)
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT: pin/unpin, icon+badge, "Site settings →".
+- [x] `hat-and-alignment` *(optional)* - Guided HAT: operator approved (icons swapped to Lucide SVG; native
+  context-menu clumsiness recorded as a future need); landed.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] All legs completed
+- [ ] Code merged (PR #34 → main, pending)
+- [x] Tests passing (221/221; lint + typecheck green; a11y chrome + guest clean)
+- [x] Documentation updated (README + CLAUDE.md)
 
 ### Verification
 - **Behavior test `toolbar-pins`** — toggle a pin in settings → the toolbar icon shows/hides + persists to

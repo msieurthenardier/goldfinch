@@ -1,6 +1,6 @@
 # Leg: pin-state
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Pinnable Toolbar Items (Media + Shields)](../flight.md)
 
 ## Objective

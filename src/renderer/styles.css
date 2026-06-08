@@ -1000,16 +1000,23 @@ a:focus-visible {
 }
 
 /* Icon + badge toolbar buttons (Media, Shields). Each is an .icon-btn with a
-   .tb-glyph (decorative glyph, aria-hidden) and a .tb-badge (count overlay).
-   The button uses relative positioning to anchor the badge in the corner. */
+   .tb-glyph (inline SVG, aria-hidden) and a .tb-badge (count overlay).
+   The button uses relative positioning to anchor the badge in the corner.
+   Flex centering aligns the SVG glyph within the button box. */
 #toggle-media,
 #toggle-privacy {
   position: relative;
   width: 36px; /* slightly wider than the 32px default to give the badge room */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+/* .tb-glyph is now an inline <svg>; block + fixed dimensions ensure it occupies
+   exactly its 16×16 footprint. stroke="currentColor" means the button's CSS
+   color (including .alert red) drives the stroke automatically. */
 .tb-glyph {
-  font-size: 14px;
-  line-height: 1;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 .tb-badge {

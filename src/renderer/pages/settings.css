@@ -316,7 +316,7 @@ main section p {
 }
 
 /* Pin-icon toggle button — reset UA chrome, then apply color states.
-   The inline svg uses fill="currentColor", so color drives filled/muted. */
+   The inline svg uses stroke="currentColor" (Lucide), so color drives the stroke. */
 .pin-toggle {
   background: none;
   border: none;
@@ -328,6 +328,15 @@ main section p {
   align-items: center;
   justify-content: center;
   transition: color 0.12s;
+}
+
+/* Explicit SVG sizing — ensures the 16×16 Lucide pin renders at the right scale
+   regardless of author-stylesheet resets. currentColor on stroke is inherited from
+   the button's color property set by aria-pressed states below. */
+.pin-toggle svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 /* Pinned (aria-pressed="true") — accent color = filled pin */

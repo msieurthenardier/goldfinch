@@ -1,6 +1,6 @@
 # Leg: toolbar-icons-and-pin-apply
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Pinnable Toolbar Items (Media + Shields)](../flight.md)
 
 ## Objective
