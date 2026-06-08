@@ -36,11 +36,23 @@ or download **v0.4.6** directly:
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.
 - **Overflow menu** (the **⋮** button at the right end of the toolbar row):
-  opens a menu with **Settings** (opens the internal settings page in a new
-  tab — a "coming soon" stub for now; the wired controls land in a later
-  release) and **Exit** (quits Goldfinch). Keyboard-operable: focus the button
-  and press `Enter`, `Space`, or `↓` to open, arrow keys to move between items,
-  and `Esc` to close.
+  opens a menu with **Settings** (opens `goldfinch://settings` in a new tab —
+  a Chrome-style shell with a sticky left section-nav and five titled sections:
+  Appearance, Privacy & Shields, On startup, Downloads, and About; controls are
+  placeholder stubs until a later release) and **Exit** (quits Goldfinch).
+  Keyboard-operable: focus the button and press `Enter`, `Space`, or `↓` to
+  open, arrow keys to move between items, and `Esc` to close.
+- **Address-bar chips**: a small button to the left of the address bar reflects
+  the active tab. On a `goldfinch://` tab it shows an identity chip
+  (labeled "Secure Goldfinch page") and makes the address bar **read-only** — you
+  can't type a URL into an internal tab. On an `http(s)` tab it shows a site-info
+  chip (labeled with the host) that opens a **site-info popup** (origin, connection
+  type, trackers blocked, permission count, and a "Site settings →" link into the
+  Shields panel). On a blank new tab no chip state is shown.
+- **Internal-tab navigation lock**: if a web URL is entered while a
+  `goldfinch://` tab is active (e.g. via a keyboard shortcut or programmatic
+  call), Goldfinch opens it in a **new normal tab** rather than navigating the
+  internal tab away — the internal tab stays on its settings page.
 - **Privacy & Shields** (toggle individual strategies in the Shield panel):
   - **Tracker & ad blocking** (`block`) — cancels requests to known tracker and
     ad domains (analytics, ads, social pixels, and other categories) classified
@@ -140,10 +152,16 @@ registered as `standard` + `secure` at module load, and its pages are served fro
 a dedicated in-memory internal session (the `goldfinch-internal` partition) via
 `protocol.handle`. Each response carries a strict Content-Security-Policy
 (`frame-ancestors 'none'`, `default-src 'self'`) so the pages can't be embedded or
-run inline script. Today the scheme serves a single stub — `goldfinch://settings`
-("coming soon"); the real settings UI arrives in a later release.
+run inline script.
+
+`goldfinch://settings` is a Chrome-style settings shell: a sticky left section-nav
+linking five titled sections (Appearance, Privacy & Shields, On startup, Downloads,
+About) that scroll in a single document. CSS and JS subresources are served from
+the same handler under an explicit per-host path allowlist — the handler never
+builds a file path from the URL (traversal is structurally impossible), and
+content-type is derived from the allowlist entry's extension, never from the URL.
 
 Internal pages are **trusted local chrome, not web content**, and are reachable
 only through Goldfinch's own UI (the kebab → **Settings**). Untrusted web content
 cannot navigate to, open, embed, or `fetch` the `goldfinch://` scheme. See
-`CLAUDE.md` for the security model.
+`CLAUDE.md` for the security model and the address-bar chip behavior.

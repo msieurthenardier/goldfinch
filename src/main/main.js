@@ -10,6 +10,7 @@ const jars = require('./jars');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
+const { createResolver } = require('./internal-assets');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -25,13 +26,23 @@ const PAGE_PARTITION = 'persist:goldfinch';
 // CSP; `secure: true` marks it a trusted origin. Do NOT "simplify" these privileges away. (DD2)
 protocol.registerSchemesAsPrivileged([{ scheme: 'goldfinch', privileges: { standard: true, secure: true } }]);
 
-// Fixed host -> bundled file allowlist for the internal scheme. Adding a page (Flight 5) is
-// an explicit edit here, never a directory passthrough — paths are NOT derived from the URL,
-// so traversal is structurally impossible. `asar:false` + `files: src/**/*` ship these
-// unpacked, so pathToFileURL resolves in dev and packaged builds alike.
+// Fixed host -> per-path allowlist for the internal scheme. Each entry is
+// { [normalizedPathname]: absoluteFilePath }. Absolute paths stay HERE (in main.js
+// with __dirname access); internal-assets.js is __dirname-free so it can be unit-tested
+// with a synthetic map. Adding a page (Flight 5+) is an explicit edit here, never a
+// directory passthrough — paths are NOT derived from the URL, so traversal is structurally
+// impossible. `asar:false` + `files: src/**/*` ship these unpacked, so pathToFileURL
+// resolves in dev and packaged builds alike.
 const INTERNAL_PAGES = {
-  settings: path.join(__dirname, '..', 'renderer', 'pages', 'settings.html')
+  settings: {
+    '/': path.join(__dirname, '..', 'renderer', 'pages', 'settings.html'),
+    '/settings.css': path.join(__dirname, '..', 'renderer', 'pages', 'settings.css'),
+    '/settings.js': path.join(__dirname, '..', 'renderer', 'pages', 'settings.js')
+  }
 };
+
+// Build the resolver once at startup; handleInternal calls it per request.
+const resolveInternal = createResolver(INTERNAL_PAGES);
 
 // Strict CSP for internal pages, set in the protocol.handle RESPONSE headers (DD3) — NOT via
 // onHeadersReceived (custom-protocol responses bypass the webRequest pipeline, so that hook
@@ -47,26 +58,28 @@ const INTERNAL_CSP = "default-src 'self'; base-uri 'none'; object-src 'none'; fr
 let creatingInternalSession = false;
 
 // protocol.handle handler for the internal session. Serves ONLY the fixed INTERNAL_PAGES
-// allowlist (host-based, root path, GET); 404s everything else; 405s non-GET; never throws
+// allowlist (host + path, GET); 404s everything else; 405s non-GET; never throws
 // (an unhandled throw in protocol.handle yields a failed load with no diagnostics).
+// Content-type is derived from the resolved map entry's file extension (via contentTypeFor
+// inside createResolver), never from the raw URL pathname — traversal is structurally
+// impossible because the file path comes from the fixed map, not from pathname arithmetic.
 async function handleInternal(request) {
   if (request.method !== 'GET') {
     return new Response('Method not allowed', { status: 405 });
   }
   const url = new URL(request.url);
-  const file = INTERNAL_PAGES[url.host];
-  const rootPath = url.pathname === '/' || url.pathname === '';
-  if (!file || !rootPath) {
+  const resolved = resolveInternal(url.host, url.pathname);
+  if (!resolved) {
     return new Response('Not found', { status: 404 });
   }
   try {
-    const res = await net.fetch(pathToFileURL(file).toString());
+    const res = await net.fetch(pathToFileURL(resolved.file).toString());
     if (!res.ok) return new Response('Not found', { status: 404 });
     // Re-wrap so we control the headers — do NOT pass net.fetch's file: headers verbatim.
     // res.body is a ReadableStream, accepted by the Response constructor.
     return new Response(res.body, {
       headers: {
-        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Type': resolved.contentType,
         'Content-Security-Policy': INTERNAL_CSP
       }
     });
