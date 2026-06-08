@@ -27,6 +27,10 @@ interface GoldfinchBridge {
   privacyClearCookies(payload: any): Promise<any>;
   privacyClearStorage(payload: any): Promise<any>;
 
+  // --- settings (chrome-trusted; read + subscribe only) ---
+  settingsGet(key: string): Promise<any>;
+  onSettingsChanged(cb: (all: any) => void): void;
+
   // --- shields ---
   shieldsGet(): Promise<any>;
   shieldsSet(patch: any): Promise<any>;
@@ -53,8 +57,24 @@ interface GoldfinchBridge {
   internalPartition: string;
 }
 
+/**
+ * Internal bridge surface exposed by src/preload/internal-preload.js to goldfinch:// pages.
+ * Only present when the page's origin is 'goldfinch://settings'.
+ */
+interface GoldfinchInternalBridge {
+  version: number;
+  settingsGet(key: string): Promise<any>;
+  settingsSet(key: string, value: any): Promise<any>;
+  onSettingsChanged(cb: (all: any) => void): void;
+  shieldsGet(): Promise<any>;
+  shieldsSet(patch: object): Promise<any>;
+  onShieldsChanged(cb: (cfg: any) => void): void;
+}
+
 interface Window {
   goldfinch: GoldfinchBridge;
+  /** Present only in goldfinch:// internal pages (contextBridge from internal-preload.js). */
+  goldfinchInternal?: GoldfinchInternalBridge;
 }
 
 /**

@@ -25,11 +25,22 @@
       </section>
       <section id="privacy">
         <h2>Privacy &amp; Shields</h2>
-        <p>Shields toggles will appear here.</p>
+        <fieldset class="shields-group">
+          <legend class="sr-only">Shields</legend>
+          <label class="shield-row shield-parent"><span>Shields</span><input type="checkbox" id="shield-enabled" /></label>
+          <label class="shield-row"><span>Block trackers</span><input type="checkbox" id="shield-block" /></label>
+          <label class="shield-row"><span>Strip tracking params</span><input type="checkbox" id="shield-strip" /></label>
+          <label class="shield-row"><span>Isolate 3rd-party cookies</span><input type="checkbox" id="shield-isolate" /></label>
+          <label class="shield-row"><span>Farble fingerprint</span><input type="checkbox" id="shield-farble" /></label>
+        </fieldset>
+        <p>These are global Shields defaults, applied to every site.</p>
       </section>
       <section id="startup">
         <h2>On startup</h2>
-        <p>Startup and home page options will appear here.</p>
+        <label for="home-page-input">Home page</label>
+        <input id="home-page-input" type="url" autocomplete="off" spellcheck="false" />
+        <button id="home-page-save" type="button">Save</button>
+        <p id="home-page-status" role="status"></p>
       </section>
       <section id="downloads">
         <h2>Downloads</h2>

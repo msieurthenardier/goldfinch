@@ -38,8 +38,11 @@ or download **v0.4.7** directly:
 - **Overflow menu** (the **⋮** button at the right end of the toolbar row):
   opens a menu with **Settings** (opens `goldfinch://settings` in a new tab —
   a Chrome-style shell with a sticky left section-nav and five titled sections:
-  Appearance, Privacy & Shields, On startup, Downloads, and About; controls are
-  placeholder stubs until a later release) and **Exit** (quits Goldfinch).
+  Appearance, Privacy & Shields, On startup, Downloads, and About; the
+  **Privacy & Shields** section has working global Shields toggles and the
+  **On startup** section has an editable Home page — both persisted and kept
+  in sync with the slide-out Shields panel; remaining sections are stubs) and
+  **Exit** (quits Goldfinch).
   Keyboard-operable: focus the button and press `Enter`, `Space`, or `↓` to
   open, arrow keys to move between items, and `Esc` to close.
 - **Address-bar chips**: a small button to the left of the address bar reflects
@@ -137,7 +140,9 @@ npm start
 | `src/preload/webview-preload.js` | Injected into every page; scans the DOM for media. |
 | `src/preload/internal-preload.js` | Minimal, context-isolated bridge for trusted `goldfinch://` internal pages (the Settings page). |
 | `src/shared/internal-page.js` | Single source of truth for the internal `goldfinch-internal` session partition string. |
-| `src/renderer/pages/settings.html` | The internal Settings page — a "coming soon" stub today. |
+| `src/main/settings-store.js` | Durable, atomic, schema-versioned app preferences store (`userData/settings.json`); validated writes; pluggable serialization seam. |
+| `src/main/internal-ipc.js` | Origin-checked IPC bridge helpers (`registerInternalHandler`) — main-side sender verification for trusted `goldfinch://` internal pages. |
+| `src/renderer/pages/settings.html` | The internal Settings page — Privacy & Shields global toggles and editable Home page (wired and persisted). |
 | `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox. |
 
 Each tab is a `<webview>` running real Chromium. The media scanner preload is
@@ -161,7 +166,19 @@ the same handler under an explicit per-host path allowlist — the handler never
 builds a file path from the URL (traversal is structurally impossible), and
 content-type is derived from the allowlist entry's extension, never from the URL.
 
+**Privacy & Shields** and **On startup** sections have working, persisted controls:
+- **Privacy & Shields** — five global Shields checkboxes (Shields on/off, block
+  trackers, strip tracking params, isolate third-party cookies, farble fingerprint)
+  that read from and write to `shields.json` via the origin-checked internal bridge.
+  Changes stay in sync with the slide-out Shields panel in both directions. Per-site
+  pause is panel-only (it needs a current site, which the settings page doesn't have).
+- **On startup** — an editable Home page field that reads from and writes to
+  `settings.json` (the new durable settings store). New tabs open to the persisted
+  URL; invalid URLs are rejected with an error message.
+
 Internal pages are **trusted local chrome, not web content**, and are reachable
 only through Goldfinch's own UI (the kebab → **Settings**). Untrusted web content
-cannot navigate to, open, embed, or `fetch` the `goldfinch://` scheme. See
-`CLAUDE.md` for the security model and the address-bar chip behavior.
+cannot navigate to, open, embed, or `fetch` the `goldfinch://` scheme. Privileged
+IPC from the settings page is gated at the main process by an origin + session
+check (`registerInternalHandler` in `src/main/internal-ipc.js`). See `CLAUDE.md`
+for the full security model and the address-bar chip behavior.
