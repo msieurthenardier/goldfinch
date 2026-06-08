@@ -1,6 +1,6 @@
 # Leg: home-page-setting
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Wire Existing Controls (Shields + Home Page) into Settings](../flight.md)
 
 ## Objective

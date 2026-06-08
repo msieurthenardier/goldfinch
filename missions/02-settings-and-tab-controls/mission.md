@@ -83,10 +83,12 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
   content wherever controls are not yet wired. **Verified Flight 5: `goldfinch://settings` shell —
   sticky section-nav + 5 titled sections + placeholder; `settings-shell` behavior test 12/12 live; guest
   a11y clean.**
-- [ ] **SC7** — The privacy/Shields controls (already persisted) and the default/home page are
+- [x] **SC7** — The privacy/Shields controls (already persisted) and the default/home page are
   operable from the settings surface, and changes persist and take effect consistently with the
   existing panels. Promoting the home page to a real setting includes the minimal persistence it
-  needs (it is hardcoded today) (*behavior-test-backed*).
+  needs (*behavior-test-backed*). **Verified Flight 6: global Shields toggles + editable home page wired over
+  the origin-checked bridge; `settings-controls` 12/12 live — persist + take-effect + two-way panel sync.
+  (Global toggles only; per-site overrides are future — see Known Issues.)**
 - [x] **SC8** — The new tab-bar controls, kebab menu, and settings surface are keyboard-operable
   and introduce no new WCAG A/AA violations under the project's accessibility gate
   (*behavior-test-backed / a11y gate*).
@@ -154,6 +156,14 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   at flight execution; the chief unknown gating the frameless work (see Flight 1).
 
 ## Known Issues
+
+- **Shields has no per-site overrides (only global config + coarse per-site pause)** — surfaced during
+  Flight 6 HAT (operator). The Shields toggles (`enabled`/`block`/`strip`/`isolate`/`farble`) are **global**:
+  the settings page and the slide-out panel are in lock-step regardless of the active site. The only per-site
+  control today is `pausedSites` (a coarse "pause Shields on this site" on/off). **Future need**: real
+  **per-site overrides — more-strict-only** (a site may tighten beyond the global defaults, not loosen below
+  them). Out of scope for Flight 6; a future flight. Note: until that lands, any settings/panel copy must NOT
+  claim per-site exception management (the Flight-6 settings note was corrected accordingly).
 
 - **Tab-overflow handling needs a dedicated "many-tabs" pass** (surfaced during Flight 1
   verify-integration HAT; deferred by operator decision). Two issues to fix when that work is
@@ -251,7 +261,7 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   handler to serve CSS/JS subresources, and hoisting the shared `menuController` keyboard contract
   before the popup becomes menu #3. May split into Flight 5 (shell) + 5b (chips/popup/lock) if it
   balloons.)*
-- [ ] **Flight 6: Wire existing controls** — surface the **global** Shields toggles into the settings page
+- [x] **Flight 6: Wire existing controls** — surface the **global** Shields toggles into the settings page
   and promote `HOMEPAGE` to a real persisted, editable setting, both persisting + taking live effect and
   staying consistent with the existing panels. Backed by a **new durable, secure, schema-versioned settings
   store** (built properly now — operator) and the **origin-checked internal-page bridge** (main-side

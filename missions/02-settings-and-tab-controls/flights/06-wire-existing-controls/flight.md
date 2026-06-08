@@ -1,15 +1,16 @@
 # Flight: Wire Existing Controls (Shields + Home Page) into Settings
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC7** — The privacy/Shields controls (already persisted) and the default/home page are operable from
+- [x] **SC7** — The privacy/Shields controls (already persisted) and the default/home page are operable from
   the settings surface, and changes persist and take effect consistently with the existing panels.
-  Promoting the home page to a real setting includes the minimal persistence it needs (it is hardcoded
-  today).
-- [ ] **SC8** — The newly-wired settings controls are keyboard-operable and introduce no new WCAG A/AA
-  violations under the (pinned) accessibility gate.
+  Promoting the home page to a real setting includes the minimal persistence it needs. **Verified Flight 6:
+  global Shields toggles + editable home page wired over the origin-checked bridge; `settings-controls`
+  behavior test PASS — persist (`shields.json`/`settings.json`) + take-effect + two-way panel sync.**
+- [x] **SC8** — The newly-wired settings controls are keyboard-operable and introduce no new WCAG A/AA
+  violations under the (pinned) accessibility gate. **Verified Flight 6: chrome + guest a11y clean.**
 
 > **Scope note.** This flight makes the **global Shields toggles** and the **home page** operable from
 > `goldfinch://settings`, backed by a **new durable, secure settings store** and the **origin-checked
@@ -245,17 +246,19 @@ the foundations; the two wirings are independent of each other and could paralle
   README/CLAUDE.md.
 - [x] `verify-integration` - `settings-controls` PASS + origin-check security assertion; a11y (chrome +
   guest) clean; tab-scheme-guard / settings-shell regressions intact; offline 211/211. (SC7, SC8)
-- [ ] `hat-and-alignment` *(optional)* - Guided HAT: wired toggles + home-page control.
+- [x] `hat-and-alignment` *(optional)* - Guided HAT: wired toggles + home-page control. Operator-confirmed;
+  styling/copy fixes inline (pill switches matching the panel; label-left/toggle-right; Shields parent; no
+  border box; un-bold Save; corrected the per-site copy). Future per-site-overrides need recorded.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] All legs completed (7/7)
+- [ ] Code merged (draft PR — base `main`; ready-for-review at land)
+- [x] Tests passing (offline 211/211; live `settings-controls` PASS; a11y chrome+guest clean)
+- [x] Documentation updated (README + CLAUDE.md — leg 5)
 
 ### Verification
 - **Behavior test `settings-controls`** (SC7, SC8) — toggle a global Shield in settings → it persists in

@@ -82,7 +82,32 @@ _(none yet)_
 
 ## Anomalies
 
-_(none yet)_
+### Flight-6 form controls shipped as raw browser defaults (FIXED, HAT)
+**Observed**: the Flight-5 settings shell was brand-styled, but the new Flight-6 controls (Shields fieldset/
+checkboxes, home-page input + Save) rendered as unstyled browser defaults on the dark bg — surprisingly poor
+(operator).
+**Severity**: cosmetic (functional throughout).
+**Resolution**: iterative `settings.css`/`settings.html` styling passes (all style/copy, offline gates stayed
+211/211): brand-matched controls → native checkboxes restyled as the panel's **gold pill switches**
+(`appearance:none` mirroring `.switch`) → panel model (label-left/toggle-right; **Shields** bold parent +
+indented children; fieldset border removed, `legend` SR-only) → Save button un-bolded. Verified by
+screenshot each pass. See the `hat-and-alignment` leg.
+
+### "Per-site exceptions" copy was inaccurate (FIXED, HAT) — future feature recorded
+**Observed**: the settings note "Per-site exceptions are managed from the Shields panel" overclaims — the
+Shields toggles are **global** (settings page and panel are lock-step regardless of site); no per-site
+override feature exists (only a coarse per-site pause).
+**Severity**: cosmetic (misleading copy).
+**Resolution**: changed to "These are global Shields defaults, applied to every site." The real **per-site
+overrides (more-strict-only)** need is recorded in the **mission Known Issues** for a future flight (operator,
+explicitly out of scope for Flight 6).
+
+### `dev:debug` electronmon restarts on `settings.css`/`.html` edits (process note, not a defect)
+**Observed**: during the HAT, each settings-page style edit triggered electronmon to restart the app,
+resetting to a single tab at the persisted home page (`example.com`) — which incidentally re-confirmed
+home-page persistence across restart. Required reopening Settings (or a guest reload) to see each CSS change.
+**Severity**: none (dev-loop ergonomics).
+**Resolution**: n/a — expected watcher behavior; noted for future HAT sessions on served internal-page assets.
 
 ---
 
@@ -288,3 +313,14 @@ guest attach + filesystem reads (`userData/{settings,shields}.json`); `chrome-de
 - **Regression — PASS**: `tab-scheme-guard` core (web `window.open('goldfinch://…')` → internal tab count
   unchanged at 1); settings shell intact (guest a11y attached + ran).
 - **SC7 + SC8 verified.** Offline 211/211. No remediation needed.
+
+### 2026-06-08 — `hat-and-alignment` — COMPLETED (operator-confirmed)
+**Status**: completed
+
+Guided HAT on the live app. Functionality sound; findings were styling/copy of the Flight-6 controls — all
+fixed inline (style/copy only; offline gates stayed 211/211) + re-verified by screenshot (see Anomalies):
+brand-styled the controls → native checkboxes restyled as the panel's **gold pill switches** → panel model
+(label-left/toggle-right; **Shields** bold parent + indented children; border box removed, legend SR-only) →
+Save un-bolded → corrected the inaccurate "per-site exceptions" note to "global Shields defaults." The real
+**per-site overrides (more-strict-only)** need was recorded in the **mission Known Issues** (out of scope,
+operator). **Flight lands.** All 7 legs complete; SC7 + SC8 verified.
