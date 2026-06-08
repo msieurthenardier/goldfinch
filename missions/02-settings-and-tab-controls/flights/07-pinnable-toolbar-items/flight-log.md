@@ -78,13 +78,25 @@ flight-level Reviewer pass (reviews the whole uncommitted diff, docs included). 
 
 ## Deviations
 
-_(none yet)_
+### Witnessed-pattern deviation — FD-driven `toolbar-pins` (leg 7)
+The `toolbar-pins` behavior test was driven by the Flight Director (act + observe), not a spawned
+Executor/Validator pair. Compensating control: every verdict cites a raw machine-read value (DOM attribute,
+`settings.json` content, tab URL/active state). Same deviation accepted in flights 5–6. The native-menu
+right-click Unpin (DD7) is not CDP-drivable → carried to the HAT (leg 8).
 
 ---
 
 ## Anomalies
 
-_(none yet)_
+### Appearance pin toggle: only the first toggle worked (found + fixed live, leg 7)
+Live verification caught a cross-process bug: the first Appearance pin toggle worked, but every subsequent
+toggle silently no-op'd. **Root cause**: `internal-settings-set` returns the **full config** object; the pins
+controller's `settingsSet(...).then(apply)` set `current` to the full config, so `current.media` became
+`undefined`; the next click then sent a non-boolean-valued object as the `toolbarPins` value, the validator
+rejected it, `settingsSet` threw, and `.catch` swallowed it. **Fix**: apply the locally-computed `next`
+`{media,shields}` map instead of the resolution (`settings.js` pins controller). Re-verified live — 3
+consecutive toggles sync. The home-page controller was checked (it ignores the resolution; no change). This
+is precisely the kind of cross-process bug the behavior test exists to catch — a point for the debrief.
 
 ---
 

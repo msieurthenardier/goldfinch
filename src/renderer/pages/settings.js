@@ -189,10 +189,13 @@
   window.goldfinchInternal.settingsGet('toolbarPins').then(apply).catch(() => {});
 
   // Click handler: flip the pin for the clicked key, write the full map.
+  // settingsSet resolves to the full config object, not the toolbarPins value, so apply
+  // the locally-computed `next` (a clean {media,shields} map) — never the resolution.
   for (const k of /** @type {Array<'media'|'shields'>} */ (['media', 'shields'])) {
     btns[k].addEventListener('click', () => {
-      window.goldfinchInternal.settingsSet('toolbarPins', { ...current, [k]: !current[k] })
-        .then(apply)
+      const next = { ...current, [k]: !current[k] };
+      window.goldfinchInternal.settingsSet('toolbarPins', next)
+        .then(() => apply(next))
         .catch(() => {});
     });
   }

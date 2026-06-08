@@ -243,7 +243,8 @@ The internal-preload unsubscribe fix rides with the settings-controls leg (same 
 - [x] `site-settings-rewire` - "Site settings →" → `goldfinch://settings#privacy`; + `buildSiteInfo`
   defensive escaping. (DD4)
 - [x] `docs` - pin system + `toolbarPins` + "Site settings →" destination in README/CLAUDE.md.
-- [ ] `verify-integration` - `toolbar-pins` behavior test; a11y (chrome + guest); regressions. (SC8)
+- [x] `verify-integration` - `toolbar-pins` behavior test (FD-driven); a11y (chrome + guest) clean; offline
+  gates green; found + fixed a pin-toggle two-way-sync bug. (SC8)
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: pin/unpin, icon+badge, "Site settings →".
 
 ---
