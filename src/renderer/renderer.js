@@ -395,8 +395,8 @@ function buildSiteInfo(tab) {
     '<div class="si-section">' +
     '<div class="si-row si-host">' + escapeHtml(host) + '</div>' +
     '<div class="si-row"><span class="si-label">Connection</span><span class="si-value">' + escapeHtml(connection) + '</span></div>' +
-    '<div class="si-row"><span class="si-label">Trackers blocked</span><span class="si-value">' + trackers + '</span></div>' +
-    '<div class="si-row"><span class="si-label">Permissions</span><span class="si-value">' + permissions + '</span></div>' +
+    '<div class="si-row"><span class="si-label">Trackers blocked</span><span class="si-value">' + escapeHtml(String(trackers)) + '</span></div>' +
+    '<div class="si-row"><span class="si-label">Permissions</span><span class="si-value">' + escapeHtml(String(permissions)) + '</span></div>' +
     '</div>' +
     '<div class="si-actions">' +
     '<button class="text-btn small si-settings-btn">Site settings →</button>' +
@@ -406,7 +406,13 @@ function buildSiteInfo(tab) {
   if (settingsBtn) {
     settingsBtn.addEventListener('click', () => {
       closeSiteInfo();
-      togglePrivacy(true);
+      const existing = [...tabs.values()].find(isInternalTab);
+      if (existing) {
+        existing.webview.loadURL('goldfinch://settings/#privacy').catch(() => {});
+        activateTab(existing.id);
+      } else {
+        createTab('goldfinch://settings/#privacy', null, { trusted: true });
+      }
     });
   }
 }
@@ -563,6 +569,8 @@ function activeTab() {
 
 /** @param {Tab|null} tab @returns {boolean} */
 function isInternalTab(tab) {
+  // tab.container.id === 'internal' is set at the createTab trusted branch (~467)
+  // when { trusted: true } is passed. Keep these two sites in sync. (DD5)
   return !!(
     tab &&
     tab.container &&
@@ -868,10 +876,13 @@ function togglePanel(force) {
     // Closing while focus is inside the (now zero-width) panel would strand it:
     // restore focus to the toggle. Guard avoids stealing focus on programmatic
     // closes where focus isn't in the panel (e.g. opening the privacy panel).
-    els.toggleMedia.focus();
+    // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
+    // silent no-op that strands focus on <body> — skip it when the button is hidden.
+    if (!els.toggleMedia.classList.contains('hidden')) els.toggleMedia.focus();
   }
 }
 els.toggleMedia.addEventListener('click', () => togglePanel());
+els.toggleMedia.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('media'); });
 els.mediaClose.addEventListener('click', () => togglePanel(false));
 // Non-modal: Escape closes the media panel; togglePanel restores focus to the toggle.
 els.panel.addEventListener('keydown', (e) => {
@@ -914,7 +925,9 @@ function renderMedia() {
   const media = (tab && tab.media) || [];
   const filtered = visibleItems();
 
-  els.mediaCount.textContent = media.length ? `Media (${media.length})` : 'Media';
+  els.mediaCount.textContent = media.length ? String(media.length) : '';
+  els.mediaCount.classList.toggle('hidden', !media.length);
+  els.toggleMedia.setAttribute('aria-label', media.length ? 'Media, ' + media.length + ' items' : 'Media');
   els.mediaList.innerHTML = '';
   els.mediaEmpty.classList.toggle('hidden', filtered.length > 0);
   els.mediaStatus.textContent = filtered.length
@@ -1441,11 +1454,14 @@ function togglePrivacy(force) {
   } else if (els.privacyPanel.contains(document.activeElement)) {
     // Closing while focus is inside the (now zero-width) panel would strand it:
     // restore focus to the toggle. Guard avoids stealing focus on programmatic closes.
-    els.togglePrivacy.focus();
+    // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
+    // silent no-op that strands focus on <body> — skip it when the button is hidden.
+    if (!els.togglePrivacy.classList.contains('hidden')) els.togglePrivacy.focus();
   }
 }
 
 els.togglePrivacy.addEventListener('click', () => togglePrivacy());
+els.togglePrivacy.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('shields'); });
 els.privacyClose.addEventListener('click', () => togglePrivacy(false));
 // Non-modal: Escape closes the privacy panel; togglePrivacy restores focus to the toggle.
 els.privacyPanel.addEventListener('keydown', (e) => {
@@ -1504,10 +1520,12 @@ async function clearStorage() {
 function updatePrivacyBadge() {
   const tab = activeTab();
   const n = tab && tab.privacy.net ? tab.privacy.net.trackers.count : 0;
-  // The "(N)" count is the non-color cue (WCAG 1.4.1): the red `.alert` styling
-  // is reinforced by the visible tracker count so state isn't conveyed by color
-  // alone.
-  els.privacyCount.textContent = n ? `Shield (${n})` : 'Shield';
+  // The badge count is the non-color cue (WCAG 1.4.1): the red `.alert` styling
+  // is reinforced by the visible tracker count (badge + aria-label) so state isn't
+  // conveyed by color alone.
+  els.privacyCount.textContent = n ? String(n) : '';
+  els.privacyCount.classList.toggle('hidden', !n);
+  els.togglePrivacy.setAttribute('aria-label', n ? 'Shields, ' + n + ' blocked' : 'Shields');
   els.togglePrivacy.classList.toggle('alert', n > 0);
 }
 
@@ -1522,8 +1540,21 @@ window.goldfinch.onShieldsChanged((c) => {
   shieldsConfig = c;
   renderPrivacy();
 });
+/**
+ * Show or hide the Media/Shields toolbar icons per the current pin state.
+ * Unpinned → button hidden (`.hidden`); keyboard shortcuts remain active.
+ * @param {{ media: boolean, shields: boolean }} pins
+ */
+function applyToolbarPins(pins) {
+  els.toggleMedia.classList.toggle('hidden', !pins.media);
+  els.togglePrivacy.classList.toggle('hidden', !pins.shields);
+}
+
+window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {});
+
 window.goldfinch.onSettingsChanged((all) => {
   if (all && all.homePage !== undefined) homePageCache = all.homePage || HOMEPAGE;
+  if (all && all.toolbarPins) applyToolbarPins(all.toolbarPins);
 });
 
 function currentSite() {

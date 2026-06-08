@@ -12,6 +12,7 @@ interface GoldfinchBridge {
   windowToggleMaximize(): void;
   windowClose(): void;
   appQuit(): void;
+  toolbarContextMenu(item: string): void;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
 
@@ -65,10 +66,12 @@ interface GoldfinchInternalBridge {
   version: number;
   settingsGet(key: string): Promise<any>;
   settingsSet(key: string, value: any): Promise<any>;
-  onSettingsChanged(cb: (all: any) => void): void;
+  onSettingsChanged(cb: (all: any) => void): number;
+  offSettingsChanged(h: number): void;
   shieldsGet(): Promise<any>;
   shieldsSet(patch: object): Promise<any>;
-  onShieldsChanged(cb: (cfg: any) => void): void;
+  onShieldsChanged(cb: (cfg: any) => void): number;
+  offShieldsChanged(h: number): void;
 }
 
 interface Window {

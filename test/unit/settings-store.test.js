@@ -321,3 +321,183 @@ test('custom serializer round-trip', () => {
     removeTempDir(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// toolbarPins tests
+// ---------------------------------------------------------------------------
+
+// Test: toolbarPins default on first load
+test('toolbarPins — default on first load (no settings.json)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.deepEqual(result.toolbarPins, { media: true, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: set full toolbarPins → persist → reload
+test('toolbarPins — set full map persists and reloads', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('toolbarPins', { media: false, shields: true });
+
+    const result = store.load(dir);
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: set partial {media:false} → normalized to {media:false, shields:true}
+test('toolbarPins — set partial map normalizes to full map', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('toolbarPins', { media: false });
+
+    // After set, both get and getAll should return the normalized full map
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
+    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true });
+
+    // Also verify persistence: reload should preserve the normalized value
+    const result = store.load(dir);
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: set throws on invalid toolbarPins values, prior value kept
+test('toolbarPins — set throws on null, prior value kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('toolbarPins');
+
+    assert.throws(
+      () => store.set('toolbarPins', null),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.deepEqual(store.get('toolbarPins'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('toolbarPins — set throws on array, prior value kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('toolbarPins');
+
+    assert.throws(
+      () => store.set('toolbarPins', []),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.deepEqual(store.get('toolbarPins'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('toolbarPins — set throws on string, prior value kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('toolbarPins');
+
+    assert.throws(
+      () => store.set('toolbarPins', 'x'),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.deepEqual(store.get('toolbarPins'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('toolbarPins — set throws on non-boolean value, prior value kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('toolbarPins');
+
+    assert.throws(
+      () => store.set('toolbarPins', { media: 'no' }),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.deepEqual(store.get('toolbarPins'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: load stored partial {media:false} → {media:false, shields:true} (forward-compat)
+test('toolbarPins — load stored partial map merges with defaults (forward-compat)', () => {
+  const dir = makeTempDir();
+  try {
+    // Write a settings.json with only media:false (shields missing — simulates a future file
+    // read by an older build, or a file written before shields was added)
+    const partial = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: { media: false } });
+    fs.writeFileSync(path.join(dir, 'settings.json'), partial, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    // Both get() and getAll() must return the fully-merged map
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
+    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: load malformed toolbarPins (string) → default {media:true, shields:true}
+test('toolbarPins — load malformed toolbarPins falls back to default', () => {
+  const dir = makeTempDir();
+  try {
+    const bad = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: 'x' });
+    fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.deepEqual(result.toolbarPins, { media: true, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: getAll().toolbarPins is a fresh object (mutating snapshot doesn't corrupt store)
+test('toolbarPins — getAll returns a fresh nested object', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+
+    const snapshot = store.getAll();
+    // Mutate the returned snapshot's toolbarPins
+    snapshot.toolbarPins.media = false;
+    snapshot.toolbarPins.shields = false;
+
+    // Store must be unaffected
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
+    assert.deepEqual(store.getAll().toolbarPins, { media: true, shields: true });
+  } finally {
+    removeTempDir(dir);
+  }
+});

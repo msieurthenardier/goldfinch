@@ -999,11 +999,54 @@ a:focus-visible {
   margin-top: 8px;
 }
 
-/* Shield toolbar button turns red when trackers are present. */
+/* Icon + badge toolbar buttons (Media, Shields). Each is an .icon-btn with a
+   .tb-glyph (inline SVG, aria-hidden) and a .tb-badge (count overlay).
+   The button uses relative positioning to anchor the badge in the corner.
+   Flex centering aligns the SVG glyph within the button box. */
+#toggle-media,
+#toggle-privacy {
+  position: relative;
+  width: 36px; /* slightly wider than the 32px default to give the badge room */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* .tb-glyph is now an inline <svg>; block + fixed dimensions ensure it occupies
+   exactly its 16×16 footprint. stroke="currentColor" means the button's CSS
+   color (including .alert red) drives the stroke automatically. */
+.tb-glyph {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.tb-badge {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Shield toolbar button turns red when trackers are present.
+   Note: .icon-btn has no border, so border-color is vestigial here — the
+   background + color changes carry the alert state visually. */
 #toggle-privacy.alert {
   background: #c0392b;
-  border-color: #c0392b;
   color: #fff;
+}
+/* Alert badge on the Shields icon uses a brighter red so it reads on the red button */
+#toggle-privacy.alert .tb-badge {
+  background: #ff6b6b;
+  color: #1e1f25;
 }
 
 /* privacy status tones */

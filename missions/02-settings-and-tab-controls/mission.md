@@ -157,6 +157,16 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
 
 ## Known Issues
 
+- **No system-wide context-menu component (native menus are clumsy)** — surfaced during Flight 7 HAT
+  (operator). Flight 7's right-click "Unpin" on a pinned toolbar icon uses a **native Electron menu** (chosen
+  for scope; DD7), which is OS-styled and reads as clumsy against the app's custom dark/gold chrome. The
+  right-click → Unpin *works*; only the presentation is off. **Future need**: a **system-wide custom
+  context-menu component** (a design-system context menu — on-brand styling, keyboard/Escape/outside-dismiss,
+  and behavior-testable since it lives in the DOM), then migrate the toolbar Unpin (and any other right-click
+  surfaces) onto it. This is likely the moment to graduate `menuController` to a reusable module (the
+  long-deferred Flight-5/6 debt) since a context menu would be its 4th consumer. Out of scope for Flight 7; a
+  future flight.
+
 - **Shields has no per-site overrides (only global config + coarse per-site pause)** — surfaced during
   Flight 6 HAT (operator). The Shields toggles (`enabled`/`block`/`strip`/`isolate`/`farble`) are **global**:
   the settings page and the slide-out panel are in lock-step regardless of the active site. The only per-site
@@ -269,7 +279,7 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   Issue). (SC7, SC8) *(Scope split at planning, by operator decision: the pin system + the "Site settings →"
   rewire moved to Flight 7 — this flight grew past one 1–3 day flight. Per-site Shields pause stays in the
   slide-out panel.)*
-- [ ] **Flight 7: Pinnable toolbar items (Media + Shields)** *(flight-local; added at Flight-6 planning by
+- [x] **Flight 7: Pinnable toolbar items (Media + Shields)** *(flight-local; added at Flight-6 planning by
   operator decision)* — a generic **pin/unpin** system for toolbar items, stored in the Flight-6 settings
   store: **pinned** → shown in the address-bar row **as an icon** (Media + Shields convert from text to
   icon); **unpinned** → removed from the toolbar, reachable only via settings. Both default **pinned**
