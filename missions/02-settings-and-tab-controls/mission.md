@@ -251,7 +251,20 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   handler to serve CSS/JS subresources, and hoisting the shared `menuController` keyboard contract
   before the popup becomes menu #3. May split into Flight 5 (shell) + 5b (chips/popup/lock) if it
   balloons.)*
-- [ ] **Flight 6: Wire existing controls** — surface the Shields toggles into the settings page
-  via the internal-page bridge (reusing `shields-get`/`shields-set`); promote `HOMEPAGE` to a real
-  persisted, editable home-page setting (minimal store + get/set IPC, read at tab creation). Both
-  persist and take live effect, matching the existing panels. (SC7, SC8)
+- [ ] **Flight 6: Wire existing controls** — surface the **global** Shields toggles into the settings page
+  and promote `HOMEPAGE` to a real persisted, editable setting, both persisting + taking live effect and
+  staying consistent with the existing panels. Backed by a **new durable, secure, schema-versioned settings
+  store** (built properly now — operator) and the **origin-checked internal-page bridge** (main-side
+  sender verification — the hard security prerequisite that closes the Flight-4/5 internal-bridge Known
+  Issue). (SC7, SC8) *(Scope split at planning, by operator decision: the pin system + the "Site settings →"
+  rewire moved to Flight 7 — this flight grew past one 1–3 day flight. Per-site Shields pause stays in the
+  slide-out panel.)*
+- [ ] **Flight 7: Pinnable toolbar items (Media + Shields)** *(flight-local; added at Flight-6 planning by
+  operator decision)* — a generic **pin/unpin** system for toolbar items, stored in the Flight-6 settings
+  store: **pinned** → shown in the address-bar row **as an icon** (Media + Shields convert from text to
+  icon); **unpinned** → removed from the toolbar, reachable only via settings. Both default **pinned**
+  (preserve today's UX). Rewire the site-info popup's **"Site settings →"** to open the **settings page**
+  (Privacy & Shields section) rather than the now-optional slide-out panel. Generic mechanism (more items
+  later). Also pulls forward the deferred debt on that surface: `menuController` module-graduation +
+  unit-test (if a 4th consumer lands), `buildSiteInfo` defensive escaping, the `isInternalTab` coupling
+  comment. *(No new SC — flight-local UX, like Flight 5's chips.)*
