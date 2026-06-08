@@ -1,6 +1,6 @@
 # Flight: Wire Existing Controls (Shields + Home Page) into Settings
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
