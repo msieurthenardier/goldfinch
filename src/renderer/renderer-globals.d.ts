@@ -45,6 +45,12 @@ interface GoldfinchBridge {
 
   // Absolute file:// path to the webview preload script.
   webviewPreloadPath: string;
+
+  // Absolute file:// path to the trusted internal-page preload script.
+  internalPreloadPath: string;
+
+  // The internal `goldfinch://` partition string (single source of truth).
+  internalPartition: string;
 }
 
 interface Window {
@@ -57,3 +63,4 @@ interface Window {
  */
 declare function isSafeTabUrl(url: any): boolean;
 declare function isSafePosterUrl(url: any): boolean;
+declare function isInternalPageUrl(url: any): boolean;

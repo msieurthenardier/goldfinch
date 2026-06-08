@@ -76,11 +76,47 @@ function isSafePosterUrl(url) {
   return true;
 }
 
+/**
+ * isInternalPageUrl(url)
+ *
+ * Returns true iff the URL is the canonical root of a trusted internal page:
+ *   - goldfinch://settings   (with or without a trailing slash)
+ *
+ * Used ONLY by the trusted branch of createTab (provenance is the call site —
+ * the flag is never inferred from the URL). Mirrors leg-2's main-process root-path
+ * logic: accept `pathname === '/' || pathname === ''` so it holds in BOTH the Node
+ * test runner (where `goldfinch` is not a registered standard scheme → `pathname:''`)
+ * and the Electron runtime (registered standard scheme → `pathname:'/'`).
+ *
+ * Returns false for everything else: goldfinch://settings/<sub>, goldfinch://<other>,
+ * every web/file/data/javascript scheme, non-strings, empties, malformed input.
+ * Never throws.
+ */
+function isInternalPageUrl(url) {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (trimmed === '') return false;
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return false;
+  }
+
+  return (
+    parsed.protocol === 'goldfinch:' &&
+    parsed.host === 'settings' &&
+    (parsed.pathname === '/' || parsed.pathname === '')
+  );
+}
+
 // Dual export: CommonJS (main process + test runner) and global (renderer,
 // which runs with nodeIntegration:false and cannot require()).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { isSafeTabUrl, isSafePosterUrl };
+  module.exports = { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl };
 } else {
   /** @type {any} */ (globalThis).isSafeTabUrl = isSafeTabUrl;
   /** @type {any} */ (globalThis).isSafePosterUrl = isSafePosterUrl;
+  /** @type {any} */ (globalThis).isInternalPageUrl = isInternalPageUrl;
 }

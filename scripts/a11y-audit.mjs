@@ -1,11 +1,27 @@
 // Accessibility audit harness — injects axe-core into the running app's
-// renderer over CDP and fails on violations. (Flight 5 / DD3.)
+// renderer over CDP and diffs violations against a curated baseline.
+// (Origin: DD3 — CDP `Runtime.evaluate` bypasses the page CSP, which is what
+// lets us inject axe into the running renderer at all.)
+//
+// Baseline-diff gate (DD7): rather than failing on ANY violation, the harness
+// diffs each violation's per-node target selectors against a small, hand-curated
+// committed ACCEPTED allowlist ({ id, selector, reason }, optional state). A
+// violation node is "accepted" only when some ACCEPTED entry matches its rule id
+// AND its node selector (state as an optional tiebreak); any unmatched
+// (id, node-selector) pair is a NEW finding and fails the gate. The allowlist is
+// curated and REVIEWED IN THE PR — it is never auto-dumped from raw axe output
+// (a `--update` golden-dump would churn and get rubber-stamped, so there isn't
+// one). Matching is per node, so an accepted selector never suppresses a
+// different, unaccepted node of the same rule id.
 //
 // Usage:
 //   npm run a11y                       # full rule set (verify-leg sweep)
 //   npm run a11y -- --rules=button-name,aria-valid-attr-value
 //   npm run a11y -- --tags=wcag2a,wcag2aa
 //   npm run a11y -- --url=http://127.0.0.1:8000/   # media fixture to load
+//   npm run a11y -- --target=goldfinch://settings  # audit a guest <webview>
+//                                                  # target by URL substring
+//                                                  # instead of the chrome
 //
 // `nested-interactive` is ALWAYS disabled: the tab strip's role="tab" wrapping
 // a focusable close <button> is an accepted, documented APG pattern (see
@@ -38,6 +54,9 @@ const tagsArg = argValue('--tags');
 const fixtureUrl = argValue('--url') || DEFAULT_FIXTURE_URL;
 // A reasonable image path inside the fixture, used to force the lightbox open.
 const fixtureImageUrl = new URL('bird.png', fixtureUrl).href;
+// --target=<url-substring>: audit an already-loaded guest page/<webview> target
+// (e.g. goldfinch://settings) instead of the chrome index.html renderer (DD7).
+const targetArg = argValue('--target');
 
 // axe `runOnly` selector: rules take precedence over tags; omit for the full set.
 let runOnly = null;
@@ -64,6 +83,39 @@ function fail(msg) {
   process.exit(1);
 }
 
+// ---------- curated a11y baseline (DD7) ----------
+// Hand-curated allowlist of accepted, pre-existing violations. A violation node
+// is suppressed ONLY when an entry matches the rule `id` AND the node `selector`
+// (with `state` as an optional tiebreak — when set, the entry only matches that
+// UI state). Curated + reviewed in the PR — never auto-dumped.
+//
+// Reconciled against the live `npm run a11y` run on 2026-06-07 (Flight 4, leg
+// verify-integration). The 5 structural app-shell entries were CONFIRMED present
+// in the live run (16 matching nodes across base-chrome/media-panel/privacy-panel/
+// lightbox). The 2 scrollable-region-focusable entries did NOT fire in the gate's
+// states — they only trigger when the scroll region actually overflows, which the
+// gate's empty privacy/lightbox states don't; they are kept PRE-ACCEPTED (mission
+// Known Issue stands) so they don't surface as NEW if a future overflow state is
+// audited. Curated + reviewed in the PR — never auto-dumped. Unused entries are
+// harmless (an entry that matches nothing never suppresses anything).
+const ACCEPTED = [
+  // ~8 moderate structural app-shell findings: the browser chrome is an app shell,
+  // not a document, so it has landmark/heading/region advisories that are accepted
+  // exceptions (cf. the committed nested-interactive disable). Confirmed live
+  // 2026-06-07; targets verified against src/renderer/index.html ids.
+  { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
+  { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
+  { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
+  // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a
+  // scroll container that isn't keyboard-focusable. Not reproduced by the gate's
+  // current (no-overflow) privacy-panel/lightbox states as of 2026-06-07; kept
+  // pre-accepted so a future overflow-state audit doesn't flag them as NEW.
+  { id: 'scrollable-region-focusable', selector: '#privacy-body', state: 'privacy-panel', reason: 'privacy-panel scroll body not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' },
+  { id: 'scrollable-region-focusable', selector: '#lightbox-stage', state: 'lightbox', reason: 'lightbox scroll stage not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' }
+];
+
 // ---------- pick the renderer target ----------
 async function findRendererTarget() {
   let list;
@@ -83,6 +135,45 @@ async function findRendererTarget() {
   );
   if (!target || !target.webSocketDebuggerUrl) {
     fail('no renderer target (url ending in index.html) found at :9222 — is the app running?');
+  }
+  return target;
+}
+
+// ---------- pick a guest target by URL substring (DD7, --target mode) ----------
+// Selects a guest page/<webview> whose URL contains `substring` (e.g.
+// 'goldfinch://settings') instead of the chrome. Assumes the guest is ALREADY
+// loaded — this mode does no fixture navigate and drives none of the chrome's
+// state functions (a guest has no togglePanel/togglePrivacy/openLightbox).
+//
+// LEG-6 CAVEAT (live-confirm): the flat CDP `/json` list may NOT surface Electron
+// `<webview>` guests (especially the privileged goldfinch:// internal page) —
+// they can be out-of-process targets reachable only via Target.getTargets /
+// Target.setAutoAttach over the browser-level endpoint. If a goldfinch:// guest
+// doesn't appear in this list, leg 6 must switch to that mechanism; this
+// flat-list find is the statically-correct starting point, not a proven one.
+async function findGuestTarget(substring) {
+  let list;
+  try {
+    const res = await fetch(`${CDP_HTTP}/json`);
+    list = await res.json();
+  } catch (e) {
+    fail(
+      `cannot reach CDP at ${CDP_HTTP} (${e.message}). ` +
+        'Start the app with `npm run dev:debug` first — this gate needs the live GUI.'
+    );
+  }
+  const target = list.find(
+    (t) =>
+      (t.type === 'page' || t.type === 'webview') &&
+      typeof t.url === 'string' &&
+      t.url.includes(substring)
+  );
+  if (!target || !target.webSocketDebuggerUrl) {
+    fail(
+      `no guest target with a url containing "${substring}" found at :9222 — is it loaded? ` +
+        '(a <webview> guest may not appear in the flat /json list; leg 6 may need ' +
+        'Target.getTargets/setAutoAttach — see the findGuestTarget note.)'
+    );
   }
   return target;
 }
@@ -148,8 +239,14 @@ async function runAxe(cdp, axeSource, stateLabel) {
   await evaluate(cdp, axeSource);
   const opts = { rules: { 'nested-interactive': { enabled: false } } };
   if (runOnly) opts.runOnly = runOnly;
+  // Capture each node's target SELECTORS (not just a count) so allowlist matching
+  // is by id + selector, per node. axe `target` is a CrossTreeSelector[] and
+  // shadow-DOM entries are themselves arrays (arrays-of-arrays), so flatten
+  // before join or a shadow target collapses into a malformed "#a #b,#c".
   const expr = `axe.run(document, ${JSON.stringify(opts)}).then(r => r.violations.map(v => ({
-    id: v.id, impact: v.impact, nodes: v.nodes.length, help: v.help
+    id: v.id, impact: v.impact, help: v.help,
+    count: v.nodes.length,
+    nodes: v.nodes.map(n => n.target.flat(Infinity).join(' '))
   })))`;
   const violations = await evaluate(cdp, expr, { awaitPromise: true });
   return (violations || []).map((v) => ({ ...v, state: stateLabel }));
@@ -157,55 +254,95 @@ async function runAxe(cdp, axeSource, stateLabel) {
 
 // ---------- drive the UI into each state, audit, aggregate ----------
 async function main() {
-  const target = await findRendererTarget();
+  const target = targetArg ? await findGuestTarget(targetArg) : await findRendererTarget();
   const cdp = connect(target.webSocketDebuggerUrl);
   await cdp.ready;
   await cdp.send('Runtime.enable');
 
   const axeSource = readFileSync(join(__dirname, '..', 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
 
-  // Load the media fixture so the media panel has something to catalog.
-  await evaluate(cdp, `navigate(${JSON.stringify(fixtureUrl)})`);
-  await sleep(2500); // let the guest load + the media scan populate
-
   const allViolations = [];
 
-  // The media & privacy panels are mutually exclusive (togglePrivacy(true)
-  // closes the media panel) and renderPrivacy() early-returns while collapsed,
-  // so each state must be opened and audited separately — NOT by toggling the
-  // .collapsed class directly. Drive the renderer's own functions.
+  if (targetArg) {
+    // Guest mode (DD7): the target is an already-loaded guest page/<webview>
+    // (e.g. goldfinch://settings). It has none of the chrome's state-driving
+    // functions, so we skip the 4-state sweep entirely — just inject axe and
+    // audit its current DOM once (no fixture navigate, no UI driving).
+    allViolations.push(...(await runAxe(cdp, axeSource, `guest:${targetArg}`)));
+  } else {
+    // Chrome mode: load the media fixture so the media panel has something to
+    // catalog, then drive the renderer into each state and audit.
+    await evaluate(cdp, `navigate(${JSON.stringify(fixtureUrl)})`);
+    await sleep(2500); // let the guest load + the media scan populate
 
-  // 1) Base chrome.
-  allViolations.push(...(await runAxe(cdp, axeSource, 'base-chrome')));
+    // The media & privacy panels are mutually exclusive (togglePrivacy(true)
+    // closes the media panel) and renderPrivacy() early-returns while collapsed,
+    // so each state must be opened and audited separately — NOT by toggling the
+    // .collapsed class directly. Drive the renderer's own functions.
 
-  // 2) Media panel open (media cards / iconBtn / media-pick controls render).
-  await evaluate(cdp, 'togglePanel(true)');
-  await sleep(400);
-  allViolations.push(...(await runAxe(cdp, axeSource, 'media-panel')));
+    // 1) Base chrome.
+    allViolations.push(...(await runAxe(cdp, axeSource, 'base-chrome')));
 
-  // 3) Privacy panel open (pShields() renders the Shields switches).
-  await evaluate(cdp, 'togglePrivacy(true)');
-  await sleep(400);
-  allViolations.push(...(await runAxe(cdp, axeSource, 'privacy-panel')));
+    // 2) Media panel open (media cards / iconBtn / media-pick controls render).
+    await evaluate(cdp, 'togglePanel(true)');
+    await sleep(400);
+    allViolations.push(...(await runAxe(cdp, axeSource, 'media-panel')));
 
-  // 4) Lightbox open on a fixture image (dialog + transport controls render).
-  await evaluate(cdp, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
-  await sleep(400);
-  allViolations.push(...(await runAxe(cdp, axeSource, 'lightbox')));
+    // 3) Privacy panel open (pShields() renders the Shields switches).
+    await evaluate(cdp, 'togglePrivacy(true)');
+    await sleep(400);
+    allViolations.push(...(await runAxe(cdp, axeSource, 'privacy-panel')));
+
+    // 4) Lightbox open on a fixture image (dialog + transport controls render).
+    await evaluate(cdp, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
+    await sleep(400);
+    allViolations.push(...(await runAxe(cdp, axeSource, 'lightbox')));
+  }
 
   cdp.close();
 
+  // ---------- partition: accepted (baseline) vs NEW, PER NODE (DD7) ----------
+  // Explode every violation into per-node (id, selector, state) pairs and match
+  // each pair independently against ACCEPTED. A pair is accepted iff some entry
+  // shares the same id AND selector (and, when the entry sets `state`, the same
+  // state). Per-node matching means an accepted selector NEVER suppresses a
+  // different, unaccepted node of the same rule id.
+  const accepted = [];
+  const newPairs = [];
+  for (const v of allViolations) {
+    for (const selector of v.nodes) {
+      const pair = { id: v.id, selector, state: v.state, impact: v.impact, help: v.help };
+      const isAccepted = ACCEPTED.some(
+        (e) =>
+          e.id === v.id &&
+          e.selector === selector &&
+          (e.state === undefined || e.state === v.state)
+      );
+      (isAccepted ? accepted : newPairs).push(pair);
+    }
+  }
+
   // ---------- report ----------
   console.log(
-    `\na11y-audit — ${runOnly ? `${runOnly.type}s: ${runOnly.values.join(',')}` : 'full rule set'} (nested-interactive disabled)`
+    `\na11y-audit — ${runOnly ? `${runOnly.type}s: ${runOnly.values.join(',')}` : 'full rule set'} (nested-interactive disabled)` +
+      (targetArg ? ` — guest target containing "${targetArg}"` : '')
   );
-  if (allViolations.length === 0) {
-    console.log('No violations across all states. ✅');
+
+  if (accepted.length > 0) {
+    console.log(`\n${accepted.length} accepted (baseline) violation node(s) — informational:`);
+    for (const p of accepted) {
+      console.log(`  [${p.state}] ${p.id} — ${p.impact || 'n/a'} — ${p.selector}`);
+    }
+  }
+
+  if (newPairs.length === 0) {
+    console.log('\nNo NEW violations — every violation node is in the ACCEPTED baseline. ✅');
     process.exit(0);
   }
-  console.log(`\n${allViolations.length} violation(s):`);
-  for (const v of allViolations) {
-    console.log(`  [${v.state}] ${v.id} — ${v.impact || 'n/a'} — ${v.nodes} node(s) — ${v.help}`);
+
+  console.log(`\n${newPairs.length} NEW violation node(s) — not in the ACCEPTED baseline:`);
+  for (const p of newPairs) {
+    console.log(`  [${p.state}] ${p.id} — ${p.impact || 'n/a'} — ${p.selector} — ${p.help}`);
   }
   process.exit(1);
 }

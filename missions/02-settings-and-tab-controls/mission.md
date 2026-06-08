@@ -71,11 +71,13 @@ cannot reuse the media webview-preload or the chrome `window.goldfinch` surface.
   app tears down the test harness, so this is checked by hand, not by behavior test*).
   *(Verified Flight 2: trusted Exit click → `app.quit()` → clean termination, Windows/Linux;
   macOS deferred to a mac HAT.)*
-- [ ] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
+- [x] **SC5** — Choosing **Settings** opens the settings surface in its own tab via an internal
   address, reloadable like any other tab, while web-page content **cannot navigate to, open,
   embed, or spoof** the internal scheme — page-originated attempts (`window.open('goldfinch://…')`,
   `location = 'goldfinch://…'`, `<iframe src="goldfinch://…">`, cross-origin `fetch`) are all
-  rejected (*behavior-test-backed — extends the `tab-scheme-guard` spec*).
+  rejected (*behavior-test-backed — extends the `tab-scheme-guard` spec*). **Verified Flight 4:
+  `tab-scheme-guard` 13/13 live; all four spoof vectors rejected; trusted kebab→Settings opens +
+  reloads `goldfinch://settings`. (Surface is a stub — SC6/SC7 enrich/wire it in Flights 5/6.)**
 - [ ] **SC6** — The settings surface presents a modern-browser-style layout — persistent
   section navigation plus titled sections — recognizable as a settings area, with placeholder
   content wherever controls are not yet wired.
@@ -164,6 +166,36 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   verify-integration a11y sweep but **confirmed pre-existing** (identical on the pre-flight build);
   not introduced by Flight 1, which touched neither component. Tracked here for a future a11y /
   panels touch-up — fix: give `#privacy-body` + the lightbox scroll container `tabindex="0"`.
+  *(Flight 4 update: the a11y gate is now baseline-pinned — `scripts/a11y-audit.mjs` diffs against a
+  curated `ACCEPTED` allowlist. The live 2026-06-07 run did NOT reproduce these two (they only fire
+  when the scroll region overflows, which the gate's empty states don't); they are kept **pre-accepted**
+  in the allowlist so a future overflow-state audit won't flag them as NEW. The underlying fix still
+  stands.)*
+
+- **Internal tab is freely web-navigable → harden the internal bridge before Flight 6 wires real IPC**
+  — discovered in Flight 4 verify-integration. The settings tab is a first-class tab (Option A), so its
+  address bar / programmatic `navigate()` can load an arbitrary http page **into the privileged
+  `goldfinch-internal` session** (webPreferences are fixed at webview attach, so the http page inherits
+  `contextIsolation:true` + the internal preload + access to the `goldfinch://` handler). **Inert in
+  Flight 4** (the bridge exposes only `{version:1}`; entry requires a *trusted, chrome-initiated*
+  navigation — not web-reachable; all SC5 gates verified 13/13). **But Flight 6 adds real
+  home-page/Shields IPC to the internal bridge** — at which point web content in the internal tab could
+  call privileged IPC. **This is the Electron analogue of Chrome's process model**: `chrome://` WebUI
+  pages run in a dedicated privileged renderer, and navigating to a web URL forces a **cross-process
+  swap** so web content lands in a fresh sandboxed renderer that never inherits the WebUI context (the
+  "Chrome" address-bar chip / "secure Chrome page" is Chrome surfacing that privileged context). Our
+  `<webview>` can't do that automatically — `partition`/`preload`/`contextIsolation` are **immutable
+  after attach**, so the internal session persists across the navigation. Fix in Flight 5/6, layered:
+  - **(must, before Flight 6 IPC) Origin-check the bridge** — the internal preload refuses every
+    privileged IPC unless `location.origin` is `goldfinch://…`. Cheap backstop that neutralizes the
+    blast radius even if the swap/lock below slips.
+  - **(swap or lock) Either** re-home the tab on cross-context navigation (tear down + recreate the
+    `<webview>` in the correct session/preload — closest to Chrome's swap) **or** lock internal tabs so
+    they don't free-browse (read-only/special address bar on `goldfinch://`; a web navigation opens a
+    new normal tab instead — simplest, and you don't browse the web *from* a settings page anyway).
+  - **(UX, Flight 5) Address-bar internal-page identity indicator** — a `goldfinch://`/internal chip
+    (à la Chrome's "Chrome" chip) for legibility + anti-spoofing, so web content can't fake a settings
+    page. See `flights/04-internal-page-scheme/flight-log.md` (Anomalies).
 
 ## Flights
 
@@ -190,13 +222,15 @@ discoverability, the unchanged container/privacy behavior, and the accessibility
   removing Flight 2's hand-wired mutual-exclusion. (SC8; flight-local dismissal correctness)
   *(landed 2026-06-07; `menu-dismissal` 9/9, container menu axe-clean, regressions intact, page-click +
   app-switch dismissal HAT-confirmed)*
-- [ ] **Flight 4: Internal page scheme (`goldfinch://`)** — register the privileged internal
+- [x] **Flight 4: Internal page scheme (`goldfinch://`)** — register the privileged internal
   scheme (`{ standard, secure }`) and serve bundled assets via `protocol.handle` on a dedicated
   internal session; open internal pages only through a trusted embedder path; keep `will-navigate`
   rejecting the scheme from web origins; add a dedicated internal-page preload bridge; extend the
   `tab-scheme-guard` behavior test to cover `goldfinch://` spoof/embed vectors. (SC5)
-  *(May split during flight design into "scheme registration + serving" and "boundary hardening +
-  spoof test" — risk is concentrated here.)*
+  *(landed 2026-06-07; NOT split — kept one flight, 7 legs; `tab-scheme-guard` 13/13 live, CSP
+  `frame-ancestors 'none'` confirmed, a11y baseline pinned. The two design reviews caught a synchronous
+  `session-created` exclusion bug and a New-Identity data-loss trap before any code shipped. Latent
+  internal-tab web-navigability finding carried to Flight 5/6 — see Known Issues.)*
 - [ ] **Flight 5: Settings page shell** — build the stub `goldfinch://settings` page with
   modern-browser chrome (persistent section nav + titled sections) and placeholder content;
   accessible. (SC6, SC8)

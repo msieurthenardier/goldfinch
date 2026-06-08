@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isSafeTabUrl, isSafePosterUrl } = require('../../src/shared/url-safety');
+const { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } = require('../../src/shared/url-safety');
 
 // ---------------------------------------------------------------------------
 // Allowed cases
@@ -223,4 +223,66 @@ test('poster: rejects malformed URL (no scheme)', () => {
 
 test('poster: rejects about:blank', () => {
   assert.equal(isSafePosterUrl('about:blank'), false);
+});
+
+// ---------------------------------------------------------------------------
+// isInternalPageUrl — only the canonical goldfinch://settings root is trusted.
+// NOTE: host-casing (goldfinch://SETTINGS) is intentionally NOT asserted — Electron
+// normalizes the host for registered standard schemes but the Node test runner is
+// case-preserving, so such an assertion would diverge from runtime.
+// ---------------------------------------------------------------------------
+test('internal: allows goldfinch://settings', () => {
+  assert.equal(isInternalPageUrl('goldfinch://settings'), true);
+});
+
+test('internal: allows goldfinch://settings/ (trailing slash)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://settings/'), true);
+});
+
+test('internal: rejects goldfinch://settings/x (sub-path)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://settings/x'), false);
+});
+
+test('internal: rejects goldfinch://other host', () => {
+  assert.equal(isInternalPageUrl('goldfinch://other'), false);
+});
+
+test('internal: rejects https://settings', () => {
+  assert.equal(isInternalPageUrl('https://settings'), false);
+});
+
+test('internal: rejects file: URL', () => {
+  assert.equal(isInternalPageUrl('file:///etc/passwd'), false);
+});
+
+test('internal: rejects data: URL', () => {
+  assert.equal(isInternalPageUrl('data:text/html,<h1>hi</h1>'), false);
+});
+
+test('internal: rejects javascript: URL', () => {
+  assert.equal(isInternalPageUrl('javascript:alert(1)'), false);
+});
+
+test('internal: rejects empty string', () => {
+  assert.equal(isInternalPageUrl(''), false);
+});
+
+test('internal: rejects null', () => {
+  assert.equal(isInternalPageUrl(null), false);
+});
+
+test('internal: rejects undefined', () => {
+  assert.equal(isInternalPageUrl(undefined), false);
+});
+
+test('internal: rejects number', () => {
+  assert.equal(isInternalPageUrl(42), false);
+});
+
+test('internal: rejects object', () => {
+  assert.equal(isInternalPageUrl({}), false);
+});
+
+test('internal: rejects malformed URL (no scheme)', () => {
+  assert.equal(isInternalPageUrl('not-a-url'), false);
 });

@@ -95,10 +95,77 @@
     </button>
   </section>
 
+  <section>
+    <h2>Internal scheme (goldfinch://) spoof vectors</h2>
+
+    <!-- Vector 7: goldfinch:// via window.open — rejected at createTab/isSafeTabUrl (renderer gate) -->
+    <button id="open-goldfinch" onclick="window.open('goldfinch://settings')">
+      open goldfinch://settings (window.open — should NOT open internal tab)
+    </button>
+
+    <!-- Vector 8: goldfinch:// via window.location self-navigation — exercises the
+         session-aware will-navigate web branch (still rejects goldfinch://) -->
+    <button id="nav-goldfinch" onclick="window.location = 'goldfinch://settings'">
+      navigate self to goldfinch://settings (will-navigate guard)
+    </button>
+
+    <!-- Vector 9: goldfinch:// embedded as an iframe — must NOT render the settings
+         stub from a web origin (no handler + CSP frame-ancestors). Wired in the
+         <script> below; result written to a stable element so a blank (pass) iframe
+         is distinguishable from "the button never fired". -->
+    <button id="embed-goldfinch">
+      embed &lt;iframe src=&quot;goldfinch://settings&quot;&gt; (should render blank, not the stub)
+    </button>
+    <div id="goldfinch-embed-result"></div>
+
+    <!-- Vector 10: goldfinch:// via fetch — must reject (scheme not registered for the
+         web session). Result written to a stable element + console. Wired below. -->
+    <button id="fetch-goldfinch">
+      fetch('goldfinch://settings') (should reject)
+    </button>
+    <div id="goldfinch-fetch-result"></div>
+  </section>
+
   <script>
     // Wire up the javascript: button here to avoid HTML attribute quoting issues.
     document.getElementById('open-javascript').addEventListener('click', function () {
       window.open('javascript:document.title="pwned"');
+    });
+
+    // Vector 9: inject an explicitly sized, bordered iframe pointed at goldfinch://settings.
+    // From a web origin this has no handler (and the internal CSP frame-ancestors 'none'),
+    // so the frame stays blank — it must NOT render the "Settings — coming soon" stub.
+    // We write a positive status so a blank-but-present iframe (the pass state) is
+    // distinguishable from a button that never fired.
+    document.getElementById('embed-goldfinch').addEventListener('click', function () {
+      var iframe = document.createElement('iframe');
+      iframe.src = 'goldfinch://settings';
+      iframe.id = 'goldfinch-embed-frame';
+      iframe.width = '320';
+      iframe.height = '120';
+      iframe.style.display = 'block';
+      iframe.style.marginTop = '0.5rem';
+      iframe.style.border = '2px solid #f90';
+      iframe.style.background = '#000';
+      document.body.appendChild(iframe);
+      var msg = 'iframe injected (src=goldfinch://settings)';
+      document.getElementById('goldfinch-embed-result').textContent = msg;
+      console.log('tab-scheme-guard:', msg);
+    });
+
+    // Vector 10: fetch goldfinch://settings from the web origin. Expected to reject
+    // (scheme not registered for this session). Mirror the outcome to a stable element
+    // and the console so the Validator can read resolved-vs-rejected.
+    document.getElementById('fetch-goldfinch').addEventListener('click', function () {
+      var out = document.getElementById('goldfinch-fetch-result');
+      fetch('goldfinch://settings').then(function () {
+        out.textContent = 'resolved';
+        console.log('tab-scheme-guard: fetch goldfinch://settings resolved');
+      }).catch(function (err) {
+        var msg = 'rejected: ' + err;
+        out.textContent = msg;
+        console.log('tab-scheme-guard: fetch goldfinch://settings ' + msg);
+      });
     });
 
     console.log('tab-scheme-guard fixture loaded');

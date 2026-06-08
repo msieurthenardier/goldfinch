@@ -326,7 +326,7 @@ function closeKebabMenu() {
 // Activation: native click on the focused <button> menuitem fires these.
 els.kebabMenu.querySelector('#kebab-settings')?.addEventListener('click', () => {
   closeKebabMenu();
-  // TODO(Flight 3+): open goldfinch://settings once the internal-page path exists
+  createTab('goldfinch://settings', null, { trusted: true });
 });
 els.kebabMenu.querySelector('#kebab-exit')?.addEventListener('click', () => {
   closeKebabMenu();
@@ -375,15 +375,26 @@ els.kebabMenu.addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------------------------ tabs */
 
-function createTab(url = HOMEPAGE, container = null) {
-  if (!isSafeTabUrl(url)) return null;
+function createTab(url = HOMEPAGE, container = null, { trusted = false } = {}) {
+  // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
+  // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
+  // so web content reaching here via onOpenTab can never select the internal branch.
+  const ok = trusted ? isInternalPageUrl(url) : isSafeTabUrl(url);
+  if (!ok) return null;
   const id = `tab-${++tabSeq}`;
-  const jar = container || DEFAULT_CONTAINER;
+  // ⚠️ DATA-LOSS TRAP: the synthetic internal jar is set as the `jar` ITSELF — one object
+  // that the webview `partition` attribute, `tab.container`, AND the dot logic all derive
+  // from. If the partition were set to the internal string while tab.container stayed
+  // DEFAULT_CONTAINER, a New Identity click on the Settings tab would wipe the user's real
+  // `persist:goldfinch` jar (identity-new reads tab.container.partition).
+  const jar = trusted
+    ? { id: 'internal', name: 'Settings', color: '#9aa0ac', partition: window.goldfinch.internalPartition }
+    : container || DEFAULT_CONTAINER;
 
   const webview = /** @type {Electron.WebviewTag} */ (document.createElement('webview'));
   webview.id = `webview-${id}`;
   webview.setAttribute('src', url);
-  webview.setAttribute('preload', window.goldfinch.webviewPreloadPath);
+  webview.setAttribute('preload', trusted ? window.goldfinch.internalPreloadPath : window.goldfinch.webviewPreloadPath);
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', jar.partition);
   webview.classList.add('hidden');
@@ -413,9 +424,10 @@ function createTab(url = HOMEPAGE, container = null) {
   btn.setAttribute('aria-controls', `webview-${id}`);
   btn.setAttribute('aria-keyshortcuts', 'Delete');
   btn.setAttribute('aria-label', 'New tab');
-  // Colored dot for non-default jars.
+  // Colored dot for non-default jars. The internal (Settings) jar is treated like
+  // default — no dot (it's chrome, not a user container).
   const dot =
-    jar.id === 'default'
+    jar.id === 'default' || jar.id === 'internal'
       ? ''
       : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
   btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;

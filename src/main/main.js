@@ -1,15 +1,79 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
-const { isSafeTabUrl } = require('../shared/url-safety');
+const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
+const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 
 const PAGE_PARTITION = 'persist:goldfinch';
+
+// Dedicated, in-memory session for internal `goldfinch://` pages. INTERNAL_PARTITION is
+// imported from the shared module above (single source of truth) — it must match
+// byte-for-byte the `partition` the trusted webview sets (leg 3). No `persist:` prefix —
+// the stub is static and has no state to persist (DD3).
+
+// Register `goldfinch://` as a privileged scheme at MODULE LOAD — before app ready, which
+// registerSchemesAsPrivileged requires. `standard: true` is LOAD-BEARING: it gives the
+// scheme real origin/host semantics so `new URL('goldfinch://settings').host === 'settings'`
+// (the host-based routing the handler relies on) and yields a secure context for the strict
+// CSP; `secure: true` marks it a trusted origin. Do NOT "simplify" these privileges away. (DD2)
+protocol.registerSchemesAsPrivileged([{ scheme: 'goldfinch', privileges: { standard: true, secure: true } }]);
+
+// Fixed host -> bundled file allowlist for the internal scheme. Adding a page (Flight 5) is
+// an explicit edit here, never a directory passthrough — paths are NOT derived from the URL,
+// so traversal is structurally impossible. `asar:false` + `files: src/**/*` ship these
+// unpacked, so pathToFileURL resolves in dev and packaged builds alike.
+const INTERNAL_PAGES = {
+  settings: path.join(__dirname, '..', 'renderer', 'pages', 'settings.html')
+};
+
+// Strict CSP for internal pages, set in the protocol.handle RESPONSE headers (DD3) — NOT via
+// onHeadersReceived (custom-protocol responses bypass the webRequest pipeline, so that hook
+// would silently never fire). `frame-ancestors 'none'` is the in-page half of the anti-embed
+// guarantee; `default-src 'self'` forbids inline script/style (the stub uses neither).
+const INTERNAL_CSP = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
+
+// Set to true immediately BEFORE session.fromPartition(INTERNAL_PARTITION). That call emits
+// `session-created` SYNCHRONOUSLY, before any post-creation marker on the session could be
+// set — so the hook must read THIS module-scoped flag to skip the web-content wirings
+// (applyShields + wireDownloadHandler). The post-creation `__goldfinchInternal` marker is
+// only belt-and-suspenders. (DD3 / leg acceptance criterion)
+let creatingInternalSession = false;
+
+// protocol.handle handler for the internal session. Serves ONLY the fixed INTERNAL_PAGES
+// allowlist (host-based, root path, GET); 404s everything else; 405s non-GET; never throws
+// (an unhandled throw in protocol.handle yields a failed load with no diagnostics).
+async function handleInternal(request) {
+  if (request.method !== 'GET') {
+    return new Response('Method not allowed', { status: 405 });
+  }
+  const url = new URL(request.url);
+  const file = INTERNAL_PAGES[url.host];
+  const rootPath = url.pathname === '/' || url.pathname === '';
+  if (!file || !rootPath) {
+    return new Response('Not found', { status: 404 });
+  }
+  try {
+    const res = await net.fetch(pathToFileURL(file).toString());
+    if (!res.ok) return new Response('Not found', { status: 404 });
+    // Re-wrap so we control the headers — do NOT pass net.fetch's file: headers verbatim.
+    // res.body is a ReadableStream, accepted by the Response constructor.
+    return new Response(res.body, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': INTERNAL_CSP
+      }
+    });
+  } catch {
+    return new Response('Internal error', { status: 500 });
+  }
+}
 
 let mainWindow = null;
 
@@ -43,7 +107,18 @@ function createWindow() {
   // Run each <webview> preload in the page's MAIN world so the privacy hooks
   // can wrap fingerprinting APIs directly (CSP-immune). nodeIntegration stays
   // off, so pages get no Node; the preload's vars stay module-scoped.
-  mainWindow.webContents.on('will-attach-webview', (_e, webPreferences) => {
+  //
+  // EXCEPTION: the trusted internal `goldfinch://` webview (identified by its
+  // partition) runs CONTEXT-ISOLATED + sandboxed with no node — it's privileged
+  // local chrome, not untrusted web content, and its minimal preload uses only
+  // contextBridge (sandbox-compatible). (DD5 / leg 3)
+  mainWindow.webContents.on('will-attach-webview', (_e, webPreferences, params) => {
+    if (params.partition === INTERNAL_PARTITION) {
+      webPreferences.contextIsolation = true;
+      webPreferences.nodeIntegration = false;
+      webPreferences.sandbox = true;
+      return;
+    }
     webPreferences.contextIsolation = false;
     webPreferences.sandbox = false;
     webPreferences.nodeIntegration = false;
@@ -72,8 +147,18 @@ app.on('web-contents-created', (_event, contents) => {
       if (mainWindow) mainWindow.webContents.send('open-tab', url);
       return { action: 'deny' };
     });
+    // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
+    // navigate only within its own allowlist; every web-origin webview keeps the
+    // stricter web rule (still rejects goldfinch://, file:, data:, javascript:, …).
+    // Optional access → a missing/falsy session falls through to the stricter web branch.
     contents.on('will-navigate', (e, url) => {
-      if (!isSafeTabUrl(url)) e.preventDefault();
+      if (/** @type {any} */ (contents.session)?.__goldfinchInternal) {
+        // Internal session: only ever on the internal allowlist (goldfinch://settings).
+        if (!isInternalPageUrl(url)) e.preventDefault();
+      } else {
+        // Web session: unchanged.
+        if (!isSafeTabUrl(url)) e.preventDefault();
+      }
     });
   }
 });
@@ -310,6 +395,10 @@ function tabFirstParty(id) {
 // webRequest event: it both records privacy data (observe) and enforces the
 // active Shields (block / strip / isolate).
 function applyShields(ses) {
+  // Belt-and-suspenders: the internal session is excluded primarily by the module-flag
+  // skip in the `session-created` hook (it fires synchronously during fromPartition, before
+  // this marker is set). This guard only catches any later explicit applyShields call.
+  if (ses.__goldfinchInternal) return;
   if (ses.__goldfinchShields) return; // wire each session once
   ses.__goldfinchShields = true;
 
@@ -517,6 +606,15 @@ ipcMain.handle('privacy-clear-storage', async (_e, { url }) => {
 // keystone for the multi-jar model: containers, burners and per-site jars all
 // inherit protection automatically.
 app.on('session-created', (ses) => {
+  // PRIMARY exclusion of the internal session: this hook fires synchronously inside
+  // session.fromPartition(INTERNAL_PARTITION) (see whenReady), so the module flag is the
+  // only reliable discriminator — a post-creation marker isn't set yet. Skip BOTH the web
+  // Shields/tracker hooks and the download handler, which have no business on a bundled
+  // local page. (DD3)
+  if (creatingInternalSession) {
+    /** @type {any} */ (ses).__goldfinchInternal = true;
+    return;
+  }
   applyShields(ses);
   wireDownloadHandler(ses);
 });
@@ -530,6 +628,17 @@ app.whenReady().then(() => {
   const pageSession = session.fromPartition(PAGE_PARTITION);
   wireDownloadHandler(pageSession);
   applyShields(pageSession);
+
+  // Dedicated internal session for `goldfinch://` pages. Set the flag BEFORE fromPartition
+  // so the synchronous `session-created` hook skips applyShields + wireDownloadHandler for
+  // it, then register the scheme handler on THIS session's protocol (session-scoped — the
+  // global protocol would bind the default session and the internal webview wouldn't see it). (DD2/DD3)
+  creatingInternalSession = true;
+  const internalSession = session.fromPartition(INTERNAL_PARTITION); // emits session-created synchronously NOW
+  creatingInternalSession = false;
+  /** @type {any} */ (internalSession).__goldfinchInternal = true; // belt-and-suspenders for any later applyShields call
+  internalSession.protocol.handle('goldfinch', handleInternal);
+
   createWindow();
 
   app.on('activate', () => {
