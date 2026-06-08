@@ -243,8 +243,8 @@ the foundations; the two wirings are independent of each other and could paralle
   the guest too (two-way sync). (SC7, SC8; DD3)
 - [x] `docs` - Settings store + bridge security model + home-page setting + Shields-in-settings in
   README/CLAUDE.md.
-- [ ] `verify-integration` - `settings-controls` + security assertion; a11y (chrome + guest); tab-scheme-guard
-  / settings-shell / menu+tab regressions; offline gates. (SC7, SC8)
+- [x] `verify-integration` - `settings-controls` PASS + origin-check security assertion; a11y (chrome +
+  guest) clean; tab-scheme-guard / settings-shell regressions intact; offline 211/211. (SC7, SC8)
 - [ ] `hat-and-alignment` *(optional)* - Guided HAT: wired toggles + home-page control.
 
 ---

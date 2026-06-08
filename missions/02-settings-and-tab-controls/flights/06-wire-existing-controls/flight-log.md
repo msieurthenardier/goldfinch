@@ -254,3 +254,37 @@ deferred to leg 6 (need the running app).
 
 **Offline gates:**
 - `npm run lint` — green (docs only; no source changes)
+
+### 2026-06-08 — Flight review + checkpoint commit (Phase 2d)
+- **Offline sweep (integrated, post leg-5)**: lint + typecheck clean; `npm test` 210/210.
+- **Flight-level Reviewer** (Sonnet, fresh context) reviewed the full diff vs the planning baseline
+  (`1cae9cd`) against all five legs + security. Verdict **[HANDOFF:confirmed]** — no blocking issues. One
+  non-blocking precision finding: the bridge wrapper pre-coerced the session marker with `!!` before the
+  predicate's strict `=== true`. **Fixed pre-commit** (raw value flows to the predicate; added a wrapper test
+  with `__goldfinchInternal:1 → reject`). Tests now **211/211**.
+- **Checkpoint commit** `79c93f1`: legs 1–5 + the hardening (code + docs + artifacts). Legs kept `landed`,
+  flight `in-flight` — leg-6 live verification + leg-7 HAT gate the landing.
+
+### 2026-06-08 — `verify-integration` — LANDED (live, Flight-Director-driven)
+**Status**: landed
+
+App launched fresh with the Flight-6 code on CDP `:9222`; driven via `scripts/cdp-driver.mjs` + node-CDP
+guest attach + filesystem reads (`userData/{settings,shields}.json`); `chrome-devtools` MCP NOT used.
+
+- **`settings-controls` behavior test — PASS** (run log `tests/behavior/settings-controls/runs/2026-06-07-21-23-58.md`;
+  spec → `active`): controls present + full bridge surface; **Shields** flip from settings → `shields.json`
+  persisted → chrome panel reflects (settings→panel); panel "Block" click → guest checkbox + `shields.json`
+  reflect (panel→settings) — **two-way sync both directions**; **home page** set from settings → "Saved" →
+  `settings.json` `{version:1,homePage:"https://example.com/"}` → **new tab opened to it** (take-effect);
+  **invalid** `javascript:` rejected with the store's `TypeError` surfaced in the UI, `settings.json`
+  unchanged.
+- **Origin-check security — PASS**: `window.goldfinchInternal` undefined in a web tab; the chrome **page**
+  context has no `ipcRenderer`/`require`/`settingsSet` → cannot reach `internal-*` channels; main-side check
+  unit-tested (mandatory wrapper test). **In-session vector not driven** (hard post-Flight-5 lock) — asserted
+  structurally + unit-tested, **gap logged per DD5**. The Flight-4/5 internal-bridge Known Issue is **closed**
+  for all drivable vectors.
+- **a11y — PASS**: `npm run a11y` (chrome) + `--target=goldfinch://settings` (guest, wired controls) both no
+  NEW violations (the `<fieldset>/<legend>` + labelled input held).
+- **Regression — PASS**: `tab-scheme-guard` core (web `window.open('goldfinch://…')` → internal tab count
+  unchanged at 1); settings shell intact (guest a11y attached + ran).
+- **SC7 + SC8 verified.** Offline 211/211. No remediation needed.

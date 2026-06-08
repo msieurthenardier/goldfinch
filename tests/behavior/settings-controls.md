@@ -1,8 +1,9 @@
 # Behavior Test: Settings controls — Shields toggles + home page (wired)
 
 **Slug**: `settings-controls`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-08
+**Last Run**: 2026-06-07-21-23-58 (pass; see `settings-controls/runs/`)
 
 ## Intent
 Verify that the **global Shields toggles** and the **home page** are operable **from `goldfinch://settings`**,
