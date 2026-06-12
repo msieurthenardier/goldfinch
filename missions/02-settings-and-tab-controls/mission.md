@@ -1,6 +1,6 @@
 # Mission: Settings Area & Tab-Bar Controls
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
