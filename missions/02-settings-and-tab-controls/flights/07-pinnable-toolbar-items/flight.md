@@ -1,6 +1,6 @@
 # Flight: Pinnable Toolbar Items (Media + Shields)
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
@@ -254,7 +254,7 @@ The internal-preload unsubscribe fix rides with the settings-controls leg (same 
 
 ### Completion Checklist
 - [x] All legs completed
-- [ ] Code merged (PR #34 → main, pending)
+- [x] Code merged (PR #34 → main; released in v0.4.9)
 - [x] Tests passing (221/221; lint + typecheck green; a11y chrome + guest clean)
 - [x] Documentation updated (README + CLAUDE.md)
 

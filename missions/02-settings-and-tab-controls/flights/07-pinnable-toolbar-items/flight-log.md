@@ -3,9 +3,12 @@
 **Flight**: [Pinnable Toolbar Items (Media + Shields)](flight.md)
 
 ## Summary
-Flight `in-flight` (2026-06-08). Execution via `/agentic-workflow` (Developer + Reviewer crew; leg design
-reviewed per leg; code review + commit batched after the last autonomous leg). Execution notes, decisions,
-deviations, and anomalies appended here during the flight.
+Flight **`landed`** 2026-06-08 (status `completed` at debrief, 2026-06-11). Execution via `/agentic-workflow`
+(Developer + Reviewer crew; leg design reviewed per leg; code review + commit batched after the last
+autonomous leg). **8/8 legs**: legs 1–6 checkpoint-committed after the flight-level Reviewer pass
+([HANDOFF:confirmed], gates 221/221); leg 7 live verification found + fixed the pin-toggle two-way-sync bug;
+leg 8 HAT swapped the toolbar glyphs to Lucide inline SVG (DD2 override) and the operator approved landing.
+Merged via PR #34; released v0.4.9. See `flight-debrief.md`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Flight: Internal Page Scheme (`goldfinch://`)
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Settings Area & Tab-Bar Controls](../../mission.md)
 
 ## Contributing to Criteria
@@ -434,7 +434,7 @@ as soon as serving works (end of the serving leg) and gates the boundary leg's g
 
 ### Completion Checklist
 - [x] All legs completed (7/7: 5 code + verify-integration + HAT)
-- [ ] Code merged *(PR #29 marked ready for review; merge is the operator's call)*
+- [x] Code merged *(PR #29 merged to main; released in v0.4.7)*
 - [x] Tests passing — offline `npm test` 161/161, typecheck 0, lint 0; live `tab-scheme-guard` 13/13;
   `npm run a11y` no new violations
 - [x] Documentation updated — README + CLAUDE.md document the scheme + four-gate model + a11y baseline
