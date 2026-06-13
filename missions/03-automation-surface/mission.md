@@ -17,9 +17,9 @@ invoke these as tools. It serves three consumers from one surface:
 
 The surface is built **natively in the main process** (via `webContents` trusted input, page
 capture, and script evaluation) rather than the external Chromium debugging port. It is **local-only**
-(never bound beyond the loopback interface), **off by default / opt-in**, **API-key-gated** (the key
-managed in the Settings area), and **auditable** (the operator can see and review automation
-activity). The privacy thesis is upheld: this is *automation you can trust* — powerful for the
+(never bound beyond the loopback interface), **off by default / opt-in**, **key-gated** (per-jar keys
+for the web surface plus an env-gated admin key for the app/chrome surface, managed in the Settings
+area), and **auditable** (the operator can see and review automation activity). The privacy thesis is upheld: this is *automation you can trust* — powerful for the
 operator, unreachable by the open web or a remote attacker.
 
 ## Context
@@ -97,6 +97,29 @@ origin-checked internal bridge, settings page).
   high-stakes/first-run specs at the operator's election. SC-level "behavior-test-backed" claims
   in this mission inherit that standard.
 
+**Authorization model — per-jar keys + an env-gated admin key (operator decision, 2026-06-13).**
+Automation is keyed to **jars** (the existing container identities in `src/main/jars.js` — each an
+isolated session partition with its own cookies, storage, and fingerprint persona). Two tiers:
+- **Jar key (web surface).** Authorizes driving *web content within one jar only*: navigate, trusted
+  input, DOM/a11y read, screenshot of web content, and managing that jar's tabs — enumeration and
+  actions are **filtered to that jar's partition**, so a jar session cannot see or touch other jars'
+  tabs. The internal-session exclusion stays **absolute** for jar keys. External consumers (the-one,
+  external Claude Code) receive **jar keys only**, so each automation caller runs as its own isolated
+  browser identity and structurally cannot reach the chrome or settings. This is the jar model doing
+  what it was built for.
+- **Admin key (app/chrome surface).** The single, deliberate, **authorized relaxation** of the
+  internal-session exclusion: it can drive the chrome renderer (toolbar / tab strip / menus), operate
+  settings controls, and `capturePage()` the whole window (chrome + composited guests) — the
+  capabilities that dogfooding the *chrome's own* behavior specs need. It is **never issued to an
+  external consumer** (policy) and is **hard-gated behind an environment variable**: the admin tier
+  does not appear in the UI at all unless that env var is set. A normal interactive/shipped build
+  cannot expose it; dogfooding, dev, and future *sandboxed agent-everything* deployments (no human at
+  the browser) set the env var deliberately. Even when shown it stays off-by-default, key-gated, and
+  audited. Least-privilege within admin: prefer `capturePage()` (no debugger) for the whole-window
+  shot and trusted input + `executeJavaScript` for settings controls; reserve the
+  CDP-debugger-on-internal attach for the **a11y-tree read** (no pure-JS path) — the single
+  most-guarded capability.
+
 **MCP implementation is deliberately undecided.** Whether to hand-roll the MCP/JSON-RPC surface (keeps
 zero runtime deps; matches the project + the-one ethos) or bundle the official MCP SDK (spec
 compliance, but Goldfinch's first runtime dependency) is an **early flight-design spike**, not a
@@ -120,15 +143,23 @@ mission-level commitment.
   client (e.g. a Claude Code session) can **discover and invoke** them as tools and drive the browser
   end to end (*behavior-test-backed*).
 - [ ] **SC7** — The surface is **local-only**: it binds only to the loopback interface and a
-  non-loopback connection attempt cannot reach it; the open web cannot reach it either
+  non-loopback connection attempt cannot reach it; the open web cannot reach it either — which
+  requires **Origin/Host allow-listing in addition to the loopback bind** (a `127.0.0.1` server is
+  reachable from a page via DNS-rebinding, and *this very browser* renders the hostile pages)
   (*behavior-test-backed / security*).
-- [ ] **SC8** — The surface is **off by default and opt-in**, and **requires a valid API key** — a
-  request with a missing or wrong key is rejected; a valid key is accepted (*behavior-test-backed /
-  security*).
-- [ ] **SC9** — The API key is **managed from the Settings area** (generate / rotate / revoke),
-  persisted, and changes take effect immediately (*behavior-test-backed; depends on Mission 02*).
+- [ ] **SC8** — The surface is **off by default and opt-in**, and **requires a valid key** — a request
+  with a missing or wrong key is rejected; a valid key is accepted. Keys are **per jar** (each
+  authorizes its own jar's web surface only); an **env-gated admin key** (invisible in the UI unless
+  the gating env var is set) authorizes the app/chrome surface and is never issued to external
+  consumers (*behavior-test-backed / security*).
+- [ ] **SC9** — Keys are **managed from the Settings area** (generate / rotate / revoke), persisted,
+  and changes take effect immediately: a **per-jar key** is issued/rotated/revoked from the existing
+  jars surface, and the **admin key** from its env-gated control. Key storage routes through the
+  settings store's encrypted codec seam (the `safeStorage` path), not a parallel plaintext file
+  (*behavior-test-backed; depends on Mission 02*).
 - [ ] **SC10** — Automation activity is **auditable**: while a client is attached, the operator can
-  see that a session is active (a visible indicator) and review what it did (an action log)
+  see that a session is active (a visible indicator that **distinguishes an admin session from a jar
+  session and names the jar**) and review what it did (an action log)
   (*behavior-test-backed / manual*).
 - [ ] **SC11** — Goldfinch's **own behavior tests run against this surface** (dogfooding), and the
   dev-only ungated debugging path is **retired or hardened** so it is no longer the verification
@@ -136,6 +167,13 @@ mission-level commitment.
   gate onto the new surface, and updating/removing **`.mcp.json`** (the Playwright-MCP-at-`:9222`
   registration) and `npm run dev:debug`'s `--remote-allow-origins=*` — not just the `.md` specs
   (*verified by the full test + a11y suite running green on the new surface*).
+
+> **Verification apparatus (interim).** SC1–SC4 are marked *behavior-test-backed*, but the apparatus
+> that backs them — an MCP client over the loopback transport — does not exist until Flight 3. Until
+> then Flights 1–2 are verified by **unit tests** (plus the existing `cdp-driver` harness where it
+> still applies); the behavior-test backing for SC1–SC4 is **deferred until after Flight 3 attaches**
+> and is established as part of the Flight 6 spec migration. "Behavior-test-backed" here means *will
+> be*, once the surface it tests exists — not before.
 
 > **Non-functional goal (tracked, not a hard SC):** the surface should be **fast and efficient enough
 > for interactive agentic use** — low round-trip latency per action so an agent loop feels responsive.
@@ -166,10 +204,18 @@ mission-level commitment.
   renderer-initiated nav), so the engine's `navigate`/`open-tab` entry points must **re-apply
   `isSafeTabUrl` themselves**.
 - **Weigh the zero-runtime-dependency stance** in the MCP-impl spike (hand-roll vs SDK) — not
-  pre-decided, but the project's zero-dep identity is a real input.
+  pre-decided, but the project's zero-dep identity is a real input; resolved by an explicit operator
+  **go/no-go at Flight 3** (choosing the SDK breaks zero-dep — an identity-level call, not the
+  implementer's).
+- **Loopback bind is necessary but not sufficient** — the transport must also **allow-list
+  Origin/Host** to defeat DNS-rebinding from pages this browser itself renders (see SC7).
+- **Two-tier, jar-scoped authorization** — automation is keyed per jar (web surface, scoped to the
+  jar's partition) plus a single **env-gated admin key** (app/chrome surface, never issued
+  externally). The internal-session exclusion stays absolute for jar keys; the admin key is its sole
+  authorized relaxation. (See the authorization-model note in Context.)
 - **Depends on Mission 02's settings area** for key management — specifically M02's persisted
-  settings store + get/set IPC + internal-page bridge (M02 Flights 4–5), not merely "after M02."
-  Sequenced after those land.
+  settings store + get/set IPC + internal-page bridge (M02 Flights 4–5). **Satisfied** (M02 completed
+  2026-06-12).
 - **Performance**: low-latency enough for interactive agent use.
 
 ## Environment Requirements
@@ -188,7 +234,9 @@ mission-level commitment.
   that holds the operator's tabs), so standard MCP **stdio doesn't fit** (it assumes the client
   launches the server). Likely **Streamable-HTTP/SSE over loopback**, or a custom loopback socket
   fronted by a thin MCP shim — confirm at Flight 2.
-- **MCP impl**: hand-roll vs official SDK — spike early; weigh against zero-dep identity.
+- **MCP impl**: hand-roll vs official SDK — spike early; weigh against zero-dep identity. **Decided by
+  an explicit operator go/no-go at Flight 3** (identity-level: the SDK would be Goldfinch's first
+  runtime dependency).
 - **Hidden-tab strategy** (the chief Flight-1 unknown): activate-then-act (switch visible → act →
   restore) vs offscreen rendering vs force-paint, so `capturePage`/`sendInputEvent` work on a
   *non-active* target tab.
@@ -204,7 +252,14 @@ mission-level commitment.
   coordinates — design for agent ergonomics (the a11y-tree-first instinct from prior behavior tests).
 - **Audit/consent UX**: connect-time consent prompt vs a settings toggle + a live "automation active"
   indicator + an action log; how much is shown.
-- **Key model**: a single operator key vs per-client keys with scopes; rotation/revocation semantics.
+- **Key model** — **RESOLVED (2026-06-13):** **per-jar keys** (web surface, scoped to the jar's
+  partition) **+ an env-gated admin key** (app/chrome surface, never issued externally). Open
+  sub-detail: exact storage home (settings-store keyed by jarId vs a key field on the jar record) —
+  either way through the encrypted `safeStorage` codec seam, no plaintext file; confirm at Flight 5.
+- **CDP single-client-per-contents conflict**: `webContents.debugger` allows one client per contents,
+  so an a11y/CDP read conflicts with **DevTools open on the same tab** (a live hazard while
+  dogfooding) and with a second automation client. Resolution stance (detach-on-demand /
+  single-client lock / clear refusal) — confirm at Flight 2.
 
 ## Known Issues
 
@@ -216,25 +271,34 @@ _None yet — populated as flights surface blockers._
 > work progresses, and will evolve with discoveries. *(The "after Mission 02 lands" gate is
 > satisfied — Mission 02 completed 2026-06-12.)*
 
-_(~8 flights — this is the largest mission yet; flights are created one at a time and may merge/split
+_(~9 flights — this is the largest mission yet; flights are created one at a time and may merge/split
 as work reveals.)_
 
-- [ ] **Flight 1: Drive engine (input / nav / tabs)** — native, tab-targeted module: trusted input
-  (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab open/close/switch/enumerate;
-  targets **both** the chrome renderer and guest webviews. (SC1, SC2, SC5)
-- [ ] **Flight 2: Observe engine (screenshot / DOM / a11y) + hidden-tab strategy** — `capturePage`,
-  DOM read, and the **accessibility tree via in-process `webContents.debugger`**; resolve the
-  **activate-then-act visibility strategy** so non-active tabs can be captured/driven. (SC3, SC4)
+> **Accepted interim risk (operator, 2026-06-13).** Flight 3 stands up the local server *before*
+> Flight 4 adds the opt-in/key/audit gate, so there is a window where an ungated loopback automation
+> surface exists. Accepted because **nothing ships until Flight 4 lands** — the ungated server never
+> reaches a release. Recorded here so the window is a decision, not an oversight.
+
+- [ ] **Flight 1: Drive engine (input / nav / tabs) + hidden-tab strategy** — native, tab-targeted
+  module: trusted input (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab
+  open/close/switch/enumerate; targets **both** the chrome renderer and guest webviews. **Owns the
+  activate-then-act visibility strategy** (switch visible → act → restore) so input and tab-targeting
+  work on a *non-active* tab — Flight 1 is the first to need it; Flight 2 reuses it. (SC1, SC2, SC5)
+- [ ] **Flight 2: Observe engine (screenshot / DOM / a11y)** — `capturePage`, DOM read, and the
+  **accessibility tree via in-process `webContents.debugger`**; **reuses Flight 1's activate-then-act
+  strategy** so non-active tabs can be captured. (SC3, SC4)
 - [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
-  running app); **spike hand-roll vs MCP SDK** and commit; ship an example client + consumer docs.
-  (SC6, SC7)
-- [ ] **Flight 4: Gating — opt-in + key auth + audit** — off-by-default toggle; API-key validation;
-  hard refusal of any non-loopback path; a visible "automation active" indicator + an action/audit
-  log. (SC7, SC8, SC10)
-- [ ] **Flight 5: Settings key management** — generate / rotate / revoke the API key from the Settings
-  area, persisted + effective immediately (plugs into Mission 02's settings store/IPC/internal-page
-  bridge). (SC9)
+  running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
+  MCP SDK** (identity-level — the SDK is the first runtime dep), then commit; ship an example client +
+  consumer docs. (SC6, SC7)
+- [ ] **Flight 4: Gating — opt-in + key auth + audit** — off-by-default toggle; **per-jar key
+  validation + the env-gated admin tier**; hard refusal of any non-loopback path and any disallowed
+  Origin/Host; a visible "automation active" indicator (**distinguishing admin vs jar sessions**) + an
+  action/audit log. (SC7, SC8, SC10)
+- [ ] **Flight 5: Settings key management** — generate / rotate / revoke **per-jar keys from the jars
+  surface** plus the **env-gated admin key**, persisted via the encrypted `safeStorage` codec seam +
+  effective immediately (plugs into Mission 02's settings store/IPC/internal-page bridge). (SC9)
 - [ ] **Flight 6: Migrate behavior specs onto the surface** — move all behavior specs (11 at
   Mission-02 close) to drive via the new surface (dogfooding). (SC11, part 1)
 - [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
