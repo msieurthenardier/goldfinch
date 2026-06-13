@@ -56,8 +56,8 @@ Goldfinch's own behavior tests was painful: the `chrome-devtools` MCP is disqual
 its *own* browser → false pass), Playwright MCP wasn't reliably connected, and the test had to
 hand-roll a raw-CDP-over-WebSocket driver against the dev debugging port. That friction is captured in
 `BACKLOG.md` (this mission **supersedes** that seed) and prototyped in `scripts/cdp-driver.mjs`
-(attach-don't-launch, trusted `Input.dispatch*` — currently on branch `chore/cdp-driver` / PR #22,
-not yet merged to `main`). The committed dev path —
+(attach-don't-launch, trusted `Input.dispatch*` — committed to `main` since Mission 02 Flight 2 and
+the apparatus for every behavior-test run since). The committed dev path —
 `npm run dev:debug` exposing `--remote-debugging-port=9222 --remote-allow-origins=*` — is the
 **cautionary tale**: powerful but completely ungated. This mission delivers the **gated, native,
 production-grade replacement** and migrates the tests onto it.
@@ -68,9 +68,34 @@ directly; **the-one** (Python / FastAPI / Docker, with a hand-rolled tool regist
 loopback-only surface via host networking / a socket bridge / a thin local shim on *its* side — the
 bridge is the consumer's concern, not a remote bind in Goldfinch.
 
-**Dependency.** Key management lives in the **Settings area from Mission 02**, so this mission is
-sequenced **after Mission 02 lands** (`Mission 02 → Mission 03`); its key-management flight plugs into
-the existing settings surface.
+**Dependency — SATISFIED (2026-06-12).** Key management lives in the **Settings area from Mission
+02**; that mission is now **completed** (all SC1–SC9 met, debriefed — see
+`../02-settings-and-tab-controls/mission-debrief.md`), so the gate is open. The key-management
+flight plugs into the landed settings surface (durable schema-versioned `settings-store.js`,
+origin-checked internal bridge, settings page).
+
+**Carried-in prerequisites (Mission-02 debrief → this planning):**
+- **Internal-session exclusion (hard security rule).** Any automation enumeration or
+  `webContents.debugger` attach MUST skip webContents whose session is the internal one
+  (`session.__goldfinchInternal === true`) — a debugger on the `goldfinch://settings` guest is a
+  privilege escalation into the privileged bridge. Gate on the session marker (main-process
+  state), never partition-string matching.
+- **Session-type registry before a third session category.** The `creatingInternalSession`
+  one-shot flag + informal `__goldfinchInternal` marker don't scale to dynamically-created
+  automation sessions; establish a registry (e.g. `WeakMap<Session, type>`) when this mission
+  introduces its session category. Hidden/automation-driven tabs are **web** sessions (Shields
+  applied) — never `goldfinch-internal`.
+- **The settings store is the only config home.** The API key + opt-in toggle live in
+  `settings-store.js` (`DEFAULTS`/`VALIDATORS`/`NORMALIZERS`; the pluggable codec seam is the
+  path to `safeStorage` encryption for the key) — no parallel config file. Status changes
+  (automation active, session count) fan out via `broadcastToChromeAndInternal`.
+- **Any `goldfinch://automation` page follows the three-surface growth rule** (`INTERNAL_PAGES` +
+  `isInternalPageUrl` + the `will-navigate` internal allowlist grow together) and enters only via
+  the trusted `createTab(..., { trusted: true })` path.
+- **Behavior-test mode (operator decision, M02 debrief):** FD-driven runs with cited machine-read
+  evidence are the accepted standard; the two-agent Witnessed pattern remains available for
+  high-stakes/first-run specs at the operator's election. SC-level "behavior-test-backed" claims
+  in this mission inherit that standard.
 
 **MCP implementation is deliberately undecided.** Whether to hand-roll the MCP/JSON-RPC surface (keeps
 zero runtime deps; matches the project + the-one ethos) or bundle the official MCP SDK (spec
@@ -107,7 +132,7 @@ mission-level commitment.
   (*behavior-test-backed / manual*).
 - [ ] **SC11** — Goldfinch's **own behavior tests run against this surface** (dogfooding), and the
   dev-only ungated debugging path is **retired or hardened** so it is no longer the verification
-  apparatus. This means migrating **all six behavior specs**, rewriting the **`scripts/a11y-audit.mjs`**
+  apparatus. This means migrating **all behavior specs (11 at Mission-02 close)**, rewriting the **`scripts/a11y-audit.mjs`**
   gate onto the new surface, and updating/removing **`.mcp.json`** (the Playwright-MCP-at-`:9222`
   registration) and `npm run dev:debug`'s `--remote-allow-origins=*` — not just the `.md` specs
   (*verified by the full test + a11y suite running green on the new surface*).
@@ -188,7 +213,8 @@ _None yet — populated as flights surface blockers._
 ## Flights
 
 > **Note:** Tentative suggestions, not commitments. Flights are planned and created one at a time as
-> work progresses, and will evolve with discoveries. Runs **after Mission 02 lands**.
+> work progresses, and will evolve with discoveries. *(The "after Mission 02 lands" gate is
+> satisfied — Mission 02 completed 2026-06-12.)*
 
 _(~8 flights — this is the largest mission yet; flights are created one at a time and may merge/split
 as work reveals.)_
@@ -209,8 +235,8 @@ as work reveals.)_
 - [ ] **Flight 5: Settings key management** — generate / rotate / revoke the API key from the Settings
   area, persisted + effective immediately (plugs into Mission 02's settings store/IPC/internal-page
   bridge). (SC9)
-- [ ] **Flight 6: Migrate behavior specs onto the surface** — move all six behavior specs to drive via
-  the new surface (dogfooding). (SC11, part 1)
+- [ ] **Flight 6: Migrate behavior specs onto the surface** — move all behavior specs (11 at
+  Mission-02 close) to drive via the new surface (dogfooding). (SC11, part 1)
 - [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
   onto the new surface; retire/harden `npm run dev:debug`'s `--remote-allow-origins=*` and
   update/remove `.mcp.json` so the ungated `:9222` path is no longer the apparatus. (SC11, part 2)
