@@ -57,13 +57,15 @@ already exist in-process:
 
 **Two feasibility realities (from the viability review) the flights must design around:**
 - **Hidden/background tabs.** Inactive tabs are `display:none`, so a hidden `<webview>` has no live
-  render widget — `capturePage()` returns blank and `sendInputEvent` is unreliable. The operator
-  requirement (2026-06-13) is **concurrent human + agent use**: an agent must drive/capture tabs **in
-  the background** while a human keeps their own foreground tab — so "agent-active" is decoupled from
-  "foreground," and agent tabs must be kept **rendered-but-not-in-front** (offscreen-positioning the
-  webview, or hosting agent tabs in per-tab hidden windows — OSR does not apply to `<webview>`).
-  Bring-to-front / send-to-back become explicit agent operations. **How to keep a background webview
-  live (input + capture) is the chief Flight-1 design unknown — resolved by a gating spike.**
+  render widget — `capturePage()` returns blank and `sendInputEvent` is unreliable. **v1 decision
+  (2026-06-13): foreground-to-act** — the agent brings a tab to the front to act on or screenshot it
+  (like a human switching tabs), keeping the existing single-live-tab model and avoiding the
+  focus-interference of driving background tabs. The named v1 consumers (dogfooding tests, external
+  Claude Code, the-one) are headless/sandboxed, so an agent "taking the wheel" is fine. **True
+  concurrent human + agent background driving is deferred — and de-risked**: a Flight-1 pre-flight
+  spike proved both behind-layering (occluded on-screen webview) and per-tab hidden windows capture +
+  drive on Electron `^42` (offscreen-translation does not; OSR doesn't apply to `<webview>`). See
+  Known Issues.
 - **The engine must target BOTH the chrome renderer AND guest webviews from day one** — dogfooding
   the chrome's own behavior tests (`tab-keyboard-operability`, `unified-tab-controls`,
   `responsive-tab-strip`) drives the chrome; `core-browsing-shields`/`farbling` drive guests. Not an
@@ -281,7 +283,15 @@ mission-level commitment.
 
 ## Known Issues
 
-_None yet — populated as flights surface blockers._
+- [ ] **Concurrent human + agent background driving deferred from v1** — discovered in Flight 1
+  planning (2026-06-13). v1 is **foreground-to-act**: an agent brings a tab to the front to act on or
+  screenshot it, so it cannot work invisibly behind a human who is actively browsing. Accepted because
+  the named v1 consumers are headless/sandboxed. **De-risked**: a Flight-1 pre-flight spike proved
+  **(A) behind-layering** (occluded on-screen webview — capture + input + same-tab front/back with
+  state preserved) and **(B) per-tab hidden window** (focus-isolated) both work on Electron `^42`;
+  offscreen-translation breaks capture and OSR doesn't apply to `<webview>`. When concurrent
+  background driving becomes a requirement it is a known, validated **future flight** (prefer (A);
+  validate single-window focus-interference with a real human), not a research risk.
 
 ## Flights
 
@@ -297,15 +307,13 @@ as work reveals.)_
 > surface exists. Accepted because **nothing ships until Flight 4 lands** — the ungated server never
 > reaches a release. Recorded here so the window is a decision, not an oversight.
 
-- [ ] **Flight 1: Drive engine (input / nav / tabs) + background-tab strategy** — native, tab-targeted
-  module: trusted input (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab
-  open/close/enumerate/**bring-to-front/send-to-back**; targets **both** the chrome renderer and guest
-  webviews. **Owns the background-live render strategy** (keep a webview driveable while not in front,
-  decoupling agent-active from foreground) via a **gating spike** — Flight 1 is the first to need it;
-  Flight 2 reuses it for capture. (SC1, SC2, SC5)
+- [ ] **Flight 1: Drive engine (input / nav / tabs)** — native, tab-targeted module: trusted input
+  (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab
+  open/close/enumerate/**switch (bring-to-front)/send-to-back**; targets **both** the chrome renderer
+  and guest webviews. **Foreground-to-act** model (agent brings a tab to front to act on/capture it);
+  background driving deferred + de-risked by a pre-flight spike. (SC1, SC2, SC5)
 - [ ] **Flight 2: Observe engine (screenshot / DOM / a11y)** — `capturePage`, DOM read, and the
-  **accessibility tree via in-process `webContents.debugger`**; **reuses Flight 1's background-live
-  strategy** so background tabs can be captured without foregrounding. (SC3, SC4)
+  **accessibility tree via in-process `webContents.debugger`**, on the foreground tab. (SC3, SC4)
 - [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
