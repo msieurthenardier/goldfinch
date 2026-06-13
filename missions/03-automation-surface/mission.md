@@ -57,9 +57,13 @@ already exist in-process:
 
 **Two feasibility realities (from the viability review) the flights must design around:**
 - **Hidden/background tabs.** Inactive tabs are `display:none`, so a hidden `<webview>` has no live
-  render widget — `capturePage()` returns blank and `sendInputEvent` is unreliable. Acting on a
-  *specific* (non-active) tab needs an **activate-then-act** strategy (switch visible → act →
-  restore) or offscreen rendering. This is the chief Flight-1 design unknown.
+  render widget — `capturePage()` returns blank and `sendInputEvent` is unreliable. The operator
+  requirement (2026-06-13) is **concurrent human + agent use**: an agent must drive/capture tabs **in
+  the background** while a human keeps their own foreground tab — so "agent-active" is decoupled from
+  "foreground," and agent tabs must be kept **rendered-but-not-in-front** (offscreen-positioning the
+  webview, or hosting agent tabs in per-tab hidden windows — OSR does not apply to `<webview>`).
+  Bring-to-front / send-to-back become explicit agent operations. **How to keep a background webview
+  live (input + capture) is the chief Flight-1 design unknown — resolved by a gating spike.**
 - **The engine must target BOTH the chrome renderer AND guest webviews from day one** — dogfooding
   the chrome's own behavior tests (`tab-keyboard-operability`, `unified-tab-controls`,
   `responsive-tab-strip`) drives the chrome; `core-browsing-shields`/`farbling` drive guests. Not an
@@ -293,14 +297,15 @@ as work reveals.)_
 > surface exists. Accepted because **nothing ships until Flight 4 lands** — the ungated server never
 > reaches a release. Recorded here so the window is a decision, not an oversight.
 
-- [ ] **Flight 1: Drive engine (input / nav / tabs) + hidden-tab strategy** — native, tab-targeted
+- [ ] **Flight 1: Drive engine (input / nav / tabs) + background-tab strategy** — native, tab-targeted
   module: trusted input (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab
-  open/close/switch/enumerate; targets **both** the chrome renderer and guest webviews. **Owns the
-  activate-then-act visibility strategy** (switch visible → act → restore) so input and tab-targeting
-  work on a *non-active* tab — Flight 1 is the first to need it; Flight 2 reuses it. (SC1, SC2, SC5)
+  open/close/enumerate/**bring-to-front/send-to-back**; targets **both** the chrome renderer and guest
+  webviews. **Owns the background-live render strategy** (keep a webview driveable while not in front,
+  decoupling agent-active from foreground) via a **gating spike** — Flight 1 is the first to need it;
+  Flight 2 reuses it for capture. (SC1, SC2, SC5)
 - [ ] **Flight 2: Observe engine (screenshot / DOM / a11y)** — `capturePage`, DOM read, and the
-  **accessibility tree via in-process `webContents.debugger`**; **reuses Flight 1's activate-then-act
-  strategy** so non-active tabs can be captured. (SC3, SC4)
+  **accessibility tree via in-process `webContents.debugger`**; **reuses Flight 1's background-live
+  strategy** so background tabs can be captured without foregrounding. (SC3, SC4)
 - [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
