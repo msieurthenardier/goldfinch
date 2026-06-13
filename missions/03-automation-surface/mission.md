@@ -1,6 +1,6 @@
 # Mission: First-Class Browser Automation Surface
 
-**Status**: planning
+**Status**: active
 
 ## Outcome
 
