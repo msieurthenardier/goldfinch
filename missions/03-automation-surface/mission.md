@@ -280,6 +280,15 @@ mission-level commitment.
   so an a11y/CDP read conflicts with **DevTools open on the same tab** (a live hazard while
   dogfooding) and with a second automation client. Resolution stance (detach-on-demand /
   single-client lock / clear refusal) — confirm at Flight 2.
+  - **Flight 2 update (2026-06-13): resolution stance implemented; live conflict verification deferred
+    to Flight 3.** The stance is built (Flight-2 DD7/DD8: attach-on-demand, detach-in-`finally`,
+    synchronous single-client lock, clean **returned** `debugger-unavailable` refusal). The `locked`
+    refusal is **live-confirmed** (concurrent reads) and `attach-failed` is **unit-tested**. BUT the
+    live DevTools-conflict test was **apparatus-limited**: the dev seam is only reachable over
+    `dev:debug`'s `--remote-debugging-port`, which puts Chromium in multi-session CDP mode and
+    confounds the one-client-per-contents premise (DevTools open + in-process attach both succeeded).
+    So whether a real conflict throws is **NOT settled** — re-verify under the **Flight-3 transport**
+    (no remote-debugging-port confound). See Flight-2 flight-log Deviations.
 
 ## Known Issues
 
@@ -312,8 +321,10 @@ as work reveals.)_
   open/close/enumerate/**switch (bring-to-front)/send-to-back**; targets **both** the chrome renderer
   and guest webviews. **Foreground-to-act** model (agent brings a tab to front to act on/capture it);
   background driving deferred + de-risked by a pre-flight spike. (SC1, SC2, SC5)
-- [ ] **Flight 2: Observe engine (screenshot / DOM / a11y)** — `capturePage`, DOM read, and the
+- [x] **Flight 2: Observe engine (screenshot / DOM / a11y)** — `capturePage`, DOM read, and the
   **accessibility tree via in-process `webContents.debugger`**, on the foreground tab. (SC3, SC4)
+  *(landed 2026-06-13 — native read capability delivered + live-verified; SC3/SC4 behavior-test backing
+  lands with the Flight-3 transport / Flight-6 migration.)*
 - [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs

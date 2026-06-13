@@ -269,6 +269,63 @@ off the Leg-3 baseline). `npm run typecheck` clean. `npm run lint` clean. Grep c
 
 **Anomalies:** none.
 
+### Leg 5 — verify-integration — **Status: completed** (2026-06-13)
+
+FD-driven live smoke against the running app (`npm run dev:debug`, Electron **42.3.3**, CDP protocol
+1.3, port 9222), driving the dev seam via `cdp-driver.mjs eval
+"window.goldfinch.automationDevInvoke('<op>', [args])"`. Machine-read evidence captured to the
+ephemeral dir `/tmp/behavior-tests/goldfinch/observe-verify/2026-06-13-18-33-52/` (**not committed** —
+per ARTIFACTS.md; re-derive by re-running).
+
+- **AC1 static** — `npm test` 391/0, `typecheck` clean, `lint` clean (re-confirmed).
+- **AC2 guest screenshot** — `captureScreenshot(2)` on a google.com guest → non-blank **1398×810** RGB
+  PNG (75 KB), visually faithful to the page. The **`DEFAULT_PAINT_DELAY_MS = 80` was sufficient** (the
+  guest was already loaded/foregrounded); no tuning needed.
+- **AC3 guest DOM** — `readDom(2)` → `{url:"https://www.google.com/", title:"Google", htmlLen:278688}`,
+  `<html>` present; full-fidelity, matches the page.
+- **AC4 guest a11y** — `readAxTree(2)` → a **163-node** array, root `RootWebArea`. **Resolves the flight
+  Open Question:** `webContents.debugger.attach('1.3')` → `Accessibility.enable` → `getFullAXTree`
+  **works on a guest `webContents` on Electron ^42**, and `enable`-before-`getFullAXTree` is the correct
+  sequence (as coded).
+- **AC5 whole window** — `captureWindow()` → **1400×900** PNG showing chrome (tab strip / toolbar /
+  address bar / window controls) **and** the composited guest.
+- **AC6 internal-session exclusion (security, load-bearing)** — opened `goldfinch://settings` (wcId 3,
+  jar `internal`) via the trusted kebab path. (a) `enumerateTabs` returned **only** wcId 2 — the
+  internal tab was **excluded**; (b) `captureScreenshot(3)` / `readDom(3)` / `readAxTree(3)` **each
+  threw** `automation: internal-session — wcId 3 belongs to the internal goldfinch://settings session
+  and cannot be driven`. DD6 holds live across all three observe ops.
+- **AC7 chrome-a11y-under-cdp-driver (recorded, not asserted)** — confirmed wcId 1 is the chrome
+  (`readDom(1)` → `index.html`, "Goldfinch"). `readAxTree(1)` on the chrome **SUCCEEDED** (154-node
+  tree) while `cdp-driver` held the chrome's CDP target. **Finding: no contention** — see the Deviation
+  below (apparatus-confounded).
+
+**Anomalies:** none functional. The DD8 conflict-trigger finding is recorded under Deviations.
+
+### Leg 6 — hat-and-alignment — **Status: completed** (2026-06-13)
+
+Guided HAT, FD-driven with operator in the loop (operator confirmed the DevTools-window behavior and
+set the DD8 disposition). Faithfulness verified by viewing the captured PNGs + machine read-backs.
+
+- **Faithfulness** — guest screenshot and whole-window capture both render the **actual** page
+  (Google homepage + doodle) and the real chrome; `readDom`/`readAxTree` correspond to the visible
+  page. ✓
+- **Foreground-correctness (foreground-to-act, live)** — with the google guest (wcId 2) **backgrounded**
+  behind the active settings tab (3), `captureScreenshot(2)` **brought it to front** (active flag
+  flipped 3→2) and returned a non-blank, faithful 1398×810 PNG. The DD5 foreground-to-act contract is
+  visibly correct on a genuinely backgrounded tab. ✓
+- **Refusal contract (live, via the lock path)** — two `readAxTree(2)` fired in the same renderer tick →
+  one returned the 163-node tree, the other returned exactly
+  `{automation:'debugger-unavailable', reason:'locked', wcId:2}`. The synchronous single-client lock and
+  the refusal **return shape** are confirmed in the real wiring. ✓
+- **DD8 DevTools-open conflict (primary live conflict test) — did NOT trigger; apparatus-limited.** See
+  the Deviation. Disposition (operator, 2026-06-13): **record as apparatus-limited and land** — the
+  `attach-failed` refusal stays unit-tested; real-conflict verification defers to the Flight-3 transport.
+- **No leak** — after opening **and** closing DevTools on the guest plus the concurrent/attach churn,
+  `readAxTree(2)` and `readDom(2)` still return cleanly. The detach-in-`finally` discipline holds live.
+- **Alignment** — raw output shapes (163-node AX array, 278 KB DOM string) were workable for this
+  machine-read verification; no projection prioritized (DD4 — raw is the v1 choice; a Flight-9 ergonomics
+  concern).
+
 ---
 
 ## Flight Director Notes
@@ -333,12 +390,36 @@ handling; a future MCP consumer (Flight 3) discriminates on `Array.isArray`. The
 "thrown" wording is superseded (annotated, not rewritten — spec is a snapshot).
 
 ## Deviations
-_Departures from the planned approach will be recorded here._
 
----
+### DD8 "DevTools-open → clean a11y refusal" primary live conflict test did NOT trigger — apparatus-limited
+**Planned**: The flight (DD8 + Leg-6 HAT) names opening **DevTools** on a tab as the reliable live
+trigger for the `attach-failed` refusal: an in-process `readAxTree` on a contents already held by a
+second CDP client (DevTools) should `attach()`-throw → return
+`{automation:'debugger-unavailable', reason:'attach-failed'}`.
+**Actual**: With DevTools confirmed open on the guest (`webview.isDevToolsOpened() === true` on wcId 2),
+`readAxTree(2)` **succeeded** (163-node tree) — no refusal. The opportunistic AC7 chrome read under
+`cdp-driver` likewise succeeded. So no live trigger produced the `attach-failed` refusal.
+**Reason (apparatus confound — surfaced by the operator)**: the dev seam is **only reachable over a CDP
+port** — `npm run dev:debug` runs with `--remote-debugging-port=9222 --remote-allow-origins=*`, and
+`cdp-driver` drives the seam through it. That port puts Chromium's debugging stack in **multi-session
+mode** (flattened CDP sessions), which plausibly relaxes the one-client-per-contents exclusivity the
+test assumes. The result is **confounded by construction**: every live invocation carries a CDP
+connection, so a "no conflict" outcome can't be attributed to `observe.js` vs. the port, and the
+classic Electron "attach throws when DevTools is open" behavior could not be reproduced here. (An
+earlier characterization that "the in-process debugger is privileged" was **withdrawn** — not
+supported.)
+**Disposition (operator, 2026-06-13): record as apparatus-limited and land.** The `attach-failed`
+refusal path stays **unit-tested** (fake `attach()` throws → clean refusal — authoritative); the
+`locked` refusal path is **live-confirmed** (concurrent reads); the refusal **return shape** is
+therefore live-exercised. Real second-client-conflict verification is **deferred to the Flight-3
+transport**, which replaces this CDP-port apparatus (a production build has neither the port nor this
+dev seam). The mission's "CDP single-client per contents" Open Question is **NOT** resolved by this
+flight — it is reframed as: *verify under the Flight-3 transport, without a remote-debugging-port
+confound.* The clean-refusal code remains correct, defensive, and the right design regardless.
 
 ## Anomalies
-_Unexpected issues will be recorded here._
+_None. (The DD8 conflict-trigger result is a test-apparatus limitation, recorded under Deviations, not a
+defect: no observe op misbehaved, no debugger attach leaked.)_
 
 ---
 

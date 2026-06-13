@@ -1,6 +1,6 @@
 # Flight: Observe Engine (screenshot / DOM / a11y)
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -221,8 +221,8 @@ capture/attach is integration-verified by the smoke and the operator-oracle HAT.
 - [x] `readDom` via `executeJavaScript`, full-fidelity, unit-tested
 - [x] `readAxTree` via `webContents.debugger` (attach→getFullAXTree→detach), single-client lock + clean refusal, unit-tested
 - [x] Engine + dev seam wired for the three ops; `CLAUDE.md` automation section + `input.js` comment refresh
-- [ ] Live smoke: guest screenshot/DOM/a11y succeed; whole-window capture; internal-session observe rejected; chrome-a11y-under-cdp-driver outcome **recorded** (not asserted, DD8); full unit suite + typecheck + lint green
-- [ ] Guided HAT: operator confirms observation *faithfulness* (screenshot/DOM/a11y match reality) + the **DevTools-open → clean a11y refusal** (primary live conflict test, DD8)
+- [x] Live smoke: guest screenshot/DOM/a11y succeed; whole-window capture; internal-session observe rejected; chrome-a11y-under-cdp-driver outcome **recorded** (not asserted, DD8); full unit suite + typecheck + lint green
+- [x] Guided HAT: operator confirms observation *faithfulness* (screenshot/DOM/a11y match reality) + foreground-correctness + the refusal contract (live via the lock path). **DevTools-open conflict test was apparatus-limited (no live trigger; see flight-log Deviations) — dispositioned: land, defer to Flight-3 transport.**
 
 ### Adaptation Criteria
 
@@ -271,13 +271,13 @@ capture/attach is integration-verified by the smoke and the operator-oracle HAT.
 - [x] `wire-and-docs` — add the three ops to `engine.js` + the dev-seam dispatch; **refresh the stale
   `input.js` comments**; **add the `CLAUDE.md` Automation section** (carry-forward from the F1 debrief,
   shared-surface). (DD9 + F1-debrief action items)
-- [ ] `verify-integration` — live smoke via the dev seam + `cdp-driver.mjs`: foreground a guest and
+- [x] `verify-integration` — live smoke via the dev seam + `cdp-driver.mjs`: foreground a guest and
   screenshot/DOM/a11y it (succeed); whole-window capture; confirm an internal `goldfinch://settings`
   wcId is **rejected** for all three observe ops (DD6); full unit suite + typecheck + lint green.
   **Opportunistic (not a required assertion):** attempt a chrome a11y read while cdp-driver is attached
   and **record** whether it refuses or succeeds (the DD8 premise is unverified) — the clean-refusal path
   is authoritatively covered by the unit test + the HAT DevTools scenario, not this step.
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT: the operator is the ground-truth oracle
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT: the operator is the ground-truth oracle
   for observation **faithfulness** — screenshot shows the real page (incl. whole-window chrome+guest),
   DOM/a11y match the visible controls, and a backgrounded tab is correctly foregrounded (non-blank shot).
   **Primary live conflict test:** operator opens **DevTools** on a tab, then an a11y read on that tab
@@ -289,11 +289,11 @@ capture/attach is integration-verified by the smoke and the operator-oracle HAT.
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (unit suite + typecheck + lint)
-- [ ] Documentation updated (`observe.js` JSDoc; the new `CLAUDE.md` Automation section)
-- [ ] Flight debrief written (per M02 process finding — debrief is part of landing)
+- [x] All legs completed (1–6)
+- [ ] Code merged *(draft PR #38 open, stacked on flight/01 PR #36 — merges after review)*
+- [x] Tests passing (unit suite 391/0 + typecheck + lint) — re-confirmed at the verify leg
+- [x] Documentation updated (`observe.js` JSDoc; the new `CLAUDE.md` Automation section)
+- [ ] Flight debrief written — separate `/flight-debrief` step (transitions the flight to `completed`)
 
 ### Verification
 - **Unit**: `node --test test/unit/*.test.js` green, including new `observe.js` cases — the
