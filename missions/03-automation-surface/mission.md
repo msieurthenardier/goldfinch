@@ -35,8 +35,8 @@ allowed to do), **privacy** (isolation by default — container jars, per-jar fi
 Shields — so neither the open web nor a remote attacker gets more than the operator grants), and
 **automatability** (a first-class surface an agent can drive). This mission delivers the third pillar
 *without spending* the first two: automation you can hand to an agent precisely because it is gated,
-jar-scoped, and auditable. The README description is now the floor, not the ceiling — worth refreshing
-to match this thesis.
+jar-scoped, and auditable. The README description is now the floor, not the ceiling — it gets
+refreshed to match this thesis as a **Flight 8** deliverable, once the full surface exists to describe.
 
 Goldfinch is a privacy-focused Electron (`^42`) / Chromium browser with **zero runtime dependencies**
 and a hand-roll-over-frameworks ethos. Each tab is a real `<webview>` with its own `webContents`; the
@@ -318,8 +318,11 @@ as work reveals.)_
 - [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
   onto the new surface; retire/harden `npm run dev:debug`'s `--remote-allow-origins=*` and
   update/remove `.mcp.json` so the ungated `:9222` path is no longer the apparatus. (SC11, part 2)
-- [ ] **Flight 8: External-consumer enablement (incl. the-one)** — finalize the integration contract +
-  docs + an end-to-end drive from an external process; coordinate the the-one-side wiring (tracked in
-  the-one's repo; effectively Linux-host-networking / shim per the reach constraint). (use cases 2 & 3)
+- [ ] **Flight 8: External-consumer enablement (incl. the-one) + README reframe** — finalize the
+  integration contract + docs + an end-to-end drive from an external process; coordinate the
+  the-one-side wiring (tracked in the-one's repo; effectively Linux-host-networking / shim per the
+  reach constraint); and **refresh the README** from the media-panel description to the
+  control / privacy / automatability framing now that the automatability pillar exists to describe.
+  (use cases 2 & 3)
 - [ ] **Flight 9: Alignment / agent-ergonomics tuning** *(optional)* — interactive vibe session with a
   real agent driving, to tune element addressing, latency feel, and the MCP tool shapes.
