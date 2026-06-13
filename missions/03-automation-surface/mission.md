@@ -24,6 +24,20 @@ operator, unreachable by the open web or a remote attacker.
 
 ## Context
 
+**Project framing — what Goldfinch is becoming.** Goldfinch began as a privacy-minded browser with one
+standout feature: an expandable media panel that catalogs every image, video, audio file, and embed on
+a page so the operator can preview, play, or download each independently. That's still the README's
+description, but it now undersells the project. Across Mission 01 (Electron/security hardening),
+Mission 02 (the settings + tab-control surface), and this mission, Goldfinch has grown a sharper
+thesis: **a browser for a world where software agents are first-class users alongside people.** Three
+pillars define it — **control** (the operator decides what the browser and the pages it loads are
+allowed to do), **privacy** (isolation by default — container jars, per-jar fingerprint personas,
+Shields — so neither the open web nor a remote attacker gets more than the operator grants), and
+**automatability** (a first-class surface an agent can drive). This mission delivers the third pillar
+*without spending* the first two: automation you can hand to an agent precisely because it is gated,
+jar-scoped, and auditable. The README description is now the floor, not the ceiling — worth refreshing
+to match this thesis.
+
 Goldfinch is a privacy-focused Electron (`^42`) / Chromium browser with **zero runtime dependencies**
 and a hand-roll-over-frameworks ethos. Each tab is a real `<webview>` with its own `webContents`; the
 main process (`src/main/main.js`) already addresses tabs by `webContentsId` (downloads, per-tab
