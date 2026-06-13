@@ -1915,6 +1915,57 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+/* --------------------------------------------------------- automation hook */
+
+// Automation hook — chrome renderer ONLY (this file is the privileged app shell;
+// it is never the preload for a guest webview, so web content cannot reach this).
+// Thin wrappers over the existing tab ops; main drives these via executeJavaScript
+// and applies the authoritative internal-session filter on its side (DD1/DD5).
+//
+// openTab uses a dom-ready RACE GUARD: createTab() calls activateTab()
+// synchronously, and dom-ready can fire before this Promise body runs. We
+// attach the listener first, then re-check tab.wcId immediately so a
+// just-fired dom-ready is never missed into the timeout path.
+const OPEN_TAB_TIMEOUT_MS = 5000;
+
+// @ts-ignore — dynamic property on Window; intentional chrome-renderer-only automation hook (DD1/DD5)
+window.__goldfinchAutomation = {
+  listTabs() {
+    return [...tabs.values()].map((t) => ({
+      wcId: t.wcId,                      // null until dom-ready
+      url: t.url,
+      title: t.title,
+      jarId: t.container ? t.container.id : null,
+      active: t.id === activeTabId,
+    }));
+  },
+  openTab(url) {
+    const tab = createTab(url);          // untrusted branch → isSafeTabUrl enforced
+    if (!tab) return null;               // URL rejected
+    if (tab.wcId != null) return tab.wcId;
+    // wcId is assigned at dom-ready; resolve once it lands (bounded wait).
+    return new Promise((resolve) => {
+      const wv = tab.webview;
+      const onReady = () => { wv.removeEventListener('dom-ready', onReady); resolve(tab.wcId ?? null); };
+      wv.addEventListener('dom-ready', onReady);
+      if (tab.wcId != null) { wv.removeEventListener('dom-ready', onReady); resolve(tab.wcId); return; }
+      setTimeout(() => { wv.removeEventListener('dom-ready', onReady); resolve(tab.wcId ?? null); }, OPEN_TAB_TIMEOUT_MS);
+    });
+  },
+  closeTabByWcId(wcId) {
+    const tab = findTabByWcId(wcId);
+    if (!tab) return false;
+    closeTab(tab.id);
+    return true;
+  },
+  activateTabByWcId(wcId) {
+    const tab = findTabByWcId(wcId);
+    if (!tab) return false;
+    activateTab(tab.id);
+    return true;
+  },
+};
+
 /* ------------------------------------------------------------------- helpers */
 
 function escapeHtml(s) {

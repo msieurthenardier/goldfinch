@@ -307,7 +307,7 @@ as work reveals.)_
 > surface exists. Accepted because **nothing ships until Flight 4 lands** — the ungated server never
 > reaches a release. Recorded here so the window is a decision, not an oversight.
 
-- [ ] **Flight 1: Drive engine (input / nav / tabs)** — native, tab-targeted module: trusted input
+- [x] **Flight 1: Drive engine (input / nav / tabs)** — native, tab-targeted module: trusted input
   (`sendInputEvent`), navigation (**re-applying `isSafeTabUrl`**), and tab
   open/close/enumerate/**switch (bring-to-front)/send-to-back**; targets **both** the chrome renderer
   and guest webviews. **Foreground-to-act** model (agent brings a tab to front to act on/capture it);

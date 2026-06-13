@@ -1,6 +1,6 @@
 # Flight: Drive Engine (input / nav / tabs)
 
-**Status**: planning
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -251,21 +251,21 @@ the live smoke. The engine is the single entry point for automation actions (no 
 
 > **Note:** Tentative; created one at a time as the flight progresses.
 
-- [ ] `engine-scaffold-and-resolve` — `src/main/automation/` module skeleton; `webContentsId →
+- [x] `engine-scaffold-and-resolve` — `src/main/automation/` module skeleton; `webContentsId →
   webContents` resolution; internal-session exclusion predicate. **Acceptance: `resolve()` rejects a
   directly-supplied internal-guest `wcId` (`session.__goldfinchInternal === true`), not only the
   enumerate path**; chrome-vs-guest classification. Pure logic unit-tested. (DD1, DD2, DD5)
-- [ ] `tab-lifecycle` — renderer hook `window.__goldfinchAutomation` (chrome renderer only) wrapping
+- [x] `tab-lifecycle` — renderer hook `window.__goldfinchAutomation` (chrome renderer only) wrapping
   `createTab`/`closeTab`/`activateTab`; engine drives it via `executeJavaScript`; `listTabs` filtered
   in main by the internal-session exclusion → DD2 shape. **The one renderer source change in this
   flight is exposing this hook.** (DD1, DD3, SC5)
-- [ ] `native-navigation` — `navigate`/back/forward/reload on a resolved `webContents`, re-applying
+- [x] `native-navigation` — `navigate`/back/forward/reload on a resolved `webContents`, re-applying
   `isSafeTabUrl`; URL-gate unit-tested. (DD6, SC1)
-- [ ] `trusted-input` — `sendInputEvent` for click / type / scroll / key on the chrome and on a
+- [x] `trusted-input` — `sendInputEvent` for click / type / scroll / key on the chrome and on a
   foregrounded guest; bring-to-front before acting (DD3); resolve the two input spikes live. (DD4, SC2)
-- [ ] `dev-seam-and-integration` — dev-only invocation seam; wire the engine as the single automation
+- [x] `dev-seam-and-integration` — dev-only invocation seam; wire the engine as the single automation
   entry; ensure debugger-free (DD8). (DD7)
-- [ ] `verify-integration` — live smoke via the dev seam + `cdp-driver.mjs`: bring a guest tab to front
+- [x] `verify-integration` — live smoke via the dev seam + `cdp-driver.mjs`: bring a guest tab to front
   and drive it (nav + input + tab ops), and drive the chrome; confirm the internal `goldfinch://settings`
   guest is (a) absent from `listTabs` AND (b) **rejected when its `wcId` is supplied directly to an
   act/nav call** (the bypass path, per DD5); full unit suite + typecheck + lint green.
@@ -277,11 +277,13 @@ the live smoke. The engine is the single entry point for automation actions (no 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (unit suite + typecheck + lint)
-- [ ] Documentation updated (engine module JSDoc; note the dev-only seam is interim)
-- [ ] Flight debrief written (per M02 process finding — debrief is part of landing)
+- [x] All legs completed (6 autonomous legs; optional `hat-and-alignment` not run — see Flight Director Notes)
+- [ ] Code merged (draft PR opened at landing; merges after review)
+- [x] Tests passing (358/358 unit + typecheck + lint green; live smoke passed)
+- [x] Documentation updated (engine modules carry JSDoc headers marking the dev seam interim/DD7; no
+  README/CLAUDE.md change — the surface is dev-only with no transport until Flight 3, and the README
+  reframe is a Flight 8 deliverable)
+- [ ] Flight debrief written (separate `/flight-debrief` step — transitions flight to `completed`)
 
 ### Verification
 
