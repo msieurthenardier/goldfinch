@@ -29,18 +29,22 @@ const { resolveContents, isInternalContents } = require('./resolve');
  * Pure function — never throws. Per-entry resolve failures drop that entry
  * rather than aborting the map.
  *
+ * The internal-session drop is gated on !allowInternal (DD6 / Leg 2): the admin
+ * engine (allowInternal:true) KEEPS the internal goldfinch://settings tab in the
+ * enumeration; jar/default engines drop it.
+ *
  * @param {Array<{wcId: number|null, url: string, title: string, jarId: string|null, active: boolean}>|null} rawTabs
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {{ wcId: number, url: string, title: string, jarId: string|null, active: boolean }[]}
  */
-function mapEnumeratedTabs(rawTabs, { fromId, chromeContents: _chromeContents }) {
+function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
   const out = [];
   for (const t of rawTabs || []) {
     if (typeof t.wcId !== 'number') continue;        // not yet at dom-ready
     let wc;
     try { wc = fromId(t.wcId); } catch { continue; }
     if (!wc || wc.isDestroyed?.()) continue;          // gone / destroyed
-    if (isInternalContents(wc)) continue;             // DD5: internal session dropped
+    if (!allowInternal && isInternalContents(wc)) continue; // DD5/DD6: internal dropped unless admin
     out.push({ wcId: t.wcId, url: t.url, title: t.title, jarId: t.jarId, active: !!t.active });
   }
   return out;
@@ -52,12 +56,12 @@ function mapEnumeratedTabs(rawTabs, { fromId, chromeContents: _chromeContents })
  * Calls the renderer hook's listTabs(), then filters and maps the result
  * through mapEnumeratedTabs (DD5 internal-session exclusion applied in main).
  *
- * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {Promise<{ wcId: number, url: string, title: string, jarId: string|null, active: boolean }[]>}
  */
-async function enumerateTabs({ executeInRenderer, fromId, chromeContents }) {
-  const raw = await executeInRenderer('window.__goldfinchAutomation.listTabs()');
-  return mapEnumeratedTabs(raw, { fromId, chromeContents });
+async function enumerateTabs(deps) {
+  const raw = await deps.executeInRenderer('window.__goldfinchAutomation.listTabs()');
+  return mapEnumeratedTabs(raw, deps); // forwards allowInternal so admin keeps the internal tab
 }
 
 /**
@@ -92,12 +96,12 @@ async function openTab(url, { executeInRenderer }) {
  * is closed, so a subsequent enumerateTabs shows one blank tab, not zero.
  *
  * @param {number} wcId
- * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {Promise<boolean>}
  */
-async function closeTab(wcId, { executeInRenderer, fromId, chromeContents }) {
-  resolveContents(wcId, { fromId, chromeContents }); // throws on bad/dead/internal
-  return executeInRenderer('window.__goldfinchAutomation.closeTabByWcId(' + wcId + ')');
+async function closeTab(wcId, deps) {
+  resolveContents(wcId, deps); // throws on bad/dead/internal (allowInternal forwarded)
+  return deps.executeInRenderer('window.__goldfinchAutomation.closeTabByWcId(' + wcId + ')');
 }
 
 /**
@@ -106,12 +110,12 @@ async function closeTab(wcId, { executeInRenderer, fromId, chromeContents }) {
  * Re-validates the target via resolveContents before dispatching (AC5 / DD5).
  *
  * @param {number} wcId
- * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ executeInRenderer: (code: string) => Promise<any>, fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {Promise<boolean>}
  */
-async function activateTab(wcId, { executeInRenderer, fromId, chromeContents }) {
-  resolveContents(wcId, { fromId, chromeContents }); // throws on bad/dead/internal
-  return executeInRenderer('window.__goldfinchAutomation.activateTabByWcId(' + wcId + ')');
+async function activateTab(wcId, deps) {
+  resolveContents(wcId, deps); // throws on bad/dead/internal (allowInternal forwarded)
+  return deps.executeInRenderer('window.__goldfinchAutomation.activateTabByWcId(' + wcId + ')');
 }
 
 module.exports = { mapEnumeratedTabs, enumerateTabs, openTab, closeTab, activateTab };

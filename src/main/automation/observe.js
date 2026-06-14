@@ -96,24 +96,28 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before capture (DD5 foreground-to-act); absent for
  *              chrome-only callers
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @param {{ waitForPaint?: (wc: any, opts?: { delayMs?: number }) => Promise<void>, delayMs?: number }} [opts]
  *   waitForPaint — paint-settle implementation (defaults to defaultWaitForPaint; injectable so
  *                  unit tests run without real timers)
  *   delayMs      — fixed paint-settle delay override (Leg-5 tuning)
  * @returns {Promise<string>} base64-encoded PNG
  */
-async function captureScreenshot(wcId, { fromId, chromeContents, activate }, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
+  const { chromeContents, activate } = deps;
+  // BOTH resolves forward the full deps so allowInternal flows on each (DD6 / Leg 2).
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
     await waitForPaint(wc, { delayMs });                        // paint-settle after foregrounding
   }
   const image = await wc.capturePage();                         // capturePage() is a Promise in Electron ^42
@@ -164,21 +168,24 @@ const READ_DOM_SNIPPET = '(() => ({' +
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers, in which case a guest is read without foregrounding
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @returns {Promise<{ url: string, title: string, html: string }>} a consistent live-DOM
  *   snapshot: location.href, document.title, and the full documentElement outerHTML.
  */
-async function readDom(wcId, { fromId, chromeContents, activate }) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function readDom(wcId, deps) {
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
   return wc.executeJavaScript(READ_DOM_SNIPPET);
 }
@@ -244,22 +251,25 @@ async function captureWindow({ chromeContents }) {
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @param {{ depth?: number, properties?: string[] }} [opts]  DD4 Flight-9 stub — accepted, ignored in v1
  * @returns {Promise<Array<object> | { automation: 'debugger-unavailable', reason: string, wcId: number }>}
  */
-async function readAxTree(wcId, { fromId, chromeContents, activate }, { depth, properties } = {}) {
+async function readAxTree(wcId, deps, { depth, properties } = {}) {
   void depth; void properties;                  // DD4 Flight-9 stub — accepted, unimplemented in v1
-  let wc = resolveContents(wcId, { fromId, chromeContents });   // throws bad/dead/internal (DD6)
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);   // throws bad/dead/internal (DD6); allowInternal forwarded
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                        // DD5 foreground-to-act (await BEFORE the lock)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and re-resolving
     // re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
   // Single-client lock (DD7) — keyed on the STABLE wcId, not the per-resolve `wc` handle, so it
   // correctly spans the re-resolve above. The has() check and add() are synchronous with NO await

@@ -111,10 +111,10 @@ function scrollEvent(x, y, deltaX, deltaY) {
  *
  * @param {number} wcId
  * @param {object} event
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  */
-function sendInput(wcId, event, { fromId, chromeContents }) {
-  const wc = resolveContents(wcId, { fromId, chromeContents });
+function sendInput(wcId, event, deps) {
+  const wc = resolveContents(wcId, deps);
   wc.sendInputEvent(event);
 }
 
@@ -134,16 +134,20 @@ function sendInput(wcId, event, { fromId, chromeContents }) {
  *
  * @param {number} wcId
  * @param {object[]} events
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
  */
-async function actOn(wcId, events, { fromId, chromeContents, activate }) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function actOn(wcId, events, deps) {
+  const { chromeContents, activate } = deps;
+  // BOTH resolveContents calls (pre- and post-activate) forward the FULL deps so
+  // allowInternal flows on each — otherwise admin's internal drive would re-throw
+  // on the second resolve (DD6 / Leg 2).
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                      // DD3 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale by now,
     // and re-resolving re-applies the DD5 guard post-activation. Always resolve immediately
     // before acting (the discipline the rest of the module group follows).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
   for (const ev of events) wc.sendInputEvent(ev);
 }

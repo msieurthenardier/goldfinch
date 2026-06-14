@@ -24,21 +24,51 @@ const { isSafeTabUrl } = require('../shared/url-safety');
 // Schema defaults
 // ---------------------------------------------------------------------------
 
-/** @type {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
+/**
+ * @typedef {{
+ *   version: number,
+ *   homePage: string,
+ *   toolbarPins: { media: boolean, shields: boolean },
+ *   automationEnabled: boolean,
+ *   automationKeyHashes: Record<string, string>,
+ *   automationAdminKeyHash: string
+ * }} Settings
+ */
+
+/** @type {Settings} */
 const DEFAULTS = {
   version: 1,
   homePage: 'https://www.google.com',
-  toolbarPins: { media: true, shields: true }
+  toolbarPins: { media: true, shields: true },
+  // Automation surface gating (Flight 4). off-by-default: the MCP surface binds
+  // under --automation-dev but the auth gate 401s everything until this is true
+  // AND a valid key is presented. Additive keys — no schema version bump (load()
+  // merges over Object.keys(DEFAULTS) with no version-gated migration).
+  automationEnabled: false,
+  // jarId → SHA-256 hex hash of that jar's automation key (DD5). Plaintext keys
+  // are never persisted — only their hashes live here.
+  automationKeyHashes: {},
+  // SHA-256 hex hash of the admin key, or '' when no admin key is minted (DD6).
+  automationAdminKeyHash: ''
 };
+
+// SHA-256 hex digests are exactly 64 lowercase hex chars.
+const HEX64 = /^[0-9a-f]{64}$/;
 
 // ---------------------------------------------------------------------------
 // Fresh defaults: returns a deep copy of DEFAULTS so config.toolbarPins is
 // never the DEFAULTS.toolbarPins reference (shared-reference hazard guard).
 // ---------------------------------------------------------------------------
 
-/** @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
+/** @returns {Settings} */
 function freshDefaults() {
-  return { ...DEFAULTS, toolbarPins: { ...DEFAULTS.toolbarPins } };
+  return {
+    ...DEFAULTS,
+    toolbarPins: { ...DEFAULTS.toolbarPins },
+    // Deep-copy the automation key map too — otherwise every load shares the one
+    // DEFAULTS.automationKeyHashes object (same shared-reference hazard as toolbarPins).
+    automationKeyHashes: { ...DEFAULTS.automationKeyHashes }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +97,26 @@ const VALIDATORS = {
     v !== null &&
     typeof v === 'object' &&
     !Array.isArray(v) &&
-    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'boolean')
+    Object.values(/** @type {object} */ (v)).every((x) => typeof x === 'boolean'),
+
+  // automationEnabled: strictly boolean (no truthy coercion).
+  automationEnabled: (v) => typeof v === 'boolean',
+
+  // automationKeyHashes: a plain object (NOT null, NOT an array) whose every
+  // value is a 64-char lowercase-hex SHA-256 digest. Deliberately strict — it
+  // does NOT ride toolbarPins' lenient boolean-map pattern. A non-hex / null /
+  // array value rejects the whole map, so validateKey only ever sees clean hex.
+  automationKeyHashes: (v) =>
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    Object.values(/** @type {object} */ (v)).every(
+      (x) => typeof x === 'string' && HEX64.test(x)
+    ),
+
+  // automationAdminKeyHash: '' (no admin key) or a 64-char lowercase-hex digest.
+  automationAdminKeyHash: (v) =>
+    typeof v === 'string' && (v === '' || HEX64.test(v))
 };
 
 // ---------------------------------------------------------------------------
@@ -89,7 +138,7 @@ const NORMALIZERS = {
 /** @type {string | null} */
 let dir = null;
 
-/** @type {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }} */
+/** @type {Settings} */
 let config = freshDefaults();
 
 const defaultSerialize = (/** @type {object} */ c) => JSON.stringify(c, null, 2);
@@ -108,7 +157,7 @@ let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
  *
  * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
  * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
- * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
+ * @returns {Settings}
  */
 function load(userDataPath, opts = {}) {
   dir = userDataPath;
@@ -190,10 +239,16 @@ function get(key) {
 }
 
 /**
- * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
+ * @returns {Settings}
  */
 function getAll() {
-  return { ...config, toolbarPins: { ...config.toolbarPins } };
+  return {
+    ...config,
+    toolbarPins: { ...config.toolbarPins },
+    // Deep-copy the key map so callers can't mutate the live stored map through
+    // the returned reference (same guard as toolbarPins).
+    automationKeyHashes: { ...config.automationKeyHashes }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +270,7 @@ function getAll() {
  *
  * @param {string} key
  * @param {unknown} value
- * @returns {{ version: number, homePage: string, toolbarPins: { media: boolean, shields: boolean } }}
+ * @returns {Settings}
  */
 function set(key, value) {
   if (dir === null) {

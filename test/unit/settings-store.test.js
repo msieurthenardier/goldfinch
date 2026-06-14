@@ -501,3 +501,207 @@ test('toolbarPins — getAll returns a fresh nested object', () => {
     removeTempDir(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Automation gating keys (Flight 4): automationEnabled / automationKeyHashes /
+// automationAdminKeyHash. Additive keys — no schema version bump.
+// ---------------------------------------------------------------------------
+
+// A valid 64-char lowercase-hex SHA-256 digest fixture.
+const HEX_A = 'a'.repeat(64);
+const HEX_B = '0123456789abcdef'.repeat(4); // 64 chars
+
+test('automation keys — defaults on first load (off, empty map, empty admin hash)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.automationEnabled, false);
+    assert.deepEqual(result.automationKeyHashes, {});
+    assert.equal(result.automationAdminKeyHash, '');
+    assert.equal(store.get('automationEnabled'), false);
+    assert.deepEqual(store.get('automationKeyHashes'), {});
+    assert.equal(store.get('automationAdminKeyHash'), '');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automation keys — additive load with NO version bump (version stays 1)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.version, 1, 'schema version must NOT be bumped for additive keys');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// --- automationEnabled validator ---
+test('automationEnabled — set true persists and reloads', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('automationEnabled', true);
+    const result = store.load(dir);
+    assert.equal(result.automationEnabled, true);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationEnabled — set throws on non-boolean (truthy not coerced), prior kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    for (const bad of [1, 'true', null, {}, []]) {
+      assert.throws(
+        () => store.set('automationEnabled', bad),
+        (err) => err instanceof TypeError && err.message.includes('invalid value')
+      );
+    }
+    assert.equal(store.get('automationEnabled'), false);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// --- automationKeyHashes validator ---
+test('automationKeyHashes — set a valid hex map persists and reloads', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('automationKeyHashes', { work: HEX_A, personal: HEX_B });
+    const result = store.load(dir);
+    assert.deepEqual(result.automationKeyHashes, { work: HEX_A, personal: HEX_B });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — set throws on null/array, prior kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    for (const bad of [null, [HEX_A]]) {
+      assert.throws(
+        () => store.set('automationKeyHashes', bad),
+        (err) => err instanceof TypeError && err.message.includes('invalid value')
+      );
+    }
+    assert.deepEqual(store.get('automationKeyHashes'), {});
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — set throws on non-hex / wrong-length / non-string values', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const bads = [
+      { work: 'not-a-hash' },
+      { work: HEX_A.toUpperCase() }, // uppercase rejected (lowercase only)
+      { work: HEX_A.slice(0, 63) },  // too short
+      { work: HEX_A + 'a' },         // too long
+      { work: 123 },                 // non-string
+      { ok: HEX_A, bad: 'xyz' },     // one bad value rejects the whole map
+    ];
+    for (const bad of bads) {
+      assert.throws(
+        () => store.set('automationKeyHashes', bad),
+        (err) => err instanceof TypeError && err.message.includes('invalid value')
+      );
+    }
+    assert.deepEqual(store.get('automationKeyHashes'), {});
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — load malformed map falls back to default {}', () => {
+  const dir = makeTempDir();
+  try {
+    const bad = JSON.stringify({ version: 1, automationKeyHashes: { work: 'nope' } });
+    fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.deepEqual(result.automationKeyHashes, {});
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — getAll returns a fresh nested map (no live-ref leak)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('automationKeyHashes', { work: HEX_A });
+
+    const snapshot = store.getAll();
+    snapshot.automationKeyHashes.work = HEX_B;
+    snapshot.automationKeyHashes.injected = HEX_B;
+
+    // Store must be unaffected by mutation of the snapshot.
+    assert.deepEqual(store.get('automationKeyHashes'), { work: HEX_A });
+    assert.deepEqual(store.getAll().automationKeyHashes, { work: HEX_A });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationKeyHashes — freshDefaults does not share the DEFAULTS map across loads', () => {
+  const dirA = makeTempDir();
+  const dirB = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dirA);
+    store.set('automationKeyHashes', { work: HEX_A });
+
+    // A fresh load over a clean dir must yield an EMPTY map — not the one mutated above.
+    const result = store.load(dirB);
+    assert.deepEqual(result.automationKeyHashes, {});
+  } finally {
+    removeTempDir(dirA);
+    removeTempDir(dirB);
+  }
+});
+
+// --- automationAdminKeyHash validator ---
+test('automationAdminKeyHash — accepts empty string and a 64-hex digest', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('automationAdminKeyHash', HEX_A);
+    assert.equal(store.get('automationAdminKeyHash'), HEX_A);
+    store.set('automationAdminKeyHash', '');
+    assert.equal(store.get('automationAdminKeyHash'), '');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationAdminKeyHash — set throws on non-hex / wrong-length / non-string', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    for (const bad of ['nope', HEX_A.toUpperCase(), HEX_A.slice(0, 10), 123, null, {}]) {
+      assert.throws(
+        () => store.set('automationAdminKeyHash', bad),
+        (err) => err instanceof TypeError && err.message.includes('invalid value')
+      );
+    }
+    assert.equal(store.get('automationAdminKeyHash'), '');
+  } finally {
+    removeTempDir(dir);
+  }
+});

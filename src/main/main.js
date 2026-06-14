@@ -13,9 +13,9 @@ const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
-const { isAutomationDevEnabled, isMcpAutomationEnabled } = require('../shared/automation-dev');
+const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
-const { createMcpServer } = require('./automation/mcp-server');
+const { createMcpServer, enableAndMintJarKey, mintAdminKey } = require('./automation/mcp-server');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -760,12 +760,74 @@ app.whenReady().then(() => {
   // window. The SC7 Origin/Host guard is wired inside createMcpServer and runs
   // before any MCP processing — the server never binds without it.
   if (isMcpAutomationEnabled(process.argv)) {
-    mcpServer = createMcpServer({ getEngine: () => createEngine(() => mainWindow) });
+    mcpServer = createMcpServer({
+      // Engine accessor now takes an options bag so the per-session admin Server
+      // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
+      getEngine: (engineOpts) => createEngine(() => mainWindow, engineOpts),
+      // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
+      // the engine uses (webContents.fromId / session.fromPartition) so the
+      // façade's membership compare and the engine's op resolve cannot diverge.
+      scopeCtx: {
+        jars,
+        fromId: (id) => webContents.fromId(id),
+        fromPartition: (partition) => session.fromPartition(partition),
+        getChromeContents: () => (mainWindow ? mainWindow.webContents : null),
+      },
+      // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
+      // session open/close broadcasts the new audit snapshot over the M02 channel
+      // to the chrome renderer + any internal guest. No chrome UI consumes it this
+      // flight — Flight 5's indicator + log viewer render it. This is the contract.
+      broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
+    });
     mcpServer.start().catch((err) => {
       // A bind failure (e.g. EADDRINUSE on 7777) must not crash the app — surface
       // it and leave the rest of the browser running. GOLDFINCH_MCP_PORT overrides.
       console.error('[mcp] failed to start automation server:', err && err.message);
     });
+
+    // Dev-only enable+mint seam (Flight 4, DD3/DD5/DD6). Gated on the SAME narrower
+    // isMcpAutomationEnabled predicate as the server itself (NOT isAutomationDevEnabled),
+    // so it is unreachable outside --automation-dev. It mirrors the automation:dev-invoke
+    // identity check (chrome-renderer-only) and lets a headless/behavior-test harness flip
+    // the surface on and obtain a key. The plaintext key is RETURNED ONCE via the IPC
+    // return value (never persisted, never logged) so the harness need not scrape logs.
+    ipcMain.handle('automation:dev-enable-mint', async (event, { jarId, admin } = {}) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) {
+        throw new Error('automation: dev-seam is chrome-renderer-only');
+      }
+      // Pass jars so the mint guard rejects an unknown/burner jarId (Leg 2).
+      const key = enableAndMintJarKey(jarId, settings, jars);
+      // Admin minting is gated inside mintAdminKey on GOLDFINCH_AUTOMATION_ADMIN;
+      // returns null when the gate is unset.
+      const adminKey = admin ? mintAdminKey(settings) : null;
+      return { key, adminKey };
+    });
+
+    // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The dev-enable-mint
+    // IPC above is chrome-renderer-only and so unreachable by an external headless /
+    // behavior-test harness; this block lets such a harness flip the surface on and
+    // read a key WITHOUT a renderer round-trip. DEV-ONLY and least-privilege:
+    //   - Fires ONLY under the double gate shouldAutoMint(argv, env): the EXACT
+    //     `--automation-dev` token (already true in this branch) AND
+    //     GOLDFINCH_AUTOMATION_DEV_MINT === '1'. A shipped build never carries
+    //     `--automation-dev`, so this can never run in production.
+    //   - A plain `npm run dev:automation` (no GOLDFINCH_AUTOMATION_DEV_MINT) does
+    //     NOT enable the surface and prints NOTHING — off-by-default stays observable.
+    //   - Mints for the canonical persistent 'default' jar (always present in
+    //     jars.list(); the mint guard rejects unknown/burner ids). Admin key minted
+    //     only when GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
+    //   - Prints the result ONCE to stdout as a single parseable line so the FD can
+    //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
+    if (shouldAutoMint(process.argv, process.env)) {
+      try {
+        const key = enableAndMintJarKey('default', settings, jars);
+        const adminKey = process.env.GOLDFINCH_AUTOMATION_ADMIN ? mintAdminKey(settings) : null;
+        // enableAndMintJarKey flips automationEnabled=true. Single parseable line.
+        process.stdout.write('AUTOMATION_DEV_MINT ' + JSON.stringify({ key, adminKey }) + '\n');
+      } catch (err) {
+        console.error('[mcp] dev auto-mint failed:', err && err.message);
+      }
+    }
   }
 
   app.on('activate', () => {

@@ -43,4 +43,24 @@ function isMcpAutomationEnabled(argv) {
   return Array.isArray(argv) && argv.includes('--automation-dev');
 }
 
-module.exports = { isAutomationDevEnabled, isMcpAutomationEnabled };
+/**
+ * Returns true iff the env-gated dev auto-mint affordance should fire. DEV-ONLY: it is the
+ * double-gate predicate behind the auto-mint-to-stdout block in main.js (Flight 4, Leg 5). Both
+ * gates must hold:
+ *   1. isMcpAutomationEnabled(argv) — i.e. the EXACT `--automation-dev` token (so it can never run
+ *      in a shipped build, which never carries that flag, and stays decoupled from `dev:debug`).
+ *   2. env.GOLDFINCH_AUTOMATION_DEV_MINT === '1' — strict equality against the literal '1', so a
+ *      plain `npm run dev:automation` (no env var) stays inert and off-by-default remains observable.
+ *
+ * Pure; never throws. Admin minting is a SEPARATE, narrower gate (GOLDFINCH_AUTOMATION_ADMIN) checked
+ * by the caller / mintAdminKey — it is intentionally NOT folded in here.
+ *
+ * @param {unknown} argv  typically process.argv
+ * @param {Record<string, string | undefined> | undefined} env  typically process.env
+ * @returns {boolean}
+ */
+function shouldAutoMint(argv, env) {
+  return isMcpAutomationEnabled(argv) && !!env && env.GOLDFINCH_AUTOMATION_DEV_MINT === '1';
+}
+
+module.exports = { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint };

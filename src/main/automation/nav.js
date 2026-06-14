@@ -35,14 +35,14 @@ const { resolveContents } = require('./resolve');
  *
  * @param {number} wcId   the webContentsId to navigate
  * @param {string} url    the URL to load
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {Promise<void>}
  */
-async function navigate(wcId, url, { fromId, chromeContents }) {
+async function navigate(wcId, url, deps) {
   if (!isSafeTabUrl(url)) {
     throw new Error('automation: bad-url — refusing to navigate to an unsafe URL: ' + String(url));
   }
-  const wc = resolveContents(wcId, { fromId, chromeContents }); // throws on internal/bad/dead
+  const wc = resolveContents(wcId, deps); // throws on internal/bad/dead (allowInternal forwarded)
   return wc.loadURL(url);
 }
 
@@ -54,11 +54,11 @@ async function navigate(wcId, url, { fromId, chromeContents }) {
  * a canGoBack() guard.
  *
  * @param {number} wcId
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {void}
  */
-function goBack(wcId, { fromId, chromeContents }) {
-  const wc = resolveContents(wcId, { fromId, chromeContents });
+function goBack(wcId, deps) {
+  const wc = resolveContents(wcId, deps);
   return wc.goBack();
 }
 
@@ -68,11 +68,11 @@ function goBack(wcId, { fromId, chromeContents }) {
  * Same no-history no-op note as goBack.
  *
  * @param {number} wcId
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {void}
  */
-function goForward(wcId, { fromId, chromeContents }) {
-  const wc = resolveContents(wcId, { fromId, chromeContents });
+function goForward(wcId, deps) {
+  const wc = resolveContents(wcId, deps);
   return wc.goForward();
 }
 
@@ -80,11 +80,11 @@ function goForward(wcId, { fromId, chromeContents }) {
  * Reload the webContents.
  *
  * @param {number} wcId
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  * @returns {void}
  */
-function reload(wcId, { fromId, chromeContents }) {
-  const wc = resolveContents(wcId, { fromId, chromeContents });
+function reload(wcId, deps) {
+  const wc = resolveContents(wcId, deps);
   return wc.reload();
 }
 
