@@ -17,24 +17,36 @@
 //   A standalone Node spike completed a full `initialize` + `tools/list`
 //   handshake from the SDK client over 127.0.0.1 with this exact shape. PASS.
 //
-// SESSION MODEL: STATEFUL (per-connection session id via randomUUID). The
-// stateless variant (sessionIdGenerator: undefined) 500'd the post-initialize
-// `notifications/initialized` POST in this SDK version (1.29.0); the stateful
-// path completed the handshake cleanly and is the SDK's documented robust path.
-// One local consumer, so the single-session overhead is negligible. (Resolves
-// the flight's session-model open question.)
+// SESSION MODEL: STATEFUL, MULTI-SESSION (per-connection session id via
+// randomUUID). The stateless variant (sessionIdGenerator: undefined) 500'd the
+// post-initialize `notifications/initialized` POST in this SDK version (1.29.0);
+// the stateful path completes the handshake cleanly and is the SDK's documented
+// robust path.
 //
-// NO ENGINE TOOLS ARE REGISTERED YET (legs 2–3 populate the registry). The
-// server advertises the `tools` capability with an empty `tools/list`. The
-// engine accessor is injected (lazy) so legs 2–3 can register tools without
-// reshaping the constructor — and so a request arriving before the window is
-// ready cannot null-deref.
+// MULTI-SESSION (defect fix — see flight-log): a SINGLE transport that is
+// connected ONCE at startup binds ONE session for the app's whole lifetime in
+// the SDK's stateful mode. After the first client disconnects, a fresh
+// `initialize` is refused with -32600 "Server already initialized", and the old
+// session id is unrecoverable (-32001 "Session not found") — so clients cannot
+// reconnect and a second/concurrent client cannot connect. We instead follow
+// the SDK's standard stateful multi-session pattern: a NEW Server+transport pair
+// is created per `initialize` request, keyed by the transport's generated
+// session id in a live-sessions Map, routed to thereafter by the
+// `Mcp-Session-Id` header, and evicted on the transport's `onclose`.
+//
+// The engine accessor is injected (lazy) so each per-session Server reaches the
+// same live engine — and so a request arriving before the window is ready cannot
+// null-deref (buildToolRegistry catches the throw inside callTool).
 
 const http = require('http');
 const { randomUUID } = require('crypto');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const { ListToolsRequestSchema, CallToolRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
+const {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  isInitializeRequest,
+} = require('@modelcontextprotocol/sdk/types.js');
 const { isAllowed } = require('./origin-guard');
 const { buildToolRegistry } = require('./mcp-tools');
 
@@ -55,17 +67,18 @@ function resolvePort() {
 /**
  * Build the loopback MCP server. Does NOT start listening — call `start()`.
  *
- * The engine accessor is accepted and held for legs 2–3 (which will register the
- * 16 engine ops as tools) but is NOT used this leg — no tools are registered.
- * It is taken lazily (a getter) so it is never dereferenced at construction and
- * a recreated/closed window is always picked up at call time.
+ * The engine accessor is held lazily and injected into every per-session tool
+ * registry, so each session's Server reaches the same live engine. It is taken
+ * lazily (a getter) so it is never dereferenced at construction and a
+ * recreated/closed window is always picked up at call time.
  *
  * @param {object} [opts]
  * @param {() => any} [opts.getEngine]  lazy accessor for the automation engine
- *   (createEngine(...) result), consumed by legs 2–3 to register tools. Unused
- *   this leg.
+ *   (createEngine(...) result); wired into each session's tool registry.
  * @param {string} [opts.version]  server version advertised in the handshake;
  *   defaults to the app version from package.json.
+ * @param {number} [opts.port]  listen port override (takes precedence over
+ *   GOLDFINCH_MCP_PORT / the default); used by tests to pick a free high port.
  * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number }}
  */
 function createMcpServer(opts = {}) {
@@ -85,39 +98,84 @@ function createMcpServer(opts = {}) {
     }
   }
 
-  const port = resolvePort();
+  const port = Number.isInteger(opts.port) && opts.port > 0 ? opts.port : resolvePort();
 
-  // The low-level MCP Server. Advertise the `tools` capability. `initialize`
-  // negotiates it; `tools/list` and `tools/call` are backed by the SDK-free
-  // tool registry (mcp-tools.js) built once from the held getEngine. Leg 2
-  // registers the 12 drive tools; Leg 3 appends the 4 observe tools.
-  const mcp = new Server(
-    { name: SERVER_NAME, version },
-    { capabilities: { tools: {} } }
-  );
-  // Build the registry once; getEngine is called fresh per callTool inside it.
-  const registry = buildToolRegistry(getEngine);
-  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: registry.listTools() }));
-  mcp.setRequestHandler(CallToolRequestSchema, async (req) =>
-    registry.callTool(req.params.name, req.params.arguments)
-  );
+  // Live sessions, keyed by the transport's generated session id. Each entry
+  // owns a Server + its StreamableHTTPServerTransport. Created on `initialize`,
+  // routed to thereafter by the `Mcp-Session-Id` header, evicted on transport
+  // `onclose`.
+  /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport }>} */
+  const sessions = new Map();
 
-  // Stateful Streamable-HTTP transport (see SESSION MODEL note above).
-  // enableJsonResponse: true keeps the simple request/response framing (no SSE
-  // stream needed for one local consumer).
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-    enableJsonResponse: true,
-  });
+  /**
+   * Build a fresh MCP Server with the 16 tools wired over the shared (lazy)
+   * getEngine. One per session — `tools/list`/`tools/call` are backed by the
+   * SDK-free registry (mcp-tools.js), and getEngine is called fresh per
+   * callTool inside it so every session reaches the same live engine.
+   * @returns {import('@modelcontextprotocol/sdk/server/index.js').Server}
+   */
+  function buildServer() {
+    const server = new Server(
+      { name: SERVER_NAME, version },
+      { capabilities: { tools: {} } }
+    );
+    const registry = buildToolRegistry(getEngine);
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: registry.listTools() }));
+    server.setRequestHandler(CallToolRequestSchema, async (req) =>
+      registry.callTool(req.params.name, req.params.arguments)
+    );
+    return server;
+  }
 
   /** @type {import('http').Server | null} */
   let httpServer = null;
-  let connected = false;
   let started = false;
 
   /**
+   * Read and JSON-parse a request body. Resolves `undefined` on an empty body or
+   * a parse failure (the caller treats a non-initialize / unparseable body
+   * without a valid session as a 400).
+   * @param {import('http').IncomingMessage} req
+   * @returns {Promise<any>}
+   */
+  function readJsonBody(req) {
+    return new Promise((resolve) => {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (!raw) { resolve(undefined); return; }
+        try {
+          resolve(JSON.parse(raw));
+        } catch {
+          resolve(undefined);
+        }
+      });
+      req.on('error', () => resolve(undefined));
+    });
+  }
+
+  /**
+   * Write a JSON-RPC error response with the given HTTP status.
+   * @param {import('http').ServerResponse} res
+   * @param {number} status
+   * @param {string} message
+   */
+  function sendJsonRpcError(res, status, message) {
+    if (res.headersSent) { res.end(); return; }
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32000, message },
+      id: null,
+    }));
+  }
+
+  /**
    * The Node http request handler. The SC7 origin guard runs FIRST on every
-   * request (DD3) — a denied request gets a 403 and never reaches the SDK.
+   * request (DD3) — a denied request gets a 403 and never reaches the SDK or any
+   * session routing. After the guard, requests are routed to an existing session
+   * (by `Mcp-Session-Id`) or, for an initialize POST, a new session is created.
    * @param {import('http').IncomingMessage} req
    * @param {import('http').ServerResponse} res
    */
@@ -132,28 +190,77 @@ function createMcpServer(opts = {}) {
       res.end();
       return;
     }
-    // Hand the raw Node (req, res) straight to the transport (premise verified).
-    transport.handleRequest(req, res).catch(() => {
+    routeRequest(req, res).catch(() => {
       if (!res.headersSent) res.writeHead(500);
       res.end();
     });
   }
 
   /**
-   * Start the server: connect the MCP Server to the transport once, then bind
-   * the http server to 127.0.0.1. Idempotent — a second call is a no-op.
-   * Rejects (without crashing the app) on a bind error (e.g. EADDRINUSE) so the
-   * caller can surface the GOLDFINCH_MCP_PORT override hint.
+   * Route a guard-passed request to a session transport, creating a session on
+   * an initialize POST.
+   * @param {import('http').IncomingMessage} req
+   * @param {import('http').ServerResponse} res
+   * @returns {Promise<void>}
+   */
+  async function routeRequest(req, res) {
+    const sessionId = /** @type {string | undefined} */ (
+      Array.isArray(req.headers['mcp-session-id'])
+        ? req.headers['mcp-session-id'][0]
+        : req.headers['mcp-session-id']
+    );
+
+    // Existing session → route straight to its transport (handles POST/GET/DELETE,
+    // including the SSE stream and session teardown).
+    if (sessionId) {
+      const entry = sessions.get(sessionId);
+      if (entry) {
+        await entry.transport.handleRequest(req, res);
+        return;
+      }
+      // A session id was supplied but is unknown (stale/torn-down).
+      sendJsonRpcError(res, 404, 'No valid session: unknown Mcp-Session-Id');
+      return;
+    }
+
+    // No session id. Only a POST carrying an `initialize` request may create one.
+    if (req.method !== 'POST') {
+      sendJsonRpcError(res, 400, 'No valid session: Mcp-Session-Id required');
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    if (!isInitializeRequest(body)) {
+      sendJsonRpcError(res, 400, 'No valid session: initialize required to open one');
+      return;
+    }
+
+    // Create a NEW session: fresh transport + Server, registered on init.
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (sid) => { sessions.set(sid, { server, transport }); },
+    });
+    transport.onclose = () => {
+      if (transport.sessionId) sessions.delete(transport.sessionId);
+    };
+    const server = buildServer();
+    await server.connect(transport);
+    // Pass the already-parsed body so the SDK does not try to re-read the stream.
+    await transport.handleRequest(req, res, body);
+  }
+
+  /**
+   * Start the server: bind the http server to 127.0.0.1. Idempotent — a second
+   * call is a no-op. Per-session Server/transport pairs are connected lazily on
+   * each `initialize` (see routeRequest), not at start. Rejects (without
+   * crashing the app) on a bind error (e.g. EADDRINUSE) so the caller can
+   * surface the GOLDFINCH_MCP_PORT override hint.
    * @returns {Promise<void>}
    */
   async function start() {
     if (started) return;
     started = true;
-
-    if (!connected) {
-      await mcp.connect(transport);
-      connected = true;
-    }
 
     httpServer = http.createServer(onRequest);
 
@@ -182,8 +289,8 @@ function createMcpServer(opts = {}) {
   }
 
   /**
-   * Stop the server: close the http listener (releasing the port) and the
-   * transport. Idempotent — safe to call from both `before-quit` and
+   * Stop the server: close the http listener (releasing the port) and EVERY live
+   * session's transport. Idempotent — safe to call from both `before-quit` and
    * `window-all-closed`, and safe when never started.
    * @returns {Promise<void>}
    */
@@ -194,14 +301,25 @@ function createMcpServer(opts = {}) {
     const srv = httpServer;
     httpServer = null;
     if (srv) {
-      await new Promise((resolve) => srv.close(() => resolve(undefined)));
+      // close() stops accepting and waits for existing connections to finish;
+      // lingering keep-alive sockets (the SDK client uses them) would otherwise
+      // hold the listen socket open and delay/deny an immediate restart on the
+      // same port. Forcibly destroy them so the port frees promptly.
+      const closed = new Promise((resolve) => srv.close(() => resolve(undefined)));
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      await closed;
     }
-    try {
-      await transport.close();
-    } catch {
-      // already closed — ignore
+    // Close all live sessions. Each transport.close() fires its onclose, which
+    // deletes the entry; snapshot first so iteration is not disturbed by that.
+    const entries = [...sessions.values()];
+    sessions.clear();
+    for (const { transport } of entries) {
+      try {
+        await transport.close();
+      } catch {
+        // already closed — ignore
+      }
     }
-    connected = false;
   }
 
   return { start, stop, port };
