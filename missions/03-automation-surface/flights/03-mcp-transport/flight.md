@@ -1,6 +1,6 @@
 # Flight: MCP-Compatible Local Server + Transport
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -326,7 +326,7 @@ the `resolve`/`tabs`/`nav`/`input`/`observe` modules stay SDK-free and dependenc
   confirmed; run `mcp-drive-end-to-end` + `mcp-loopback-origin-guard`; **record the DevTools-CDP-conflict
   outcome over the transport, app launched without `--remote-debugging-port` (DD10)**; full unit suite +
   typecheck + lint green.
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT: operator drives a real external MCP
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT: operator drives a real external MCP
   client (or the example client) against the running server end to end, tuning tool shapes / latency /
   ergonomics.
 

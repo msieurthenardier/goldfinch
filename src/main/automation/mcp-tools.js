@@ -243,16 +243,24 @@ const DRIVE_TOOLS = [
   },
   {
     name: 'pressKey',
-    description: 'Press a named key (keyDown + keyUp) in the target tab. Known keys: ' + PRESS_KEY_NAMES + '.',
+    description:
+      'Press a named key (keyDown + keyUp) in the target tab. The key is given as `name` (preferred) or `key` (accepted alias) — exactly one is required, alongside wcId. Valid key names: ' +
+      PRESS_KEY_NAMES + '.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        name: { type: 'string', description: 'friendly key name — one of: ' + PRESS_KEY_NAMES },
+        name: { type: 'string', description: 'friendly key name (preferred) — one of: ' + PRESS_KEY_NAMES },
+        key: { type: 'string', description: 'accepted alias for `name` — one of: ' + PRESS_KEY_NAMES },
       },
-      required: ['wcId', 'name'],
+      // wcId is always required; the key may arrive as `name` (preferred) or `key`
+      // (alias). anyOf expresses "at least one of name/key" cleanly under JSON-schema
+      // validation without coupling the two into a single required slot.
+      required: ['wcId'],
+      anyOf: [{ required: ['name'] }, { required: ['key'] }],
     },
-    call: (engine, { wcId, name }) => engine.pressKey(wcId, name),
+    // name primary, key alias (??: an explicit `name` wins; falls back to `key`).
+    call: (engine, args) => engine.pressKey(args.wcId, args.name ?? args.key),
   },
 ];
 

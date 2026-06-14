@@ -339,7 +339,7 @@ as work reveals.)_
   **accessibility tree via in-process `webContents.debugger`**, on the foreground tab. (SC3, SC4)
   *(landed 2026-06-13 — native read capability delivered + live-verified; SC3/SC4 behavior-test backing
   lands with the Flight-3 transport / Flight-6 migration.)*
-- [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
+- [x] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
   MCP SDK** (identity-level — the SDK is the first runtime dep), then commit; ship an example client +

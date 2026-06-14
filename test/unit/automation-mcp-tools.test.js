@@ -110,11 +110,20 @@ test('input schemas carry the correct required fields per the discovery contract
   const scrollProps = byName.get('scroll').inputSchema.properties;
   assert.equal(scrollProps.dx.type, 'number');
   assert.equal(scrollProps.dy.type, 'number');
-  // pressKey — wcId + name; description enumerates the known keys (incl. ShiftTab)
-  assert.deepEqual(req('pressKey'), ['wcId', 'name']);
-  const pk = byName.get('pressKey').inputSchema.properties.name;
-  assert.match(pk.description, /ShiftTab/);
-  assert.match(pk.description, /Tab, Enter, Escape/);
+  // pressKey — wcId always required; the key arrives as `name` (preferred) or `key`
+  // (alias), expressed as an anyOf so exactly one of the two satisfies the schema.
+  const pressKeySchema = byName.get('pressKey').inputSchema;
+  assert.deepEqual(req('pressKey'), ['wcId']);
+  assert.deepEqual(pressKeySchema.anyOf, [{ required: ['name'] }, { required: ['key'] }]);
+  const pkProps = pressKeySchema.properties;
+  assert.equal(pkProps.name.type, 'string');
+  assert.equal(pkProps.key.type, 'string'); // alias property, same string type
+  // description enumerates the known keys (incl. ShiftTab) and documents the name|key alias
+  const pkDesc = byName.get('pressKey').description;
+  assert.match(pkDesc, /ShiftTab/);
+  assert.match(pkDesc, /Tab, Enter, Escape/);
+  assert.match(pkDesc, /\bname\b/);
+  assert.match(pkDesc, /\bkey\b/);
 });
 
 // ---------------------------------------------------------------------------
@@ -174,6 +183,27 @@ test('openTab maps to engine.openTab(url); typeText to engine.typeText(wcId, tex
   assert.deepEqual(calls.typeText[0], [1, 'hello']);
   await reg.callTool('pressKey', { wcId: 1, name: 'ShiftTab' });
   assert.deepEqual(calls.pressKey[0], [1, 'ShiftTab']);
+});
+
+test('pressKey with { wcId, name } maps to engine.pressKey(wcId, name)', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('pressKey', { wcId: 7, name: 'Enter' });
+  assert.deepEqual(calls.pressKey[0], [7, 'Enter']);
+});
+
+test('pressKey with the { wcId, key } alias maps to engine.pressKey(wcId, key)', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('pressKey', { wcId: 7, key: 'Enter' });
+  assert.deepEqual(calls.pressKey[0], [7, 'Enter']);
+});
+
+test('pressKey prefers `name` over `key` when both are supplied', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('pressKey', { wcId: 7, name: 'Enter', key: 'Tab' });
+  assert.deepEqual(calls.pressKey[0], [7, 'Enter']);
 });
 
 test('callTool with undefined arguments defaults to {} (no destructuring throw)', async () => {

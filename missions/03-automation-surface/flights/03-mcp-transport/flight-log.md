@@ -139,6 +139,16 @@ Live verification of the full surface against the running app (launched via `npm
 
 ---
 
+### `hat-and-alignment` — completed 2026-06-14 (interactive HAT)
+
+- **H1 — HAT evidence accepted (operator, 2026-06-14):** the live V3 example-client smoke + the V6 `mcp-drive-end-to-end` Witnessed run (9/9, all 16 tools exercised, trusted-input echoes pixel- and a11y-confirmed, whole-window cross-check) are accepted as sufficient human-acceptance evidence that the agent-facing surface drives the browser end to end. No separate operator-driven client pass was required.
+- **H2 — ergonomics tuning dispositioned:** the one rough edge from V6 — `pressKey`'s key arg being named `name` (a client sending `{key:"Enter"}` got `unknown key undefined`) — was **fixed inline**: the `pressKey` MCP tool now accepts **`key` as an alias for `name`** (schema `required:[wcId]` + `anyOf:[{required:[name]},{required:[key]}]`; mapper `engine.pressKey(wcId, name ?? key)`) and its description enumerates the valid key vocabulary. Engine/`input.js` KEY_MAP untouched (still the source of truth). Unit-tested both arg paths; the underlying `pressKey` live path was already confirmed in V6, and the change is a pure adapter arg-alias, so a full live Witnessed re-run was not warranted (proportionate). `npm test` 478/478, typecheck + lint clean.
+- **H3 — operator sign-off:** Flight 3's deliverable — a discoverable, drivable, dev-gated MCP automation surface over the loopback transport — meets intent. Deferrals named and recorded: key gating/auth/audit → Flight 4; the DD10 confound-free DevTools/`attach-failed` observation (needs a non-CDP DevTools-open affordance) → future flight; element-addressing ergonomics → Flight 9; README reframe + external-consumer (the-one) wiring → Flight 8.
+
+**Flight landed 2026-06-14** — all 7 legs completed; SC6 advanced + behavior-test-backed, SC7's transport/bind/origin half landed (key-gated half is Flight 4). Debrief is the separate `/flight-debrief` step.
+
+---
+
 ## Flight Director Notes
 
 ### 2026-06-13 — Flight execution begins
@@ -174,6 +184,14 @@ Live verification of the full surface against the running app (launched via `npm
 ### Regression test — `test/unit/automation-mcp-server.test.js` (headless)
 Added a headless unit test (mcp-server.js needs no Electron; a **fake engine** with canned op returns is injected) that drives the real SDK client (`client/index.js` + `client/streamableHttp.js`) against the server on test port **7790**. Four cases: (1) a first client initializes and `tools/list` returns **16** tools; (2) **THE REGRESSION** — after the first client closes, a **second fresh** client initializes + lists successfully (proves reconnect, the thing that was broken); (3) two **concurrent** clients both initialize + list with **distinct** session ids; (4) clean `stop()` then an immediate **restart on the same port** succeeds (no EADDRINUSE) and a fresh client works. Each test stops its server in a `finally` so the port frees.
 **Test-harness note (not a server defect)**: each client sets `Connection: close` on its requests. Node's global undici fetch pool would otherwise keep a keep-alive socket and **reuse it across server instances on the same 127.0.0.1 port**; after a `stop()` force-closes sockets, the pooled socket is dead — a later fetch reusing it fails (`fetch failed`) and the dead handle keeps `node --test` from exiting. Per-request connection close means nothing is pooled, so the restart case is deterministic and the process exits with no leaked handles. The real app never hits this (a restart there is a new OS process with a fresh pool). To free sockets promptly on the server side, `stop()` also calls `httpServer.closeAllConnections()` (Node 18.2+) before awaiting `close()`.
+
+### `pressKey` key-arg alias + description sharpening (Leg 7 hat-and-alignment — HAT, 2026-06-14)
+**Context**: V6 live verification surfaced a small ergonomics rough edge. The `pressKey` MCP tool's key argument is named `name`, but an agent intuitively reaching for `{ key: "Enter" }` got `automation: unknown key undefined` — `args.name` was `undefined`, and the engine's `keyEvents` threw on the missing key. The tool also did not advertise the valid key vocabulary anywhere a client could read it without trial-and-error.
+**Decision (operator HAT — accept the alias, sharpen the doc)**: in `src/main/automation/mcp-tools.js`'s `pressKey` def only (the thin adapter; `input.js` KEY_MAP stays the single source of truth for valid keys, unchanged):
+- **Mapper accepts either arg name**: `engine.pressKey(args.wcId, args.name ?? args.key)` — `name` is primary, `key` is an accepted alias (an explicit `name` wins; falls back to `key`). `wcId` stays required.
+- **Schema expresses "one of name/key"**: `required: ['wcId']` plus `anyOf: [{ required: ['name'] }, { required: ['key'] }]`. This is the simplest JSON-schema shape that stays SDK-valid and says "wcId always, plus at least one of name/key" without coupling the two into one slot. `key` is a `string` property alongside `name`.
+- **Description enumerates the valid key vocabulary** (the `PRESS_KEY_NAMES` constant: Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, ShiftTab — verified 1:1 against `input.js` KEY_MAP + the ShiftTab special-case) and states the key may be given as `name` (preferred) or `key` (alias).
+- No other tool descriptions needed sharpening — they already enumerate their contracts (e.g. `openTab`'s null semantics, `readAxTree`'s refusal + stale-handle caveat). Diff kept to `pressKey`. No new runtime dependency. Tests extended in `test/unit/automation-mcp-tools.test.js` (name path, key-alias path, name-wins-when-both, and the updated discovery-contract assertion for the `anyOf`/`required: ['wcId']` shape). Gates green: 478 unit tests pass, typecheck clean, lint clean.
 
 ---
 
