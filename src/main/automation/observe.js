@@ -1,6 +1,7 @@
 // @ts-check
 'use strict';
 const { resolveContents, classifyContents } = require('./resolve');
+const { withDebuggerSession } = require('./cdp');
 // Automation engine — READ half (observe). Foreground-first, debugger-free screenshots
 // via webContents.capturePage() (DD1): a guest is brought to front before capture or it
 // returns blank (Flight-1 spike). Results are base64 PNG strings (NativeImage.toPNG().
@@ -11,31 +12,14 @@ const { resolveContents, classifyContents } = require('./resolve');
 // chromeContents, activate) is injected through deps so orchestration is unit-testable
 // offline with fakes. Live capture is integration-verified (Leg 5 smoke + Leg 6 HAT).
 //
-// webContents.debugger lives ONLY in this module's readAxTree (DD3): there is no pure-JS
-// path to the platform accessibility tree, so the a11y read attaches the in-process CDP
-// debugger on demand, detaches in a finally, holds a synchronous single-client lock, and
-// returns a clean debugger-unavailable refusal when the contents is already held
-// (attach-on-demand / detach-in-finally / single-client lock / clean refusal —
-// DD3/DD7/DD8/DD9). Every OTHER op in this module (captureScreenshot / captureWindow /
-// readDom) and every OTHER automation module (resolve.js / input.js) stays debugger-free.
+// webContents.debugger discipline is now shared via cdp.js (withDebuggerSession /
+// debuggerUnavailable / attached Set). readAxTree uses withDebuggerSession, which
+// enforces attach-on-demand / detach-in-finally / single-client lock. The shared lock
+// means a concurrent scroll (input.js) + readAxTree on the same wcId cannot both attach.
+// (DD3/DD7/DD8/DD9; the DD8 boundary crossing — scroll now also uses the debugger — is
+// operator-approved for this leg.) Every OTHER op in this module (captureScreenshot /
+// captureWindow / readDom) stays debugger-free.
 // Leg 4 (wire-and-docs) adds the dispatch keys to engine.js (no engine.js edit here).
-
-// Single-client lock (DD7): wcIds with an in-flight debugger attach. The has()/add() pair is
-// synchronous (no await between) so concurrent readAxTree calls on the same contents are race-safe.
-const attached = new Set();
-
-/**
- * Build the discriminated debugger-unavailable refusal object (DD8). Returned (NOT thrown) by
- * readAxTree when the contents is already held — either the in-engine lock (`reason: 'locked'`)
- * or a real attach failure (`reason: 'attach-failed'`, another CDP client holds it). Structurally
- * distinct from a success (which is an Array of AXNodes) — callers discriminate via Array.isArray.
- *
- * @param {number} wcId
- * @param {'locked' | 'attach-failed'} reason
- * @returns {{ automation: 'debugger-unavailable', reason: string, wcId: number }}
- */
-const debuggerUnavailable = (wcId, reason) =>
-  ({ automation: 'debugger-unavailable', reason, wcId });
 
 // Default paint-settle delay (ms) after foregrounding a guest before capturePage().
 // DD1's blank-capture is a compositor/visibility effect on an already-loaded guest, so the
@@ -271,30 +255,17 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
     // re-applies the DD6 guard post-activation (the Flight-1 discipline).
     wc = resolveContents(wcId, deps);
   }
-  // Single-client lock (DD7) — keyed on the STABLE wcId, not the per-resolve `wc` handle, so it
-  // correctly spans the re-resolve above. The has() check and add() are synchronous with NO await
-  // between them; the only awaits are AFTER the add (the sendCommands). Two concurrent calls on one
-  // wcId may both activate (idempotent bring-to-front) but only one wins the synchronous add().
-  if (attached.has(wcId)) return debuggerUnavailable(wcId, 'locked');  // sync check…
-  attached.add(wcId);                                                  // …+ add (no await between)
-  try {
-    try {
-      wc.debugger.attach('1.3');
-    } catch {
-      return debuggerUnavailable(wcId, 'attach-failed');   // another client holds it (DD8)
-    }
-    try {
-      // NOTE: do NOT re-resolve between attach and detach — the finally detach below must run on
-      // the SAME `wc` that was attached (it does, as written; this comment guards future edits).
-      await wc.debugger.sendCommand('Accessibility.enable');
-      const res = await wc.debugger.sendCommand('Accessibility.getFullAXTree');
-      return res && Array.isArray(res.nodes) ? res.nodes : [];        // empty = valid success (DD4)
-    } finally {
-      try { wc.debugger.detach(); } catch { /* already detached — don't mask the outcome */ }
-    }
-  } finally {
-    attached.delete(wcId);                       // release the lock (DD7) — even on attach-throw
-  }
+  // Delegate to shared CDP session helper (cdp.js): acquires the synchronous single-client lock
+  // keyed on the STABLE wcId, attaches '1.3', runs the AX commands, detaches in a finally, and
+  // releases the lock in a finally. Two concurrent calls on one wcId may both activate (idempotent
+  // bring-to-front) but only one wins the synchronous lock add() — the other gets 'locked'.
+  // NOTE: do NOT re-resolve between withDebuggerSession entry and its internal detach — the wc
+  // captured here is the same handle used for attach and detach. This comment guards future edits.
+  return withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
+    await w.debugger.sendCommand('Accessibility.enable');
+    const res = await w.debugger.sendCommand('Accessibility.getFullAXTree');
+    return res && Array.isArray(res.nodes) ? res.nodes : [];          // empty = valid success (DD4)
+  });
 }
 
 module.exports = { captureScreenshot, readDom, captureWindow, readAxTree };

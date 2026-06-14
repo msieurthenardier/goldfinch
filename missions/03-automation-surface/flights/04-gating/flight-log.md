@@ -102,6 +102,13 @@ Developer design review: **approve with changes** — all incorporated (single c
 
 ## Flight Director Notes
 
+**2026-06-14 — Out-of-band fix (operator-requested during HAT): synthetic `scroll` rewired to CDP.**
+Discovered live while demoing the surface through the user-wide MCP: `scroll` (sendInputEvent mouseWheel) does **not** move `<webview>` guests — empirically confirmed (no-op recapture is byte-identical → capture is a reliable observable; post-scroll hash unchanged). A first attempt (prepend `mouseMove` + chunk the wheel delta + `canScroll`) still produced zero movement → it's an Electron `sendInputEvent`-wheel-on-webview limitation, not a builder bug.
+- **Decision (operator-approved via AskUserQuestion): rewire `scroll` to in-process CDP `Input.dispatchMouseEvent({type:'mouseWheel'})`** — the only reliable, SC2-compliant mechanism (fires real wheel handlers). This **crosses Flight-2's DD8** ("input.js is debugger-free") — recorded as a deliberate, operator-approved partial supersession of DD8 (annotated here, not by rewriting Flight-2's artifact).
+- **Implementation:** extracted the shared debugger discipline into `src/main/automation/cdp.js` (`withDebuggerSession` + the **single shared `attached` lock** + `debuggerUnavailable`); `readAxTree` refactored to use it (contract preserved exactly); `scroll` reimplemented through it. The shared lock means a concurrent `scroll` + `readAxTree` on one wcId cannot both attach (one gets the `locked` refusal). Dead `scrollEvent`/`scrollEvents` builders removed.
+- **Verified LIVE** through the gated MCP (key `tpuKI…`): a Wikipedia article scrolled ~2500px (screenshot hash changed `92bfa2…`→`8c3c02…`; after-shot shows the version-history table). Independent code review: `[HANDOFF:confirmed]` (readAxTree contract intact, lock race-safe, no detach/lock leak). Gates: 590/590 tests, typecheck + lint clean.
+- **Scope note:** this is a Flight-1/SC2 behavior fix riding on `flight/04-gating` (committed separately from the gating work); the flight debrief should carry it forward. Not part of SC8.
+
 **2026-06-14 — Leg 05 (`verify-integration`) — live runs + operator disposition.**
 Auto-mint-to-stdout helper built (Developer; gated on `isMcpAutomationEnabled(argv)` + `GOLDFINCH_AUTOMATION_DEV_MINT=1`; prints `AUTOMATION_DEV_MINT {"key","adminKey"}` once). **Full headless gates green: `npm test` 579/579, typecheck clean, lint clean.**
 FD-driven machine-read live runs (apparatus: `curl` + SDK MCP client over the loopback transport; app via `npm run dev:automation` + the mint env; ports overridden via `GOLDFINCH_MCP_PORT` 7797–7799 because a stale server held 7777 — apparatus note, not a defect):

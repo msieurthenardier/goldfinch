@@ -463,9 +463,9 @@ test('captureWindow: nullish chromeContents → throws "automation: chrome windo
 // ---------------------------------------------------------------------------
 // readAxTree — in-process webContents.debugger a11y read (Leg 3, DD3/DD4/DD7/DD8)
 //
-// The ONLY webContents.debugger use in the engine. Each test attaches a fake debugger
-// (makeDebugger) onto a guest wc. The module-private `attached` Set lock is shared across the
-// imported module, so every test uses a DISTINCT wcId to keep the lock state isolated.
+// readAxTree now delegates to withDebuggerSession (cdp.js). Each test attaches a fake debugger
+// (makeDebugger) onto a guest wc. The shared `attached` Set lock (cdp.js) is shared across
+// readAxTree AND scroll — every test uses a DISTINCT wcId to keep the lock state isolated.
 // ---------------------------------------------------------------------------
 
 // Canned AX nodes the happy-path fake returns (raw, no projection — DD4).
