@@ -1,6 +1,6 @@
 # Flight: MCP-Compatible Local Server + Transport
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
