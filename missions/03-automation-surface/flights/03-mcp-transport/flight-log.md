@@ -122,6 +122,23 @@ the flight's Design Decisions / legs. No items auto-retired.
 
 ---
 
+### `verify-integration` — completed 2026-06-14 (live / FD-guided)
+
+Live verification of the full surface against the running app (launched via `npm run dev:automation`, no `--remote-debugging-port`). Disposition V1–V8:
+
+- **V1 — bind/loopback ✅**: `ss` shows the server bound to **`127.0.0.1:7777`** only (not `0.0.0.0`/`::`). The negative gate (`dev`/`dev:debug` must not start `:7777`) is structurally + unit-backed via `isMcpAutomationEnabled`.
+- **V2 — discovery ✅**: a real SDK client connected, `initialize` ok, `tools/list` returned exactly the **16** tools.
+- **V3 — drive smoke ✅**: `scripts/mcp-example-client.mjs` drove openTab→navigate→captureScreenshot→readDom→enumerateTabs live (superseded by the graded V6).
+- **V4 — SC7 403 matrix ✅**: non-loopback Host → 403; non-loopback Origin → 403; DNS-rebinding shape (loopback Host + hostile Origin) → 403; loopback no-Origin and port-mismatched loopback → 406 (passed the guard, SDK-rejected bare GET — i.e. not the guard's 403).
+- **V5 — `/behavior-test mcp-loopback-origin-guard` PASS (7/7)** — run log `tests/behavior/mcp-loopback-origin-guard/runs/2026-06-14-14-28-59.md`. SC7 transport half behavior-test-backed. **This run surfaced the single-session transport defect** (see below).
+- **V6 — `/behavior-test mcp-drive-end-to-end` PASS (9/9)** — run log `tests/behavior/mcp-drive-end-to-end/runs/2026-06-14-15-29-23.md`. SC6 behavior-test-backed: discovery + tab lifecycle + nav + DOM/screenshot/a11y + trusted input (all three echoes pixel- and a11y-confirmed) + whole-window cross-check; all 16 tools exercised. Run also doubled as end-to-end confirmation of the multi-session fix.
+- **V7 — DD10 finding RECORDED (not reproducible confound-free)**: staging the DevTools/MCP conflict needs a second external CDP client (DevTools) on the tab, but Goldfinch's only DevTools-open path is `--remote-debugging-port` — the exact confound DD10 must avoid — and there is no non-CDP affordance. So the external-CDP **`attach-failed`** branch can't be observed live (stays unit-tested); the in-engine **`locked`** refusal IS live-confirmed confound-free (concurrent `readAxTree` on wcId 2 → one `ARRAY(len 145)` + one `{"reason":"locked"}` **normal** result). Operator disposition (2026-06-14): record + follow-up (a future non-CDP, `--automation-dev`-gated DevTools-open affordance settles it). Mission Open Question + `devtools-cdp-conflict.md` annotated.
+- **V8 — gates ✅**: `npm test` 475/475, `typecheck` clean, `lint` clean.
+
+**Outcome**: SC5/SC6 (drive + tabs + observe) and SC7's transport/origin/bind half are live + behavior-test-backed. The leg's chief value was catching the **multi-session transport defect** (Decisions below) under live conditions — fixed in-leg (commit 69bae77, independently reviewed) and re-verified by a clean V6.
+
+---
+
 ## Flight Director Notes
 
 ### 2026-06-13 — Flight execution begins

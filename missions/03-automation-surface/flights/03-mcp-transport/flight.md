@@ -321,7 +321,7 @@ the `resolve`/`tabs`/`nav`/`input`/`observe` modules stay SDK-free and dependenc
   `devtools-cdp-conflict`) — **authored-only, marked `draft` / "run at Flight 6"** (a clear status field
   + header note so a stray `/behavior-test` invocation doesn't produce a confusing partial run). (DD9 +
   Flight-2 debrief decision)
-- [ ] `verify-integration` — live smoke: a real MCP client lists 16 tools + drives end to end
+- [x] `verify-integration` — live smoke: a real MCP client lists 16 tools + drives end to end
   (navigate/click/type/screenshot/readAxTree/tab-mgmt); Origin/Host reject + non-loopback refusal
   confirmed; run `mcp-drive-end-to-end` + `mcp-loopback-origin-guard`; **record the DevTools-CDP-conflict
   outcome over the transport, app launched without `--remote-debugging-port` (DD10)**; full unit suite +
