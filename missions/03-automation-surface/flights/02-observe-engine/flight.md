@@ -1,6 +1,6 @@
 # Flight: Observe Engine (screenshot / DOM / a11y)
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
