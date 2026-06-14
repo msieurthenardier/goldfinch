@@ -1,0 +1,121 @@
+<!--
+  BEHAVIOR-TEST FIXTURE — do not deploy or link from production.
+  This page is used by the mcp-drive-end-to-end behavior test to verify that
+  trusted input synthesized over the Goldfinch MCP surface (click / typeText /
+  pressKey) lands on a real web page and is VISIBLY REFLECTED in the page render.
+  It lives under tests/behavior/fixtures/ which is excluded from linting/prettier.
+
+  Why a served HTTP fixture (not file://): the MCP drive tools refuse non-http(s)
+  schemes, and the rendered-state discipline (AUTHORING.md) wants an observable
+  whose ECHO is visible in pixels / a11y tree, not a DOM .value read. This page
+  mirrors typed text and click/keypress reactions into LARGE on-page text so a
+  captureScreenshot (pixels) and readAxTree (a11y) both show the change.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Drive End-to-End Fixture</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #101418;
+      color: #e0e0e0;
+    }
+    h1 { color: #f90; margin-bottom: 0.25rem; }
+    .marker { color: #0f0; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    section { margin-bottom: 2rem; }
+    h2 { color: #aaa; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+    input {
+      font-family: monospace;
+      font-size: 1.2rem;
+      width: 100%;
+      padding: 0.5rem;
+      background: #1b2027;
+      color: #e0e0e0;
+      border: 1px solid #4af;
+      box-sizing: border-box;
+    }
+    /* The echo is rendered LARGE so it is unambiguous in a screenshot. */
+    #echo {
+      font-size: 2rem;
+      color: #4af;
+      min-height: 2.4rem;
+      margin-top: 0.75rem;
+      word-break: break-all;
+    }
+    #click-label {
+      font-size: 2rem;
+      color: #fa0;
+      margin-top: 0.5rem;
+    }
+    #key-label {
+      font-size: 2rem;
+      color: #0fa;
+      margin-top: 0.5rem;
+    }
+    button {
+      font-family: monospace;
+      font-size: 1.1rem;
+      padding: 0.5rem 1rem;
+      background: #243; color: #cfc; border: 1px solid #4c6; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>MCP DRIVE END-TO-END FIXTURE</h1>
+  <div class="marker">mcp-drive-fixture-loaded</div>
+
+  <section>
+    <h2>Typed-text echo (typeText)</h2>
+    <p>Focus the input and type. The text is mirrored verbatim into the large blue echo below — visible in a screenshot and in the a11y tree.</p>
+    <input id="field" aria-label="echo input" autofocus placeholder="type here">
+    <div id="echo" aria-live="polite">ECHO: (nothing typed yet)</div>
+  </section>
+
+  <section>
+    <h2>Click reaction (click)</h2>
+    <p>A synthetic click on this button flips the label to a value no initial render shows.</p>
+    <button id="btn" type="button">CLICK ME</button>
+    <div id="click-label" aria-live="polite">CLICK: not yet clicked</div>
+  </section>
+
+  <section>
+    <h2>Key reaction (pressKey)</h2>
+    <p>With the input focused, pressing Enter sets the key label.</p>
+    <div id="key-label" aria-live="polite">KEY: no key yet</div>
+  </section>
+
+  <script>
+    const field = document.getElementById('field');
+    const echo = document.getElementById('echo');
+    const clickLabel = document.getElementById('click-label');
+    const keyLabel = document.getElementById('key-label');
+
+    // Mirror typed text into large visible page text (rendered-state echo).
+    field.addEventListener('input', () => {
+      echo.textContent = 'ECHO: ' + field.value;
+    });
+
+    // Click reaction: a visible label change distinct from the initial render.
+    document.getElementById('btn').addEventListener('click', () => {
+      clickLabel.textContent = 'CLICK: button was clicked';
+    });
+
+    // Key reaction: Enter sets a visible label.
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        keyLabel.textContent = 'KEY: Enter pressed';
+      }
+    });
+
+    console.log('mcp-drive-fixture-loaded');
+  </script>
+
+</body>
+</html>

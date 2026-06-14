@@ -122,6 +122,12 @@ npm start
 > On Linux you need a graphical session. Under WSL, use WSLg (Windows 11) or an
 > X server. If sandboxing errors appear, try `npm start -- --no-sandbox`.
 
+### Development
+
+`npm run dev:automation` launches the app with a **dev-gated, loopback-only MCP automation
+server** (`127.0.0.1:7777`) that lets an MCP client drive and observe tabs. It is exposed in no
+released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for the consumer reference.
+
 ## Keyboard shortcuts
 
 | Shortcut        | Action              |

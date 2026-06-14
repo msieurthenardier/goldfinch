@@ -150,10 +150,9 @@ test('captureScreenshot: guest — activate called BEFORE capturePage (ordering 
     fromId: makeFakeFromId({ 20: guestWc }),
     chromeContents: null,  // guestWc is not === chromeContents → classified as guest
     activate,
-    waitForPaint: noopWaitForPaint,
   };
 
-  const result = await captureScreenshot(20, deps);
+  const result = await captureScreenshot(20, deps, { waitForPaint: noopWaitForPaint });
 
   const activateIdx = callLog.findIndex((e) => e.what === 'activate');
   const captureIdx = callLog.findIndex((e) => e.what === 'capturePage');
@@ -172,10 +171,9 @@ test('captureScreenshot: guest — activate called exactly once with the wcId', 
     fromId: makeFakeFromId({ 21: guestWc }),
     chromeContents: null,
     activate,
-    waitForPaint: noopWaitForPaint,
   };
 
-  await captureScreenshot(21, deps);
+  await captureScreenshot(21, deps, { waitForPaint: noopWaitForPaint });
 
   assert.equal(activateCalls.length, 1, 'activate must be called exactly once');
   assert.equal(activateCalls[0], 21, 'activate must be called with the wcId');
@@ -200,10 +198,9 @@ test('captureScreenshot: RE-RESOLVE proof — the SECOND (post-activate) handle 
     fromId,
     chromeContents: null,
     activate: async () => {},
-    waitForPaint: noopWaitForPaint,
   };
 
-  const result = await captureScreenshot(22, deps);
+  const result = await captureScreenshot(22, deps, { waitForPaint: noopWaitForPaint });
 
   assert.equal(lookups, 2, 'fromId must be called twice (initial resolve + post-activate re-resolve)');
   assert.equal(firstHandle._captureCount, 0, 'the STALE pre-activate handle must NOT be captured');
@@ -220,10 +217,9 @@ test('captureScreenshot: chrome target — activate NOT called (chrome is always
     fromId: makeFakeFromId({ 1: chromeWc }),
     chromeContents: chromeWc,  // classify as 'chrome'
     activate,
-    waitForPaint: noopWaitForPaint,
   };
 
-  const result = await captureScreenshot(1, deps);
+  const result = await captureScreenshot(1, deps, { waitForPaint: noopWaitForPaint });
 
   assert.equal(activateCalls.length, 0, 'activate must NOT be called for a chrome target');
   assert.equal(chromeWc._captureCount, 1, 'capturePage must still be called');
@@ -235,19 +231,19 @@ test('captureScreenshot: chrome target — activate NOT called (chrome is always
 // ---------------------------------------------------------------------------
 
 test('captureScreenshot: bad-handle (non-number wcId) → throws bad-handle', async () => {
-  const deps = { fromId: makeFakeFromId({}), chromeContents: null, waitForPaint: noopWaitForPaint };
+  const deps = { fromId: makeFakeFromId({}), chromeContents: null };
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
-    () => captureScreenshot('20', deps),
+    () => captureScreenshot('20', deps, { waitForPaint: noopWaitForPaint }),
     (err) => err instanceof Error && err.message.includes('automation: bad-handle')
   );
 });
 
 test('captureScreenshot: dead (isDestroyed) wcId → throws no-such-contents, no capture', async () => {
   const destroyed = makeDestroyedWc(55);
-  const deps = { fromId: makeFakeFromId({ 55: destroyed }), chromeContents: null, waitForPaint: noopWaitForPaint };
+  const deps = { fromId: makeFakeFromId({ 55: destroyed }), chromeContents: null };
   await assert.rejects(
-    () => captureScreenshot(55, deps),
+    () => captureScreenshot(55, deps, { waitForPaint: noopWaitForPaint }),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
   );
   assert.equal(destroyed._captureCount, 0, 'capturePage must not be called on a dead handle');
@@ -262,11 +258,10 @@ test('captureScreenshot: internal-session wcId → throws, NEITHER activate NOR 
     fromId: makeFakeFromId({ 77: internalWc }),
     chromeContents: null,
     activate,
-    waitForPaint: noopWaitForPaint,
   };
 
   await assert.rejects(
-    () => captureScreenshot(77, deps),
+    () => captureScreenshot(77, deps, { waitForPaint: noopWaitForPaint }),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
   );
   assert.equal(activateCalls.length, 0, 'activate must NOT be called on the internal-session path');
@@ -283,10 +278,9 @@ test('captureScreenshot: returns the base64 of the PNG buffer', async () => {
     fromId: makeFakeFromId({ 60: guestWc }),
     chromeContents: null,
     activate: async () => {},
-    waitForPaint: noopWaitForPaint,
   };
 
-  const result = await captureScreenshot(60, deps);
+  const result = await captureScreenshot(60, deps, { waitForPaint: noopWaitForPaint });
 
   assert.equal(result, Buffer.from('PNGBYTES').toString('base64'));
   assert.equal(typeof result, 'string');

@@ -1,6 +1,6 @@
 # Flight: MCP-Compatible Local Server + Transport
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -294,7 +294,7 @@ the `resolve`/`tabs`/`nav`/`input`/`observe` modules stay SDK-free and dependenc
 
 > **Note:** Tentative; created one at a time as the flight progresses. May merge/split.
 
-- [ ] `mcp-server-scaffold` — **(first step: live SDK premise check — does `StreamableHTTPServerTransport`
+- [x] `mcp-server-scaffold` — **(first step: live SDK premise check — does `StreamableHTTPServerTransport`
   take a raw Node `(req,res)`? if not, divert to hand-roll, DD2).** Add the pinned
   `@modelcontextprotocol/sdk` dep; stand up the MCP `Server` + `StreamableHTTPServerTransport` on a
   `127.0.0.1:7777` Node http server in `main.js`, gated on **`--automation-dev`** (add the
@@ -303,19 +303,19 @@ the `resolve`/`tabs`/`nav`/`input`/`observe` modules stay SDK-free and dependenc
   allow/deny, incl. the no-Origin policy in DD3) unit-tested exhaustively, + the 403 request guard
   in front of all MCP processing; `initialize` handshake works from a real client; resolve the
   SDK-in-Electron-main + session-model open questions live. (DD1, DD2, DD3, DD4)
-- [ ] `drive-tools` — register the 12 drive ops as MCP tools with JSON input schemas; thin adapter over
+- [x] `drive-tools` — register the 12 drive ops as MCP tools with JSON input schemas; thin adapter over
   `engine[op]`; DD6 error mapping (`isError` on `resolveContents` throws). Unit-tested with a fake
   engine. (DD5, DD6)
-- [ ] `observe-tools` — register the 4 observe ops; image content for screenshots; refusal-as-result vs
+- [x] `observe-tools` — register the 4 observe ops; image content for screenshots; refusal-as-result vs
   `isError` (DD6); **fix the `captureScreenshot` opts-spread footgun (DD7) — keep the existing 10
   `captureScreenshot` unit tests green (the regression net); scope is `captureScreenshot` only,
   `readAxTree`'s opts is already a separate arg**; carry the `readAxTree` stale-handle caveat (DD8).
   Unit-tested. (DD5, DD6, DD7, DD8)
-- [ ] `example-client-and-docs` — example SDK-client script (connect → `tools/list` → short end-to-end
+- [x] `example-client-and-docs` — example SDK-client script (connect → `tools/list` → short end-to-end
   drive); consumer docs (endpoint, Origin/Host requirement, tool list, refusal semantics, a11y
   stale-handle caveat); `.mcp.json` entry for Goldfinch's server; `CLAUDE.md`/README updates documenting
   the MCP layer + the SDK as the sanctioned first runtime dependency. (SC6)
-- [ ] `behavior-test-specs` — author the Witnessed specs (DD9): `mcp-drive-end-to-end` (SC6) and
+- [x] `behavior-test-specs` — author the Witnessed specs (DD9): `mcp-drive-end-to-end` (SC6) and
   `mcp-loopback-origin-guard` (SC7) — **run this flight** (status `active`); plus the carried-forward
   Flight-6 drafts (`foreground-to-act`, `internal-session-exclusion`, `observe-refusal-contract`,
   `devtools-cdp-conflict`) — **authored-only, marked `draft` / "run at Flight 6"** (a clear status field

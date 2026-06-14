@@ -9,6 +9,7 @@
     "start": "electron .",
     "dev": "electron . --enable-logging",
     "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*",
+    "dev:automation": "electron . --enable-logging --no-sandbox --automation-dev",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "test": "node --test test/unit/*.test.js",
@@ -57,6 +58,9 @@
       "category": "Network",
       "maintainer": "msieurthenardier <msieurthenardier@gmail.com>"
     }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
