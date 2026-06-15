@@ -70,13 +70,20 @@ GUI surface — they never expose a key plaintext beyond its one-time mint revea
   this toggle is on. Off is the safe default; nothing is reachable until you opt in.
 - **MCP address + Copy** — a read-only field showing the **live** address (`127.0.0.1:<port>`) with
   a Copy button. Paste it straight into your MCP client or `.mcp.json`.
+- **MCP client config block + Copy** — a ready-to-paste `.mcp.json` entry populated with the live
+  address, with its own Copy button. Drop it into your MCP client config as-is; it tracks the active
+  port, so it stays current across a live rebind.
 - **Port + Save + Find free port** — the configurable listen port (`automationPort`, default
-  **`49707`**, range `[1024, 65535]`). Save validates and applies; Find free port suggests an open
-  one. A pending-port note flags when a saved value differs from the active bind (the change takes
-  effect on the next launch).
+  **`49707`**, range `[1024, 65535]`). Save validates and **applies the new port immediately** — the
+  running server rebinds to it (the old listener is released), and the address / config block /
+  status line all update live. `GOLDFINCH_MCP_PORT` (the dev/test env override) still takes
+  precedence where set, so a Saved value only takes effect when that env var is unset. A failed
+  rebind (e.g. the chosen port is already in use) surfaces on the status line so you can pick another
+  — Find free port suggests an open one.
 - **Bind status** — a status line that reads `Connected — listening on 127.0.0.1:<port>` when the
-  server is bound, `Failed to bind: <error>` on a bind error, or `Not running — start Goldfinch with
-  --automation-dev to bind the surface` when the surface isn't listening.
+  server is bound, `Failed to bind: <error>` on a bind error (including a failed live rebind), or
+  `Not running — start Goldfinch with --automation-dev to bind the surface` when the surface isn't
+  listening.
 - **Connect hint** — inline guidance to point the MCP client at the address above with an
   `Authorization: Bearer <key>` header (generate a key under **Keys**), noting it is loopback-only
   and pointing back to this doc for WSL2 / Docker connection details.
@@ -249,7 +256,10 @@ the live indicator + log viewer against this contract. The shape below is the de
   `kind` distinguishes the **admin** tier from a **jar** identity; a jar session **names** its jar
   in `jarId` (admin's `jarId` is `null`). `since` is epoch-ms (the session-open time). Tracking
   follows the **transport lifecycle**: a session appears on `initialize` and is removed when its
-  transport closes.
+  transport closes. A properly-terminated session (a `DELETE`) clears as before; **ungraceful client
+  disconnects are now detected too** — a dropped standalone GET SSE stream tears the session down, so
+  the indicator / viewer don't keep showing a stale "connected" session after a client crashes or
+  goes away without a `DELETE`.
 - **`log`** — a **bounded ring** (capacity **500**) of recent tool invocations, **newest-last**
   (natural append order), each:
   ```js
@@ -286,7 +296,10 @@ snapshot, so Flight 5 / a future IPC query can read state without waiting for an
 - `sessions` tracks **transport liveness, not auth-liveness**. A session whose key is **revoked
   mid-flight stays listed as active until its next request 401s and its transport closes** — the
   revoke *is* enforced at the gate (the next request is rejected), but the indicator lags to the
-  transport close. Expect a brief, bounded lag rather than instant disappearance on revoke.
+  transport close. Expect a brief, bounded lag rather than instant disappearance on revoke. Note this
+  is distinct from a *client* going away: an ungraceful disconnect (a dropped standalone GET SSE
+  stream) now closes the transport directly, so a crashed or vanished client no longer lingers as a
+  stale "connected" session.
 
 ## Example client
 

@@ -1,12 +1,12 @@
 # Flight: Settings key management + automation UI
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC9** — keys are **managed from the Settings area** (generate / rotate / revoke), persisted, effective immediately: per-jar keys from the jars surface + the env-gated admin key from its env-gated control. *(Storage: the DD5 hash model — see DD2 below — reframes "encrypted safeStorage codec" as already-satisfied; hashes are non-secret at rest.)*
-- [ ] **SC10** (visible half) — automation activity is **auditable**: a visible "automation active" indicator that **distinguishes an admin session from a jar session and names the jar**, plus an action-log viewer. *(The data layer + `automation-activity-changed` broadcast landed in Flight 4; this flight renders it.)*
-- [ ] **SC8** (UI completion) — the off-by-default **opt-in toggle** gets its operator-facing control (the gate/validation landed in Flight 4; this flight surfaces the toggle).
+- [x] **SC9** — keys are **managed from the Settings area** (generate / rotate / revoke), persisted, effective immediately: per-jar keys from the jars surface + the env-gated admin key from its env-gated control. *(Storage: the DD5 hash model — see DD2 below — reframes "encrypted safeStorage codec" as already-satisfied; hashes are non-secret at rest.)* *(Met + behavior-test-backed: `settings-automation` + `mcp-jar-scoping` live, 2026-06-15.)*
+- [x] **SC10** (visible half) — automation activity is **auditable**: a visible "automation active" indicator that **distinguishes an admin session from a jar session and names the jar**, plus an action-log viewer. *(The data layer + `automation-activity-changed` broadcast landed in Flight 4; this flight renders it.)* *(Met + live: indicator named the jar + viewer listed sessions/actions; ungraceful-disconnect close-detection fixed in leg 7.)*
+- [x] **SC8** (UI completion) — the off-by-default **opt-in toggle** gets its operator-facing control (the gate/validation landed in Flight 4; this flight surfaces the toggle). *(Met + live.)*
 
 ---
 
@@ -109,13 +109,13 @@ UI + a thin backend layer over the Flight-4 auth core, all origin-checked throug
 7. **`hat-and-alignment`** *(optional — included)* — guided HAT: operator drives the new UI end to end (enable → generate key → copy → connect a client → watch the indicator/log → rotate/revoke → confirm the live session dies), admin tier when env-set.
 
 ### Checkpoints
-- [ ] `automationPort` setting + validator; `resolvePort` precedence (env > setting > default `49707`); free-port scanner; bind-status capture; `automation:get-status` + `automation:find-free-port` IPC (origin-checked).
-- [ ] Settings "Automation" section: enable toggle, live address + copy + bind-status, port field + find-free-port, connect hint.
-- [ ] Per-jar generate/rotate/revoke + env-gated admin-key controls (show-once + copy); dev seam retired/demoted; revoke kills a live session (Flight-4 live re-validation).
-- [ ] Visible active-session indicator (admin vs jar, names jar) + audit-log viewer; `onAutomationActivity` bridge.
-- [ ] `settings-automation` behavior test authored.
-- [ ] Live: `settings-automation` passes (CDP); `mcp-jar-scoping` full live run passes (flips from `partial`); full gates green.
-- [ ] Guided HAT.
+- [x] `automationPort` setting + validator; `resolvePort` precedence (env > setting > default `49707`); free-port scanner; bind-status capture; `automation:get-status` + `automation:find-free-port` IPC (origin-checked).
+- [x] Settings "Automation" section: enable toggle, live address + copy + bind-status, port field + find-free-port, connect hint.
+- [x] Per-jar generate/rotate/revoke + env-gated admin-key controls (show-once + copy); dev seam retired/demoted; revoke kills a live session (Flight-4 live re-validation).
+- [x] Visible active-session indicator (admin vs jar, names jar) + audit-log viewer; `onAutomationActivity` bridge.
+- [x] `settings-automation` behavior test authored.
+- [x] Live: `settings-automation` passes (CDP); `mcp-jar-scoping` full live run passes (flips from `partial`); full gates green.
+- [x] Guided HAT *(pass with tweaks; alignment added live port-rebind — see Deviations in the flight log)*.
 
 ### Adaptation Criteria
 **Divert if**:
@@ -145,10 +145,10 @@ UI + a thin backend layer over the Flight-4 auth core, all origin-checked throug
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR stacked on #41 / `flight/04-gating`)
-- [ ] Tests passing (unit + headless port/status/key IPC + typecheck + lint)
-- [ ] Documentation updated (`docs/mcp-automation.md`: the Settings controls, the configurable port + address display, the connect hint; CLAUDE.md settings/automation note) **and port references reconciled to the new default** (`.mcp.json`, CLAUDE.md automation section, `tests/behavior/mcp-auth-gating.md` + `mcp-jar-scoping.md` — incl. the stale auto-mint-prerequisite note in those specs)
+- [x] All legs completed (7/7)
+- [ ] Code merged (PR #42 ready, stacked on #41 / `flight/04-gating` — merges after the #40→#41 cascade)
+- [x] Tests passing (`npm test` 613 + typecheck + lint; live `settings-automation` + `mcp-jar-scoping`)
+- [x] Documentation updated (`docs/mcp-automation.md`: Settings controls, configurable port + live address + live-rebind, the `.mcp.json` config block, the audit/session-lifecycle notes) **and port references reconciled to the new default** (`CLAUDE.md`, `.mcp.json` entry dropped, `tests/behavior/mcp-auth-gating.md` + `mcp-jar-scoping.md` — incl. the stale auto-mint-prerequisite note)
 - [ ] Flight debrief written (separate `/flight-debrief` step)
 
 ### Verification

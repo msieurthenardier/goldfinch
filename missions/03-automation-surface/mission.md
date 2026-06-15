@@ -175,15 +175,19 @@ mission-level commitment.
   the gating env var is set) authorizes the app/chrome surface and is never issued to external
   consumers (*behavior-test-backed / security*). *(Met — Flight 4. `mcp-auth-gating` full live pass;
   `mcp-jar-scoping` partial-live + exhaustive headless, operator-accepted.)*
-- [ ] **SC9** — Keys are **managed from the Settings area** (generate / rotate / revoke), persisted,
+- [x] **SC9** — Keys are **managed from the Settings area** (generate / rotate / revoke), persisted,
   and changes take effect immediately: a **per-jar key** is issued/rotated/revoked from the existing
   jars surface, and the **admin key** from its env-gated control. Key storage routes through the
   settings store's encrypted codec seam (the `safeStorage` path), not a parallel plaintext file
-  (*behavior-test-backed; depends on Mission 02*).
-- [ ] **SC10** — Automation activity is **auditable**: while a client is attached, the operator can
+  (*behavior-test-backed; depends on Mission 02*). *(Met — Flight 5. Storage = the DD5/DD2 hash model
+  reframing "encrypted codec" as satisfied-by-hashing, non-secret at rest, operator-confirmed.
+  `settings-automation` live pass + `mcp-jar-scoping` full live pass, 2026-06-15.)*
+- [x] **SC10** — Automation activity is **auditable**: while a client is attached, the operator can
   see that a session is active (a visible indicator that **distinguishes an admin session from a jar
   session and names the jar**) and review what it did (an action log)
-  (*behavior-test-backed / manual*).
+  (*behavior-test-backed / manual*). *(Met — Flight 4 data layer + Flight 5 visible half: a chrome
+  toolbar indicator naming the jar (admin-distinct) + a settings audit-log viewer; live-verified.
+  Known limitation fixed in F5 leg 7: ungraceful client disconnects now clear the indicator.)*
 - [ ] **SC11** — Goldfinch's **own behavior tests run against this surface** (dogfooding), and the
   dev-only ungated debugging path is **retired or hardened** so it is no longer the verification
   apparatus. This means migrating **all behavior specs (11 at Mission-02 close)**, rewriting the **`scripts/a11y-audit.mjs`**
@@ -352,9 +356,13 @@ as work reveals.)_
   Origin/Host; ~~a visible "automation active" indicator~~ + an action/audit log. *(Landed 2026-06-15.
   SC8 met + behavior-test-backed; SC7 key-half met; SC10 **data layer** met — the visible indicator +
   audit-log viewer UI are Flight 5, per the agreed Flight 4↔5 split. PR #41, stacked on #40.)* (SC7, SC8, SC10)
-- [ ] **Flight 5: Settings key management** — generate / rotate / revoke **per-jar keys from the jars
+- [x] **Flight 5: Settings key management** — generate / rotate / revoke **per-jar keys from the jars
   surface** plus the **env-gated admin key**, persisted via the encrypted `safeStorage` codec seam +
   effective immediately (plugs into Mission 02's settings store/IPC/internal-page bridge). (SC9)
+  *(Landed 2026-06-15. SC9 + SC10 visible half + SC8 toggle UI met & behavior-test-backed live;
+  also surfaced the live MCP address + a configurable port (off 7777 → 49707) with live-rebind, an
+  audit indicator + viewer, and flipped the F4 `mcp-jar-scoping` partial → pass. PR #42, stacked on
+  #41. Fast-follows: activity-log paging/clear/retention. Debrief pending.)*
 - [ ] **Flight 6: Migrate behavior specs onto the surface** — move all behavior specs (11 at
   Mission-02 close) to drive via the new surface (dogfooding). (SC11, part 1)
 - [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
