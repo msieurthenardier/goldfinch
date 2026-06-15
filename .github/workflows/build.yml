@@ -60,6 +60,12 @@ jobs:
         with:
           name: goldfinch-${{ matrix.platform }}
           if-no-files-found: ignore
+          # Transport-only: the `release` job downloads these within the same run,
+          # so they need not linger. Short retention keeps each ~530 MiB release
+          # build from accumulating against the Actions artifact-storage quota
+          # (the default 90-day retention filled the free 500 MB tier — a v0.5.0
+          # release-build failure). 1 day is ample for the same-run handoff.
+          retention-days: 1
           path: |
             dist/*.exe
             dist/*.dmg
