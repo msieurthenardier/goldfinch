@@ -137,7 +137,7 @@ UI + a thin backend layer over the Flight-4 auth core, all origin-checked throug
 - [x] `key-management` — per-jar generate/rotate/revoke + env-gated admin-key controls (show-once + copy); new IPC; retire/demote dev seam. (SC9; DD2, DD4, DD5)
 - [x] `activity-indicator-and-audit-viewer` — visible active-session indicator (admin vs jar, names jar) + audit-log viewer; `onAutomationActivity` bridge. (SC10 visible half; DD6)
 - [x] `behavior-test-specs` — author `settings-automation` (CDP apparatus). (DD3)
-- [ ] `verify-integration` — run `settings-automation`; complete the `mcp-jar-scoping` full live run; full gates. (DD7)
+- [x] `verify-integration` — run `settings-automation`; complete the `mcp-jar-scoping` full live run; full gates. (DD7)
 - [ ] `hat-and-alignment` *(optional — included)* — guided HAT of the full control surface. (DD7)
 
 ---

@@ -1,9 +1,9 @@
 # Behavior Test: Automation settings — toggle, address/port, keys, activity
 
 **Slug**: `settings-automation`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-15
-**Last Run**: never
+**Last Run**: 2026-06-15-12-40-28 (pass — 12/13; 1 deferred to `mcp-jar-scoping` admin run; see `settings-automation/runs/`)
 
 ## Intent
 Verify that the `goldfinch://settings` **Automation** section is a complete, self-service control
@@ -64,7 +64,7 @@ UI** (the off-by-default opt-in gets its operator-facing control).
 | 10 | (Admin-tier — only when `GOLDFINCH_AUTOMATION_ADMIN` set) Read `#automation-admin-status`. Click `#automation-admin-mint`; read the reveal + status. Click `#automation-admin-revoke`; re-read status. | Mint: the admin key is revealed once (+ copyable) and `#automation-admin-status` reads `Admin key set`; revoke returns it to `No admin key`. (Negative path when the env gate is unset is covered by step 9.) |
 | 11 | Stage a **live jar session**: using the `AUTOMATION_DEV_MINT` jar key, POST an MCP `initialize` to `http://127.0.0.1:{port}/mcp` with `Authorization: Bearer <jar-key>`. Attach to the **chrome renderer** (index.html) target and read `#automation-indicator` (`.hidden`? `#automation-indicator-badge` text? `title`/`aria-label`). Attach to the **settings guest** and read `#automation-active-sessions` + `#automation-activity-log`. | With a session attached: `#automation-indicator` is NOT `.hidden`, its badge shows the session count, and its `title`/`aria-label` reads `<n> automation session(s) connected: <default jar display name>` (wording "connected", names the jar). `#automation-active-sessions` lists the session as a **jar** session naming the jar + a "since" time; `#automation-activity-log` shows the `initialize`/tool entries newest-first. *(Degradable to `partial` if a session cannot be staged in the run env — the cross-jar/admin/burner matrix is covered by `mcp-jar-scoping`; this step only confirms the UI renders a real session, and the empty-state otherwise.)* |
 | 12 | (If an admin session can also be staged) Open a second session with the admin Bearer; re-read `#automation-indicator` + `#automation-active-sessions`. | `#automation-indicator` gains the `.admin` class (a distinct **non-alarm** state) and the viewer marks the admin session row with the `.admin` class, labeled `admin` (not via a jar name), distinct from the jar row. *(Degradable to `partial`; admin matrix lives in `mcp-jar-scoping`.)* |
-| 13 | Close the staged session(s) (drop the transport); re-read `#automation-indicator` + `#automation-active-sessions`. | Once all transports close, `#automation-indicator` hides again and `#automation-active-sessions` returns to its empty state ("No automation sessions"). (A revoked-but-open session legitimately lingers as "connected" until its transport closes — DD6.) |
+| 13 | Close the staged session(s); re-read `#automation-indicator` + `#automation-active-sessions`. **Distinguish** a proper termination (`transport.terminateSession()` → DELETE) from an ungraceful disconnect (process death / `client.close()` only). | **Proper termination** (DELETE): the session is removed — `#automation-indicator` hides once all transports close and `#automation-active-sessions` returns to "No automation sessions". **Ungraceful disconnect** (no DELETE): the session legitimately **lingers** as "connected" until a DELETE or app restart — the SDK treats a dropped SSE stream as resumable, and `client.close()` tears down locally without a DELETE (DD6 transport-lifecycle wording). A run that can only stage ungraceful disconnects records this as a known limitation, not a fail. |
 
 **Row conventions**: `[a11y]`-marked rows are accessibility-relevant. Steps 11–13's live-session checks
 degrade to `partial`/`inconclusive` if a session can't be staged in the run environment; the UI-control

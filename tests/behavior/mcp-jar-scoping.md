@@ -3,7 +3,7 @@
 **Slug**: `mcp-jar-scoping`
 **Status**: active
 **Created**: 2026-06-14
-**Last Run**: 2026-06-14-13-24-38 (partial — FD-driven machine-read; cross-jar/internal/burner breadth headless-backed)
+**Last Run**: 2026-06-15-13-12-09 (pass — FD-driven; full live matrix via the Flight-5 jars UI: jar-key confinement + out-of-jar/internal/burner refusals + admin-sees-all + admin cross-jar/internal drive. Supersedes the 2026-06-14 partial.)
 
 ## Intent
 

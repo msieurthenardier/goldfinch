@@ -1,6 +1,6 @@
 # Leg: verify-integration
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [Settings key management + automation UI](../flight.md)
 
 ## Objective
