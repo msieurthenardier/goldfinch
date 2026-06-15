@@ -162,16 +162,19 @@ mission-level commitment.
 - [ ] **SC6** — The capabilities are exposed over an **MCP-compatible interface**: an external MCP
   client (e.g. a Claude Code session) can **discover and invoke** them as tools and drive the browser
   end to end (*behavior-test-backed*).
-- [ ] **SC7** — The surface is **local-only**: it binds only to the loopback interface and a
+- [x] **SC7** — The surface is **local-only**: it binds only to the loopback interface and a
   non-loopback connection attempt cannot reach it; the open web cannot reach it either — which
   requires **Origin/Host allow-listing in addition to the loopback bind** (a `127.0.0.1` server is
   reachable from a page via DNS-rebinding, and *this very browser* renders the hostile pages)
-  (*behavior-test-backed / security*).
-- [ ] **SC8** — The surface is **off by default and opt-in**, and **requires a valid key** — a request
+  (*behavior-test-backed / security*). *(Met: structural loopback/Origin-Host half — Flight 3
+  `mcp-loopback-origin-guard`; key half — Flight 4 `mcp-auth-gating`. Guard-first 403 + auth 401
+  confirmed live.)*
+- [x] **SC8** — The surface is **off by default and opt-in**, and **requires a valid key** — a request
   with a missing or wrong key is rejected; a valid key is accepted. Keys are **per jar** (each
   authorizes its own jar's web surface only); an **env-gated admin key** (invisible in the UI unless
   the gating env var is set) authorizes the app/chrome surface and is never issued to external
-  consumers (*behavior-test-backed / security*).
+  consumers (*behavior-test-backed / security*). *(Met — Flight 4. `mcp-auth-gating` full live pass;
+  `mcp-jar-scoping` partial-live + exhaustive headless, operator-accepted.)*
 - [ ] **SC9** — Keys are **managed from the Settings area** (generate / rotate / revoke), persisted,
   and changes take effect immediately: a **per-jar key** is issued/rotated/revoked from the existing
   jars surface, and the **admin key** from its env-gated control. Key storage routes through the
@@ -344,10 +347,11 @@ as work reveals.)_
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
   MCP SDK** (identity-level — the SDK is the first runtime dep), then commit; ship an example client +
   consumer docs. (SC6, SC7)
-- [ ] **Flight 4: Gating — opt-in + key auth + audit** — off-by-default toggle; **per-jar key
+- [x] **Flight 4: Gating — opt-in + key auth + audit** — off-by-default toggle; **per-jar key
   validation + the env-gated admin tier**; hard refusal of any non-loopback path and any disallowed
-  Origin/Host; a visible "automation active" indicator (**distinguishing admin vs jar sessions**) + an
-  action/audit log. (SC7, SC8, SC10)
+  Origin/Host; ~~a visible "automation active" indicator~~ + an action/audit log. *(Landed 2026-06-15.
+  SC8 met + behavior-test-backed; SC7 key-half met; SC10 **data layer** met — the visible indicator +
+  audit-log viewer UI are Flight 5, per the agreed Flight 4↔5 split. PR #41, stacked on #40.)* (SC7, SC8, SC10)
 - [ ] **Flight 5: Settings key management** — generate / rotate / revoke **per-jar keys from the jars
   surface** plus the **env-gated admin key**, persisted via the encrypted `safeStorage` codec seam +
   effective immediately (plugs into Mission 02's settings store/IPC/internal-page bridge). (SC9)

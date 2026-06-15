@@ -3,7 +3,7 @@
 **Flight**: [Gating — opt-in + key auth + audit](flight.md)
 
 ## Summary
-Legs 1–5 complete (2026-06-14). Auth core delivered: opt-in toggle (`automationEnabled`), per-jar key auth + env-gated admin tier, jar-scoping enforcement (session-object-identity), audit data layer (in-process ring + broadcast). **SC8 met + behavior-test-backed** (`mcp-auth-gating` full live pass; `mcp-jar-scoping` partial live + exhaustive headless, operator-accepted). SC7 key half met. SC10 data layer met (visible indicator + log viewer deferred to Flight 5). 579 tests green; typecheck + lint clean. Optional `hat-and-alignment` leg pending operator. Stacks on `flight/03-mcp-transport` (PR #40).
+**Flight LANDED 2026-06-15.** All 6 legs complete. Auth core delivered: opt-in toggle (`automationEnabled`), per-jar key auth + env-gated admin tier, jar-scoping enforcement (session-object-identity), audit data layer (in-process ring + broadcast). **SC8 met + behavior-test-backed** (`mcp-auth-gating` full live pass; `mcp-jar-scoping` partial live + exhaustive headless, operator-accepted). SC7 key half met. SC10 data layer met (visible indicator + log viewer deferred to Flight 5). **HAT** satisfied live (external user-wide MCP client drove the confined default jar; admin tier confirmed; cross-OS-boundary consumer completed `initialize` — proving the use-case #2/#3 reach path early). Out-of-band operator-requested fix: `scroll` rewired to in-process CDP mouseWheel (commit `cb58231`, crosses DD8, verified live). **590 tests green; typecheck + lint clean.** PR #41 ready, stacked on `flight/03-mcp-transport` (#40). Flight debrief is the separate `/flight-debrief` step.
 
 ---
 

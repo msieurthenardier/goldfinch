@@ -1,6 +1,6 @@
 # Flight: Gating — opt-in + key auth + audit
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -123,12 +123,12 @@ The auth/identity layer wraps the Flight-3 transport without disturbing its guar
 The SDK stays confined to `mcp-server.js`; `automation-auth.js` is pure (hash + compare + identity resolution), Electron-free, unit-testable. The **`Session→jar` resolver + the jar-membership guard live in `resolve.js` beside `resolveContents`** — the engine's two authoritative guards, co-located, pure, and testable; `mcp-tools.js` stays security-logic-free (the scoping is a single façade in `buildServer(identity)`, not sprinkled across the 16 tool `call`s). Internal-session exclusion stays absolute for jar keys; admin is the sole relaxation.
 
 ### Checkpoints
-- [ ] `automationEnabled` + `automationKeyHashes` (explicit hex-map validator) + `automationAdminKeyHash` in the settings schema; `automation-auth.js` pure validator unit-tested (jarId/admin/null, admin env-gate + empty edges, constant-time); the `onRequest` auth gate (401 on disabled/missing/invalid, after the 403 origin guard); body-size cap; `isMcpAutomationEnabled`-gated dev mint/enable path.
-- [ ] Identity bound at session creation; `buildServer(identity)` jar-scoped façade; the net-new `resolveContentsForJar` (session-object-identity, lazy); `enumerateTabs` filtered by **resolved session** (not renderer jarId); drive/observe out-of-jar refused; burner tabs unautomatable; per-request **live** re-validation + session-identity match (revoke/toggle-off kills live sessions); internal-session exclusion absolute for jar keys; env-gated admin tier (value = key; inert unless set) bypasses jar-scoping + is the sole internal-session relaxation.
-- [ ] Audit action-log data + session-active state + broadcast (no UI).
-- [ ] `mcp-auth-gating` + `mcp-jar-scoping` specs authored.
-- [ ] Live: both behavior tests pass; non-loopback + bad-key + cross-jar + internal-session all refused; full unit suite + typecheck + lint green.
-- [ ] Guided HAT.
+- [x] `automationEnabled` + `automationKeyHashes` (explicit hex-map validator) + `automationAdminKeyHash` in the settings schema; `automation-auth.js` pure validator unit-tested (jarId/admin/null, admin env-gate + empty edges, constant-time); the `onRequest` auth gate (401 on disabled/missing/invalid, after the 403 origin guard); body-size cap; `isMcpAutomationEnabled`-gated dev mint/enable path.
+- [x] Identity bound at session creation; `buildServer(identity)` jar-scoped façade; the net-new `resolveContentsForJar` (session-object-identity, lazy); `enumerateTabs` filtered by **resolved session** (not renderer jarId); drive/observe out-of-jar refused; burner tabs unautomatable; per-request **live** re-validation + session-identity match (revoke/toggle-off kills live sessions); internal-session exclusion absolute for jar keys; env-gated admin tier (value = key; inert unless set) bypasses jar-scoping + is the sole internal-session relaxation.
+- [x] Audit action-log data + session-active state + broadcast (no UI).
+- [x] `mcp-auth-gating` + `mcp-jar-scoping` specs authored.
+- [x] Live: `mcp-auth-gating` full live pass; `mcp-jar-scoping` partial-live (cross-jar/internal/burner breadth headless-backed, operator-accepted); bad-key + admin-only + guard-first 403 confirmed live; full unit suite (579→590 w/ scroll fix) + typecheck + lint green.
+- [x] Guided HAT (satisfied via live external-client drive + admin tier; multi-jar breadth dispositioned).
 
 ### Adaptation Criteria
 
@@ -151,17 +151,17 @@ The SDK stays confined to `mcp-server.js`; `automation-auth.js` is pure (hash + 
 - [x] `audit-data` — action-log data layer + session-active state + `broadcastToChromeAndInternal` fan-out; no UI. (SC10 data half; DD8)
 - [x] `behavior-test-specs` — author `mcp-auth-gating` (SC8) + `mcp-jar-scoping` (SC8; asserts cross-jar + internal + burner refusals, scoping-authority-is-the-session, admin-sees-all-when-env-set) — run this flight. (DD10)
 - [x] `verify-integration` — live: run both specs; bad-key/cross-jar/internal/burner/non-loopback refusals + revoke-kills-live-session confirmed; full gates green. (live / FD-guided)
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT with a keyed client (confined jar) + the env-set admin tier (reaches the chrome).
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT with a keyed client (confined jar) + the env-set admin tier (reaches the chrome). Satisfied live: an external user-wide MCP client drove the confined default jar (open/nav/type/click/screenshot/scroll) + a cross-OS-boundary consumer completed `initialize`; jar `captureWindow`→admin-only; admin tier accepted + whole-window capture. Multi-jar refusal breadth = headless-backed (operator-accepted disposition).
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR stacked on #40 / `flight/03-mcp-transport`)
-- [ ] Tests passing (unit + headless auth/scoping integration + typecheck + lint)
-- [ ] Documentation updated (`docs/mcp-automation.md` auth section — how to present a key, the jar-scoping + admin-tier model, the `GOLDFINCH_AUTOMATION_ADMIN` env gate; CLAUDE.md note)
+- [x] All legs completed (1–6; HAT dispositioned)
+- [ ] Code merged (PR #41 ready, **stacked on #40 / `flight/03-mcp-transport`** — merges in cascade order after #40)
+- [x] Tests passing (590 unit + headless auth/scoping integration; typecheck + lint clean)
+- [x] Documentation updated (`docs/mcp-automation.md` auth/jar-scoping/admin/audit sections; CLAUDE.md automation notes refreshed for the gated surface + the `cdp.js` shared-debugger discipline)
 - [ ] Flight debrief written (separate `/flight-debrief` step)
 
 ### Verification

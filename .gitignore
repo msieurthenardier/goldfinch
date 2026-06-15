@@ -10,3 +10,8 @@ goldfinch-*.png
 
 # Machine-local Claude Code settings (permissions/prefs)
 .claude/settings.local.json
+
+# Local env / secrets (e.g. dev automation Bearer key — never commit)
+.env
+.env.*
+!.env.example
