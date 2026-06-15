@@ -127,6 +127,15 @@ if (location.origin === 'goldfinch://settings') {
     automationGetStatus: () => ipcRenderer.invoke('automation:get-status'),
 
     /**
+     * Persist the automation port and live-rebind the running surface to it
+     * (Flight 5, Leg 7). Resolves with the fresh status; rejects ("Invalid port")
+     * when the value fails the main-side validator.
+     * @param {number} port
+     * @returns {Promise<{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }>}
+     */
+    automationSetPort: (port) => ipcRenderer.invoke('automation:set-port', port),
+
+    /**
      * Advisory scan for a free loopback port for the "find free port" affordance.
      * @returns {Promise<{ port: (number|null) }>}
      */

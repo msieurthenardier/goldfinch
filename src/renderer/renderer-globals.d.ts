@@ -103,6 +103,7 @@ interface GoldfinchInternalBridge {
   onShieldsChanged(cb: (cfg: any) => void): number;
   offShieldsChanged(h: number): void;
   automationGetStatus(): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
+  automationSetPort(port: number): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
   automationFindFreePort(): Promise<{ port: number | null }>;
   clipboardWrite(text: string): Promise<{ ok: boolean }>;
   automationListKeys(): Promise<{ jars: Array<{ id: string; name: string; color: string; hasKey: boolean }>; adminEnabled: boolean; adminKeySet: boolean }>;

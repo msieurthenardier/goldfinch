@@ -70,7 +70,10 @@
           <span id="automation-port-note" class="muted"></span>
         </div>
         <p id="automation-message" role="status"></p>
-        <p class="connect-hint">Point your MCP client at the address above with an <code>Authorization: Bearer &lt;key&gt;</code> header (generate a key under Keys below). Loopback-only — see <code>docs/mcp-automation.md</code> for WSL2 / Docker connection details.</p>
+        <p class="connect-hint">MCP client config (e.g. <code>.mcp.json</code>) — replace <code>&lt;your-key&gt;</code> with a generated key:</p>
+        <pre class="mcp-config-block"><code id="automation-mcp-config"></code></pre>
+        <button id="automation-copy-config" class="settings-btn" type="button">Copy config</button>
+        <p class="connect-hint">Loopback-only — see <code>docs/mcp-automation.md</code> for WSL2 / Docker connection details.</p>
         <h3>Keys</h3>
         <p class="muted">Generate a per-jar key for the automation surface. The key is shown once — copy it immediately.</p>
         <div id="automation-jars"></div>
@@ -79,6 +82,7 @@
           <div class="settings-row">
             <input id="automation-key-value" class="settings-text-input" type="text" readonly spellcheck="false" />
             <button id="automation-key-copy" class="settings-btn" type="button">Copy</button>
+            <button id="automation-key-done" class="settings-btn" type="button">Done</button>
           </div>
           <p class="muted">Copy it now — it cannot be shown again. Only its hash is stored.</p>
           <p id="automation-key-message" role="status"></p>

@@ -104,6 +104,80 @@ let mcpServer = null;
 // MCP surface being active in this process; `bound` flips true only after start()
 // resolves; `error` carries the EADDRINUSE/other message on failure.
 let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, error: null };
+// Concurrency guard for live port-rebind (Flight 5, Leg 7). Two quick saves must
+// not overlap a stop()/start() pair; the second rebind waits for the first.
+let rebinding = null;
+
+// Create + start a fresh MCP server instance, capturing bind-status into mcpStatus
+// (Flight 5 / DD1 + Leg 7). NO explicit `port` is passed, so createMcpServer runs
+// resolvePort (env GOLDFINCH_MCP_PORT > persisted automationPort > default) — which
+// is exactly what makes a live-rebind pick up a newly-saved port and keeps the
+// precedence coherent with a fresh launch. Sets bound=true on a successful bind, or
+// records the error (e.g. EADDRINUSE) and leaves bound=false on failure.
+async function startMcpServerInstance() {
+  mcpServer = createMcpServer({
+    // Engine accessor now takes an options bag so the per-session admin Server
+    // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
+    getEngine: (engineOpts) => createEngine(() => mainWindow, engineOpts),
+    // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
+    // the engine uses (webContents.fromId / session.fromPartition) so the
+    // façade's membership compare and the engine's op resolve cannot diverge.
+    scopeCtx: {
+      jars,
+      fromId: (id) => webContents.fromId(id),
+      fromPartition: (partition) => session.fromPartition(partition),
+      getChromeContents: () => (mainWindow ? mainWindow.webContents : null),
+    },
+    // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
+    // session open/close broadcasts the new audit snapshot over the M02 channel.
+    broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
+  });
+  // Capture the resolved port up front; bound flips true once start() resolves.
+  mcpStatus = { enabled: true, host: '127.0.0.1', port: mcpServer.port, bound: false, error: null };
+  try {
+    await mcpServer.start();
+    mcpStatus.bound = true;
+  } catch (err) {
+    // A bind failure (e.g. EADDRINUSE) must not crash the app — record it for the
+    // status surface and leave the rest of the browser running. On a failed rebind
+    // the surface is down on a bad port; the operator re-saves a good one.
+    mcpStatus.bound = false;
+    mcpStatus.error = (err && err.message) || String(err);
+    console.error('[mcp] failed to start automation server:', err && err.message);
+  }
+}
+
+// Live-rebind the running MCP server to the current resolved port (Flight 5, Leg 7).
+// No-op when the surface is not active in this process (nothing to rebind). Stops
+// the old listener + all sessions, then starts a fresh instance via resolvePort, so
+// a port saved in Settings applies live (live-rebind == next-launch precedence). A
+// simple promise-chain guard serializes overlapping saves.
+async function rebindMcpServer() {
+  if (!mcpServer) return; // surface not active — nothing to rebind
+  if (rebinding) { await rebinding; }
+  rebinding = (async () => {
+    await mcpServer.stop();
+    await startMcpServerInstance();
+  })();
+  try {
+    await rebinding;
+  } finally {
+    rebinding = null;
+  }
+}
+
+// Shared get-status return shape (Leg 7). `port` reflects the bound port when the
+// surface is active; when disabled, mcpStatus.port is null so we compute the
+// would-be resolved port. Host is hard-pinned to loopback (SC7).
+function currentAutomationStatus() {
+  return {
+    enabled: mcpStatus.enabled,
+    host: '127.0.0.1',
+    port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings),
+    bound: mcpStatus.bound,
+    error: mcpStatus.error,
+  };
+}
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -571,18 +645,21 @@ registerInternalHandler(ipcMain, 'internal-shields-set', (_e, patch) => {
   return cfg;
 });
 
-// Automation bind-status surface (Flight 5 / DD1). `port` reflects the bound port
-// when the surface is active; when disabled, mcpStatus.port is null so we compute
-// the would-be resolved port here (single source — see the start site, which does
-// NOT eagerly set the port in the disabled branch). Host is hard-pinned to
-// loopback (SC7 — never configurable).
-registerInternalHandler(ipcMain, 'automation:get-status', () => ({
-  enabled: mcpStatus.enabled,
-  host: '127.0.0.1',
-  port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings),
-  bound: mcpStatus.bound,
-  error: mcpStatus.error,
-}));
+// Automation bind-status surface (Flight 5 / DD1). The shape is shared with
+// set-port via currentAutomationStatus() (Leg 7) — `port` reflects the bound port
+// when the surface is active, else the would-be resolved port; host is hard-pinned
+// to loopback (SC7 — never configurable).
+registerInternalHandler(ipcMain, 'automation:get-status', () => currentAutomationStatus());
+// Persist the port AND live-rebind the running surface to it (Flight 5, Leg 7).
+// settings.set throws on an invalid port → rejected invoke → the renderer shows
+// "Invalid port". rebindMcpServer rebinds if the surface is active (resolvePort
+// picks up the new setting), or is a no-op otherwise. Returns the fresh status so
+// the renderer renders the now-active port without a separate get-status round-trip.
+registerInternalHandler(ipcMain, 'automation:set-port', async (_e, port) => {
+  settings.set('automationPort', port);
+  await rebindMcpServer();
+  return currentAutomationStatus();
+});
 // Advisory free-port scan over the loopback dynamic range for the Settings UI's
 // "find a free port" affordance (leg 2). Returns { port: null } if none free.
 registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
@@ -612,7 +689,14 @@ registerInternalHandler(ipcMain, 'automation:list-keys', () => {
     adminKeySet: (settings.get('automationAdminKeyHash') || '') !== '',
   };
 });
-registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => ({ key: enableAndMintJarKey(jarId, settings, jars) }));
+registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
+  // enableAndMintJarKey flips automationEnabled=true via a direct settings.set;
+  // broadcast settings-changed so the enable toggle's onSettingsChanged listener
+  // re-syncs without a reload. (Admin-mint/revoke do NOT touch automationEnabled.)
+  const key = enableAndMintJarKey(jarId, settings, jars);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { key };
+});
 registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => { revokeJarKey(jarId, settings); return { ok: true }; });
 registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => ({ key: mintAdminKey(settings) }));
 registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => { revokeAdminKey(settings); return { ok: true }; });
@@ -825,39 +909,10 @@ app.whenReady().then(() => {
   // window. The SC7 Origin/Host guard is wired inside createMcpServer and runs
   // before any MCP processing — the server never binds without it.
   if (isMcpAutomationEnabled(process.argv)) {
-    mcpServer = createMcpServer({
-      // Engine accessor now takes an options bag so the per-session admin Server
-      // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
-      getEngine: (engineOpts) => createEngine(() => mainWindow, engineOpts),
-      // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
-      // the engine uses (webContents.fromId / session.fromPartition) so the
-      // façade's membership compare and the engine's op resolve cannot diverge.
-      scopeCtx: {
-        jars,
-        fromId: (id) => webContents.fromId(id),
-        fromPartition: (partition) => session.fromPartition(partition),
-        getChromeContents: () => (mainWindow ? mainWindow.webContents : null),
-      },
-      // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
-      // session open/close broadcasts the new audit snapshot over the M02 channel
-      // to the chrome renderer + any internal guest. No chrome UI consumes it this
-      // flight — Flight 5's indicator + log viewer render it. This is the contract.
-      broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
-    });
-    // Capture the resolved port up front; bound flips true once start() resolves
-    // (Flight 5 / DD1). This is the single source of mcpStatus.port for the enabled
-    // path — the get-status handler only computes a fallback when disabled.
-    mcpStatus = { enabled: true, host: '127.0.0.1', port: mcpServer.port, bound: false, error: null };
-    mcpServer.start()
-      .then(() => { mcpStatus.bound = true; })
-      .catch((err) => {
-        // A bind failure (e.g. EADDRINUSE) must not crash the app — record it for
-        // the status surface and leave the rest of the browser running.
-        // GOLDFINCH_MCP_PORT / the automationPort setting override the port.
-        mcpStatus.bound = false;
-        mcpStatus.error = (err && err.message) || String(err);
-        console.error('[mcp] failed to start automation server:', err && err.message);
-      });
+    // Start the surface via the shared factory (Leg 7) — same option-bag + bind-status
+    // capture as a live rebind. Fire-and-forget here, matching the original launch
+    // behavior (the app does not block on the bind).
+    void startMcpServerInstance();
 
     // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The real key
     // management now lives in goldfinch://settings (Flight 5, Leg 3) via the

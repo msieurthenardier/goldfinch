@@ -251,10 +251,13 @@ async function copyText(text, messageEl) {
   const findPortBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-find-port'));
   const portNote = /** @type {HTMLElement|null} */ (document.getElementById('automation-port-note'));
   const messageEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-message'));
+  const configCodeEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-mcp-config'));
+  const copyConfigBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-copy-config'));
 
   if (
     !enabledToggle || !enabledNote || !statusLine || !addressInput || !copyBtn ||
-    !portInput || !portSaveBtn || !findPortBtn || !portNote || !messageEl
+    !portInput || !portSaveBtn || !findPortBtn || !portNote || !messageEl ||
+    !configCodeEl || !copyConfigBtn
   ) {
     return;
   }
@@ -288,6 +291,22 @@ async function copyText(text, messageEl) {
     // Host is always loopback (SC7); the address always renders the resolved port
     // so the operator can pre-configure their client even when not bound.
     addressInput.value = 'http://127.0.0.1:' + status.port + '/mcp';
+
+    // MCP client config block (Claude Code `.mcp.json` http-server form, matching
+    // docs/mcp-automation.md). Built from the live status.port (host always
+    // loopback) so the operator can copy a ready-to-paste config. The
+    // Authorization value is a literal placeholder — never a real key. Written via
+    // textContent (never innerHTML) so the JSON renders verbatim.
+    const mcpConfig = {
+      mcpServers: {
+        goldfinch: {
+          type: 'http',
+          url: 'http://127.0.0.1:' + status.port + '/mcp',
+          headers: { Authorization: 'Bearer <your-key>' },
+        },
+      },
+    };
+    configCodeEl.textContent = JSON.stringify(mcpConfig, null, 2);
 
     if (status.bound) {
       statusLine.textContent = 'Connected — listening on 127.0.0.1:' + status.port;
@@ -329,22 +348,24 @@ async function copyText(text, messageEl) {
       });
   });
 
-  // Port save: write, then refresh status (so the note recomputes against the
-  // active bind). A validator rejection surfaces inline; the field keeps the
-  // user's text for correction.
+  // Port save: persist + live-rebind in one IPC (Leg 7). set-port returns the fresh
+  // status, so after a successful rebind status.port equals the new port and
+  // renderStatus updates the address/config/status line live (the "next launch" note
+  // clears as pending == active). A validator rejection surfaces inline; the field
+  // keeps the user's text for correction.
   portSaveBtn.addEventListener('click', () => {
-    window.goldfinchInternal.settingsSet('automationPort', Number(portInput.value))
-      .then(() => {
+    window.goldfinchInternal.automationSetPort(Number(portInput.value))
+      .then((status) => {
         messageEl.textContent = 'Saved';
-        return window.goldfinchInternal.automationGetStatus().then(renderStatus);
+        renderStatus(status);
       })
       .catch(() => {
         messageEl.textContent = 'Invalid port (1024–65535)';
       });
   });
 
-  // Find free port: populate the field with the scanned port and save it; on a
-  // null result the field is left unchanged.
+  // Find free port: populate the field with the scanned port and save+rebind it; on
+  // a null result the field is left unchanged.
   findPortBtn.addEventListener('click', () => {
     window.goldfinchInternal.automationFindFreePort()
       .then((res) => {
@@ -354,10 +375,10 @@ async function copyText(text, messageEl) {
           return undefined;
         }
         portInput.value = String(port);
-        return window.goldfinchInternal.settingsSet('automationPort', port)
-          .then(() => {
+        return window.goldfinchInternal.automationSetPort(port)
+          .then((status) => {
             messageEl.textContent = 'Saved';
-            return window.goldfinchInternal.automationGetStatus().then(renderStatus);
+            renderStatus(status);
           });
       })
       .catch(() => {
@@ -372,6 +393,11 @@ async function copyText(text, messageEl) {
   // the clipboardWrite IPC fallback — AC7).
   copyBtn.addEventListener('click', () => {
     copyText(addressInput.value, messageEl);
+  });
+
+  // Copy the rendered MCP client config via the shared helper.
+  copyConfigBtn.addEventListener('click', () => {
+    copyText(configCodeEl.textContent || '', messageEl);
   });
 
   // Two-way sync: another surface changing the setting re-syncs here.
@@ -398,6 +424,7 @@ async function copyText(text, messageEl) {
   const revealEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-key-reveal'));
   const keyValue = /** @type {HTMLInputElement|null} */ (document.getElementById('automation-key-value'));
   const keyCopyBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-key-copy'));
+  const keyDoneBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-key-done'));
   const keyMessageEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-key-message'));
   const adminBlock = /** @type {HTMLElement|null} */ (document.getElementById('automation-admin'));
   const adminStatus = /** @type {HTMLElement|null} */ (document.getElementById('automation-admin-status'));
@@ -405,7 +432,7 @@ async function copyText(text, messageEl) {
   const adminRevokeBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-admin-revoke'));
 
   if (
-    !jarsContainer || !revealEl || !keyValue || !keyCopyBtn || !keyMessageEl ||
+    !jarsContainer || !revealEl || !keyValue || !keyCopyBtn || !keyDoneBtn || !keyMessageEl ||
     !adminBlock || !adminStatus || !adminMintBtn || !adminRevokeBtn
   ) {
     return;
@@ -543,6 +570,10 @@ async function copyText(text, messageEl) {
   keyCopyBtn.addEventListener('click', () => {
     copyText(keyValue.value, keyMessageEl);
   });
+
+  // Dismiss the show-once reveal once the operator has copied the key. Clears the
+  // plaintext field and re-hides the reveal via the existing clearReveal().
+  keyDoneBtn.addEventListener('click', clearReveal);
 
   // Initial load — reveal stays hidden (it is only ever populated by a mint).
   clearReveal();

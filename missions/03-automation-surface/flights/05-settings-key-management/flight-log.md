@@ -116,6 +116,21 @@ FD-authored the `settings-automation` behavior-test spec (`tests/behavior/settin
 
 ---
 
+### hat-and-alignment (leg 7) — `completed` (2026-06-15)
+Guided HAT with the operator driving the live `goldfinch://settings` Automation surface. **Verdict: pass with minor tweaks** (all applied + re-verified live). The bulk of the surface was already machine-verified in leg 6; the HAT confirmed look/feel + flow and drove the alignment decisions.
+
+**Inline fixes/tweaks applied this leg (operator-elected), all re-verified live on fresh assets + `npm test` 612 / typecheck / lint green:**
+1. **Show-once reveal Done button** — `#automation-key-done` dismisses the revealed key; placed **beside Copy** in the same row (operator-requested position).
+2. **Enable-toggle live re-sync** — jar-key-mint broadcasts `settings-changed` (resolves the toggle-lag anomaly).
+3. **Ungraceful-disconnect session teardown** — GET SSE-close → `transport.close()` → `noteSessionClose` (resolves the stale-indicator anomaly; unit-test-guarded + live-verified).
+4. **MCP-config code block** — the connect-hint now shows a ready-to-paste `.mcp.json` config block populated with the live address (replacing the prose), + a Copy-config button; a one-line pointer to `docs/mcp-automation.md` for WSL2/Docker.
+
+**Deferred (operator-elected, recorded as fast-follow candidates — NOT this flight):** activity-log **paging / show-all**, a **Clear activity** button, and a **retention-days** setting (the last needs disk persistence, which DD8 deliberately excluded — would be its own flight/decision). The log remains an in-memory ring (cap 500, viewer shows ~50, cleared on restart).
+
+**Note (dev-only, not a product issue):** during dev, a settings-guest `location.reload()` can serve a cached `settings.js` (new HTML element + old JS), making a just-added control look unpopulated; a fresh app launch loads all assets consistently (the config block populated correctly on fresh launch). Packaged builds are unaffected.
+
+---
+
 ## Flight Director Notes
 
 ### 2026-06-15 — Flight start (orchestration)
@@ -156,7 +171,14 @@ _Runtime decisions not in the original plan will be recorded here._
 ---
 
 ## Deviations
-_Departures from the planned approach will be recorded here._
+
+### Live port-rebind on save — supersedes DD1's next-launch commitment (operator decision, 2026-06-15, leg-7 HAT)
+**Planned (DD1)**: a port change is persisted and **takes effect on next launch**; the UI shows active vs pending; live-rebind was explicitly "a possible future enhancement, not this flight" (resolved-to-divert at design review).
+**Actual**: during the leg-7 HAT the operator hit the next-launch behavior as confusing ("changed the port, hit Save, the address/config look stale") and, given the choice (improve labeling / live-rebind / accept), **elected to implement live-rebind now**. The running MCP server now rebinds to the new port on save (`stop()` → fresh `createMcpServer` via `resolvePort` → `start()`), so the address/config/status update live.
+**Reason**: the next-launch UX was unintuitive; the operator wanted the typed port to apply immediately. This pulls DD1's deferred enhancement into the flight.
+**Precedence preserved**: rebind resolves the port via the same `resolvePort` (env `GOLDFINCH_MCP_PORT` > persisted `automationPort` > default), so live == next-launch. In a normal launch (no env) the typed setting applies live; the `GOLDFINCH_MCP_PORT` dev/test override still wins where set (so live-rebind is verified in a launch WITHOUT the env pin). Host stays `127.0.0.1` (SC7). A failed rebind (EADDRINUSE) surfaces via the status line; the operator can pick another port and re-save.
+**Implementation**: `main.js` factors `startMcpServerInstance()` + `rebindMcpServer()` (stop → recreate via `resolvePort` → start; concurrency-guarded; no-op when the surface is inactive) + a shared `currentAutomationStatus()`; new origin-checked `automation:set-port` IPC (set + rebind + return status); bridge `automationSetPort`; the settings port-Save + find-free-port call it and render the returned status. Unit test added (start→stop→start on a different port; old listener released). 
+**Verified live (no env pin, 2026-06-15)**: changed the port 49707→50500 via Save → UI updated live (address/config/status = 50500, note cleared), `ss` showed `127.0.0.1:50500` listening and 49707 gone, new port returned HTTP 401 (gated server live) and the old port refused; rebound back to 49707 cleanly. `npm test` 613 / typecheck / lint green.
 
 ---
 
@@ -165,13 +187,13 @@ _Departures from the planned approach will be recorded here._
 ### Enable-toggle does not live-update when a key mint flips `automationEnabled` (minor UX lag)
 **Observed**: `enableAndMintJarKey` flips `automationEnabled = true` as a side effect via a direct `settings.set(...)` in the main process, which does NOT fan out a `settings-changed` broadcast (only the `internal-settings-set` IPC path does). So after generating the first jar key, the persisted setting is `true` but the `#automation-enabled` checkbox in the open settings page only re-syncs on the next settings load.
 **Severity**: cosmetic. The stored value is correct and the surface behaves correctly; only the live checkbox lags.
-**Resolution**: surfaced during the leg-5 spec review (2026-06-15). The `settings-automation` spec asserts the *stored* `automationEnabled` (read-back), not the live checkbox. Candidate polish for the leg-7 HAT (have the key-management controller re-sync the toggle on `refresh()`, or broadcast on the side-effect write) — not a blocker for the flight's SCs.
+**Resolution**: **FIXED in leg 7 (HAT inline fix).** The `automation:jar-key-mint` IPC handler now broadcasts `settings-changed` after `enableAndMintJarKey` flips `automationEnabled`, so the settings-page enable toggle re-syncs live (verified: set `automationEnabled=false` → generate a key → toggle re-checks without reload).
 
 ### Ungracefully-disconnected automation sessions linger as "connected" (audit close-detection gap)
 **Observed**: during the leg-6 `settings-automation` live run (2026-06-15), staging then disconnecting MCP sessions showed: a client that calls `transport.terminateSession()` (explicit DELETE) is cleared from the audit (active count 3→2, the chrome indicator + viewer drop it — the server's `transport.onclose` → `auditLog.noteSessionClose` fires correctly). BUT a client that disconnects WITHOUT a DELETE — abrupt process death, or the SDK's `client.close()` which only tears down locally — leaves a stale "connected" session in the audit until a DELETE or app restart. The SDK server transport treats a dropped standalone GET SSE stream as resumable (not session-end), so there is no socket-close → no `onclose`.
 **Severity**: degraded (indicator accuracy), not functional/security. SC10's core is met — the operator sees active sessions, named jars, the action log, and properly-terminated sessions clear. The risk is a crashed/non-terminating agent leaving the "automation active" indicator stuck-on until the app restarts.
 **Root layer**: close-DETECTION in the Flight-3/4 transport/audit layer, NOT the Flight-5 render (which faithfully shows whatever the audit reports). Consistent with DD6's "connected reflects transport lifecycle (lingers until its transport closes)".
-**Resolution**: recorded as a **known limitation** with the `settings-automation` run dispositioned **pass-with-limitation** (operator-reviewed, FD-driven run). **Candidate fast-follow** (own flight/mission item, likely Flight 7 or a maintenance flight): detect the standalone GET SSE stream's socket close (or add a session idle-TTL / heartbeat) to expire a dropped session so the indicator clears for ungraceful disconnects. Not a Flight-5 blocker — the flight's deliverable (the visible indicator + viewer) is correct.
+**Resolution**: **FIXED in leg 7 (HAT inline fix, operator elected fix-now).** `routeRequest` now attaches a response-`close` handler on the standalone **GET** SSE stream of an existing session (GET only — POST/DELETE complete normally and must not trigger teardown); on client disconnect it calls `transport.close()` → `onclose` → `noteSessionClose`. A unit test in `automation-mcp-server.test.js` guards it (opens a session, drops the GET SSE stream without a DELETE, asserts the audit drains; fails when the fix is reverted). Verified live: stage a session (indicator badge 1) → abrupt-kill the client (no DELETE) → audit drains to 0 + indicator hides. Tradeoff accepted: a dropped SSE stream tears down immediately rather than awaiting a resumable reconnect (correct for Goldfinch's clients — the indicator reflects "currently connected").
 
 ---
 

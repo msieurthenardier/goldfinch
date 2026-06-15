@@ -332,6 +332,78 @@ test('clean stop() tears everything down — a subsequent start on the same port
   }
 });
 
+test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, not A (Leg 7)', async () => {
+  // The live port-rebind (Flight 5, Leg 7) is exactly this primitive: stop the
+  // current server, then create+start a fresh one on the (now-changed) resolved
+  // port. Prove the sequence works across two distinct free ports — the fresh
+  // server is reachable on B, and port A is free again (the old listener released).
+  const PORT_A = 7791;
+  const PORT_B = 7792;
+
+  // Phase 1: bind on A and confirm a full SDK handshake reaches the fake engine.
+  const onA = createMcpServer({
+    getEngine: (engineOpts) => fakeEngine(engineOpts),
+    getSettings: () => fakeSettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: PORT_A,
+  });
+  await onA.start();
+  assert.equal(onA.port, PORT_A, '.port reflects A');
+  const endpointA = new URL('http://127.0.0.1:' + PORT_A + '/mcp');
+  {
+    const client = new Client({ name: 'rebind-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(endpointA, {
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+    });
+    await client.connect(transport);
+    try {
+      const { tools } = await client.listTools();
+      assert.equal(tools.length, EXPECTED_TOOL_COUNT, 'reachable on A while bound to A');
+    } finally {
+      await client.close();
+    }
+  }
+
+  // Phase 2: stop A (releases the listener + sessions), then start a FRESH server
+  // on B — the rebind primitive. The new instance must reach the engine on B.
+  await onA.stop();
+  const onB = createMcpServer({
+    getEngine: (engineOpts) => fakeEngine(engineOpts),
+    getSettings: () => fakeSettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: PORT_B,
+  });
+  await onB.start();
+  try {
+    assert.equal(onB.port, PORT_B, '.port reflects B after rebind');
+    const endpointB = new URL('http://127.0.0.1:' + PORT_B + '/mcp');
+    const client = new Client({ name: 'rebind-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(endpointB, {
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+    });
+    await client.connect(transport);
+    try {
+      const { tools } = await client.listTools();
+      assert.equal(tools.length, EXPECTED_TOOL_COUNT, 'reachable on B after rebind');
+    } finally {
+      await client.close();
+    }
+
+    // Port A is free again — a fresh server can re-bind it with no EADDRINUSE,
+    // proving stop() released the old listener (the rebind didn't leak it).
+    const reA = createMcpServer({
+      getEngine: (engineOpts) => fakeEngine(engineOpts),
+      getSettings: () => fakeSettings(),
+      scopeCtx: fakeScopeCtx(),
+      port: PORT_A,
+    });
+    await assert.doesNotReject(reA.start(), 'A is free again after the rebind off it');
+    await reA.stop();
+  } finally {
+    await onB.stop();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Auth gate (Flight 4, DD2/DD3/DD5/DD6). The gate runs AFTER the origin guard
 // (which keeps its 403) and BEFORE session routing. A loopback request from this
@@ -794,6 +866,54 @@ test('audit — opening then closing a session updates getActivity().sessions (n
     await client.close();
     await waitFor(() => server.getActivity().sessions.length === 0);
     assert.equal(server.getActivity().sessions.length, 0, 'active set drains on disconnect');
+  } finally {
+    await server.stop();
+  }
+});
+
+// Open the session's standalone GET SSE stream (the long-lived stream a real
+// client holds for server→client messages) and return the live http.ClientRequest
+// so the caller can abort it WITHOUT a DELETE — simulating an ungraceful client
+// drop (process death / SDK client.close() that only tears down locally). Resolves
+// once the response headers arrive so the server-side res 'close' handler is armed.
+function openGetStream(sessionId, key = VALID_KEY) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: TEST_PORT,
+        path: '/mcp',
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: 'Bearer ' + key,
+          'mcp-session-id': sessionId,
+        },
+      },
+      (res) => resolve({ req, res })
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('audit — an ungracefully-dropped GET SSE stream (no DELETE) drains the session', async () => {
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    // Open a session (raw initialize POST → session id), then hold its standalone
+    // GET SSE stream open — the realistic long-lived client stream.
+    const sid = await rawInitSession(VALID_KEY);
+    await waitFor(() => server.getActivity().sessions.length === 1);
+    const { req } = await openGetStream(sid);
+
+    // Drop the GET stream WITHOUT a DELETE / terminateSession — the process-death
+    // case. The fix's res 'close' handler must tear the session down so it does
+    // not linger as "connected". (Before the fix, transport.onclose never fired
+    // for a dropped GET and the session lingered until app restart.)
+    req.destroy();
+    await waitFor(() => server.getActivity().sessions.length === 0);
+    assert.equal(server.getActivity().sessions.length, 0, 'dropped GET stream drains the session');
   } finally {
     await server.stop();
   }

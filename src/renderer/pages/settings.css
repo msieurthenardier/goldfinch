@@ -440,6 +440,20 @@ main section p {
   margin-top: 10px;
 }
 
+/* MCP client config block: a copy-ready `.mcp.json` snippet. Monospace on the
+   dark surface tokens, with horizontal scroll so the JSON never wraps awkwardly. */
+.mcp-config-block {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
 /* --- Automation key management (Leg 3) --- */
 
 /* Per-jar key row: reuses .settings-row layout; the name takes the slack so the

@@ -138,7 +138,7 @@ UI + a thin backend layer over the Flight-4 auth core, all origin-checked throug
 - [x] `activity-indicator-and-audit-viewer` — visible active-session indicator (admin vs jar, names jar) + audit-log viewer; `onAutomationActivity` bridge. (SC10 visible half; DD6)
 - [x] `behavior-test-specs` — author `settings-automation` (CDP apparatus). (DD3)
 - [x] `verify-integration` — run `settings-automation`; complete the `mcp-jar-scoping` full live run; full gates. (DD7)
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT of the full control surface. (DD7)
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT of the full control surface. (DD7)
 
 ---
 

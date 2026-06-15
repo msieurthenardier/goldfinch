@@ -455,6 +455,23 @@ function createMcpServer(opts = {}) {
           res.end();
           return;
         }
+        // Client-disconnect detection: the standalone GET is the session's
+        // long-lived SSE stream. When it closes (client gone, no DELETE), tear the
+        // session down so the audit/indicator don't show a stale "connected" entry.
+        // ONLY the GET stream — a POST (every tool call) and DELETE complete
+        // normally and also fire 'close'; tearing down on those would kill the
+        // session on every tool call / break the normal terminate path.
+        // Tradeoff (acceptable for Goldfinch's clients): a dropped SSE stream tears
+        // down immediately rather than awaiting a resumable reconnect.
+        if (req.method === 'GET') {
+          res.on('close', () => {
+            if (sessions.has(sessionId)) {
+              // transport.close() fires onclose → sessions.delete + noteSessionClose
+              // (idempotent), so a concurrent/prior teardown is a clean no-op.
+              try { entry.transport.close(); } catch { /* already closing */ }
+            }
+          });
+        }
         await entry.transport.handleRequest(req, res);
         return;
       }
