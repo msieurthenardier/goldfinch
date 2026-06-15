@@ -1,6 +1,6 @@
 # Flight: Gating — opt-in + key auth + audit
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
