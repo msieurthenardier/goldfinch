@@ -61,9 +61,7 @@ function createEngine(getMainWindow) {
     scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
       input.scroll(wcId, x, y, dx, dy, deps()),
     pressKey: (/** @type {number} */ wcId, /** @type {string} */ name) => input.pressKey(wcId, name, deps()),
-    // `opts` is for delayMs/waitForPaint ONLY (Leg-5 paint-settle tuning): the spread-after-deps()
-    // order means an over-supplied opts would override injected deps, so keep it to those keys.
-    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, { ...deps(), ...opts }),
+    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),
     captureWindow: () => observe.captureWindow(deps()),
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
     readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),

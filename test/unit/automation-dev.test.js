@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isAutomationDevEnabled } = require('../../src/shared/automation-dev');
+const { isAutomationDevEnabled, isMcpAutomationEnabled } = require('../../src/shared/automation-dev');
 
 describe('isAutomationDevEnabled', () => {
   // --- true cases ---
@@ -95,5 +95,63 @@ describe('isAutomationDevEnabled', () => {
     assert.equal(isAutomationDevEnabled([null, undefined, 42, '--automation-dev']), true);
     // Array with only non-strings — returns false, does not throw.
     assert.equal(isAutomationDevEnabled([null, 42, true, {}]), false);
+  });
+});
+
+describe('isMcpAutomationEnabled (narrower MCP gate, DD4)', () => {
+  // --- true ONLY for the exact --automation-dev token ---
+
+  it('returns true for --automation-dev', () => {
+    assert.equal(isMcpAutomationEnabled(['--automation-dev']), true);
+  });
+
+  it('returns true when --automation-dev is mixed with other args', () => {
+    assert.equal(
+      isMcpAutomationEnabled(['/path/to/electron', '.', '--enable-logging', '--no-sandbox', '--automation-dev']),
+      true
+    );
+  });
+
+  // --- CRITICAL: false for the CDP port (structural decoupling) ---
+
+  it('returns FALSE for a bare --remote-debugging-port (the CDP-decoupling invariant)', () => {
+    assert.equal(isMcpAutomationEnabled(['--remote-debugging-port']), false);
+  });
+
+  it('returns FALSE for --remote-debugging-port=9222 (dev:debug must NOT start the MCP server)', () => {
+    assert.equal(
+      isMcpAutomationEnabled(['electron', '.', '--remote-debugging-port=9222', '--remote-allow-origins=*']),
+      false
+    );
+  });
+
+  // --- other false cases ---
+
+  it('returns false for an empty array', () => {
+    assert.equal(isMcpAutomationEnabled([]), false);
+  });
+
+  it('returns false for unrelated args', () => {
+    assert.equal(isMcpAutomationEnabled(['node', 'main.js', '--enable-logging']), false);
+  });
+
+  it('returns false for a prefix of --automation-dev (must be the exact token)', () => {
+    assert.equal(isMcpAutomationEnabled(['--automation-dev-extra']), false);
+    assert.equal(isMcpAutomationEnabled(['--automation-de']), false);
+  });
+
+  it('returns false for null / undefined / non-array inputs', () => {
+    assert.equal(isMcpAutomationEnabled(null), false);
+    assert.equal(isMcpAutomationEnabled(undefined), false);
+    assert.equal(isMcpAutomationEnabled('--automation-dev'), false);
+    assert.equal(isMcpAutomationEnabled(42), false);
+    assert.equal(isMcpAutomationEnabled({ 0: '--automation-dev', length: 1 }), false);
+  });
+
+  it('never throws for any input', () => {
+    assert.doesNotThrow(() => isMcpAutomationEnabled(null));
+    assert.doesNotThrow(() => isMcpAutomationEnabled(undefined));
+    assert.doesNotThrow(() => isMcpAutomationEnabled({}));
+    assert.doesNotThrow(() => isMcpAutomationEnabled([null, undefined, 42, true]));
   });
 });

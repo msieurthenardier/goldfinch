@@ -87,17 +87,27 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  * Resolve-before-activate means an internal-session / bad-handle / dead wcId throws via
  * resolveContents BEFORE activate or capturePage is reached (DD6 absolute exclusion).
  *
+ * Signature mirrors readAxTree's already-safe (wcId, deps, opts) shape (DD7): caller-tunable
+ * paint params (waitForPaint / delayMs) live in a SEPARATE 3rd `opts` arg so an over-supplied
+ * opts key can never clobber the injected fromId / chromeContents / activate in the deps bag.
+ *
  * @param {number} wcId
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
- *   waitForPaint?: (wc: any, opts?: { delayMs?: number }) => Promise<void>,
- *   delayMs?: number,
  * }} deps
+ *   fromId   — webContents.fromId at the call site (injected)
+ *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
+ *   activate — brings a guest to front before capture (DD5 foreground-to-act); absent for
+ *              chrome-only callers
+ * @param {{ waitForPaint?: (wc: any, opts?: { delayMs?: number }) => Promise<void>, delayMs?: number }} [opts]
+ *   waitForPaint — paint-settle implementation (defaults to defaultWaitForPaint; injectable so
+ *                  unit tests run without real timers)
+ *   delayMs      — fixed paint-settle delay override (Leg-5 tuning)
  * @returns {Promise<string>} base64-encoded PNG
  */
-async function captureScreenshot(wcId, { fromId, chromeContents, activate, waitForPaint = defaultWaitForPaint, delayMs }) {
+async function captureScreenshot(wcId, { fromId, chromeContents, activate }, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
   let wc = resolveContents(wcId, { fromId, chromeContents });
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)

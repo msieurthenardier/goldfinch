@@ -289,6 +289,20 @@ mission-level commitment.
     confounds the one-client-per-contents premise (DevTools open + in-process attach both succeeded).
     So whether a real conflict throws is **NOT settled** — re-verify under the **Flight-3 transport**
     (no remote-debugging-port confound). See Flight-2 flight-log Deviations.
+  - **Flight 3 finding (2026-06-14, leg `verify-integration` / DD10): the confound-free DevTools
+    conflict is NOT stageable in the current build — circular-affordance gap.** Under the
+    `dev:automation` transport (no `--remote-debugging-port`) the engine is in single-client-per-contents
+    mode as intended, BUT staging the conflict requires a *second* external CDP client (DevTools) on the
+    tab, and **the only way to open DevTools in Goldfinch is the `--remote-debugging-port` path — which is
+    the very confound DD10 must avoid** (Goldfinch has no non-CDP DevTools affordance: no `openDevTools`
+    call, no shortcut, no menu). So the external-CDP `attach-failed` branch **cannot be observed live**
+    without first adding a non-CDP DevTools-open affordance. What IS live-confirmed confound-free over the
+    Flight-3 transport: the in-engine **`locked`** refusal — two concurrent `readAxTree` on one tab return
+    one AXNode array + one `{"automation":"debugger-unavailable","reason":"locked"}` **normal** result
+    (verified 2026-06-14, wcId 2). `attach-failed` remains **unit-tested only**. **Disposition (operator,
+    2026-06-14):** record the finding + carry a follow-up (a non-CDP, `--automation-dev`-gated
+    DevTools-open affordance would let a future flight settle the `attach-failed` observation); the
+    `devtools-cdp-conflict` draft spec is annotated accordingly. Not a blocker for Flight 3.
 
 ## Known Issues
 
@@ -325,7 +339,7 @@ as work reveals.)_
   **accessibility tree via in-process `webContents.debugger`**, on the foreground tab. (SC3, SC4)
   *(landed 2026-06-13 — native read capability delivered + live-verified; SC3/SC4 behavior-test backing
   lands with the Flight-3 transport / Flight-6 migration.)*
-- [ ] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
+- [x] **Flight 3: MCP-compatible local server + transport** — expose drive+observe as MCP-discoverable
   tools over a **loopback** transport (Streamable-HTTP/SSE or a thin shim — stdio can't attach to a
   running app), with **Origin/Host allow-listing** from the start; **operator go/no-go on hand-roll vs
   MCP SDK** (identity-level — the SDK is the first runtime dep), then commit; ship an example client +

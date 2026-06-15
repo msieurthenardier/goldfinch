@@ -13,8 +13,9 @@ const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
-const { isAutomationDevEnabled } = require('../shared/automation-dev');
+const { isAutomationDevEnabled, isMcpAutomationEnabled } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
+const { createMcpServer } = require('./automation/mcp-server');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -93,6 +94,10 @@ async function handleInternal(request) {
 }
 
 let mainWindow = null;
+// The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
+// hooks (before-quit / window-all-closed) can reach it. Stays null unless the
+// process was launched with --automation-dev (isMcpAutomationEnabled, DD4).
+let mcpServer = null;
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -747,11 +752,38 @@ app.whenReady().then(() => {
     });
   }
 
+  // Loopback MCP automation server (Flight 3, DD1–DD4). Gated on the NARROWER
+  // isMcpAutomationEnabled predicate — only `--automation-dev`, NOT
+  // `--remote-debugging-port` — so dev:debug (CDP) does NOT co-bind the MCP
+  // server (structural CDP-decoupling; the whole point of the narrower gate).
+  // Started after createWindow() so the (lazy) engine accessor sees a live
+  // window. The SC7 Origin/Host guard is wired inside createMcpServer and runs
+  // before any MCP processing — the server never binds without it.
+  if (isMcpAutomationEnabled(process.argv)) {
+    mcpServer = createMcpServer({ getEngine: () => createEngine(() => mainWindow) });
+    mcpServer.start().catch((err) => {
+      // A bind failure (e.g. EADDRINUSE on 7777) must not crash the app — surface
+      // it and leave the rest of the browser running. GOLDFINCH_MCP_PORT overrides.
+      console.error('[mcp] failed to start automation server:', err && err.message);
+    });
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+// Primary MCP stop hook — before-quit fires on a real quit across ALL platforms,
+// including macOS (where window-all-closed does NOT quit). stop() is idempotent,
+// so both this and the window-all-closed secondary firing is safe.
+app.on('before-quit', () => { mcpServer?.stop(); });
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Secondary MCP stop, INSIDE the non-darwin branch: on macOS closing all
+  // windows does not quit (the app stays dock-resident), so we must NOT tear the
+  // server down there while the app lives — before-quit handles macOS.
+  if (process.platform !== 'darwin') {
+    mcpServer?.stop();
+    app.quit();
+  }
 });
