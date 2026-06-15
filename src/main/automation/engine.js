@@ -1,17 +1,20 @@
 // @ts-check
 'use strict';
 // Single automation entry point (flight technical approach). Wires the pure engine modules to
-// real Electron handles. Interim dev seam reaches this via main.js (DD7); debugger-free (DD8).
+// real Electron handles. Interim dev seam reaches this via main.js (DD7). engine.js itself is
+// debugger-free (DD8); it wires ./observe, whose readAxTree is the engine's sole debugger user.
 // Integration-verified in Leg 6 live smoke — not unit-tested offline (requires Electron runtime).
 const { webContents } = require('electron');
 const tabs = require('./tabs');
 const nav = require('./nav');
 const input = require('./input');
+const observe = require('./observe');
 
 /**
  * Create the automation engine, bound to the live Electron environment.
  * Deps are built freshly per call so a recreated window is always picked up.
- * No webContents.debugger anywhere in this module (DD8).
+ * engine.js itself uses no webContents.debugger (DD8); it wires ./observe, whose readAxTree is
+ * the engine's sole debugger user.
  *
  * @param {() => (Electron.BrowserWindow | null)} getMainWindow
  *   Accessor for the current chrome BrowserWindow (may return null if window is closed).
@@ -58,6 +61,12 @@ function createEngine(getMainWindow) {
     scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
       input.scroll(wcId, x, y, dx, dy, deps()),
     pressKey: (/** @type {number} */ wcId, /** @type {string} */ name) => input.pressKey(wcId, name, deps()),
+    // `opts` is for delayMs/waitForPaint ONLY (Leg-5 paint-settle tuning): the spread-after-deps()
+    // order means an over-supplied opts would override injected deps, so keep it to those keys.
+    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, { ...deps(), ...opts }),
+    captureWindow: () => observe.captureWindow(deps()),
+    readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
+    readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),
   };
 }
 

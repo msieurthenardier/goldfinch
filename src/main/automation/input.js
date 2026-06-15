@@ -49,7 +49,8 @@ function keyEvents(name) {
  *
  * mouseMove → mouseDown (buttons:1) → mouseUp (buttons:0).
  * The `buttons` bitmask mirrors the working CDP recipe (cdp-driver.mjs:92-93)
- * so a page's `event.buttons` sees the press. Pending Leg 6 live confirmation.
+ * so a page's `event.buttons` sees the press. Confirmed live in Flight-1 Leg 6
+ * (cdp-driver smoke): the buttons bitmask makes a page's `event.buttons` see the press.
  *
  * @param {number} x
  * @param {number} y
@@ -60,7 +61,7 @@ function mouseClickEvents(x, y, { button = 'left', clickCount = 1 } = {}) {
   return [
     { type: 'mouseMove', x, y },
     // buttons bitmask (1 down / 0 up) mirrors the working CDP recipe (cdp-driver.mjs:92-93)
-    // so a page's event.buttons sees the press. Pending Leg 6 live confirmation.
+    // so a page's event.buttons sees the press. Confirmed live in Flight-1 Leg 6 (cdp-driver smoke).
     { type: 'mouseDown', x, y, button, clickCount, buttons: 1 },
     { type: 'mouseUp',   x, y, button, clickCount, buttons: 0 },
   ];
