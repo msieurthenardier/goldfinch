@@ -364,3 +364,203 @@ main section p {
   font-size: 12px;
   margin-top: 6px;
 }
+
+/* ── Shared control rows + inputs/buttons (Automation, reusable) ──────────────────
+   Dedicated classes (NOT the #home-page-* ID selectors) so multiple sections can
+   share the styling without coupling. A flex row lets the label + input + multiple
+   buttons + note lay out coherently (the home-page row relies on bare-sibling
+   inline-block, which does not generalize to multi-button rows). */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+/* Text input — mirrors #home-page-input (bg-2 fill, bg-3 border, radius, padding,
+   accent focus ring). */
+.settings-text-input {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  min-width: 340px;
+  outline: none;
+}
+
+.settings-text-input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The port is a narrow numeric field — override the wide default min-width. */
+#automation-port {
+  min-width: 90px;
+  max-width: 120px;
+}
+
+/* Button — mirrors #home-page-save (accent fill, radius, padding, hover
+   brightness, accent focus ring). */
+.settings-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.1s;
+}
+
+.settings-btn:hover {
+  filter: brightness(1.1);
+}
+
+.settings-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Muted helper text (enabled-note, port-note). */
+.muted {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+/* One-line connect hint deferring detail to docs/mcp-automation.md. */
+.connect-hint {
+  color: var(--fg-dim);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+/* MCP client config block: a copy-ready `.mcp.json` snippet. Monospace on the
+   dark surface tokens, with horizontal scroll so the JSON never wraps awkwardly. */
+.mcp-config-block {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 6px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+/* --- Automation key management (Leg 3) --- */
+
+/* Per-jar key row: reuses .settings-row layout; the name takes the slack so the
+   status + buttons sit to the right. */
+.jar-row .jar-name {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+/* Small color chip identifying the jar (matches the jar's color token). */
+.jar-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+}
+
+/* Show-once reveal block: set apart from the jars list so the just-minted key
+   reads as a distinct, transient affordance. */
+#automation-key-reveal {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+/* Env-gated admin block spacing. */
+#automation-admin {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Activity viewer (Leg 4 / SC10 / DD6) ---- */
+
+/* Active session rows: kind chip + named identity + since. The admin row uses a
+   non-alarm distinct accent (violet) — admin is "more privileged", not "broken". */
+.activity-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.activity-kind {
+  flex: 0 0 auto;
+  min-width: 42px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.activity-session.admin .activity-kind {
+  color: #a371f7;
+  border-color: #a371f7;
+}
+.activity-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  word-break: break-word;
+}
+.activity-since {
+  flex: 0 0 auto;
+}
+
+/* Recent action log rows: time · op · identity · outcome. Error rows are tinted
+   distinct from ok rows. Monospace-ish columns keep the log scannable. */
+.activity-log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.activity-log-time {
+  flex: 0 0 auto;
+}
+.activity-log-op {
+  flex: 0 0 auto;
+  min-width: 90px;
+  color: var(--accent);
+}
+.activity-log-identity {
+  flex: 1 1 auto;
+  word-break: break-word;
+  color: var(--fg-dim);
+}
+.activity-log-outcome {
+  flex: 0 0 auto;
+  color: #6dff8f;
+}
+.activity-log-row.error .activity-log-outcome {
+  color: #ff8c7a;
+}
+
+/* Empty-state line inside either list. */
+.activity-empty {
+  margin: 6px 0;
+}

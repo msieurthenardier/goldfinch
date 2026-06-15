@@ -1004,7 +1004,8 @@ a:focus-visible {
    The button uses relative positioning to anchor the badge in the corner.
    Flex centering aligns the SVG glyph within the button box. */
 #toggle-media,
-#toggle-privacy {
+#toggle-privacy,
+#automation-indicator {
   position: relative;
   width: 36px; /* slightly wider than the 32px default to give the badge room */
   display: flex;
@@ -1046,6 +1047,26 @@ a:focus-visible {
 /* Alert badge on the Shields icon uses a brighter red so it reads on the red button */
 #toggle-privacy.alert .tb-badge {
   background: #ff6b6b;
+  color: #1e1f25;
+}
+
+/* Automation indicator (SC10/DD6). Visible only when ≥1 session is connected.
+   The connected (jar-only) state uses the brand accent (gold). The .admin state
+   uses a DELIBERATELY non-alarm color (violet) — admin is "more privileged", not
+   "broken"; a danger-red here would misread as an error. Final color is a HAT/leg-7
+   polish point. The badge background tracks the same state colors. */
+#automation-indicator {
+  color: var(--accent);
+}
+#automation-indicator .tb-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+#automation-indicator.admin {
+  color: #a371f7;
+}
+#automation-indicator.admin .tb-badge {
+  background: #a371f7;
   color: #1e1f25;
 }
 

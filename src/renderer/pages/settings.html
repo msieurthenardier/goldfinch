@@ -12,6 +12,7 @@
       <ul role="list">
         <li><a href="#appearance">Appearance</a></li>
         <li><a href="#privacy">Privacy &amp; Shields</a></li>
+        <li><a href="#automation">Automation</a></li>
         <li><a href="#startup">On startup</a></li>
         <li><a href="#downloads">Downloads</a></li>
         <li><a href="#about">About</a></li>
@@ -47,6 +48,59 @@
           <label class="shield-row"><span>Farble fingerprint</span><input type="checkbox" id="shield-farble" /></label>
         </fieldset>
         <p>These are global Shields defaults, applied to every site.</p>
+      </section>
+      <section id="automation">
+        <h2>Automation</h2>
+        <fieldset class="shields-group">
+          <legend class="sr-only">Automation</legend>
+          <label class="shield-row shield-parent"><span>Enable automation surface</span><input type="checkbox" id="automation-enabled" /></label>
+        </fieldset>
+        <p id="automation-enabled-note" class="muted"></p>
+        <p id="automation-status">—</p>
+        <div class="settings-row">
+          <label for="automation-address">MCP address</label>
+          <input id="automation-address" class="settings-text-input" type="text" readonly spellcheck="false" />
+          <button id="automation-copy-address" class="settings-btn" type="button">Copy</button>
+        </div>
+        <div class="settings-row">
+          <label for="automation-port">Port</label>
+          <input id="automation-port" class="settings-text-input" type="number" min="1024" max="65535" autocomplete="off" />
+          <button id="automation-port-save" class="settings-btn" type="button">Save</button>
+          <button id="automation-find-port" class="settings-btn" type="button">Find free port</button>
+          <span id="automation-port-note" class="muted"></span>
+        </div>
+        <p id="automation-message" role="status"></p>
+        <p class="connect-hint">MCP client config (e.g. <code>.mcp.json</code>) — replace <code>&lt;your-key&gt;</code> with a generated key:</p>
+        <pre class="mcp-config-block"><code id="automation-mcp-config"></code></pre>
+        <button id="automation-copy-config" class="settings-btn" type="button">Copy config</button>
+        <p class="connect-hint">Loopback-only — see <code>docs/mcp-automation.md</code> for WSL2 / Docker connection details.</p>
+        <h3>Keys</h3>
+        <p class="muted">Generate a per-jar key for the automation surface. The key is shown once — copy it immediately.</p>
+        <div id="automation-jars"></div>
+        <div id="automation-key-reveal" hidden>
+          <label for="automation-key-value">New key (shown once)</label>
+          <div class="settings-row">
+            <input id="automation-key-value" class="settings-text-input" type="text" readonly spellcheck="false" />
+            <button id="automation-key-copy" class="settings-btn" type="button">Copy</button>
+            <button id="automation-key-done" class="settings-btn" type="button">Done</button>
+          </div>
+          <p class="muted">Copy it now — it cannot be shown again. Only its hash is stored.</p>
+          <p id="automation-key-message" role="status"></p>
+        </div>
+        <div id="automation-admin" hidden>
+          <h3>Admin key</h3>
+          <p class="muted">The admin key drives the app/chrome surface. Never share it with an external consumer.</p>
+          <div class="settings-row">
+            <span id="automation-admin-status">—</span>
+            <button id="automation-admin-mint" class="settings-btn" type="button">Generate admin key</button>
+            <button id="automation-admin-revoke" class="settings-btn" type="button">Revoke</button>
+          </div>
+        </div>
+        <h3>Activity</h3>
+        <p class="muted">Sessions currently connected to the automation surface, and a log of recent actions. "Connected" reflects the transport — a revoked session lingers here until its connection closes.</p>
+        <div id="automation-active-sessions"></div>
+        <h4>Recent actions</h4>
+        <div id="automation-activity-log"></div>
       </section>
       <section id="startup">
         <h2>On startup</h2>

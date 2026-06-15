@@ -9,7 +9,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isInternalContents, classifyContents, resolveContents } = require('../../src/main/automation/resolve');
+const { isInternalContents, classifyContents, resolveContents, resolveContentsForJar } = require('../../src/main/automation/resolve');
 
 // ---------------------------------------------------------------------------
 // isInternalContents — predicate matrix
@@ -169,6 +169,135 @@ test('resolveContents: destroyed webContents → throws no-such-contents', () =>
     () => resolveContents(55, { fromId, chromeContents: null }),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
   );
+});
+
+// ---------------------------------------------------------------------------
+// resolveContents — allowInternal (DD6 / Leg 2): admin's sole relaxation
+// ---------------------------------------------------------------------------
+
+test('resolveContents: allowInternal:true SKIPS the internal-session throw (admin relaxation)', () => {
+  const internalWc = makeInternalWc(99);
+  const fromId = (id) => id === 99 ? internalWc : null;
+  const result = resolveContents(99, { fromId, chromeContents: null, allowInternal: true });
+  assert.equal(result, internalWc);
+});
+
+test('resolveContents: allowInternal:true STILL throws bad-handle (cap is internal-only)', () => {
+  assert.throws(
+    // @ts-expect-error — intentionally passing wrong type
+    () => resolveContents('x', { fromId: () => null, chromeContents: null, allowInternal: true }),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle')
+  );
+});
+
+test('resolveContents: allowInternal:true STILL throws no-such-contents (cap is internal-only)', () => {
+  assert.throws(
+    () => resolveContents(7, { fromId: () => null, chromeContents: null, allowInternal: true }),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
+  );
+});
+
+test('resolveContents: allowInternal:false (explicit) still throws internal-session', () => {
+  const internalWc = makeInternalWc(99);
+  const fromId = (id) => id === 99 ? internalWc : null;
+  assert.throws(
+    () => resolveContents(99, { fromId, chromeContents: null, allowInternal: false }),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
+  );
+});
+
+// ---------------------------------------------------------------------------
+// resolveContentsForJar (net-new, Leg 2 / DD7) — SESSION OBJECT IDENTITY
+// ---------------------------------------------------------------------------
+
+// One interned Session object per partition — the === identity is the test.
+function makeSessionWorld() {
+  const sessions = new Map();
+  const sessionFor = (partition) => {
+    if (!sessions.has(partition)) sessions.set(partition, { __partition: partition, __goldfinchInternal: partition === 'goldfinch-internal' });
+    return sessions.get(partition);
+  };
+  return { sessionFor, fromPartition: (p) => sessionFor(p) };
+}
+
+function makeWcInPartition(id, partition, world) {
+  return { id, session: world.sessionFor(partition), isDestroyed() { return false; } };
+}
+
+test('resolveContentsForJar: wc whose session === jar session → returns the wc', () => {
+  const world = makeSessionWorld();
+  const jar = { id: 'personal', partition: 'persist:container:personal' };
+  const wc = makeWcInPartition(10, jar.partition, world);
+  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.equal(resolveContentsForJar(10, jar, deps), wc);
+});
+
+test('resolveContentsForJar: wc in a DIFFERENT jar session → throws out-of-jar', () => {
+  const world = makeSessionWorld();
+  const personal = { id: 'personal', partition: 'persist:container:personal' };
+  // wc belongs to 'work' session, but we ask for 'personal'.
+  const wc = makeWcInPartition(11, 'persist:container:work', world);
+  const deps = { fromId: (id) => id === 11 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.throws(
+    () => resolveContentsForJar(11, personal, deps),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+});
+
+test('resolveContentsForJar: burner session (matches no jar) → throws out-of-jar', () => {
+  const world = makeSessionWorld();
+  const personal = { id: 'personal', partition: 'persist:container:personal' };
+  const wc = makeWcInPartition(12, 'burner:1', world);
+  const deps = { fromId: (id) => id === 12 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.throws(
+    () => resolveContentsForJar(12, personal, deps),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+});
+
+test('resolveContentsForJar: null jar → throws out-of-jar (a key bound to no jar drives nothing)', () => {
+  const world = makeSessionWorld();
+  const wc = makeWcInPartition(13, 'persist:container:personal', world);
+  const deps = { fromId: (id) => id === 13 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.throws(
+    () => resolveContentsForJar(13, null, deps),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+});
+
+test('resolveContentsForJar: bad/dead/internal still throw via resolveContents FIRST (before membership)', () => {
+  const world = makeSessionWorld();
+  const jar = { id: 'personal', partition: 'persist:container:personal' };
+  const deps = { fromId: () => null, chromeContents: null, fromPartition: world.fromPartition };
+  // bad-handle
+  assert.throws(
+    // @ts-expect-error — wrong type on purpose
+    () => resolveContentsForJar('x', jar, deps),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle')
+  );
+  // no-such-contents
+  assert.throws(
+    () => resolveContentsForJar(99, jar, deps),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
+  );
+  // internal-session: jar deps carry no allowInternal → internal throws before membership
+  const internalWc = makeWcInPartition(50, 'goldfinch-internal', world);
+  const internalDeps = { fromId: (id) => id === 50 ? internalWc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.throws(
+    () => resolveContentsForJar(50, jar, internalDeps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
+  );
+});
+
+test('resolveContentsForJar: LAZY fromPartition compare picks up a RUNTIME jars-add', () => {
+  // A jar added at runtime: its partition interns a fresh Session on first
+  // fromPartition call. The compare is lazy (no cached map), so a wc created in
+  // that partition resolves correctly the moment the jar exists.
+  const world = makeSessionWorld();
+  const newJar = { id: 'just-added', partition: 'persist:container:just-added' };
+  const wc = makeWcInPartition(20, newJar.partition, world);
+  const deps = { fromId: (id) => id === 20 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.equal(resolveContentsForJar(20, newJar, deps), wc);
 });
 
 test('resolveContents: error messages are distinguishable per guard', () => {

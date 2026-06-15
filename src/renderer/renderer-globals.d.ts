@@ -3,6 +3,32 @@
  * Mirrors the contextBridge surface exposed by src/preload/chrome-preload.js.
  */
 
+/** One attached automation session in the audit snapshot (SC10/DD6). Carries no key/hash. */
+interface AutomationSession {
+  sessionId: string;
+  identity: string;
+  kind: 'admin' | 'jar';
+  jarId: string | null;
+  since: number;
+}
+
+/** One entry in the bounded automation action log. Carries no key/hash. */
+interface AutomationLogEntry {
+  ts: number;
+  sessionId: string;
+  identity: string;
+  op: string;
+  targetWcId: number | null;
+  outcome: 'ok' | 'error';
+  errorCode: string | null;
+}
+
+/** The automation activity snapshot returned by get-activity and the live broadcast. */
+interface AutomationActivity {
+  sessions: AutomationSession[];
+  log: AutomationLogEntry[];
+}
+
 interface GoldfinchBridge {
   // --- platform ---
   platform: string;
@@ -38,6 +64,10 @@ interface GoldfinchBridge {
   shieldsPause(payload: any): Promise<any>;
   onShieldsChanged(cb: (cfg: any) => void): void;
 
+  // --- automation activity (chrome-trusted read + subscribe; SC10/DD6) ---
+  automationGetActivity(): Promise<AutomationActivity>;
+  onAutomationActivity(cb: (snap: AutomationActivity) => void): void;
+
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
   jarsAdd(payload: any): Promise<any>;
@@ -72,6 +102,18 @@ interface GoldfinchInternalBridge {
   shieldsSet(patch: object): Promise<any>;
   onShieldsChanged(cb: (cfg: any) => void): number;
   offShieldsChanged(h: number): void;
+  automationGetStatus(): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
+  automationSetPort(port: number): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
+  automationFindFreePort(): Promise<{ port: number | null }>;
+  clipboardWrite(text: string): Promise<{ ok: boolean }>;
+  automationListKeys(): Promise<{ jars: Array<{ id: string; name: string; color: string; hasKey: boolean }>; adminEnabled: boolean; adminKeySet: boolean }>;
+  automationJarKeyMint(jarId: string): Promise<{ key: string }>;
+  automationJarKeyRevoke(jarId: string): Promise<{ ok: boolean }>;
+  automationAdminKeyMint(): Promise<{ key: string | null }>;
+  automationAdminKeyRevoke(): Promise<{ ok: boolean }>;
+  automationGetActivity(): Promise<AutomationActivity>;
+  onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
+  offAutomationActivity(h: number): void;
 }
 
 interface Window {

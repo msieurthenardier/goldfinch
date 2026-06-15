@@ -1,6 +1,7 @@
 // @ts-check
 'use strict';
 const { resolveContents, classifyContents } = require('./resolve');
+const { withDebuggerSession } = require('./cdp');
 // Automation engine — READ half (observe). Foreground-first, debugger-free screenshots
 // via webContents.capturePage() (DD1): a guest is brought to front before capture or it
 // returns blank (Flight-1 spike). Results are base64 PNG strings (NativeImage.toPNG().
@@ -11,31 +12,14 @@ const { resolveContents, classifyContents } = require('./resolve');
 // chromeContents, activate) is injected through deps so orchestration is unit-testable
 // offline with fakes. Live capture is integration-verified (Leg 5 smoke + Leg 6 HAT).
 //
-// webContents.debugger lives ONLY in this module's readAxTree (DD3): there is no pure-JS
-// path to the platform accessibility tree, so the a11y read attaches the in-process CDP
-// debugger on demand, detaches in a finally, holds a synchronous single-client lock, and
-// returns a clean debugger-unavailable refusal when the contents is already held
-// (attach-on-demand / detach-in-finally / single-client lock / clean refusal —
-// DD3/DD7/DD8/DD9). Every OTHER op in this module (captureScreenshot / captureWindow /
-// readDom) and every OTHER automation module (resolve.js / input.js) stays debugger-free.
+// webContents.debugger discipline is now shared via cdp.js (withDebuggerSession /
+// debuggerUnavailable / attached Set). readAxTree uses withDebuggerSession, which
+// enforces attach-on-demand / detach-in-finally / single-client lock. The shared lock
+// means a concurrent scroll (input.js) + readAxTree on the same wcId cannot both attach.
+// (DD3/DD7/DD8/DD9; the DD8 boundary crossing — scroll now also uses the debugger — is
+// operator-approved for this leg.) Every OTHER op in this module (captureScreenshot /
+// captureWindow / readDom) stays debugger-free.
 // Leg 4 (wire-and-docs) adds the dispatch keys to engine.js (no engine.js edit here).
-
-// Single-client lock (DD7): wcIds with an in-flight debugger attach. The has()/add() pair is
-// synchronous (no await between) so concurrent readAxTree calls on the same contents are race-safe.
-const attached = new Set();
-
-/**
- * Build the discriminated debugger-unavailable refusal object (DD8). Returned (NOT thrown) by
- * readAxTree when the contents is already held — either the in-engine lock (`reason: 'locked'`)
- * or a real attach failure (`reason: 'attach-failed'`, another CDP client holds it). Structurally
- * distinct from a success (which is an Array of AXNodes) — callers discriminate via Array.isArray.
- *
- * @param {number} wcId
- * @param {'locked' | 'attach-failed'} reason
- * @returns {{ automation: 'debugger-unavailable', reason: string, wcId: number }}
- */
-const debuggerUnavailable = (wcId, reason) =>
-  ({ automation: 'debugger-unavailable', reason, wcId });
 
 // Default paint-settle delay (ms) after foregrounding a guest before capturePage().
 // DD1's blank-capture is a compositor/visibility effect on an already-loaded guest, so the
@@ -96,24 +80,28 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before capture (DD5 foreground-to-act); absent for
  *              chrome-only callers
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @param {{ waitForPaint?: (wc: any, opts?: { delayMs?: number }) => Promise<void>, delayMs?: number }} [opts]
  *   waitForPaint — paint-settle implementation (defaults to defaultWaitForPaint; injectable so
  *                  unit tests run without real timers)
  *   delayMs      — fixed paint-settle delay override (Leg-5 tuning)
  * @returns {Promise<string>} base64-encoded PNG
  */
-async function captureScreenshot(wcId, { fromId, chromeContents, activate }, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
+  const { chromeContents, activate } = deps;
+  // BOTH resolves forward the full deps so allowInternal flows on each (DD6 / Leg 2).
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
     await waitForPaint(wc, { delayMs });                        // paint-settle after foregrounding
   }
   const image = await wc.capturePage();                         // capturePage() is a Promise in Electron ^42
@@ -164,21 +152,24 @@ const READ_DOM_SNIPPET = '(() => ({' +
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers, in which case a guest is read without foregrounding
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @returns {Promise<{ url: string, title: string, html: string }>} a consistent live-DOM
  *   snapshot: location.href, document.title, and the full documentElement outerHTML.
  */
-async function readDom(wcId, { fromId, chromeContents, activate }) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function readDom(wcId, deps) {
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
   return wc.executeJavaScript(READ_DOM_SNIPPET);
 }
@@ -244,47 +235,37 @@ async function captureWindow({ chromeContents }) {
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers
+ *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
  * @param {{ depth?: number, properties?: string[] }} [opts]  DD4 Flight-9 stub — accepted, ignored in v1
  * @returns {Promise<Array<object> | { automation: 'debugger-unavailable', reason: string, wcId: number }>}
  */
-async function readAxTree(wcId, { fromId, chromeContents, activate }, { depth, properties } = {}) {
+async function readAxTree(wcId, deps, { depth, properties } = {}) {
   void depth; void properties;                  // DD4 Flight-9 stub — accepted, unimplemented in v1
-  let wc = resolveContents(wcId, { fromId, chromeContents });   // throws bad/dead/internal (DD6)
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);   // throws bad/dead/internal (DD6); allowInternal forwarded
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                        // DD5 foreground-to-act (await BEFORE the lock)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and re-resolving
     // re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
-  // Single-client lock (DD7) — keyed on the STABLE wcId, not the per-resolve `wc` handle, so it
-  // correctly spans the re-resolve above. The has() check and add() are synchronous with NO await
-  // between them; the only awaits are AFTER the add (the sendCommands). Two concurrent calls on one
-  // wcId may both activate (idempotent bring-to-front) but only one wins the synchronous add().
-  if (attached.has(wcId)) return debuggerUnavailable(wcId, 'locked');  // sync check…
-  attached.add(wcId);                                                  // …+ add (no await between)
-  try {
-    try {
-      wc.debugger.attach('1.3');
-    } catch {
-      return debuggerUnavailable(wcId, 'attach-failed');   // another client holds it (DD8)
-    }
-    try {
-      // NOTE: do NOT re-resolve between attach and detach — the finally detach below must run on
-      // the SAME `wc` that was attached (it does, as written; this comment guards future edits).
-      await wc.debugger.sendCommand('Accessibility.enable');
-      const res = await wc.debugger.sendCommand('Accessibility.getFullAXTree');
-      return res && Array.isArray(res.nodes) ? res.nodes : [];        // empty = valid success (DD4)
-    } finally {
-      try { wc.debugger.detach(); } catch { /* already detached — don't mask the outcome */ }
-    }
-  } finally {
-    attached.delete(wcId);                       // release the lock (DD7) — even on attach-throw
-  }
+  // Delegate to shared CDP session helper (cdp.js): acquires the synchronous single-client lock
+  // keyed on the STABLE wcId, attaches '1.3', runs the AX commands, detaches in a finally, and
+  // releases the lock in a finally. Two concurrent calls on one wcId may both activate (idempotent
+  // bring-to-front) but only one wins the synchronous lock add() — the other gets 'locked'.
+  // NOTE: do NOT re-resolve between withDebuggerSession entry and its internal detach — the wc
+  // captured here is the same handle used for attach and detach. This comment guards future edits.
+  return withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
+    await w.debugger.sendCommand('Accessibility.enable');
+    const res = await w.debugger.sendCommand('Accessibility.getFullAXTree');
+    return res && Array.isArray(res.nodes) ? res.nodes : [];          // empty = valid success (DD4)
+  });
 }
 
 module.exports = { captureScreenshot, readDom, captureWindow, readAxTree };

@@ -13,11 +13,9 @@ const {
   keyEvents,
   mouseClickEvents,
   charEvents,
-  scrollEvent,
   sendInput,
   click,
   typeText,
-  scroll,
   pressKey,
 } = require('../../src/main/automation/input');
 
@@ -236,40 +234,9 @@ test('charEvents: special chars propagate as-is', () => {
   assert.equal(evs[1].keyCode, '@');
 });
 
-// ---------------------------------------------------------------------------
-// scrollEvent — shape, canScroll, wheelTicks
-// ---------------------------------------------------------------------------
-
-test('scrollEvent: type is "mouseWheel"', () => {
-  assert.equal(scrollEvent(0, 0, 0, 0).type, 'mouseWheel');
-});
-
-test('scrollEvent: canScroll is true (required or Electron silently delivers no scroll)', () => {
-  assert.equal(scrollEvent(0, 0, 0, 120).canScroll, true);
-});
-
-test('scrollEvent: wheelTicksY = deltaY/120 for deltaY=120 → 1', () => {
-  const ev = scrollEvent(0, 0, 0, 120);
-  assert.equal(ev.wheelTicksY, 1);
-});
-
-test('scrollEvent: wheelTicksX = deltaX/120 for deltaX=240 → 2', () => {
-  const ev = scrollEvent(0, 0, 240, 0);
-  assert.equal(ev.wheelTicksX, 2);
-});
-
-test('scrollEvent: coordinates and deltas propagate', () => {
-  const ev = scrollEvent(10, 20, 30, 60);
-  assert.equal(ev.x, 10);
-  assert.equal(ev.y, 20);
-  assert.equal(ev.deltaX, 30);
-  assert.equal(ev.deltaY, 60);
-});
-
-test('scrollEvent: wheelTicksY = 0 when deltaY = 0', () => {
-  const ev = scrollEvent(0, 0, 0, 0);
-  assert.equal(ev.wheelTicksY, 0);
-});
+// scrollEvent and scrollEvents were removed when scroll was reimplemented via CDP
+// (Input.dispatchMouseEvent). Tests for the new CDP-based scroll live in
+// automation-scroll.test.js (mirrors the readAxTree test pattern with a fake wc.debugger).
 
 // ---------------------------------------------------------------------------
 // sendInput — resolve-rejection passthrough (no activation)
@@ -424,22 +391,9 @@ test('typeText: empty string — activates but sends no events', async () => {
   assert.equal(guestWc._received.length, 0);
 });
 
-// ---------------------------------------------------------------------------
-// scroll — correct event, canScroll:true, wheelTicks
-// ---------------------------------------------------------------------------
-
-test('scroll: sends a single mouseWheel event with canScroll:true', async () => {
-  const guestWc = makeGuestWc(40);
-  const deps = { fromId: makeFakeFromId({ 40: guestWc }), chromeContents: null };
-
-  await scroll(40, 0, 0, 0, 120, deps);
-
-  assert.equal(guestWc._received.length, 1);
-  const ev = guestWc._received[0];
-  assert.equal(ev.type, 'mouseWheel');
-  assert.equal(ev.canScroll, true);
-  assert.equal(ev.wheelTicksY, 1);
-});
+// scrollEvents and the old sendInputEvent-based scroll helper were removed when scroll was
+// reimplemented via CDP (Input.dispatchMouseEvent). Tests for the new CDP-based scroll live in
+// automation-scroll.test.js (mirrors the readAxTree test pattern with a fake wc.debugger).
 
 // ---------------------------------------------------------------------------
 // pressKey — correct events sent to correct target

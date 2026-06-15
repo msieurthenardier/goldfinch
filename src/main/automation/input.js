@@ -1,10 +1,19 @@
 // @ts-check
 'use strict';
 const { resolveContents, classifyContents } = require('./resolve');
+const { withDebuggerSession } = require('./cdp');
 // Trusted input via webContents.sendInputEvent (fires real handlers + native focus
-// traversal). Debugger-free (DD8). MOUSE RECIPE NOTE: mouseMove→mouseDown→mouseUp is the
-// known-good starting sequence (mirrors the working CDP driver, cdp-driver.mjs:91-93);
-// the live click-on-guest reliability + guest coordinate space are confirmed/tuned in Leg 6.
+// traversal). MOUSE RECIPE NOTE: mouseMove→mouseDown→mouseUp is the known-good starting
+// sequence (mirrors the working CDP driver, cdp-driver.mjs:91-93); the live
+// click-on-guest reliability + guest coordinate space are confirmed/tuned in Leg 6.
+//
+// DD8 NOTE: `scroll` now uses webContents.debugger via the shared cdp.js session helper
+// (operator-approved boundary crossing). sendInputEvent mouseWheel produced ZERO movement
+// on webview guests even with mouseMove + chunked deltas + canScroll (confirmed live).
+// The fix is CDP Input.dispatchMouseEvent — the same in-process debugger mechanism
+// readAxTree uses. The shared lock in cdp.js (attached Set) prevents a concurrent
+// scroll + readAxTree on one wcId from both attaching. All other ops (click / typeText /
+// pressKey / sendInput) remain sendInputEvent-based and debugger-free.
 
 // ---------------------------------------------------------------------------
 // Pure key-name → Electron Accelerator code map
@@ -41,7 +50,7 @@ function keyEvents(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Pure mouse / char / scroll event builders
+// Pure mouse / char event builders
 // ---------------------------------------------------------------------------
 
 /**
@@ -79,26 +88,6 @@ function charEvents(text) {
   return [...String(text)].map((ch) => ({ type: 'char', keyCode: ch }));
 }
 
-/**
- * Build a single mouseWheel event.
- *
- * `canScroll: true` is REQUIRED or Electron silently delivers no scroll.
- * `wheelTicksX/Y` are the conventional delta/120 tick counts.
- *
- * @param {number} x
- * @param {number} y
- * @param {number} deltaX  pixel delta on X axis
- * @param {number} deltaY  pixel delta on Y axis
- * @returns {object}
- */
-function scrollEvent(x, y, deltaX, deltaY) {
-  return {
-    type: 'mouseWheel', x, y, deltaX, deltaY,
-    wheelTicksX: deltaX / 120, wheelTicksY: deltaY / 120,
-    canScroll: true,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Low-level single-event primitive (no foreground-to-act)
 // ---------------------------------------------------------------------------
@@ -106,15 +95,15 @@ function scrollEvent(x, y, deltaX, deltaY) {
 /**
  * Low-level single-event primitive — resolve the target (DD5) then call
  * wc.sendInputEvent(event). Does NOT foreground-to-act; the click/typeText/
- * scroll/pressKey helpers (below) are the DD3-correct entry points for guests.
- * No webContents.debugger anywhere in this module (DD8).
+ * pressKey helpers (below) are the DD3-correct entry points for guests.
+ * No webContents.debugger in sendInput itself (only scroll uses the debugger).
  *
  * @param {number} wcId
  * @param {object} event
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  */
-function sendInput(wcId, event, { fromId, chromeContents }) {
-  const wc = resolveContents(wcId, { fromId, chromeContents });
+function sendInput(wcId, event, deps) {
+  const wc = resolveContents(wcId, deps);
   wc.sendInputEvent(event);
 }
 
@@ -134,16 +123,20 @@ function sendInput(wcId, event, { fromId, chromeContents }) {
  *
  * @param {number} wcId
  * @param {object[]} events
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
  */
-async function actOn(wcId, events, { fromId, chromeContents, activate }) {
-  let wc = resolveContents(wcId, { fromId, chromeContents });
+async function actOn(wcId, events, deps) {
+  const { chromeContents, activate } = deps;
+  // BOTH resolveContents calls (pre- and post-activate) forward the FULL deps so
+  // allowInternal flows on each — otherwise admin's internal drive would re-throw
+  // on the second resolve (DD6 / Leg 2).
+  let wc = resolveContents(wcId, deps);
   if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                      // DD3 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale by now,
     // and re-resolving re-applies the DD5 guard post-activation. Always resolve immediately
     // before acting (the discipline the rest of the module group follows).
-    wc = resolveContents(wcId, { fromId, chromeContents });
+    wc = resolveContents(wcId, deps);
   }
   for (const ev of events) wc.sendInputEvent(ev);
 }
@@ -171,16 +164,67 @@ const click = (wcId, x, y, deps, opts) => actOn(wcId, mouseClickEvents(x, y, opt
 const typeText = (wcId, text, deps) => actOn(wcId, charEvents(text), deps);
 
 /**
- * Synthetic scroll wheel event.
+ * Scroll via the in-process CDP debugger (Input.dispatchMouseEvent / mouseWheel).
+ *
+ * sendInputEvent mouseWheel produces ZERO movement on webview guests (confirmed live:
+ * screenshot hash unchanged across a no-op recapture baseline). The fix is to dispatch
+ * the wheel event through the CDP Input domain — the same in-process webContents.debugger
+ * mechanism readAxTree uses for the Accessibility domain (DD8-crossing, operator-approved).
+ *
+ * Sequence mirrors readAxTree:
+ *   resolveContents (throws bad/dead/internal; allowInternal forwarded) →
+ *   if guest + activate: await activate(wcId) + RE-RESOLVE (stale-handle guard) →
+ *   withDebuggerSession (acquire shared lock, attach '1.3') →
+ *   Input.dispatchMouseEvent { type:'mouseWheel', x, y, deltaX, deltaY } →
+ *   detach in finally, release lock in finally.
+ *
+ * The CDP Input domain needs no `enable` call before dispatching.
+ *
+ * Return contract (mirrors readAxTree):
+ *   - success → void (the MCP engine serializes void ops to {"ok":true})
+ *   - locked / attach-failed → RETURNS the debugger-unavailable refusal object
+ *     (a NORMAL result, not isError — callers check result.automation)
+ *   - bad/dead/internal → THROWS via resolveContents (programmer / security error)
+ *
+ * Signature preserves `scroll(wcId, x, y, dx, dy, deps)` so engine.js / mcp-tools.js
+ * wiring is unchanged. wc.debugger is on the resolved wc — no new deps needed.
  *
  * @param {number} wcId
  * @param {number} x
  * @param {number} y
  * @param {number} dx  pixel delta on X axis
  * @param {number} dy  pixel delta on Y axis
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{
+ *   fromId: (id: number) => any,
+ *   chromeContents: any,
+ *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
+ * }} deps
+ * @returns {Promise<void | { automation: 'debugger-unavailable', reason: string, wcId: number }>}
  */
-const scroll = (wcId, x, y, dx, dy, deps) => actOn(wcId, [scrollEvent(x, y, dx, dy)], deps);
+async function scroll(wcId, x, y, dx, dy, deps) {
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);  // throws bad/dead/internal (DD6); allowInternal forwarded
+  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+    await activate(wcId);                // DD5 foreground-to-act (guest only)
+    // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
+    // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
+    wc = resolveContents(wcId, deps);
+  }
+  // withDebuggerSession acquires the shared single-client lock (cdp.js `attached` Set),
+  // attaches '1.3', runs the dispatch, and detaches in a finally. The shared lock means
+  // a concurrent scroll + readAxTree on the same wcId cannot both attach.
+  return withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
+    await w.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x,
+      y,
+      deltaX: dx,
+      deltaY: dy,
+    });
+    // Success → return void; engine serializes void ops to {"ok":true}.
+  });
+}
 
 /**
  * Press a named key (keyDown + keyUp pair).
@@ -199,7 +243,6 @@ module.exports = {
   keyEvents,
   mouseClickEvents,
   charEvents,
-  scrollEvent,
   sendInput,
   click,
   typeText,

@@ -6,7 +6,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isAutomationDevEnabled, isMcpAutomationEnabled } = require('../../src/shared/automation-dev');
+const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint } = require('../../src/shared/automation-dev');
 
 describe('isAutomationDevEnabled', () => {
   // --- true cases ---
@@ -153,5 +153,62 @@ describe('isMcpAutomationEnabled (narrower MCP gate, DD4)', () => {
     assert.doesNotThrow(() => isMcpAutomationEnabled(undefined));
     assert.doesNotThrow(() => isMcpAutomationEnabled({}));
     assert.doesNotThrow(() => isMcpAutomationEnabled([null, undefined, 42, true]));
+  });
+});
+
+describe('shouldAutoMint (dev auto-mint double gate, Leg 5)', () => {
+  const ARGV = ['/path/to/electron', '.', '--automation-dev'];
+
+  // --- true ONLY when BOTH gates hold ---
+
+  it('returns true when --automation-dev AND GOLDFINCH_AUTOMATION_DEV_MINT === "1"', () => {
+    assert.equal(shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), true);
+  });
+
+  it('ignores unrelated env keys when both gates hold', () => {
+    assert.equal(
+      shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: '1', GOLDFINCH_AUTOMATION_ADMIN: '1', FOO: 'bar' }),
+      true
+    );
+  });
+
+  // --- CRITICAL: false when EITHER gate is missing ---
+
+  it('returns FALSE when --automation-dev is present but the env var is unset (plain dev:automation stays inert)', () => {
+    assert.equal(shouldAutoMint(ARGV, {}), false);
+  });
+
+  it('returns FALSE when the env var is set but --automation-dev is absent (no surface to mint into)', () => {
+    assert.equal(shouldAutoMint(['electron', '.'], { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), false);
+  });
+
+  it('returns FALSE for --remote-debugging-port + env var (dev:debug must not auto-mint)', () => {
+    assert.equal(
+      shouldAutoMint(['electron', '.', '--remote-debugging-port=9222'], { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }),
+      false
+    );
+  });
+
+  // --- env var must be EXACTLY '1' ---
+
+  it('returns FALSE when GOLDFINCH_AUTOMATION_DEV_MINT is a non-"1" truthy value', () => {
+    assert.equal(shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: 'true' }), false);
+    assert.equal(shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: 'yes' }), false);
+    assert.equal(shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: '0' }), false);
+    assert.equal(shouldAutoMint(ARGV, { GOLDFINCH_AUTOMATION_DEV_MINT: '' }), false);
+  });
+
+  // --- robustness ---
+
+  it('returns false and never throws for missing / non-object env', () => {
+    assert.equal(shouldAutoMint(ARGV, undefined), false);
+    assert.equal(shouldAutoMint(ARGV, null), false);
+    assert.doesNotThrow(() => shouldAutoMint(ARGV, undefined));
+    assert.doesNotThrow(() => shouldAutoMint(null, null));
+  });
+
+  it('returns false for non-array argv even with the env var set', () => {
+    assert.equal(shouldAutoMint(null, { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), false);
+    assert.equal(shouldAutoMint('--automation-dev', { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), false);
   });
 });

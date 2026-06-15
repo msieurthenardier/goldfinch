@@ -62,14 +62,18 @@ function classifyContents(wc, chromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents: any }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through for
  *                    callers that immediately classify the result)
+ *   allowInternal — when true (admin's SOLE relaxation, Leg 2 / DD6), the
+ *                   internal-session throw is SKIPPED. Defaults to false/undefined:
+ *                   existing callers that pass no allowInternal behave exactly as
+ *                   before. bad-handle / no-such-contents ALWAYS apply.
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents: _chromeContents }) {
+function resolveContents(wcId, { fromId, chromeContents: _chromeContents, allowInternal = false }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -83,11 +87,58 @@ function resolveContents(wcId, { fromId, chromeContents: _chromeContents }) {
   // DD5 load-bearing guard: reject internal-session contents at resolve-time.
   // A directly-supplied internal-guest wcId is rejected here, not merely
   // filtered from an enumerate pass — this closes the bypass path.
-  if (isInternalContents(wc)) {
+  //
+  // DD6 (Leg 2): the admin engine builds deps with allowInternal:true — its
+  // SOLE relaxation of this exclusion. Jar keys (and every existing caller)
+  // leave allowInternal false/undefined, so the internal session stays
+  // ABSOLUTELY off-limits to them.
+  if (!allowInternal && isInternalContents(wc)) {
     throw new Error('automation: internal-session — wcId ' + wcId + ' belongs to the internal goldfinch://settings session and cannot be driven');
   }
 
   return wc;
 }
 
-module.exports = { isInternalContents, classifyContents, resolveContents };
+/**
+ * Resolve a webContentsId AND verify it belongs to the given jar by SESSION
+ * OBJECT IDENTITY (DD7 — the SC8 linchpin).
+ *
+ * Membership is decided by `wc.session === deps.fromPartition(jar.partition)`,
+ * NOT by partition-string comparison and NEVER by the renderer-reported jarId.
+ * Electron interns sessions by partition, so a guest webview created with
+ * `partition = jar.partition` shares the *same* Session object main resolves —
+ * the same discipline isInternalContents uses for the internal marker.
+ *
+ * Net-new in Leg 2 — no Session→jar map exists today. The compare is LAZY (no
+ * cached map) so a runtime `jars-add` is picked up immediately: fromPartition is
+ * called fresh each time, and Electron returns the live interned Session.
+ *
+ * Order of guards:
+ *   1. resolveContents(wcId, deps) — applies bad-handle / no-such-contents /
+ *      internal-session (internal stays ABSOLUTE here; jar keys never carry
+ *      allowInternal, so an internal wcId throws before the membership check).
+ *   2. session object-identity membership — throws `automation: out-of-jar` on
+ *      mismatch (or when jar is absent).
+ *
+ * Kept ELECTRON-FREE: fromPartition is injected via deps (the engine/scope ctx
+ * passes session.fromPartition).
+ *
+ * @param {number} wcId  the webContentsId to resolve
+ * @param {{ id: string, partition: string } | null | undefined} jar  the jar to confine to
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, fromPartition: (partition: string) => any, allowInternal?: boolean }} deps
+ * @returns {any} the live, in-jar webContents
+ * @throws {Error} bad-handle / no-such-contents / internal-session (via
+ *   resolveContents) or `automation: out-of-jar` on a membership mismatch.
+ */
+function resolveContentsForJar(wcId, jar, deps) {
+  const wc = resolveContents(wcId, deps); // bad-handle / no-such-contents / internal-session
+  if (!jar || wc.session !== deps.fromPartition(jar.partition)) {
+    throw new Error(
+      'automation: out-of-jar — wcId ' + wcId +
+      ' does not belong to jar ' + (jar ? jar.id : '(none)')
+    );
+  }
+  return wc;
+}
+
+module.exports = { isInternalContents, classifyContents, resolveContents, resolveContentsForJar };
