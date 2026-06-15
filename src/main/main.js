@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, session, webContents, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -15,7 +15,7 @@ const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
 const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
-const { createMcpServer, enableAndMintJarKey, mintAdminKey } = require('./automation/mcp-server');
+const { createMcpServer, enableAndMintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -98,6 +98,12 @@ let mainWindow = null;
 // hooks (before-quit / window-all-closed) can reach it. Stays null unless the
 // process was launched with --automation-dev (isMcpAutomationEnabled, DD4).
 let mcpServer = null;
+// Bind-status of the MCP automation server, captured at start (Flight 5 / DD1).
+// Queryable via the origin-checked `automation:get-status` IPC so the Settings UI
+// can show whether the surface is active and which port it bound. `enabled` is the
+// MCP surface being active in this process; `bound` flips true only after start()
+// resolves; `error` carries the EADDRINUSE/other message on failure.
+let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, error: null };
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -565,6 +571,65 @@ registerInternalHandler(ipcMain, 'internal-shields-set', (_e, patch) => {
   return cfg;
 });
 
+// Automation bind-status surface (Flight 5 / DD1). `port` reflects the bound port
+// when the surface is active; when disabled, mcpStatus.port is null so we compute
+// the would-be resolved port here (single source — see the start site, which does
+// NOT eagerly set the port in the disabled branch). Host is hard-pinned to
+// loopback (SC7 — never configurable).
+registerInternalHandler(ipcMain, 'automation:get-status', () => ({
+  enabled: mcpStatus.enabled,
+  host: '127.0.0.1',
+  port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings),
+  bound: mcpStatus.bound,
+  error: mcpStatus.error,
+}));
+// Advisory free-port scan over the loopback dynamic range for the Settings UI's
+// "find a free port" affordance (leg 2). Returns { port: null } if none free.
+registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
+
+// Clipboard write fallback (Flight 5, Leg 2 — DD4). navigator.clipboard is the
+// primary path in the secure goldfinch://settings page, but it can be blocked at
+// runtime under contextIsolation + sandbox; this origin-checked IPC gives the
+// settings copy buttons a reliable fallback. First copy consumer is leg 2's MCP
+// address; leg 3's key copy reuses the shared copyText() helper that calls this.
+registerInternalHandler(ipcMain, 'clipboard:write', (_e, text) => {
+  clipboard.writeText(String(text == null ? '' : text));
+  return { ok: true };
+});
+
+// Automation key management (Flight 5, Leg 3 / SC9). All origin-checked
+// (registerInternalHandler) — the secure goldfinch://settings page is the only
+// allowed sender. Mint returns the show-once plaintext (the ONLY way plaintext
+// leaves main — never persisted, never logged); list/revoke deal in hashes only.
+// `list-keys` is the single source for the admin env gate (AC2 — get-status does
+// NOT report it). Generate and rotate are the same mint op (DD5); the UI labels
+// the button per hasKey/adminKeySet.
+registerInternalHandler(ipcMain, 'automation:list-keys', () => {
+  const hashes = settings.get('automationKeyHashes') || {};
+  return {
+    jars: jars.list().map((j) => ({ id: j.id, name: j.name, color: j.color, hasKey: !!hashes[j.id] })),
+    adminEnabled: !!process.env.GOLDFINCH_AUTOMATION_ADMIN,
+    adminKeySet: (settings.get('automationAdminKeyHash') || '') !== '',
+  };
+});
+registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => ({ key: enableAndMintJarKey(jarId, settings, jars) }));
+registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => { revokeJarKey(jarId, settings); return { ok: true }; });
+registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => ({ key: mintAdminKey(settings) }));
+registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => { revokeAdminKey(settings); return { ok: true }; });
+
+// Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6).
+// INTENTIONALLY a bare ipcMain.handle — NOT registerInternalHandler — for the SAME
+// reason as `settings-get`/`shields-get` above: BOTH the file:// chrome toolbar
+// indicator AND the goldfinch://settings audit viewer read it. The chrome's file://
+// origin fails the internal-origin check, so wrapping this in registerInternalHandler
+// would silently break the chrome indicator. Do NOT "fix" it that way. This is safe:
+// the payload is non-secret operator-facing audit state (sessions + an action log; it
+// carries NO key or hash), and only the chrome + internal preloads can reach IPC at
+// all — a web webview has no ipcRenderer. The sibling automation:* handlers above ARE
+// origin-checked because only the settings page calls them; this one is the deliberate
+// exception because the chrome also reads it.
+ipcMain.handle('automation:get-activity', () => (mcpServer ? mcpServer.getActivity() : { sessions: [], log: [] }));
+
 // Per-jar fingerprint seed. Stable for a session so a site sees a consistent
 // (but fake) fingerprint; different per jar = a different "persona". Rerolled
 // by New Identity (stage 3).
@@ -779,33 +844,26 @@ app.whenReady().then(() => {
       // flight — Flight 5's indicator + log viewer render it. This is the contract.
       broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
     });
-    mcpServer.start().catch((err) => {
-      // A bind failure (e.g. EADDRINUSE on 7777) must not crash the app — surface
-      // it and leave the rest of the browser running. GOLDFINCH_MCP_PORT overrides.
-      console.error('[mcp] failed to start automation server:', err && err.message);
-    });
+    // Capture the resolved port up front; bound flips true once start() resolves
+    // (Flight 5 / DD1). This is the single source of mcpStatus.port for the enabled
+    // path — the get-status handler only computes a fallback when disabled.
+    mcpStatus = { enabled: true, host: '127.0.0.1', port: mcpServer.port, bound: false, error: null };
+    mcpServer.start()
+      .then(() => { mcpStatus.bound = true; })
+      .catch((err) => {
+        // A bind failure (e.g. EADDRINUSE) must not crash the app — record it for
+        // the status surface and leave the rest of the browser running.
+        // GOLDFINCH_MCP_PORT / the automationPort setting override the port.
+        mcpStatus.bound = false;
+        mcpStatus.error = (err && err.message) || String(err);
+        console.error('[mcp] failed to start automation server:', err && err.message);
+      });
 
-    // Dev-only enable+mint seam (Flight 4, DD3/DD5/DD6). Gated on the SAME narrower
-    // isMcpAutomationEnabled predicate as the server itself (NOT isAutomationDevEnabled),
-    // so it is unreachable outside --automation-dev. It mirrors the automation:dev-invoke
-    // identity check (chrome-renderer-only) and lets a headless/behavior-test harness flip
-    // the surface on and obtain a key. The plaintext key is RETURNED ONCE via the IPC
-    // return value (never persisted, never logged) so the harness need not scrape logs.
-    ipcMain.handle('automation:dev-enable-mint', async (event, { jarId, admin } = {}) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
-        throw new Error('automation: dev-seam is chrome-renderer-only');
-      }
-      // Pass jars so the mint guard rejects an unknown/burner jarId (Leg 2).
-      const key = enableAndMintJarKey(jarId, settings, jars);
-      // Admin minting is gated inside mintAdminKey on GOLDFINCH_AUTOMATION_ADMIN;
-      // returns null when the gate is unset.
-      const adminKey = admin ? mintAdminKey(settings) : null;
-      return { key, adminKey };
-    });
-
-    // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The dev-enable-mint
-    // IPC above is chrome-renderer-only and so unreachable by an external headless /
-    // behavior-test harness; this block lets such a harness flip the surface on and
+    // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The real key
+    // management now lives in goldfinch://settings (Flight 5, Leg 3) via the
+    // origin-checked automation:jar-key-mint / automation:admin-key-mint IPC; that
+    // surface is renderer-driven and so unreachable by an external headless /
+    // behavior-test harness. This block lets such a harness flip the surface on and
     // read a key WITHOUT a renderer round-trip. DEV-ONLY and least-privilege:
     //   - Fires ONLY under the double gate shouldAutoMint(argv, env): the EXACT
     //     `--automation-dev` token (already true in this branch) AND

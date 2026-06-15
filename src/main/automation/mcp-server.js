@@ -39,6 +39,7 @@
 // null-deref (buildToolRegistry catches the throw inside callTool).
 
 const http = require('http');
+const net = require('net');
 const { randomUUID } = require('crypto');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
@@ -60,7 +61,10 @@ const { createAuditLog } = require('./audit-log');
 // a truncated word. Anchored at start; the separator after the code is required.
 const ERROR_CODE_RE = /^automation:\s*([a-z-]+)\s+—/;
 
-const DEFAULT_PORT = 7777;
+// Configurable MCP listen port. Default moved off the squatted 7777 into the IANA
+// dynamic range (DD1). The persisted `automationPort` setting and GOLDFINCH_MCP_PORT
+// env override resolve over this in resolvePort().
+const DEFAULT_PORT = 49707;
 const SERVER_NAME = 'goldfinch';
 
 // DD9: cap request-body accumulation at 1 MiB. Over-cap → 413, do not buffer
@@ -74,14 +78,46 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const BODY_TOO_LARGE = Symbol('body-too-large');
 
 /**
- * Resolve the listen port: GOLDFINCH_MCP_PORT (if a valid positive integer)
- * else the fixed default 7777 (DD2).
+ * Resolve the listen port with precedence: valid GOLDFINCH_MCP_PORT env
+ * (any positive integer — the dev/operator escape hatch, may deliberately be
+ * < 1024) > valid persisted `automationPort` (range-bound [1024, 65535] to
+ * match its validator) > default 49707 (DD1). A missing/invalid env value falls
+ * through to the setting, and a missing/invalid/unavailable setting falls
+ * through to the default — never throws.
+ * @param {() => { get: (k: string) => any }} [getSettings] lazy settings accessor.
  * @returns {number}
  */
-function resolvePort() {
-  const raw = process.env.GOLDFINCH_MCP_PORT;
-  const n = raw == null ? NaN : Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : DEFAULT_PORT;
+function resolvePort(getSettings) {
+  const envRaw = process.env.GOLDFINCH_MCP_PORT;
+  const envN = envRaw == null ? NaN : Number(envRaw);
+  if (Number.isInteger(envN) && envN > 0) return envN;
+  try {
+    const s = (typeof getSettings === 'function' ? getSettings() : require('../settings-store'));
+    const p = s && typeof s.get === 'function' ? s.get('automationPort') : undefined;
+    if (Number.isInteger(p) && p >= 1024 && p <= 65535) return p; // setting is range-bound (matches its validator)
+  } catch { /* settings unavailable — fall through */ }
+  return DEFAULT_PORT;
+}
+
+/**
+ * Find the first loopback-free port at or above `lo`, probing sequentially up to
+ * `hi`. Returns the port number, or `null` if none in range is free. The result
+ * is ADVISORY: there is a documented TOCTOU window between probing and an
+ * eventual bind, so the caller must still handle EADDRINUSE.
+ * @param {number} [lo] inclusive low bound (default 49152, IANA dynamic range).
+ * @param {number} [hi] inclusive high bound (default 65535).
+ * @returns {Promise<number | null>}
+ */
+async function freePortInRange(lo = 49152, hi = 65535) {
+  for (let p = lo; p <= hi; p++) {
+    const free = await new Promise((resolve) => {
+      const srv = net.createServer();
+      srv.once('error', () => resolve(false));
+      srv.listen(p, '127.0.0.1', () => srv.close(() => resolve(true)));
+    });
+    if (free) return p;
+  }
+  return null;
 }
 
 /**
@@ -154,7 +190,7 @@ function createMcpServer(opts = {}) {
     }
   }
 
-  const port = Number.isInteger(opts.port) && opts.port > 0 ? opts.port : resolvePort();
+  const port = Number.isInteger(opts.port) && opts.port > 0 ? opts.port : resolvePort(getSettings);
 
   // Audit fan-out (Leg 3 / DD8). Default no-op so headless tests need no Electron.
   const broadcast = typeof opts.broadcast === 'function' ? opts.broadcast : () => {};
@@ -637,10 +673,46 @@ function mintAdminKey(settings) {
   return key;
 }
 
+/**
+ * Revoke a per-jar automation key by deleting its hash entry. Copy-then-set
+ * (mirrors enableAndMintJarKey) so other jars' hashes stay intact. No-op if the
+ * jarId has no hash; never throws on a missing id.
+ *
+ * Does NOT touch the live `sessions` Map (DD5): Flight-4 per-request
+ * re-validation (resolveIdentity reads live hashes every request) returns null
+ * once the hash is gone, so the next MCP request 401s — "effective immediately"
+ * comes for free without tearing down the live transport.
+ *
+ * @param {string} jarId  the jar whose key to revoke
+ * @param {{ get: (k: string) => any, set: (k: string, v: any) => any }} settings
+ */
+function revokeJarKey(jarId, settings) {
+  const hashes = { ...(settings.get('automationKeyHashes') || {}) };
+  if (Object.prototype.hasOwnProperty.call(hashes, jarId)) {
+    delete hashes[jarId];
+    settings.set('automationKeyHashes', hashes);
+  }
+  // Live sessions are NOT touched (DD5): per-request re-validation 401s the next call.
+}
+
+/**
+ * Revoke the admin key by clearing `automationAdminKeyHash` to ''. Like
+ * revokeJarKey, leaves the live sessions Map alone; per-request re-validation
+ * 401s the next admin-scoped request.
+ *
+ * @param {{ get: (k: string) => any, set: (k: string, v: any) => any }} settings
+ */
+function revokeAdminKey(settings) {
+  settings.set('automationAdminKeyHash', '');
+}
+
 module.exports = {
   createMcpServer,
   resolvePort,
+  freePortInRange,
   DEFAULT_PORT,
   enableAndMintJarKey,
   mintAdminKey,
+  revokeJarKey,
+  revokeAdminKey,
 };

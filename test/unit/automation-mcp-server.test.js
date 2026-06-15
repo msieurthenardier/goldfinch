@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, enableAndMintJarKey } = require('../../src/main/automation/mcp-server');
+const { createMcpServer, enableAndMintJarKey, revokeJarKey, revokeAdminKey } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 
 const TEST_PORT = 7790;
@@ -899,4 +899,70 @@ test('mint guard — omitting the jars accessor keeps the legacy non-empty-strin
   const key = enableAndMintJarKey('anything', settings);
   assert.equal(typeof key, 'string');
   assert.throws(() => enableAndMintJarKey('', settings), /non-empty string/);
+});
+
+// ---------------------------------------------------------------------------
+// Revoke (Leg 3): revokeJarKey deletes only the target jar's hash (others
+// intact; absent id is a no-op); revokeAdminKey clears to ''. Neither touches a
+// live sessions Map — DD5's "effective immediately" comes from per-request
+// re-validation, proved at the validation layer below.
+// ---------------------------------------------------------------------------
+
+test('revokeJarKey — deletes only the target jar hash; other jars untouched', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
+  enableAndMintJarKey('personal', settings, jars);
+  enableAndMintJarKey('work', settings, jars);
+  const beforeWork = settings.get('automationKeyHashes').work;
+
+  revokeJarKey('personal', settings);
+
+  const hashes = settings.get('automationKeyHashes');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(hashes, 'personal'),
+    false,
+    'target jar hash deleted'
+  );
+  assert.equal(hashes.work, beforeWork, "other jar's hash left intact");
+});
+
+test('revokeJarKey — an absent jar id is a no-op (never throws; leaves hashes unchanged)', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }] };
+  enableAndMintJarKey('personal', settings, jars);
+  const before = { ...settings.get('automationKeyHashes') };
+
+  assert.doesNotThrow(() => revokeJarKey('ghost', settings));
+  assert.deepEqual(settings.get('automationKeyHashes'), before, 'hashes unchanged for an absent id');
+});
+
+test('revokeAdminKey — clears the admin key hash to the empty string', () => {
+  const settings = memSettings();
+  settings.set('automationAdminKeyHash', hashKey('an-admin-key'));
+  revokeAdminKey(settings);
+  assert.equal(settings.get('automationAdminKeyHash'), '');
+});
+
+test('revoke re-validation — a minted token validates to its jar, then to null after revoke', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
+  const key = enableAndMintJarKey('personal', settings, jars);
+
+  // Pre-revoke: the live hashes resolve the token to its jar (what resolveIdentity
+  // reads every request).
+  assert.equal(
+    validateKey(key, { keyHashes: settings.get('automationKeyHashes') }),
+    'personal',
+    'minted token validates to its jar before revoke'
+  );
+
+  revokeJarKey('personal', settings);
+
+  // Post-revoke: the SAME token now validates to null — the next MCP request 401s
+  // (DD5 "effective immediately"), with no sessions.delete() required.
+  assert.equal(
+    validateKey(key, { keyHashes: settings.get('automationKeyHashes') }),
+    null,
+    'same token validates to null after revoke (proves 401-on-next-request)'
+  );
 });

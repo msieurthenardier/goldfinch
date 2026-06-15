@@ -42,6 +42,13 @@ contextBridge.exposeInMainWorld('goldfinch', {
   shieldsPause: (payload) => ipcRenderer.invoke('shields-pause', payload),
   onShieldsChanged: (cb) => ipcRenderer.on('shields-changed', (_e, cfg) => cb(cfg)),
 
+  // --- automation activity (chrome-trusted read + subscribe; SC10/DD6 toolbar indicator) ---
+  // Bare read of the non-secret audit snapshot ({ sessions, log }); the raw on()
+  // pattern matches onShieldsChanged. The matching automation:get-activity handler in
+  // main.js is intentionally NOT origin-checked so this file:// surface can reach it.
+  automationGetActivity: () => ipcRenderer.invoke('automation:get-activity'),
+  onAutomationActivity: (cb) => ipcRenderer.on('automation-activity-changed', (_e, d) => cb(d)),
+
   // --- cookie jars / identities ---
   jarsList: () => ipcRenderer.invoke('jars-list'),
   jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),
