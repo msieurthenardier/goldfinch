@@ -13,6 +13,8 @@ const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
+const { isAutomationDevEnabled } = require('../shared/automation-dev');
+const { createEngine } = require('./automation/engine');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -113,7 +115,12 @@ function createWindow() {
       nodeIntegration: false,
       // <webview> tag is how we embed real Chromium web pages as tabs.
       webviewTag: true,
-      sandbox: false
+      sandbox: false,
+      // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
+      // can gate the automationDevInvoke bridge method without access to the browser-process
+      // --remote-debugging-port switch (which is not in the renderer's own process.argv).
+      // Conditional spread so the key is simply absent in normal/release runs (AC3). (DD7)
+      ...(isAutomationDevEnabled(process.argv) ? { additionalArguments: ['--automation-dev'] } : {})
     }
   });
 
@@ -719,6 +726,26 @@ app.whenReady().then(() => {
   internalSession.protocol.handle('goldfinch', handleInternal);
 
   createWindow();
+
+  // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
+  // Registered ONCE at startup, after createWindow() so mainWindow exists.
+  // Never registered in production (no --remote-debugging-port → isAutomationDevEnabled false).
+  // The identity check (event.sender === mainWindow.webContents) isolates the seam to the
+  // chrome renderer — a guest webview has its own webContents and cannot pass this check.
+  // No webContents.debugger anywhere (DD8).
+  if (isAutomationDevEnabled(process.argv)) {
+    const engine = createEngine(() => mainWindow);
+    ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
+      // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
+      // check): this handler is NEVER registered in production (dev-gated), and a guest webview
+      // has a different webContents than mainWindow's, so the identity check fully isolates it.
+      if (!mainWindow || event.sender !== mainWindow.webContents) {
+        throw new Error('automation: dev-seam is chrome-renderer-only');
+      }
+      if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
+      return engine[op](...(Array.isArray(args) ? args : []));
+    });
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

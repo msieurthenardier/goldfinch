@@ -5,6 +5,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
+const { isAutomationDevEnabled } = require('../shared/automation-dev');
 
 contextBridge.exposeInMainWorld('goldfinch', {
   // --- platform ---
@@ -62,5 +63,13 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // The internal partition string (single source of truth, src/shared/internal-page.js),
   // set as the trusted webview's `partition` attribute so it matches the main-process
   // internal session byte-for-byte.
-  internalPartition: INTERNAL_PARTITION
+  internalPartition: INTERNAL_PARTITION,
+
+  // Dev-only automation seam (DD7 — interim; folded at Flight 3). Absent in normal/release
+  // runs (isAutomationDevEnabled false when --automation-dev marker is not injected). Chrome-
+  // renderer-only: the guest webview uses webview-preload.js (no automationDevInvoke there),
+  // and main.js also rejects any sender that isn't mainWindow.webContents.
+  ...(isAutomationDevEnabled(process.argv)
+    ? { automationDevInvoke: (/** @type {string} */ op, /** @type {any[]} */ args) => ipcRenderer.invoke('automation:dev-invoke', { op, args }) }
+    : {})
 });
