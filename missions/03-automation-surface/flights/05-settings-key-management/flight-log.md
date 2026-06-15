@@ -133,6 +133,19 @@ FD-authored the `settings-automation` behavior-test spec (`tests/behavior/settin
 
 ---
 
+### verify-integration (leg 6) — reconciliation done; live runs pending (2026-06-15)
+**Part 1 — 7777 + stale-prereq reconciliation (DONE, committed):** a Developer reconciled the scoped docs/specs to the new default `49707`:
+- `docs/mcp-automation.md` (default URL / port-override / `/mcp` example / `.mcp.json` snippet → 49707; **added a "Settings controls" section** documenting the Flight-5 toggle / configurable port / live address + bind-status / connect hint; documented why no standing `.mcp.json` goldfinch entry ships — off-by-default → a standing entry would perpetually fail to connect).
+- `CLAUDE.md` (automation default port → 49707), `README.md` (→ 49707), `scripts/mcp-example-client.mjs` (`|| 49707`).
+- `tests/behavior/mcp-auth-gating.md` + `mcp-jar-scoping.md`: corrected the **stale** "auto-mint apparatus does NOT exist yet / to be built in verify-integration" notes → "landed in F4" (`shouldAutoMint` gating `--automation-dev` + `GOLDFINCH_AUTOMATION_DEV_MINT=1`); reconciled hardcoded `127.0.0.1:7777` → `127.0.0.1:$GOLDFINCH_MCP_PORT` (pinned for runs; new default 49707). Step semantics unchanged.
+- `.mcp.json`: the stale goldfinch `:7777` entry removal committed (kept removed; rationale documented).
+- **Left out of scope** (recorded, not silently skipped): the origin-guard unit-test 7777 fixtures (port-agnostic loopback samples), origin-guard.js illustrative comments, and the six other F1–F3 behavior specs still referencing 7777 — deferred to **Flight 6** (spec migration, which moves them all onto the new surface).
+- Static gates after reconciliation: `npm test` 611/611, `npm run typecheck`, `npm run lint` — all green.
+
+**Part 2 — live behavior-test runs (PENDING operator + GUI):** `settings-automation` (CDP `:9222`) and the `mcp-jar-scoping` full live run require the GUI/CDP apparatus and operator tab-staging across jars (`personal`/`work` + a burner + the settings tab) — inherently interactive. Held for the operator; the flight stays `in-flight` and PR #42 stays draft until these + the leg-7 HAT complete.
+
+---
+
 ## Decisions
 _Runtime decisions not in the original plan will be recorded here._
 

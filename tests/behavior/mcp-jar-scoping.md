@@ -19,19 +19,21 @@ This needs a behavior test rather than a unit test because the confinement is de
 
 ## Preconditions
 
-- **Apparatus — the enable/mint helper (a `verify-integration` PREREQUISITE; it does NOT exist yet).** Identical to the sibling `mcp-auth-gating` spec: an **env-gated auto-mint-to-stdout in `main.js`**, to be **built in the next leg (`verify-integration`)** before this spec can run.
-  - At startup, gated on `isMcpAutomationEnabled(process.argv)` (`--automation-dev`, `src/shared/automation-dev.js`) **AND** `GOLDFINCH_AUTOMATION_DEV_MINT=1`, the app calls `enableAndMintJarKey(jarId, settings, jars)` (and `mintAdminKey(settings)` when `GOLDFINCH_AUTOMATION_ADMIN` is set), flips `automationEnabled = true`, and **prints `{ key, adminKey }` ONCE to stdout**.
-  - For this spec the minted jar key must be for the **`personal`** jar (so the staged `personal` tabs are in-jar and the `work`/burner/internal tabs are out-of-jar). `enableAndMintJarKey`/`mintAdminKey` already exist (landed this flight); the boot-time auto-mint-to-stdout wrapper is the only NEW code and is the **`verify-integration` prerequisite** — **do not build it in the spec-authoring leg.**
+- **Apparatus — the enable/mint helper (EXISTS; landed in Flight 4).** Identical to the sibling `mcp-auth-gating` spec: an **env-gated auto-mint-to-stdout in `main.js`** that is **already built** — `shouldAutoMint(argv, env)` gates it on the exact `--automation-dev` token **AND** `GOLDFINCH_AUTOMATION_DEV_MINT=1`.
+  - When `shouldAutoMint(argv, env)` is true, the app calls `enableAndMintJarKey(jarId, settings, jars)` (and `mintAdminKey(settings)` when `GOLDFINCH_AUTOMATION_ADMIN` is set), flips `automationEnabled = true`, and **prints `{ key, adminKey }` ONCE to stdout**.
+  - For this spec the minted jar key must be for the **`personal`** jar (so the staged `personal` tabs are in-jar and the `work`/burner/internal tabs are out-of-jar). `enableAndMintJarKey`/`mintAdminKey` live in `src/main/automation/mcp-server.js`, and the boot-time auto-mint-to-stdout wrapper that calls them landed in Flight 4. No new apparatus is needed to run this spec.
   - The Executor **captures the printed `key` (jar runs) and `adminKey` (admin run) from stdout at launch** — the plaintext is shown once.
+- **Port (load-bearing for every URL below).** Runs pin the listen port with **`GOLDFINCH_MCP_PORT`** for determinism (new default is `49707`). Every `127.0.0.1:$GOLDFINCH_MCP_PORT` below resolves to the pinned port; export it once at launch and reuse it in all curl/SDK calls.
 - **How the key attaches to the client.** The minted plaintext is presented as `Authorization: Bearer <key>` on the **SDK client transport** via `requestInit.headers`:
   ```js
+  const port = process.env.GOLDFINCH_MCP_PORT || 49707; // pinned per run; new default 49707
   const transport = new StreamableHTTPClientTransport(
-    new URL('http://127.0.0.1:7777/mcp'),
+    new URL(`http://127.0.0.1:${port}/mcp`),
     { requestInit: { headers: { Authorization: `Bearer ${key}` } } }
   );
   ```
   (the `connectClient(key)` pattern). The Bearer rides every request the transport sends.
-- **Jar-key run (relaunch 1):** Goldfinch launched via `npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1` and `GOLDFINCH_AUTOMATION_ADMIN` **unset** — mints the `personal` jar key; `adminKey` is `null`. MCP server up on `127.0.0.1:7777/mcp`.
+- **Jar-key run (relaunch 1):** Goldfinch launched via `npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1` and `GOLDFINCH_AUTOMATION_ADMIN` **unset** — mints the `personal` jar key; `adminKey` is `null`. MCP server up on `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
 - **Admin run (relaunch 2 — env-gated variant):** Goldfinch relaunched via `npm run dev:automation` with **both** `GOLDFINCH_AUTOMATION_DEV_MINT=1` and `GOLDFINCH_AUTOMATION_ADMIN=1` — additionally mints the admin key (non-null `adminKey`). The env var is read at process start; admin-off (jar-key run) vs admin-on (admin run) are **separate launches**, never a mid-run toggle. **Re-stage the tabs each relaunch** — burners are ephemeral and persistent-jar tab state is per-session; the setup row (Step 1's setup) must be re-performed for the admin run.
 - **Real-environment setup (performed via the Goldfinch UI — the jar/container `▾` switcher).** Stage, before the assertion steps:
   - At least one tab in the **`personal`** jar (e.g. `https://example.com` opened while `personal` is the active container).
@@ -40,7 +42,7 @@ This needs a behavior test rather than a unit test because the confinement is de
   - The internal **`goldfinch://settings`** tab open (kebab ⋮ → Settings) — the internal-session target.
 - **Determining target wcIds.** The Executor needs each tab's `webContents.id`. For the `personal` key these come from its own `enumerateTabs` (only `personal` tabs). For the **out-of-jar** targets (`work` tab, burner, internal) — which a jar key cannot enumerate — the wcIds are obtained from the **admin run's** `enumerateTabs` (which lists all + internal) OR from the launch-side stdout, then used as drive targets in the jar-key run. (The point of the cross-jar drive rows is that a jar key, *given* an out-of-jar wcId, is still refused.)
 - `curl`, Bash, and an MCP client (SDK client / adapted `scripts/mcp-example-client.mjs` / Claude Code MCP session) are available.
-- **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify (launches its own browser → false pass). Apparatus = SDK client over `127.0.0.1:7777`, app via `npm run dev:automation`. Not the `:9222` CDP path.
+- **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify (launches its own browser → false pass). Apparatus = SDK client over `127.0.0.1:$GOLDFINCH_MCP_PORT`, app via `npm run dev:automation`. Not the `:9222` CDP path.
 
 ## Observables Required
 

@@ -32,14 +32,14 @@ ships in no release before Flight 4.
 
 | | |
 |---|---|
-| Default URL | `http://127.0.0.1:7777/mcp` |
+| Default URL | `http://127.0.0.1:49707/mcp` |
 | Bind | `127.0.0.1` only (never `0.0.0.0` / `::`) |
-| Port override | `GOLDFINCH_MCP_PORT` (any valid positive integer; else `7777`) |
+| Port override | `GOLDFINCH_MCP_PORT` (any valid positive integer; else `49707`) |
 | Transport | MCP Streamable HTTP, stateful (per-connection session id) |
 
 **The path is a convention, not a route.** The server runs the Origin/Host guard and then hands
 *every* request — at any path — to the transport; it does not route on the URL path. The documented
-`/mcp` path is purely a clean, conventional URL. A consumer that posts to `http://127.0.0.1:7777/`
+`/mcp` path is purely a clean, conventional URL. A consumer that posts to `http://127.0.0.1:49707/`
 works identically. The example client and the `.mcp.json` entry both use `/mcp`.
 
 ### Loopback Origin / Host requirement — and why you might get a 403
@@ -59,6 +59,27 @@ the SDK) unless **all** of these hold:
 A standard MCP SDK client over loopback satisfies this by default. If you see a `403`, you are
 almost certainly behind a proxy or header-rewriter that injected a non-loopback `Host`/`Origin`
 or rewrote the peer address — fix the consumer's headers, not the server.
+
+## Settings controls (Flight 5)
+
+The surface is configured from `goldfinch://settings` under **Automation**. All controls are local
+GUI surface — they never expose a key plaintext beyond its one-time mint reveal.
+
+- **Enable automation surface** — an off-by-default opt-in checkbox (`automationEnabled`). The
+  server only binds under `--automation-dev`, but even then the auth gate `401`s every request until
+  this toggle is on. Off is the safe default; nothing is reachable until you opt in.
+- **MCP address + Copy** — a read-only field showing the **live** address (`127.0.0.1:<port>`) with
+  a Copy button. Paste it straight into your MCP client or `.mcp.json`.
+- **Port + Save + Find free port** — the configurable listen port (`automationPort`, default
+  **`49707`**, range `[1024, 65535]`). Save validates and applies; Find free port suggests an open
+  one. A pending-port note flags when a saved value differs from the active bind (the change takes
+  effect on the next launch).
+- **Bind status** — a status line that reads `Connected — listening on 127.0.0.1:<port>` when the
+  server is bound, `Failed to bind: <error>` on a bind error, or `Not running — start Goldfinch with
+  --automation-dev to bind the surface` when the surface isn't listening.
+- **Connect hint** — inline guidance to point the MCP client at the address above with an
+  `Authorization: Bearer <key>` header (generate a key under **Keys**), noting it is loopback-only
+  and pointing back to this doc for WSL2 / Docker connection details.
 
 ## Authentication — off by default, key-gated (Flight 4)
 
@@ -284,12 +305,16 @@ the app.
 
 ## `.mcp.json` registration
 
-The repo's `.mcp.json` registers this server for Claude Code as an HTTP MCP server:
+The repo's `.mcp.json` does **not** ship a standing `goldfinch` entry. The surface is
+**off-by-default** (see the Settings toggle below): in a normal session there is no server to
+reach, so a standing entry would produce perpetual failed connection attempts on every Claude Code
+start. Instead, a consumer who opts in adds the entry themselves at their configured port:
 
 ```json
-"goldfinch": { "type": "http", "url": "http://127.0.0.1:7777/mcp" }
+"goldfinch": { "type": "http", "url": "http://127.0.0.1:49707/mcp" }
 ```
 
-This entry is **inert until `npm run dev:automation` is running** — a connection failure means the
-server isn't up, not that the config is wrong. (The same file also registers the `playwright`
-server; that entry is unrelated to this surface.)
+Substitute your configured port (the Settings UI shows the live address — copy it from there). The
+entry is **inert until the automation surface is enabled and the app is running** — a connection
+failure means the server isn't up, not that the config is wrong. (The repo's `.mcp.json` still
+registers the `playwright` server; that entry is unrelated to this surface.)
