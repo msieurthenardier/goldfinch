@@ -1,6 +1,6 @@
 # Flight: Settings key management + automation UI
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -149,7 +149,7 @@ UI + a thin backend layer over the Flight-4 auth core, all origin-checked throug
 - [ ] Code merged (PR #42 ready, stacked on #41 / `flight/04-gating` — merges after the #40→#41 cascade)
 - [x] Tests passing (`npm test` 613 + typecheck + lint; live `settings-automation` + `mcp-jar-scoping`)
 - [x] Documentation updated (`docs/mcp-automation.md`: Settings controls, configurable port + live address + live-rebind, the `.mcp.json` config block, the audit/session-lifecycle notes) **and port references reconciled to the new default** (`CLAUDE.md`, `.mcp.json` entry dropped, `tests/behavior/mcp-auth-gating.md` + `mcp-jar-scoping.md` — incl. the stale auto-mint-prerequisite note)
-- [ ] Flight debrief written (separate `/flight-debrief` step)
+- [x] Flight debrief written (2026-06-15)
 
 ### Verification
 - **Unit/headless**: `automationPort` validator (range, non-integer, out-of-range); `freePortInRange` (returns a free loopback port; skips occupied); `resolvePort` precedence (env > setting > default); bind-status capture (bound vs EADDRINUSE vs disabled); the generate/rotate/revoke IPC (origin-checked; revoke deletes the hash; generate returns show-once plaintext + stores the hash).
