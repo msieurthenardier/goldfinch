@@ -19,16 +19,16 @@
 // Endpoint override (mirrors the server's own GOLDFINCH_MCP_PORT contract in mcp-server.js):
 //   GOLDFINCH_MCP_PORT=8888 node scripts/mcp-example-client.mjs       # compose against another port
 //   GOLDFINCH_MCP_URL=http://127.0.0.1:9001/mcp node scripts/mcp-example-client.mjs   # full-URL escape hatch
-// Default endpoint: http://127.0.0.1:7777/mcp (the server is path-agnostic; /mcp is a convention).
+// Default endpoint: http://127.0.0.1:49707/mcp (the server is path-agnostic; /mcp is a convention).
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // Resolve the endpoint: GOLDFINCH_MCP_URL (full URL) wins; else compose from GOLDFINCH_MCP_PORT
-// (the same env var mcp-server.js's resolvePort honors), defaulting to the documented :7777/mcp.
+// (the same env var mcp-server.js's resolvePort honors), defaulting to the documented :49707/mcp.
 const endpoint = new URL(
   process.env.GOLDFINCH_MCP_URL ||
-    'http://127.0.0.1:' + (process.env.GOLDFINCH_MCP_PORT || 7777) + '/mcp'
+    'http://127.0.0.1:' + (process.env.GOLDFINCH_MCP_PORT || 49707) + '/mcp'
 );
 
 // Print a tool's result, distinguishing the three content shapes the server emits:

@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, enableAndMintJarKey } = require('../../src/main/automation/mcp-server');
+const { createMcpServer, enableAndMintJarKey, revokeJarKey, revokeAdminKey } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 
 const TEST_PORT = 7790;
@@ -329,6 +329,78 @@ test('clean stop() tears everything down — a subsequent start on the same port
     }
   } finally {
     await second.stop();
+  }
+});
+
+test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, not A (Leg 7)', async () => {
+  // The live port-rebind (Flight 5, Leg 7) is exactly this primitive: stop the
+  // current server, then create+start a fresh one on the (now-changed) resolved
+  // port. Prove the sequence works across two distinct free ports — the fresh
+  // server is reachable on B, and port A is free again (the old listener released).
+  const PORT_A = 7791;
+  const PORT_B = 7792;
+
+  // Phase 1: bind on A and confirm a full SDK handshake reaches the fake engine.
+  const onA = createMcpServer({
+    getEngine: (engineOpts) => fakeEngine(engineOpts),
+    getSettings: () => fakeSettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: PORT_A,
+  });
+  await onA.start();
+  assert.equal(onA.port, PORT_A, '.port reflects A');
+  const endpointA = new URL('http://127.0.0.1:' + PORT_A + '/mcp');
+  {
+    const client = new Client({ name: 'rebind-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(endpointA, {
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+    });
+    await client.connect(transport);
+    try {
+      const { tools } = await client.listTools();
+      assert.equal(tools.length, EXPECTED_TOOL_COUNT, 'reachable on A while bound to A');
+    } finally {
+      await client.close();
+    }
+  }
+
+  // Phase 2: stop A (releases the listener + sessions), then start a FRESH server
+  // on B — the rebind primitive. The new instance must reach the engine on B.
+  await onA.stop();
+  const onB = createMcpServer({
+    getEngine: (engineOpts) => fakeEngine(engineOpts),
+    getSettings: () => fakeSettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: PORT_B,
+  });
+  await onB.start();
+  try {
+    assert.equal(onB.port, PORT_B, '.port reflects B after rebind');
+    const endpointB = new URL('http://127.0.0.1:' + PORT_B + '/mcp');
+    const client = new Client({ name: 'rebind-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(endpointB, {
+      requestInit: { headers: { connection: 'close', authorization: 'Bearer ' + VALID_KEY } },
+    });
+    await client.connect(transport);
+    try {
+      const { tools } = await client.listTools();
+      assert.equal(tools.length, EXPECTED_TOOL_COUNT, 'reachable on B after rebind');
+    } finally {
+      await client.close();
+    }
+
+    // Port A is free again — a fresh server can re-bind it with no EADDRINUSE,
+    // proving stop() released the old listener (the rebind didn't leak it).
+    const reA = createMcpServer({
+      getEngine: (engineOpts) => fakeEngine(engineOpts),
+      getSettings: () => fakeSettings(),
+      scopeCtx: fakeScopeCtx(),
+      port: PORT_A,
+    });
+    await assert.doesNotReject(reA.start(), 'A is free again after the rebind off it');
+    await reA.stop();
+  } finally {
+    await onB.stop();
   }
 });
 
@@ -799,6 +871,54 @@ test('audit — opening then closing a session updates getActivity().sessions (n
   }
 });
 
+// Open the session's standalone GET SSE stream (the long-lived stream a real
+// client holds for server→client messages) and return the live http.ClientRequest
+// so the caller can abort it WITHOUT a DELETE — simulating an ungraceful client
+// drop (process death / SDK client.close() that only tears down locally). Resolves
+// once the response headers arrive so the server-side res 'close' handler is armed.
+function openGetStream(sessionId, key = VALID_KEY) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: TEST_PORT,
+        path: '/mcp',
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          authorization: 'Bearer ' + key,
+          'mcp-session-id': sessionId,
+        },
+      },
+      (res) => resolve({ req, res })
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('audit — an ungracefully-dropped GET SSE stream (no DELETE) drains the session', async () => {
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    // Open a session (raw initialize POST → session id), then hold its standalone
+    // GET SSE stream open — the realistic long-lived client stream.
+    const sid = await rawInitSession(VALID_KEY);
+    await waitFor(() => server.getActivity().sessions.length === 1);
+    const { req } = await openGetStream(sid);
+
+    // Drop the GET stream WITHOUT a DELETE / terminateSession — the process-death
+    // case. The fix's res 'close' handler must tear the session down so it does
+    // not linger as "connected". (Before the fix, transport.onclose never fired
+    // for a dropped GET and the session lingered until app restart.)
+    req.destroy();
+    await waitFor(() => server.getActivity().sessions.length === 0);
+    assert.equal(server.getActivity().sessions.length, 0, 'dropped GET stream drains the session');
+  } finally {
+    await server.stop();
+  }
+});
+
 test('audit — admin session reports kind:admin with jarId null', async () => {
   process.env.GOLDFINCH_AUTOMATION_ADMIN = '1';
   const broadcasts = [];
@@ -899,4 +1019,70 @@ test('mint guard — omitting the jars accessor keeps the legacy non-empty-strin
   const key = enableAndMintJarKey('anything', settings);
   assert.equal(typeof key, 'string');
   assert.throws(() => enableAndMintJarKey('', settings), /non-empty string/);
+});
+
+// ---------------------------------------------------------------------------
+// Revoke (Leg 3): revokeJarKey deletes only the target jar's hash (others
+// intact; absent id is a no-op); revokeAdminKey clears to ''. Neither touches a
+// live sessions Map — DD5's "effective immediately" comes from per-request
+// re-validation, proved at the validation layer below.
+// ---------------------------------------------------------------------------
+
+test('revokeJarKey — deletes only the target jar hash; other jars untouched', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
+  enableAndMintJarKey('personal', settings, jars);
+  enableAndMintJarKey('work', settings, jars);
+  const beforeWork = settings.get('automationKeyHashes').work;
+
+  revokeJarKey('personal', settings);
+
+  const hashes = settings.get('automationKeyHashes');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(hashes, 'personal'),
+    false,
+    'target jar hash deleted'
+  );
+  assert.equal(hashes.work, beforeWork, "other jar's hash left intact");
+});
+
+test('revokeJarKey — an absent jar id is a no-op (never throws; leaves hashes unchanged)', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }] };
+  enableAndMintJarKey('personal', settings, jars);
+  const before = { ...settings.get('automationKeyHashes') };
+
+  assert.doesNotThrow(() => revokeJarKey('ghost', settings));
+  assert.deepEqual(settings.get('automationKeyHashes'), before, 'hashes unchanged for an absent id');
+});
+
+test('revokeAdminKey — clears the admin key hash to the empty string', () => {
+  const settings = memSettings();
+  settings.set('automationAdminKeyHash', hashKey('an-admin-key'));
+  revokeAdminKey(settings);
+  assert.equal(settings.get('automationAdminKeyHash'), '');
+});
+
+test('revoke re-validation — a minted token validates to its jar, then to null after revoke', () => {
+  const settings = memSettings();
+  const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
+  const key = enableAndMintJarKey('personal', settings, jars);
+
+  // Pre-revoke: the live hashes resolve the token to its jar (what resolveIdentity
+  // reads every request).
+  assert.equal(
+    validateKey(key, { keyHashes: settings.get('automationKeyHashes') }),
+    'personal',
+    'minted token validates to its jar before revoke'
+  );
+
+  revokeJarKey('personal', settings);
+
+  // Post-revoke: the SAME token now validates to null — the next MCP request 401s
+  // (DD5 "effective immediately"), with no sessions.delete() required.
+  assert.equal(
+    validateKey(key, { keyHashes: settings.get('automationKeyHashes') }),
+    null,
+    'same token validates to null after revoke (proves 401-on-next-request)'
+  );
 });

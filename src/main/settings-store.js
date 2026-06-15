@@ -31,7 +31,8 @@ const { isSafeTabUrl } = require('../shared/url-safety');
  *   toolbarPins: { media: boolean, shields: boolean },
  *   automationEnabled: boolean,
  *   automationKeyHashes: Record<string, string>,
- *   automationAdminKeyHash: string
+ *   automationAdminKeyHash: string,
+ *   automationPort: number
  * }} Settings
  */
 
@@ -49,7 +50,11 @@ const DEFAULTS = {
   // are never persisted — only their hashes live here.
   automationKeyHashes: {},
   // SHA-256 hex hash of the admin key, or '' when no admin key is minted (DD6).
-  automationAdminKeyHash: ''
+  automationAdminKeyHash: '',
+  // Configurable MCP listen port (DD1). Default moved off the squatted 7777 into
+  // the IANA dynamic range. GOLDFINCH_MCP_PORT env overrides this at resolve time;
+  // a change takes effect on next launch (no live rebind).
+  automationPort: 49707
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -116,7 +121,13 @@ const VALIDATORS = {
 
   // automationAdminKeyHash: '' (no admin key) or a 64-char lowercase-hex digest.
   automationAdminKeyHash: (v) =>
-    typeof v === 'string' && (v === '' || HEX64.test(v))
+    typeof v === 'string' && (v === '' || HEX64.test(v)),
+
+  // automationPort: an integer in the registered/dynamic port range [1024, 65535].
+  // Number.isInteger rejects strings, null, arrays, booleans, and non-integers —
+  // no extra guards needed.
+  automationPort: (v) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535
 };
 
 // ---------------------------------------------------------------------------

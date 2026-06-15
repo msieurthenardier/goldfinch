@@ -125,7 +125,7 @@ npm start
 ### Development
 
 `npm run dev:automation` launches the app with a **dev-gated, loopback-only MCP automation
-server** (`127.0.0.1:7777`) that lets an MCP client drive and observe tabs. It is exposed in no
+server** (`127.0.0.1:49707`) that lets an MCP client drive and observe tabs. It is exposed in no
 released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for the consumer reference.
 
 ## Keyboard shortcuts

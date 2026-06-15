@@ -116,7 +116,102 @@ if (location.origin === 'goldfinch://settings') {
      * Call from a pagehide handler to prevent accumulation across reloads.
      * @param {number} h
      */
-    offShieldsChanged: (h) => off(h)
+    offShieldsChanged: (h) => off(h),
+
+    // Automation status/address (Flight 5, Leg 2). Activity listeners are Leg 4.
+
+    /**
+     * Read the live automation-surface status.
+     * @returns {Promise<{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }>}
+     */
+    automationGetStatus: () => ipcRenderer.invoke('automation:get-status'),
+
+    /**
+     * Persist the automation port and live-rebind the running surface to it
+     * (Flight 5, Leg 7). Resolves with the fresh status; rejects ("Invalid port")
+     * when the value fails the main-side validator.
+     * @param {number} port
+     * @returns {Promise<{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }>}
+     */
+    automationSetPort: (port) => ipcRenderer.invoke('automation:set-port', port),
+
+    /**
+     * Advisory scan for a free loopback port for the "find free port" affordance.
+     * @returns {Promise<{ port: (number|null) }>}
+     */
+    automationFindFreePort: () => ipcRenderer.invoke('automation:find-free-port'),
+
+    /**
+     * Write text to the system clipboard (fallback when navigator.clipboard is
+     * blocked at runtime under contextIsolation + sandbox — DD4).
+     * @param {string} text
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    clipboardWrite: (text) => ipcRenderer.invoke('clipboard:write', text),
+
+    // Automation key management (Flight 5, Leg 3 / SC9). Mint returns the
+    // show-once plaintext; list/revoke deal in hashes only (never plaintext).
+
+    /**
+     * List jars joined with key presence, plus the admin env gate + admin-key
+     * state. Never returns hashes or plaintext.
+     * @returns {Promise<{ jars: Array<{ id: string, name: string, color: string, hasKey: boolean }>, adminEnabled: boolean, adminKeySet: boolean }>}
+     */
+    automationListKeys: () => ipcRenderer.invoke('automation:list-keys'),
+
+    /**
+     * Generate (or rotate) the per-jar automation key; returns the show-once
+     * plaintext. Rejects for an unknown/burner jarId.
+     * @param {string} jarId
+     * @returns {Promise<{ key: string }>}
+     */
+    automationJarKeyMint: (jarId) => ipcRenderer.invoke('automation:jar-key-mint', jarId),
+
+    /**
+     * Revoke the per-jar automation key (deletes its hash). No-op if absent.
+     * @param {string} jarId
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    automationJarKeyRevoke: (jarId) => ipcRenderer.invoke('automation:jar-key-revoke', jarId),
+
+    /**
+     * Generate (or rotate) the admin key; returns the show-once plaintext, or
+     * { key: null } when the GOLDFINCH_AUTOMATION_ADMIN env gate is unset.
+     * @returns {Promise<{ key: (string|null) }>}
+     */
+    automationAdminKeyMint: () => ipcRenderer.invoke('automation:admin-key-mint'),
+
+    /**
+     * Revoke the admin key (clears its hash).
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    automationAdminKeyRevoke: () => ipcRenderer.invoke('automation:admin-key-revoke'),
+
+    // Automation activity (Flight 5, Leg 4 / SC10 / DD6). Read-only audit snapshot
+    // ({ sessions, log }) + live broadcast for the settings-page Activity viewer.
+
+    /**
+     * Read the current automation activity snapshot (active sessions + action log).
+     * Carries no key/hash. Returns { sessions: [], log: [] } when the surface is off.
+     * @returns {Promise<{ sessions: any[], log: any[] }>}
+     */
+    automationGetActivity: () => ipcRenderer.invoke('automation:get-activity'),
+
+    /**
+     * Subscribe to automation-activity-changed broadcasts.
+     * cb receives the updated { sessions, log } snapshot.
+     * Returns a numeric handle for use with offAutomationActivity.
+     * @param {(snap: { sessions: any[], log: any[] }) => void} cb
+     * @returns {number}
+     */
+    onAutomationActivity: (cb) => on('automation-activity-changed', cb),
+
+    /**
+     * Unsubscribe the automation-activity listener registered under handle h.
+     * Call from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offAutomationActivity: (h) => off(h)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

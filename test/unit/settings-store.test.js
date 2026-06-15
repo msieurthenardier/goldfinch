@@ -705,3 +705,64 @@ test('automationAdminKeyHash — set throws on non-hex / wrong-length / non-stri
     removeTempDir(dir);
   }
 });
+
+// --- automationPort validator (Flight 5 / DD1) ---
+test('automationPort — default on first load is 49707', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.automationPort, 49707);
+    assert.equal(store.get('automationPort'), 49707);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationPort — accepts in-range integers (boundaries + middle), persists and reloads', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    for (const good of [1024, 49707, 65535]) {
+      store.set('automationPort', good);
+      assert.equal(store.get('automationPort'), good);
+      const result = store.load(dir);
+      assert.equal(result.automationPort, good);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationPort — set throws on out-of-range / non-integer / non-number, prior kept', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('automationPort');
+    for (const bad of [1023, 65536, 1024.5, '49707', null, [], true]) {
+      assert.throws(
+        () => store.set('automationPort', bad),
+        (err) => err instanceof TypeError && err.message.includes('invalid value')
+      );
+    }
+    assert.equal(store.get('automationPort'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('automationPort — load malformed/out-of-range value is repaired to default', () => {
+  const dir = makeTempDir();
+  try {
+    const bad = JSON.stringify({ version: 1, automationPort: 70000 });
+    fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.automationPort, 49707, 'out-of-range stored port should repair to default');
+    assert.equal(store.get('automationPort'), 49707);
+  } finally {
+    removeTempDir(dir);
+  }
+});

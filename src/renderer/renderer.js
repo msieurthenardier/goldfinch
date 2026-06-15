@@ -58,7 +58,9 @@ const els = {
   kebab: /** @type {HTMLButtonElement} */ (document.getElementById('kebab')),
   kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu')),
   addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
-  siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup'))
+  siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup')),
+  automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
+  automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -215,6 +217,10 @@ const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', pa
 let containers = [DEFAULT_CONTAINER];
 window.goldfinch.jarsList().then((list) => {
   if (list && list.length) containers = list;
+  // The activity snapshot may have arrived before the jars list resolved, in which
+  // case a jar session's indicator title showed the raw jarId. Re-run with the cached
+  // snapshot now that `containers` is populated, so the friendly jar name is used.
+  updateAutomationIndicator(lastSnap);
 });
 
 function makeBurner() {
@@ -1540,9 +1546,63 @@ window.goldfinch.onShieldsChanged((c) => {
   shieldsConfig = c;
   renderPrivacy();
 });
+
+/* ---- Automation activity indicator (SC10 / DD6) ---- */
+
+// The last snapshot received, cached so the jarsList() resolve can re-run the render
+// with friendly jar names once `containers` is populated (the snapshot can arrive first).
+let lastSnap = /** @type {{ sessions?: any[] }} */ ({ sessions: [] });
+
+/**
+ * Map a jarId to its display name via the loaded `containers`, falling back to the raw
+ * jarId when the jar isn't (yet) known. jarId is operator-controlled, so the result is
+ * only ever used via textContent / title — never innerHTML.
+ * @param {string|null} jarId
+ * @returns {string}
+ */
+function jarDisplayName(jarId) {
+  const c = containers.find((x) => x.id === jarId);
+  return c ? c.name : (jarId || 'jar');
+}
+
+/**
+ * Render the toolbar automation indicator from an activity snapshot. Hidden + badge
+ * cleared when there are no sessions; otherwise shows a count badge and a descriptive
+ * title/aria-label naming each attached identity ("admin" or the jar's display name).
+ * The `.admin` class applies a non-alarm distinct color when any session is an admin
+ * session. Wording is "connected" (transport lifecycle), never "authorized" (DD6).
+ * @param {{ sessions?: any[] }} snap
+ */
+function updateAutomationIndicator(snap) {
+  lastSnap = snap || { sessions: [] };
+  const sessions = (lastSnap && lastSnap.sessions) || [];
+  const n = sessions.length;
+  els.automationIndicator.classList.toggle('hidden', n === 0);
+  if (!n) {
+    els.automationIndicatorBadge.textContent = '';
+    els.automationIndicatorBadge.classList.add('hidden');
+    els.automationIndicator.classList.remove('admin');
+    return;
+  }
+  const hasAdmin = sessions.some((s) => s.kind === 'admin');
+  const names = sessions.map((s) => (s.kind === 'admin' ? 'admin' : jarDisplayName(s.jarId)));
+  els.automationIndicatorBadge.textContent = String(n);
+  els.automationIndicatorBadge.classList.remove('hidden');
+  els.automationIndicator.classList.toggle('admin', hasAdmin);
+  const label = n + ' automation session' + (n > 1 ? 's' : '') + ' connected: ' + names.join(', ');
+  els.automationIndicator.title = label;
+  els.automationIndicator.setAttribute('aria-label', label);
+}
+
+// Initial snapshot (catches sessions attached before the chrome loaded) + live updates.
+window.goldfinch.automationGetActivity().then(updateAutomationIndicator).catch(() => {});
+window.goldfinch.onAutomationActivity(updateAutomationIndicator);
+
 /**
  * Show or hide the Media/Shields toolbar icons per the current pin state.
  * Unpinned → button hidden (`.hidden`); keyboard shortcuts remain active.
+ * NOTE: the automation indicator is deliberately NOT touched here — it self-manages
+ * its `.hidden` state from the live session count (SC10/DD6), and is not pinnable.
  * @param {{ media: boolean, shields: boolean }} pins
  */
 function applyToolbarPins(pins) {
