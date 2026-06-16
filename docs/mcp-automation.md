@@ -13,8 +13,9 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **16 tools** — 12 drive tools and 4
-observe tools. Tools are a thin adapter over Goldfinch's internal automation engine; the same
+binds to **loopback only** (`127.0.0.1`), and advertises **17 tools** — 12 drive tools, 4
+observe tools, and 1 admin chrome-discovery tool. Tools are a thin adapter over Goldfinch's
+internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
 
 ## Launch
@@ -154,19 +155,22 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
     minted for a burner.
   - `captureWindow` (whole-window composite) is **admin-only** for a jar key — it fails with a
     **distinct** `automation: admin-only` error (not `out-of-jar`).
-  - **Known limitation (v1):** `openTab` cannot target a specific jar for a jar key; a new tab opens
-    in the renderer's active container. A tab that lands in another jar is simply not enumerable or
-    drivable by this key (confinement still holds — there is no cross-jar read).
+  - **`openTab` is jar-targeted (DD3, Flight 6).** A jar key's `openTab` always opens in *its own
+    jar* — the façade forces the caller's `jar.id` regardless of whether `jarId` was supplied. A jar
+    key supplying its own `jarId` explicitly is allowed; supplying a **foreign** `jarId` is refused
+    with `automation: out-of-jar`. An **unknown** `jarId` (not in the renderer's container registry)
+    is refused at the renderer with `automation: unknown-jar` — there is no silent fallback to the
+    default container.
   - **A key whose jar no longer exists drives nothing.** If the jar is deleted from the registry
     while a key is still valid, every op for that identity errors (`automation: no-such-jar`).
 
 - **The admin identity bypasses jar-scoping.** An `admin`-resolved connection enumerates **every**
   jar's guest tabs **and** the internal `goldfinch://settings` tab, can drive/observe any of them
-  (the **sole** relaxation of the internal-session exclusion), and may call `captureWindow`. Admin is
-  the *only* identity allowed to touch the internal session. (For this flight, "admin sees all + the
-  chrome" means cross-jar guest visibility + the internal tab + `captureWindow`'s whole-window
-  composite. Driving the chrome renderer itself — toolbar / tab strip — is structurally
-  undiscoverable via the surface today and is a later affordance.)
+  (the **sole** relaxation of the internal-session exclusion), and may call `captureWindow` and
+  `getChromeTarget`. Admin is the *only* identity allowed to touch the internal session or discover
+  the chrome renderer. Jar keys calling `getChromeTarget` get `automation: admin-only` (mirroring
+  `captureWindow`). The `wcId` returned by `getChromeTarget` is then passed to the drive/observe
+  tools to act on / read the app shell (tab strip, toolbar, menus).
 
 > **Status:** the surface now binds identity to the session and enforces jar-scoping + the admin
 > tier. Audit logging and the operator-facing key-mint / indicator UI land in later Flight-4/Flight-5
@@ -174,15 +178,16 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 16 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
-by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab` or `enumerateTabs`.
+All 17 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
+by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
+or (for the chrome renderer) `getChromeTarget`.
 
 ### Drive tools (12)
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (non-internal, dom-ready) tabs |
-| `openTab` | `{ url: string }` *(required)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error) |
+| `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the default container (or the jar key's own jar). |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `navigate` | `{ wcId: integer, url: string }` *(required)* | JSON text `{"ok":true}` (void op; http(s) only — unsafe URLs are refused) |
@@ -202,6 +207,18 @@ by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab` 
 | `captureWindow` | *(none)* | **Image content** (PNG, `image/png`) of the whole browser window (chrome + composited guests) |
 | `readDom` | `{ wcId: integer }` *(required)* | JSON text: `{ url, title, html }` — the full live `document.documentElement` outerHTML (no trimming), foreground-first |
 | `readAxTree` | `{ wcId: integer }` *(required)* | JSON text: the accessibility-tree `AXNode` array — **or** a `{ automation: "debugger-unavailable", reason, wcId }` refusal (a **normal** result, see below). Foreground-first; uses the in-process debugger |
+
+### Admin discovery (1)
+
+| Tool | Input schema | Result shape |
+|------|--------------|--------------|
+| `getChromeTarget` | *(none)* | JSON text: `{ wcId, kind: "chrome", url }` — the chrome renderer's automation target. Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). |
+
+> **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring
+> `captureWindow`). Jar keys that attempt to drive the chrome renderer directly by supplying the
+> chrome `wcId` to a wcId-first op are refused with `automation: out-of-jar` (chrome-exclusion
+> guard in `resolveContentsForJar`, defense-in-depth). Only admin sessions may discover or drive
+> the chrome.
 
 ## Result and refusal semantics
 

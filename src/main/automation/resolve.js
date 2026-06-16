@@ -117,7 +117,14 @@ function resolveContents(wcId, { fromId, chromeContents: _chromeContents, allowI
  *   1. resolveContents(wcId, deps) — applies bad-handle / no-such-contents /
  *      internal-session (internal stays ABSOLUTE here; jar keys never carry
  *      allowInternal, so an internal wcId throws before the membership check).
- *   2. session object-identity membership — throws `automation: out-of-jar` on
+ *   2. chrome-exclusion (Flight-6, defense-in-depth) — refuse the chrome
+ *      renderer's webContents for ANY jar identity, BEFORE the session check.
+ *      Today the chrome uses session.defaultSession and no jar partition aliases
+ *      it (so the session check below already refuses it), but object-identity
+ *      exclusion is robust against any future config change that gives the chrome
+ *      a jar-aliased session. Backstops getChromeTarget's admin-only façade gate
+ *      for the wcId-first ops. Guard is a no-op when deps.chromeContents is nullish.
+ *   3. session object-identity membership — throws `automation: out-of-jar` on
  *      mismatch (or when jar is absent).
  *
  * Kept ELECTRON-FREE: fromPartition is injected via deps (the engine/scope ctx
@@ -128,10 +135,19 @@ function resolveContents(wcId, { fromId, chromeContents: _chromeContents, allowI
  * @param {{ fromId: (id: number) => any, chromeContents?: any, fromPartition: (partition: string) => any, allowInternal?: boolean }} deps
  * @returns {any} the live, in-jar webContents
  * @throws {Error} bad-handle / no-such-contents / internal-session (via
- *   resolveContents) or `automation: out-of-jar` on a membership mismatch.
+ *   resolveContents) or `automation: out-of-jar` on a chrome-exclusion hit or
+ *   a membership mismatch.
  */
 function resolveContentsForJar(wcId, jar, deps) {
   const wc = resolveContents(wcId, deps); // bad-handle / no-such-contents / internal-session
+  // Flight-6 chrome-exclusion (defense-in-depth): refuse the chrome renderer's webContents for
+  // ANY jar identity, BEFORE the session check. Today the chrome uses session.defaultSession and
+  // no jar partition aliases it (so the session check below already refuses it), but object-
+  // identity exclusion is robust against any future config change that gives the chrome a
+  // jar-aliased session. Backstops getChromeTarget's admin-only façade gate for the wcId-first ops.
+  if (deps.chromeContents != null && wc === deps.chromeContents) {
+    throw new Error('automation: out-of-jar — wcId ' + wcId + ' is the chrome renderer and is not drivable by a jar key');
+  }
   if (!jar || wc.session !== deps.fromPartition(jar.partition)) {
     throw new Error(
       'automation: out-of-jar — wcId ' + wcId +

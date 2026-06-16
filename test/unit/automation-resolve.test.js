@@ -300,6 +300,64 @@ test('resolveContentsForJar: LAZY fromPartition compare picks up a RUNTIME jars-
   assert.equal(resolveContentsForJar(20, newJar, deps), wc);
 });
 
+// ---------------------------------------------------------------------------
+// resolveContentsForJar — chrome-exclusion guard (Flight 6, defense-in-depth)
+// ---------------------------------------------------------------------------
+
+test('resolveContentsForJar: wc === deps.chromeContents AND session matches the jar → throws out-of-jar BEFORE session check (ordering proof)', () => {
+  // Synthetic: wc IS the chromeContents object AND its session happens to equal the jar
+  // partition's session. In real code this collision cannot occur (the chrome uses
+  // defaultSession, no jar aliases it), but the test proves the chrome-exclusion guard
+  // fires before/independent of the session check. AC2 ordering requirement.
+  const world = makeSessionWorld();
+  const jar = { id: 'default', partition: 'persist:goldfinch' };
+  // Build a wc whose session matches the jar AND also IS the chromeContents reference.
+  const sharedSession = world.sessionFor(jar.partition);
+  const wc = { id: 42, session: sharedSession, isDestroyed() { return false; } };
+  // chromeContents IS the same object — object identity match.
+  const deps = {
+    fromId: (id) => id === 42 ? wc : null,
+    chromeContents: wc,
+    fromPartition: world.fromPartition,
+  };
+  // Must throw out-of-jar with the chrome-renderer message — NOT pass through to the
+  // session check (which would also refuse, but for the wrong reason).
+  assert.throws(
+    () => resolveContentsForJar(42, jar, deps),
+    (err) => err instanceof Error
+      && err.message.includes('automation: out-of-jar')
+      && err.message.includes('chrome renderer'),
+    'chrome-exclusion guard must fire before the session check'
+  );
+});
+
+test('resolveContentsForJar: nullish deps.chromeContents → guard is a no-op, normal in-jar guest resolves', () => {
+  // When no chromeContents is injected (e.g. in tests that don't set it), the guard
+  // must not misfire — !deps.chromeContents != null is false, so the guard skips.
+  const world = makeSessionWorld();
+  const jar = { id: 'personal', partition: 'persist:container:personal' };
+  const wc = makeWcInPartition(10, jar.partition, world);
+  const deps = {
+    fromId: (id) => id === 10 ? wc : null,
+    chromeContents: null, // explicitly null
+    fromPartition: world.fromPartition,
+  };
+  // Should NOT throw — the null guard (!= null) prevents the guard from firing.
+  assert.equal(resolveContentsForJar(10, jar, deps), wc);
+});
+
+test('resolveContentsForJar: undefined deps.chromeContents → guard is a no-op', () => {
+  const world = makeSessionWorld();
+  const jar = { id: 'personal', partition: 'persist:container:personal' };
+  const wc = makeWcInPartition(11, jar.partition, world);
+  const deps = {
+    fromId: (id) => id === 11 ? wc : null,
+    // chromeContents absent (undefined)
+    fromPartition: world.fromPartition,
+  };
+  assert.equal(resolveContentsForJar(11, jar, deps), wc);
+});
+
 test('resolveContents: error messages are distinguishable per guard', () => {
   // Pins AC4: three distinct prefixes so callers can identify which guard fired.
   const internalWc = makeInternalWc(1);

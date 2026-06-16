@@ -8,20 +8,18 @@
 //   - admin  → the engine is returned UNCHANGED. The admin engine is built with
 //              { allowInternal: true }, so it already enumerates every jar's guest
 //              tabs + the internal goldfinch://settings tab, drives/observes any of
-//              them, and allows captureWindow. No jar filtering. (For Flight 4,
-//              "admin sees all + the chrome" means cross-jar guest visibility +
-//              the internal tab + captureWindow's whole-window composite — NOT
-//              driving the chrome renderer, which is structurally undiscoverable
-//              via the surface; that is a Flight-6 affordance — see flight log FD
-//              scope decision.)
+//              them, and allows captureWindow and getChromeTarget. No jar filtering.
+//              (Flight-6: the chrome renderer is now discoverable via getChromeTarget
+//              — admin-only, via this façade gate. See flight log FD scope decision.)
 //   - jar    → a façade that, on every wcId-first op, FIRST verifies jar
 //              membership by SESSION OBJECT IDENTITY (resolveContentsForJar /
 //              DD7) before delegating to the engine op. enumerateTabs is filtered
 //              by resolved session (never the renderer-reported jarId).
 //              captureWindow is REFUSED with a DISTINCT admin-only error. openTab
-//              is delegated (known v1 limitation: a new tab cannot be targeted at
-//              the jar — but a tab that lands elsewhere is simply not enumerable
-//              or drivable by this key, so confinement holds).
+//              is jar-targeted (DD3, Flight 6): the façade forces the caller's own
+//              jar.id, refuses a foreign jarId (out-of-jar), and delegates to the
+//              engine. Admin openTab passes any jarId straight through to the renderer
+//              container-lookup, which refuses unknown jarIds (unknown-jar).
 //
 // ELECTRON-FREE: every Electron handle (fromId, fromPartition, getChromeContents,
 // jars) is injected via ctx, so this module unit-tests offline with fakes.
@@ -134,13 +132,23 @@ function scopeEngine(engine, identity, ctx) {
     throw new Error('automation: admin-only — captureWindow (whole-window capture) is restricted to the admin identity');
   };
 
-  // openTab → delegated. KNOWN LIMITATION (v1, noted in flight log): a jar key
-  // cannot target the jar for a new tab; a tab that lands in another jar is
-  // simply not enumerable/drivable by this key (no cross-jar read — confinement
-  // holds). Acceptable for Flight 4.
-  facade.openTab = (/** @type {string} */ url) => {
-    requireJar();
-    return engine.openTab(url);
+  // openTab → jar-targeted (DD3, Flight 6). A jar key may only open in ITS OWN jar:
+  // a supplied jarId must match this identity (or be absent → defaulted to own jar);
+  // a foreign jarId is refused. Admin (engine unchanged) may target any jar.
+  facade.openTab = (/** @type {string} */ url, /** @type {string|undefined} */ jarId) => {
+    const jar = requireJar();
+    if (jarId != null && jarId !== jar.id) {
+      throw new Error('automation: out-of-jar — a jar key may only open tabs in its own jar (' + jar.id + ')');
+    }
+    return engine.openTab(url, jar.id);   // force the caller's own jar
+  };
+
+  // getChromeTarget → REFUSED for jar keys with a DISTINCT admin-only message (mirrors
+  // captureWindow). The chrome shell is reachable only by the admin identity; defense-in-depth
+  // is the resolveContentsForJar chrome-exclusion for any wcId-first op (DD1, Flight 6).
+  facade.getChromeTarget = () => {
+    requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow
+    throw new Error('automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity');
   };
 
   return facade;

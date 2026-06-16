@@ -61,12 +61,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 16 tools (12 drive + 4 observe), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 17 tools (12 drive + 4 observe + 1 chrome-discovery), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 16);
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...ALL_NAMES].sort());
+  assert.equal(tools.length, 17);
+  const allNames17 = [...ALL_NAMES, 'getChromeTarget'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames17].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -174,15 +175,23 @@ test('single-wcId ops map to engine.op(wcId)', async () => {
   }
 });
 
-test('openTab maps to engine.openTab(url); typeText to engine.typeText(wcId, text); pressKey to engine.pressKey(wcId, name)', async () => {
+test('openTab (no jarId) maps to engine.openTab(url, undefined); typeText to engine.typeText(wcId, text); pressKey to engine.pressKey(wcId, name)', async () => {
   const { engine, calls } = makeFakeEngine({ returns: { openTab: 99 } });
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('openTab', { url: 'https://a.test' });
-  assert.deepEqual(calls.openTab[0], ['https://a.test']);
+  // jarId is absent in the input → undefined forwarded as second arg (documents the contract)
+  assert.deepEqual(calls.openTab[0], ['https://a.test', undefined]);
   await reg.callTool('typeText', { wcId: 1, text: 'hello' });
   assert.deepEqual(calls.typeText[0], [1, 'hello']);
   await reg.callTool('pressKey', { wcId: 1, name: 'ShiftTab' });
   assert.deepEqual(calls.pressKey[0], [1, 'ShiftTab']);
+});
+
+test('openTab forwards jarId to engine.openTab(url, jarId) when supplied', async () => {
+  const { engine, calls } = makeFakeEngine({ returns: { openTab: 77 } });
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('openTab', { url: 'https://b.test', jarId: 'personal' });
+  assert.deepEqual(calls.openTab[0], ['https://b.test', 'personal']);
 });
 
 test('pressKey with { wcId, name } maps to engine.pressKey(wcId, name)', async () => {
@@ -542,6 +551,50 @@ test('captureWindow chrome-unavailable throw → isError', async () => {
   const { engine } = makeFakeEngine({ throws: { captureWindow: new Error(msg) } });
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('captureWindow', {});
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+// ---------------------------------------------------------------------------
+// getChromeTarget — Flight-6 chrome-discovery tool (17th tool)
+// NOTE: makeFakeEngine only covers ALL_NAMES (drive + observe), so getChromeTarget
+// tests use plain objects to avoid the helper's ALL_NAMES limitation.
+// ---------------------------------------------------------------------------
+
+test('getChromeTarget is listed with a no-input inputSchema and no internal call/shape leak', () => {
+  const reg = buildToolRegistry(() => ({ getChromeTarget: () => ({}) }));
+  const tools = reg.listTools();
+  const t = tools.find((x) => x.name === 'getChromeTarget');
+  assert.ok(t, 'getChromeTarget must be in listTools()');
+  assert.equal(t.inputSchema.type, 'object');
+  assert.deepEqual(Object.keys(t.inputSchema.properties ?? {}), [], 'no-input: properties must be empty');
+  assert.deepEqual(Object.keys(t).sort(), ['description', 'inputSchema', 'name']);
+  assert.equal(typeof t.call, 'undefined', 'internal call must not leak');
+});
+
+test('callTool getChromeTarget over a fake admin engine returns the serialized target (normal result)', async () => {
+  const target = { wcId: 5, kind: 'chrome', url: 'about:blank' };
+  const engine = { getChromeTarget: () => target };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getChromeTarget', {});
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(JSON.parse(textOf(result)), target);
+});
+
+test('callTool getChromeTarget over a jar-scoped engine (throws admin-only) → isError with the message', async () => {
+  const msg = 'automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity';
+  const engine = { getChromeTarget: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getChromeTarget', {});
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+test('callTool getChromeTarget chrome-window-unavailable throw → isError', async () => {
+  const msg = 'automation: chrome-window-unavailable — mainWindow is null (closed or starting up)';
+  const engine = { getChromeTarget: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getChromeTarget', {});
   assert.equal(result.isError, true);
   assert.equal(textOf(result), msg);
 });

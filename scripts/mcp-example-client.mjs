@@ -1,7 +1,7 @@
 // Example MCP-SDK client for the RUNNING Goldfinch automation server (Flight 3 deliverable).
 //
 // WHAT THIS IS: a minimal, dependency-only-on-the-MCP-SDK consumer that connects to Goldfinch's
-// loopback Streamable-HTTP MCP server, lists its 16 tools, and drives a short end-to-end sequence
+// loopback Streamable-HTTP MCP server, lists its 17 tools, and drives a short end-to-end sequence
 // (open a tab → navigate → screenshot → read DOM). It is the SDK-client sibling of
 // `scripts/cdp-driver.mjs` and `scripts/a11y-audit.mjs` (same attach-don't-launch, Node-script
 // pattern) — but over the real MCP consumer path (the SDK client + StreamableHTTPClientTransport),
@@ -62,7 +62,10 @@ async function main() {
   await client.connect(transport); // performs the MCP initialize handshake
 
   try {
-    // 1) Discover: list the tools the server advertises (expect the 16 Goldfinch tools).
+    // 1) Discover: list the tools the server advertises (expect the 17 Goldfinch tools).
+    //    This client connects without auth — listTools is not identity-filtered, so all 17 tools
+    //    appear in discovery. getChromeTarget (the 17th) is admin-only and only *callable* by an
+    //    admin-keyed client; calling it unauthenticated will be refused at the handler level.
     const { tools } = await client.listTools();
     console.log(`\nTools (${tools.length}):`);
     for (const t of tools) console.log(`  - ${t.name}`);

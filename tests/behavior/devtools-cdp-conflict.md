@@ -16,9 +16,10 @@
 ## Preconditions
 
 - Goldfinch is running via **`npm run dev:automation`** — **confirm there is NO `--remote-debugging-port`** in the launch (the confound-free venue; a `:9222` CDP attach would be a *third* client and muddy the finding).
-- An MCP client connected to `http://127.0.0.1:7777/mcp`.
+- An MCP client connected to `http://127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
 - The chrome can open Chromium DevTools on a web tab.
-- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:7777`** with the app launched via `npm run dev:automation` (**no CDP port**), plus opening/closing Chromium DevTools from the chrome. The `chrome-devtools` MCP **must not** be used (it launches its own browser AND adds another CDP client — double disqualification here).
+- **Port (load-bearing for every URL below).** Pin the listen port with **`GOLDFINCH_MCP_PORT`** (default `49707`); export it once at launch and reuse it in all client/curl calls.
+- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:$GOLDFINCH_MCP_PORT`** with the app launched via `npm run dev:automation` (**no CDP port**), plus opening/closing Chromium DevTools from the chrome. The `chrome-devtools` MCP **must not** be used (it launches its own browser AND adds another CDP client — double disqualification here).
 
 ## Observables Required
 

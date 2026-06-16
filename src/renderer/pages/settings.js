@@ -414,6 +414,17 @@ async function copyText(text, messageEl) {
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
 })();
 
+// DD6 (Flight 6): one shared on-load fetch of automation key state, consumed by BOTH the
+// key-management and activity-viewer IIFEs (was two IPC round-trips). Memoizes the FIRST
+// call only — refresh() after mint/revoke still fetches fresh (it must reflect a new key).
+let _automationKeysOnce = null;
+function automationKeysOnce() {
+  const bridge = window.goldfinchInternal;
+  if (!bridge) return Promise.resolve(null);            // null-safe off-origin (AC4)
+  if (!_automationKeysOnce) _automationKeysOnce = bridge.automationListKeys();
+  return _automationKeysOnce;
+}
+
 /* ---- automation key management controller (Leg 3) ---- */
 
 (function () {
@@ -576,8 +587,9 @@ async function copyText(text, messageEl) {
   keyDoneBtn.addEventListener('click', clearReveal);
 
   // Initial load — reveal stays hidden (it is only ever populated by a mint).
+  // on load — use the shared single fetch (AC1); reveal stays hidden.
   clearReveal();
-  refresh().catch(() => {});
+  automationKeysOnce().then((info) => { if (info) { renderJars(info.jars); renderAdmin(info.adminEnabled, info.adminKeySet); } }).catch(() => {});
 })();
 
 /* ---- automation activity viewer (Leg 4 / SC10 / DD6) ---- */
@@ -597,7 +609,7 @@ async function copyText(text, messageEl) {
   // operator-controlled, so it is only ever rendered via textContent.
   /** @type {Map<string, string>} */
   const jarNames = new Map();
-  bridge.automationListKeys()
+  automationKeysOnce()
     .then((info) => {
       if (info && Array.isArray(info.jars)) {
         for (const j of info.jars) jarNames.set(j.id, j.name);

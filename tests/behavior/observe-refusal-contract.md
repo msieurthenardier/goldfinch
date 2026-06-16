@@ -13,10 +13,11 @@ Verify the DD6/DD8 **result/refusal/error tri-state** of the observe tools acros
 
 ## Preconditions
 
-- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:7777`.
-- An MCP client connected to `http://127.0.0.1:7777/mcp`.
+- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:$GOLDFINCH_MCP_PORT`.
+- An MCP client connected to `http://127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
 - A web tab is open (control target).
-- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:7777`** (app via `npm run dev:automation`), plus the ability to **open Chromium DevTools on a target tab from the chrome** (the PRIMARY way to occupy the single-client CDP debugger and force `attach-failed`). Not the `:9222` CDP path; `chrome-devtools` MCP does not qualify.
+- **Port (load-bearing for every URL below).** Pin the listen port with **`GOLDFINCH_MCP_PORT`** (default `49707`); export it once at launch and reuse it in all client/curl calls.
+- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:$GOLDFINCH_MCP_PORT`** (app via `npm run dev:automation`), plus the ability to **open Chromium DevTools on a target tab from the chrome** (the PRIMARY way to occupy the single-client CDP debugger and force `attach-failed`). Not the `:9222` CDP path; `chrome-devtools` MCP does not qualify.
 
 ## Observables Required
 

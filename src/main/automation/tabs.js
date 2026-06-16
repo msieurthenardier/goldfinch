@@ -71,18 +71,25 @@ async function enumerateTabs(deps) {
  * prevent string-concatenation injection (AC6). The renderer's createTab
  * untrusted branch re-applies isSafeTabUrl as the authoritative gate.
  *
+ * When jarId is provided it is also JSON.stringify-encoded and appended as a
+ * second argument to the renderer hook. When omitted (null/undefined) the
+ * single-arg form is used so JSON.stringify(undefined) → "undefined" never
+ * appears in the generated code string (the jarId == null guard is deliberate).
+ *
  * Resolves to the new tab's wcId once dom-ready fires in the renderer, or
  * null if the URL was rejected or no handle became available within the timeout.
  *
  * @param {string} url
+ * @param {string|null|undefined} jarId
  * @param {{ executeInRenderer: (code: string) => Promise<any> }} deps
  * @returns {Promise<number|null>}
  */
-async function openTab(url, { executeInRenderer }) {
+async function openTab(url, jarId, { executeInRenderer }) {
   if (typeof url !== 'string') {
     throw new Error('automation: bad-url — url must be a string');
   }
-  return executeInRenderer('window.__goldfinchAutomation.openTab(' + JSON.stringify(url) + ')');
+  const jarArg = jarId == null ? '' : ', ' + JSON.stringify(jarId);
+  return executeInRenderer('window.__goldfinchAutomation.openTab(' + JSON.stringify(url) + jarArg + ')');
 }
 
 /**

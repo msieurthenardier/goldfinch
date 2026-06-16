@@ -59,7 +59,7 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
 
   return {
     enumerateTabs: () => tabs.enumerateTabs(deps()),
-    openTab: (/** @type {string} */ url) => tabs.openTab(url, deps()),
+    openTab: (/** @type {string} */ url, /** @type {string|undefined} */ jarId) => tabs.openTab(url, jarId, deps()),
     closeTab: (/** @type {number} */ wcId) => tabs.closeTab(wcId, deps()),
     activateTab: (/** @type {number} */ wcId) => tabs.activateTab(wcId, deps()),
     navigate: (/** @type {number} */ wcId, /** @type {string} */ url) => nav.navigate(wcId, url, deps()),
@@ -76,6 +76,12 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     captureWindow: () => observe.captureWindow(deps()),
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
     readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),
+    getChromeTarget: () => {
+      const mw = getMainWindow();
+      const cc = mw ? mw.webContents : null;
+      if (!cc) throw new Error('automation: chrome-window-unavailable — mainWindow is null (closed or starting up)');
+      return { wcId: cc.id, kind: 'chrome', url: cc.getURL() };
+    },
   };
 }
 

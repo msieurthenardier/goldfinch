@@ -13,9 +13,10 @@ Verify the DD1/DD5 **foreground-to-act** discipline over the MCP surface: when a
 
 ## Preconditions
 
-- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:7777`.
-- An MCP client connected to `http://127.0.0.1:7777/mcp`.
-- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:7777`** (app via `npm run dev:automation`), not the `:9222` CDP path. The `chrome-devtools` MCP **does not qualify** (own browser → false pass). Two visually-distinct pages are used so a screenshot can tell A from B (e.g. `https://example.com/` vs `https://example.org/`, which render different headings).
+- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:$GOLDFINCH_MCP_PORT`.
+- An MCP client connected to `http://127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
+- **Port (load-bearing for every URL below).** Pin the listen port with **`GOLDFINCH_MCP_PORT`** (default `49707`); export it once at launch and reuse it in all client/curl calls.
+- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:$GOLDFINCH_MCP_PORT`** (app via `npm run dev:automation`), not the `:9222` CDP path. The `chrome-devtools` MCP **does not qualify** (own browser → false pass). Two visually-distinct pages are used so a screenshot can tell A from B (e.g. `https://example.com/` vs `https://example.org/`, which render different headings).
 
 ## Observables Required
 

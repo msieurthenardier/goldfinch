@@ -124,13 +124,20 @@ const DRIVE_TOOLS = [
   },
   {
     name: 'openTab',
-    description: 'Open a new tab at the given URL. Returns the new tab\'s wcId, or null if the URL was rejected renderer-side or no handle became available within the timeout.',
+    description: 'Open a new tab at the given URL. Optional jarId targets a specific container/jar. ' +
+      'A jar key may only open tabs in its own jar (foreign jarId → refused with out-of-jar). ' +
+      'Admin may target any jar. An unknown jarId is refused (unknown-jar) — never a silent fallback. ' +
+      'Omit jarId to open in the default container (admin/unscoped) or in the jar key\'s own jar. ' +
+      'Returns the new tab\'s wcId, or null if the URL was rejected renderer-side or no handle became available within the timeout.',
     inputSchema: {
       type: 'object',
-      properties: { url: { type: 'string', description: 'http(s) URL to open' } },
+      properties: {
+        url: { type: 'string', description: 'http(s) URL to open' },
+        jarId: { type: 'string', description: 'Target container/jar id. Omit to use the default (or own jar for a jar key). A jar key may only supply its own jarId; admin may supply any. An unknown jarId is refused.' },
+      },
       required: ['url'],
     },
-    call: (engine, { url }) => engine.openTab(url),
+    call: (engine, { url, jarId }) => engine.openTab(url, jarId),
   },
   {
     name: 'closeTab',
@@ -326,9 +333,26 @@ const OBSERVE_TOOLS = [
   },
 ];
 
-// The full tool table — the 12 drive tools + the 4 observe tools (Leg 3),
+// ---------------------------------------------------------------------------
+// Tool definitions — chrome discovery (1). Admin-only; jar keys are refused
+// at the scope façade (scope.js:getChromeTarget), never filtered here.
+// No result-shaping needed — { wcId, kind, url } rides the default JSON-text
+// serialize. This is the discovery affordance added in Flight 6 (DD1).
+// ---------------------------------------------------------------------------
+
+/** @type {ToolDef[]} */
+const CHROME_TOOLS = [
+  {
+    name: 'getChromeTarget',
+    description: 'ADMIN ONLY. Return the chrome renderer\'s automation target: { wcId, kind: "chrome", url }. The returned wcId is passed to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). Jar keys are refused with automation: admin-only.',
+    inputSchema: { type: 'object', properties: {} }, // no-input, mirrors captureWindow's schema
+    call: (engine) => engine.getChromeTarget(),
+  },
+];
+
+// The full tool table — 12 drive + 4 observe + 1 chrome-discovery (Leg 3 + Flight 6),
 // iterated by buildToolRegistry for both discovery and dispatch.
-const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS];
+const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...CHROME_TOOLS];
 
 // ---------------------------------------------------------------------------
 // Registry builder
