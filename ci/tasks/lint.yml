@@ -1,0 +1,21 @@
+---
+# ESLint over the repo — mirrors the GitHub Actions "Lint" step (ci.yml).
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: node
+    tag: "22"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      cd repo
+      npm ci
+      npm run lint

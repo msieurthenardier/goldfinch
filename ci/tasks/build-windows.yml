@@ -1,0 +1,43 @@
+---
+# Windows installer (nsis) — fallback artifact only, NOT a release.
+# Runs on the Concourse `windows` worker (Node 22 + git + python preinstalled).
+# `--publish never` keeps it off GitHub Releases; build.yml (GitHub Actions)
+# remains the real release path.
+#
+# Ad-hoc:  fly -t local-goldfinch execute -c ci/tasks/build-windows.yml -i repo=. -o installers=./out
+# Pipeline: the build-windows job puts ./installers to MinIO.
+#
+# NOTE: Windows tasks have no image_resource — they run directly on the worker host.
+platform: windows
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: installers
+
+run:
+  path: powershell
+  args:
+    - -NoProfile
+    - -ExecutionPolicy
+    - Bypass
+    - -Command
+    - |
+      $ErrorActionPreference = 'Stop'
+      # Mirrors build.yml's signing-disable env. NOTE: GitHub runners have no
+      # cert so they emit UNSIGNED installers; this Windows worker has a cert in
+      # its machine store, so signtool still signs the fallback build. That is
+      # harmless for a personal fallback installer (the real signed/release path
+      # is build.yml). Left in for parity / in case the worker cert is removed.
+      $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+      Set-Location repo
+      npm ci
+      npx electron-builder --win --publish never
+      $ver = node -p "require('./package.json').version"
+      Set-Location ..
+      $name = if ($env:BUILD_NAME) { $env:BUILD_NAME } else { 'local' }
+      New-Item -ItemType Directory -Force -Path stage | Out-Null
+      Copy-Item repo/dist/*.exe stage/ -ErrorAction SilentlyContinue
+      Compress-Archive -Path stage/* -DestinationPath "installers/goldfinch-windows-$ver-b$name.zip" -Force
+      Get-ChildItem installers

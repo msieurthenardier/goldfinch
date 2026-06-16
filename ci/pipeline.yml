@@ -1,0 +1,86 @@
+---
+# Goldfinch CI on local Concourse — conserves GitHub Actions minutes.
+#
+# Set/update:  ci/set-pipeline.sh   (wraps `fly set-pipeline -p goldfinch`)
+# Secrets:     Vault under concourse/goldfinch/goldfinch/* (see ci/README.md).
+#
+# - `ci` runs the full PR-equivalent check suite automatically on every push to
+#   main (the GitHub Actions ci.yml equivalent; ci.yml's PR trigger is disabled).
+# - `build-linux` / `build-windows` are MANUAL (no auto-trigger) — on-demand
+#   fallback installers pushed to MinIO. They never publish to GitHub Releases;
+#   build.yml (GitHub Actions) remains the real release path.
+
+resources:
+  - name: repo
+    type: git
+    icon: github
+    source:
+      uri: git@github.com:msieurthenardier/goldfinch.git
+      branch: main
+      # Read-only SSH deploy key (repo-scoped). The seed entrypoint was made
+      # multiline-safe so this PEM round-trips the Vault seed file. See ci/README.md.
+      private_key: ((git-key.private_key))
+
+  - name: linux-installers
+    type: s3
+    icon: package-variant-closed
+    source:
+      endpoint: ((minio.endpoint))
+      bucket: ((minio.bucket))
+      access_key_id: ((minio.access_key))
+      secret_access_key: ((minio.secret_key))
+      region_name: us-east-1
+      disable_ssl: true
+      regexp: goldfinch-linux-(.*).tar.gz
+
+  - name: windows-installers
+    type: s3
+    icon: package-variant-closed
+    source:
+      endpoint: ((minio.endpoint))
+      bucket: ((minio.bucket))
+      access_key_id: ((minio.access_key))
+      secret_access_key: ((minio.secret_key))
+      region_name: us-east-1
+      disable_ssl: true
+      regexp: goldfinch-windows-(.*).zip
+
+jobs:
+  - name: ci
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - in_parallel:
+          fail_fast: false
+          steps:
+            - task: test
+              file: repo/ci/tasks/test.yml
+            - task: typecheck
+              file: repo/ci/tasks/typecheck.yml
+            - task: lint
+              file: repo/ci/tasks/lint.yml
+            - task: audit
+              file: repo/ci/tasks/audit.yml
+            - task: package-linux
+              file: repo/ci/tasks/package-linux.yml
+
+  - name: build-linux
+    plan:
+      - get: repo
+        passed: [ci]   # build only a commit that passed ci; manual trigger
+      - task: build
+        file: repo/ci/tasks/build-linux.yml
+      - put: linux-installers
+        params:
+          file: installers/goldfinch-linux-*.tar.gz
+
+  - name: build-windows
+    plan:
+      - get: repo
+        passed: [ci]
+      - task: build
+        file: repo/ci/tasks/build-windows.yml
+      - put: windows-installers
+        params:
+          file: installers/goldfinch-windows-*.zip

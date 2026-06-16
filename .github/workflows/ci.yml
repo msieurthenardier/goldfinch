@@ -1,13 +1,18 @@
 name: CI
 
-# Fast pull-request check: verifies the app installs and packages (compile +
-# bundle) on Linux only. The full Windows/macOS/Linux installer matrix lives in
-# build.yml and runs on releases (v* tags) / manual dispatch — so PRs don't
-# burn macOS runner minutes.
+# CI MOVED TO LOCAL CONCOURSE (to conserve GitHub Actions minutes).
+# The PR-equivalent check suite (test/typecheck/lint/audit/package-linux) now
+# runs on the local Concourse instance — see ci/README.md and ci/pipeline.yml.
+#   - Pre-push, against your working tree:
+#       fly -t local-goldfinch execute -c ci/tasks/test.yml -i repo=.
+#   - Automatically on every push to main: the `ci` job in ci/pipeline.yml.
+#
+# This workflow is kept as a manual-only fallback (workflow_dispatch) for when
+# Concourse is unavailable; its automatic pull_request trigger is intentionally
+# disabled so PRs no longer consume Actions minutes. build.yml (releases) is
+# untouched and remains the real release path.
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

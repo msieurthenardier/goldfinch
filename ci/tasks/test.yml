@@ -1,0 +1,24 @@
+---
+# Unit suite — mirrors the GitHub Actions "Unit tests" step (ci.yml).
+# Runnable two ways:
+#   fly -t local-goldfinch execute -c ci/tasks/test.yml -i repo=.   (local tree)
+#   as a task in ci/pipeline.yml                                    (git resource)
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: node
+    tag: "22"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      cd repo
+      npm ci
+      npm test

@@ -1,0 +1,23 @@
+---
+# Dependency audit — mirrors the GitHub Actions "Dependency audit" step (ci.yml).
+# Triage policy (unchanged from ci.yml): a high here is actionable ONLY by
+# updating the offending dependency — never by lowering --audit-level.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: node
+    tag: "22"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      cd repo
+      npm ci
+      npm audit --audit-level=high
