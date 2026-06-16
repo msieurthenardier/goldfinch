@@ -61,6 +61,62 @@ const { createAuditLog } = require('./audit-log');
 // a truncated word. Anchored at start; the separator after the code is required.
 const ERROR_CODE_RE = /^automation:\s*([a-z-]+)\s+—/;
 
+/**
+ * Derive a short, human-readable context string for an audit log entry — the
+ * "where/what" complement to the op name and targetWcId already recorded.
+ *
+ * Privacy rule: `typeText` MUST NOT log the content; it records only the
+ * character count so an operator can audit that typing happened without ever
+ * exposing a typed secret (password, token, etc.) to the log.
+ *
+ * Null-safe: `args` may be undefined (e.g. when a tool is called with no
+ * arguments). All other ops whose wcId already names the tab return `null`.
+ *
+ * @param {string} op  MCP tool name
+ * @param {Record<string, any> | undefined} args  tool call arguments
+ * @returns {string | null}
+ */
+function deriveAuditDetail(op, args) {
+  if (!args) return null;
+  switch (op) {
+    case 'navigate':
+      return args.url != null ? 'url=' + String(args.url) : null;
+    case 'openTab': {
+      let detail = args.url != null ? 'url=' + String(args.url) : null;
+      if (detail && args.jarId != null) detail += ' jar=' + String(args.jarId);
+      return detail;
+    }
+    case 'click': {
+      const x = args.x;
+      const y = args.y;
+      if (x == null || y == null) return null;
+      let detail = '(' + x + ',' + y + ')';
+      if (args.button != null && args.button !== 'left') detail += ' button=' + String(args.button);
+      if (args.clickCount != null && args.clickCount !== 1) detail += ' clicks=' + String(args.clickCount);
+      return detail;
+    }
+    case 'scroll': {
+      const x = args.x;
+      const y = args.y;
+      const dx = args.dx;
+      const dy = args.dy;
+      if (x == null || y == null || dx == null || dy == null) return null;
+      return '(' + x + ',' + y + ') d=(' + dx + ',' + dy + ')';
+    }
+    case 'pressKey': {
+      const keyName = args.name ?? args.key;
+      return keyName != null ? 'key=' + String(keyName) : null;
+    }
+    case 'typeText': {
+      // REDACTED: length only — never the content.
+      const len = String(args.text ?? '').length;
+      return 'text(' + len + ' chars)';
+    }
+    default:
+      return null;
+  }
+}
+
 // Configurable MCP listen port. Default moved off the squatted 7777 into the IANA
 // dynamic range (DD1). The persisted `automationPort` setting and GOLDFINCH_MCP_PORT
 // env override resolve over this in resolvePort().
@@ -209,7 +265,7 @@ function createMcpServer(opts = {}) {
   const sessions = new Map();
 
   /**
-   * Build a fresh MCP Server with the 16 tools wired over a per-session,
+   * Build a fresh MCP Server with the 17 tools wired over a per-session,
    * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
    *   - wrapped by scopeEngine(engine, identity, ctx) — admin → unchanged; jar →
@@ -256,6 +312,7 @@ function createMcpServer(opts = {}) {
         targetWcId: args?.wcId ?? null,
         outcome: isError ? 'error' : 'ok',
         errorCode,
+        detail: deriveAuditDetail(name, args),
       });
       return result;
     });
@@ -732,4 +789,5 @@ module.exports = {
   mintAdminKey,
   revokeJarKey,
   revokeAdminKey,
+  deriveAuditDetail,
 };

@@ -18,12 +18,12 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, enableAndMintJarKey, revokeJarKey, revokeAdminKey } = require('../../src/main/automation/mcp-server');
+const { createMcpServer, enableAndMintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 
 const TEST_PORT = 7790;
 const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
-const EXPECTED_TOOL_COUNT = 16;
+const EXPECTED_TOOL_COUNT = 17;
 
 // The valid key the test harness mints. The injected settings stub stores its
 // hash and reports the surface enabled, so a Bearer with this key passes the gate.
@@ -247,7 +247,7 @@ function initBody() {
   };
 }
 
-test('first client initializes and tools/list returns 16 tools', async () => {
+test('first client initializes and tools/list returns 17 tools', async () => {
   const server = await startServer();
   try {
     const client = await connectClient();
@@ -1085,4 +1085,132 @@ test('revoke re-validation — a minted token validates to its jar, then to null
     null,
     'same token validates to null after revoke (proves 401-on-next-request)'
   );
+});
+
+// ---------------------------------------------------------------------------
+// deriveAuditDetail (pure helper, HAT SC10 inline fix). Tests every mapping and
+// the key safety invariant: typeText MUST NOT log content — length only.
+// ---------------------------------------------------------------------------
+
+test('deriveAuditDetail — navigate returns url=<url>', () => {
+  assert.equal(deriveAuditDetail('navigate', { wcId: 1, url: 'https://example.com' }), 'url=https://example.com');
+});
+
+test('deriveAuditDetail — navigate with null url returns null', () => {
+  assert.equal(deriveAuditDetail('navigate', { wcId: 1 }), null);
+});
+
+test('deriveAuditDetail — openTab returns url=<url>', () => {
+  assert.equal(deriveAuditDetail('openTab', { url: 'https://x.example' }), 'url=https://x.example');
+});
+
+test('deriveAuditDetail — openTab with jarId appends jar=<jarId>', () => {
+  assert.equal(deriveAuditDetail('openTab', { url: 'https://x.example', jarId: 'work' }), 'url=https://x.example jar=work');
+});
+
+test('deriveAuditDetail — click returns (x,y) with defaults omitted', () => {
+  assert.equal(deriveAuditDetail('click', { wcId: 1, x: 10, y: 20 }), '(10,20)');
+});
+
+test('deriveAuditDetail — click with non-default button includes it', () => {
+  assert.equal(deriveAuditDetail('click', { wcId: 1, x: 10, y: 20, button: 'right', clickCount: 1 }), '(10,20) button=right');
+});
+
+test('deriveAuditDetail — click with non-default clickCount includes it', () => {
+  assert.equal(deriveAuditDetail('click', { wcId: 1, x: 5, y: 5, clickCount: 2 }), '(5,5) clicks=2');
+});
+
+test('deriveAuditDetail — scroll returns (x,y) d=(dx,dy)', () => {
+  assert.equal(deriveAuditDetail('scroll', { wcId: 1, x: 0, y: 0, dx: 0, dy: -100 }), '(0,0) d=(0,-100)');
+});
+
+test('deriveAuditDetail — pressKey returns key=<name> (preferred alias)', () => {
+  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, name: 'Enter' }), 'key=Enter');
+});
+
+test('deriveAuditDetail — pressKey falls back to key alias when name absent', () => {
+  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, key: 'Tab' }), 'key=Tab');
+});
+
+test('deriveAuditDetail — typeText returns text(N chars) — NEVER the raw content', () => {
+  const secret = 'hunter2';
+  const detail = deriveAuditDetail('typeText', { wcId: 1, text: secret });
+  // Must be the length form.
+  assert.equal(detail, 'text(' + secret.length + ' chars)');
+  // MUST NOT contain the raw text.
+  assert.ok(!detail.includes(secret), 'typeText detail must not contain the typed content');
+});
+
+test('deriveAuditDetail — typeText with empty text returns text(0 chars)', () => {
+  assert.equal(deriveAuditDetail('typeText', { wcId: 1, text: '' }), 'text(0 chars)');
+});
+
+test('deriveAuditDetail — null-returning ops yield null', () => {
+  const nullOps = ['enumerateTabs', 'getChromeTarget', 'captureWindow', 'captureScreenshot',
+    'readDom', 'readAxTree', 'closeTab', 'activateTab', 'goBack', 'goForward', 'reload'];
+  for (const op of nullOps) {
+    assert.equal(deriveAuditDetail(op, { wcId: 1 }), null, op + ' should return null');
+  }
+});
+
+test('deriveAuditDetail — null-safe: returns null when args is undefined', () => {
+  assert.equal(deriveAuditDetail('navigate', undefined), null);
+  assert.equal(deriveAuditDetail('typeText', undefined), null);
+  assert.equal(deriveAuditDetail('click', undefined), null);
+});
+
+test('audit — navigate tool call records detail=url=… in the log entry', async () => {
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    const client = await connectClient(VALID_KEY);
+    try {
+      await client.callTool({ name: 'navigate', arguments: { wcId: 1, url: 'https://detail-test.example' } });
+      const entry = server.getActivity().log.slice(-1)[0];
+      assert.equal(entry.op, 'navigate');
+      assert.equal(entry.detail, 'url=https://detail-test.example');
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await server.stop();
+  }
+});
+
+test('audit — typeText tool call records text(N chars) detail — never the content', async () => {
+  const secret = 's3cr3t!';
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    const client = await connectClient(VALID_KEY);
+    try {
+      await client.callTool({ name: 'typeText', arguments: { wcId: 1, text: secret } });
+      const entry = server.getActivity().log.slice(-1)[0];
+      assert.equal(entry.op, 'typeText');
+      assert.equal(entry.detail, 'text(' + secret.length + ' chars)');
+      assert.ok(!entry.detail.includes(secret), 'the typed secret must not appear in the log detail');
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await server.stop();
+  }
+});
+
+test('audit — enumerateTabs tool call records detail:null (no context needed)', async () => {
+  const broadcasts = [];
+  const server = await startAuditServer(broadcasts);
+  try {
+    const client = await connectClient(VALID_KEY);
+    try {
+      await client.callTool({ name: 'enumerateTabs', arguments: {} });
+      const entry = server.getActivity().log.slice(-1)[0];
+      assert.equal(entry.op, 'enumerateTabs');
+      assert.equal(entry.detail, null);
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await server.stop();
+  }
 });

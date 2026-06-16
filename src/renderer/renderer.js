@@ -1999,8 +1999,14 @@ window.__goldfinchAutomation = {
       active: t.id === activeTabId,
     }));
   },
-  openTab(url) {
-    const tab = createTab(url);          // untrusted branch → isSafeTabUrl enforced
+  openTab(url, jarId) {
+    let container = null;
+    if (jarId != null) {
+      container = containers.find((c) => c.id === jarId) || null;
+      // Unknown jarId → REFUSE (DD3): do NOT silently fall back to DEFAULT_CONTAINER.
+      if (!container) throw new Error('automation: unknown-jar — no container ' + jarId);
+    }
+    const tab = createTab(url, container);   // null container → createTab uses DEFAULT_CONTAINER (today's behavior)
     if (!tab) return null;               // URL rejected
     if (tab.wcId != null) return tab.wcId;
     // wcId is assigned at dom-ready; resolve once it lands (bounded wait).

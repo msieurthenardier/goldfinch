@@ -21,6 +21,8 @@ interface AutomationLogEntry {
   targetWcId: number | null;
   outcome: 'ok' | 'error';
   errorCode: string | null;
+  /** Per-op context string for auditability (e.g. url=…, key=…, text(N chars)). Null when not applicable. */
+  detail?: string | null;
 }
 
 /** The automation activity snapshot returned by get-activity and the live broadcast. */

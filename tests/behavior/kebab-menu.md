@@ -27,61 +27,86 @@ and harmless when chosen.
 
 ## Preconditions
 
-- Goldfinch is running via `npm run dev:debug` (exposes `--remote-debugging-port=9222
-  --remote-allow-origins=*`, `--no-sandbox`). The apparatus must **attach to this already-running
-  instance's `:9222`, never launch a fresh browser** (a fresh browser has none of the app's chrome).
-  Qualifying clients: the committed **`scripts/cdp-driver.mjs`** (raw CDP-over-WebSocket, trusted
-  `Input.dispatch*`, attach-don't-launch), or the **Playwright MCP** registered in `.mcp.json` with
-  `--cdp-endpoint http://127.0.0.1:9222`. **The `chrome-devtools` MCP does NOT qualify — it launches
-  its own browser** (the standing Goldfinch false-pass trap).
+- **Apparatus — admin MCP surface.** Goldfinch is running via `npm run dev:automation` with
+  `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_MCP_PORT=49707`. At
+  launch, the app prints `AUTOMATION_DEV_MINT { "key": "...", "adminKey": "..." }` to stdout —
+  capture the `adminKey`. The MCP server listens on `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
+- **Port (load-bearing for every URL below).** Pin the listen port via `GOLDFINCH_MCP_PORT` (default
+  `49707`). Export it once at launch and reuse it in all SDK calls.
+- **How the admin key attaches to the client (load-bearing).** Connect an admin MCP client (SDK
+  `StreamableHTTPClientTransport`, `Authorization: Bearer <adminKey>`) on
+  `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`:
+  ```js
+  const port = process.env.GOLDFINCH_MCP_PORT || 49707;
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://127.0.0.1:${port}/mcp`),
+    { requestInit: { headers: { Authorization: `Bearer ${adminKey}` } } }
+  );
+  ```
+  The Bearer rides every request the transport sends. These specs require the **admin** key — a jar
+  key is refused `getChromeTarget` (`admin-only`) and cannot drive the chrome renderer.
 - **This test drives the renderer (the Goldfinch chrome UI), NOT a `<webview>` guest** — the toolbar
-  and kebab live in the chrome renderer. Select the top-level Goldfinch window target whose URL is
-  the renderer `index.html`, not `about:blank`/`http(s)` guest pages.
-- Input must be delivered as **trusted events** (CDP `Input.dispatchMouseEvent` /
-  `Input.dispatchKeyEvent`, or MCP `click`/`press_key`), not synthetic `dispatchEvent` — only trusted
-  events fire the renderer's real click/keydown handlers and native focus traversal.
+  and kebab live in the chrome renderer. `getChromeTarget()` returns the chrome `wcId` directly; all
+  drive and observe calls pass this `wcId` (no target-selection trap).
+- Input must be delivered as **trusted events** via the MCP tools (`click(wcId, x, y)`,
+  `pressKey(wcId, name)`) — only trusted events fire the renderer's real click/keydown handlers and
+  native focus traversal.
+- **Coordinate-click rule (apparatus rule from the leg-2 spike):** all clicks are coordinate-based —
+  `click(wcId, x, y)` located via a `captureWindow()` screenshot. There are no CSS selectors over
+  the MCP surface. Take a `captureWindow()` screenshot to locate the kebab button's coordinates
+  before clicking it.
+- **Focus-anchor rule (apparatus rule from the leg-2 spike):** a cold `Tab` from the bare document
+  does not relocate focus — this is normal browser behavior, NOT an engine defect. **Before any
+  keyboard-only sequence, establish a focus anchor by sending a `click(wcId, x, y)` into the chrome
+  first.** Use a `captureWindow()` screenshot to locate the click target.
 - **Do NOT select the Exit item with a committing activation** (it quits the app and ends the run).
   Exit is asserted as *present/selectable only*; its quit effect is verified manually outside this test.
-- **Active precondition probe** (Step 1): confirm `:9222` answers and a renderer target is present
-  before exercising anything.
+- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`,
+  and `getChromeTarget()` returns a numeric chrome `wcId` before exercising anything.
+- **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify — it launches its
+  own browser and never touches this app (the standing Goldfinch false-pass trap). The apparatus is
+  the SDK admin MCP client over `127.0.0.1:$GOLDFINCH_MCP_PORT`, app launched via
+  `npm run dev:automation`. This is **not** the CDP attach path — `npm run dev:automation` does not
+  expose a DevTools port; only the admin MCP surface is used.
 
 ## Observables Required
 
-- browser (DOM + a11y tree + rendered pixels — measured via a CDP client **attached to the app's
-  `:9222`**): the kebab button's presence, accessible name (≈ "More" / "Menu"), `aria-haspopup="menu"`,
-  and `aria-expanded`; its toolbar position via `getBoundingClientRect` (right of `#toggle-privacy`,
-  the last interactive control in `#toolbar`); the popup's open state (visible / not `.hidden`) and
-  its **`role="menu"`**; the menu items (count = **exactly 2**, each `role="menuitem"`) and their
-  accessible names ("Settings", "Exit"); `document.activeElement`
-  for focus-on-open, arrow roving, and Escape-restores-to-trigger; the live tab count (to confirm the
-  inert Settings selection changes nothing); and **screenshots** for the focus-ring delta (a
-  rendered-pixel property the a11y tree can't attest).
-- shell (precondition probe: `:9222` reachability — measured via Bash/curl or
-  `node scripts/cdp-driver.mjs eval '1+1'`).
+- mcp (admin MCP tools on the chrome `wcId` — `readAxTree(wcId)` for the kebab button's presence,
+  accessible name (≈ "More" / "Menu"), `aria-haspopup="menu"`, `aria-expanded`; the toolbar
+  position located via a `captureWindow()` screenshot (right of the Shield button, the last
+  interactive control in the toolbar); the popup's open state (visible / not `.hidden`) and its
+  **`role="menu"`**; the menu items (count = **exactly 2**, each `role="menuitem"`) and their
+  accessible names ("Settings", "Exit"); focused node in `readAxTree(wcId)` for focus-on-open,
+  arrow roving, and Escape-restores-to-trigger; the live tab count from `enumerateTabs` or
+  `readAxTree(wcId)` (to confirm the inert Settings selection changes nothing); and
+  `captureWindow()` / `captureScreenshot(wcId)` screenshots for the focus-ring delta — a
+  rendered-pixel property the a11y tree can't attest)
+- shell (precondition probe: `tools/list` count and `getChromeTarget` result — measured via the MCP
+  client or Bash)
 
 ## Steps
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Probe: `curl http://127.0.0.1:9222/json` (or `node scripts/cdp-driver.mjs eval '1+1'`). Identify the **renderer** target (Goldfinch window whose URL is the local `index.html`). Note the current tab count. | `:9222` responds and a renderer target is listed; the apparatus is attach-capable. Tab count recorded. If `:9222` is dead or only guest targets exist, halt — preconditions not met. |
-| 2 | Inspect the **toolbar row** (the row with the address bar, Media, and Shield buttons). Locate the kebab control. | A single **kebab (⋮) button** sits **immediately to the right of the Shield button** (`#toggle-privacy`) as the **last interactive control in the toolbar** — its left edge is at/after the Shield button's right edge. It has an accessible name, `aria-haspopup="menu"`, and `aria-expanded="false"`. [a11y] |
-| 3 | **Mouse — open:** click the kebab button. | The menu opens: `aria-expanded` becomes `true`; a popup with **`role="menu"`** appears containing **exactly two `role="menuitem"` items**, with accessible names **"Settings"** and **"Exit"** (in that order). No third item. [a11y] |
-| 4 | **Focus on open:** with the menu open (reopen by keyboard if Step 3 left it closed — focus the kebab via `Tab`, press `Enter`), read `document.activeElement`. | Opening the menu moves focus **into the menu** — the first item ("Settings") is focused. Focus is never stranded on `<body>`. [a11y] |
-| 5 | **Keyboard — arrow navigation:** with the menu open and the first item focused, press `ArrowDown`, then `ArrowDown` again, then `ArrowUp`; observe `document.activeElement` after each. Also test `Home` and `End`. | `ArrowDown` moves focus Settings → Exit; a further `ArrowDown` wraps to Settings (or stays at Exit — record which; APG allows either, wrapping preferred); `ArrowUp` moves back up. `Home` focuses Settings; `End` focuses Exit. Focus stays within the two menu items throughout. [a11y] |
-| 6 | **Keyboard — Escape closes + restores focus:** with the menu open, press `Escape`. | The menu closes; `aria-expanded` returns to `false`; focus is **restored to the kebab trigger** (not lost to `<body>`). [a11y] |
-| 7 | **Mouse — click-outside closes:** open the menu again (click the kebab), then click somewhere outside the menu (e.g. the address bar or page area). | The menu closes and `aria-expanded` returns to `false`. |
-| 8 | **Settings is present but inert:** open the menu, focus/select the **Settings** item (`Enter` or click). Read the tab count and the active tab's URL afterward. | Selecting Settings **closes the menu** and **does nothing else** — tab count is unchanged from Step 1, no new tab opened, no navigation occurred (Settings is a placeholder until the internal-page mechanism lands in a later flight). No error/crash. |
-| 9 | **Focus-ring visibility:** move keyboard focus to the kebab button (via `Tab`); capture a focused screenshot and an unfocused screenshot of the button. | While focused, the kebab button shows a **visible focus indicator** against the dark toolbar background — a focused-vs-unfocused screenshot shows a clear ring/outline delta, NOT `outline:none` and NOT an invisible ring. [a11y] |
-| 10 | **Exit item present (do NOT commit):** open the menu and confirm the **Exit** item is focusable/selectable, but **do not activate it** (activation quits the app and ends the run). Read its accessible name and that it is keyboard-reachable. | The Exit item is present, has accessible name "Exit", and is reachable/focusable by keyboard. Its quit behavior (SC4) is verified **manually**, outside this test. [a11y] |
-| 11 | **Menu mutual exclusion:** open the container (`▾`) menu (trusted click on `#new-tab-menu`); confirm it is open. Then open the kebab menu (trusted click on `#kebab`). Read both menus' open state. Then, with the kebab menu open, open the container menu again and re-read both. *(Note: the container menu is built dynamically and has no `role="menu"`; read its open-state authoritatively from `#new-tab-menu`'s `aria-expanded`, and the kebab's from `#kebab`'s `aria-expanded`/`#kebab-menu` `.hidden`.)* | Opening the kebab **closes the open container menu** (`#new-tab-menu` `aria-expanded="false"`, kebab open); and conversely, opening the container menu **closes the open kebab menu** (kebab `aria-expanded="false"`/hidden, container open). The two menus are never open simultaneously. |
-| 12 | **Tab closes the kebab menu + restores focus:** open the kebab menu (focus is on the first item), then press trusted `Tab`. Read the menu's open state, `aria-expanded`, and `document.activeElement`. (Optionally repeat with `Shift+Tab`.) | `Tab` (and `Shift+Tab`) **closes the kebab menu** (`aria-expanded="false"`, hidden) and **restores focus to the kebab trigger** (`document.activeElement` is `#kebab`), not stranded on a now-hidden menuitem or `<body>`. [a11y] |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count (via `enumerateTabs` or `readAxTree(wcId)`). | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
+| 2 | Take a `captureWindow()` screenshot; locate and inspect the **toolbar row** (the row with the address bar, Media, and Shield buttons) and the kebab control. Confirm via `readAxTree(wcId)`. | A single **kebab (⋮) button** sits **immediately to the right of the Shield button** as the **last interactive control in the toolbar** — its left edge is at/after the Shield button's right edge. It has an accessible name, `aria-haspopup="menu"`, and `aria-expanded="false"`. [a11y] |
+| 3 | **Mouse — open:** take a `captureWindow()` screenshot; locate the kebab button's coordinates; call `click(wcId, x, y)` on those coordinates. Then call `readAxTree(wcId)`. | The menu opens: `aria-expanded` becomes `true`; a popup with **`role="menu"`** appears containing **exactly two `role="menuitem"` items**, with accessible names **"Settings"** and **"Exit"** (in that order). No third item. [a11y] |
+| 4 | **Focus on open:** with the menu open (reopen by keyboard if Step 3 left it closed — establish a focus anchor via `click(wcId, x, y)` on the kebab coordinates, then `pressKey(wcId, 'Enter')`), call `readAxTree(wcId)` and inspect the focused node. | Opening the menu moves focus **into the menu** — the first item ("Settings") is the focused node in `readAxTree(wcId)`. Focus is never stranded on `<body>`. [a11y] |
+| 5 | **Keyboard — arrow navigation:** with the menu open and the first item focused, call `pressKey(wcId, 'ArrowDown')`, then `pressKey(wcId, 'ArrowDown')` again, then `pressKey(wcId, 'ArrowUp')`; call `readAxTree(wcId)` after each. Also call `pressKey(wcId, 'Home')` and `pressKey(wcId, 'End')`. | `ArrowDown` moves focus Settings → Exit; a further `ArrowDown` wraps to Settings (or stays at Exit — record which; APG allows either, wrapping preferred); `ArrowUp` moves back up. `Home` focuses Settings; `End` focuses Exit. Focus stays within the two menu items throughout per `readAxTree(wcId)`. [a11y] |
+| 6 | **Keyboard — Escape closes + restores focus:** with the menu open, call `pressKey(wcId, 'Escape')`. Then call `readAxTree(wcId)`. | The menu closes; `aria-expanded` returns to `false`; focus is **restored to the kebab trigger** (not lost to `<body>`) per `readAxTree(wcId)`. [a11y] |
+| 7 | **Mouse — click-outside closes:** take a `captureWindow()` screenshot; open the menu again (locate the kebab and call `click(wcId, x, y)`), then click somewhere outside the menu (e.g. the address bar area — locate via the screenshot and call `click(wcId, x, y)` on those coordinates). Call `readAxTree(wcId)`. | The menu closes and `aria-expanded` returns to `false`. |
+| 8 | **Settings is present but inert:** open the menu (locate the kebab via `captureWindow()` and `click(wcId, x, y)`); locate and click the **Settings** item (via `captureWindow()` coordinates or `pressKey(wcId, 'Enter')` when it is focused). Read the tab count and the active tab's URL via `readAxTree(wcId)` afterward. | Selecting Settings **closes the menu** and **does nothing else** — tab count is unchanged from Step 1, no new tab opened, no navigation occurred (Settings is a placeholder until the internal-page mechanism lands in a later flight). No error/crash. |
+| 9 | **Focus-ring visibility:** establish a focus anchor via `click(wcId, x, y)` on the toolbar; tab to the kebab button via `pressKey(wcId, 'Tab')`; capture an unfocused `captureWindow()` before (or unfocus after), then a focused screenshot. | While focused, the kebab button shows a **visible focus indicator** against the dark toolbar background — a focused-vs-unfocused `captureWindow()` shows a clear ring/outline delta, NOT `outline:none` and NOT an invisible ring. [a11y] |
+| 10 | **Exit item present (do NOT commit):** open the menu (locate via `captureWindow()` and `click(wcId, x, y)`); call `readAxTree(wcId)` to confirm the **Exit** item's accessible name and that it is keyboard-reachable. **Do not activate it** (activation quits the app and ends the run). | The Exit item is present, has accessible name "Exit", and is reachable/focusable by keyboard (`pressKey(wcId, 'ArrowDown')` reaches it). Its quit behavior (SC4) is verified **manually**, outside this test. [a11y] |
+| 11 | **Menu mutual exclusion:** open the container (`▾`) menu (locate via `captureWindow()` and `click(wcId, x, y)` on `#new-tab-menu`); confirm it is open via `readAxTree(wcId)`. Then open the kebab menu (locate via `captureWindow()` and `click(wcId, x, y)` on the kebab). Read both menus' open state via `readAxTree(wcId)`. Then, with the kebab menu open, open the container menu again and re-read both. *(Note: the container menu is built dynamically and has no `role="menu"`; read its open-state authoritatively from `#new-tab-menu`'s `aria-expanded`, and the kebab's from its `aria-expanded`/hidden state in `readAxTree(wcId)` or `readDom(wcId)`.)* | Opening the kebab **closes the open container menu** (`#new-tab-menu` `aria-expanded="false"`, kebab open); and conversely, opening the container menu **closes the open kebab menu** (kebab `aria-expanded="false"`/hidden, container open). The two menus are never open simultaneously. |
+| 12 | **Tab closes the kebab menu + restores focus:** open the kebab menu (focus is on the first item); then call `pressKey(wcId, 'Tab')`. Call `readAxTree(wcId)` to read the menu's open state, `aria-expanded`, and focused node. (Optionally repeat with `pressKey(wcId, 'ShiftTab')`.) | `Tab` (and `Shift+Tab`) **closes the kebab menu** (`aria-expanded="false"`, hidden) and **restores focus to the kebab trigger** (the focused node in `readAxTree(wcId)` is the kebab button), not stranded on a now-hidden menuitem or `<body>`. [a11y] |
 
 **Row conventions:** one row = one checkpoint. `[a11y]` flags accessibility-relevant checks for the
 optional Accessibility Validator.
 
 ## Out of Scope
 
-- **Exit actually terminating the app** (SC4) — not CDP-observable (tears down the harness); manual.
+- **Exit actually terminating the app** (SC4) — not MCP-observable (tears down the harness); manual.
 - **Settings opening a page** (SC5/SC6/SC7) — the `goldfinch://` mechanism and the settings page do
   not exist yet; covered by later flights (extends `tab-scheme-guard.md` / new specs).
 - Tab-strip controls, the golden pill, responsive sizing, and window controls — `unified-tab-controls.md`,

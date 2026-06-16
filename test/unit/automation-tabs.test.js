@@ -207,7 +207,7 @@ test('enumerateTabs: internal settings tab absent even when present in renderer 
 
 test('openTab: dispatches the URL via JSON.stringify (injection-safe encoding)', async () => {
   const exec = makeRecordingExecute(42);
-  await openTab('https://example.com', { executeInRenderer: exec });
+  await openTab('https://example.com', null, { executeInRenderer: exec });
   assert.equal(exec.calls.length, 1);
   const code = exec.calls[0];
   // The code must contain the JSON-encoded URL string
@@ -218,7 +218,7 @@ test('openTab: dispatches the URL via JSON.stringify (injection-safe encoding)',
 test('openTab: URL with special characters is JSON-encoded safely (no injection)', async () => {
   const maliciousUrl = 'https://x.com/path?a="); alert(1); ("';
   const exec = makeRecordingExecute(null);
-  await openTab(maliciousUrl, { executeInRenderer: exec });
+  await openTab(maliciousUrl, null, { executeInRenderer: exec });
   const code = exec.calls[0];
   // The full URL must appear as a JSON-encoded string literal in the code
   assert.ok(code.includes(JSON.stringify(maliciousUrl)), 'special chars must be JSON-encoded');
@@ -226,13 +226,13 @@ test('openTab: URL with special characters is JSON-encoded safely (no injection)
 
 test('openTab: resolves to the wcId returned by the renderer (number)', async () => {
   const exec = makeFixedExecute(42);
-  const result = await openTab('https://example.com', { executeInRenderer: exec });
+  const result = await openTab('https://example.com', null, { executeInRenderer: exec });
   assert.equal(result, 42);
 });
 
 test('openTab: resolves to null when renderer returns null (URL rejected)', async () => {
   const exec = makeFixedExecute(null);
-  const result = await openTab('about:blank', { executeInRenderer: exec });
+  const result = await openTab('about:blank', null, { executeInRenderer: exec });
   assert.equal(result, null);
 });
 
@@ -240,7 +240,7 @@ test('openTab: non-string url throws bad-url before any dispatch', async () => {
   const exec = makeRecordingExecute(null);
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
-    async () => openTab(42, { executeInRenderer: exec }),
+    async () => openTab(42, null, { executeInRenderer: exec }),
     (err) => err instanceof Error && err.message.includes('bad-url')
   );
   assert.equal(exec.calls.length, 0, 'no dispatch should happen on bad-url');
@@ -250,10 +250,33 @@ test('openTab: null url throws bad-url before any dispatch', async () => {
   const exec = makeRecordingExecute(null);
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
-    async () => openTab(null, { executeInRenderer: exec }),
+    async () => openTab(null, null, { executeInRenderer: exec }),
     (err) => err instanceof Error && err.message.includes('bad-url')
   );
   assert.equal(exec.calls.length, 0);
+});
+
+test('openTab: with no jarId (null), generated call string is single-arg (no undefined literal)', async () => {
+  const exec = makeRecordingExecute(1);
+  await openTab('https://example.com', null, { executeInRenderer: exec });
+  const code = exec.calls[0];
+  // Must end after the JSON-encoded URL — no second argument
+  assert.ok(code.endsWith('openTab("https://example.com")'), 'no-jarId must produce single-arg call; got: ' + code);
+});
+
+test('openTab: with undefined jarId, generated call string is single-arg', async () => {
+  const exec = makeRecordingExecute(1);
+  await openTab('https://example.com', undefined, { executeInRenderer: exec });
+  const code = exec.calls[0];
+  assert.ok(code.endsWith('openTab("https://example.com")'), 'undefined jarId must produce single-arg call; got: ' + code);
+});
+
+test('openTab: with jarId, generated call string is two-arg (JSON url, JSON jarId)', async () => {
+  const exec = makeRecordingExecute(5);
+  await openTab('https://example.com', 'personal', { executeInRenderer: exec });
+  const code = exec.calls[0];
+  const expected = 'window.__goldfinchAutomation.openTab("https://example.com", "personal")';
+  assert.equal(code, expected, 'jarId must be appended as a JSON-encoded second arg with ", " separator');
 });
 
 // ---------------------------------------------------------------------------

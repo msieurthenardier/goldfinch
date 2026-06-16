@@ -13,10 +13,11 @@ Verify the DD5 load-bearing security guard across the MCP transport: the privile
 
 ## Preconditions
 
-- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:7777`.
-- An MCP client connected to `http://127.0.0.1:7777/mcp`.
+- Goldfinch is running via **`npm run dev:automation`** (no `--remote-debugging-port`); MCP server up on `127.0.0.1:$GOLDFINCH_MCP_PORT`.
+- An MCP client connected to `http://127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
 - A way to obtain the internal guest's `wcId` **out of band** (it is deliberately not enumerable — see Step 4's apparatus note). The internal Settings tab is openable from the chrome (kebab ⋮ → Settings).
-- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:7777`** (app via `npm run dev:automation`), plus an **out-of-band readback** for the internal wcId (Step 4). Not the `:9222` CDP path; `chrome-devtools` MCP does not qualify (own browser → false pass).
+- **Port (load-bearing for every URL below).** Pin the listen port with **`GOLDFINCH_MCP_PORT`** (default `49707`); export it once at launch and reuse it in all client/curl calls.
+- **Apparatus note:** the apparatus is the **MCP client over `127.0.0.1:$GOLDFINCH_MCP_PORT`** (app via `npm run dev:automation`), plus an **out-of-band readback** for the internal wcId (Step 4). Not the `:9222` CDP path; `chrome-devtools` MCP does not qualify (own browser → false pass).
 
 ## Observables Required
 

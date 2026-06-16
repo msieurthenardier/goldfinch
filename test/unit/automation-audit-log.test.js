@@ -40,7 +40,7 @@ test('record stamps ts via the injected now and appends newest-last', () => {
   assert.equal(entries[1].op, 'click');
 });
 
-test('record fills defaults: sessionId/targetWcId/errorCode default to null', () => {
+test('record fills defaults: sessionId/targetWcId/errorCode/detail default to null', () => {
   const log = createAuditLog({ now: () => 42 });
   log.record({ identity: 'admin', op: 'enumerateTabs', outcome: 'ok' });
   const [e] = log.recentEntries();
@@ -52,6 +52,7 @@ test('record fills defaults: sessionId/targetWcId/errorCode default to null', ()
     targetWcId: null,
     outcome: 'ok',
     errorCode: null,
+    detail: null,
   });
 });
 
@@ -164,4 +165,27 @@ test('onChange is optional — mutations work with no listener', () => {
     log.record({ identity: 'test', sessionId: 's1', op: 'reload', targetWcId: 1, outcome: 'ok' });
     log.noteSessionClose('s1');
   });
+});
+
+test('record stores a provided detail string in the ring entry', () => {
+  const log = createAuditLog({ now: () => 1 });
+  log.record({ identity: 'admin', sessionId: 's', op: 'navigate', targetWcId: 3, outcome: 'ok', detail: 'url=https://x' });
+  const [e] = log.recentEntries();
+  assert.equal(e.detail, 'url=https://x');
+});
+
+test('record defaults detail to null when not supplied', () => {
+  const log = createAuditLog({ now: () => 1 });
+  log.record({ identity: 'admin', op: 'enumerateTabs', outcome: 'ok' });
+  const [e] = log.recentEntries();
+  assert.equal(e.detail, null);
+});
+
+test('detail propagates through snapshot() and recentEntries()', () => {
+  const snapshots = [];
+  const log = createAuditLog({ now: () => 1, onChange: (snap) => snapshots.push(snap) });
+  log.record({ identity: 'admin', sessionId: 's', op: 'navigate', targetWcId: 5, outcome: 'ok', detail: 'url=https://example.com' });
+  const snap = log.snapshot();
+  assert.equal(snap.log[0].detail, 'url=https://example.com');
+  assert.equal(snapshots[0].log[0].detail, 'url=https://example.com');
 });

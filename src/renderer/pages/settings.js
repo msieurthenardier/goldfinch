@@ -267,8 +267,26 @@ async function copyText(text, messageEl) {
   /** @type {{ enabled: boolean, host: string, port: number, bound: boolean, error: (string|null) }|null} */
   let lastStatus = null;
 
+  // The currently-persisted/active port — used to drive Save button dirty state.
+  // Seeded on initial load from the persisted setting (preferred) or the active
+  // status port (fallback), whichever resolves first.
+  /** @type {number|null} */
+  let savedPort = null;
+
+  /** @param {string} v @returns {boolean} */
+  function isValidPort(v) {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 1024 && n <= 65535;
+  }
+
+  /** Sync the Save button disabled state to the dirty / validity check. */
+  function updatePortSaveDirty() {
+    const v = portInput.value;
+    portSaveBtn.disabled = !(isValidPort(v) && Number(v) !== savedPort);
+  }
+
   /**
-   * Recompute the pending-port annotation. Shows "(takes effect on next launch)"
+   * Recompute the pending-port annotation. Shows "(unsaved — applies on Save)"
    * ONLY when the surface is bound AND the entered/pending port differs from the
    * active port — gating on `bound` avoids a misleading note when nothing is
    * running (AC6).
@@ -276,7 +294,7 @@ async function copyText(text, messageEl) {
   function recomputePortNote() {
     portNote.textContent =
       lastStatus && lastStatus.bound && Number(portInput.value) !== lastStatus.port
-        ? '(takes effect on next launch)'
+        ? '(unsaved — applies on Save)'
         : '';
   }
 
@@ -329,13 +347,30 @@ async function copyText(text, messageEl) {
   }
 
   // Initial load: status, then the persisted toggle + pending port.
-  window.goldfinchInternal.automationGetStatus().then(renderStatus).catch(() => {});
+  // savedPort is seeded from whichever path resolves first; the second path
+  // overwrites it so the persisted setting always wins when both complete.
+  window.goldfinchInternal.automationGetStatus().then((status) => {
+    renderStatus(status);
+    // Fallback: if the persisted-port path hasn't resolved yet, use the active
+    // port as the baseline so Save starts disabled.
+    if (savedPort === null && status && status.port != null) {
+      savedPort = status.port;
+      portInput.value = String(status.port);
+      updatePortSaveDirty();
+    }
+  }).catch(() => {});
   window.goldfinchInternal.settingsGet('automationEnabled').then((v) => {
     enabledToggle.checked = !!v;
   }).catch(() => {});
   window.goldfinchInternal.settingsGet('automationPort').then((p) => {
-    if (p != null) portInput.value = String(p);
+    if (p != null) {
+      // Persisted setting is the authoritative baseline — overwrite whatever
+      // the status path may have set so the field and dirty check agree.
+      savedPort = Number(p);
+      portInput.value = String(p);
+    }
     recomputePortNote();
+    updatePortSaveDirty();
   }).catch(() => {});
 
   // Enable toggle: write on change. No status re-fetch — a setting flip does not
@@ -350,7 +385,7 @@ async function copyText(text, messageEl) {
 
   // Port save: persist + live-rebind in one IPC (Leg 7). set-port returns the fresh
   // status, so after a successful rebind status.port equals the new port and
-  // renderStatus updates the address/config/status line live (the "next launch" note
+  // renderStatus updates the address/config/status line live (the "unsaved" note
   // clears as pending == active). A validator rejection surfaces inline; the field
   // keeps the user's text for correction.
   portSaveBtn.addEventListener('click', () => {
@@ -358,6 +393,11 @@ async function copyText(text, messageEl) {
       .then((status) => {
         messageEl.textContent = 'Saved';
         renderStatus(status);
+        // Advance the baseline to the now-active port so Save returns to
+        // disabled (clean signal the save registered).
+        savedPort = status.port;
+        portInput.value = String(status.port);
+        updatePortSaveDirty();
       })
       .catch(() => {
         messageEl.textContent = 'Invalid port (1024–65535)';
@@ -379,6 +419,10 @@ async function copyText(text, messageEl) {
           .then((status) => {
             messageEl.textContent = 'Saved';
             renderStatus(status);
+            // Advance baseline so Save is disabled after find-free-port completes.
+            savedPort = status.port;
+            portInput.value = String(status.port);
+            updatePortSaveDirty();
           });
       })
       .catch(() => {
@@ -386,8 +430,11 @@ async function copyText(text, messageEl) {
       });
   });
 
-  // Recompute the note as the operator edits the port (before saving).
-  portInput.addEventListener('input', recomputePortNote);
+  // Recompute the note and dirty state as the operator edits the port (before saving).
+  portInput.addEventListener('input', () => {
+    recomputePortNote();
+    updatePortSaveDirty();
+  });
 
   // Copy the displayed address via the shared helper (navigator.clipboard with
   // the clipboardWrite IPC fallback — AC7).
@@ -407,12 +454,25 @@ async function copyText(text, messageEl) {
     if (!all) return;
     if (all.automationEnabled != null) enabledToggle.checked = !!all.automationEnabled;
     if (all.automationPort != null) {
+      savedPort = Number(all.automationPort);
       portInput.value = String(all.automationPort);
       recomputePortNote();
+      updatePortSaveDirty();
     }
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
 })();
+
+// DD6 (Flight 6): one shared on-load fetch of automation key state, consumed by BOTH the
+// key-management and activity-viewer IIFEs (was two IPC round-trips). Memoizes the FIRST
+// call only — refresh() after mint/revoke still fetches fresh (it must reflect a new key).
+let _automationKeysOnce = null;
+function automationKeysOnce() {
+  const bridge = window.goldfinchInternal;
+  if (!bridge) return Promise.resolve(null);            // null-safe off-origin (AC4)
+  if (!_automationKeysOnce) _automationKeysOnce = bridge.automationListKeys();
+  return _automationKeysOnce;
+}
 
 /* ---- automation key management controller (Leg 3) ---- */
 
@@ -576,8 +636,9 @@ async function copyText(text, messageEl) {
   keyDoneBtn.addEventListener('click', clearReveal);
 
   // Initial load — reveal stays hidden (it is only ever populated by a mint).
+  // on load — use the shared single fetch (AC1); reveal stays hidden.
   clearReveal();
-  refresh().catch(() => {});
+  automationKeysOnce().then((info) => { if (info) { renderJars(info.jars); renderAdmin(info.adminEnabled, info.adminKeySet); } }).catch(() => {});
 })();
 
 /* ---- automation activity viewer (Leg 4 / SC10 / DD6) ---- */
@@ -597,7 +658,7 @@ async function copyText(text, messageEl) {
   // operator-controlled, so it is only ever rendered via textContent.
   /** @type {Map<string, string>} */
   const jarNames = new Map();
-  bridge.automationListKeys()
+  automationKeysOnce()
     .then((info) => {
       if (info && Array.isArray(info.jars)) {
         for (const j of info.jars) jarNames.set(j.id, j.name);
@@ -706,6 +767,13 @@ async function copyText(text, messageEl) {
         op.className = 'activity-log-op';
         op.textContent = e.op;
         row.appendChild(op);
+
+        if (e.detail) {
+          const detail = document.createElement('span');
+          detail.className = 'activity-log-detail muted';
+          detail.textContent = e.detail;
+          row.appendChild(detail);
+        }
 
         const identity = document.createElement('span');
         identity.className = 'activity-log-identity';

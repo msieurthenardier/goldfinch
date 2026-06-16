@@ -45,7 +45,7 @@ function classifyIdentity(identity) {
  * @param {(snapshot: { sessions: any[], log: any[] }) => void} [opts.onChange]
  *   called with snapshot() after every state-changing mutation.
  * @returns {{
- *   record: (e: { identity: string, sessionId: string|null, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode?: string|null }) => void,
+ *   record: (e: { identity: string, sessionId: string|null, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode?: string|null, detail?: string|null }) => void,
  *   noteSessionOpen: (sessionId: string, identity: string) => void,
  *   noteSessionClose: (sessionId: string) => void,
  *   recentEntries: () => any[],
@@ -62,7 +62,7 @@ function createAuditLog(opts = {}) {
 
   // The ring: a plain array in append order (newest LAST). On overflow the oldest
   // (index 0) is shifted off so length never exceeds `capacity`.
-  /** @type {Array<{ ts: number, sessionId: string|null, identity: string, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode: string|null }>} */
+  /** @type {Array<{ ts: number, sessionId: string|null, identity: string, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode: string|null, detail: string|null }>} */
   const ring = [];
 
   // Active sessions, keyed by transport session id.
@@ -98,7 +98,7 @@ function createAuditLog(opts = {}) {
   /**
    * Append a tool-invocation record to the ring, stamping `ts` via the injected
    * clock. Evicts the oldest entry past capacity. Fires onChange.
-   * @param {{ identity: string, sessionId: string|null, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode?: string|null }} e
+   * @param {{ identity: string, sessionId: string|null, op: string, targetWcId: number|null, outcome: 'ok'|'error', errorCode?: string|null, detail?: string|null }} e
    */
   function record(e) {
     ring.push({
@@ -109,6 +109,7 @@ function createAuditLog(opts = {}) {
       targetWcId: e.targetWcId ?? null,
       outcome: e.outcome,
       errorCode: e.errorCode ?? null,
+      detail: e.detail ?? null,
     });
     while (ring.length > capacity) ring.shift();
     fire();

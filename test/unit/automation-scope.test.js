@@ -59,7 +59,7 @@ function makeFakeEngine(world, { includeInternal = false } = {}) {
   for (const op of WCID_FIRST_OPS) {
     engine[op] = (wcId, ...rest) => { calls.push([op, wcId, ...rest]); return { op, wcId }; };
   }
-  engine.openTab = (url) => { calls.push(['openTab', url]); return { openedFor: url }; };
+  engine.openTab = (url, jarId) => { calls.push(['openTab', url, jarId]); return { openedFor: url }; };
   engine.captureWindow = () => { calls.push(['captureWindow']); return 'WINDOW'; };
   return engine;
 }
@@ -193,13 +193,45 @@ test('scopeEngine: jar captureWindow throws admin-only (NOT out-of-jar)', () => 
   assert.equal(engine.__calls.length, 0, 'captureWindow never reaches the engine for a jar key');
 });
 
-test('scopeEngine: jar openTab is delegated to the engine (known v1 limitation: no jar targeting)', () => {
+test('scopeEngine: jar openTab (no jarId) forces the caller\'s own jar.id to the engine', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
   const scoped = scopeEngine(engine, 'personal', makeCtx(world));
   const res = scoped.openTab('https://new');
   assert.deepEqual(res, { openedFor: 'https://new' });
-  assert.deepEqual(engine.__calls, [['openTab', 'https://new']]);
+  // The façade forces jar.id='personal'; engine receives (url, 'personal')
+  assert.deepEqual(engine.__calls, [['openTab', 'https://new', 'personal']]);
+});
+
+test('scopeEngine: jar openTab(url, ownId) is allowed — engine gets own jar.id', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  const res = scoped.openTab('https://new', 'personal');
+  assert.deepEqual(res, { openedFor: 'https://new' });
+  assert.deepEqual(engine.__calls, [['openTab', 'https://new', 'personal']]);
+});
+
+test('scopeEngine: jar openTab(url, foreignId) throws out-of-jar, engine NOT reached', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  assert.throws(
+    () => scoped.openTab('https://new', 'work'),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+  assert.equal(engine.__calls.length, 0, 'engine must NOT be reached on out-of-jar refusal');
+});
+
+test('scopeEngine: admin openTab passes jarId straight through to the engine unchanged', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world, { includeInternal: true });
+  // admin returns the engine unchanged
+  const scoped = scopeEngine(engine, 'admin', makeCtx(world));
+  assert.equal(scoped, engine, 'admin must return the engine as-is');
+  // Calling it confirms the raw engine records the args as-is
+  engine.openTab('https://admin', 'work');
+  assert.deepEqual(engine.__calls, [['openTab', 'https://admin', 'work']]);
 });
 
 // ---------------------------------------------------------------------------
@@ -224,6 +256,48 @@ test('scopeEngine: an UNKNOWN jar identity makes every op error (no-such-jar)', 
   }
   assert.throws(() => scoped.openTab('https://x'), /no-such-jar/);
   assert.throws(() => scoped.captureWindow(), /no-such-jar/);
+});
+
+// ---------------------------------------------------------------------------
+// getChromeTarget refusal (admin-only, DISTINCT from out-of-jar)
+// ---------------------------------------------------------------------------
+
+test('scopeEngine: jar getChromeTarget throws admin-only (NOT out-of-jar), engine NOT reached', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getChromeTarget = () => { engine.__calls.push(['getChromeTarget']); return { wcId: 0, kind: 'chrome', url: '' }; };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  assert.throws(
+    () => scoped.getChromeTarget(),
+    (err) => err instanceof Error
+      && err.message.includes('automation: admin-only')
+      && !err.message.includes('out-of-jar')
+  );
+  // engine.__calls should NOT include getChromeTarget — the façade refused before reaching engine
+  assert.equal(engine.__calls.filter((c) => c[0] === 'getChromeTarget').length, 0,
+    'getChromeTarget must never reach the engine for a jar key');
+});
+
+test('scopeEngine: admin getChromeTarget reaches the engine and returns its value', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world, { includeInternal: true });
+  const target = { wcId: 1, kind: 'chrome', url: 'goldfinch://app' };
+  engine.getChromeTarget = () => target;
+  // admin → engine unchanged
+  const scoped = scopeEngine(engine, 'admin', makeCtx(world));
+  assert.equal(scoped, engine, 'admin must return the engine unchanged');
+  assert.equal(scoped.getChromeTarget(), target);
+});
+
+test('scopeEngine: unknown jar calling getChromeTarget throws no-such-jar (requireJar fires first)', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getChromeTarget = () => { throw new Error('should not reach engine'); };
+  const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
+  assert.throws(
+    () => scoped.getChromeTarget(),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-jar')
+  );
 });
 
 test('scopeEngine: a jar DELETED mid-session degrades to all-ops-error', () => {
