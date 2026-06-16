@@ -1,82 +1,33 @@
 name: Build installers
 
 # Build desktop installers for Windows, macOS, and Linux.
-# - Run manually from the Actions tab (workflow_dispatch), or
-# - Push a version tag like v0.1.0 to also publish a GitHub Release.
+# - Push a version tag like v0.1.0 -> build all platforms and publish a GitHub Release.
+# - Run manually (workflow_dispatch) -> build-only smoke check (no publish).
+#
+# Installers are published DIRECTLY to the GitHub Release by electron-builder
+# (`--publish always`), NOT round-tripped through Actions artifact storage. The
+# artifact-storage path repeatedly failed: the free 500 MB tier filled with the
+# ~530 MB-per-platform builds and blocked the v0.5.0 / v0.5.1 release uploads
+# ("Artifact storage quota has been hit"). Publishing straight to the Release
+# removes that dependency entirely.
 on:
   workflow_dispatch:
   push:
     tags:
       - 'v*'
 
-# Least privilege: every job starts read-only; only the publishing jobs
-# (release, update-readme) escalate to contents: write per-job below.
+# Least privilege: read-only by default; only the jobs that touch the Release /
+# main escalate to contents: write per-job below.
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: mac
-          - os: ubuntu-latest
-            platform: linux
-          - os: windows-latest
-            platform: win
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Set up Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # On a v* tag, the tag is the source of truth for the release version:
-      # sync package.json so installer names/metadata match without a manual bump.
-      - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
-
-      - name: Build ${{ matrix.platform }} installers
-        run: npx electron-builder --${{ matrix.platform }} --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Apple/Windows signing certs in CI -> produce unsigned builds.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
-      - name: Upload installers
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: goldfinch-${{ matrix.platform }}
-          if-no-files-found: ignore
-          # Transport-only: the `release` job downloads these within the same run,
-          # so they need not linger. Short retention keeps each ~530 MiB release
-          # build from accumulating against the Actions artifact-storage quota
-          # (the default 90-day retention filled the free 500 MB tier — a v0.5.0
-          # release-build failure). 1 day is ample for the same-run handoff.
-          retention-days: 1
-          path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.zip
-            dist/*.AppImage
-            dist/*.deb
-
-  release:
-    name: Publish release
+  # Create the draft Release once (tags only), with auto-generated notes, so the
+  # parallel platform builds upload into ONE existing release instead of racing
+  # to create it. Also validates the tag is strict semver and classifies stability.
+  create-release:
+    name: Create draft release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -103,24 +54,103 @@ jobs:
             echo "Validated '$tag' as a STABLE release ($ver)."
           fi
 
-      - name: Download all installers
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
-          prerelease: ${{ steps.ver.outputs.is_stable != 'true' }}
+      - name: Create the draft release (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # electron-builder uploads assets into the release whose tag is v{version};
+          # pre-create it as a DRAFT with generated notes so notes survive and the
+          # three matrix jobs don't race to create it. Idempotent: reuse if present.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — reusing."
+          else
+            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --draft --generate-notes --title "${GITHUB_REF_NAME}"
+          fi
 
-  # After a release is published, point the README's download links at the new
-  # version and commit it back to main.
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: create-release
+    # Run on a tag (after the draft exists) AND on manual dispatch (build-only,
+    # where create-release is skipped). `always()` lets this run despite the
+    # skipped dependency on dispatch.
+    if: always() && (needs.create-release.result == 'success' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # electron-builder uploads installers to the Release on a tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # On a v* tag, the tag is the source of truth for the release version:
+      # sync package.json so installer names/metadata AND electron-builder's
+      # target release tag (v{version}) match the git tag without a manual bump.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
+      # Tag -> `always` (publish installers straight into the draft Release).
+      # Dispatch -> `never` (build-only smoke check; nothing is published/stored).
+      - name: Build ${{ matrix.platform }} installers
+        run: npx electron-builder --${{ matrix.platform }} --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple/Windows signing certs in CI -> produce unsigned builds.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+  # Flip the draft Release to published once all platforms have uploaded.
+  publish-release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          stable='${{ needs.create-release.outputs.is_stable }}'
+          if [[ "$stable" == "true" ]]; then
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --draft=false --prerelease=false --latest
+          else
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --draft=false --prerelease=true
+          fi
+
+  # After a stable release publishes, point the README's download links at the
+  # new version and commit it back to main.
   update-readme:
     name: Update README download links
-    if: ${{ needs.release.outputs.is_stable == 'true' }}
-    needs: release
+    if: ${{ needs.create-release.outputs.is_stable == 'true' }}
+    needs: [create-release, publish-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write

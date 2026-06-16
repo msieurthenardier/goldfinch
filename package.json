@@ -25,6 +25,11 @@
     "appId": "com.goldfinch.browser",
     "productName": "Goldfinch",
     "asar": false,
+    "publish": {
+      "provider": "github",
+      "owner": "msieurthenardier",
+      "repo": "goldfinch"
+    },
     "directories": {
       "output": "dist",
       "buildResources": "build"
