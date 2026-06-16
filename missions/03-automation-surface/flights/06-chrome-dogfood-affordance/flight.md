@@ -1,6 +1,6 @@
 # Flight: Chrome-driving affordance + behavior-spec dogfooding (scoped)
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
