@@ -89,11 +89,12 @@ Concourse resolves `((var.field))` from Vault at `concourse/goldfinch/goldfinch/
 | `concourse/goldfinch/goldfinch/git-token` | `value` (read-only fine-grained PAT, Contents:read) | `repo` git resource (HTTPS clone of the private repo) |
 | `concourse/goldfinch/goldfinch/minio` | `endpoint`, `access_key`, `secret_key`, `bucket` | `linux-installers` / `windows-installers` s3 resources |
 
-> MinIO `endpoint` is `172.17.0.1:9000`, **not** `minio:9000`: Concourse task
-> containers use external DNS and are NOT on the compose network, so the
+> MinIO `endpoint` is `http://172.17.0.1:9000`, **not** `minio:9000`: Concourse
+> task containers use external DNS and are NOT on the compose network, so the
 > service name doesn't resolve. They reach MinIO via the host docker-bridge
-> gateway (`172.17.0.1`) where MinIO publishes port 9000. The s3 resources set
-> `disable_ssl: true` (plain HTTP).
+> gateway (`172.17.0.1`) where MinIO publishes port 9000. The scheme is
+> required — the Concourse s3 resource parses `endpoint` as a full URL and
+> rejects a bare `host:port`.
 
 **The Vault dev server is in-memory** — secrets are lost on container restart.
 They are reseeded from `~/projects/concourse-local/.vault-seeds.json` on startup,
