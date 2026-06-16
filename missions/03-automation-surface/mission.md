@@ -363,8 +363,15 @@ as work reveals.)_
   also surfaced the live MCP address + a configurable port (off 7777 → 49707) with live-rebind, an
   audit indicator + viewer, and flipped the F4 `mcp-jar-scoping` partial → pass. PR #42, stacked on
   #41. Fast-follows: activity-log paging/clear/retention. Debrief pending.)*
-- [ ] **Flight 6: Migrate behavior specs onto the surface** — move all behavior specs (11 at
-  Mission-02 close) to drive via the new surface (dogfooding). (SC11, part 1)
+- [x] **Flight 6: Chrome-driving affordance + behavior-spec dogfooding (scoped)** — *(landed
+  2026-06-16; reframed from "migrate all specs" to "enable + prove + migrate a subset" — operator
+  decision, see Flight-6 flight.md scope note).* Built the admin-only `getChromeTarget` tool +
+  `openTab` jar-targeting, proved the chrome-drive apparatus live (DD2 spike), and dogfooded a
+  representative subset (`tab-keyboard-operability`, `kebab-menu`, `settings-shell`) onto the admin
+  MCP surface. Also: 6 Group-A specs reconciled to `$GOLDFINCH_MCP_PORT`, a `settings.js` cleanup,
+  and HAT-found SC10 audit-context + port-control UX fixes. **The bulk Group-B migration + the
+  `a11y-audit.mjs` rewrite + retiring the ungated `:9222` path remain (follow-on + Flight 7).**
+  (SC11, part 1 — scoped)
 - [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
   onto the new surface; retire/harden `npm run dev:debug`'s `--remote-allow-origins=*` and
   update/remove `.mcp.json` so the ungated `:9222` path is no longer the apparatus. (SC11, part 2)

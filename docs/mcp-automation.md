@@ -280,20 +280,25 @@ the live indicator + log viewer against this contract. The shape below is the de
 - **`log`** — a **bounded ring** (capacity **500**) of recent tool invocations, **newest-last**
   (natural append order), each:
   ```js
-  { ts, sessionId, identity, op, targetWcId, outcome: "ok" | "error", errorCode }
+  { ts, sessionId, identity, op, targetWcId, outcome: "ok" | "error", errorCode, detail }
   ```
   `ts` is epoch-ms; `op` is the tool name; `targetWcId` is the call's `wcId` argument or `null`
   (no-wcId ops: `enumerateTabs`, `openTab`, `captureWindow`); `outcome` is `"ok"` unless the call
   returned an `isError` result; `errorCode` carries the discriminated refusal code parsed from the
   `automation: <code> — …` message (e.g. `out-of-jar`, `admin-only`, `internal-session`,
-  `bad-handle`) — or `"error"` for a bare/unexpected throw, and `null` on success.
+  `bad-handle`) — or `"error"` for a bare/unexpected throw, and `null` on success. `detail` is a
+  short per-op context string for operator auditability — e.g. `url=https://…` for `navigate`/
+  `openTab`, `(x,y)` for `click`/`scroll`, `key=Enter` for `pressKey`, `text(N chars)` for
+  `typeText` (**length only — content is never logged**); `null` for ops where `targetWcId`
+  already names the tab sufficiently (`enumerateTabs`, `captureWindow`, `getChromeTarget`,
+  `readDom`, etc.).
 
 **Snapshot shape** (the broadcast payload **and** the on-demand read):
 
 ```js
 {
   sessions: [ { sessionId, identity, kind, jarId, since }, … ],
-  log:      [ { ts, sessionId, identity, op, targetWcId, outcome, errorCode }, … ]  // newest-last
+  log:      [ { ts, sessionId, identity, op, targetWcId, outcome, errorCode, detail }, … ]  // newest-last
 }
 ```
 

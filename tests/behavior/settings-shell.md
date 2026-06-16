@@ -17,37 +17,80 @@ chrome renderer and reflects the active tab, and the lock is a navigation-routin
 in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exactly this shape.
 
 ## Preconditions
-- Goldfinch running via `npm run dev:debug` (CDP `:9222`); `scripts/cdp-driver.mjs` reaches it. **Not**
-  the `chrome-devtools` MCP (it launches its own browser → false pass).
+- **Apparatus — admin MCP surface.** Goldfinch is running via `npm run dev:automation` with
+  `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_MCP_PORT=49707`. At
+  launch, the app prints `AUTOMATION_DEV_MINT { "key": "...", "adminKey": "..." }` to stdout —
+  capture the `adminKey`. The MCP server listens on `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`.
+- **Port (load-bearing for every URL below).** Pin the listen port via `GOLDFINCH_MCP_PORT` (default
+  `49707`). Export it once at launch and reuse it in all SDK calls.
+- **How the admin key attaches to the client (load-bearing).** Connect an admin MCP client (SDK
+  `StreamableHTTPClientTransport`, `Authorization: Bearer <adminKey>`) on
+  `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`:
+  ```js
+  const port = process.env.GOLDFINCH_MCP_PORT || 49707;
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://127.0.0.1:${port}/mcp`),
+    { requestInit: { headers: { Authorization: `Bearer ${adminKey}` } } }
+  );
+  ```
+  The Bearer rides every request the transport sends.
+- **These specs require the admin key.** A jar key is refused `getChromeTarget` (`admin-only`) and
+  cannot see the internal `goldfinch://settings` guest (jar keys cannot reach internal sessions).
+  Only the admin identity can enumerate + drive internal tabs (admin engine built with
+  `{ allowInternal: true }`).
+- **Two distinct targets (load-bearing for this spec):**
+  - **Chrome target** (`getChromeTarget()` → chrome `wcId`): the Goldfinch chrome UI — address-bar
+    chip, toolbar, tab strip. Read via `readDom(wcId)` / `readAxTree(wcId)`; drive via
+    `click(wcId, x, y)` / `pressKey(wcId, name)`.
+  - **Internal guest target** (from `enumerateTabs` → the entry with `url: 'goldfinch://settings'`
+    → its `wcId` as `guestWcId`): the `goldfinch://settings` `<webview>` guest. Read via
+    `readDom(guestWcId)` / `readAxTree(guestWcId)`; drive via `click(guestWcId, x, y)` /
+    `pressKey(guestWcId, name)`. Keep them straight — do NOT pass the chrome `wcId` to guest read
+    calls or vice versa.
+- **Coordinate-click rule (apparatus rule from the leg-2 spike):** all clicks are coordinate-based —
+  `click(wcId, x, y)` located via a `captureWindow()` screenshot. There are no CSS selectors over
+  the MCP surface.
+- **Focus-anchor rule (apparatus rule from the leg-2 spike):** a cold `Tab` from the bare document
+  does not relocate focus — this is normal browser behavior, NOT an engine defect. **Before any
+  keyboard-only sequence, establish a focus anchor by sending a `click(wcId, x, y)` (or
+  `click(guestWcId, x, y)`) into the target first.**
 - The build includes the served `settings.css` (+ optional `settings.js`) and the chip/popup/lock code.
 - A reachable web page for the web-chip + lock checks (e.g. `https://example.com/`).
-- **Guest-reachability probe** (belt-and-suspenders): after opening Settings, confirm the
-  `goldfinch://settings` guest is attachable for DOM reads (it surfaced in the flat CDP `/json` list in
-  Flight-4 live runs; if a build ever changes that, fall back to `Target.getTargets`/`setAutoAttach`).
+- **Active-precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`,
+  and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings, confirm the
+  `goldfinch://settings` guest is enumerable via `enumerateTabs` (the admin engine's `allowInternal`
+  makes it visible; if it is absent, halt).
+- **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify — it launches its own
+  browser and never touches this app (false pass). The apparatus is the SDK admin MCP client over
+  `127.0.0.1:$GOLDFINCH_MCP_PORT`, app launched via `npm run dev:automation`. This is **not** the
+  CDP attach path — `npm run dev:automation` does not expose a DevTools port; only the admin MCP
+  surface is used.
 
 ## Observables Required
-- browser (rendered guest DOM of `goldfinch://settings` — the `<nav>` links, the titled `<section>`s and
-  their `<h2>`s, `aria-current`; the chrome renderer's chip element + popup; tab set + partitions —
-  measured via `scripts/cdp-driver.mjs` / node-CDP attach to the renderer **and** the guest target;
-  screenshot + a11y tree primary, DOM reads supplementary)
-- shell (precondition probes: `:9222` reachable, cdp-driver eval — measured via Bash)
+- mcp (admin MCP tools — `readDom(guestWcId)` / `readAxTree(guestWcId)` for the rendered guest DOM
+  of `goldfinch://settings` (the `<nav>` links, the titled `<section>`s and their `<h2>`s,
+  `aria-current`); `readDom(wcId)` / `readAxTree(wcId)` for the chrome renderer's chip element +
+  popup; `captureWindow()` / `captureScreenshot(wcId)` for screenshots; `enumerateTabs` for tab set
+  + partitions — all measured via the admin MCP client)
+- shell (precondition probes: `tools/list` count and `getChromeTarget` result — measured via the MCP
+  client or Bash)
 
 ## Steps
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Probe: `node scripts/cdp-driver.mjs eval '1+1'`; confirm a renderer target at `:9222`. | Returns `2`; a Goldfinch renderer (index.html) target is present. Else halt. |
-| 2 | Open Settings via the kebab (⋮ → Settings), or the identical trusted path `createTab('goldfinch://settings', null, {trusted:true})` — note which. Wait for load. | A tab opens to `goldfinch://settings`; the active webview's partition is `goldfinch-internal`; the address bar shows the internal URL. |
-| 3 | Attach to the `goldfinch://settings` guest; read its `<nav>` links and `<section>`/`<h2>` set; screenshot. | The guest renders a **persistent left section-nav** with the 5 links (Appearance, Privacy & Shields, On startup / Home page, Downloads, About) and **5 titled `<section>`s** each with an `<h2>` + placeholder content. Recognizable as a settings area. |
-| 4 | In the guest, move keyboard focus to a section nav link (Tab to it) and activate it (Enter). | Focus reaches the nav link (visible focus ring); activating it moves to the corresponding section (the target `<section>`/`<h2>` is scrolled into view / focused). Section nav is keyboard-operable. `[a11y]` |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()` and record `wcId`. | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Else halt. |
+| 2 | Open Settings via the kebab (take a `captureWindow()` screenshot; locate the kebab (⋮) button coordinates; call `click(wcId, x, y)` to open the kebab menu, then `click(wcId, x, y)` on the Settings item coordinates), or the identical trusted path `openTab('goldfinch://settings', null, {trusted:true})` — note which. Wait for load. Then call `enumerateTabs` and identify the `goldfinch://settings` entry; record its `wcId` as `guestWcId`. | A tab opens to `goldfinch://settings`; the active webview's partition is `goldfinch-internal`; the address bar shows the internal URL. `enumerateTabs` includes the `goldfinch://settings` entry (the admin engine's `allowInternal` makes the internal guest enumerable). Record `guestWcId`. |
+| 3 | Call `readDom(guestWcId)` and `readAxTree(guestWcId)` on the `goldfinch://settings` guest; take a `captureWindow()` screenshot. | The guest renders a **persistent left section-nav** with the 5 links (Appearance, Privacy & Shields, On startup / Home page, Downloads, About) and **5 titled `<section>`s** each with an `<h2>` + placeholder content. Recognizable as a settings area. |
+| 4 | In the guest, establish a focus anchor via `click(guestWcId, x, y)` on the nav area (locate via `captureWindow()` or `readDom(guestWcId)`), then move keyboard focus to a section nav link (via `pressKey(guestWcId, 'Tab')`) and activate it (`pressKey(guestWcId, 'Enter')`). Call `readAxTree(guestWcId)` to confirm focus and scroll state. | Focus reaches the nav link (visible focus ring in `captureWindow()`); activating it moves to the corresponding section (the target `<section>`/`<h2>` is scrolled into view / focused per `readAxTree(guestWcId)`). Section nav is keyboard-operable. `[a11y]` |
 | 5 | (Setup) Run `npm run a11y -- --target=goldfinch://settings` against the open shell. | (empty — judged in step 6) |
 | 6 | Read the guest-target a11y result. | **No NEW violations** vs the pinned `ACCEPTED` baseline — the shell introduces no new WCAG A/AA violations. `[a11y]` |
-| 7 | Confirm the **internal-page identity chip**: with the Settings tab active, read the chip element in the chrome `#address-wrap`. | An internal-page identity chip is shown (a "Goldfinch"/secure-internal indicator), distinct from the web-page chip; it is NOT a web origin/lock. |
-| 8 | Open a normal web tab to `https://example.com/` and activate it; read the chip in `#address-wrap`. | A **web-page site-info chip** is shown (a connection/lock indicator + the origin `example.com`), distinct from the internal chip. |
-| 9 | Click the web chip; read the popup element + its text. | A site-info **popup** opens showing the origin + connection (https) + a compact summary derived from the tab's existing privacy data (trackers blocked / permissions count) + a **"Site settings →"** action. *(A freshly-opened site legitimately summarizes to `0 trackers` / empty; `tab.privacy.net` is null until the ~350ms `privacy-net` IPC arrives — `0`/"—"/empty is a valid pass, the popup must not be blank/crashed.)* |
-| 10 | Activate the popup's "Site settings →" action; observe the chrome. | The existing **Shields/privacy panel** opens for the site (the popup is a thin entry point, not a duplicate). The popup closes. |
-| 11 | **Internal-tab lock**: re-activate the `goldfinch://settings` tab; type a web URL (`https://example.com/`) into the address bar and press Enter (or invoke `navigate('https://example.com/')` while the internal tab is active — note which). | A **new normal tab** opens to `https://example.com/` (partition `persist:goldfinch`); the **internal Settings tab stays on `goldfinch://settings`** (its webview did NOT navigate to the web URL). The tab count increased by one. |
-| 12 | Dismiss the site-info popup by clicking elsewhere / pressing Escape (if still open) and confirm the shared menu-dismiss behavior. | The popup closes on outside-click / Escape (it routes through the shared `menuController`); focus returns appropriately. `[a11y]` |
+| 7 | Confirm the **internal-page identity chip**: with the Settings tab active, call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the chip element in the chrome `#address-wrap`. | An internal-page identity chip is shown (a "Goldfinch"/secure-internal indicator), distinct from the web-page chip; it is NOT a web origin/lock. |
+| 8 | Open a normal web tab to `https://example.com/` and activate it; call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the chip in `#address-wrap`. | A **web-page site-info chip** is shown (a connection/lock indicator + the origin `example.com`), distinct from the internal chip. |
+| 9 | Take a `captureWindow()` screenshot to locate the web chip; call `click(wcId, x, y)` on the chip coordinates; call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the popup element + its text. | A site-info **popup** opens showing the origin + connection (https) + a compact summary derived from the tab's existing privacy data (trackers blocked / permissions count) + a **"Site settings →"** action. *(A freshly-opened site legitimately summarizes to `0 trackers` / empty; `tab.privacy.net` is null until the ~350ms `privacy-net` IPC arrives — `0`/"—"/empty is a valid pass, the popup must not be blank/crashed.)* |
+| 10 | Take a `captureWindow()` screenshot to locate the popup's "Site settings →" action; call `click(wcId, x, y)` on its coordinates; observe the chrome via `readAxTree(wcId)`. | The existing **Shields/privacy panel** opens for the site (the popup is a thin entry point, not a duplicate). The popup closes. |
+| 11 | **Internal-tab lock**: re-activate the `goldfinch://settings` tab (locate it via `captureWindow()` and `click(wcId, x, y)`, or `enumerateTabs`); take a `captureWindow()` screenshot to locate the address bar; call `click(wcId, x, y)` on the address bar coordinates (≈ (400, 63) at 1400×900) to focus it, then call `typeText(wcId, 'https://example.com/')` and `pressKey(wcId, 'Enter')` (or note which trusted path is used). | A **new normal tab** opens to `https://example.com/` (partition `persist:goldfinch`); the **internal Settings tab stays on `goldfinch://settings`** (its webview did NOT navigate to the web URL — confirmed via `enumerateTabs` and `readDom(wcId)` on the chrome). The tab count increased by one. |
+| 12 | Dismiss the site-info popup by calling `click(wcId, x, y)` outside it (locate via `captureWindow()`) or `pressKey(wcId, 'Escape')` (if still open) and confirm the shared menu-dismiss behavior via `readAxTree(wcId)`. | The popup closes on outside-click / Escape (it routes through the shared `menuController`); focus returns appropriately. `[a11y]` |
 
 **Row conventions**: `[a11y]`-marked rows are accessibility-relevant. Step 11's lock is the UX half of the
 Flight-4 internal-tab finding — it does NOT assert the security origin-check (that's Flight 6).

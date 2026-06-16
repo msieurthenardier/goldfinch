@@ -418,8 +418,13 @@ main section p {
   transition: filter 0.1s;
 }
 
-.settings-btn:hover {
+.settings-btn:not(:disabled):hover {
   filter: brightness(1.1);
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .settings-btn:focus-visible {

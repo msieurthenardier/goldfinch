@@ -1,6 +1,6 @@
 # Flight: Chrome-driving affordance + behavior-spec dogfooding (scoped)
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -123,23 +123,23 @@ Make the chrome renderer (tab strip, toolbar, kebab, window controls) drivable b
 > **Note:** Tentative; created one at a time as the flight progresses. May merge/split.
 
 - [x] `chrome-target-affordance` — admin-only `getChromeTarget` tool + scope + tests. (DD1)
-- [ ] `chrome-drive-spike` — verify trusted input + DOM/a11y read + captureWindow on the chrome wcId (apparatus premise). (DD2)
+- [x] `chrome-drive-spike` — verify trusted input + DOM/a11y read + captureWindow on the chrome wcId (apparatus premise). (DD2)
 - [x] `open-tab-jar-targeting` — `openTab` jarId param + scope enforcement + tests. (DD3)
-- [ ] `migrate-subset-specs` — rewrite the chosen subset onto the admin MCP surface. (DD4, DD5)
+- [x] `migrate-subset-specs` — rewrite the chosen subset onto the admin MCP surface. (DD4, DD5)
 - [x] `group-a-port-reconcile` — 6 Group-A `7777` → port; scrub stale `.mcp.json` ref. (DD5)
 - [x] `settings-cleanup` — consolidate dual `automationListKeys()`. (DD6)
-- [ ] `verify-integration` — run the migrated subset live (admin surface) + full gates + dev:debug regression check. (DD4)
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT. (DD7)
+- [x] `verify-integration` — run the migrated subset live (admin surface) + full gates + dev:debug regression check. (DD4)
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT. (DD7)
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR onto `main`)
-- [ ] Tests passing (unit for getChromeTarget/openTab scope + typecheck + lint)
-- [ ] Documentation updated (`docs/mcp-automation.md`: the `getChromeTarget` admin tool + `openTab` jarId; CLAUDE.md automation note); the migrated specs + the 6 reconciled specs reflect the surface/port
+- [x] All legs completed
+- [x] Code merged (PR onto `main`) — *PR #44 marked ready for review; merge is the operator's call*
+- [x] Tests passing (650/650 unit + typecheck + lint green)
+- [x] Documentation updated (`docs/mcp-automation.md`: `getChromeTarget` + `openTab` jarId + audit `detail`; CLAUDE.md automation note → 17 tools; migrated + reconciled specs reflect the surface/port)
 - [ ] Flight debrief written (separate `/flight-debrief` step)
 
 ### Verification
