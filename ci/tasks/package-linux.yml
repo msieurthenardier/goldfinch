@@ -1,0 +1,24 @@
+---
+# Package smoke check (compile + bundle, no installers) — mirrors the GitHub
+# Actions "Package (no installers)" step (ci.yml): `electron-builder --linux --dir`.
+# This only unpacks the app into dist/ (no AppImage/deb), so a bare node image
+# with electron-builder's own download of the Electron binary is sufficient.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: node
+    tag: "22"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      cd repo
+      npm ci
+      npx electron-builder --linux --dir

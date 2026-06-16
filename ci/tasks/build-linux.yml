@@ -1,0 +1,44 @@
+---
+# Linux installers (AppImage + deb) — fallback artifacts only, NOT a release.
+# `--publish never` is load-bearing: this NEVER touches GitHub Releases. The
+# real release path stays in GitHub Actions (build.yml). This just gives you
+# grabbable installers when GH Actions minutes run dry.
+#
+# Ad-hoc:  fly -t local-goldfinch execute -c ci/tasks/build-linux.yml -i repo=. -o installers=./out
+# Pipeline: the build-linux job puts ./installers to MinIO.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: node
+    tag: "22"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: installers
+
+run:
+  path: bash
+  args:
+    - -ceu
+    - |
+      # deb packaging needs fakeroot; AppImage tooling is fetched by electron-builder.
+      apt-get update -qq && apt-get install -y --no-install-recommends fakeroot >/dev/null
+      cd repo
+      npm ci
+      # electron-builder's deb (fpm) target needs `homepage`; package.json has
+      # none, so it normally derives it from the .git remote. Ad-hoc
+      # `fly execute -i repo=.` uploads no .git, so set it on this worker's
+      # COPY of package.json (the repo is untouched) to keep the deb target
+      # green in both the pipeline and ad-hoc paths.
+      npm pkg set homepage="https://github.com/msieurthenardier/goldfinch"
+      npx electron-builder --linux --publish never
+      VER="$(node -p "require('./package.json').version")"
+      cd ..
+      mkdir -p stage
+      cp repo/dist/*.AppImage repo/dist/*.deb stage/ 2>/dev/null || true
+      tar czf "installers/goldfinch-linux-${VER}-b${BUILD_NAME:-local}.tar.gz" -C stage .
+      ls -la installers
