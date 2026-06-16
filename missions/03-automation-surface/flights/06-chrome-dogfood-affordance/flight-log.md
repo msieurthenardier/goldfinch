@@ -245,3 +245,23 @@ _Unexpected issues._
 
 ## Session Notes
 _Chronological notes from work sessions._
+
+### 2026-06-16 — Infra interruption: GitHub Actions minutes exhausted → CI migrated to local Concourse
+**Context**: Mid-Mission-3 we ran out of GitHub Actions minutes. To unblock and conserve minutes going forward, the PR-equivalent CI was migrated to the local Concourse instance (`http://localhost:8080`, team `goldfinch`). This is an **ad-hoc infra fix**, not a flight leg — recorded here per operator instruction.
+
+**What landed** (goldfinch PR [#48](https://github.com/msieurthenardier/goldfinch/pull/48), squash-merged to `main`):
+- `ci/tasks/*.yml` — self-contained Concourse tasks for `test`/`typecheck`/`lint`/`audit`/`package-linux` + `build-linux`/`build-windows`. Each runs ad-hoc against the local working tree via `fly -t local-goldfinch execute -c ci/tasks/<t>.yml -i repo=.` (zero credentials — the pre-push dev gate) and is wired into `ci/pipeline.yml`.
+- `ci/pipeline.yml` — `ci` auto-runs on every push to `main` (git resource over a read-only SSH **deploy key**); `build-linux`/`build-windows` are **manual** (`passed: [ci]`), push installer archives to **MinIO** (`goldfinch-installers`), `--publish never`.
+- `.github/workflows/ci.yml` — `pull_request` trigger **disabled** (now `workflow_dispatch`-only). `build.yml` (releases, incl. macOS) **untouched** — still the real release path.
+
+**Operator decisions**: scope = PR CI + Linux/Win fallback builds (builds never publish — GHA still owns releases); no GitHub status reporting (Concourse UI only); disable GHA `ci.yml`; auto-on-`main` pipeline via deploy key; land via branch+PR.
+
+**Key findings / decisions during execution**:
+- **Credential = read-only SSH deploy key** (most-scoped option). The Vault dev server is in-memory and reseeds from `~/projects/concourse-local/.vault-seeds.json`; that seed entrypoint built `vault kv put` args by **unquoted word-splitting**, which corrupts any multiline value (PEM key). Fixed the entrypoint to write each field to a temp file and pass `key=@file` (backward-compatible; isolation-tested single-line + multiline). The deploy key now round-trips byte-for-byte (419 B, trailing `\n` preserved).
+- **deb target** needs `homepage` (package.json has none → normally derived from `.git` remote). `fly execute` uploads no `.git`, so `build-linux` sets it on the worker's *copy* via `npm pkg set` (repo untouched). Releases were unaffected (GHA checkout has `.git`).
+- **MinIO endpoint** must be `http://172.17.0.1:9000` (host docker-bridge gateway + scheme): Concourse task containers use external DNS (not on the compose network, so `minio:9000` won't resolve), and the s3 resource parses `endpoint` as a full URL (bare `host:port` → "first path segment cannot contain colon").
+- **Windows worker** has Node 22 + git + python → `build-windows` runs natively (signs with the worker's local cert; harmless for a personal fallback).
+
+**Validation**: all tasks green on the real workers (650-test suite, typecheck, lint, audit, `package-linux`); `build-linux` → AppImage + deb, `build-windows` → nsis exe; deploy-key git fetch of `main`; full pipeline on `main` — `ci` green + `build-linux` job pushed the 218 MB tarball to MinIO (verified present). macOS installers remain GHA-only (no macOS Concourse worker).
+
+**Out-of-repo changes** (in `~/projects/concourse-local`, not goldfinch): `vault-entrypoint.sh` (multiline-safe seeding) + `.vault-seeds.json` (added `goldfinch/git-key` deploy key + `goldfinch/minio` creds). A read-only deploy key (`concourse-local-ci (read-only)`, id 154671208) was added to the GitHub repo.
