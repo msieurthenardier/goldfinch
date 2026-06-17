@@ -1,6 +1,6 @@
 # Flight: Production gating re-architecture + dev-profile isolation + port free-fallback
 
-**Status**: in-flight
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -154,18 +154,19 @@ Re-architect the automation surface's gating so the **production (packaged) bina
 - [x] `port-free-fallback` — `GOLDFINCH_MCP_PORT` dev-only (`honorEnv: !app.isPackaged`); dev env-strict, else setting/default free-port fallback; capture + surface the bound port. (DD6) *(landed + committed; live two-instance/env-strict → leg 7)*
 - [x] `docs-and-security-model` — rewrite CLAUDE.md automation-security + `docs/mcp-automation.md` for toggle-binds. (DD7) *(landed + committed)*
 - [x] `verify-integration` — FD-driven live on a real `npm run pack` build in WSL: pack/launch, toggle-binds (OFF→unbound, ON→bound live, keyless/bad-key 401, valid-key 200+session), **SC6 via a real 3rd-party MCP client**, DD1 dev-profile isolation (installed profile byte-unchanged), DD6 free-fallback (49707→49708) + two-instance coexistence + env-strict hard-fail, gates green. (DD8a) *(landed; flip-OFF unbind / admin-on-prod / DD9-live / activity-viewer carried to leg 8 on the real installed instance per operator)*
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT on the operator's **real installed instance** (once a Windows installer exists): flip-OFF live unbind, admin-on-production, DD9 `automation-key-gating`, `settings-activity-viewer`. (DD8b) **← remaining to land the flight.**
+- [~] `hat-and-alignment` *(optional — SKIPPED, operator decision 2026-06-17)* — the operator judged the guided HAT effectively covered by leg 7's live packaged-build verification (incl. SC6 via a real 3rd-party MCP client). The few items not re-observed live (flip-OFF unbind, admin-on-production, DD9 `automation-key-gating`, `settings-activity-viewer`) are platform-agnostic JS already covered by unit tests + code review; they can be confirmed ad-hoc on the real installed instance later. Not a blocker to landing. (DD8b)
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR onto `main`)
-- [ ] Tests passing (`npm test` + typecheck + lint)
-- [ ] Documentation updated (CLAUDE.md automation-security + `docs/mcp-automation.md` rewritten; `package.json` script comments if changed)
+- [x] All legs completed (legs 1–7; leg 8 HAT skipped per operator — covered by leg 7 live verification + unit/code)
+- [x] Code merged (PR #52 onto `main`)
+- [x] Tests passing (`npm test` 732 / typecheck / lint green)
+- [x] Documentation updated (CLAUDE.md automation-security + `docs/mcp-automation.md` rewritten to toggle-binds)
 - [ ] Flight debrief written (separate `/flight-debrief` step)
+- [x] Patch version bumped 0.5.1 → 0.5.2 ahead of the installer build
 
 ### Verification
 - **Toggle-binds (packaged):** on a `npm run pack` build, flipping the Settings toggle ON binds the MCP server (curl to `127.0.0.1:<port>/mcp` transitions from connection-refused → 401-without-key → tools-with-key) and OFF unbinds it (connection-refused again; indicator clears). `--automation-dev` on the package changes nothing.

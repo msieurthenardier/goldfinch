@@ -322,18 +322,18 @@ mission-level commitment.
   offscreen-translation breaks capture and OSR doesn't apply to `<webview>`. When concurrent
   background driving becomes a requirement it is a known, validated **future flight** (prefer (A);
   validate single-window focus-interference with a real human), not a research risk.
-- [ ] **Production gating re-architecture (→ F8, planning 2026-06-17)** — surfaced at the F7 leg-9 HAT. The
+- [x] **Production gating re-architecture (→ F8, RESOLVED 2026-06-17)** — surfaced at the F7 leg-9 HAT. The
   surface should **bind on the Settings toggle alone** (no `--automation-dev` needed), with
   **`GOLDFINCH_AUTOMATION_ADMIN` usable on the production binary** for the admin tier, and
   `--automation-dev` **demoted** to a dev-only convenience. This **moves the security boundary**
   (the toggle becomes the bind gate), so it needs its own design + Architect review → **F8** (DD2/DD4/DD5).
-- [ ] **Dev/installed shared-profile bleed → dev-profile isolation needed (→ F8, planning 2026-06-17)** — F7 dev
+- [x] **Dev/installed shared-profile bleed → dev-profile isolation needed (→ F8, RESOLVED 2026-06-17)** — F7 dev
   runs against the operator's shared `~/.config/goldfinch` profile polluted it (`automationEnabled`
   flipped true + dev-minted key hashes). Under the current flag-gated binding this is
   credential/state bleed, **not** silent surface-enablement (binding still needs the flag); under
   F8's toggle-binds model it **would** matter, so **dev-profile isolation** is essential there → **F8** (DD1,
   sequenced first; one-time operator profile reset is an F8 prerequisite).
-- [ ] **MCP port conflict between instances → launch-time free-port fallback (→ F8, planning 2026-06-17)** — two
+- [x] **MCP port conflict between instances → launch-time free-port fallback (→ F8, RESOLVED 2026-06-17; two-instance coexistence live-verified)** — two
   Goldfinch instances contend for the same MCP port. Add a **launch-time free-port fallback**
   (env-strict `GOLDFINCH_MCP_PORT` honored exactly, else fall back to a free port) → **F8** (DD6).
 - [ ] **2 NEW `.ps-list` a11y violations (future a11y work)** — the F7 leg-7 `npm run a11y` run
@@ -405,7 +405,7 @@ as work reveals.)_
 > external-consumer enablement + README moved to **F10**; alignment to **F11**. F7's completed
 > artifacts are left as-is — their "F8-eval" references mean **F9**.
 
-- [ ] **Flight 8: Production gating re-architecture + dev-profile isolation + port free-fallback** —
+- [x] **Flight 8: Production gating re-architecture + dev-profile isolation + port free-fallback** *(landed 2026-06-17, PR #52)* —
   make the **Settings toggle the sole bind gate** in production (bind at launch + live on flip),
   **human-only / UI-only** enablement (no programmatic enable), **`GOLDFINCH_AUTOMATION_ADMIN` usable
   on the packaged binary**, **`--automation-dev` demoted** to a dev-only force-bind (no-op when

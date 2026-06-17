@@ -115,6 +115,12 @@ FD-driven live verification, 2026-06-17, on a real `npm run pack` Linux build (`
 
 **Verdict:** the F8 production posture — toggle-binds (launch + live), human-only enable, loopback + key gating, dev-profile isolation, port free-fallback, two-instance coexistence, env-strict — is **live-verified on a real packaged build**. The deferred items are platform-agnostic JS already covered by unit tests + code review; they roll into the leg-8 HAT on the operator's real installed (Windows) instance.
 
+### Leg 8 — hat-and-alignment (DD8b) — **SKIPPED (operator decision, 2026-06-17)**
+- Operator: "I think we can skip the hat, we've effectively just done that." The guided HAT's substance was covered by leg 7's live packaged-build verification (toggle-binds curl transitions, **SC6 via a real 3rd-party MCP client**, DD1 isolation byte-unchanged, DD6 free-fallback + two-instance coexistence, env-strict hard-fail). The items not re-observed live (flip-OFF unbind, admin-on-production, DD9 `automation-key-gating`, `settings-activity-viewer`) are platform-agnostic JS already covered by unit tests + code review; confirmable ad-hoc on the real installed instance. `automation-key-gating.md` + `settings-activity-viewer.md` remain authored drafts (run later / carry to F9). Not a blocker to landing.
+
+### Flight landing — 2026-06-17
+- All legs 1–7 complete (leg 8 skipped per above). `npm test` 732 / typecheck / lint green; docs rewritten (DD7); the three F7-HAT mission Known Issues (production gating re-arch, dev/installed profile bleed, MCP port conflict) marked **RESOLVED** in mission.md. **Patch version bumped 0.5.1 → 0.5.2** ahead of the installer build (operator request). Flight status → `landed`; Flight 8 checked off in mission.md. Flight debrief to follow; then merge PR #52 + kick off a **Concourse** installer build (operator is out of GitHub Actions minutes).
+
 ---
 
 ## Decisions

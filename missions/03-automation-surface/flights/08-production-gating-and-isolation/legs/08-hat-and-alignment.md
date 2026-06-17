@@ -1,6 +1,7 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: skipped (operator decision, 2026-06-17)
+**Disposition:** the operator judged the guided HAT effectively covered by leg 7's live packaged-build verification — which included the toggle-binds curl transitions, **SC6 via a real 3rd-party MCP client**, dev-profile isolation (installed profile byte-unchanged), port free-fallback + two-instance coexistence, and env-strict hard-fail. The items not re-observed live (flip-OFF unbind, admin-on-production, DD9 `automation-key-gating`, `settings-activity-viewer`) are platform-agnostic JS covered by unit tests + code review and can be confirmed ad-hoc on the real installed instance. Not a blocker to landing; `automation-key-gating.md` + `settings-activity-viewer.md` remain authored drafts (runnable later / carry to F9).
 **Flight**: [Production gating re-architecture + dev-profile isolation + port free-fallback](../flight.md)
 
 ## Objective
