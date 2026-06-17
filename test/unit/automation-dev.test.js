@@ -1,12 +1,19 @@
 'use strict';
-// Unit tests for isAutomationDevEnabled (src/shared/automation-dev.js).
+// Unit tests for the pure dev/bind gates in src/shared/automation-dev.js:
+// isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint, and shouldBindAutomation
+// (Flight 8 / DD2 — the toggle-binds decision predicate).
 // engine.js / the dev seam (main.js handler + preload method) are integration-verified in
 // Leg 6 live smoke and are NOT unit-tested offline — they require the Electron runtime.
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint } = require('../../src/shared/automation-dev');
+const {
+  isAutomationDevEnabled,
+  isMcpAutomationEnabled,
+  shouldAutoMint,
+  shouldBindAutomation,
+} = require('../../src/shared/automation-dev');
 
 describe('isAutomationDevEnabled', () => {
   // --- true cases ---
@@ -210,5 +217,44 @@ describe('shouldAutoMint (dev auto-mint double gate, Leg 5)', () => {
   it('returns false for non-array argv even with the env var set', () => {
     assert.equal(shouldAutoMint(null, { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), false);
     assert.equal(shouldAutoMint('--automation-dev', { GOLDFINCH_AUTOMATION_DEV_MINT: '1' }), false);
+  });
+});
+
+describe('shouldBindAutomation (toggle-binds decision predicate, Flight 8 / DD2)', () => {
+  // --- true when EITHER term holds ---
+
+  it('returns true when automationEnabled === true (production toggle on)', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: true, devForceBind: false }), true);
+  });
+
+  it('returns true when devForceBind === true (dev force-bind, toggle off)', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: false, devForceBind: true }), true);
+  });
+
+  it('returns true when both terms are true', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: true, devForceBind: true }), true);
+  });
+
+  // --- false when NEITHER term holds (the both-false case) ---
+
+  it('returns false when both terms are false (packaged build, toggle off, no dev flag)', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: false, devForceBind: false }), false);
+  });
+
+  // --- strict-equality discipline: only the genuine boolean true binds ---
+
+  it('returns false for truthy non-boolean automationEnabled (strict === true)', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: 1, devForceBind: false }), false);
+    assert.equal(shouldBindAutomation({ automationEnabled: 'true', devForceBind: false }), false);
+  });
+
+  it('returns false for truthy non-boolean devForceBind (strict === true)', () => {
+    assert.equal(shouldBindAutomation({ automationEnabled: false, devForceBind: 1 }), false);
+  });
+
+  it('defaults missing terms to undefined → false, and never throws on no args', () => {
+    assert.equal(shouldBindAutomation({}), false);
+    assert.equal(shouldBindAutomation(), false);
+    assert.doesNotThrow(() => shouldBindAutomation());
   });
 });

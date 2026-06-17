@@ -331,17 +331,17 @@ async function copyText(text, messageEl) {
     } else if (status.enabled && status.error) {
       statusLine.textContent = 'Failed to bind: ' + status.error;
     } else {
+      // DD2 (Flight 8): the Automation toggle is the sole bind gate — flipping it on
+      // binds the surface live (no launch flag needed).
       statusLine.textContent =
-        'Not running — start Goldfinch with `--automation-dev` to bind the surface';
+        'Not running — turn on the Automation toggle to bind the surface';
     }
 
-    // Toggle-honesty (AC5): the automationEnabled setting only gates auth on an
-    // already-running server; the server binds only under --automation-dev. When
-    // the surface is not enabled at runtime, explain why flipping the toggle ON
-    // won't bind this launch.
+    // DD2 (Flight 8): the toggle binds the surface live — a flip takes effect
+    // immediately, so there is no "launch with a flag" caveat to surface.
     enabledNote.textContent = status.enabled
       ? ''
-      : 'Takes effect when Goldfinch is launched with `--automation-dev`.';
+      : 'Binds the local automation surface.';
 
     recomputePortNote();
   }
@@ -373,11 +373,16 @@ async function copyText(text, messageEl) {
     updatePortSaveDirty();
   }).catch(() => {});
 
-  // Enable toggle: write on change. No status re-fetch — a setting flip does not
-  // change status.enabled in a non-dev build, so the enabled-note stays correct.
+  // Enable toggle: write on change, then re-fetch status. DD2 (Flight 8): the toggle
+  // is the sole bind gate, so a flip now DOES change the bind state live (ON →
+  // start-from-null, OFF → stop-and-stay-stopped). Re-fetch after settingsSet resolves
+  // so the status-line/address reflect the now-bound/unbound surface.
   enabledToggle.addEventListener('change', () => {
     window.goldfinchInternal.settingsSet('automationEnabled', enabledToggle.checked)
-      .then(() => { messageEl.textContent = ''; })
+      .then(() => {
+        messageEl.textContent = '';
+        window.goldfinchInternal.automationGetStatus().then(renderStatus).catch(() => {});
+      })
       .catch((e) => {
         messageEl.textContent = 'Not saved: ' + (e && e.message ? e.message : 'error');
       });
@@ -500,6 +505,13 @@ function automationKeysOnce() {
 
   const bridge = window.goldfinchInternal;
 
+  // DD9 (Flight 8): the PERSISTED `automationEnabled` gates KEY GENERATION (mint),
+  // never revocation. Tracked here and kept live by the onSettingsChanged subscription
+  // below. Gate strictly on the persisted value (what the toggle reflects) — NEVER on
+  // status.enabled / effective-bound — so dev (override live, persisted off) mirrors
+  // production key-gating and the contract is testable in dev.
+  let automationEnabled = false;
+
   /**
    * Show an inline error in the key message line. Does NOT reveal a key.
    * @param {unknown} e
@@ -561,6 +573,8 @@ function automationKeysOnce() {
       mintBtn.className = 'settings-btn';
       mintBtn.type = 'button';
       mintBtn.textContent = jar.hasKey ? 'Rotate key' : 'Generate key';
+      // DD9: key GENERATION is gated on the persisted toggle; Revoke (below) is not.
+      mintBtn.disabled = !automationEnabled;
       mintBtn.addEventListener('click', () => {
         clearReveal();
         bridge.automationJarKeyMint(jar.id)
@@ -595,6 +609,8 @@ function automationKeysOnce() {
     if (!adminEnabled) return;
     adminStatus.textContent = adminKeySet ? 'Admin key set' : 'No admin key';
     adminMintBtn.textContent = adminKeySet ? 'Rotate admin key' : 'Generate admin key';
+    // DD9: admin key GENERATION is gated on the persisted toggle; admin Revoke is not.
+    adminMintBtn.disabled = !automationEnabled;
     adminRevokeBtn.disabled = !adminKeySet;
   }
 
@@ -637,8 +653,30 @@ function automationKeysOnce() {
 
   // Initial load — reveal stays hidden (it is only ever populated by a mint).
   // on load — use the shared single fetch (AC1); reveal stays hidden.
+  // DD9: fold the persisted `automationEnabled` read into the SAME init so the FIRST
+  // render already has the flag (no mint-button flicker) and NO second
+  // automationListKeys fires (automationKeysOnce is the memoized fetch; refresh()
+  // bypasses it, so we must NOT refresh() just to pick up the flag here).
   clearReveal();
-  automationKeysOnce().then((info) => { if (info) { renderJars(info.jars); renderAdmin(info.adminEnabled, info.adminKeySet); } }).catch(() => {});
+  Promise.all([automationKeysOnce(), bridge.settingsGet('automationEnabled')])
+    .then(([info, en]) => {
+      automationEnabled = !!en;
+      if (info) { renderJars(info.jars); renderAdmin(info.adminEnabled, info.adminKeySet); }
+    })
+    .catch(() => {});
+
+  // Live updates (DD9): when the persisted toggle flips, update the tracked flag and
+  // re-render so the mint buttons enable/disable immediately. refresh() rebuilds
+  // jars + admin reading the tracked flag. Remove the handle on pagehide, matching
+  // the other IIFEs' cleanup pattern (pagehide fires in the OLD document context
+  // where the handle + wrapper are still valid).
+  const hKeys = bridge.onSettingsChanged((all) => {
+    if (all && all.automationEnabled != null) {
+      automationEnabled = !!all.automationEnabled;
+      refresh().catch(() => {});
+    }
+  });
+  window.addEventListener('pagehide', () => bridge.offSettingsChanged(hKeys), { once: true });
 })();
 
 /* ---- automation activity viewer (Leg 4 / SC10 / DD6) ---- */
