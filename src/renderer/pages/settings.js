@@ -700,21 +700,17 @@ function automationKeysOnce() {
     container.appendChild(p);
   }
 
-  // Entries per page. 20/page newest-first, with freeze-on-page-2+ (DD4). The
-  // windowing + freshness state machine is the pure module audit-paging.js,
-  // loaded as a <script> before this one (globals: windowPage / countNewer /
-  // activeLogOf / reduceAudit — the url-safety.js dual-export precedent).
+  // Entries per page. 20/page newest-first. The freshness contract (page 1 live,
+  // higher pages frozen) survives underneath but is invisible to the operator —
+  // standard numbered pagination on top. The windowing + freshness state machine
+  // is the pure module audit-paging.js, loaded as a <script> before this one
+  // (globals: windowPage / countNewer / activeLogOf / reduceAudit / pageList /
+  // pageCount — the url-safety.js dual-export precedent).
   const PAGE_SIZE = 20;
 
-  // Pager controls (static in the HTML so the role="status" paused region exists
-  // at parse time and announces reliably on first population).
+  // Single nav container; the numbered pager (‹ 1 2 3 … › buttons) is rebuilt
+  // into it on every render.
   const pagerEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-pager'));
-  const prevBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-prev'));
-  const nextBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-next'));
-  const indicatorEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-indicator'));
-  const pausedEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-paused'));
-  const pausedTextEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-paused-text'));
-  const backToLiveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-back-to-live'));
 
   /** @type {{ page: number, frozenLog: any[]|null, liveLog: any[] }} */
   let state = { page: 1, frozenLog: null, liveLog: [] };
@@ -804,9 +800,33 @@ function automationKeysOnce() {
   }
 
   /**
-   * Render the current paged window + pager chrome from `state`. Windows over the
-   * active log (frozenLog ?? liveLog) so the rows + total never jump to the live
-   * ring while frozen.
+   * Build one pager control button (arrow or page number). Real <button> with an
+   * accessible name; the current page carries aria-current="page".
+   * @param {string} label    visible text
+   * @param {string} ariaLabel accessible name
+   * @param {() => void} onClick
+   * @param {{ disabled?: boolean, current?: boolean }} [flags]
+   * @returns {HTMLButtonElement}
+   */
+  function pagerButton(label, ariaLabel, onClick, flags) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pager-btn';
+    b.textContent = label;
+    b.setAttribute('aria-label', ariaLabel);
+    if (flags && flags.disabled) b.disabled = true;
+    if (flags && flags.current) {
+      b.setAttribute('aria-current', 'page');
+      b.classList.add('current');
+    }
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /**
+   * Render the current paged window + standard numbered pager from `state`.
+   * Windows over the active log (frozenLog ?? liveLog) so the rows + total never
+   * jump to the live ring while reading a higher page.
    */
   function renderActivity() {
     renderSessions(lastSessions);
@@ -822,28 +842,44 @@ function automationKeysOnce() {
       for (const e of win.rows) logEl.appendChild(buildLogRow(e));
     }
 
-    // --- pager controls + indicator ---
-    if (pagerEl) pagerEl.hidden = win.total === 0;
-    if (indicatorEl) {
-      indicatorEl.textContent = win.total
-        ? ('Showing ' + win.showingFrom + '–' + win.showingTo + ' of ' + win.total)
-        : '';
-    }
-    if (prevBtn) prevBtn.disabled = !win.hasPrev;
-    if (nextBtn) nextBtn.disabled = !win.hasNext;
+    // --- standard numbered pager: ‹ 1 2 3 … 7 › ---
+    if (!pagerEl) return;
+    pagerEl.hidden = win.total === 0;
+    pagerEl.textContent = '';
+    if (win.total === 0) return;
 
-    // --- paused affordance (page >= 2, i.e. frozen) ---
-    const frozen = state.frozenLog != null;
-    if (pausedEl) pausedEl.hidden = !frozen;
-    if (frozen && pausedTextEl) {
-      const n = countNewer(state.liveLog, state.frozenLog);
-      pausedTextEl.textContent = 'Paused — ' + n + ' newer · ';
+    const pages = pageCount(win.total, PAGE_SIZE);
+
+    // Previous arrow (disabled on page 1).
+    pagerEl.appendChild(pagerButton('‹', 'Previous page', () => dispatch({ type: 'prev' }), { disabled: !win.hasPrev }));
+
+    // Numbered buttons + ellipsis spans.
+    for (const item of pageList(win.total, PAGE_SIZE, state.page, { edge: 1, around: 1 })) {
+      if (item === '…') {
+        const span = document.createElement('span');
+        span.className = 'pager-ellipsis';
+        span.setAttribute('aria-hidden', 'true');
+        span.textContent = '…';
+        pagerEl.appendChild(span);
+        continue;
+      }
+      const n = /** @type {number} */ (item);
+      const isCurrent = n === state.page;
+      pagerEl.appendChild(pagerButton(
+        String(n),
+        isCurrent ? 'Page ' + n + ', current page' : 'Page ' + n,
+        () => dispatch({ type: 'goto', page: n }),
+        { current: isCurrent }
+      ));
     }
+
+    // Next arrow (disabled on last page).
+    pagerEl.appendChild(pagerButton('›', 'Next page', () => dispatch({ type: 'next' }), { disabled: state.page >= pages }));
   }
 
   /**
    * Dispatch an event through the freshness state machine and re-render.
-   * @param {{type:string, log?: any[]}} event
+   * @param {{type:string, log?: any[], page?: number}} event
    */
   function dispatch(event) {
     state = reduceAudit(state, event);
@@ -863,16 +899,8 @@ function automationKeysOnce() {
     dispatch({ type: 'broadcast', log: s.log || [] });
   }
 
-  // Pager click handlers — dispatch the matching event and re-render.
-  if (prevBtn) prevBtn.addEventListener('click', () => dispatch({ type: 'prev' }));
-  if (nextBtn) nextBtn.addEventListener('click', () => dispatch({ type: 'next' }));
-  if (backToLiveBtn) {
-    backToLiveBtn.addEventListener('click', () => {
-      dispatch({ type: 'back-to-live' });
-      // Restore focus to a sensible anchor now that the paused control is hidden.
-      if (prevBtn) prevBtn.focus();
-    });
-  }
+  // Pager buttons are (re)built per render in renderActivity() with their own
+  // click handlers, so there is nothing to wire up here.
 
   // Initial snapshot (catches sessions/log present before this page loaded) + live
   // updates. Listener removed on pagehide to prevent accumulation across reloads.

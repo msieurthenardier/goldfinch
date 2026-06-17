@@ -322,6 +322,24 @@ mission-level commitment.
   offscreen-translation breaks capture and OSR doesn't apply to `<webview>`. When concurrent
   background driving becomes a requirement it is a known, validated **future flight** (prefer (A);
   validate single-window focus-interference with a real human), not a research risk.
+- [ ] **Production gating re-architecture (carry to F8)** — surfaced at the F7 leg-9 HAT. The
+  surface should **bind on the Settings toggle alone** (no `--automation-dev` needed), with
+  **`GOLDFINCH_AUTOMATION_ADMIN` usable on the production binary** for the admin tier, and
+  `--automation-dev` **demoted** to a dev-only convenience. This **moves the security boundary**
+  (the toggle becomes the bind gate), so it needs its own design + Architect review → **F8**.
+- [ ] **Dev/installed shared-profile bleed → dev-profile isolation needed (carry to F8)** — F7 dev
+  runs against the operator's shared `~/.config/goldfinch` profile polluted it (`automationEnabled`
+  flipped true + dev-minted key hashes). Under the current flag-gated binding this is
+  credential/state bleed, **not** silent surface-enablement (binding still needs the flag); under
+  F8's toggle-binds model it **would** matter, so **dev-profile isolation** is essential there → **F8**.
+- [ ] **MCP port conflict between instances → launch-time free-port fallback (carry to F8)** — two
+  Goldfinch instances contend for the same MCP port. Add a **launch-time free-port fallback**
+  (env-strict `GOLDFINCH_MCP_PORT` honored exactly, else fall back to a free port) → **F8**.
+- [ ] **2 NEW `.ps-list` a11y violations (future a11y work)** — the F7 leg-7 `npm run a11y` run
+  reported 2 NEW `scrollable-region-focusable` (serious) violations on `.ps-list` in the
+  privacy-panel + the lightbox — independent chrome-UI a11y findings (surfaced while the harness
+  attached, unrelated to F7's `:9222` hardening). Carry to a future a11y leg/flight (remediate with
+  `tabindex="0"`, or add curated `ACCEPTED` allowlist entries if intentional).
 
 ## Flights
 
@@ -372,9 +390,14 @@ as work reveals.)_
   and HAT-found SC10 audit-context + port-control UX fixes. **The bulk Group-B migration + the
   `a11y-audit.mjs` rewrite + retiring the ungated `:9222` path remain (follow-on + Flight 7).**
   (SC11, part 1 — scoped)
-- [ ] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
+- [x] **Flight 7: Rewrite the a11y gate + retire the ungated path** — rewrite `scripts/a11y-audit.mjs`
   onto the new surface; retire/harden `npm run dev:debug`'s `--remote-allow-origins=*` and
   update/remove `.mcp.json` so the ungated `:9222` path is no longer the apparatus. (SC11, part 2)
+  *(Landed 2026-06-17 — scoped: bulk Group-B spec migration + audit-log paging (numbered) +
+  `:9222` hardening (`--remote-allow-origins` narrowed to loopback, `.mcp.json` trimmed). The
+  `evaluate` tool + `farbling-correctness` + the `a11y-audit.mjs` rewrite + final `:9222` removal
+  remain F8-eval. Production gating re-architecture + dev-profile isolation + port free-fallback →
+  follow-on F8. PR #51.)*
 - [ ] **Flight 8: External-consumer enablement (incl. the-one) + README reframe** — finalize the
   integration contract + docs + an end-to-end drive from an external process; coordinate the
   the-one-side wiring (tracked in the-one's repo; effectively Linux-host-networking / shim per the

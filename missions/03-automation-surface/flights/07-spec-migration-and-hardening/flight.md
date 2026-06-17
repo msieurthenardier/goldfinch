@@ -1,6 +1,6 @@
 # Flight: Bulk spec migration + ungated-path hardening (scoped)
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -111,18 +111,18 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 - [x] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
 - [x] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
 - [x] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3) — landed `http://127.0.0.1:9222`, WS probe-confirmed (arm1=101, arm2=403, arm3=101; a11y attaches).
-- [ ] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1)
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6)
+- [x] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1) — FD-driven live pass (admin MCP client; 17 tools; `:9222` confound-free); leg-1 `Ctrl+M` chord `{ok:true}` live; 709 gates green.
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6) — caught + fixed the audit-paging 404 render bug + numbered-pagination UX directive; operator-confirmed; dogfooded via the real `mcp__goldfinch__*` MCP. AC4 (zero-state) deferred to F8.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR onto `main`)
-- [ ] Tests passing (audit-paging renderer change + any migration-driven unit deltas + typecheck + lint)
-- [ ] Documentation updated (`docs/mcp-automation.md` if the audit-paging contract changes; CLAUDE.md if `dev:debug` hardening changes the dev workflow note)
+- [x] All legs completed
+- [ ] Code merged (PR onto `main`) — PR #51 marked ready for review (merge is the operator's call)
+- [x] Tests passing (audit-paging renderer change + any migration-driven unit deltas + typecheck + lint) — 709 pass / 0 fail; typecheck + lint clean
+- [x] Documentation updated (`docs/mcp-automation.md` if the audit-paging contract changes; CLAUDE.md if `dev:debug` hardening changes the dev workflow note) — CLAUDE.md `dev:debug` bullet updated for the narrowed `--remote-allow-origins` (leg 7); audit-paging is renderer-only (broadcast data contract unchanged), so `docs/mcp-automation.md` needed no change
 - [ ] Flight debrief written (separate `/flight-debrief` step)
 
 ### Verification

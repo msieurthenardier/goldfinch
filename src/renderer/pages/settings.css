@@ -570,31 +570,44 @@ main section p {
   margin: 6px 0;
 }
 
-/* ---- Activity pager (Flight 7 / DD4): 20/page newest-first + freeze affordance ---- */
+/* ---- Activity pager (Flight 7 / Leg 9): standard numbered pagination ---- */
 
-/* Prev/next controls + the "Showing X–Y of N" indicator, above the log. */
+/* ‹ 1 2 3 … 7 › — conventional numbered pager below the log. The freeze contract
+   (page 1 live, higher pages frozen) lives underneath but is invisible here. */
 .activity-pager {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 4px;
   margin: 8px 0 4px;
 }
-.activity-indicator {
-  font-size: 12px;
-}
-
-/* Freeze affordance: shown only on page >= 2 (the snapshot is frozen). role="status"
-   so the "N newer" count is announced. Uses the violet admin accent's neutral
-   sibling — paused is informational, not an error. */
-.activity-paused {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 4px 0 6px;
-  padding: 4px 8px;
+.pager-btn {
+  min-width: 28px;
+  padding: 3px 8px;
   border-radius: 4px;
-  background: var(--bg-2);
   border: 1px solid var(--border);
-  font-size: 12px;
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled):not(.current) {
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pager-btn.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pager-ellipsis {
+  padding: 3px 4px;
   color: var(--fg-dim);
+  font-size: 13px;
+  user-select: none;
 }

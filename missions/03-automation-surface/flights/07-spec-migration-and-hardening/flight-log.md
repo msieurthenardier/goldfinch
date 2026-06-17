@@ -170,12 +170,53 @@ Architect review (2026-06-16): **approve with changes** — all incorporated (si
 - **arm3 (`Origin: http://127.0.0.1:9222`)** → HTTP **101** (ACCEPTED) — the allow-listed loopback Origin is admitted.
 - **`npm run a11y`** ran successfully against the candidate-flag app (the Node WebSocket client attached + axe injected/executed over the narrowed port) — **AC3 confirmed** for the a11y harness. `farbling`'s local chrome-devtools-MCP attach is also safe: it sends no Origin or a loopback Origin → both attach per arm1/arm3; only foreign origins are blocked.
 
-**Applied:** `package.json` `dev:debug` → `--remote-allow-origins=http://127.0.0.1:9222` (the `:9222` port itself is **not** removed this flight — F8-eval). `BACKLOG.md` allow-origins item annotated (the `*` is fixed; final `:9222` removal + the `evaluate` tool remain the F8-eval tracking item). `CLAUDE.md` `dev:debug` bullet updated to the narrowed allow-list. AC1–AC7 all met; gates re-run green. Committed in its own post-probe commit (separate from the earlier batched Phase-2d block).
+**Applied:** `package.json` `dev:debug` → `--remote-allow-origins=http://127.0.0.1:9222` (the `:9222` port itself is **not** removed this flight — F8-eval). `BACKLOG.md` allow-origins item annotated (the `*` is fixed; final `:9222` removal + the `evaluate` tool remain the F8-eval tracking item). `CLAUDE.md` `dev:debug` bullet updated to the narrowed allow-list. AC1–AC7 all met; gates re-run green. Committed in its own post-probe commit (`b97b060`, separate from the earlier batched Phase-2d block).
+
+### 2026-06-16 — Leg 8 `verify-integration` (FD-driven live) → completed
+**Status**: completed. FD-driven live verification (operator-authorized direct run) against `npm run dev:automation` (admin auto-mint, `GOLDFINCH_MCP_PORT=49707`). Evidence (ephemeral, not committed): `/tmp/behavior-tests/goldfinch/verify-integration/2026-06-16-19-42-35/` (`driver.mjs` + `verify-output.txt`).
+
+A real admin MCP client (`@modelcontextprotocol/sdk` `StreamableHTTPClientTransport` + admin Bearer) exercised every migrated apparatus primitive, **confound-free** (`:9222` confirmed DOWN throughout):
+- `listTools` → **17 tools** (`getChromeTarget` present); unauthenticated `/mcp` → **401** (gate works).
+- `getChromeTarget` (admin-only) → `{wcId:1, kind:chrome}`; `readDom(chrome)` → 11976b html; `readAxTree(chrome)` → **352 AX nodes**; `captureWindow` → 114460b PNG.
+- `pressKey(chrome, 'M', ['control'])` → **`{ok:true}`** — the **leg-1 modifier-chord capability validated LIVE** (toolbar-pins Step 6 path).
+- `openTab('https://example.com/')` → wcId 3; `enumerateTabs` lists the guest; `readDom(guest).url = https://example.com/` (body "Example Domain") — guest-nav + URL read path (param-strip/scheme-guard/core-browsing specs).
+
+Full gates green (692 pass / typecheck / lint). Hardened-`:9222` deferred path confirmed via the leg-7 `npm run a11y` run. The audit-paging UI + the indicator hidden-at-true-zero frame are carried to the leg-9 HAT (not MCP-observable). The 2 NEW a11y violations (Anomalies) remain a carry-forward, NOT an F7 regression.
+
+### 2026-06-17 — Leg 9 `hat-and-alignment` (FD-guided HAT) → completed
+**Status**: completed. The guided HAT against the leg-6 audit-paging surface caught + fixed **two real defects** (both now in the working tree), and the operator signed off.
+
+**HAT fixes:**
+1. **Render bug (BLOCKING) — `audit-paging.js` was never in the `goldfinch://` `INTERNAL_PAGES` allowlist (404'd).** `settings.html` loaded the module but the internal scheme serves only the fixed allowlist; the 404 left `windowPage`/`reduceAudit` undefined → `renderActivity()` threw (swallowed by the initial-fetch `.catch`) → the Activity viewer rendered nothing even with 35+ entries. Fix: added `INTERNAL_PAGES['/audit-paging.js']` (mirrors `/settings.js`) + corrected the `settings.html` script path to the allowlisted same-origin path. `INTERNAL_CSP` (`default-src 'self'`) already covers it — not loosened. Pinned by a new `resolve('settings','/audit-paging.js')` case in `internal-assets.test.js`.
+2. **Operator UX directive — standard numbered pagination.** The custom "Newer / Older / Paused — N newer · back to live / Showing X–Y of N" pager was replaced with **standard numbered pagination `‹ 1 2 3 … ›`** (current page `aria-current="page"`, ellipsis gaps, disabled prev/next at boundaries). The freeze-on-page-2+ freshness contract is retained but now invisible.
+
+**Verified:**
+- Paging **operator-confirmed live** ("looks good").
+- The surface was **dogfooded through the real registered `mcp__goldfinch__*` MCP** (personal jar key, jar-scoped): `openTab`/`readDom`/`readAxTree` work; `getChromeTarget` correctly **refused** (admin-only).
+- The leg-1 `Ctrl+M` chord verified `{ok:true}` live in leg 8.
+
+**ACs:** AC1 (paging), AC2 (freeze-behavior-underneath), AC3 (a11y structure), AC5 (sampled spec via real MCP), AC6 (chord), AC7 (issues fixed inline + re-verified) → **passed**. **AC4 (indicator-hides-at-true-zero) → DEFERRED to F8** — not MCP-observable (the harness is itself a live admin session) and it lives in the gating/indicator work F8 owns.
+
+**Gates green** (post-fix): `npm test` **709 pass / 0 fail**, `npm run typecheck` clean, `npm run lint` clean.
 
 ---
 
 ## Flight Director Notes
 _Orchestration decisions recorded here during execution._
+
+### 2026-06-17 — F8 follow-on decision (operator) + leg-9 HAT alignment notes
+The leg-9 HAT surfaced a desired **re-architecture of the automation gating/binding model**, scoped by the operator to a **dedicated follow-on flight (F8)** because it moves the security boundary and needs its own design + Architect review:
+- **Toggle-binds the surface** — the Settings "enable automation" toggle becomes the bind gate; no `--automation-dev` flag needed to bind.
+- **`GOLDFINCH_AUTOMATION_ADMIN` usable on the production binary** — admin tier reachable via env on a shipped build (not only the dev launcher).
+- **`--automation-dev` demoted** to a dev-only convenience.
+- **Dev-profile isolation** — dev runs use an isolated profile, not the operator's shared `~/.config/goldfinch`.
+- **Launch-time MCP port free-fallback** — env-strict (`GOLDFINCH_MCP_PORT` honored exactly) else a free-port fallback to avoid instance collisions.
+
+Why a dedicated flight: under F8's **toggle-binds** model, the Settings toggle *becomes* the bind gate, so it shifts the security boundary — it needs its own design + Architect review, not a fast-follow.
+
+**Alignment notes carried to F8 planning:**
+- (i) **Shared-profile bleed (dev runs).** The FD's pre-isolation dev runs polluted the operator's shared `~/.config/goldfinch` profile (`automationEnabled` flipped true + dev-minted key hashes). **Operator to reset via Settings** (toggle off + revoke keys). Under the **CURRENT** flag-gated binding this is credential/state bleed, **NOT** silent surface-enablement (binding still needs the `--automation-dev` flag). **But under F8's toggle-binds model it WOULD matter** (the toggle alone would bind), so **dev-profile isolation is essential there**.
+- (ii) **2 NEW a11y violations (independent).** The leg-7 `npm run a11y` run reported 2 NEW axe violations (`scrollable-region-focusable`, severity serious) on `.ps-list` in the privacy-panel + the lightbox — independent chrome-UI a11y findings (the harness merely surfaced them while attaching), **carry to a future a11y leg/flight**.
 
 ### 2026-06-16 — Flight planned + signed off (status `ready`)
 Designed via `/flight` (recon → spec → Architect review → operator sign-off). Architect: approve-with-changes, all incorporated (single cycle; no second pass — reviewer-prescribed fixes, no new design risk). **Operator signed off; status → `ready`.** Staged for a future `/agentic-workflow` run (not executed now — operator's call). Sequencing reminder for execution: bulk migration (legs 1–4) BEFORE `harden-ungated-path` (leg 6); the `harden` leg's `--remote-allow-origins` narrowing is a resolve-or-divert (empirical Node-WS Origin probe first).
@@ -228,3 +269,12 @@ Flight Director: batched implementation of all 7 autonomous legs complete and su
 - **Leg 9 (`hat-and-alignment`)** — FD-guided interactive HAT.
 
 Branch pushed; **draft PR** opened onto `main` ("Flight 7: spec migration + ungated-path hardening (scoped)"), marked draft pending live verification (legs 7 narrowing / 8 / 9).
+
+### 2026-06-16 — Leg 9 `hat-and-alignment`: two HAT defects fixed (uncommitted — FD re-verifies live)
+A live HAT against the committed Leg-6 audit-log paging surfaced two defects; both fixed in the working tree (NOT committed). Gates green: **709 tests pass**, `typecheck` + `lint` clean.
+
+1. **Render bug (BLOCKING) — `audit-paging.js` was never served to the settings guest.** `settings.html` loaded the module via `../shared/audit-paging.js`, but the `goldfinch://` internal scheme serves ONLY the fixed `INTERNAL_PAGES` allowlist (everything else 404s). The 404 left `windowPage`/`reduceAudit`/etc. undefined → `renderActivity()` threw (swallowed by the initial-fetch `.catch`) → the Activity viewer rendered nothing even with 35+ entries. Fix: added `/audit-paging.js` → `src/shared/audit-paging.js` to `INTERNAL_PAGES['settings']` (mirrors the `/settings.js` entry), and changed the `settings.html` script src to the allowlisted same-origin path `audit-paging.js` (kept before `settings.js`). `INTERNAL_CSP` (`default-src 'self'`) already covers the same-origin script — not loosened. Pinned by a new `resolve('settings','/audit-paging.js')` case in `internal-assets.test.js`.
+
+2. **Operator UX directive — standard numbered pagination.** Replaced the bespoke "‹ Newer / Older ›" + "Showing X–Y of N" + "Paused — N newer · Back to live" affordance with conventional numbered pagination (`‹ 1 2 3 … 7 ›`, current page highlighted via `aria-current="page"`, ellipsis spans for gaps, disabled prev/next at the boundaries). The freshness contract is unchanged but now invisible: page 1 is live (re-renders on broadcast), higher pages show a frozen snapshot, page 1 resumes live. Added a `goto` event + a pure `pageList()` (with `pageCount()`) to `audit-paging.js`; `next`/`prev`/`broadcast` and the freeze/newer/clamp machine are retained.
+
+Files changed: `src/main/main.js` (INTERNAL_PAGES entry), `src/renderer/pages/settings.html` (script src + single `<nav>` pager, removed indicator/paused/back-to-live elements), `src/shared/audit-paging.js` (`goto` + `pageList` + `pageCount`), `src/renderer/pages/settings.js` (`renderActivity` builds the numbered pager; removed indicator/paused logic), `src/renderer/pages/settings.css` (numbered-pager styles; removed dead `.activity-indicator`/`.activity-paused` rules), `src/renderer/renderer-globals.d.ts` + `eslint.config.mjs` (declare the two new renderer globals), `test/unit/audit-paging.test.js` + `test/unit/internal-assets.test.js` (new coverage). **Not committed** — FD re-verifies live first.

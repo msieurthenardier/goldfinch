@@ -106,22 +106,81 @@ function activeLog(state) {
 }
 
 /**
+ * Number of pages for `total` entries at `pageSize`. Always >= 1 (an empty log
+ * is still "page 1 of 1") so navigation/clamping has a coherent floor.
+ *
+ * @param {number} total
+ * @param {number} pageSize
+ * @returns {number}
+ */
+function pageCount(total, pageSize) {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+/**
+ * Pure helper that builds a conventional numbered-pagination model: a list of
+ * page numbers interleaved with `'…'` ellipsis markers for gaps. Always shows
+ * the first/last `edge` pages and `around` pages on each side of `currentPage`;
+ * collapses the rest to a single `'…'`. An ellipsis is only emitted when it
+ * replaces MORE than one page (a lone gap of 1 is rendered as that page number,
+ * never as `…`) — the standard `‹ 1 … 4 5 6 … 12 ›` look.
+ *
+ * @param {number} total       total entries
+ * @param {number} pageSize    entries per page
+ * @param {number} currentPage 1-based current page
+ * @param {{edge?: number, around?: number}} [opts]
+ * @returns {Array<number|'…'>} e.g. [1, '…', 4, 5, 6, '…', 12]
+ */
+function pageList(total, pageSize, currentPage, opts) {
+  const edge = opts && typeof opts.edge === 'number' ? opts.edge : 1;
+  const around = opts && typeof opts.around === 'number' ? opts.around : 1;
+  const count = pageCount(total, pageSize);
+  const cur = Math.min(Math.max(currentPage, 1), count);
+
+  // Collect the set of page numbers to show explicitly.
+  const show = new Set();
+  for (let p = 1; p <= edge && p <= count; p += 1) show.add(p);
+  for (let p = count - edge + 1; p <= count; p += 1) { if (p >= 1) show.add(p); }
+  for (let p = cur - around; p <= cur + around; p += 1) { if (p >= 1 && p <= count) show.add(p); }
+
+  const pages = [...show].sort((a, b) => a - b);
+  /** @type {Array<number|'…'>} */
+  const out = [];
+  let prev = 0;
+  for (const p of pages) {
+    const gap = p - prev;
+    if (prev !== 0 && gap > 1) {
+      // A gap of exactly 1 missing page is filled with that page (no lone …).
+      if (gap === 2) out.push(prev + 1);
+      else out.push('…');
+    }
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+/**
  * The freshness state machine. Pure: returns a new state, never mutates.
  *
  * Events:
  *  - {type:'broadcast', log} — page 1: update liveLog, stay live (frozenLog
  *    stays null). page >= 2: update liveLog only, KEEP frozenLog (rows stable;
- *    only the newer-count changes).
+ *    only what a higher page renders is the frozen snapshot).
  *  - {type:'next'} — no-op if !hasNext (clamp). Else page+1; entering page >= 2
  *    from page 1 snapshots frozenLog = liveLog.
  *  - {type:'prev'} — no-op if !hasPrev. Else page-1; landing on page 1 clears
  *    frozenLog (resumes live). A broadcast arriving the same tick will NOT
  *    re-freeze (page is 1 -> stays live).
- *  - {type:'back-to-live'} — page=1, frozenLog=null (same end-state as prev-ing
- *    back to page 1).
+ *  - {type:'goto', page:N} — clamp N to [1, pageCount]. Page 1 clears frozenLog
+ *    (resumes live). Page >= 2 freezes frozenLog = liveLog if currently live,
+ *    else keeps the existing snapshot (navigating between frozen pages does not
+ *    re-snapshot). This is the single navigation event the numbered pager uses;
+ *    next/prev are kept as thin wrappers over the same freeze contract.
+ *  - {type:'back-to-live'} — page=1, frozenLog=null (same end-state as goto 1).
  *
  * @param {PagerState} state
- * @param {{type:string, log?: AuditEntry[]}} event
+ * @param {{type:string, log?: AuditEntry[], page?: number}} event
  * @returns {PagerState}
  */
 function reduceAudit(state, event) {
@@ -132,6 +191,20 @@ function reduceAudit(state, event) {
       // page 1 -> live: update liveLog, frozenLog stays null.
       // page >= 2 -> frozen: update liveLog only, keep frozenLog.
       return { ...state, liveLog: log };
+    }
+    case 'goto': {
+      // Clamp the target into [1, pageCount] against the ACTIVE log (frozen while
+      // frozen, live on page 1) so a navigation can't overshoot the snapshot.
+      const total = activeLog(state).length;
+      const target = Math.min(Math.max(event.page | 0, 1), pageCount(total, PAGE_SIZE));
+      if (target === 1) {
+        // Page 1 always resumes live.
+        return { ...state, page: 1, frozenLog: null };
+      }
+      // Page >= 2: freeze the live ring on first leaving page 1; otherwise keep
+      // the snapshot already taken (moving between frozen pages must not re-snap).
+      const frozenLog = state.frozenLog != null ? state.frozenLog : state.liveLog;
+      return { ...state, page: target, frozenLog };
     }
     case 'next': {
       const win = windowPage(activeLog(state), state.page, PAGE_SIZE);
@@ -160,10 +233,12 @@ function reduceAudit(state, event) {
 // Dual export: CommonJS (main process + test runner) and global (renderer,
 // which runs with nodeIntegration:false and cannot require()).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { windowPage, countNewer, activeLog, reduceAudit };
+  module.exports = { windowPage, countNewer, activeLog, reduceAudit, pageList, pageCount };
 } else {
   /** @type {any} */ (globalThis).windowPage = windowPage;
   /** @type {any} */ (globalThis).countNewer = countNewer;
   /** @type {any} */ (globalThis).activeLogOf = activeLog;
   /** @type {any} */ (globalThis).reduceAudit = reduceAudit;
+  /** @type {any} */ (globalThis).pageList = pageList;
+  /** @type {any} */ (globalThis).pageCount = pageCount;
 }

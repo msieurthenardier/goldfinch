@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Settings — Goldfinch</title>
     <link rel="stylesheet" href="settings.css" />
-    <script src="../shared/audit-paging.js" defer></script>
+    <script src="audit-paging.js" defer></script>
     <script src="settings.js" defer></script>
   </head>
   <body>
@@ -101,16 +101,8 @@
         <p class="muted">Sessions currently connected to the automation surface, and a log of recent actions. "Connected" reflects the transport — a revoked session lingers here until its connection closes.</p>
         <div id="automation-active-sessions"></div>
         <h4>Recent actions</h4>
-        <div id="automation-activity-pager" class="activity-pager" hidden>
-          <button id="automation-activity-prev" class="settings-btn" type="button" aria-label="Newer actions (previous page)">‹ Newer</button>
-          <button id="automation-activity-next" class="settings-btn" type="button" aria-label="Older actions (next page)">Older ›</button>
-          <span id="automation-activity-indicator" class="activity-indicator muted"></span>
-        </div>
-        <div id="automation-activity-paused" class="activity-paused" role="status" hidden>
-          <span id="automation-activity-paused-text"></span>
-          <button id="automation-activity-back-to-live" class="settings-btn" type="button">Back to live</button>
-        </div>
         <div id="automation-activity-log"></div>
+        <nav id="automation-activity-pager" class="activity-pager" aria-label="Activity log pages" hidden></nav>
       </section>
       <section id="startup">
         <h2>On startup</h2>

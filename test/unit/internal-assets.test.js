@@ -12,12 +12,14 @@ const { contentTypeFor, createResolver } = require('../../src/main/internal-asse
 const FAKE_HTML = '/fake/pages/settings.html';
 const FAKE_CSS = '/fake/pages/settings.css';
 const FAKE_JS = '/fake/pages/settings.js';
+const FAKE_AUDIT_JS = '/fake/shared/audit-paging.js';
 
 const syntheticMap = {
   settings: {
     '/': FAKE_HTML,
     '/settings.css': FAKE_CSS,
-    '/settings.js': FAKE_JS
+    '/settings.js': FAKE_JS,
+    '/audit-paging.js': FAKE_AUDIT_JS
   }
 };
 
@@ -82,6 +84,15 @@ test('resolve: /settings.js → settings.js with text/javascript content-type', 
   const result = resolve('settings', '/settings.js');
   assert.ok(result !== null, 'expected non-null result for /settings.js');
   assert.equal(result.file, FAKE_JS);
+  assert.equal(result.contentType, 'text/javascript; charset=utf-8');
+});
+
+test('resolve: /audit-paging.js → the shared module with text/javascript content-type', () => {
+  // Leg 9 fix: settings.html loads audit-paging.js as a same-origin <script>, so
+  // the internal scheme MUST serve it from its allowlist (a ../shared/ path 404s).
+  const result = resolve('settings', '/audit-paging.js');
+  assert.ok(result !== null, 'expected non-null result for /audit-paging.js');
+  assert.equal(result.file, FAKE_AUDIT_JS);
   assert.equal(result.contentType, 'text/javascript; charset=utf-8');
 });
 

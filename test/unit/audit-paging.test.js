@@ -8,7 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { windowPage, countNewer, activeLog, reduceAudit } = require('../../src/shared/audit-paging');
+const { windowPage, countNewer, activeLog, reduceAudit, pageList, pageCount } = require('../../src/shared/audit-paging');
 
 // Build a newest-LAST log of N entries with ascending ts (ts === index+1), the
 // ring's natural append order.
@@ -255,4 +255,125 @@ test('reduceAudit: back-to-live and prev-to-page-1 reach the same observable end
 test('reduceAudit: unknown event type is a no-op (returns the same state)', () => {
   const state = { page: 2, frozenLog: makeLog(20), liveLog: makeLog(25) };
   assert.equal(reduceAudit(state, { type: 'nope' }), state);
+});
+
+// ---------------------------------------------------------------------------
+// pageCount — always >= 1
+// ---------------------------------------------------------------------------
+
+test('pageCount: empty log is still page 1 of 1', () => {
+  assert.equal(pageCount(0, PAGE), 1);
+});
+
+test('pageCount: exact multiples and partials', () => {
+  assert.equal(pageCount(20, PAGE), 1);
+  assert.equal(pageCount(21, PAGE), 2);
+  assert.equal(pageCount(40, PAGE), 2);
+  assert.equal(pageCount(41, PAGE), 3);
+});
+
+// ---------------------------------------------------------------------------
+// pageList — standard numbered-pagination model with ellipsis
+// ---------------------------------------------------------------------------
+
+test('pageList: single page -> just [1]', () => {
+  assert.deepEqual(pageList(10, PAGE, 1), [1]);
+});
+
+test('pageList: a handful of pages, no gaps -> contiguous numbers', () => {
+  // 3 pages, current 2: 1 2 3 (no ellipsis needed)
+  assert.deepEqual(pageList(41, PAGE, 2), [1, 2, 3]);
+});
+
+test('pageList: many pages, current in the middle -> ellipses on both sides', () => {
+  // 12 pages (total 12*20=240), current 6 -> [1,'…',5,6,7,'…',12]
+  assert.deepEqual(pageList(240, PAGE, 6), [1, '…', 5, 6, 7, '…', 12]);
+});
+
+test('pageList: current near the start -> trailing ellipsis only', () => {
+  // 12 pages, current 1 -> [1,2,'…',12]
+  assert.deepEqual(pageList(240, PAGE, 1), [1, 2, '…', 12]);
+});
+
+test('pageList: current near the end -> leading ellipsis only', () => {
+  // 12 pages, current 12 -> [1,'…',11,12]
+  assert.deepEqual(pageList(240, PAGE, 12), [1, '…', 11, 12]);
+});
+
+test('pageList: a single-page gap is filled with the page number, not a lone ellipsis', () => {
+  // 5 pages, current 3 -> 1 2 3 4 5 (every page within edge/around — no gap)
+  assert.deepEqual(pageList(100, PAGE, 3), [1, 2, 3, 4, 5]);
+  // 6 pages, current 1 -> [1,2,'…',6]: gap 3..5 collapses, but the lone gap rule
+  // only fires for a gap of exactly one missing page.
+  assert.deepEqual(pageList(120, PAGE, 1), [1, 2, '…', 6]);
+});
+
+test('pageList: lone-gap collapse — a gap of exactly one page shows that page', () => {
+  // 4 pages, current 1, edge 1 around 1 -> show {1,2,4}; gap between 2 and 4 is a
+  // single missing page (3) -> rendered as 3, not '…': [1,2,3,4].
+  assert.deepEqual(pageList(80, PAGE, 1), [1, 2, 3, 4]);
+});
+
+test('pageList: clamps an out-of-range current page', () => {
+  // current 99 on a 3-page set behaves like the last page.
+  assert.deepEqual(pageList(41, PAGE, 99), pageList(41, PAGE, 3));
+});
+
+// ---------------------------------------------------------------------------
+// reduceAudit goto — the numbered-pager navigation event
+// ---------------------------------------------------------------------------
+
+test('reduceAudit: goto a higher page from page 1 freezes the live ring', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(60) };
+  state = reduceAudit(state, { type: 'goto', page: 3 });
+  assert.equal(state.page, 3);
+  assert.ok(state.frozenLog);
+  assert.deepEqual(state.frozenLog, makeLog(60));
+});
+
+test('reduceAudit: goto between frozen pages keeps the original snapshot (no re-snap)', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(60) };
+  state = reduceAudit(state, { type: 'goto', page: 2 }); // freeze 60
+  const frozen = state.frozenLog;
+  // a broadcast grows the live ring while frozen
+  state = reduceAudit(state, { type: 'broadcast', log: makeLog(70) });
+  state = reduceAudit(state, { type: 'goto', page: 3 }); // move within frozen pages
+  assert.equal(state.page, 3);
+  assert.equal(state.frozenLog, frozen); // SAME reference — not re-snapped to 70
+});
+
+test('reduceAudit: goto page 1 clears the freeze (resumes live)', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(60) };
+  state = reduceAudit(state, { type: 'goto', page: 3 }); // frozen
+  state = reduceAudit(state, { type: 'goto', page: 1 });
+  assert.equal(state.page, 1);
+  assert.equal(state.frozenLog, null);
+  // a same-tick broadcast must not re-freeze (page is 1)
+  state = reduceAudit(state, { type: 'broadcast', log: makeLog(80) });
+  assert.equal(state.frozenLog, null);
+  assert.equal(activeLog(state).length, 80);
+});
+
+test('reduceAudit: goto clamps above pageCount to the last page', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(41) }; // 3 pages
+  state = reduceAudit(state, { type: 'goto', page: 99 });
+  assert.equal(state.page, 3);
+  assert.ok(state.frozenLog);
+});
+
+test('reduceAudit: goto clamps below 1 to page 1 (and stays live)', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(41) };
+  state = reduceAudit(state, { type: 'goto', page: 0 });
+  assert.equal(state.page, 1);
+  assert.equal(state.frozenLog, null);
+  state = reduceAudit(state, { type: 'goto', page: -5 });
+  assert.equal(state.page, 1);
+});
+
+test('reduceAudit: goto while frozen clamps against the FROZEN total, not the grown live ring', () => {
+  let state = { page: 1, frozenLog: null, liveLog: makeLog(41) }; // 3 frozen pages
+  state = reduceAudit(state, { type: 'goto', page: 2 }); // freeze 41
+  state = reduceAudit(state, { type: 'broadcast', log: makeLog(200) }); // live ring grows to 10 pages
+  state = reduceAudit(state, { type: 'goto', page: 99 }); // clamp against frozen (3), not live (10)
+  assert.equal(state.page, 3);
 });
