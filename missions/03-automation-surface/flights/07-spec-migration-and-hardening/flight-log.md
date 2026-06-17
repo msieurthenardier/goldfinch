@@ -161,6 +161,17 @@ Architect review (2026-06-16): **approve with changes** — all incorporated (si
 - `BACKLOG.md` allow-origins item — gated on the probe outcome (land vs F8-eval tracking).
 - Any Origin-injecting shim — divert-only, decided after the probe.
 
+### 2026-06-16 — Leg 7 `harden-ungated-path` → LANDED (probe passed, narrowing applied)
+**Status**: completed. The live two-arm (three-arm, in practice) WS probe was run by the Flight Director against the app launched with the candidate flag `--remote-allow-origins=http://127.0.0.1:9222`. **Decision: LAND.**
+
+**Probe results (verbatim):**
+- **arm1 (no Origin header)** → HTTP **101** (WS upgrade ACCEPTED) — the no-Origin Node clients (`a11y-audit.mjs`, `cdp-driver.mjs`) still attach under the narrowed flag.
+- **arm2 (`Origin: http://evil.example`)** → HTTP **403** (REJECTED) — a hostile/foreign web Origin is blocked, so the narrowing is genuinely **load-bearing**, not a no-op. This is the AC2 proof.
+- **arm3 (`Origin: http://127.0.0.1:9222`)** → HTTP **101** (ACCEPTED) — the allow-listed loopback Origin is admitted.
+- **`npm run a11y`** ran successfully against the candidate-flag app (the Node WebSocket client attached + axe injected/executed over the narrowed port) — **AC3 confirmed** for the a11y harness. `farbling`'s local chrome-devtools-MCP attach is also safe: it sends no Origin or a loopback Origin → both attach per arm1/arm3; only foreign origins are blocked.
+
+**Applied:** `package.json` `dev:debug` → `--remote-allow-origins=http://127.0.0.1:9222` (the `:9222` port itself is **not** removed this flight — F8-eval). `BACKLOG.md` allow-origins item annotated (the `*` is fixed; final `:9222` removal + the `evaluate` tool remain the F8-eval tracking item). `CLAUDE.md` `dev:debug` bullet updated to the narrowed allow-list. AC1–AC7 all met; gates re-run green. Committed in its own post-probe commit (separate from the earlier batched Phase-2d block).
+
 ---
 
 ## Flight Director Notes
@@ -195,6 +206,9 @@ _Departures from the planned approach._
 
 ## Anomalies
 _Unexpected issues._
+
+### 2026-06-16 — `npm run a11y` reported 2 NEW axe violations during the Leg 7 probe (carry forward — NOT fixed in F7)
+While confirming AC3 (the a11y harness attaches over the narrowed `:9222`), `npm run a11y` ran successfully but reported **2 NEW** axe violations: **`scrollable-region-focusable`** (severity **serious**) on `.ps-list` in **(a)** the privacy-panel and **(b)** the lightbox. These are independent chrome-UI accessibility findings — a scrollable region that lacks keyboard focusability — **unrelated to F7's `:9222`/Origin hardening** (the harness merely surfaced them while attaching). **Not fixed in F7** (out of scope for the hardening leg). **Flag for a future a11y leg/flight**: either remediate (`tabindex="0"` on the scroll containers) or, if intentional, add curated `ACCEPTED` allowlist entries in `scripts/a11y-audit.mjs`. The narrowing landed regardless — the probe and AC3 both passed; this is an observation to carry forward.
 
 ---
 

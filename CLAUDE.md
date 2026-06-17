@@ -7,7 +7,7 @@ Goldfinch — an Electron desktop browser with a media panel (scan/play/download
 ## Commands
 
 - `npm start` — run the app
-- `npm run dev:debug` — run with remote debugging on `:9222` (`--no-sandbox`, WSL/headless friendly)
+- `npm run dev:debug` — run with remote debugging on `:9222` (`--no-sandbox`, WSL/headless friendly). The CDP Origin allow-list is narrowed to `--remote-allow-origins=http://127.0.0.1:9222` (F7): no-Origin Node clients (`a11y-audit.mjs`, `cdp-driver.mjs`) and loopback Origins still attach, but a foreign web Origin is rejected. `:9222` is dev-only; its final removal is tracked for F8-eval.
 - `npm run dist` — build installers (electron-builder); `npm run pack` for an unpacked `--dir` build
 - `npm test` — runs `node --test` over `test/unit/**`. Unit suite covers the pure security/privacy helpers (`src/shared/url-safety.js`, `src/main/download-path.js`, `jars.js` validation + `isSafeColor`, `trackers.js`, `shields.js`). **For real-environment / UI behavior, drive the running app over CDP**: start `dev:debug`, then connect to `http://127.0.0.1:9222` and `Runtime.evaluate` against the page target (the renderer) or the `webview` target (page content). The migrated behavior tests now drive the in-process MCP automation surface (`npm run dev:automation`), not Playwright-MCP over `:9222`. See `tests/behavior/` for behavior-test specs.
 - `npm run lint` — ESLint over the whole repo (`eslint.config.mjs`; flat config).

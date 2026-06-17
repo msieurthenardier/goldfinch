@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
-    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=*",
+    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222",
     "dev:automation": "electron . --enable-logging --no-sandbox --automation-dev",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",

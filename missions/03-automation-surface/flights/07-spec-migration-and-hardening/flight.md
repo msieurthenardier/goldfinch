@@ -20,8 +20,8 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ### Open Questions
 - [x] **`core-browsing-shields` apparatus** → RESOLVED (Architect, DD2): it is an **admin** spec (Step 5 reads the chrome privacy panel via `getChromeTarget`; Steps 3–4 navigate a guest via `openTab`). Eval-free. Not a jar-key migration.
 - [x] **`settings-automation` migration shape** → RESOLVED (Architect, Technical Approach §3): **two targets** — chrome indicator via `getChromeTarget`+`readDom`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`+`readDom`. Eval-free (DOM elements). The staged MCP session is unchanged.
-- [ ] **How narrow can `dev:debug`'s `--remote-allow-origins` go** while the Node CDP clients (`a11y-audit.mjs`, `farbling`) still attach? Node 22's global `WebSocket` sends **no `Origin`** by default, so narrowing may be a no-op OR may break the attach — **resolve EMPIRICALLY at `harden-ungated-path`** with a Node-22 WS probe before landing the flag (see DD3 + Adaptation Criteria divert).
-- [ ] **`devtools-cdp-conflict` disposition** — `BLOCKED-AS-WRITTEN` pending a non-CDP DevTools-open affordance (deferred). After hardening it stays blocked; **annotate that the block is due to the missing non-CDP DevTools affordance, NOT the (now-fixed) wide-open Origin** (Architect suggestion) → carry to F8-eval.
+- [x] **How narrow can `dev:debug`'s `--remote-allow-origins` go** while the Node CDP clients (`a11y-audit.mjs`, `farbling`) still attach? **RESOLVED (`harden-ungated-path`, probe-confirmed):** landed `--remote-allow-origins=http://127.0.0.1:9222`. The live WS probe showed no-Origin clients attach (arm1=101), a foreign Origin is rejected (arm2 `http://evil.example`=403 → load-bearing), and the loopback Origin is admitted (arm3=101); `npm run a11y` ran over the narrowed port. NOT a no-op, NOT a break.
+- [x] **`devtools-cdp-conflict` disposition** — **RESOLVED (annotated, stays blocked):** the spec carries a Flight-7 annotation that its `BLOCKED-AS-WRITTEN` state is gated on the **missing non-CDP DevTools-open affordance**, explicitly NOT the (now-narrowed) wide-open Origin; status stays `draft`, venue `dev:automation` (no `:9222`) → carried to F8-eval.
 
 ### Design Decisions
 
@@ -110,7 +110,7 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 - [x] `migrate-settings-automation` — dual target: chrome indicator via `getChromeTarget`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`. (DD1)
 - [x] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
 - [x] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
-- [ ] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3)
+- [x] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3) — landed `http://127.0.0.1:9222`, WS probe-confirmed (arm1=101, arm2=403, arm3=101; a11y attaches).
 - [ ] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1)
 - [ ] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6)
 

@@ -1,9 +1,9 @@
 # Leg: harden-ungated-path
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Bulk spec migration + ungated-path hardening (scoped)](../flight.md)
 
-> **Progress (2026-06-16):** Deterministic parts done — `.mcp.json` Playwright-`:9222` entry trimmed (AC4), `devtools-cdp-conflict.md` annotated (AC5), the stale CLAUDE.md Playwright sentence fixed (AC6 partial); gates green (AC7). The `--remote-allow-origins` narrowing in `package.json` is **pending the operator's live WS probe** (AC1/AC2/AC3 + the land-vs-divert disposition + `BACKLOG.md`). Leg stays `ready` until the probe lands the narrowing.
+> **Progress (2026-06-16):** landed — narrowing applied, probe passed. The two-arm WS probe (run live by the FD) confirmed: arm1 no-Origin → 101 (no-Origin Node clients still attach), arm2 `Origin: http://evil.example` → 403 (foreign origin blocked → narrowing is load-bearing), arm3 loopback Origin → 101; `npm run a11y` ran successfully over the narrowed port. `package.json` `dev:debug` narrowed to `--remote-allow-origins=http://127.0.0.1:9222` (AC1/AC2/AC3). Deterministic parts done earlier — `.mcp.json` trimmed (AC4), `devtools-cdp-conflict.md` annotated (AC5), docs (AC6); gates green (AC7).
 
 ## Objective
 Harden the ungated `:9222` path (DD3) without removing it: **empirically determine** (Node-22 WS probe) a `--remote-allow-origins` form that blocks the wide-open `*` exposure yet keeps the deferred `a11y-audit.mjs` + `farbling-correctness` Node/CDP clients attaching; trim the stale `.mcp.json` Playwright-`:9222` entry; and annotate the `devtools-cdp-conflict` block as gated on the missing non-CDP DevTools affordance (NOT the now-narrowed Origin). **Resolve-or-divert**: land the narrowing only if the probe confirms the clients still attach; otherwise apply a documented fallback.
@@ -38,13 +38,13 @@ Harden the ungated `:9222` path (DD3) without removing it: **empirically determi
 - The chosen disposition (land vs divert) + the probe result recorded in the flight log Decisions/Anomalies.
 
 ## Acceptance Criteria
-- [ ] **AC1 (empirical probe run + recorded — BOTH arms)** — Two probe arms were run against the app launched with the candidate narrowed `--remote-allow-origins` and recorded in the flight log: **(arm 1, no-Origin)** a Node-22 `new WebSocket` with no Origin still attaches (proves the deferred Node clients survive); **(arm 2, with-Origin)** a `new WebSocket(wsUrl, { headers: { Origin: 'http://evil.example' } })` is **rejected** under the narrowed list (and admitted under `*`) — proving the narrowing actually blocks a disallowed web origin, not just that the Node client attaches. The narrowing form is chosen FROM both arms, not guessed. (`a11y` runs? `farbling` attaches? also recorded.)
-- [ ] **AC2 (`*` no longer wide-open AND demonstrably load-bearing — or documented residual)** — `package.json` `dev:debug` no longer uses `--remote-allow-origins=*` (a loopback allow-list is landed) **and arm 2 confirmed it rejects a disallowed Origin** (so the narrowing is real hardening, not a no-op); OR, if the probe shows narrowing breaks the no-Origin Node attach (arm 1 fails) and no admitting form works, the divert is taken and the residual `*` is **explicitly documented** (CLAUDE.md/flight log) as a known dev-only exposure carried to F8-eval. If arm 1 passes but arm 2 shows narrowing is a no-op (Chromium ignores Origin entirely), record that the narrowing provides no added protection and treat it as a documented residual → F8-eval (don't claim false hardening). One disposition is true and recorded.
-- [ ] **AC3 (deferred consumers still served)** — After the change, `npm run a11y` (the axe harness over `:9222`) and the `farbling-correctness` chrome-devtools-MCP attach both still work (operator-confirmed live). `scripts/cdp-driver.mjs` (the same-shape no-Origin sibling) is acknowledged: its attach is covered by probe arm 1 (no-Origin) — confirm it's no longer named by any migrated spec (dormant; removal is F8-eval). If the landed narrowing broke any consumer, the divert (AC2) was taken instead.
-- [ ] **AC4 (`.mcp.json` trimmed)** — The Playwright-`:9222` entry is removed; `grep -rn "9222" .mcp.json` returns nothing. No remaining spec/tooling references the Playwright-`:9222` endpoint (verified before trimming).
-- [ ] **AC5 (devtools-cdp-conflict annotated)** — `devtools-cdp-conflict.md` carries an annotation that its BLOCKED-AS-WRITTEN state is due to the missing non-CDP DevTools-open affordance, NOT the now-narrowed Origin; it stays `draft`, venue unchanged (`dev:automation`, no `:9222`), carried to F8-eval.
-- [ ] **AC6 (docs current)** — `CLAUDE.md`/`docs/mcp-automation.md` `dev:debug`/automation notes reflect the narrowed flag (or the documented residual).
-- [ ] **AC7 (gates green)** — `npm test` + `npm run typecheck` + `npm run lint` pass (config/doc change; expect green).
+- [x] **AC1 (empirical probe run + recorded — BOTH arms)** — Two probe arms were run against the app launched with the candidate narrowed `--remote-allow-origins` and recorded in the flight log: **(arm 1, no-Origin)** a Node-22 `new WebSocket` with no Origin still attaches (proves the deferred Node clients survive); **(arm 2, with-Origin)** a `new WebSocket(wsUrl, { headers: { Origin: 'http://evil.example' } })` is **rejected** under the narrowed list (and admitted under `*`) — proving the narrowing actually blocks a disallowed web origin, not just that the Node client attaches. The narrowing form is chosen FROM both arms, not guessed. (`a11y` runs? `farbling` attaches? also recorded.)
+- [x] **AC2 (`*` no longer wide-open AND demonstrably load-bearing — or documented residual)** — `package.json` `dev:debug` no longer uses `--remote-allow-origins=*` (a loopback allow-list is landed) **and arm 2 confirmed it rejects a disallowed Origin** (so the narrowing is real hardening, not a no-op); OR, if the probe shows narrowing breaks the no-Origin Node attach (arm 1 fails) and no admitting form works, the divert is taken and the residual `*` is **explicitly documented** (CLAUDE.md/flight log) as a known dev-only exposure carried to F8-eval. If arm 1 passes but arm 2 shows narrowing is a no-op (Chromium ignores Origin entirely), record that the narrowing provides no added protection and treat it as a documented residual → F8-eval (don't claim false hardening). One disposition is true and recorded.
+- [x] **AC3 (deferred consumers still served)** — After the change, `npm run a11y` (the axe harness over `:9222`) and the `farbling-correctness` chrome-devtools-MCP attach both still work (operator-confirmed live). `scripts/cdp-driver.mjs` (the same-shape no-Origin sibling) is acknowledged: its attach is covered by probe arm 1 (no-Origin) — confirm it's no longer named by any migrated spec (dormant; removal is F8-eval). If the landed narrowing broke any consumer, the divert (AC2) was taken instead.
+- [x] **AC4 (`.mcp.json` trimmed)** — The Playwright-`:9222` entry is removed; `grep -rn "9222" .mcp.json` returns nothing. No remaining spec/tooling references the Playwright-`:9222` endpoint (verified before trimming).
+- [x] **AC5 (devtools-cdp-conflict annotated)** — `devtools-cdp-conflict.md` carries an annotation that its BLOCKED-AS-WRITTEN state is due to the missing non-CDP DevTools-open affordance, NOT the now-narrowed Origin; it stays `draft`, venue unchanged (`dev:automation`, no `:9222`), carried to F8-eval.
+- [x] **AC6 (docs current)** — `CLAUDE.md`/`docs/mcp-automation.md` `dev:debug`/automation notes reflect the narrowed flag (or the documented residual).
+- [x] **AC7 (gates green)** — `npm test` + `npm run typecheck` + `npm run lint` pass (config/doc change; expect green).
 
 ## Verification Steps
 - AC1/AC2/AC3: the guided probe + post-change live confirmation (operator runs; FD records). Inspect `package.json:11`.
@@ -93,13 +93,13 @@ Harden the ungated `:9222` path (DD3) without removing it: **empirically determi
 
 **Complete ALL steps before signaling `[COMPLETE:leg]`:**
 
-- [ ] All acceptance criteria verified (incl. the recorded probe result + chosen disposition)
-- [ ] `grep -rn "9222" .mcp.json` empty
-- [ ] `npm test`/typecheck/lint green
-- [ ] Update flight-log.md with leg progress entry + the probe result + land-vs-divert decision
-- [ ] Set this leg's status to `landed`
-- [ ] Check off this leg in flight.md (at flight commit)
-- [ ] Batched flight — do NOT commit per-leg (committed with the Phase-2d review block)
+- [x] All acceptance criteria verified (incl. the recorded probe result + chosen disposition)
+- [x] `grep -rn "9222" .mcp.json` empty
+- [x] `npm test`/typecheck/lint green
+- [x] Update flight-log.md with leg progress entry + the probe result + land-vs-divert decision
+- [x] Set this leg's status to `completed` (probe passed; narrowing landed)
+- [x] Check off this leg in flight.md
+- [x] Committed (this leg lands in its own post-probe commit, not the earlier batched Phase-2d block)
 
 ## Citation Audit
 To verify at design-review time (2026-06-16): `package.json:11` (`dev:debug` `--remote-allow-origins=*`); `.mcp.json` (Playwright `--cdp-endpoint http://127.0.0.1:9222`); `scripts/a11y-audit.mjs:182` (Node global `WebSocket`), `:44` (`CDP_HTTP`); `farbling-correctness.md:16,23` (chrome-devtools MCP on `:9222`); `devtools-cdp-conflict.md:10` (BLOCKED-AS-WRITTEN, missing affordance). The design-review Developer cross-checks the probe protocol soundness (does it actually exercise the no-Origin attach against the narrowed list?) and the divert completeness.

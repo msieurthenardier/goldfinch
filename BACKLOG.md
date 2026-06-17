@@ -42,8 +42,12 @@ run those tests in, the tool and the method co-evolve and we dogfood daily.
 
 ### Hard constraint (must be designed in, not bolted on)
 An automation surface inside a **privacy** browser is a juicy attack surface. The cautionary tale
-already lives in the repo: `dev:debug` ships `--remote-debugging-port=9222 --remote-allow-origins=*`
-— fine in dev, catastrophic in prod. For this to *strengthen* the privacy thesis rather than betray
+already lives in the repo: `dev:debug` shipped `--remote-debugging-port=9222 --remote-allow-origins=*`
+— fine in dev, catastrophic in prod. **(Update, F7 `harden-ungated-path`:** the wide-open `*` is
+**fixed** — `dev:debug` now uses `--remote-allow-origins=http://127.0.0.1:9222`, a loopback-Origin
+allow-list, probe-confirmed to still admit the no-Origin Node clients while rejecting foreign web
+origins. The **final `:9222` removal** + the in-page `evaluate` MCP tool remain the **F8-eval**
+tracking item, since `a11y-audit.mjs` + `farbling-correctness` still need the port.**)** For this to *strengthen* the privacy thesis rather than betray
 it, the surface must be **local-only, opt-in, per-session consented, key/token-gated, and
 auditable**. "Automation you can actually trust" is then the pitch, not a contradiction. This reuses
 the project's existing security discipline (the two-point hostile-URL boundary; the internal-scheme
