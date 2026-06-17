@@ -88,6 +88,10 @@
 - **Completeness grep (AC):** `grep -n "not yet shipped\|no released build\|no production launch\|only binds under\|only thing that starts\|not in any released build" CLAUDE.md docs/mcp-automation.md` → **returns nothing (rc=1, clean).**
 - **Gates (no source changed — trivially green):** `npm test` **732 pass / 0 fail**; `npm run typecheck` clean; `npm run lint` clean.
 
+### Leg 7 — verify-integration (DD8a) — **in progress (blocked on operator/GUI)**
+- 2026-06-17 — **First-ever `npm run pack` CONFIRMED (prerequisite de-risked by the FD).** `electron-builder --dir` (v26.15.3, electron 42.4.0, linux x64) built `dist/linux-unpacked/goldfinch` successfully, **exit 0** — no icon / linux-dep blocker. Native-dep rebuild + electron-zip extract completed. (`asar:false` warning is expected/intended per the build config.) `dist/` is gitignored (build output, not committed). This clears the flight's "pack has never been run" prerequisite concern.
+- **REMAINING (needs operator + GUI):** the live probes — toggle-binds curl transitions on the packaged binary, human-only-enable, admin-on-prod, two-instance port fallback, dev-profile isolation byte-unchanged, and the `automation-key-gating` behavior test — all require launching the GUI app (WSLg display) and the **one-time operator profile reset** of `~/.config/goldfinch`. Handed to the operator; the FD will drive the curl/file-listing evidence once the app is running.
+
 ---
 
 ## Decisions
