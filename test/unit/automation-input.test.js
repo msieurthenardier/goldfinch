@@ -153,6 +153,106 @@ test('keyEvents: unknown key (empty string) → throws', () => {
 });
 
 // ---------------------------------------------------------------------------
+// keyEvents — modifier chords (AC1), single-char keys (AC3), normalization (AC2)
+// ---------------------------------------------------------------------------
+
+test('keyEvents: "M" + ["control"] → keyCode "M", modifiers ["control"] on both events (AC1)', () => {
+  const evs = keyEvents('M', ['control']);
+  assert.equal(evs.length, 2);
+  assert.equal(evs[0].type, 'keyDown');
+  assert.equal(evs[0].keyCode, 'M');
+  assert.deepEqual(evs[0].modifiers, ['control']);
+  assert.equal(evs[1].type, 'keyUp');
+  assert.equal(evs[1].keyCode, 'M');
+  assert.deepEqual(evs[1].modifiers, ['control']);
+});
+
+test('keyEvents: "P" + ["control","shift"] → both modifiers in canonical order (AC1)', () => {
+  const evs = keyEvents('P', ['control', 'shift']);
+  assert.equal(evs[0].keyCode, 'P');
+  assert.deepEqual(evs[0].modifiers, ['control', 'shift']);
+  assert.deepEqual(evs[1].modifiers, ['control', 'shift']);
+});
+
+test('keyEvents: modifiers normalize to canonical order regardless of input order (AC2)', () => {
+  // shift passed before control still emits in canonical [control, shift] order.
+  const evs = keyEvents('P', ['shift', 'control']);
+  assert.deepEqual(evs[0].modifiers, ['control', 'shift']);
+});
+
+test('keyEvents: single lowercase letter "m" resolves to uppercase keyCode "M" (AC3)', () => {
+  const evs = keyEvents('m', ['control']);
+  assert.equal(evs[0].keyCode, 'M');
+  assert.equal(evs[1].keyCode, 'M');
+});
+
+test('keyEvents: single digit "1" resolves to keyCode "1" (AC3)', () => {
+  const evs = keyEvents('1', ['control']);
+  assert.equal(evs[0].keyCode, '1');
+  assert.deepEqual(evs[0].modifiers, ['control']);
+});
+
+test('keyEvents: alias "ctrl" normalizes to "control" (AC2)', () => {
+  const evs = keyEvents('M', ['ctrl']);
+  assert.deepEqual(evs[0].modifiers, ['control']);
+});
+
+test('keyEvents: aliases "cmd"/"command" normalize to "meta", "option" to "alt" (AC2)', () => {
+  assert.deepEqual(keyEvents('M', ['cmd'])[0].modifiers, ['meta']);
+  assert.deepEqual(keyEvents('M', ['command'])[0].modifiers, ['meta']);
+  assert.deepEqual(keyEvents('M', ['option'])[0].modifiers, ['alt']);
+});
+
+test('keyEvents: alias normalization is case-insensitive (AC2)', () => {
+  assert.deepEqual(keyEvents('M', ['CTRL'])[0].modifiers, ['control']);
+  assert.deepEqual(keyEvents('M', ['Shift'])[0].modifiers, ['shift']);
+});
+
+test('keyEvents: unknown modifier → throws with "automation: unknown modifier" (AC2)', () => {
+  assert.throws(
+    () => keyEvents('M', ['hyper']),
+    (err) => err instanceof Error &&
+      err.message.includes('automation: unknown modifier') &&
+      err.message.includes('hyper')
+  );
+});
+
+test('keyEvents: ShiftTab + explicit ["shift"] → shift not double-applied (de-dupe, AC2 edge)', () => {
+  const evs = keyEvents('ShiftTab', ['shift']);
+  assert.equal(evs[0].keyCode, 'Tab');
+  assert.deepEqual(evs[0].modifiers, ['shift']);
+});
+
+test('keyEvents: ShiftTab + ["control"] → intrinsic shift merges with control (AC2 edge)', () => {
+  const evs = keyEvents('ShiftTab', ['control']);
+  assert.equal(evs[0].keyCode, 'Tab');
+  assert.deepEqual(evs[0].modifiers, ['control', 'shift']);
+});
+
+test('keyEvents: duplicate modifiers de-dupe (["control","control"] → ["control"]) (AC2 edge)', () => {
+  assert.deepEqual(keyEvents('M', ['control', 'control'])[0].modifiers, ['control']);
+});
+
+// AC4 — backward compatibility: no-modifier calls are byte-identical to before.
+test('keyEvents: no-modifier call has modifiers:[] (byte-identical to pre-chord, AC4)', () => {
+  const evs = keyEvents('Enter');
+  assert.deepEqual(evs[0].modifiers, []);
+  assert.deepEqual(evs[1].modifiers, []);
+  // Full structural equality with the historical shape.
+  assert.deepEqual(evs, [
+    { type: 'keyDown', keyCode: 'Enter', modifiers: [] },
+    { type: 'keyUp', keyCode: 'Enter', modifiers: [] },
+  ]);
+});
+
+test('keyEvents: ShiftTab no-modifier call still yields modifiers:["shift"] (byte-identical, AC4)', () => {
+  assert.deepEqual(keyEvents('ShiftTab'), [
+    { type: 'keyDown', keyCode: 'Tab', modifiers: ['shift'] },
+    { type: 'keyUp', keyCode: 'Tab', modifiers: ['shift'] },
+  ]);
+});
+
+// ---------------------------------------------------------------------------
 // mouseClickEvents — ordering, types, coords, button/clickCount, buttons bitmask
 // ---------------------------------------------------------------------------
 
@@ -403,7 +503,7 @@ test('pressKey: "Enter" sends keyDown+keyUp pair to guest', async () => {
   const guestWc = makeGuestWc(50);
   const deps = { fromId: makeFakeFromId({ 50: guestWc }), chromeContents: null };
 
-  await pressKey(50, 'Enter', deps);
+  await pressKey(50, 'Enter', undefined, deps);
 
   assert.equal(guestWc._received.length, 2);
   assert.equal(guestWc._received[0].type, 'keyDown');
@@ -416,10 +516,34 @@ test('pressKey: "ArrowRight" maps to Electron code "Right"', async () => {
   const guestWc = makeGuestWc(51);
   const deps = { fromId: makeFakeFromId({ 51: guestWc }), chromeContents: null };
 
-  await pressKey(51, 'ArrowRight', deps);
+  await pressKey(51, 'ArrowRight', undefined, deps);
 
   assert.equal(guestWc._received[0].keyCode, 'Right');
   assert.equal(guestWc._received[1].keyCode, 'Right');
+});
+
+test('pressKey: chord "M" + ["control"] sends keyDown+keyUp with modifiers (Ctrl+M)', async () => {
+  const guestWc = makeGuestWc(53);
+  const deps = { fromId: makeFakeFromId({ 53: guestWc }), chromeContents: null };
+
+  await pressKey(53, 'M', ['control'], deps);
+
+  assert.equal(guestWc._received.length, 2);
+  assert.equal(guestWc._received[0].keyCode, 'M');
+  assert.deepEqual(guestWc._received[0].modifiers, ['control']);
+  assert.equal(guestWc._received[1].keyCode, 'M');
+  assert.deepEqual(guestWc._received[1].modifiers, ['control']);
+});
+
+test('pressKey: unknown modifier → throws before any send', () => {
+  const guestWc = makeGuestWc(54);
+  const deps = { fromId: makeFakeFromId({ 54: guestWc }), chromeContents: null };
+
+  assert.throws(
+    () => pressKey(54, 'M', ['bogus'], deps),
+    (err) => err instanceof Error && err.message.includes('automation: unknown modifier')
+  );
+  assert.equal(guestWc._received.length, 0);
 });
 
 test('pressKey: unknown key name → throws before any send', () => {
@@ -429,7 +553,7 @@ test('pressKey: unknown key name → throws before any send', () => {
   const deps = { fromId: makeFakeFromId({ 52: guestWc }), chromeContents: null };
 
   assert.throws(
-    () => pressKey(52, 'NotAKey', deps),
+    () => pressKey(52, 'NotAKey', undefined, deps),
     (err) => err instanceof Error && err.message.includes('automation: unknown key')
   );
   assert.equal(guestWc._received.length, 0);

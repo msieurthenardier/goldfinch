@@ -31,7 +31,7 @@ export default [
     files: ['src/renderer/**/*.js'], // plain browser script + injected globals
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly' }
+      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly' }
     }
   },
   eslintConfigPrettier // last — Prettier owns formatting

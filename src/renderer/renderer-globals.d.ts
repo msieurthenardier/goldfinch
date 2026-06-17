@@ -131,3 +131,20 @@ interface Window {
 declare function isSafeTabUrl(url: any): boolean;
 declare function isSafePosterUrl(url: any): boolean;
 declare function isInternalPageUrl(url: any): boolean;
+
+/**
+ * Injected by src/shared/audit-paging.js via the globalThis branch (the
+ * activity-viewer pagination + freshness state machine — DD4). `activeLog` is
+ * exposed as `activeLogOf` to avoid colliding with any generic page global.
+ */
+declare function windowPage(
+  activeLog: any[],
+  page: number,
+  pageSize: number
+): { rows: any[]; total: number; showingFrom: number; showingTo: number; hasPrev: boolean; hasNext: boolean };
+declare function countNewer(liveLog: any[], frozenLog: any[] | null): number;
+declare function activeLogOf(state: { page: number; frozenLog: any[] | null; liveLog: any[] }): any[];
+declare function reduceAudit(
+  state: { page: number; frozenLog: any[] | null; liveLog: any[] },
+  event: { type: string; log?: any[] }
+): { page: number; frozenLog: any[] | null; liveLog: any[] };

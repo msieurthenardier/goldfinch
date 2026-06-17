@@ -1,6 +1,6 @@
 # Flight: Bulk spec migration + ungated-path hardening (scoped)
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -73,14 +73,15 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ## In-Flight
 
 ### Technical Approach
-1. **`migrate-chrome-specs-a`** — migrate `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` (chrome tab-strip/toolbar) onto the admin MCP surface (F6 template).
-2. **`migrate-chrome-specs-b`** — migrate `menu-dismissal`, `tab-scheme-guard`, `settings-controls` (chrome menus/guards/settings controls) onto the admin MCP surface.
-3. **`migrate-settings-automation`** — migrate `settings-automation`'s read apparatus, which has **two distinct targets** (Architect MED): the **chrome `#automation-indicator`** → admin `getChromeTarget` + `readDom`/`readAxTree`; the **settings-guest viewer** (`#automation-active-sessions`, `#automation-activity-log` — in the `goldfinch://settings` internal guest) → the F6 `settings-shell` pattern: the **admin** engine (`allowInternal:true`) `enumerateTabs` → the internal-guest `wcId` → `readDom` (NOT `getChromeTarget`, which is chrome-only). The staged MCP session under test is unchanged.
-4. **`migrate-core-browsing-shields`** — `core-browsing-shields` as an **admin** spec (DD2): `openTab(url, jarId)` for the guest nav + guest-`wcId` `readDom` for the param/URL result + `getChromeTarget`+`readDom` for the chrome privacy-panel block count. Eval-free (confirmed).
-5. **`audit-log-paging`** — Settings activity viewer paginates the in-memory ring at 20/page (prev/next + "X–Y of N"); replaces the silent 50-cap. Renderer-only (`settings.js`); no backend change.
-6. **`harden-ungated-path`** — narrow `dev:debug`'s `--remote-allow-origins=*` to a loopback-Origin allow-list; trim the stale `.mcp.json` Playwright-`:9222` entry; re-evaluate/annotate the `devtools-cdp-conflict` block. Confirm `a11y-audit.mjs` + `farbling` still attach over the narrowed port.
-7. **`verify-integration`** — run the migrated specs live on the MCP surface (FD-driven, cited evidence); full `npm test` + typecheck + lint green; confirm the hardened `:9222` still serves the deferred `a11y` + `farbling` (no regression); confirm audit paging.
-8. **`hat-and-alignment`** *(optional — included)* — guided HAT of the audit-paging UI + a sample of the migrated specs.
+1. **`presskey-modifier-chords`** *(source; added in-flight — flight-log Decisions 2026-06-16)* — extend the trusted-input `pressKey` path to send modifier chords (`Ctrl+M`, `Ctrl+Shift+P`) via `pressKey(wcId, name, modifiers)`, so keyboard-shortcut checkpoints (`toolbar-pins` Step 6 + Shields variant) become drivable over the MCP surface. Discovered at the leg-2 design review; a trusted-input gap (not an eval gap), landed here per operator decision rather than deferred to F8.
+2. **`migrate-chrome-specs-a`** — migrate `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` (chrome tab-strip/toolbar) onto the admin MCP surface (F6 template).
+3. **`migrate-chrome-specs-b`** — migrate `menu-dismissal`, `tab-scheme-guard`, `settings-controls` (chrome menus/guards/settings controls) onto the admin MCP surface.
+4. **`migrate-settings-automation`** — migrate `settings-automation`'s read apparatus, which has **two distinct targets** (Architect MED): the **chrome `#automation-indicator`** → admin `getChromeTarget` + `readDom`/`readAxTree`; the **settings-guest viewer** (`#automation-active-sessions`, `#automation-activity-log` — in the `goldfinch://settings` internal guest) → the F6 `settings-shell` pattern: the **admin** engine (`allowInternal:true`) `enumerateTabs` → the internal-guest `wcId` → `readDom` (NOT `getChromeTarget`, which is chrome-only). The staged MCP session under test is unchanged.
+5. **`migrate-core-browsing-shields`** — `core-browsing-shields` as an **admin** spec (DD2): `openTab(url, jarId)` for the guest nav + guest-`wcId` `readDom` for the param/URL result + `getChromeTarget`+`readDom` for the chrome privacy-panel block count. Eval-free (confirmed).
+6. **`audit-log-paging`** — Settings activity viewer paginates the in-memory ring at 20/page (prev/next + "X–Y of N"); replaces the silent 50-cap. Renderer-only (`settings.js`); no backend change.
+7. **`harden-ungated-path`** — narrow `dev:debug`'s `--remote-allow-origins=*` to a loopback-Origin allow-list; trim the stale `.mcp.json` Playwright-`:9222` entry; re-evaluate/annotate the `devtools-cdp-conflict` block. Confirm `a11y-audit.mjs` + `farbling` still attach over the narrowed port.
+8. **`verify-integration`** — run the migrated specs live on the MCP surface (FD-driven, cited evidence); full `npm test` + typecheck + lint green; confirm the hardened `:9222` still serves the deferred `a11y` + `farbling` (no regression); confirm audit paging.
+9. **`hat-and-alignment`** *(optional — included)* — guided HAT of the audit-paging UI + a sample of the migrated specs.
 
 ### Checkpoints
 - [ ] Chrome specs migrated (groups a + b) — green live on the admin surface.
@@ -103,11 +104,12 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ### Legs
 > **Note:** Tentative; created one at a time as the flight progresses. May merge/split.
 
-- [ ] `migrate-chrome-specs-a` — `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` → admin MCP surface. (DD1)
-- [ ] `migrate-chrome-specs-b` — `menu-dismissal`, `tab-scheme-guard`, `settings-controls` → admin MCP surface. (DD1)
-- [ ] `migrate-settings-automation` — dual target: chrome indicator via `getChromeTarget`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`. (DD1)
-- [ ] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
-- [ ] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
+- [x] `presskey-modifier-chords` — *(source; added in-flight)* `pressKey(wcId, name, modifiers)` for `Ctrl+M`/`Ctrl+Shift+P` shortcut checkpoints. (flight-log Decisions 2026-06-16)
+- [x] `migrate-chrome-specs-a` — `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` → admin MCP surface. (DD1)
+- [x] `migrate-chrome-specs-b` — `menu-dismissal`, `tab-scheme-guard`, `settings-controls` → admin MCP surface. (DD1)
+- [x] `migrate-settings-automation` — dual target: chrome indicator via `getChromeTarget`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`. (DD1)
+- [x] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
+- [x] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
 - [ ] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3)
 - [ ] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1)
 - [ ] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6)

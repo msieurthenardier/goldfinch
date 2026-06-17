@@ -569,3 +569,32 @@ main section p {
 .activity-empty {
   margin: 6px 0;
 }
+
+/* ---- Activity pager (Flight 7 / DD4): 20/page newest-first + freeze affordance ---- */
+
+/* Prev/next controls + the "Showing X–Y of N" indicator, above the log. */
+.activity-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.activity-indicator {
+  font-size: 12px;
+}
+
+/* Freeze affordance: shown only on page >= 2 (the snapshot is frozen). role="status"
+   so the "N newer" count is announced. Uses the violet admin accent's neutral
+   sibling — paused is informational, not an error. */
+.activity-paused {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-dim);
+}

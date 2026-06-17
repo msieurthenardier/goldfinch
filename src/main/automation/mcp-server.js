@@ -105,7 +105,12 @@ function deriveAuditDetail(op, args) {
     }
     case 'pressKey': {
       const keyName = args.name ?? args.key;
-      return keyName != null ? 'key=' + String(keyName) : null;
+      if (keyName == null) return null;
+      // Record the chord so the audit log distinguishes a bare key (key=M) from a
+      // modifier chord (key=M+control). Bare-key calls keep their existing string.
+      const mods = Array.isArray(args.modifiers) ? args.modifiers : [];
+      const suffix = mods.length ? '+' + mods.map(String).join('+') : '';
+      return 'key=' + String(keyName) + suffix;
     }
     case 'typeText': {
       // REDACTED: length only — never the content.

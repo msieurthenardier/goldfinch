@@ -197,7 +197,7 @@ or (for the chrome renderer) `getChromeTarget`.
 | `click` | `{ wcId: integer, x: number, y: number, button?: "left"\|"right"\|"middle", clickCount?: integer }` *(`wcId`, `x`, `y` required)* | JSON text `{"ok":true}` — synthetic click at guest-viewport-relative `(x, y)` |
 | `typeText` | `{ wcId: integer, text: string }` *(required)* | JSON text `{"ok":true}` — types char-by-char into the focused element (for named keys, use `pressKey`) |
 | `scroll` | `{ wcId: integer, x: number, y: number, dx: number, dy: number }` *(required)* | JSON text `{"ok":true}` — synthetic wheel event at `(x, y)` by pixel deltas `(dx, dy)` |
-| `pressKey` | `{ wcId: integer, name: string }` *(required)* | JSON text `{"ok":true}` — presses one named key. Known names: `Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, ShiftTab` |
+| `pressKey` | `{ wcId: integer, name: string, modifiers?: ("control"\|"shift"\|"alt"\|"meta")[] }` *(`wcId` required; `name` or its alias `key` required)* | JSON text `{"ok":true}` — presses one key, optionally as a modifier chord. Known `name` values: `Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, ShiftTab`, **or a single printable letter/digit** (e.g. `"M"`, `"1"`) for chord use. Pass `modifiers` to hold modifier keys during the press — accepted values are `control`, `shift`, `alt`, `meta`. **Example — Ctrl+M:** `{ "wcId": 42, "name": "M", "modifiers": ["control"] }`; **Ctrl+Shift+P:** `{ "wcId": 42, "name": "P", "modifiers": ["control", "shift"] }`. An unknown modifier is rejected (the call errors) rather than silently dropped. |
 
 ### Observe tools (4)
 
@@ -288,7 +288,8 @@ the live indicator + log viewer against this contract. The shape below is the de
   `automation: <code> — …` message (e.g. `out-of-jar`, `admin-only`, `internal-session`,
   `bad-handle`) — or `"error"` for a bare/unexpected throw, and `null` on success. `detail` is a
   short per-op context string for operator auditability — e.g. `url=https://…` for `navigate`/
-  `openTab`, `(x,y)` for `click`/`scroll`, `key=Enter` for `pressKey`, `text(N chars)` for
+  `openTab`, `(x,y)` for `click`/`scroll`, `key=Enter` for `pressKey` (chords append the
+  modifiers, e.g. `key=M+control`), `text(N chars)` for
   `typeText` (**length only — content is never logged**); `null` for ops where `targetWcId`
   already names the tab sufficiently (`enumerateTabs`, `captureWindow`, `getChromeTarget`,
   `readDom`, etc.).

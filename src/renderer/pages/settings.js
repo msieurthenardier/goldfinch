@@ -665,7 +665,7 @@ function automationKeysOnce() {
       }
       // Re-render so any session whose snapshot arrived before the names loaded
       // picks up the friendly jar name.
-      if (lastSnap) renderActivity(lastSnap);
+      if (haveSnapshot) renderActivity();
     })
     .catch(() => {});
 
@@ -700,101 +700,183 @@ function automationKeysOnce() {
     container.appendChild(p);
   }
 
-  // Cap on rendered log rows — bounds DOM work under rapid per-mutation broadcasts.
-  const LOG_DISPLAY_CAP = 50;
-  /** @type {{ sessions?: any[], log?: any[] }|null} */
-  let lastSnap = null;
+  // Entries per page. 20/page newest-first, with freeze-on-page-2+ (DD4). The
+  // windowing + freshness state machine is the pure module audit-paging.js,
+  // loaded as a <script> before this one (globals: windowPage / countNewer /
+  // activeLogOf / reduceAudit — the url-safety.js dual-export precedent).
+  const PAGE_SIZE = 20;
+
+  // Pager controls (static in the HTML so the role="status" paused region exists
+  // at parse time and announces reliably on first population).
+  const pagerEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-pager'));
+  const prevBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-prev'));
+  const nextBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-next'));
+  const indicatorEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-indicator'));
+  const pausedEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-paused'));
+  const pausedTextEl = /** @type {HTMLElement|null} */ (document.getElementById('automation-activity-paused-text'));
+  const backToLiveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('automation-activity-back-to-live'));
+
+  /** @type {{ page: number, frozenLog: any[]|null, liveLog: any[] }} */
+  let state = { page: 1, frozenLog: null, liveLog: [] };
+  /** @type {any[]} the sessions list from the latest snapshot (rendered live, unaffected by paging). */
+  let lastSessions = [];
+  // Kept for the deferred jar-names re-render: do we have any snapshot yet?
+  let haveSnapshot = false;
 
   /**
-   * Rebuild both lists from an activity snapshot. Admin vs jar is visually
-   * distinguished; error log rows are distinct. All audit-derived strings
-   * (identity, jarId, op, errorCode) are inserted via textContent / createElement —
-   * never innerHTML — because jar names are operator-controlled (AC7).
-   * @param {{ sessions?: any[], log?: any[] }} snap
+   * Render the active-sessions list. Unchanged by paging — always reflects the
+   * latest snapshot.
+   * @param {any[]} sessions
    */
-  function renderActivity(snap) {
-    lastSnap = snap || {};
-    const sessions = (lastSnap.sessions) || [];
-    const log = (lastSnap.log) || [];
-
-    // --- active sessions ---
+  function renderSessions(sessions) {
     sessionsEl.textContent = '';
     if (!sessions.length) {
       emptyLine(sessionsEl, 'No automation sessions');
-    } else {
-      for (const s of sessions) {
-        const row = document.createElement('div');
-        row.className = 'activity-session';
-        const isAdmin = s.kind === 'admin';
-        if (isAdmin) row.classList.add('admin');
+      return;
+    }
+    for (const s of sessions) {
+      const row = document.createElement('div');
+      row.className = 'activity-session';
+      const isAdmin = s.kind === 'admin';
+      if (isAdmin) row.classList.add('admin');
 
-        const kind = document.createElement('span');
-        kind.className = 'activity-kind';
-        kind.textContent = isAdmin ? 'admin' : 'jar';
-        row.appendChild(kind);
+      const kind = document.createElement('span');
+      kind.className = 'activity-kind';
+      kind.textContent = isAdmin ? 'admin' : 'jar';
+      row.appendChild(kind);
 
-        const name = document.createElement('span');
-        name.className = 'activity-name';
-        name.textContent = isAdmin ? 'app / chrome' : jarDisplayName(s.jarId);
-        row.appendChild(name);
+      const name = document.createElement('span');
+      name.className = 'activity-name';
+      name.textContent = isAdmin ? 'app / chrome' : jarDisplayName(s.jarId);
+      row.appendChild(name);
 
-        const since = document.createElement('span');
-        since.className = 'activity-since muted';
-        since.textContent = 'connected since ' + fmtTime(s.since);
-        row.appendChild(since);
+      const since = document.createElement('span');
+      since.className = 'activity-since muted';
+      since.textContent = 'connected since ' + fmtTime(s.since);
+      row.appendChild(since);
 
-        sessionsEl.appendChild(row);
-      }
+      sessionsEl.appendChild(row);
+    }
+  }
+
+  /**
+   * Build one activity-log row element from an audit entry. All audit-derived
+   * strings (identity, jarId, op, errorCode) go through textContent — never
+   * innerHTML — because jar names are operator-controlled (AC7).
+   * @param {any} e
+   * @returns {HTMLElement}
+   */
+  function buildLogRow(e) {
+    const row = document.createElement('div');
+    row.className = 'activity-log-row';
+    if (e.outcome === 'error') row.classList.add('error');
+
+    const time = document.createElement('span');
+    time.className = 'activity-log-time muted';
+    time.textContent = fmtTime(e.ts);
+    row.appendChild(time);
+
+    const op = document.createElement('span');
+    op.className = 'activity-log-op';
+    op.textContent = e.op;
+    row.appendChild(op);
+
+    if (e.detail) {
+      const detail = document.createElement('span');
+      detail.className = 'activity-log-detail muted';
+      detail.textContent = e.detail;
+      row.appendChild(detail);
     }
 
-    // --- recent action log (newest-first; the contract is newest-last) ---
+    const identity = document.createElement('span');
+    identity.className = 'activity-log-identity';
+    identity.textContent = e.identity;
+    row.appendChild(identity);
+
+    const outcome = document.createElement('span');
+    outcome.className = 'activity-log-outcome';
+    outcome.textContent = e.outcome === 'error'
+      ? ('error' + (e.errorCode ? ': ' + e.errorCode : ''))
+      : 'ok';
+    row.appendChild(outcome);
+
+    return row;
+  }
+
+  /**
+   * Render the current paged window + pager chrome from `state`. Windows over the
+   * active log (frozenLog ?? liveLog) so the rows + total never jump to the live
+   * ring while frozen.
+   */
+  function renderActivity() {
+    renderSessions(lastSessions);
+
+    const active = activeLogOf(state);
+    const win = windowPage(active, state.page, PAGE_SIZE);
+
+    // --- recent action log (newest-first) ---
     logEl.textContent = '';
-    if (!log.length) {
+    if (!win.total) {
       emptyLine(logEl, 'No recent activity');
     } else {
-      const rows = log.slice().reverse().slice(0, LOG_DISPLAY_CAP);
-      for (const e of rows) {
-        const row = document.createElement('div');
-        row.className = 'activity-log-row';
-        if (e.outcome === 'error') row.classList.add('error');
-
-        const time = document.createElement('span');
-        time.className = 'activity-log-time muted';
-        time.textContent = fmtTime(e.ts);
-        row.appendChild(time);
-
-        const op = document.createElement('span');
-        op.className = 'activity-log-op';
-        op.textContent = e.op;
-        row.appendChild(op);
-
-        if (e.detail) {
-          const detail = document.createElement('span');
-          detail.className = 'activity-log-detail muted';
-          detail.textContent = e.detail;
-          row.appendChild(detail);
-        }
-
-        const identity = document.createElement('span');
-        identity.className = 'activity-log-identity';
-        identity.textContent = e.identity;
-        row.appendChild(identity);
-
-        const outcome = document.createElement('span');
-        outcome.className = 'activity-log-outcome';
-        outcome.textContent = e.outcome === 'error'
-          ? ('error' + (e.errorCode ? ': ' + e.errorCode : ''))
-          : 'ok';
-        row.appendChild(outcome);
-
-        logEl.appendChild(row);
-      }
+      for (const e of win.rows) logEl.appendChild(buildLogRow(e));
     }
+
+    // --- pager controls + indicator ---
+    if (pagerEl) pagerEl.hidden = win.total === 0;
+    if (indicatorEl) {
+      indicatorEl.textContent = win.total
+        ? ('Showing ' + win.showingFrom + '–' + win.showingTo + ' of ' + win.total)
+        : '';
+    }
+    if (prevBtn) prevBtn.disabled = !win.hasPrev;
+    if (nextBtn) nextBtn.disabled = !win.hasNext;
+
+    // --- paused affordance (page >= 2, i.e. frozen) ---
+    const frozen = state.frozenLog != null;
+    if (pausedEl) pausedEl.hidden = !frozen;
+    if (frozen && pausedTextEl) {
+      const n = countNewer(state.liveLog, state.frozenLog);
+      pausedTextEl.textContent = 'Paused — ' + n + ' newer · ';
+    }
+  }
+
+  /**
+   * Dispatch an event through the freshness state machine and re-render.
+   * @param {{type:string, log?: any[]}} event
+   */
+  function dispatch(event) {
+    state = reduceAudit(state, event);
+    renderActivity();
+  }
+
+  /**
+   * Handle an activity snapshot (initial read or live broadcast). The session
+   * list always reflects the latest snapshot; the log is fed through the freshness
+   * machine (page 1 stays live, page >= 2 stays frozen).
+   * @param {{ sessions?: any[], log?: any[] }} snap
+   */
+  function onSnapshot(snap) {
+    const s = snap || {};
+    lastSessions = s.sessions || [];
+    haveSnapshot = true;
+    dispatch({ type: 'broadcast', log: s.log || [] });
+  }
+
+  // Pager click handlers — dispatch the matching event and re-render.
+  if (prevBtn) prevBtn.addEventListener('click', () => dispatch({ type: 'prev' }));
+  if (nextBtn) nextBtn.addEventListener('click', () => dispatch({ type: 'next' }));
+  if (backToLiveBtn) {
+    backToLiveBtn.addEventListener('click', () => {
+      dispatch({ type: 'back-to-live' });
+      // Restore focus to a sensible anchor now that the paused control is hidden.
+      if (prevBtn) prevBtn.focus();
+    });
   }
 
   // Initial snapshot (catches sessions/log present before this page loaded) + live
   // updates. Listener removed on pagehide to prevent accumulation across reloads.
-  bridge.automationGetActivity().then(renderActivity).catch(() => {});
-  const h = bridge.onAutomationActivity(renderActivity);
+  bridge.automationGetActivity().then(onSnapshot).catch(() => {});
+  const h = bridge.onAutomationActivity(onSnapshot);
   window.addEventListener('pagehide', () => bridge.offAutomationActivity(h), { once: true });
 })();

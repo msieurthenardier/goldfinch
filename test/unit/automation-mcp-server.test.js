@@ -1132,6 +1132,18 @@ test('deriveAuditDetail — pressKey falls back to key alias when name absent', 
   assert.equal(deriveAuditDetail('pressKey', { wcId: 1, key: 'Tab' }), 'key=Tab');
 });
 
+test('deriveAuditDetail — pressKey with a single modifier records the chord (key=M+control)', () => {
+  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, name: 'M', modifiers: ['control'] }), 'key=M+control');
+});
+
+test('deriveAuditDetail — pressKey with multiple modifiers records each (key=P+control+shift)', () => {
+  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, name: 'P', modifiers: ['control', 'shift'] }), 'key=P+control+shift');
+});
+
+test('deriveAuditDetail — pressKey with empty modifiers keeps the bare-key string', () => {
+  assert.equal(deriveAuditDetail('pressKey', { wcId: 1, name: 'Enter', modifiers: [] }), 'key=Enter');
+});
+
 test('deriveAuditDetail — typeText returns text(N chars) — NEVER the raw content', () => {
   const secret = 'hunter2';
   const detail = deriveAuditDetail('typeText', { wcId: 1, text: secret });
