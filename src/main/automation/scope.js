@@ -39,6 +39,11 @@ const WCID_FIRST_OPS = [
   'navigate', 'goBack', 'goForward', 'reload',
   'click', 'typeText', 'scroll', 'pressKey',
   'captureScreenshot', 'readDom', 'readAxTree',
+  'evaluate', 'injectScript',
+  // DevTools ops (Flight 9): wcId-first, jar-membership-checked. DevTools on a jar's own
+  // guest is within the jar key's authority — NOT admin-only (unlike captureWindow /
+  // getChromeTarget). The internal-session exclusion is enforced op-locally even for admin.
+  'openDevTools', 'closeDevTools',
 ];
 
 /**

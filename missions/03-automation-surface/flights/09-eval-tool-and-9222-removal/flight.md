@@ -1,6 +1,6 @@
 # Flight: Eval tool + DevTools tool + a11y/farbling migration + final :9222 removal
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -118,14 +118,14 @@ Add a **guarded in-page `evaluate`/`injectScript` MCP tool** (arbitrary JS in a 
 ### Legs
 > **Note:** Tentative; created one at a time as the flight progresses. May merge/split.
 
-- [ ] `eval-tool` — guarded `evaluate`(/`injectScript`) MCP tool; mechanism per OQ1 spike; jar-scoped guests / admin chrome. (DD1/DD2) **FIRST.**
-- [ ] `devtools-tool` — `openDevTools`/`closeDevTools` MCP tool (the non-CDP affordance). (DD3)
-- [ ] `a11y-audit-rewrite` — `scripts/a11y-audit.mjs` onto the eval tool; `npm run a11y` green on `dev:automation`. (DD4)
-- [ ] `farbling-migration` — migrate `farbling-correctness` apparatus to the eval tool (guest main world). (DD5)
-- [ ] `run-devtools-cdp-conflict` — run the unblocked spec; record the `attach-failed` finding. (DD6)
-- [ ] `retire-9222` — remove `dev:debug` / `--remote-debugging-port` arm / `cdp-driver.mjs` / a11y CDP path; docs. (DD7) **LAST of the migration arc.**
-- [ ] `f8-followups` — serialize `applyAutomationEnabledChange`; `userData` ordering test; `resolvePort` JSDoc warning. (DD8)
-- [ ] `verify-integration` + `hat-and-alignment` *(optional — included)* — FD-driven gates + dogfood runs + the F8 authored specs. (DD9)
+- [x] `eval-tool` — guarded `evaluate`(/`injectScript`) MCP tool; mechanism per OQ1 spike; jar-scoped guests / admin chrome. (DD1/DD2) **FIRST.** *(landed 2026-06-17; live spike PASS — axe injected + `axe.run` read back as JSON.)*
+- [x] `devtools-tool` — `openDevTools`/`closeDevTools` MCP tool (the non-CDP affordance). (DD3) *(landed 2026-06-17; registry 19 → 21; unit gates green; live "window appears" + internal-refusal probe deferred to verify/HAT.)*
+- [x] `a11y-audit-rewrite` — `scripts/a11y-audit.mjs` onto the eval tool; `npm run a11y` green on `dev:automation`. (DD4) *(landed 2026-06-17; CDP/`:9222` fully removed; shared `scripts/lib/mcp-client.mjs` extracted; all gates green — 781 tests; **AC5 live a11y PASS on WSLg** — exit 0, no NEW violations.)*
+- [x] `farbling-migration` — migrate `farbling-correctness` apparatus to the eval tool (guest main world). (DD5) *(landed 2026-06-17; spec-only — apparatus → MCP `evaluate` in the guest main world; DD-F two-container = PRIMARY Step 6, New Identity = Variant; gates green 781 tests; live core-read smoke PASS on WSLg — navigator spoof `8`, `toDataURL` stable A===A2; status stays `draft` for the leg-8 formal run.)*
+- [x] `run-devtools-cdp-conflict` — ran the unblocked spec (FD-driven, confound-free); finding recorded — **`attach-failed` NOT reproduced live** (inconclusive, WSLg detached-DevTools-window didn't materialize; branch stays unit-tested-only); spec archived; mission OQ closed. (DD6) *(landed 2026-06-17.)*
+- [x] `retire-9222` — remove `dev:debug` / `--remote-debugging-port` arm / `cdp-driver.mjs` / a11y CDP path; docs. (DD7) **LAST of the migration arc.**
+- [x] `f8-followups` — serialize `applyAutomationEnabledChange`; `userData` ordering test; `resolvePort` JSDoc warning. (DD8) *(landed 2026-06-17; serialized core extracted to `automation/toggle.js` + `init-profile.js`; 773 tests / typecheck / lint green; semantics preserved.)*
+- [x] `verify-integration` + `hat-and-alignment` — FD-driven gates GREEN (773 tests/typecheck/lint), `:9222` retired (live), a11y green (leg 3); dogfood runs: farbling **PASS**, devtools-cdp-conflict recorded (leg 5), automation-key-gating + settings-activity-viewer **partial** (load-bearing assertions pass; UI-interaction steps carried/apparatus-limited); HAT skipped per operator. (DD9) *(landed 2026-06-17.)*
 
 ---
 

@@ -14,9 +14,9 @@ The page mirrors:
 
 ## Serve
 
-Run from this directory **on a non-CDP HTTP port** (NOT 9222 — that's the CDP port the
-`dev:debug` path uses; this spec uses the `dev:automation` path which has no CDP port, but
-keep the fixture port distinct anyway, e.g. `8090`):
+Run from this directory **on a plain HTTP port** (e.g. `8090`); keep it distinct from the
+MCP server port. This spec drives the `dev:automation` path (loopback MCP transport, no CDP
+port) — the legacy CDP debugging launch was removed in F9:
 
 ```
 python3 -m http.server 8090

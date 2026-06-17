@@ -76,6 +76,10 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     captureWindow: () => observe.captureWindow(deps()),
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
     readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),
+    evaluate: (/** @type {number} */ wcId, /** @type {string} */ expression) => observe.evaluate(wcId, expression, deps()),
+    injectScript: (/** @type {number} */ wcId, /** @type {string} */ script) => observe.injectScript(wcId, script, deps()),
+    openDevTools: (/** @type {number} */ wcId) => observe.openDevTools(wcId, deps()),
+    closeDevTools: (/** @type {number} */ wcId) => observe.closeDevTools(wcId, deps()),
     getChromeTarget: () => {
       const mw = getMainWindow();
       const cc = mw ? mw.webContents : null;

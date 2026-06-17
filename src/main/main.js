@@ -9,14 +9,15 @@ const shields = require('./shields');
 const jars = require('./jars');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
-const { devUserDataPath } = require('../shared/dev-profile');
+const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
-const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
+const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
+const { makeAutomationToggle } = require('./automation/toggle');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -112,9 +113,6 @@ let mcpServer = null;
 // MCP surface being active in this process; `bound` flips true only after start()
 // resolves; `error` carries the EADDRINUSE/other message on failure.
 let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, error: null };
-// Concurrency guard for live port-rebind (Flight 5, Leg 7). Two quick saves must
-// not overlap a stop()/start() pair; the second rebind waits for the first.
-let rebinding = null;
 // In-memory dev-enable override (DD3/DD4, Flight 8). Module-scoped so both
 // startMcpServerInstance (auth gate) and applyAutomationEnabledChange (flip-OFF
 // guard) can read it; assigned once in app.whenReady (after app.isPackaged is
@@ -176,58 +174,41 @@ async function startMcpServerInstance() {
   }
 }
 
+// The serialized automation toggle core (Flight 9, Leg 7 / DD8(a)). Both the live
+// flip ON/OFF and the live port-rebind run through ONE shared `inFlight` chain inside
+// this unit, so a concurrent flip + flip / flip + rebind / rebind + rebind cannot
+// interleave their stop()/start() pairs (the F8 double-bind / lost-no-op race). The
+// extracted module IS the production path — main.js's two functions below are thin
+// delegators. The factory mediates the module-scoped `mcpServer` (getServer/setServer)
+// and `mcpStatus` (setStatus); start/stop are startMcpServerInstance / mcpServer.stop().
+const automationToggle = makeAutomationToggle({
+  start: startMcpServerInstance,
+  stop: () => mcpServer.stop(),
+  getServer: () => mcpServer,
+  setServer: (server) => { mcpServer = server; },
+  isDevOverride: () => devEnableOverride,
+  setStatus: (status) => { mcpStatus = status; },
+});
+
 // Live-rebind the running MCP server to the current resolved port (Flight 5, Leg 7).
-// No-op when the surface is not active in this process (nothing to rebind). Stops
-// the old listener + all sessions, then starts a fresh instance via resolvePort, so
-// a port saved in Settings applies live (live-rebind == next-launch precedence). A
-// simple promise-chain guard serializes overlapping saves.
-async function rebindMcpServer() {
-  if (!mcpServer) return; // surface not active — nothing to rebind
-  if (rebinding) { await rebinding; }
-  rebinding = (async () => {
-    await mcpServer.stop();
-    await startMcpServerInstance();
-  })();
-  try {
-    await rebinding;
-  } finally {
-    rebinding = null;
-  }
+// No-op when the surface is not active in this process (nothing to rebind). Stops the
+// old listener + all sessions, then starts a fresh instance via resolvePort, so a port
+// saved in Settings applies live. Serialized through the shared `inFlight` chain in
+// automationToggle (Leg 7 / DD8(a)) — overlapping saves and interleaved flips cannot
+// race.
+function rebindMcpServer() {
+  return automationToggle.rebind();
 }
 
 // DD2 (Flight 8): the human `automationEnabled` toggle is the SOLE bind gate in
 // production. A live flip ON cold-starts the server from null; a live flip OFF tears
 // it down and stays down. Hooked off the `automationEnabled` write in the
-// `internal-settings-set` handler. (Leg 3 adds: skip the OFF teardown when the
-// dev-enable override is active, so the dev harness stays connected while the
-// persisted toggle is off.)
-async function applyAutomationEnabledChange(enabled) {
-  // Serialize against an in-flight port-rebind: automation:set-port → rebindMcpServer()
-  // transiently nulls mcpServer between stop() and startMcpServerInstance(). Awaiting the
-  // existing `rebinding` chain (do NOT add a second lock) prevents an interleaved flip from
-  // stop()-ing a null handle or double-freeing.
-  if (rebinding) await rebinding;
-  if (enabled) {
-    // Start-from-null on a cold flip-ON (a packaged build launches with mcpServer===null).
-    // Already bound (e.g. a dev launch force-bound) → guarded no-op, no double-bind.
-    if (!mcpServer) await startMcpServerInstance();
-  } else {
-    // DD3/DD4 flip-OFF guard: when the dev-enable override is active, KEEP the surface
-    // bound even though the persisted toggle just went off. ORDERING IS LOAD-BEARING:
-    // the caller (`internal-settings-set`) does `settings.set('automationEnabled', false)`
-    // FIRST, then calls this — so by the time we return early here the persisted value is
-    // already `false` while the surface stays bound. That is exactly the DD9-testable
-    // state (persisted-off + surface-live) that `automation-key-gating.md` exercises in
-    // dev. In production the override is false, so flip-OFF falls through to teardown.
-    if (devEnableOverride) return;
-    // Stop-and-stay-stopped: tear the listener + all sessions down and reset status to
-    // disabled so a subsequent rebind/launch does not silently resurrect the surface.
-    if (mcpServer) {
-      await mcpServer.stop();
-      mcpServer = null;
-    }
-    mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, error: null };
-  }
+// `internal-settings-set` handler. The dev-enable override flip-OFF keeps the surface
+// bound (DD3/DD4). Serialized through the shared `inFlight` chain in automationToggle
+// (Leg 7 / DD8(a)): two concurrent flip-ONs result in exactly ONE start (no
+// double-bind), and a flip concurrent with a rebind cannot stop()-on-null.
+function applyAutomationEnabledChange(enabled) {
+  return automationToggle.applyEnabledChange(enabled);
 }
 
 // Shared get-status return shape (Leg 7). `port` reflects the bound port when the
@@ -266,12 +247,12 @@ function createWindow() {
       webviewTag: true,
       sandbox: false,
       // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
-      // can gate the automationDevInvoke bridge method without access to the browser-process
-      // --remote-debugging-port switch (which is not in the renderer's own process.argv).
+      // can gate the automationDevInvoke bridge method. The chrome renderer's own process.argv
+      // does not otherwise carry the dev-automation switch, so it must be injected explicitly.
       // Conditional spread so the key is simply absent in normal/release runs (AC3). (DD7)
       // Gated on `!app.isPackaged` (DD4, Flight 8): the dev flag is a complete no-op in a
       // packaged build, so additionalArguments is always absent there.
-      ...(isAutomationDevEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
+      ...(isMcpAutomationEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
     }
   });
 
@@ -936,16 +917,7 @@ app.on('session-created', (ses) => {
 });
 
 app.whenReady().then(() => {
-  // DD1: dev runs are profile-isolated from the installed binary. Keyed off
-  // app.isPackaged alone — no flag to forget — so a dev launch can never read or
-  // write ~/.config/goldfinch. Must run before ANY getPath('userData') consumer
-  // (settings/shields/jars all resolve their store path at load()).
-  if (!app.isPackaged) {
-    app.setPath('userData', devUserDataPath(app.getPath('userData')));
-  }
-  shields.load();
-  settings.load(app.getPath('userData'));
-  jars.load();
+  initProfileAndStores(app, { shields, settings, jars });
   // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
   applyShields(session.defaultSession);
@@ -978,7 +950,7 @@ app.whenReady().then(() => {
   // The identity check (event.sender === mainWindow.webContents) isolates the seam to the
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
-  if (isAutomationDevEnabled(process.argv) && !app.isPackaged) {
+  if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
     const engine = createEngine(() => mainWindow);
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
@@ -998,10 +970,10 @@ app.whenReady().then(() => {
   // dev harness binding regardless of the persisted toggle, satisfying BOTH the bind
   // decision and the auth gate WITHOUT writing `automationEnabled` (the human-only
   // invariant is preserved even in dev). It is `!app.isPackaged && isMcpAutomationEnabled`
-  // — the NARROWER isMcpAutomationEnabled predicate (only `--automation-dev`, NOT
-  // `--remote-debugging-port`) preserves structural CDP-decoupling: dev:debug (CDP)
-  // does NOT co-bind the MCP server; and `!app.isPackaged` makes the flag a complete
-  // no-op in a packaged build (DD4).
+  // — the isMcpAutomationEnabled predicate keys only on `--automation-dev` and is
+  // structurally independent of any legacy browser-process CDP debugging switch, so the
+  // MCP server is bound only by the dev-automation flag; and `!app.isPackaged` makes the
+  // flag a complete no-op in a packaged build (DD4).
   // Started after createWindow() so the (lazy) engine accessor sees a live window. The
   // SC7 Origin/Host guard is wired inside createMcpServer and runs before any MCP
   // processing — the server never binds without it.

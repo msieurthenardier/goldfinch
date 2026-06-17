@@ -5,7 +5,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
-const { isAutomationDevEnabled } = require('../shared/automation-dev');
+const { isMcpAutomationEnabled } = require('../shared/automation-dev');
 
 contextBridge.exposeInMainWorld('goldfinch', {
   // --- platform ---
@@ -73,10 +73,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   internalPartition: INTERNAL_PARTITION,
 
   // Dev-only automation seam (DD7 — interim; folded at Flight 3). Absent in normal/release
-  // runs (isAutomationDevEnabled false when --automation-dev marker is not injected). Chrome-
+  // runs (isMcpAutomationEnabled false when the --automation-dev marker is not injected). Chrome-
   // renderer-only: the guest webview uses webview-preload.js (no automationDevInvoke there),
   // and main.js also rejects any sender that isn't mainWindow.webContents.
-  ...(isAutomationDevEnabled(process.argv)
+  ...(isMcpAutomationEnabled(process.argv)
     ? { automationDevInvoke: (/** @type {string} */ op, /** @type {any[]} */ args) => ipcRenderer.invoke('automation:dev-invoke', { op, args }) }
     : {})
 });

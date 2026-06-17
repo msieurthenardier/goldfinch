@@ -26,7 +26,13 @@ const DRIVE_NAMES = [
 
 const OBSERVE_NAMES = ['captureScreenshot', 'captureWindow', 'readDom', 'readAxTree'];
 
-const ALL_NAMES = [...DRIVE_NAMES, ...OBSERVE_NAMES];
+// Flight-9 eval ops — debugger-free executeJavaScript tools (evaluate / injectScript).
+const EVAL_NAMES = ['evaluate', 'injectScript'];
+
+// Flight-9 devtools ops — webContents.openDevTools/closeDevTools (NO CDP from the ops).
+const DEVTOOLS_NAMES = ['openDevTools', 'closeDevTools'];
+
+const ALL_NAMES = [...DRIVE_NAMES, ...OBSERVE_NAMES, ...EVAL_NAMES, ...DEVTOOLS_NAMES];
 
 /**
  * Build a fake engine whose 12 ops record their positional args and return a
@@ -61,13 +67,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 17 tools (12 drive + 4 observe + 1 chrome-discovery), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 21 tools (12 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 17);
-  const allNames17 = [...ALL_NAMES, 'getChromeTarget'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames17].sort());
+  assert.equal(tools.length, 21);
+  const allNames21 = [...ALL_NAMES, 'getChromeTarget'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames21].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -572,7 +578,146 @@ test('captureWindow chrome-unavailable throw → isError', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// getChromeTarget — Flight-6 chrome-discovery tool (17th tool)
+// Eval tools (Flight 9) — evaluate / injectScript: list shape, schemas, dispatch
+// ---------------------------------------------------------------------------
+
+test('listTools includes evaluate + injectScript with wcId + (expression|script) required schemas', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const byName = new Map(reg.listTools().map((t) => [t.name, t]));
+  const req = (name) => byName.get(name).inputSchema.required || [];
+
+  // evaluate — wcId + expression required
+  const evalT = byName.get('evaluate');
+  assert.ok(evalT, 'evaluate must be listed');
+  assert.deepEqual(req('evaluate').sort(), ['expression', 'wcId']);
+  assert.equal(evalT.inputSchema.properties.wcId.type, 'integer');
+  assert.equal(evalT.inputSchema.properties.expression.type, 'string');
+  assert.equal(typeof evalT.call, 'undefined', 'internal call must not leak');
+  assert.equal(typeof evalT.shape, 'undefined', 'no shape — evaluate rides default JSON-text serialize');
+  // description states the JSON-serializable return contract + main-world + internal exclusion
+  assert.match(evalT.description, /JSON-serializable/i);
+  assert.match(evalT.description, /main world/i);
+  assert.match(evalT.description, /internal/i);
+
+  // injectScript — wcId + script required
+  const injT = byName.get('injectScript');
+  assert.ok(injT, 'injectScript must be listed');
+  assert.deepEqual(req('injectScript').sort(), ['script', 'wcId']);
+  assert.equal(injT.inputSchema.properties.wcId.type, 'integer');
+  assert.equal(injT.inputSchema.properties.script.type, 'string');
+  assert.equal(typeof injT.call, 'undefined', 'internal call must not leak');
+  // description states void/{"ok":true} + skips-foreground-to-act + no-persistence
+  assert.match(injT.description, /\{"ok":true\}/);
+  assert.match(injT.description, /foreground-to-act/i);
+  assert.match(injT.description, /persistence/i);
+});
+
+test('evaluate maps named args → positional engine.evaluate(wcId, expression)', async () => {
+  const { engine, calls } = makeFakeEngine({ returns: { evaluate: { violations: 0 } } });
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('evaluate', { wcId: 7, expression: 'axe.run(document)' });
+  assert.deepEqual(calls.evaluate[0], [7, 'axe.run(document)']);
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(JSON.parse(textOf(result)), { violations: 0 });
+});
+
+test('injectScript maps named args → positional engine.injectScript(wcId, script), void → {"ok":true}', async () => {
+  const { engine, calls } = makeFakeEngine(); // returns undefined → void op
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('injectScript', { wcId: 7, script: 'window.__x = 1;' });
+  assert.deepEqual(calls.injectScript[0], [7, 'window.__x = 1;']);
+  assert.equal(result.isError, undefined);
+  assert.equal(textOf(result), '{"ok":true}');
+});
+
+test('evaluate non-serializable / internal-session engine throw → isError with message preserved', async () => {
+  const cases = [
+    'automation: evaluate — return value is not JSON-serializable',
+    'automation: evaluate — internal-session excluded',
+  ];
+  for (const msg of cases) {
+    const { engine } = makeFakeEngine({ throws: { evaluate: new Error(msg) } });
+    const reg = buildToolRegistry(() => engine);
+    const result = await reg.callTool('evaluate', { wcId: 1, expression: 'x' });
+    assert.equal(result.isError, true, msg);
+    assert.equal(textOf(result), msg);
+  }
+});
+
+test('injectScript internal-session engine throw → isError with message preserved', async () => {
+  const msg = 'automation: injectScript — internal-session excluded';
+  const { engine } = makeFakeEngine({ throws: { injectScript: new Error(msg) } });
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('injectScript', { wcId: 1, script: 'x' });
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+// ---------------------------------------------------------------------------
+// DevTools tools (Flight 9) — openDevTools / closeDevTools: list shape, schemas, dispatch
+// ---------------------------------------------------------------------------
+
+test('listTools includes openDevTools + closeDevTools with wcId-required schemas and the capability-distinction note', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const byName = new Map(reg.listTools().map((t) => [t.name, t]));
+  const req = (name) => byName.get(name).inputSchema.required || [];
+
+  for (const name of DEVTOOLS_NAMES) {
+    const t = byName.get(name);
+    assert.ok(t, name + ' must be listed');
+    assert.deepEqual(req(name), ['wcId'], name);
+    assert.equal(t.inputSchema.properties.wcId.type, 'integer', name);
+    assert.equal(typeof t.call, 'undefined', 'internal call must not leak for ' + name);
+    assert.equal(typeof t.shape, 'undefined', 'no shape — void → {"ok":true} via default serialize for ' + name);
+  }
+
+  // openDevTools description: detached/{mode:"detach"} rationale + CDP-client/attach-failed
+  // distinction + evaluate/injectScript keep working + internal exclusion.
+  const openDesc = byName.get('openDevTools').description;
+  assert.match(openDesc, /detach/i);
+  assert.match(openDesc, /attach-failed|debugger-unavailable/i);
+  assert.match(openDesc, /evaluate/);
+  assert.match(openDesc, /internal/i);
+
+  // closeDevTools description: idempotent + releases the CDP client.
+  const closeDesc = byName.get('closeDevTools').description;
+  assert.match(closeDesc, /idempotent/i);
+  assert.match(closeDesc, /internal/i);
+});
+
+test('openDevTools maps named args → positional engine.openDevTools(wcId), void → {"ok":true}', async () => {
+  const { engine, calls } = makeFakeEngine(); // returns undefined → void op
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('openDevTools', { wcId: 7 });
+  assert.deepEqual(calls.openDevTools[0], [7]);
+  assert.equal(result.isError, undefined);
+  assert.equal(textOf(result), '{"ok":true}');
+});
+
+test('closeDevTools maps named args → positional engine.closeDevTools(wcId), void → {"ok":true}', async () => {
+  const { engine, calls } = makeFakeEngine(); // returns undefined → void op
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('closeDevTools', { wcId: 7 });
+  assert.deepEqual(calls.closeDevTools[0], [7]);
+  assert.equal(result.isError, undefined);
+  assert.equal(textOf(result), '{"ok":true}');
+});
+
+test('devtools internal-session engine throw → isError with message preserved (both ops)', async () => {
+  for (const [name, msg] of [
+    ['openDevTools', 'automation: openDevTools — internal-session excluded'],
+    ['closeDevTools', 'automation: closeDevTools — internal-session excluded'],
+  ]) {
+    const { engine } = makeFakeEngine({ throws: { [name]: new Error(msg) } });
+    const reg = buildToolRegistry(() => engine);
+    const result = await reg.callTool(name, { wcId: 1 });
+    assert.equal(result.isError, true, name);
+    assert.equal(textOf(result), msg);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// getChromeTarget — Flight-6 chrome-discovery tool
 // NOTE: makeFakeEngine only covers ALL_NAMES (drive + observe), so getChromeTarget
 // tests use plain objects to avoid the helper's ALL_NAMES limitation.
 // ---------------------------------------------------------------------------

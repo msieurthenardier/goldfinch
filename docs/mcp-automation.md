@@ -16,8 +16,8 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **17 tools** — 12 drive tools, 4
-observe tools, and 1 admin chrome-discovery tool. Tools are a thin adapter over Goldfinch's
+binds to **loopback only** (`127.0.0.1`), and advertises **21 tools** — 12 drive tools, 4
+observe tools, 2 eval tools, 2 devtools tools, and 1 admin chrome-discovery tool. Tools are a thin adapter over Goldfinch's
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
 
@@ -42,10 +42,52 @@ and unlocks the env-gated auto-mint) — a convenience for headless drives that 
 dev run **regardless of the persisted toggle**, *without writing the setting* (the persisted
 `automationEnabled` stays whatever it was — human-only enablement is preserved). It is **a complete
 no-op on a packaged build**: every call site ANDs `!app.isPackaged`, so a shipped binary ignores the
-flag entirely. The flag is decoupled from `--remote-debugging-port`, so `npm run dev:debug` (CDP)
-does **not** start the MCP server. Dev runs are **profile-isolated** — an unpackaged launch points
+flag entirely. The MCP surface is structurally independent of any legacy CDP path — the ungated CDP
+debugging launch was removed in F9, so `--automation-dev` is the sole dev-automation switch. Dev runs are **profile-isolated** — an unpackaged launch points
 `userData` at a sibling `…/goldfinch-dev` directory (`app.setPath` when `!app.isPackaged`), so dev
 keys/settings never touch the installed profile.
+
+### Dogfooding / dev key acquisition (the `AUTOMATION_DEV_MINT` mechanism)
+
+A standalone Node script (`scripts/a11y-audit.mjs`, the farbling driver, an external
+agent harness) cannot reach the app's IPC to mint itself a key. The **dev-only**
+auto-mint affordance bridges that gap: launching with **both** `--automation-dev`
+(via `npm run dev:automation`) **and** `GOLDFINCH_AUTOMATION_DEV_MINT=1` makes the app
+mint a key on startup and print **one** parseable line to stdout:
+
+```
+AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey|null>"}
+```
+
+- `key` — a freshly minted **`default`-jar** key (always present under the double gate).
+- `adminKey` — the **admin** key, minted **only** when `GOLDFINCH_AUTOMATION_ADMIN=1` is
+  also set; otherwise `null`.
+
+It is **double-gated and dev-only**: it fires only under `shouldAutoMint` (the exact
+`--automation-dev` token **and** `GOLDFINCH_AUTOMATION_DEV_MINT === '1'`), is
+`!app.isPackaged`-gated, and is a **no-op on a packaged build**. A plain
+`npm run dev:automation` (no `DEV_MINT`) prints nothing — off-by-default stays
+observable. Minting writes only the key *hash*; the plaintext is shown once on this
+line and never persisted or re-derivable.
+
+**Recipe — attach a script to a dev key:**
+
+```bash
+# Terminal 1 — launch the app, surface bound, dev key minted (note the printed line):
+GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
+#   → AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
+
+# Terminal 2 — export the key the consumer needs, then run it:
+export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # admin/chrome work (e.g. the a11y chrome sweep)
+export GOLDFINCH_MCP_KEY=<jarKey>           # jar-scoped guest work
+node scripts/a11y-audit.mjs                 # or any consumer of scripts/lib/mcp-client.mjs
+```
+
+`scripts/lib/mcp-client.mjs`'s `connectAutomation()` reads `GOLDFINCH_MCP_ADMIN_KEY`
+(preferred) / `GOLDFINCH_MCP_KEY` from env by default and attaches the
+`Authorization: Bearer <key>` header. This is the **attach** model — the operator
+launches the app out-of-band and the script connects to the already-running loopback
+server; it does not spawn the app.
 
 ## Endpoint
 
@@ -216,7 +258,7 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 17 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
+All 21 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`.
 
@@ -245,6 +287,55 @@ or (for the chrome renderer) `getChromeTarget`.
 | `captureWindow` | *(none)* | **Image content** (PNG, `image/png`) of the whole browser window (chrome + composited guests) |
 | `readDom` | `{ wcId: integer }` *(required)* | JSON text: `{ url, title, html }` — the full live `document.documentElement` outerHTML (no trimming), foreground-first |
 | `readAxTree` | `{ wcId: integer }` *(required)* | JSON text: the accessibility-tree `AXNode` array — **or** a `{ automation: "debugger-unavailable", reason, wcId }` refusal (a **normal** result, see below). Foreground-first; uses the in-process debugger |
+
+### Eval tools (2)
+
+Debugger-free JavaScript evaluation in the target tab's **main world** via `webContents.executeJavaScript`
+(**ZERO CDP** — these tools never touch the in-process debugger, so they run concurrently with
+`readAxTree`/`scroll` without lock contention). Because `executeJavaScript` evaluates in the page's V8
+isolate (not via a `<script>` tag), `script-src` CSP does **not** apply — so one `injectScript` can inject a
+library like axe-core and a following `evaluate` can read `axe.run(...)` back. The returned Promise is
+natively awaited.
+
+| Tool | Input schema | Result shape |
+|------|--------------|--------------|
+| `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). Foreground-first (the tab is brought to front before evaluation). |
+| `injectScript` | `{ wcId: integer, script: string }` *(required)* | JSON text `{"ok":true}` (void). Defines globals / patches prototypes (e.g. the axe-core source, a farbling hook). **Skips foreground-to-act** (defining a global needs no paint). Makes **no persistence guarantee** — globals it defines are not promised to survive across a later `evaluate` gap (a navigation clears them); pair `injectScript` immediately with one `evaluate`. An in-page throw surfaces as an error result (isError). |
+
+> **Security invariant — internal session always excluded, even for admin.** Both eval tools refuse the
+> internal `goldfinch://settings` session with `automation: evaluate — internal-session excluded` (and the
+> analogous `injectScript` message) **before** any `executeJavaScript`, regardless of identity. Admin builds
+> its engine with `allowInternal:true` (so it can run read-only ops on the internal tab), but arbitrary JS in
+> `goldfinch://settings` would reach the privileged `goldfinchInternal` bridge — so the eval ops carry their
+> own op-local refusal that fires even for admin. This is the single most important security item in the eval surface.
+
+### DevTools tools (2)
+
+Open / close the Chromium DevTools front-end on a tab via `webContents.openDevTools({mode:'detach'})`
+/ `webContents.closeDevTools()` — **NO CDP from these ops** (the CDP *client* they spawn is Chromium's
+own DevTools front-end). `{mode:'detach'}` opens DevTools in a **separate OS window**, preferred under
+WSLg over the default docked mode (less compositor interference, more predictable). Neither op brings
+the tab to the foreground.
+
+| Tool | Input schema | Result shape |
+|------|--------------|--------------|
+| `openDevTools` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (void). Opens a detached DevTools window on the tab. |
+| `closeDevTools` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (void). Closes DevTools, releasing the CDP client. **Idempotent** — closing when DevTools is not open is a no-op. |
+
+> **Capability distinction.** Opening DevTools establishes a CDP client on the tab, so a **concurrent
+> `readAxTree`/`scroll`** (which attach the in-process debugger) will surface a
+> `{ automation: "debugger-unavailable", reason, wcId }` / attach-failed result — that is **expected**,
+> not a regression. By contrast, `evaluate`/`injectScript` **keep working** under DevTools (they use
+> `webContents.executeJavaScript`, not the debugger). Call `closeDevTools` to release the client so a
+> subsequent `readAxTree`/`scroll` can attach again.
+
+> **Security invariant — internal session always excluded, even for admin.** Both DevTools tools refuse the
+> internal `goldfinch://settings` session with `automation: openDevTools — internal-session excluded` (and the
+> analogous `closeDevTools` message) **before** opening/closing DevTools, regardless of identity. Opening
+> DevTools establishes a full CDP client on the page (functionally a debugger attach), and the mission rule
+> forbids a debugger client on the internal session — a privilege-escalation surface onto the privileged
+> `goldfinchInternal` bridge. (Jar-scoped guests / admin chrome are allowed; DevTools on a jar's own guest is
+> within the jar key's authority.)
 
 ### Admin discovery (1)
 

@@ -1,6 +1,6 @@
 // @ts-check
 'use strict';
-const { resolveContents, classifyContents } = require('./resolve');
+const { resolveContents, classifyContents, isInternalContents } = require('./resolve');
 const { withDebuggerSession } = require('./cdp');
 // Automation engine — READ half (observe). Foreground-first, debugger-free screenshots
 // via webContents.capturePage() (DD1): a guest is brought to front before capture or it
@@ -20,6 +20,29 @@ const { withDebuggerSession } = require('./cdp');
 // operator-approved for this leg.) Every OTHER op in this module (captureScreenshot /
 // captureWindow / readDom) stays debugger-free.
 // Leg 4 (wire-and-docs) adds the dispatch keys to engine.js (no engine.js edit here).
+//
+// Flight-9 eval ops (evaluate / injectScript): debugger-free webContents.executeJavaScript
+// ops (DD1: ZERO CDP — they never touch cdp.js / withDebuggerSession). They are co-located
+// here with readDom because they share the exact resolve → activate → re-resolve skeleton,
+// EVEN THOUGH injectScript is a *write* (it defines globals / patches prototypes). The
+// "observe" filename is historical; a future reader should not trip on a write living here.
+// Both run the FINAL isInternalContents(wc) refusal AFTER the (optional) activate branch —
+// the load-bearing DD2-HIGH guard: admin's allowInternal:true makes resolveContents permissive,
+// so without this op-local check admin could run arbitrary JS in goldfinch://settings and reach
+// the privileged goldfinchInternal bridge. The check covers BOTH the activate path (guest) and
+// the no-activate path (chrome / admin without activate).
+//
+// Flight-9 devtools ops (openDevTools / closeDevTools): webContents.openDevTools({mode:'detach'})
+// / webContents.closeDevTools() — synchronous/void → {"ok":true}. They are co-located here (NOT a
+// new devtools.js) because they share the same resolve → FINAL isInternalContents refusal → act
+// skeleton as the eval ops. They touch NO CDP / cdp.js: openDevTools is a webContents method; the
+// CDP *client* it spawns is Chromium's own DevTools front-end (the source of leg-5's intended
+// readAxTree/scroll attach-failed conflict — NOT a regression). NO foreground-to-act activation
+// (DevTools attaches to the contents regardless of paint). The FINAL isInternalContents(wc) refusal
+// fires EVEN for admin (allowInternal:true): opening DevTools establishes a full CDP client on the
+// page, so DevTools on goldfinch://settings is a privilege-escalation surface onto the privileged
+// goldfinchInternal bridge — the mission's debugger-attach-skip-internal hard rule. evaluate /
+// injectScript keep working under DevTools (executeJavaScript, not the debugger).
 
 // Default paint-settle delay (ms) after foregrounding a guest before capturePage().
 // DD1's blank-capture is a compositor/visibility effect on an already-loaded guest, so the
@@ -268,4 +291,180 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
   });
 }
 
-module.exports = { captureScreenshot, readDom, captureWindow, readAxTree };
+/**
+ * Evaluate an arbitrary expression in the target tab's MAIN WORLD via
+ * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve → (guest)
+ * await activate → RE-RESOLVE (stale-handle guard) → FINAL isInternalContents
+ * refusal → wc.executeJavaScript(expression). Chrome is always live (no activate).
+ *
+ * executeJavaScript natively awaits a returned Promise, so an async expression
+ * (e.g. `axe.run(document)`) resolves before its value crosses back. We `await`
+ * the call so the RESOLVED value (never a Promise) reaches serialization.
+ *
+ * Return contract (DD2):
+ *   - JSON-serializable value → returned verbatim (the MCP adapter JSON-texts it).
+ *   - in-page throw (ReferenceError, page code throws) → PROPAGATES as an error
+ *     (surfaces as isError at the adapter) — not swallowed.
+ *   - non-JSON-serializable value (function, DOM node, circular object) → this op
+ *     throws the EXACT DD2 message `automation: evaluate — return value is not
+ *     JSON-serializable` BEFORE returning, so the consumer never sees a raw V8
+ *     structured-clone / JSON.stringify message. We pre-flight JSON.stringify here
+ *     rather than relying on the adapter's bare JSON.stringify (mcp-tools.js
+ *     serialize), whose throw would surface as a raw message via errResult.
+ *
+ * [HIGH] DD2 internal-session exclusion EVEN FOR ADMIN: the isInternalContents
+ * refusal runs on the FINAL wc (after the optional activate branch), so it covers
+ * the no-activate path too. Admin builds the engine with allowInternal:true, so
+ * resolveContents will NOT throw on an internal wcId — this op-local check is the
+ * sole guard against arbitrary JS in goldfinch://settings reaching the privileged
+ * goldfinchInternal bridge. Refuses regardless of allowInternal.
+ *
+ * @param {number} wcId
+ * @param {{
+ *   fromId: (id: number) => any,
+ *   chromeContents: any,
+ *   activate?: (id: number) => Promise<void>,
+ *   allowInternal?: boolean,
+ * }} deps
+ * @returns {Promise<any>} the JSON-serializable evaluated value
+ */
+async function evaluate(wcId, expression, deps) {
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);
+  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+    await activate(wcId);                                       // DD5 foreground-to-act (guest only)
+    // Re-resolve AFTER the async activate: the pre-activate handle may be stale.
+    wc = resolveContents(wcId, deps);
+  }
+  // [HIGH] DD2: internal-session exclusion EVEN FOR ADMIN — runs on the FINAL wc,
+  // after the (optional) activate branch, so it covers the no-activate path too.
+  if (isInternalContents(wc)) {
+    throw new Error('automation: evaluate — internal-session excluded');
+  }
+  // executeJavaScript natively awaits a returned Promise; `await` here means the
+  // RESOLVED value (never a Promise) reaches the serialization pre-flight.
+  const value = await wc.executeJavaScript(expression);
+  // Pre-flight serialization in the ENGINE OP (not the adapter): a non-serializable
+  // return throws the EXACT DD2 message before returning, so the consumer never sees
+  // a raw V8 message. A JSON-serializable value passes through unchanged.
+  try {
+    JSON.stringify(value);
+  } catch {
+    throw new Error('automation: evaluate — return value is not JSON-serializable');
+  }
+  return value;
+}
+
+/**
+ * Inject a script into the target tab's MAIN WORLD via wc.executeJavaScript
+ * (DD1/DD2 — ZERO CDP). VOID contract: it defines globals / patches prototypes
+ * (e.g. the axe-core source, a farbling hook) and returns `undefined` → the MCP
+ * adapter serializes that to the one success shape `{"ok":true}`.
+ *
+ * Asymmetry vs evaluate (DD2 — intentional, pinned by a unit test): injectScript
+ * SKIPS foreground-to-act activation. Defining a global / patching a prototype does
+ * not need a paint, so there is NO activate call here — resolve → FINAL
+ * isInternalContents refusal → executeJavaScript. evaluate keeps foreground-to-act
+ * for parity with reads.
+ *
+ * NO persistence guarantee: window globals defined here are NOT promised to survive
+ * across a later evaluate gap (a navigation clears them). The a11y driver (leg 3)
+ * pairs injectScript immediately with one evaluate — the tool makes no implicit
+ * persistence assumption.
+ *
+ * [HIGH] DD2 internal-session exclusion EVEN FOR ADMIN: same load-bearing guard as
+ * evaluate — isInternalContents(wc) refuses BEFORE any executeJavaScript, regardless
+ * of allowInternal. In-page throws propagate as errors (surface as isError).
+ *
+ * @param {number} wcId
+ * @param {{
+ *   fromId: (id: number) => any,
+ *   chromeContents: any,
+ *   allowInternal?: boolean,
+ * }} deps
+ * @returns {Promise<void>}
+ */
+async function injectScript(wcId, script, deps) {
+  const wc = resolveContents(wcId, deps);
+  // NO activate (DD2): injectScript skips foreground-to-act — it defines globals /
+  // patches prototypes and needs no paint. The internal-session refusal still runs
+  // on this resolved wc (no activate branch to re-resolve through).
+  if (isInternalContents(wc)) {
+    throw new Error('automation: injectScript — internal-session excluded');
+  }
+  await wc.executeJavaScript(script);          // void contract → returns undefined
+}
+
+/**
+ * Open the DevTools front-end (detached OS window) on the target tab via
+ * wc.openDevTools({ mode: 'detach' }) (Flight-9 — ZERO CDP from this op; the CDP
+ * *client* is Chromium's own DevTools front-end, which is the whole point of the
+ * leg-5 conflict). VOID contract: returns `undefined` → the MCP adapter serializes
+ * that to the one success shape `{"ok":true}`.
+ *
+ * Sequence: resolve → FINAL isInternalContents refusal → wc.openDevTools({mode:'detach'}).
+ * NO foreground-to-act activation: DevTools attaches to the contents regardless of paint,
+ * so there is no activate branch (and thus no re-resolve) — the refusal runs on the
+ * resolved wc.
+ *
+ * `{ mode: 'detach' }` opens a separate OS window (preferred under WSLg over the default
+ * docked mode — less compositor interference, more predictable).
+ *
+ * [HIGH] internal-session exclusion EVEN FOR ADMIN: admin builds deps with
+ * allowInternal:true, so resolveContents will NOT throw on an internal wcId — this
+ * op-local isInternalContents check is the SOLE guard. Opening DevTools establishes a
+ * full CDP client on the page (functionally a debugger attach); the mission rule forbids
+ * a debugger client on the internal goldfinch://settings session (privilege escalation
+ * onto the goldfinchInternal bridge). Refuses regardless of allowInternal.
+ *
+ * Capability distinction (leg-5 recorded finding): once DevTools is open, a concurrent
+ * readAxTree/scroll (which attach the in-process debugger) surfaces `attach-failed`
+ * (expected); evaluate/injectScript (executeJavaScript, not the debugger) keep working.
+ *
+ * @param {number} wcId
+ * @param {{
+ *   fromId: (id: number) => any,
+ *   chromeContents: any,
+ *   allowInternal?: boolean,
+ * }} deps
+ * @returns {Promise<void>}
+ */
+async function openDevTools(wcId, deps) {
+  const wc = resolveContents(wcId, deps);
+  // NO activate (DevTools attaches regardless of paint). The internal-session refusal
+  // runs on this resolved wc — fires even for admin (allowInternal:true).
+  if (isInternalContents(wc)) {
+    throw new Error('automation: openDevTools — internal-session excluded');
+  }
+  wc.openDevTools({ mode: 'detach' });          // void contract → returns undefined
+}
+
+/**
+ * Close the DevTools front-end on the target tab via wc.closeDevTools(). VOID contract:
+ * returns `undefined` → `{"ok":true}`. IDEMPOTENT — closeDevTools() on a contents whose
+ * DevTools is not open is a no-op in Electron (does not throw), so there is no special
+ * error path: the op contract is the same whether or not DevTools was open.
+ *
+ * Sequence mirrors openDevTools: resolve → FINAL isInternalContents refusal → wc.closeDevTools().
+ * NO foreground-to-act activation.
+ *
+ * [HIGH] internal-session exclusion EVEN FOR ADMIN: same load-bearing guard as openDevTools —
+ * isInternalContents(wc) refuses before any closeDevTools, regardless of allowInternal.
+ *
+ * @param {number} wcId
+ * @param {{
+ *   fromId: (id: number) => any,
+ *   chromeContents: any,
+ *   allowInternal?: boolean,
+ * }} deps
+ * @returns {Promise<void>}
+ */
+async function closeDevTools(wcId, deps) {
+  const wc = resolveContents(wcId, deps);
+  if (isInternalContents(wc)) {
+    throw new Error('automation: closeDevTools — internal-session excluded');
+  }
+  wc.closeDevTools();                            // idempotent no-op when not open; void contract
+}
+
+module.exports = { captureScreenshot, readDom, captureWindow, readAxTree, evaluate, injectScript, openDevTools, closeDevTools };

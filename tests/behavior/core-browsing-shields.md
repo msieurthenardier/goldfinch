@@ -51,7 +51,7 @@ After the Electron 33 → 42 major upgrade, verify that the core runtime behavio
   `click(wcId, x, y)` into the chrome first (a cold `Tab` from the bare document does not relocate focus —
   normal browser behavior, not an engine defect). The current steps drive by coordinate-click + navigation,
   so no cold-`Tab` anchor is needed.
-- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`,
+- **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`,
   `getChromeTarget()` returns a numeric chrome `wcId`, and the fixture serves before exercising anything.
 - Shields are at defaults (all on) — the test asserts default-on behavior; if a prior run paused a site,
   reset (the app starts with `pausedSites: []`).
@@ -74,7 +74,7 @@ After the Electron 33 → 42 major upgrade, verify that the core runtime behavio
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()`; and probe the fixture URL (`curl http://127.0.0.1:8080/`). | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a **numeric** chrome `wcId`. The fixture returns HTTP 200. Record `chromeWcId`. Halt if any fails. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()`; and probe the fixture URL (`curl http://127.0.0.1:8080/`). | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a **numeric** chrome `wcId`. The fixture returns HTTP 200. Record `chromeWcId`. Halt if any fails. |
 | 2 | App-launch smoke: call `getChromeTarget()` and `enumerateTabs()`. | `getChromeTarget()` returns the chrome `wcId` (the Goldfinch chrome renderer is up) and `enumerateTabs()` lists **at least one guest** `<webview>` tab — the app started cleanly on the new Electron (no white screen / crash). |
 | 3 | Open a tab to a real page: `openTab('https://example.com/')` → guest `wcId`; wait for load, then `readDom(guestWcId)`. | `openTab` returns a numeric guest `wcId`; `readDom(guestWcId).html` contains "Example Domain" and `readDom(guestWcId).url` is `https://example.com/`. Core navigation + rendering survived the upgrade. (The guest `url` is the authoritative current-URL witness; the chrome address bar can be cross-read via `getChromeTarget`+`readDom` if desired.) |
 | 4 | Navigate a guest to the local fixture loaded at `http://127.0.0.1:8080/?utm_source=test&q=keep` (via `navigate(guestWcId, …)`, or `openTab(…)` for a fresh guest `wcId`). Wait for load, then `readDom(guestWcId)`. | The fixture renders; `readDom(guestWcId).url` has the tracking param **stripped** — `utm_source` gone, `q=keep` preserved — confirming the top-level navigation strip redirect (`session.webRequest` → `redirectURL`) still works. (Observe the guest **`url`**, **not** the privacy aggregate's `stripped` count — that field is 0 for mainFrame navigation by design: `recordRequest` returns early on `resourceType==='mainFrame'`. Don't assert on it.) |

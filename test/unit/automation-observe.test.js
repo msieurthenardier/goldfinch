@@ -15,6 +15,10 @@ const {
   readDom,
   captureWindow,
   readAxTree,
+  evaluate,
+  injectScript,
+  openDevTools,
+  closeDevTools,
 } = require('../../src/main/automation/observe');
 
 // The exact code string readDom is required to pass to executeJavaScript — kept in lockstep
@@ -733,4 +737,320 @@ test('readAxTree: internal-session wcId → throws; NO attach AND the attached S
   guestWc.debugger = makeDebugger({ axNodes: CANNED_AX_NODES });
   const ok = await readAxTree(378, { fromId: makeFakeFromId({ 378: guestWc }), chromeContents: null, activate: async () => {} });
   assert.deepEqual(ok, CANNED_AX_NODES, 'a valid call after the internal-session reject still succeeds (lock untouched)');
+});
+
+// ---------------------------------------------------------------------------
+// evaluate / injectScript — Flight-9 debugger-free executeJavaScript eval ops (DD1/DD2)
+//
+// These ops run wc.executeJavaScript in the guest MAIN WORLD with ZERO CDP. They share
+// readDom's resolve → (guest) activate → re-resolve skeleton, EXCEPT injectScript skips
+// activate (DD2 asymmetry). The load-bearing DD2-HIGH guard is the FINAL isInternalContents
+// refusal that fires EVEN when allowInternal:true (admin) — proven below.
+// ---------------------------------------------------------------------------
+
+// A fake guest wc whose executeJavaScript returns a CONFIGURABLE value (default { ok: 1 }) and
+// records the code + call count. `retVal` may also be a function (called with the code) so a
+// test can return a non-serializable value or throw.
+function makeEvalGuestWc(id, retVal = { ok: 1 }, { internal = false } = {}) {
+  return {
+    id,
+    session: { __goldfinchInternal: internal },
+    isDestroyed() { return false; },
+    _execCount: 0,
+    _lastExecCode: /** @type {string|null} */ (null),
+    async executeJavaScript(/** @type {string} */ code) {
+      this._execCount += 1; this._lastExecCode = code;
+      return typeof retVal === 'function' ? retVal(code) : retVal;
+    },
+  };
+}
+
+// --- evaluate ---
+
+test('evaluate: guest — activate called BEFORE executeJavaScript, returns the serializable value', async () => {
+  const guestWc = makeEvalGuestWc(400, { violations: 3 });
+  const callLog = [];
+  const origExec = guestWc.executeJavaScript.bind(guestWc);
+  guestWc.executeJavaScript = async (code) => { callLog.push({ what: 'exec', code }); return origExec(code); };
+
+  const deps = {
+    fromId: makeFakeFromId({ 400: guestWc }),
+    chromeContents: null,
+    activate: async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); },
+  };
+
+  const result = await evaluate(400, 'axe.run(document)', deps);
+
+  const activateIdx = callLog.findIndex((e) => e.what === 'activate');
+  const execIdx = callLog.findIndex((e) => e.what === 'exec');
+  assert.ok(activateIdx !== -1 && execIdx !== -1, 'both activate and executeJavaScript must run');
+  assert.ok(activateIdx < execIdx, 'activate must be called before executeJavaScript (foreground-to-act)');
+  assert.equal(guestWc._lastExecCode, 'axe.run(document)', 'the expression is passed verbatim');
+  assert.deepEqual(result, { violations: 3 });
+});
+
+test('evaluate: awaits a returned Promise so the RESOLVED value is returned (native auto-await)', async () => {
+  // executeJavaScript natively awaits a returned Promise; our fake returns a real Promise to
+  // model that, and evaluate must `await` so the resolved value (not a Promise) comes back.
+  const guestWc = makeEvalGuestWc(401, () => Promise.resolve({ resolved: true }));
+  const deps = { fromId: makeFakeFromId({ 401: guestWc }), chromeContents: null, activate: async () => {} };
+
+  const result = await evaluate(401, 'whatever', deps);
+  assert.deepEqual(result, { resolved: true });
+});
+
+test('evaluate: RE-RESOLVE proof — the SECOND (post-activate) handle is the one evaluated', async () => {
+  const firstHandle = makeEvalGuestWc(402, { which: 'first' });
+  const secondHandle = makeEvalGuestWc(402, { which: 'second' });
+  let lookups = 0;
+  const fromId = (/** @type {number} */ id) => {
+    if (id !== 402) return null;
+    lookups += 1;
+    return lookups === 1 ? firstHandle : secondHandle;
+  };
+
+  const result = await evaluate(402, 'x', { fromId, chromeContents: null, activate: async () => {} });
+
+  assert.equal(lookups, 2, 'fromId called twice (initial resolve + post-activate re-resolve)');
+  assert.equal(firstHandle._execCount, 0, 'the STALE pre-activate handle must NOT be evaluated');
+  assert.equal(secondHandle._execCount, 1, 'the FRESH post-activate handle must be the one evaluated');
+  assert.deepEqual(result, { which: 'second' });
+});
+
+test('evaluate: chrome target — activate NOT called (chrome is always live)', async () => {
+  const chromeWc = makeEvalGuestWc(1, { chrome: true });
+  const activateCalls = [];
+  const deps = {
+    fromId: makeFakeFromId({ 1: chromeWc }),
+    chromeContents: chromeWc, // classify as chrome
+    activate: async (id) => { activateCalls.push(id); },
+  };
+
+  const result = await evaluate(1, 'x', deps);
+  assert.equal(activateCalls.length, 0, 'activate must NOT be called for a chrome target');
+  assert.equal(chromeWc._execCount, 1, 'executeJavaScript must still run');
+  assert.deepEqual(result, { chrome: true });
+});
+
+test('evaluate: non-JSON-serializable return → throws the EXACT DD2 message (not a raw V8 message)', async () => {
+  // A circular plain object survives the (faked) structured-clone boundary, then fails JSON.stringify
+  // in the op's pre-flight — the op must throw the exact DD2 string before returning.
+  const circular = {};
+  circular.self = circular;
+  const guestWc = makeEvalGuestWc(403, circular);
+  const deps = { fromId: makeFakeFromId({ 403: guestWc }), chromeContents: null, activate: async () => {} };
+
+  await assert.rejects(
+    () => evaluate(403, 'x', deps),
+    (err) => err instanceof Error && err.message === 'automation: evaluate — return value is not JSON-serializable',
+  );
+});
+
+test('evaluate: in-page throw propagates (not swallowed)', async () => {
+  const boom = new ReferenceError('axe is not defined');
+  const guestWc = makeEvalGuestWc(404, () => { throw boom; });
+  const deps = { fromId: makeFakeFromId({ 404: guestWc }), chromeContents: null, activate: async () => {} };
+
+  await assert.rejects(() => evaluate(404, 'axe.run(document)', deps), (err) => err === boom);
+});
+
+test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
+  // The op-local guard is the SOLE protection: admin builds deps with allowInternal:true, so
+  // resolveContents is permissive on the internal wcId. The op must STILL refuse before any JS runs.
+  const internalWc = makeEvalGuestWc(405, { leaked: 'goldfinchInternal' }, { internal: true });
+  const activateCalls = [];
+  const deps = {
+    fromId: makeFakeFromId({ 405: internalWc }),
+    chromeContents: null,
+    activate: async (id) => { activateCalls.push(id); },
+    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+  };
+
+  await assert.rejects(
+    () => evaluate(405, 'document.title', deps),
+    (err) => err instanceof Error && err.message === 'automation: evaluate — internal-session excluded',
+  );
+  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run on the internal-session path (even for admin)');
+  // activate fires before the FINAL guard (the guest activate branch runs first); the guard still
+  // refuses on the re-resolved handle BEFORE executeJavaScript — that is the load-bearing invariant.
+});
+
+// --- injectScript ---
+
+test('injectScript: runs executeJavaScript and returns undefined (void contract)', async () => {
+  const guestWc = makeEvalGuestWc(410, 'ignored-return');
+  const deps = { fromId: makeFakeFromId({ 410: guestWc }), chromeContents: null, activate: async () => {} };
+
+  const result = await injectScript(410, 'window.__axe = {};', deps);
+  assert.equal(result, undefined, 'injectScript is void (resolves undefined → {"ok":true} at the adapter)');
+  assert.equal(guestWc._execCount, 1, 'executeJavaScript must run');
+  assert.equal(guestWc._lastExecCode, 'window.__axe = {};', 'the script is passed verbatim');
+});
+
+test('injectScript: does NOT call activate (intentional asymmetry vs evaluate) even for a guest', async () => {
+  const guestWc = makeEvalGuestWc(411);
+  const activateCalls = [];
+  const deps = {
+    fromId: makeFakeFromId({ 411: guestWc }),
+    chromeContents: null, // guest classification
+    activate: async (id) => { activateCalls.push(id); },
+  };
+
+  await injectScript(411, 'x', deps);
+  assert.equal(activateCalls.length, 0, 'injectScript must skip foreground-to-act — activate must NEVER be called');
+  assert.equal(guestWc._execCount, 1, 'executeJavaScript still runs on the un-activated guest');
+});
+
+test('injectScript: in-page throw propagates (not swallowed)', async () => {
+  const boom = new SyntaxError('bad script');
+  const guestWc = makeEvalGuestWc(412, () => { throw boom; });
+  const deps = { fromId: makeFakeFromId({ 412: guestWc }), chromeContents: null, activate: async () => {} };
+
+  await assert.rejects(() => injectScript(412, 'oops(', deps), (err) => err === boom);
+});
+
+test('[HIGH] injectScript: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
+  const internalWc = makeEvalGuestWc(413, undefined, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 413: internalWc }),
+    chromeContents: null,
+    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+  };
+
+  await assert.rejects(
+    () => injectScript(413, 'window.x = 1;', deps),
+    (err) => err instanceof Error && err.message === 'automation: injectScript — internal-session excluded',
+  );
+  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run on the internal-session path (even for admin)');
+});
+
+test('injectScript: bad-handle (non-number wcId) → throws bad-handle, no exec', async () => {
+  const deps = { fromId: makeFakeFromId({}), chromeContents: null };
+  await assert.rejects(
+    // @ts-expect-error — intentionally passing wrong type
+    () => injectScript('410', 'x', deps),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle'),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// openDevTools / closeDevTools — Flight-9 devtools ops (NO CDP from the ops).
+//
+// These ops call wc.openDevTools({mode:'detach'}) / wc.closeDevTools() and return undefined
+// (void → {"ok":true} at the adapter). NO foreground-to-act activation. The load-bearing guard
+// is the FINAL isInternalContents refusal that fires EVEN when allowInternal:true (admin) —
+// because opening DevTools establishes a full CDP client on the page (the mission's
+// debugger-attach-skip-internal rule). The "detached window actually appears" half of AC1 is a
+// live/HAT check, NOT asserted here.
+// ---------------------------------------------------------------------------
+
+// A fake wc recording openDevTools/closeDevTools calls. devToolsOpen tracks state so
+// the idempotency test can assert closeDevTools-when-not-open is a clean no-op.
+function makeDevToolsWc(id, { internal = false } = {}) {
+  return {
+    id,
+    session: { __goldfinchInternal: internal },
+    isDestroyed() { return false; },
+    _openCalls: /** @type {any[]} */ ([]),
+    _closeCount: 0,
+    devToolsOpen: false,
+    openDevTools(/** @type {any} */ opts) { this._openCalls.push(opts); this.devToolsOpen = true; },
+    closeDevTools() { this._closeCount += 1; this.devToolsOpen = false; },
+  };
+}
+
+// --- openDevTools ---
+
+test('openDevTools: calls wc.openDevTools({mode:"detach"}) on the resolved contents, returns undefined (void)', async () => {
+  const wc = makeDevToolsWc(500);
+  const deps = { fromId: makeFakeFromId({ 500: wc }), chromeContents: null };
+  const result = await openDevTools(500, deps);
+  assert.equal(result, undefined, 'void contract (resolves undefined → {"ok":true} at the adapter)');
+  assert.equal(wc._openCalls.length, 1, 'openDevTools must be called exactly once');
+  assert.deepEqual(wc._openCalls[0], { mode: 'detach' }, 'must pass {mode:"detach"} (WSLg-friendly detached window)');
+});
+
+test('openDevTools: does NOT activate (DevTools attaches regardless of paint) — no activate dep needed', async () => {
+  const wc = makeDevToolsWc(501);
+  const activateCalls = [];
+  const deps = {
+    fromId: makeFakeFromId({ 501: wc }),
+    chromeContents: null, // guest classification
+    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+  };
+  await openDevTools(501, deps);
+  assert.equal(activateCalls.length, 0, 'openDevTools must skip foreground-to-act — activate must NEVER be called');
+  assert.equal(wc._openCalls.length, 1);
+});
+
+test('openDevTools: bad-handle (non-number wcId) → throws bad-handle, no openDevTools', async () => {
+  const deps = { fromId: makeFakeFromId({}), chromeContents: null };
+  await assert.rejects(
+    // @ts-expect-error — intentionally passing wrong type
+    () => openDevTools('500', deps),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle'),
+  );
+});
+
+test('[HIGH] openDevTools: internal-session REFUSED even with allowInternal:true — DevTools NOT opened', async () => {
+  // The op-local guard is the SOLE protection: admin builds deps with allowInternal:true, so
+  // resolveContents is permissive on the internal wcId. The op must STILL refuse before opening
+  // DevTools — opening it establishes a full CDP client on goldfinch://settings (privilege escalation).
+  const internalWc = makeDevToolsWc(502, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 502: internalWc }),
+    chromeContents: null,
+    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+  };
+  await assert.rejects(
+    () => openDevTools(502, deps),
+    (err) => err instanceof Error && err.message === 'automation: openDevTools — internal-session excluded',
+  );
+  assert.equal(internalWc._openCalls.length, 0, 'openDevTools must NOT run on the internal-session path (even for admin)');
+});
+
+// --- closeDevTools ---
+
+test('closeDevTools: calls wc.closeDevTools() on the resolved contents, returns undefined (void)', async () => {
+  const wc = makeDevToolsWc(510);
+  wc.devToolsOpen = true; // pretend DevTools was open
+  const deps = { fromId: makeFakeFromId({ 510: wc }), chromeContents: null };
+  const result = await closeDevTools(510, deps);
+  assert.equal(result, undefined, 'void contract');
+  assert.equal(wc._closeCount, 1, 'closeDevTools must be called exactly once');
+  assert.equal(wc.devToolsOpen, false);
+});
+
+test('closeDevTools: idempotent — close without a prior open still returns {"ok":true} (void, no throw)', async () => {
+  const wc = makeDevToolsWc(511); // devToolsOpen starts false — never opened
+  const deps = { fromId: makeFakeFromId({ 511: wc }), chromeContents: null };
+  const result = await closeDevTools(511, deps);
+  assert.equal(result, undefined, 'close-when-not-open is a clean no-op (void → {"ok":true})');
+  assert.equal(wc._closeCount, 1, 'closeDevTools is still called (Electron no-ops internally)');
+});
+
+test('closeDevTools: does NOT activate', async () => {
+  const wc = makeDevToolsWc(512);
+  const activateCalls = [];
+  const deps = {
+    fromId: makeFakeFromId({ 512: wc }),
+    chromeContents: null,
+    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+  };
+  await closeDevTools(512, deps);
+  assert.equal(activateCalls.length, 0, 'closeDevTools must skip foreground-to-act');
+});
+
+test('[HIGH] closeDevTools: internal-session REFUSED even with allowInternal:true — closeDevTools NOT called', async () => {
+  const internalWc = makeDevToolsWc(513, { internal: true });
+  const deps = {
+    fromId: makeFakeFromId({ 513: internalWc }),
+    chromeContents: null,
+    allowInternal: true,
+  };
+  await assert.rejects(
+    () => closeDevTools(513, deps),
+    (err) => err instanceof Error && err.message === 'automation: closeDevTools — internal-session excluded',
+  );
+  assert.equal(internalWc._closeCount, 0, 'closeDevTools must NOT run on the internal-session path (even for admin)');
 });

@@ -56,7 +56,7 @@ broadcast, and persistence is a file the main process writes.
 - The build includes the `toolbarPins` store key, the icon toolbar + pin-apply, the Appearance pin toggles,
   and the "Site settings →" rewire.
 - `userData/settings.json` is readable on the filesystem; a reachable web page (e.g. `https://example.com/`).
-- **Active-precondition probe** (Step 1): confirm `tools/list` shows 17 tools including
+- **Active-precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings,
   confirm the `goldfinch://settings` guest is enumerable via `enumerateTabs` (the admin engine's
   `allowInternal` makes it visible).
@@ -82,7 +82,7 @@ broadcast, and persistence is a file the main process writes.
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then `getChromeTarget()` and record the chrome `wcId`. Read the chrome toolbar via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`: `#toggle-media` + `#toggle-privacy`. | `tools/list` returns **17 tools** including `getChromeTarget`; `getChromeTarget()` returns a **numeric** chrome `wcId`. Both toolbar controls render as **icons with a count badge** (not text "Media"/"Shield"); both are visible (default pinned). If the probe fails, halt. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then `getChromeTarget()` and record the chrome `wcId`. Read the chrome toolbar via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`: `#toggle-media` + `#toggle-privacy`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`; `getChromeTarget()` returns a **numeric** chrome `wcId`. Both toolbar controls render as **icons with a count badge** (not text "Media"/"Shield"); both are visible (default pinned). If the probe fails, halt. |
 | 2 | Open Settings (take a `captureWindow()` to locate the kebab (⋮), `click(wcId, x, y)` to open it, then `click(wcId, x, y)` on the Settings item — or the identical trusted path `openTab('goldfinch://settings', null, {trusted:true})`); wait for load; call `enumerateTabs` and record the `goldfinch://settings` entry's `wcId` as `guestWcId`. Read the **Appearance** section via `readDom(guestWcId)`/`readAxTree(guestWcId)`/`captureWindow()`. | The Appearance section shows a **pin-icon toggle button** for **Media** and **Shields** (pushpin glyph, `aria-pressed`), both **pinned** (`aria-pressed="true"`, filled). `enumerateTabs` includes the `goldfinch://settings` entry. `[a11y]` |
 | 3 | In the settings guest, establish a focus anchor with `click(guestWcId, x, y)` on the Appearance area (located via `captureWindow()`), then move keyboard focus to the **Media** pin-icon toggle (`pressKey(guestWcId, 'Tab')`) and activate it by keyboard (`pressKey(guestWcId, 'Enter')`/`'Space'`) to UNPIN it. Re-read via `readAxTree(guestWcId)`. | The Media pin toggles to unpinned (`aria-pressed="false"`, outline glyph); keyboard-operable. `[a11y]` |
 | 4 | Read `userData/settings.json` (filesystem). | `toolbarPins.media === false` — the change **persisted**. |

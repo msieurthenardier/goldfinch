@@ -3,7 +3,7 @@
 **Slug**: `settings-activity-viewer`
 **Status**: draft
 **Created**: 2026-06-17
-**Last Run**: never
+**Last Run**: 2026-06-17-17-23-30 — [run log](./settings-activity-viewer/runs/2026-06-17-17-23-30.md) (**partial** — serve-seam render guard Step 1 PASS (viewer not blank); pager/freeze Steps 2-8 carried, apparatus-limited)
 
 ## Intent
 Verify that the `goldfinch://settings` **Automation → Activity** viewer correctly **renders** the audit

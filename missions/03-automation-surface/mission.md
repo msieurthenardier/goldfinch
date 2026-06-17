@@ -310,6 +310,7 @@ mission-level commitment.
     2026-06-14):** record the finding + carry a follow-up (a non-CDP, `--automation-dev`-gated
     DevTools-open affordance would let a future flight settle the `attach-failed` observation); the
     `devtools-cdp-conflict` draft spec is annotated accordingly. Not a blocker for Flight 3.
+  - **Flight 9 closure (2026-06-17, leg `run-devtools-cdp-conflict`): affordance landed, spec run, finding recorded — `attach-failed` NOT reproduced live (inconclusive, WSLg-limited).** F9 leg 2 added the non-CDP `openDevTools`/`closeDevTools` MCP tools (the affordance the F3 finding was waiting on), and the `devtools-cdp-conflict` spec was run confound-free over `dev:automation` (no `--remote-debugging-port`; 21 tools). **Result:** `openDevTools(W)`→`{"ok":true}` then `readAxTree(W)` **succeeded** (AXNode array) with DevTools "open" — the expected `attach-failed` did **not** manifest. **But inconclusive:** under WSLg the detached DevTools window did not cleanly materialize (`blink.mojom.WidgetHost` errors), so a competing CDP client may not have been genuinely established. **Disposition:** the `attach-failed` branch remains **unit-tested-only**; the affordance + venue are proven, but a *definitive* live observation needs a non-WSLg display. The spec is **archived** with the run as its record (`tests/behavior/devtools-cdp-conflict/runs/2026-06-17-16-25-30.md`). OQ closed for F9; reopen only if a definitive observation is wanted later.
 
 ## Known Issues
 
@@ -413,7 +414,7 @@ as work reveals.)_
   from auto-binding the installed binary), and a **launch-time free-port fallback** (env-strict, else
   free). Moves a security boundary → mandatory Architect design pass. Resolves the three F7-HAT Known
   Issues above. (SC8 production posture; unblocks SC11/SC6 on the real binary)
-- [ ] **Flight 9: Eval tool + farbling + a11y-audit rewrite + final `:9222` removal** *(the F7
+- [x] **Flight 9: Eval tool + farbling + a11y-audit rewrite + final `:9222` removal** *(the F7
   "F8-eval")* — add the guarded in-page `evaluate`/`injectScript` MCP tool (its own design + premise
   audit — arbitrary JS in a guest/chrome), migrate `farbling-correctness` + rewrite
   `scripts/a11y-audit.mjs` onto it, unblock/retire the `devtools-cdp-conflict` spec, and **fully

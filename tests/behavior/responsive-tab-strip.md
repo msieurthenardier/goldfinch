@@ -73,7 +73,7 @@ covered by `npm run a11y`.)
 - **This test exercises window maximize/restore (Step 7).** On the dev platform (Linux/WSL) the
   custom maximize button is present and clickable. **Do NOT click Close or minimize** — Close
   tears down the harness and a minimized renderer is backgrounded (both are manual checks).
-- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including
+- **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId`.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify — it launches its
   own browser and never touches this app (false pass). The apparatus is the SDK admin MCP client
@@ -98,7 +98,7 @@ covered by `npm run a11y`.)
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Take a baseline `captureWindow()` and record the current tab count via `readAxTree(wcId)`. | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId`. If not, halt — preconditions not met. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Take a baseline `captureWindow()` and record the current tab count via `readAxTree(wcId)`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId`. If not, halt — preconditions not met. |
 | 2 | Open a **small** number of tabs (e.g. 3–4) at distinct fixture URLs. Take a `captureWindow()` screenshot and observe each tab's rendered width. | Tabs **expand to share** the available strip width (each is comfortably wide, well above the floor — judged visually from the screenshot). `#tabs` shows **no** horizontal scroll affordance (no scrollbar/overflow visible in the frame). |
 | 3 | Open **many** more tabs (enough to exceed the comfortable width — e.g. 12–20+). Take a fresh `captureWindow()` and observe tab widths vs. Step 2. | Tabs **shrink** to share the width (visibly narrower than Step 2); each remaining tab's **favicon and close button stay visible** in the frame and the title ellipsizes. Tabs do **not** keep a fixed 120–220px width with an always-on scrollbar (the old behavior). [a11y] |
 | 4 | Keep opening tabs until even the floor width cannot fit all tabs in the strip. Take a `captureWindow()`. | Only **now** does a horizontal scroll affordance appear in the frame (the strip overflows) — scroll is the last-resort fallback, not the default. |
