@@ -153,8 +153,8 @@ Re-architect the automation surface's gating so the **production (packaged) bina
 - [x] `admin-on-production-binary` — `GOLDFINCH_AUTOMATION_ADMIN` usable on the packaged build (UI + mint + auth); confirm-only audit, clean, no code change. (DD5) *(landed + committed; live packaged admin check → leg 7)*
 - [x] `port-free-fallback` — `GOLDFINCH_MCP_PORT` dev-only (`honorEnv: !app.isPackaged`); dev env-strict, else setting/default free-port fallback; capture + surface the bound port. (DD6) *(landed + committed; live two-instance/env-strict → leg 7)*
 - [x] `docs-and-security-model` — rewrite CLAUDE.md automation-security + `docs/mcp-automation.md` for toggle-binds. (DD7) *(landed + committed)*
-- [ ] `verify-integration` — confirm pack builds, then FD-driven live on the **packaged** build: bind/unbind, admin-on-prod, port fallback, isolation, gates. (DD8a) **← NEXT: needs `npm run pack` + GUI + operator profile reset.**
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT of the production posture + Activity-viewer behavior spec. (DD8b)
+- [x] `verify-integration` — FD-driven live on a real `npm run pack` build in WSL: pack/launch, toggle-binds (OFF→unbound, ON→bound live, keyless/bad-key 401, valid-key 200+session), **SC6 via a real 3rd-party MCP client**, DD1 dev-profile isolation (installed profile byte-unchanged), DD6 free-fallback (49707→49708) + two-instance coexistence + env-strict hard-fail, gates green. (DD8a) *(landed; flip-OFF unbind / admin-on-prod / DD9-live / activity-viewer carried to leg 8 on the real installed instance per operator)*
+- [ ] `hat-and-alignment` *(optional — included)* — guided HAT on the operator's **real installed instance** (once a Windows installer exists): flip-OFF live unbind, admin-on-production, DD9 `automation-key-gating`, `settings-activity-viewer`. (DD8b) **← remaining to land the flight.**
 
 ---
 

@@ -1,6 +1,7 @@
 # Leg: verify-integration
 
-**Status**: ready
+**Status**: landed
+**Note (2026-06-17):** core production posture **live-verified** on a real `npm run pack` build in WSL (pack/launch, toggle OFF→unbound, toggle ON→bound live, keyless/bad-key 401, valid-key 200+session, **SC6 via a real 3rd-party MCP client**, DD1 isolation byte-unchanged, DD6 free-fallback 49707→49708, two-instance coexistence, DD6 env-strict hard-fail). Deferred to the **leg-8 HAT on the operator's real installed instance** (operator decision, pending a Windows installer): flip-OFF live unbind, admin-on-production, DD9 live + `automation-key-gating`, and `settings-activity-viewer`. Full evidence in the flight-log Leg-7 entry.
 **Flight**: [Production gating re-architecture + dev-profile isolation + port free-fallback](../flight.md)
 
 ## Objective

@@ -88,9 +88,32 @@
 - **Completeness grep (AC):** `grep -n "not yet shipped\|no released build\|no production launch\|only binds under\|only thing that starts\|not in any released build" CLAUDE.md docs/mcp-automation.md` → **returns nothing (rc=1, clean).**
 - **Gates (no source changed — trivially green):** `npm test` **732 pass / 0 fail**; `npm run typecheck` clean; `npm run lint` clean.
 
-### Leg 7 — verify-integration (DD8a) — **in progress (blocked on operator/GUI)**
-- 2026-06-17 — **First-ever `npm run pack` CONFIRMED (prerequisite de-risked by the FD).** `electron-builder --dir` (v26.15.3, electron 42.4.0, linux x64) built `dist/linux-unpacked/goldfinch` successfully, **exit 0** — no icon / linux-dep blocker. Native-dep rebuild + electron-zip extract completed. (`asar:false` warning is expected/intended per the build config.) `dist/` is gitignored (build output, not committed). This clears the flight's "pack has never been run" prerequisite concern.
-- **REMAINING (needs operator + GUI):** the live probes — toggle-binds curl transitions on the packaged binary, human-only-enable, admin-on-prod, two-instance port fallback, dev-profile isolation byte-unchanged, and the `automation-key-gating` behavior test — all require launching the GUI app (WSLg display) and the **one-time operator profile reset** of `~/.config/goldfinch`. Handed to the operator; the FD will drive the curl/file-listing evidence once the app is running.
+### Leg 7 — verify-integration (DD8a) — **landed (core production posture live-verified on the packaged build; a few items carried to leg-8 HAT on the real installed instance per operator)**
+FD-driven live verification, 2026-06-17, on a real `npm run pack` Linux build (`dist/linux-unpacked/goldfinch`, `app.isPackaged === true`) launched in WSL/WSLg, with the operator performing the human GUI actions (toggle flips, key mint) and the FD citing machine-read evidence (curl status codes, `ss` listener table, file sha/mtime, stdout).
+
+**LIVE-VERIFIED (cited):**
+- ✅ **`npm run pack` builds + launches** — first-ever pack, exit 0, `dist/linux-unpacked/goldfinch` (217 MB), GUI window via WSLg, 7 healthy processes. No icon/linux-dep blocker.
+- ✅ **Toggle OFF → surface unbound** — `ss` shows nothing on 49152; app healthy (not a false pass).
+- ✅ **DD1 packaged-side** — `~/.config/goldfinch-dev` does NOT exist for the packaged build; it uses the installed `~/.config/goldfinch` (the `-dev` redirect only fires when `!app.isPackaged`).
+- ✅ **Toggle ON → bound live (DD2)** — operator flipped the toggle in Settings; `ss` then shows `127.0.0.1:49152` (goldfinch pid), no relaunch. Keyless curl → **401**; fabricated Bearer → **401**.
+- ✅ **Valid jar key → 200 + MCP session** — operator minted a jar key; authenticated `initialize` POST returned **200** with `Mcp-Session-Id` + `serverInfo {name: goldfinch, version: 0.5.1}`.
+- ✅ **SC6 end-to-end (operator-witnessed)** — operator connected a **real 3rd-party MCP client** to `127.0.0.1:49152` with the key and drove the live surface ("works from a 3rd party tool, pass"). External MCP client → toggle-bound packaged surface → live browser.
+- ✅ **DD1 dev-profile isolation** — a `dev:automation` run created `~/.config/goldfinch-dev` (own Cookies + Partitions); the installed `~/.config/goldfinch/settings.json` was **byte-identical** before/after (mtime + size + sha256 `91ed72ae…` unchanged). Dev never touched the real profile.
+- ✅ **DD6 port free-fallback** — with `49707` occupied by a dummy, the dev instance preferred `49707`, found it taken, and **fell back to `49708`** (live).
+- ✅ **Two-instance coexistence (F7 mission Known Issue → RESOLVED)** — packaged on `49152` + dev on `49708` bound simultaneously (no single-instance lock; different ports).
+- ✅ **DD6 dev env-strict hard-fail** — `GOLDFINCH_MCP_PORT=49152` (taken) on a dev launch printed the build/mode-aware error `[mcp] failed to start automation server: automation: MCP port 49152 is in use — free the port or change GOLDFINCH_MCP_PORT (it must bind exactly when set)`; **no fallback** (strict), surface unbound, app survived.
+- ✅ **Implicit human-only-enable** — the surface bound only *after* the operator's human toggle flip; the FD never enabled it programmatically.
+- ✅ **Gates** — `npm test` 732 pass / typecheck / lint green on the committed branch.
+
+**CARRIED TO LEG 8 (HAT on the real installed instance — operator deferred to when a Windows installer exists; "once I get an installer I'll connect it to the real, installed instance"):**
+- ⏭ Flip OFF → **live unbind** + indicator clears (DD2 unbind half — covered by unit tests + code, not re-observed live this session; killing the process ≠ a toggle-OFF).
+- ⏭ **Admin-on-production** (DD5) — relaunch packaged with `GOLDFINCH_AUTOMATION_ADMIN` + mint admin key + admin MCP `getChromeTarget` resolves; invisible/refused without the env.
+- ⏭ **DD9 mint-button disabled-when-off** live + `/behavior-test automation-key-gating`.
+- ⏭ **`/behavior-test settings-activity-viewer`** (DD8c) — authored draft; run at HAT or carry to F9.
+
+**Cleanup (post-verification):** all test instances killed; the installed WSL profile returned to clean state (`automationEnabled: false`, `automationKeyHashes: {}`, `automationAdminKeyHash: ""`); `~/.claude.json` MCP config reverted to its exact pre-test state (operator will reconfigure it for the real installed instance); temp logs + `.f8-bak` backups removed. Left in place: `dist/` (gitignored, re-creatable) and `~/.config/goldfinch-dev` (the intended isolated dev profile).
+
+**Verdict:** the F8 production posture — toggle-binds (launch + live), human-only enable, loopback + key gating, dev-profile isolation, port free-fallback, two-instance coexistence, env-strict — is **live-verified on a real packaged build**. The deferred items are platform-agnostic JS already covered by unit tests + code review; they roll into the leg-8 HAT on the operator's real installed (Windows) instance.
 
 ---
 
