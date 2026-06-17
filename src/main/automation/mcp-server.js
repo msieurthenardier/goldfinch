@@ -146,12 +146,19 @@ const BODY_TOO_LARGE = Symbol('body-too-large');
  * through to the setting, and a missing/invalid/unavailable setting falls
  * through to the default — never throws.
  * @param {() => { get: (k: string) => any }} [getSettings] lazy settings accessor.
+ * @param {{ honorEnv?: boolean }} [opts] when `honorEnv` is false (packaged build,
+ *   DD6), GOLDFINCH_MCP_PORT is NOT read — the port comes from the setting/default
+ *   only. Stays pure/electron-free: the call site supplies the decision
+ *   (`honorEnv: !app.isPackaged`), never `app.isPackaged` inside this function.
+ *   Defaults to `true` so every existing caller/test is unchanged.
  * @returns {number}
  */
-function resolvePort(getSettings) {
-  const envRaw = process.env.GOLDFINCH_MCP_PORT;
-  const envN = envRaw == null ? NaN : Number(envRaw);
-  if (Number.isInteger(envN) && envN > 0) return envN;
+function resolvePort(getSettings, { honorEnv = true } = {}) {
+  if (honorEnv) {
+    const envRaw = process.env.GOLDFINCH_MCP_PORT;
+    const envN = envRaw == null ? NaN : Number(envRaw);
+    if (Number.isInteger(envN) && envN > 0) return envN;
+  }
   try {
     const s = (typeof getSettings === 'function' ? getSettings() : require('../settings-store'));
     const p = s && typeof s.get === 'function' ? s.get('automationPort') : undefined;
@@ -210,6 +217,13 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   headless test. Defaults to `() => require('../settings-store')` — a bare
  *   per-request require is also live but NOT stubbable, so the injectable dep is
  *   required, not optional.
+ * @param {boolean | (() => boolean)} [opts.devEnableOverride]
+ *   in-memory dev-enable override (DD3/DD4). When active, the auth gate resolves
+ *   identity even though the persisted `automationEnabled` is off — a valid Bearer
+ *   key is STILL required (the override does NOT waive the key). main.js passes
+ *   `() => devEnableOverride` (`!app.isPackaged && isMcpAutomationEnabled(argv)`),
+ *   so this is never active in a packaged build. Accepts a boolean or a lazy
+ *   reader; normalized to a `() => boolean`. Defaults to `() => false`.
  * @param {(payload: { sessions: any[], log: any[] }) => void} [opts.broadcast]
  *   audit fan-out callback (Leg 3 / DD8). Called with the audit snapshot after
  *   every recorded tool call and every session open/close. main.js injects
@@ -219,7 +233,14 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   defaults to the app version from package.json.
  * @param {number} [opts.port]  listen port override (takes precedence over
  *   GOLDFINCH_MCP_PORT / the default); used by tests to pick a free high port.
+ *   An explicit `opts.port` forces STRICT bind-exactly-or-reject semantics.
+ * @param {boolean} [opts.honorEnv]  when false (packaged build, DD6), the
+ *   GOLDFINCH_MCP_PORT env is ignored everywhere (port resolution + strict
+ *   detection). main.js passes `!app.isPackaged`. Defaults to true.
  * @returns {{ start: () => Promise<void>, stop: () => Promise<void>, port: number, getActivity: () => { sessions: any[], log: any[] } }}
+ *   NOTE: `port` is a live getter returning the actually-bound port (updated by
+ *   start() including a fallback retry). Callers MUST read `mcpServer.port` live
+ *   each time — do NOT destructure it (that snapshots the pre-start value).
  */
 function createMcpServer(opts = {}) {
   // Lazy engine accessor. If absent, fall back to an accessor returning a value
@@ -242,6 +263,15 @@ function createMcpServer(opts = {}) {
     ? opts.getSettings
     : () => require('../settings-store');
 
+  // In-memory dev-enable override (DD3/DD4). Normalize boolean | (() => boolean)
+  // | falsy → a () => boolean reader. Read PER REQUEST by the auth gate so the
+  // override is live. The override satisfies the auth gate's enable check WITHOUT
+  // writing `automationEnabled`, keeping the human-only persisted invariant — but
+  // it does NOT waive the Bearer-key requirement.
+  const devEnableOverride = typeof opts.devEnableOverride === 'function'
+    ? opts.devEnableOverride
+    : (opts.devEnableOverride ? () => true : () => false);
+
   let version = opts.version;
   if (!version) {
     try {
@@ -251,7 +281,25 @@ function createMcpServer(opts = {}) {
     }
   }
 
-  const port = Number.isInteger(opts.port) && opts.port > 0 ? opts.port : resolvePort(getSettings);
+  // Port resolution + strict-vs-fallback detection (DD6). Read the env ONCE here
+  // (a single source of truth for strictness); resolvePort also reads it
+  // internally but synchronously at construction, so the values agree.
+  // - explicit opts.port  → STRICT (bind exactly or reject; tests rely on this).
+  // - dev GOLDFINCH_MCP_PORT pin (env honored + valid + no explicit) → STRICT.
+  // - setting/default      → FALLBACK (retry the real listen on the next free port).
+  const honorEnv = opts.honorEnv !== false;
+  const explicit = Number.isInteger(opts.port) && opts.port > 0;
+  const envRaw = honorEnv ? process.env.GOLDFINCH_MCP_PORT : undefined;
+  const envN = Number(envRaw);
+  const envUsed = !explicit && Number.isInteger(envN) && envN > 0; // !explicit short-circuit: explicit forces strict on its own
+  const preferred = explicit ? opts.port : resolvePort(getSettings, { honorEnv });
+  const strict = explicit || envUsed;
+
+  // The actually-bound port. Starts at the preferred port; start() updates it on a
+  // successful bind (including a fallback retry to a different free port). Exposed
+  // via a `get port()` getter on the returned object so consumers always read the
+  // bound value live.
+  let boundPort = preferred;
 
   // Audit fan-out (Leg 3 / DD8). Default no-op so headless tests need no Electron.
   const broadcast = typeof opts.broadcast === 'function' ? opts.broadcast : () => {};
@@ -426,7 +474,11 @@ function createMcpServer(opts = {}) {
   function resolveIdentity(req) {
     try {
       const settings = getSettings();
-      if (settings.get('automationEnabled') !== true) return null;
+      // Enable check: the persisted toggle OR the in-memory dev-enable override
+      // (DD3/DD4). The override lets an unpackaged `dev:automation` run resolve
+      // identity with the persisted toggle off, but a valid Bearer key is STILL
+      // required below — the override does NOT waive the key requirement.
+      if (settings.get('automationEnabled') !== true && !devEnableOverride()) return null;
 
       const token = parseBearer(req);
       if (!token) return null;
@@ -601,39 +653,119 @@ function createMcpServer(opts = {}) {
   /**
    * Start the server: bind the http server to 127.0.0.1. Idempotent — a second
    * call is a no-op. Per-session Server/transport pairs are connected lazily on
-   * each `initialize` (see routeRequest), not at start. Rejects (without
-   * crashing the app) on a bind error (e.g. EADDRINUSE) so the caller can
-   * surface the GOLDFINCH_MCP_PORT override hint.
+   * each `initialize` (see routeRequest), not at start.
+   *
+   * Strict-vs-fallback semantics (DD6):
+   * - STRICT (explicit opts.port, or a dev GOLDFINCH_MCP_PORT pin): attempt the
+   *   preferred port ONCE; on EADDRINUSE reject loudly (no retry) so the operator
+   *   frees the port / changes the env. The surface stays unbound; the app does
+   *   not crash.
+   * - FALLBACK (setting/default; env not the source): on EADDRINUSE pick the next
+   *   candidate via freePortInRange(attempt + 1) (advisory/fast) and retry the
+   *   REAL listen — the listen is the authority, defeating the advisory probe's
+   *   TOCTOU. Capped at MAX_BIND_ATTEMPTS; on exhaustion / no free port, reject
+   *   "no free port found". The fallback is EPHEMERAL: start() never writes the
+   *   persisted `automationPort`.
+   *
+   * On success boundPort is set to the actually-bound port (read via get port()).
+   * Rejects (without crashing the app) on a bind error so the caller can surface
+   * a mode-aware hint.
    * @returns {Promise<void>}
    */
   async function start() {
     if (started) return;
     started = true;
 
-    httpServer = http.createServer(onRequest);
+    // Cap retries so a pathological "every port in use" environment terminates.
+    const MAX_BIND_ATTEMPTS = 20;
 
-    await new Promise((resolve, reject) => {
-      const srv = /** @type {import('http').Server} */ (httpServer);
+    // Attempt to listen once on `attemptPort`. Resolves the bound port on success,
+    // or resolves a discriminated EADDRINUSE marker, or rejects on other errors.
+    // A failed attempt's server never bound, so it is simply discarded (no close).
+    const tryListen = (/** @type {number} */ attemptPort) => new Promise((resolve, reject) => {
+      const srv = http.createServer(onRequest);
       const onError = (/** @type {NodeJS.ErrnoException} */ err) => {
-        // Bind failure (EADDRINUSE etc.): reset so a later retry can re-start,
-        // and surface a clear error rather than crashing the app silently.
-        started = false;
-        httpServer = null;
         if (err && err.code === 'EADDRINUSE') {
-          reject(new Error(
-            'automation: MCP port ' + port + ' is in use — set GOLDFINCH_MCP_PORT to override'
-          ));
+          resolve({ inUse: true });
         } else {
           reject(err);
         }
       };
       srv.once('error', onError);
       // Bind LOOPBACK ONLY — 127.0.0.1, never 0.0.0.0 / :: (SC7).
-      srv.listen(port, '127.0.0.1', () => {
+      srv.listen(attemptPort, '127.0.0.1', () => {
         srv.removeListener('error', onError);
-        resolve(undefined);
+        resolve({ inUse: false, server: srv, port: attemptPort });
       });
     });
+
+    // Reset state so a later retry / stop() / rebind still works.
+    const resetAndReject = (/** @type {Error} */ err) => {
+      started = false;
+      httpServer = null;
+      throw err;
+    };
+
+    let attemptPort = preferred;
+    for (let attempt = 0; attempt < MAX_BIND_ATTEMPTS; attempt++) {
+      let result;
+      try {
+        result = await tryListen(attemptPort);
+      } catch (err) {
+        // Non-EADDRINUSE error: reject as before (reset state).
+        resetAndReject(/** @type {Error} */ (err));
+        return; // resetAndReject always throws — unreachable, but explicit for readers
+      }
+      if (!result.inUse) {
+        // Bound. Keep the server + record the actually-bound port.
+        httpServer = result.server;
+        boundPort = result.port;
+        return;
+      }
+      // EADDRINUSE.
+      if (strict) {
+        // Strict: do NOT move. The env (dev) or explicit opts.port must bind exactly.
+        resetAndReject(new Error(eaddrinuseMessage(attemptPort, /* exhausted */ false)));
+        return; // resetAndReject always throws — unreachable, but explicit for readers
+      }
+      // Fallback: probe for the next candidate above the busy port, then retry the
+      // REAL listen (the advisory probe only chooses; the bind confirms).
+      const next = await freePortInRange(attemptPort + 1);
+      if (next == null) {
+        resetAndReject(new Error(eaddrinuseMessage(attemptPort, /* exhausted */ true)));
+        return; // resetAndReject always throws — unreachable, but explicit for readers
+      }
+      attemptPort = next;
+    }
+    // Cap exhausted without binding.
+    resetAndReject(new Error(eaddrinuseMessage(attemptPort, /* exhausted */ true)));
+    return; // resetAndReject always throws — unreachable, but explicit for readers
+  }
+
+  /**
+   * Build a build/mode-aware EADDRINUSE hint (DD6). The unconditional
+   * "set GOLDFINCH_MCP_PORT to override" is replaced:
+   * - Dev env-strict (env honored, was the source): mention the env — it must bind
+   *   exactly, so free the port or change GOLDFINCH_MCP_PORT.
+   * - Explicit opts.port strict (tests/rebind): a plain in-use message, no env hint.
+   * - Fallback exhausted (dev-no-env, or packaged): "no free port found"; on a
+   *   packaged build (env ignored) point at the Settings port control, not the env.
+   * @param {number} attemptPort
+   * @param {boolean} exhausted true when the fallback ran out of free ports.
+   * @returns {string}
+   */
+  function eaddrinuseMessage(attemptPort, exhausted) {
+    if (exhausted) {
+      const where = honorEnv
+        ? ' — change the automation port in Settings or free a port'
+        : ' — change the automation port in Settings'; // packaged: env ignored
+      return 'automation: no free port found near ' + attemptPort + where;
+    }
+    if (envUsed) {
+      return 'automation: MCP port ' + attemptPort + ' is in use — free the port '
+        + 'or change GOLDFINCH_MCP_PORT (it must bind exactly when set)';
+    }
+    return 'automation: MCP port ' + attemptPort + ' is in use';
   }
 
   /**
@@ -680,25 +812,33 @@ function createMcpServer(opts = {}) {
     return auditLog.snapshot();
   }
 
-  return { start, stop, port, getActivity };
+  // `port` is a live getter (not a fixed value): start() may bind a different free
+  // port in fallback mode, and consumers (main.js's post-start capture,
+  // currentAutomationStatus) must read the bound port. Callers MUST NOT destructure
+  // `mcpServer.port` — that would snapshot the getter at the pre-start value.
+  return { start, stop, get port() { return boundPort; }, getActivity };
 }
 
 // ---------------------------------------------------------------------------
-// Dev enable+mint path (DD3/DD5/DD6) — gated on isMcpAutomationEnabled in main.js.
+// Mint path (DD3/DD5/DD6) — gated on isMcpAutomationEnabled in main.js.
 //
-// These turn the surface ON and mint a key for a headless / behavior-test harness.
-// The plaintext key is generated with a CSPRNG, its HASH is stored, and the
-// plaintext is RETURNED ONCE (never persisted). The caller (main.js) wires these
-// behind the isMcpAutomationEnabled(process.argv) gate via a dev-only IPC handler,
-// so they are unreachable in production.
+// These mint a key for a headless / behavior-test harness. The plaintext key is
+// generated with a CSPRNG, its HASH is stored, and the plaintext is RETURNED ONCE
+// (never persisted). Minting does NOT enable the surface (DD3 — enabling is
+// human-only via the UI toggle, or in dev via the in-memory dev-enable override).
+// The caller (main.js) wires these behind the isMcpAutomationEnabled(process.argv)
+// && !app.isPackaged gate, so they are unreachable in production.
 // ---------------------------------------------------------------------------
 
 const { generateKey, hashKey } = require('./automation-auth');
 
 /**
- * Enable the automation surface and mint a per-jar key. Flips
- * `automationEnabled` true, stores the new key's hash under `jarId` in
- * `automationKeyHashes`, and returns the plaintext key ONCE.
+ * Mint a per-jar automation key. Stores the new key's hash under `jarId` in
+ * `automationKeyHashes` and returns the plaintext key ONCE. Does NOT enable the
+ * automation surface — enabling is human-only / UI-only (DD3); the persisted
+ * `automationEnabled` is written ONLY by the settings-UI toggle IPC path. In dev,
+ * the surface is enabled by the in-memory dev-enable override (DD3/DD4), not by
+ * minting.
  *
  * Mint guard (Leg 2): when a `jars` accessor is supplied, the jarId MUST be
  * present in `jars.list()` — otherwise a key could bind an identity that resolves
@@ -715,15 +855,15 @@ const { generateKey, hashKey } = require('./automation-auth');
  *   accessor; when present, jarId is validated against jars.list()
  * @returns {string}  the plaintext key (caller surfaces it once; never persisted)
  */
-function enableAndMintJarKey(jarId, settings, jars) {
+function mintJarKey(jarId, settings, jars) {
   if (typeof jarId !== 'string' || jarId === '') {
-    throw new TypeError('enableAndMintJarKey: jarId must be a non-empty string');
+    throw new TypeError('mintJarKey: jarId must be a non-empty string');
   }
   if (jars && typeof jars.list === 'function') {
     const known = jars.list().some((j) => j.id === jarId);
     if (!known) {
       throw new Error(
-        'enableAndMintJarKey: jarId ' + jarId + ' is not a known jar (burner ids and unknown ids are not valid mint targets)'
+        'mintJarKey: jarId ' + jarId + ' is not a known jar (burner ids and unknown ids are not valid mint targets)'
       );
     }
   }
@@ -731,7 +871,6 @@ function enableAndMintJarKey(jarId, settings, jars) {
   const hashes = { ...(settings.get('automationKeyHashes') || {}) };
   hashes[jarId] = hashKey(key);
   settings.set('automationKeyHashes', hashes);
-  settings.set('automationEnabled', true);
   return key;
 }
 
@@ -739,8 +878,8 @@ function enableAndMintJarKey(jarId, settings, jars) {
  * Mint the admin key into `automationAdminKeyHash` and return the plaintext ONCE.
  * Only mints when the GOLDFINCH_AUTOMATION_ADMIN presence gate is set (the admin
  * tier is inert without it); returns null otherwise. Does NOT flip
- * `automationEnabled` (admin is orthogonal to the enable toggle — but a caller
- * minting both will have enabled it via enableAndMintJarKey).
+ * `automationEnabled` (admin is orthogonal to the enable toggle; enabling is
+ * human-only — DD3 — or, in dev, the in-memory dev-enable override).
  *
  * @param {{ get: (k: string) => any, set: (k: string, v: any) => any }} settings
  * @returns {string | null}  the plaintext admin key, or null if the gate is unset
@@ -754,7 +893,7 @@ function mintAdminKey(settings) {
 
 /**
  * Revoke a per-jar automation key by deleting its hash entry. Copy-then-set
- * (mirrors enableAndMintJarKey) so other jars' hashes stay intact. No-op if the
+ * (mirrors mintJarKey) so other jars' hashes stay intact. No-op if the
  * jarId has no hash; never throws on a missing id.
  *
  * Does NOT touch the live `sessions` Map (DD5): Flight-4 per-request
@@ -790,7 +929,7 @@ module.exports = {
   resolvePort,
   freePortInRange,
   DEFAULT_PORT,
-  enableAndMintJarKey,
+  mintJarKey,
   mintAdminKey,
   revokeJarKey,
   revokeAdminKey,

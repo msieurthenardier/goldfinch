@@ -5,9 +5,12 @@ A consumer reference for Goldfinch's local automation server — an [MCP](https:
 scroll / keypress) and **observe** (screenshot / window capture / DOM read / accessibility tree)
 the browser's tabs over a loopback HTTP transport.
 
-> **Status: dev-gated, not yet shipped.** The automation surface is gated behind `--automation-dev`
-> and is exposed in **no released build before Flight 4**. Today it runs only when you launch the
-> app yourself with `npm run dev:automation`. None of this is reachable in an installed Goldfinch.
+> **Status: shipped, off by default.** The automation surface is part of the installed Goldfinch.
+> It is **bound by the Settings `automationEnabled` toggle** — a human flips it on under
+> `goldfinch://settings` → **Automation**, and nothing binds or is reachable until they do. The
+> surface stays **opt-in, per-jar-key authenticated, loopback-only, and Origin/Host-guarded**
+> regardless. (`--automation-dev` remains a dev-only convenience that force-binds an unpackaged dev
+> run — a complete no-op on a packaged build; see Launch.)
 
 ## Overview
 
@@ -20,14 +23,29 @@ security guards that protect the engine (URL safety, handle resolution) apply un
 
 ## Launch
 
+**Production (the installed binary).** The MCP server binds on the **Settings `automationEnabled`
+toggle**. Open `goldfinch://settings` → **Automation** and turn the toggle on; the server starts
+immediately (no relaunch). The toggle is the **sole bind gate** — it governs both the launch-time
+bind (the persisted value is read at startup) and the live bind (flipping it on/off starts/stops the
+running server). Off is the safe default. Enablement is **human-only**: there is no programmatic
+enable path, and minting a key does **not** enable the surface.
+
+**Dev convenience.**
+
 ```bash
 npm run dev:automation
 ```
 
-This is `electron . --enable-logging --no-sandbox --automation-dev`. The `--automation-dev` flag
-is the **only** thing that starts the MCP server — it is decoupled from `--remote-debugging-port`,
-so `npm run dev:debug` (CDP) does **not** start it. There is no production launch path; the surface
-ships in no release before Flight 4.
+This is `electron . --enable-logging --no-sandbox --automation-dev`. `--automation-dev` is a
+**dev-only force-bind** (it also satisfies the auth gate's enable side, wires the dev-invoke seam,
+and unlocks the env-gated auto-mint) — a convenience for headless drives that binds an unpackaged
+dev run **regardless of the persisted toggle**, *without writing the setting* (the persisted
+`automationEnabled` stays whatever it was — human-only enablement is preserved). It is **a complete
+no-op on a packaged build**: every call site ANDs `!app.isPackaged`, so a shipped binary ignores the
+flag entirely. The flag is decoupled from `--remote-debugging-port`, so `npm run dev:debug` (CDP)
+does **not** start the MCP server. Dev runs are **profile-isolated** — an unpackaged launch points
+`userData` at a sibling `…/goldfinch-dev` directory (`app.setPath` when `!app.isPackaged`), so dev
+keys/settings never touch the installed profile.
 
 ## Endpoint
 
@@ -35,7 +53,8 @@ ships in no release before Flight 4.
 |---|---|
 | Default URL | `http://127.0.0.1:49707/mcp` |
 | Bind | `127.0.0.1` only (never `0.0.0.0` / `::`) |
-| Port override | `GOLDFINCH_MCP_PORT` (any valid positive integer; else `49707`) |
+| Production port | the `automationPort` setting (default `49707`), with **free-fallback** if it is taken — the **bound** port is surfaced live in Settings |
+| Port override (dev only) | `GOLDFINCH_MCP_PORT` (honored only on an unpackaged build; **ignored on a packaged binary**) — a dev env pin binds **exactly-or-fails-loudly** (no fallback) |
 | Transport | MCP Streamable HTTP, stateful (per-connection session id) |
 
 **The path is a convention, not a route.** The server runs the Origin/Host guard and then hands
@@ -66,9 +85,11 @@ or rewrote the peer address — fix the consumer's headers, not the server.
 The surface is configured from `goldfinch://settings` under **Automation**. All controls are local
 GUI surface — they never expose a key plaintext beyond its one-time mint reveal.
 
-- **Enable automation surface** — an off-by-default opt-in checkbox (`automationEnabled`). The
-  server only binds under `--automation-dev`, but even then the auth gate `401`s every request until
-  this toggle is on. Off is the safe default; nothing is reachable until you opt in.
+- **Enable automation surface** — an off-by-default opt-in checkbox (`automationEnabled`). This
+  toggle is the **bind gate**: the running server starts when it goes on and stops (tearing down any
+  live session) when it goes off. Off is the safe default — nothing binds or is reachable until a
+  human turns it on. Enablement is **human-only**: this checkbox is the only enable path; no
+  programmatic action (including minting a key) flips it on.
 - **MCP address + Copy** — a read-only field showing the **live** address (`127.0.0.1:<port>`) with
   a Copy button. Paste it straight into your MCP client or `.mcp.json`.
 - **MCP client config block + Copy** — a ready-to-paste `.mcp.json` entry populated with the live
@@ -77,27 +98,42 @@ GUI surface — they never expose a key plaintext beyond its one-time mint revea
 - **Port + Save + Find free port** — the configurable listen port (`automationPort`, default
   **`49707`**, range `[1024, 65535]`). Save validates and **applies the new port immediately** — the
   running server rebinds to it (the old listener is released), and the address / config block /
-  status line all update live. `GOLDFINCH_MCP_PORT` (the dev/test env override) still takes
-  precedence where set, so a Saved value only takes effect when that env var is unset. A failed
-  rebind (e.g. the chosen port is already in use) surfaces on the status line so you can pick another
-  — Find free port suggests an open one.
+  status line all update live. In production the server **free-falls-back**: if the saved port is
+  already in use, it automatically moves to the next free port and binds there — your persisted
+  preference is **not** overwritten (the *bound* port is what the address / config block show, while
+  the saved preference is retried on the next start). Find free port suggests an open port to save.
+  `GOLDFINCH_MCP_PORT` is a **dev-only** override (ignored on a packaged binary): when honored on an
+  unpackaged dev run it pins the port **exactly-or-fails-loudly** — no free-fallback — so a dev pin
+  that is taken surfaces a bind error rather than silently moving.
 - **Bind status** — a status line that reads `Connected — listening on 127.0.0.1:<port>` when the
   server is bound, `Failed to bind: <error>` on a bind error (including a failed live rebind), or
-  `Not running — start Goldfinch with --automation-dev to bind the surface` when the surface isn't
+  `Not running — turn on the Automation toggle to bind the surface` when the surface isn't
   listening.
 - **Connect hint** — inline guidance to point the MCP client at the address above with an
   `Authorization: Bearer <key>` header (generate a key under **Keys**), noting it is loopback-only
   and pointing back to this doc for WSL2 / Docker connection details.
+- **Keys (mint / revoke)** — the **Keys** section mints per-jar keys (and, when
+  `GOLDFINCH_AUTOMATION_ADMIN` is set, an admin key). **Key generation is gated on the persisted
+  toggle (DD9):** the jar and admin **mint** buttons are **disabled while the `automationEnabled`
+  toggle is off**, and re-enable live when it flips on. **Revoke is always available** — you can
+  revoke a key regardless of the toggle state. Minting a key never enables the surface (human-only
+  enablement); it only registers the key's hash.
 
 ## Authentication — off by default, key-gated (Flight 4)
 
 The Origin/Host guard is necessary but not sufficient: a local non-browser tool also passes it.
-So the surface is **off by default and key-gated**. Even under `--automation-dev` the server
-*binds*, but a second pre-routing gate (the **auth gate**, which runs *after* the 403 origin guard)
-rejects every request with **`401`** unless **both** hold:
+So the surface is **off by default and key-gated**. In production the `automationEnabled` toggle
+both **binds** the server and satisfies the enable side of the auth gate — once bound, a second
+pre-routing gate (the **auth gate**, which runs *after* the 403 origin guard) still rejects every
+request with **`401`** unless **both** hold:
 
 1. The surface is **enabled** (the `automationEnabled` setting is `true`), and
 2. The request presents a **valid key** as `Authorization: Bearer <key>`.
+
+> **Dev-enable override.** On an unpackaged dev run, `--automation-dev` satisfies the *enable* side
+> of this gate **in memory** without writing the setting — so a dev harness is usable while the
+> persisted `automationEnabled` stays `false` (human-only enablement is preserved). A valid key is
+> still required. This override is a no-op on a packaged binary.
 
 When either fails, the response is a **bare `401`** (no body, no JSON-RPC envelope) — deliberately
 mirroring the origin guard's bare `403`, because both are pre-routing security decisions made before
@@ -172,9 +208,11 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   `captureWindow`). The `wcId` returned by `getChromeTarget` is then passed to the drive/observe
   tools to act on / read the app shell (tab strip, toolbar, menus).
 
-> **Status:** the surface now binds identity to the session and enforces jar-scoping + the admin
-> tier. Audit logging and the operator-facing key-mint / indicator UI land in later Flight-4/Flight-5
-> legs. There is no production launch path yet.
+> **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
+> It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging
+> and the operator-facing key-mint / indicator UI landed in Flight 5). The **admin tier works on the
+> packaged binary** too: it is gated purely on the `GOLDFINCH_AUTOMATION_ADMIN` env presence (plus a
+> minted admin key) — env-only, with no dev/`isPackaged` coupling.
 
 ## Tool reference
 
@@ -352,5 +390,5 @@ start. Instead, a consumer who opts in adds the entry themselves at their config
 
 Substitute your configured port (the Settings UI shows the live address — copy it from there). The
 entry is **inert until the automation surface is enabled and the app is running** — a connection
-failure means the server isn't up, not that the config is wrong. (The repo's `.mcp.json` still
-registers the `playwright` server; that entry is unrelated to this surface.)
+failure means the server isn't up, not that the config is wrong. (The repo's `.mcp.json` ships an
+empty `mcpServers` map — it registers no servers, including no `goldfinch` entry.)

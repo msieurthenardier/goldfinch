@@ -9,13 +9,14 @@ const shields = require('./shields');
 const jars = require('./jars');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
+const { devUserDataPath } = require('../shared/dev-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const { registerInternalHandler } = require('./internal-ipc');
-const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint } = require('../shared/automation-dev');
+const { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
-const { createMcpServer, enableAndMintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
+const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -100,8 +101,10 @@ async function handleInternal(request) {
 
 let mainWindow = null;
 // The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
-// hooks (before-quit / window-all-closed) can reach it. Stays null unless the
-// process was launched with --automation-dev (isMcpAutomationEnabled, DD4).
+// hooks (before-quit / window-all-closed) can reach it. Stays null until the
+// surface binds: in production the Settings `automationEnabled` toggle is the sole
+// bind gate (Flight 8); in dev an unpackaged run with --automation-dev force-binds
+// via the dev-enable override (no-op when packaged, DD4).
 let mcpServer = null;
 // Bind-status of the MCP automation server, captured at start (Flight 5 / DD1).
 // Queryable via the origin-checked `automation:get-status` IPC so the Settings UI
@@ -112,6 +115,13 @@ let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, e
 // Concurrency guard for live port-rebind (Flight 5, Leg 7). Two quick saves must
 // not overlap a stop()/start() pair; the second rebind waits for the first.
 let rebinding = null;
+// In-memory dev-enable override (DD3/DD4, Flight 8). Module-scoped so both
+// startMcpServerInstance (auth gate) and applyAutomationEnabledChange (flip-OFF
+// guard) can read it; assigned once in app.whenReady (after app.isPackaged is
+// settled) to `!app.isPackaged && isMcpAutomationEnabled(process.argv)`. Writes
+// NOTHING to the settings store — the persisted `automationEnabled` stays the sole
+// human-written value. Never active in a packaged build.
+let devEnableOverride = false;
 
 // Create + start a fresh MCP server instance, capturing bind-status into mcpStatus
 // (Flight 5 / DD1 + Leg 7). NO explicit `port` is passed, so createMcpServer runs
@@ -136,11 +146,25 @@ async function startMcpServerInstance() {
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
     broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
+    // In-memory dev-enable override (DD3/DD4, Flight 8). Read LAZILY per request by
+    // the auth gate so it tracks the module-scoped value. It lets a dev `dev:automation`
+    // run resolve identity with the persisted toggle off, but a valid Bearer key is
+    // STILL required (the override does NOT waive the key).
+    devEnableOverride: () => devEnableOverride,
+    // GOLDFINCH_MCP_PORT is DEV-ONLY (DD6, Leg 5): honored only in an unpackaged
+    // build. In a packaged build the env is ignored everywhere; the port comes
+    // from the persisted automationPort + free-port fallback.
+    honorEnv: !app.isPackaged,
   });
-  // Capture the resolved port up front; bound flips true once start() resolves.
+  // Capture the resolved (attempted) port up front; this is what the failure UI
+  // shows if start() rejects. bound flips true once start() resolves.
   mcpStatus = { enabled: true, host: '127.0.0.1', port: mcpServer.port, bound: false, error: null };
   try {
     await mcpServer.start();
+    // Re-read the bound port post-start: in fallback mode start() may have bound a
+    // DIFFERENT free port than the attempted one. mcpServer.port is a live getter.
+    // The fallback is ephemeral — we never settings.set('automationPort', …) here.
+    mcpStatus.port = mcpServer.port;
     mcpStatus.bound = true;
   } catch (err) {
     // A bind failure (e.g. EADDRINUSE) must not crash the app — record it for the
@@ -171,6 +195,41 @@ async function rebindMcpServer() {
   }
 }
 
+// DD2 (Flight 8): the human `automationEnabled` toggle is the SOLE bind gate in
+// production. A live flip ON cold-starts the server from null; a live flip OFF tears
+// it down and stays down. Hooked off the `automationEnabled` write in the
+// `internal-settings-set` handler. (Leg 3 adds: skip the OFF teardown when the
+// dev-enable override is active, so the dev harness stays connected while the
+// persisted toggle is off.)
+async function applyAutomationEnabledChange(enabled) {
+  // Serialize against an in-flight port-rebind: automation:set-port → rebindMcpServer()
+  // transiently nulls mcpServer between stop() and startMcpServerInstance(). Awaiting the
+  // existing `rebinding` chain (do NOT add a second lock) prevents an interleaved flip from
+  // stop()-ing a null handle or double-freeing.
+  if (rebinding) await rebinding;
+  if (enabled) {
+    // Start-from-null on a cold flip-ON (a packaged build launches with mcpServer===null).
+    // Already bound (e.g. a dev launch force-bound) → guarded no-op, no double-bind.
+    if (!mcpServer) await startMcpServerInstance();
+  } else {
+    // DD3/DD4 flip-OFF guard: when the dev-enable override is active, KEEP the surface
+    // bound even though the persisted toggle just went off. ORDERING IS LOAD-BEARING:
+    // the caller (`internal-settings-set`) does `settings.set('automationEnabled', false)`
+    // FIRST, then calls this — so by the time we return early here the persisted value is
+    // already `false` while the surface stays bound. That is exactly the DD9-testable
+    // state (persisted-off + surface-live) that `automation-key-gating.md` exercises in
+    // dev. In production the override is false, so flip-OFF falls through to teardown.
+    if (devEnableOverride) return;
+    // Stop-and-stay-stopped: tear the listener + all sessions down and reset status to
+    // disabled so a subsequent rebind/launch does not silently resurrect the surface.
+    if (mcpServer) {
+      await mcpServer.stop();
+      mcpServer = null;
+    }
+    mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, error: null };
+  }
+}
+
 // Shared get-status return shape (Leg 7). `port` reflects the bound port when the
 // surface is active; when disabled, mcpStatus.port is null so we compute the
 // would-be resolved port. Host is hard-pinned to loopback (SC7).
@@ -178,7 +237,7 @@ function currentAutomationStatus() {
   return {
     enabled: mcpStatus.enabled,
     host: '127.0.0.1',
-    port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings),
+    port: mcpStatus.port != null ? mcpStatus.port : resolvePort(() => settings, { honorEnv: !app.isPackaged }),
     bound: mcpStatus.bound,
     error: mcpStatus.error,
   };
@@ -210,7 +269,9 @@ function createWindow() {
       // can gate the automationDevInvoke bridge method without access to the browser-process
       // --remote-debugging-port switch (which is not in the renderer's own process.argv).
       // Conditional spread so the key is simply absent in normal/release runs (AC3). (DD7)
-      ...(isAutomationDevEnabled(process.argv) ? { additionalArguments: ['--automation-dev'] } : {})
+      // Gated on `!app.isPackaged` (DD4, Flight 8): the dev flag is a complete no-op in a
+      // packaged build, so additionalArguments is always absent there.
+      ...(isAutomationDevEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
     }
   });
 
@@ -638,9 +699,18 @@ ipcMain.handle('shields-pause', (_e, { site, paused }) => {
 // sender's session carries __goldfinchInternal === true before forwarding to the handler.
 // A non-trusted sender gets a rejected invoke (the throw propagates as a promise rejection).
 registerInternalHandler(ipcMain, 'internal-settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
-registerInternalHandler(ipcMain, 'internal-settings-set', (_e, key, value) => {
+registerInternalHandler(ipcMain, 'internal-settings-set', async (_e, key, value) => {
   const cfg = settings.set(key, value);
   broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  // DD2 (Flight 8): the toggle is the sole bind gate — drive the live surface to match.
+  // No explicit status broadcast: the automation-activity-changed channel carries an
+  // activity snapshot { sessions, log }, not a status object, so pushing status here
+  // would break the indicator/audit-viewer consumers. The indicator clears for free via
+  // stop()'s transport-close cascade; the Settings status-line is refreshed by the
+  // renderer re-fetch after settingsSet resolves.
+  if (key === 'automationEnabled') {
+    await applyAutomationEnabledChange(value === true);
+  }
   return cfg;
 });
 registerInternalHandler(ipcMain, 'internal-shields-get', () => shields.get());
@@ -695,10 +765,12 @@ registerInternalHandler(ipcMain, 'automation:list-keys', () => {
   };
 });
 registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
-  // enableAndMintJarKey flips automationEnabled=true via a direct settings.set;
-  // broadcast settings-changed so the enable toggle's onSettingsChanged listener
-  // re-syncs without a reload. (Admin-mint/revoke do NOT touch automationEnabled.)
-  const key = enableAndMintJarKey(jarId, settings, jars);
+  // mintJarKey changes only `automationKeyHashes` (DD3 — it no longer enables the
+  // surface; enabling is human-only via the toggle). `automationKeyHashes` IS a
+  // setting, so broadcast settings-changed: the key list's hasKey/adminKeySet
+  // rendering re-syncs without a reload. The enable toggle's onSettingsChanged
+  // listener sees no automationEnabled change and leaves the checkbox untouched.
+  const key = mintJarKey(jarId, settings, jars);
   broadcastToChromeAndInternal('settings-changed', settings.getAll());
   return { key };
 });
@@ -864,6 +936,13 @@ app.on('session-created', (ses) => {
 });
 
 app.whenReady().then(() => {
+  // DD1: dev runs are profile-isolated from the installed binary. Keyed off
+  // app.isPackaged alone — no flag to forget — so a dev launch can never read or
+  // write ~/.config/goldfinch. Must run before ANY getPath('userData') consumer
+  // (settings/shields/jars all resolve their store path at load()).
+  if (!app.isPackaged) {
+    app.setPath('userData', devUserDataPath(app.getPath('userData')));
+  }
   shields.load();
   settings.load(app.getPath('userData'));
   jars.load();
@@ -886,13 +965,20 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // In-memory dev-enable override (DD3/DD4). Computed ONCE here (after app.whenReady,
+  // so app.isPackaged is settled), alongside the launch logic. It writes NOTHING to the
+  // settings store — it satisfies the bind decision, the flip-OFF guard, and the auth
+  // gate in dev while the persisted `automationEnabled` stays false (human-only invariant).
+  // `!app.isPackaged` makes `--automation-dev` a complete no-op in a packaged build (DD4).
+  devEnableOverride = !app.isPackaged && isMcpAutomationEnabled(process.argv);
+
   // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
   // Registered ONCE at startup, after createWindow() so mainWindow exists.
-  // Never registered in production (no --remote-debugging-port → isAutomationDevEnabled false).
+  // Never registered in production: gated on the dev flag AND !app.isPackaged (DD4).
   // The identity check (event.sender === mainWindow.webContents) isolates the seam to the
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
-  if (isAutomationDevEnabled(process.argv)) {
+  if (isAutomationDevEnabled(process.argv) && !app.isPackaged) {
     const engine = createEngine(() => mainWindow);
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
@@ -906,19 +992,30 @@ app.whenReady().then(() => {
     });
   }
 
-  // Loopback MCP automation server (Flight 3, DD1–DD4). Gated on the NARROWER
-  // isMcpAutomationEnabled predicate — only `--automation-dev`, NOT
-  // `--remote-debugging-port` — so dev:debug (CDP) does NOT co-bind the MCP
-  // server (structural CDP-decoupling; the whole point of the narrower gate).
-  // Started after createWindow() so the (lazy) engine accessor sees a live
-  // window. The SC7 Origin/Host guard is wired inside createMcpServer and runs
-  // before any MCP processing — the server never binds without it.
-  if (isMcpAutomationEnabled(process.argv)) {
+  // Loopback MCP automation server. DD2 (Flight 8): the human `automationEnabled`
+  // toggle is the SOLE bind gate in production — so a packaged build with the toggle
+  // persisted ON binds at launch. The `devEnableOverride` term (DD3/DD4) keeps the
+  // dev harness binding regardless of the persisted toggle, satisfying BOTH the bind
+  // decision and the auth gate WITHOUT writing `automationEnabled` (the human-only
+  // invariant is preserved even in dev). It is `!app.isPackaged && isMcpAutomationEnabled`
+  // — the NARROWER isMcpAutomationEnabled predicate (only `--automation-dev`, NOT
+  // `--remote-debugging-port`) preserves structural CDP-decoupling: dev:debug (CDP)
+  // does NOT co-bind the MCP server; and `!app.isPackaged` makes the flag a complete
+  // no-op in a packaged build (DD4).
+  // Started after createWindow() so the (lazy) engine accessor sees a live window. The
+  // SC7 Origin/Host guard is wired inside createMcpServer and runs before any MCP
+  // processing — the server never binds without it.
+  if (shouldBindAutomation({ automationEnabled: settings.get('automationEnabled') === true, devForceBind: devEnableOverride })) {
     // Start the surface via the shared factory (Leg 7) — same option-bag + bind-status
     // capture as a live rebind. Fire-and-forget here, matching the original launch
     // behavior (the app does not block on the bind).
     void startMcpServerInstance();
+  }
 
+  // Dev-only AUTO-MINT-TO-STDOUT affordance, gated on the dev-enable override (which
+  // already ANDs `!app.isPackaged` — DD4). The surface is enabled in dev by the
+  // override, not by minting (DD3).
+  if (devEnableOverride) {
     // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The real key
     // management now lives in goldfinch://settings (Flight 5, Leg 3) via the
     // origin-checked automation:jar-key-mint / automation:admin-key-mint IPC; that
@@ -938,9 +1035,10 @@ app.whenReady().then(() => {
     //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
     if (shouldAutoMint(process.argv, process.env)) {
       try {
-        const key = enableAndMintJarKey('default', settings, jars);
+        const key = mintJarKey('default', settings, jars);
         const adminKey = process.env.GOLDFINCH_AUTOMATION_ADMIN ? mintAdminKey(settings) : null;
-        // enableAndMintJarKey flips automationEnabled=true. Single parseable line.
+        // mintJarKey mints the key hash only (no enable side-effect); the surface is
+        // enabled by the dev-enable override. Single parseable line.
         process.stdout.write('AUTOMATION_DEV_MINT ' + JSON.stringify({ key, adminKey }) + '\n');
       } catch (err) {
         console.error('[mcp] dev auto-mint failed:', err && err.message);

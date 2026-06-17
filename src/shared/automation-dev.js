@@ -63,4 +63,22 @@ function shouldAutoMint(argv, env) {
   return isMcpAutomationEnabled(argv) && !!env && env.GOLDFINCH_AUTOMATION_DEV_MINT === '1';
 }
 
-module.exports = { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint };
+/**
+ * Returns true iff the MCP automation surface should bind. DD2 (Flight 8): the human
+ * `automationEnabled` toggle is the SOLE bind gate in production — bind iff it is on.
+ * The `devForceBind` term keeps a dev launch binding regardless of the persisted toggle
+ * (leg 2 passes `isMcpAutomationEnabled(process.argv)` here to preserve today's dev harness;
+ * leg 3 swaps that for the `!app.isPackaged`-gated in-memory dev-enable override). Pure so
+ * the launch gate and the leg-3 override compose from one unit-tested rule.
+ *
+ * Strict-equality checks (`=== true`) so only the genuine boolean true binds — never a
+ * truthy non-boolean.
+ *
+ * @param {{ automationEnabled?: unknown, devForceBind?: unknown }} [opts]
+ * @returns {boolean}
+ */
+function shouldBindAutomation({ automationEnabled, devForceBind } = {}) {
+  return automationEnabled === true || devForceBind === true;
+}
+
+module.exports = { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation };

@@ -322,19 +322,20 @@ mission-level commitment.
   offscreen-translation breaks capture and OSR doesn't apply to `<webview>`. When concurrent
   background driving becomes a requirement it is a known, validated **future flight** (prefer (A);
   validate single-window focus-interference with a real human), not a research risk.
-- [ ] **Production gating re-architecture (carry to F8)** — surfaced at the F7 leg-9 HAT. The
+- [x] **Production gating re-architecture (→ F8, RESOLVED 2026-06-17)** — surfaced at the F7 leg-9 HAT. The
   surface should **bind on the Settings toggle alone** (no `--automation-dev` needed), with
   **`GOLDFINCH_AUTOMATION_ADMIN` usable on the production binary** for the admin tier, and
   `--automation-dev` **demoted** to a dev-only convenience. This **moves the security boundary**
-  (the toggle becomes the bind gate), so it needs its own design + Architect review → **F8**.
-- [ ] **Dev/installed shared-profile bleed → dev-profile isolation needed (carry to F8)** — F7 dev
+  (the toggle becomes the bind gate), so it needs its own design + Architect review → **F8** (DD2/DD4/DD5).
+- [x] **Dev/installed shared-profile bleed → dev-profile isolation needed (→ F8, RESOLVED 2026-06-17)** — F7 dev
   runs against the operator's shared `~/.config/goldfinch` profile polluted it (`automationEnabled`
   flipped true + dev-minted key hashes). Under the current flag-gated binding this is
   credential/state bleed, **not** silent surface-enablement (binding still needs the flag); under
-  F8's toggle-binds model it **would** matter, so **dev-profile isolation** is essential there → **F8**.
-- [ ] **MCP port conflict between instances → launch-time free-port fallback (carry to F8)** — two
+  F8's toggle-binds model it **would** matter, so **dev-profile isolation** is essential there → **F8** (DD1,
+  sequenced first; one-time operator profile reset is an F8 prerequisite).
+- [x] **MCP port conflict between instances → launch-time free-port fallback (→ F8, RESOLVED 2026-06-17; two-instance coexistence live-verified)** — two
   Goldfinch instances contend for the same MCP port. Add a **launch-time free-port fallback**
-  (env-strict `GOLDFINCH_MCP_PORT` honored exactly, else fall back to a free port) → **F8**.
+  (env-strict `GOLDFINCH_MCP_PORT` honored exactly, else fall back to a free port) → **F8** (DD6).
 - [ ] **2 NEW `.ps-list` a11y violations (future a11y work)** — the F7 leg-7 `npm run a11y` run
   reported 2 NEW `scrollable-region-focusable` (serious) violations on `.ps-list` in the
   privacy-panel + the lightbox — independent chrome-UI a11y findings (surfaced while the harness
@@ -398,11 +399,30 @@ as work reveals.)_
   `evaluate` tool + `farbling-correctness` + the `a11y-audit.mjs` rewrite + final `:9222` removal
   remain F8-eval. Production gating re-architecture + dev-profile isolation + port free-fallback →
   follow-on F8. PR #51.)*
-- [ ] **Flight 8: External-consumer enablement (incl. the-one) + README reframe** — finalize the
+> **F8-numbering note (2026-06-17).** The roadmap was renumbered when the F7 HAT surfaced a
+> security-critical gating re-architecture. **F8 is now the production gating re-architecture**
+> (below). The eval-tool follow-on that F7's artifacts call **"F8-eval"** is now **F9**;
+> external-consumer enablement + README moved to **F10**; alignment to **F11**. F7's completed
+> artifacts are left as-is — their "F8-eval" references mean **F9**.
+
+- [x] **Flight 8: Production gating re-architecture + dev-profile isolation + port free-fallback** *(landed 2026-06-17, PR #52)* —
+  make the **Settings toggle the sole bind gate** in production (bind at launch + live on flip),
+  **human-only / UI-only** enablement (no programmatic enable), **`GOLDFINCH_AUTOMATION_ADMIN` usable
+  on the packaged binary**, **`--automation-dev` demoted** to a dev-only force-bind (no-op when
+  packaged), **dev-profile isolation** via `app.isPackaged` (the prerequisite that keeps a dev run
+  from auto-binding the installed binary), and a **launch-time free-port fallback** (env-strict, else
+  free). Moves a security boundary → mandatory Architect design pass. Resolves the three F7-HAT Known
+  Issues above. (SC8 production posture; unblocks SC11/SC6 on the real binary)
+- [ ] **Flight 9: Eval tool + farbling + a11y-audit rewrite + final `:9222` removal** *(the F7
+  "F8-eval")* — add the guarded in-page `evaluate`/`injectScript` MCP tool (its own design + premise
+  audit — arbitrary JS in a guest/chrome), migrate `farbling-correctness` + rewrite
+  `scripts/a11y-audit.mjs` onto it, unblock/retire the `devtools-cdp-conflict` spec, and **fully
+  remove** the hardened `:9222` path. (SC11, the deferred remainder)
+- [ ] **Flight 10: External-consumer enablement (incl. the-one) + README reframe** — finalize the
   integration contract + docs + an end-to-end drive from an external process; coordinate the
   the-one-side wiring (tracked in the-one's repo; effectively Linux-host-networking / shim per the
   reach constraint); and **refresh the README** from the media-panel description to the
   control / privacy / automatability framing now that the automatability pillar exists to describe.
   (use cases 2 & 3)
-- [ ] **Flight 9: Alignment / agent-ergonomics tuning** *(optional)* — interactive vibe session with a
+- [ ] **Flight 11: Alignment / agent-ergonomics tuning** *(optional)* — interactive vibe session with a
   real agent driving, to tune element addressing, latency feel, and the MCP tool shapes.

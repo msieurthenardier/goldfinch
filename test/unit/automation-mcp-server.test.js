@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, enableAndMintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail } = require('../../src/main/automation/mcp-server');
+const { createMcpServer, mintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 
 const TEST_PORT = 7790;
@@ -144,12 +144,13 @@ function fakeEngine(engineOpts) {
 // the surface is ENABLED with VALID_KEY minted as jar 'test'; pass a settings
 // override to test the gate's disabled / no-key paths. Returns the handle; the
 // caller stop()s in a finally.
-async function startServer(settingsOpts) {
+async function startServer(settingsOpts, extraOpts) {
   const server = createMcpServer({
     getEngine: (engineOpts) => fakeEngine(engineOpts),
     getSettings: () => fakeSettings(settingsOpts),
     scopeCtx: fakeScopeCtx(),
     port: TEST_PORT,
+    ...(extraOpts || {}),
   });
   await server.start();
   return server;
@@ -412,11 +413,56 @@ test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, 
 // ---------------------------------------------------------------------------
 
 test('auth gate — 401 when automationEnabled is false (even with a valid key)', async () => {
+  // The dev-enable override defaults OFF (() => false), so with the persisted toggle
+  // off a valid key still 401s — production off-by-default (DD3).
   const server = await startServer({ enabled: false });
   try {
     const res = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, initBody());
     assert.equal(res.status, 401);
     assert.equal(res.body, '', '401 is bare — no JSON-RPC envelope');
+  } finally {
+    await server.stop();
+  }
+});
+
+// DD3/DD4 (Flight 8) — the in-memory dev-enable override satisfies the auth gate's
+// enable check WITHOUT writing automationEnabled, but does NOT waive the Bearer key.
+test('auth gate — devEnableOverride ON + automationEnabled false + valid key → identity resolves (200)', async () => {
+  const server = await startServer({ enabled: false }, { devEnableOverride: () => true });
+  try {
+    const res = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, initBody());
+    assert.equal(res.status, 200, 'override enables the surface even with the persisted toggle off');
+  } finally {
+    await server.stop();
+  }
+});
+
+test('auth gate — devEnableOverride ON + automationEnabled false + MISSING key → still 401 (override does NOT waive the key)', async () => {
+  const server = await startServer({ enabled: false }, { devEnableOverride: () => true });
+  try {
+    const res = await rawPost({}, initBody());
+    assert.equal(res.status, 401, 'override does not waive the Bearer-key requirement');
+  } finally {
+    await server.stop();
+  }
+});
+
+test('auth gate — devEnableOverride ON + automationEnabled false + INVALID key → still 401 (override does NOT waive the key)', async () => {
+  const server = await startServer({ enabled: false }, { devEnableOverride: () => true });
+  try {
+    const res = await rawPost({ authorization: 'Bearer not-a-real-key' }, initBody());
+    assert.equal(res.status, 401, 'override does not waive the Bearer-key requirement');
+  } finally {
+    await server.stop();
+  }
+});
+
+test('auth gate — devEnableOverride OFF (default) + automationEnabled false + valid key → 401', async () => {
+  // Explicit coverage that the default-off override leaves production off-by-default intact.
+  const server = await startServer({ enabled: false }, { devEnableOverride: () => false });
+  try {
+    const res = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, initBody());
+    assert.equal(res.status, 401);
   } finally {
     await server.stop();
   }
@@ -972,9 +1018,10 @@ test('audit — the injected broadcast fires with the snapshot on session open a
 });
 
 // ---------------------------------------------------------------------------
-// Mint guard (Leg 2): enableAndMintJarKey rejects a jarId absent from
-// jars.list() so a key cannot bind an identity that resolves to no jar. Pure —
-// uses an in-memory settings stub + a fake jars accessor.
+// Mint guard (Leg 2): mintJarKey rejects a jarId absent from jars.list() so a key
+// cannot bind an identity that resolves to no jar. DD3 (Flight 8): mintJarKey
+// creates the credential ONLY — it never enables the surface (enabling is
+// human-only via the toggle). Pure — in-memory settings stub + a fake jars accessor.
 // ---------------------------------------------------------------------------
 
 function memSettings() {
@@ -982,43 +1029,45 @@ function memSettings() {
   return { get: (k) => map[k], set: (k, v) => { map[k] = v; } };
 }
 
-test('mint guard — minting a KNOWN jar id succeeds and the key validates as that jar', () => {
+test('mint — minting a KNOWN jar id creates a credential that validates as that jar (never enables)', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
-  const key = enableAndMintJarKey('personal', settings, jars);
+  const key = mintJarKey('personal', settings, jars);
   assert.equal(typeof key, 'string');
-  assert.equal(settings.get('automationEnabled'), true);
+  // DD3: minting creates the credential ONLY — it does NOT flip automationEnabled.
+  assert.equal(settings.get('automationEnabled'), undefined, 'mint does NOT enable the surface');
   const identity = validateKey(key, { keyHashes: settings.get('automationKeyHashes') });
   assert.equal(identity, 'personal');
 });
 
-test('mint guard — minting an UNKNOWN jar id throws (and does not enable / store)', () => {
+test('mint — minting an UNKNOWN jar id throws (creates no credential)', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }] };
   assert.throws(
-    () => enableAndMintJarKey('ghost', settings, jars),
+    () => mintJarKey('ghost', settings, jars),
     (err) => err instanceof Error && /not a known jar/.test(err.message)
   );
-  assert.equal(settings.get('automationEnabled'), undefined, 'surface not enabled on a rejected mint');
+  // Mint never enables, so this only confirms a rejected mint stores no credential.
+  assert.equal(settings.get('automationEnabled'), undefined, 'mint never enables (rejected or not)');
   assert.equal(settings.get('automationKeyHashes'), undefined, 'no hash stored on a rejected mint');
 });
 
-test('mint guard — a BURNER id (never in jars.list()) is rejected', () => {
+test('mint — a BURNER id (never in jars.list()) is rejected', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
   assert.throws(
-    () => enableAndMintJarKey('burner:1', settings, jars),
+    () => mintJarKey('burner:1', settings, jars),
     (err) => err instanceof Error && /not a known jar/.test(err.message)
   );
 });
 
-test('mint guard — omitting the jars accessor keeps the legacy non-empty-string behaviour', () => {
+test('mint — omitting the jars accessor keeps the legacy non-empty-string behaviour', () => {
   const settings = memSettings();
   // No jars arg → only the non-empty-string check applies (back-compat for the
   // pure auth tests). main.js always passes jars.
-  const key = enableAndMintJarKey('anything', settings);
+  const key = mintJarKey('anything', settings);
   assert.equal(typeof key, 'string');
-  assert.throws(() => enableAndMintJarKey('', settings), /non-empty string/);
+  assert.throws(() => mintJarKey('', settings), /non-empty string/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1031,8 +1080,8 @@ test('mint guard — omitting the jars accessor keeps the legacy non-empty-strin
 test('revokeJarKey — deletes only the target jar hash; other jars untouched', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
-  enableAndMintJarKey('personal', settings, jars);
-  enableAndMintJarKey('work', settings, jars);
+  mintJarKey('personal', settings, jars);
+  mintJarKey('work', settings, jars);
   const beforeWork = settings.get('automationKeyHashes').work;
 
   revokeJarKey('personal', settings);
@@ -1049,7 +1098,7 @@ test('revokeJarKey — deletes only the target jar hash; other jars untouched', 
 test('revokeJarKey — an absent jar id is a no-op (never throws; leaves hashes unchanged)', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }] };
-  enableAndMintJarKey('personal', settings, jars);
+  mintJarKey('personal', settings, jars);
   const before = { ...settings.get('automationKeyHashes') };
 
   assert.doesNotThrow(() => revokeJarKey('ghost', settings));
@@ -1066,7 +1115,7 @@ test('revokeAdminKey — clears the admin key hash to the empty string', () => {
 test('revoke re-validation — a minted token validates to its jar, then to null after revoke', () => {
   const settings = memSettings();
   const jars = { list: () => [{ id: 'personal' }, { id: 'work' }] };
-  const key = enableAndMintJarKey('personal', settings, jars);
+  const key = mintJarKey('personal', settings, jars);
 
   // Pre-revoke: the live hashes resolve the token to its jar (what resolveIdentity
   // reads every request).
