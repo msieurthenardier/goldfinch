@@ -25,27 +25,85 @@ const KEY_MAP = {
   Home: 'Home', End: 'End', Delete: 'Delete', Backspace: 'Backspace',
 };
 
+// Canonical Electron modifier vocabulary. Electron `^42` sendInputEvent accepts
+// both forms (control/ctrl, meta/cmd/command, alt/option, shift) natively — we
+// normalize to ONE internal vocabulary so the contract is clean and typos throw
+// rather than being silently dropped (a dropped modifier would false-pass a chord
+// checkpoint). The MCP tool schema advertises only these canonical four; the alias
+// map below is defensive for callers that pass the common variants directly.
+const CANONICAL_MODIFIERS = ['control', 'shift', 'alt', 'meta'];
+const MODIFIER_ALIASES = {
+  control: 'control', ctrl: 'control',
+  shift: 'shift',
+  alt: 'alt', option: 'alt',
+  meta: 'meta', cmd: 'meta', command: 'meta',
+};
+
 /**
- * Map a friendly key name to the Electron sendInputEvent keyboard event pair.
+ * Normalize a single modifier name to its canonical form, throwing on unknown.
  *
- * Uses Electron Accelerator key codes (arrows → Right/Left/Down/Up, etc.).
- * ShiftTab is a special composite (keyCode:'Tab', modifiers:['shift']).
+ * Aliases (ctrl→control, cmd/command→meta, option→alt) are lower-cased and mapped;
+ * an unrecognized modifier throws (mirrors the unknown-key throw) so a typo cannot
+ * silently produce a chord missing a modifier.
  *
- * @param {string} name  friendly key name
- * @returns {{ type: string, keyCode: string, modifiers: string[] }[]}
- * @throws {Error} if the key name is not in KEY_MAP and is not 'ShiftTab'
+ * @param {string} mod
+ * @returns {string} canonical modifier name
+ * @throws {Error} if the modifier is not a known alias of the canonical four
  */
-function keyEvents(name) {
-  let keyCode, modifiers = [];
-  if (name === 'ShiftTab') { keyCode = 'Tab'; modifiers = ['shift']; }
-  else { keyCode = KEY_MAP[name]; }
+function normalizeModifier(mod) {
+  const canonical = MODIFIER_ALIASES[String(mod).toLowerCase()];
+  if (!canonical) throw new Error(
+    'automation: unknown modifier ' + mod +
+    ' (known: ' + CANONICAL_MODIFIERS.join(', ') +
+    '; aliases: ctrl, cmd, command, option)'
+  );
+  return canonical;
+}
+
+/**
+ * Map a friendly key name (+ optional modifier chord) to the Electron
+ * sendInputEvent keyboard event pair.
+ *
+ * Key resolution order: the `ShiftTab` composite first, then the `KEY_MAP`
+ * friendly names (arrows → Right/Left/Down/Up, etc.), then — for chord use — a
+ * single printable letter/digit (`/^[a-z0-9]$/i`) resolving to its Electron
+ * Accelerator keyCode (letters uppercased, digits as-is, e.g. `M`/`1`). A name
+ * that resolves through none of these throws.
+ *
+ * The optional `modifiers` list is normalized to the canonical vocabulary
+ * (control/shift/alt/meta) — aliases map, unknowns throw — and merged + de-duped
+ * with any intrinsic composite modifier (ShiftTab keeps `shift`). With no
+ * modifiers passed, the output is byte-identical to the pre-chord behavior.
+ *
+ * @param {string} name  friendly key name, ShiftTab, or a single printable letter/digit
+ * @param {string[]} [modifiers]  optional modifier keys held during the press
+ * @returns {{ type: string, keyCode: string, modifiers: string[] }[]}
+ * @throws {Error} if the key name does not resolve, or a modifier is unknown
+ */
+function keyEvents(name, modifiers = []) {
+  let keyCode;
+  const intrinsic = [];
+  if (name === 'ShiftTab') { keyCode = 'Tab'; intrinsic.push('shift'); }
+  else if (KEY_MAP[name]) { keyCode = KEY_MAP[name]; }
+  else if (typeof name === 'string' && /^[a-z0-9]$/i.test(name)) {
+    // Single printable letter/digit → Electron Accelerator keyCode for chord use.
+    // Letters use the uppercase form (Accelerator convention); digits stay as-is.
+    keyCode = name.toUpperCase();
+  }
   if (!keyCode) throw new Error(
     'automation: unknown key ' + name +
-    ' (known: ' + Object.keys(KEY_MAP).join(', ') + ', ShiftTab)'
+    ' (known: ' + Object.keys(KEY_MAP).join(', ') +
+    ', ShiftTab, or a single letter/digit)'
   );
+  // Normalize + validate the caller's modifiers, then merge with the composite's
+  // intrinsic modifier and de-dupe (preserving canonical order so an empty list
+  // yields the same modifiers:[] as before — AC4 byte-identical).
+  const requested = modifiers.map(normalizeModifier);
+  const merged = [...intrinsic, ...requested];
+  const finalModifiers = CANONICAL_MODIFIERS.filter((m) => merged.includes(m));
   return [
-    { type: 'keyDown', keyCode, modifiers },
-    { type: 'keyUp', keyCode, modifiers },
+    { type: 'keyDown', keyCode, modifiers: finalModifiers },
+    { type: 'keyUp', keyCode, modifiers: finalModifiers },
   ];
 }
 
@@ -227,13 +285,14 @@ async function scroll(wcId, x, y, dx, dy, deps) {
 }
 
 /**
- * Press a named key (keyDown + keyUp pair).
+ * Press a named key, optionally as a modifier chord (keyDown + keyUp pair).
  *
  * @param {number} wcId
- * @param {string} name  friendly key name (Tab, Enter, ArrowRight, ShiftTab, …)
+ * @param {string} name  friendly key name (Tab, Enter, ArrowRight, ShiftTab, …) or a single letter/digit for chords
+ * @param {string[]|undefined} modifiers  optional modifier keys held during the press (e.g. ['control'] for Ctrl+M); undefined → none
  * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
  */
-const pressKey = (wcId, name, deps) => actOn(wcId, keyEvents(name), deps);
+const pressKey = (wcId, name, modifiers, deps) => actOn(wcId, keyEvents(name, modifiers), deps);
 
 // ---------------------------------------------------------------------------
 // Exports — pure builders exposed for tests; helpers for the glue layer

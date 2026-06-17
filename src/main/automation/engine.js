@@ -71,7 +71,7 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     typeText: (/** @type {number} */ wcId, /** @type {string} */ text) => input.typeText(wcId, text, deps()),
     scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
       input.scroll(wcId, x, y, dx, dy, deps()),
-    pressKey: (/** @type {number} */ wcId, /** @type {string} */ name) => input.pressKey(wcId, name, deps()),
+    pressKey: (/** @type {number} */ wcId, /** @type {string} */ name, /** @type {string[]|undefined} */ modifiers) => input.pressKey(wcId, name, modifiers, deps()),
     captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),
     captureWindow: () => observe.captureWindow(deps()),
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),

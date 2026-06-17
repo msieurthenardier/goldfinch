@@ -1,6 +1,6 @@
 # Flight: Bulk spec migration + ungated-path hardening (scoped)
 
-**Status**: ready
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
@@ -20,8 +20,8 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ### Open Questions
 - [x] **`core-browsing-shields` apparatus** → RESOLVED (Architect, DD2): it is an **admin** spec (Step 5 reads the chrome privacy panel via `getChromeTarget`; Steps 3–4 navigate a guest via `openTab`). Eval-free. Not a jar-key migration.
 - [x] **`settings-automation` migration shape** → RESOLVED (Architect, Technical Approach §3): **two targets** — chrome indicator via `getChromeTarget`+`readDom`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`+`readDom`. Eval-free (DOM elements). The staged MCP session is unchanged.
-- [ ] **How narrow can `dev:debug`'s `--remote-allow-origins` go** while the Node CDP clients (`a11y-audit.mjs`, `farbling`) still attach? Node 22's global `WebSocket` sends **no `Origin`** by default, so narrowing may be a no-op OR may break the attach — **resolve EMPIRICALLY at `harden-ungated-path`** with a Node-22 WS probe before landing the flag (see DD3 + Adaptation Criteria divert).
-- [ ] **`devtools-cdp-conflict` disposition** — `BLOCKED-AS-WRITTEN` pending a non-CDP DevTools-open affordance (deferred). After hardening it stays blocked; **annotate that the block is due to the missing non-CDP DevTools affordance, NOT the (now-fixed) wide-open Origin** (Architect suggestion) → carry to F8-eval.
+- [x] **How narrow can `dev:debug`'s `--remote-allow-origins` go** while the Node CDP clients (`a11y-audit.mjs`, `farbling`) still attach? **RESOLVED (`harden-ungated-path`, probe-confirmed):** landed `--remote-allow-origins=http://127.0.0.1:9222`. The live WS probe showed no-Origin clients attach (arm1=101), a foreign Origin is rejected (arm2 `http://evil.example`=403 → load-bearing), and the loopback Origin is admitted (arm3=101); `npm run a11y` ran over the narrowed port. NOT a no-op, NOT a break.
+- [x] **`devtools-cdp-conflict` disposition** — **RESOLVED (annotated, stays blocked):** the spec carries a Flight-7 annotation that its `BLOCKED-AS-WRITTEN` state is gated on the **missing non-CDP DevTools-open affordance**, explicitly NOT the (now-narrowed) wide-open Origin; status stays `draft`, venue `dev:automation` (no `:9222`) → carried to F8-eval.
 
 ### Design Decisions
 
@@ -73,14 +73,15 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ## In-Flight
 
 ### Technical Approach
-1. **`migrate-chrome-specs-a`** — migrate `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` (chrome tab-strip/toolbar) onto the admin MCP surface (F6 template).
-2. **`migrate-chrome-specs-b`** — migrate `menu-dismissal`, `tab-scheme-guard`, `settings-controls` (chrome menus/guards/settings controls) onto the admin MCP surface.
-3. **`migrate-settings-automation`** — migrate `settings-automation`'s read apparatus, which has **two distinct targets** (Architect MED): the **chrome `#automation-indicator`** → admin `getChromeTarget` + `readDom`/`readAxTree`; the **settings-guest viewer** (`#automation-active-sessions`, `#automation-activity-log` — in the `goldfinch://settings` internal guest) → the F6 `settings-shell` pattern: the **admin** engine (`allowInternal:true`) `enumerateTabs` → the internal-guest `wcId` → `readDom` (NOT `getChromeTarget`, which is chrome-only). The staged MCP session under test is unchanged.
-4. **`migrate-core-browsing-shields`** — `core-browsing-shields` as an **admin** spec (DD2): `openTab(url, jarId)` for the guest nav + guest-`wcId` `readDom` for the param/URL result + `getChromeTarget`+`readDom` for the chrome privacy-panel block count. Eval-free (confirmed).
-5. **`audit-log-paging`** — Settings activity viewer paginates the in-memory ring at 20/page (prev/next + "X–Y of N"); replaces the silent 50-cap. Renderer-only (`settings.js`); no backend change.
-6. **`harden-ungated-path`** — narrow `dev:debug`'s `--remote-allow-origins=*` to a loopback-Origin allow-list; trim the stale `.mcp.json` Playwright-`:9222` entry; re-evaluate/annotate the `devtools-cdp-conflict` block. Confirm `a11y-audit.mjs` + `farbling` still attach over the narrowed port.
-7. **`verify-integration`** — run the migrated specs live on the MCP surface (FD-driven, cited evidence); full `npm test` + typecheck + lint green; confirm the hardened `:9222` still serves the deferred `a11y` + `farbling` (no regression); confirm audit paging.
-8. **`hat-and-alignment`** *(optional — included)* — guided HAT of the audit-paging UI + a sample of the migrated specs.
+1. **`presskey-modifier-chords`** *(source; added in-flight — flight-log Decisions 2026-06-16)* — extend the trusted-input `pressKey` path to send modifier chords (`Ctrl+M`, `Ctrl+Shift+P`) via `pressKey(wcId, name, modifiers)`, so keyboard-shortcut checkpoints (`toolbar-pins` Step 6 + Shields variant) become drivable over the MCP surface. Discovered at the leg-2 design review; a trusted-input gap (not an eval gap), landed here per operator decision rather than deferred to F8.
+2. **`migrate-chrome-specs-a`** — migrate `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` (chrome tab-strip/toolbar) onto the admin MCP surface (F6 template).
+3. **`migrate-chrome-specs-b`** — migrate `menu-dismissal`, `tab-scheme-guard`, `settings-controls` (chrome menus/guards/settings controls) onto the admin MCP surface.
+4. **`migrate-settings-automation`** — migrate `settings-automation`'s read apparatus, which has **two distinct targets** (Architect MED): the **chrome `#automation-indicator`** → admin `getChromeTarget` + `readDom`/`readAxTree`; the **settings-guest viewer** (`#automation-active-sessions`, `#automation-activity-log` — in the `goldfinch://settings` internal guest) → the F6 `settings-shell` pattern: the **admin** engine (`allowInternal:true`) `enumerateTabs` → the internal-guest `wcId` → `readDom` (NOT `getChromeTarget`, which is chrome-only). The staged MCP session under test is unchanged.
+5. **`migrate-core-browsing-shields`** — `core-browsing-shields` as an **admin** spec (DD2): `openTab(url, jarId)` for the guest nav + guest-`wcId` `readDom` for the param/URL result + `getChromeTarget`+`readDom` for the chrome privacy-panel block count. Eval-free (confirmed).
+6. **`audit-log-paging`** — Settings activity viewer paginates the in-memory ring at 20/page (prev/next + "X–Y of N"); replaces the silent 50-cap. Renderer-only (`settings.js`); no backend change.
+7. **`harden-ungated-path`** — narrow `dev:debug`'s `--remote-allow-origins=*` to a loopback-Origin allow-list; trim the stale `.mcp.json` Playwright-`:9222` entry; re-evaluate/annotate the `devtools-cdp-conflict` block. Confirm `a11y-audit.mjs` + `farbling` still attach over the narrowed port.
+8. **`verify-integration`** — run the migrated specs live on the MCP surface (FD-driven, cited evidence); full `npm test` + typecheck + lint green; confirm the hardened `:9222` still serves the deferred `a11y` + `farbling` (no regression); confirm audit paging.
+9. **`hat-and-alignment`** *(optional — included)* — guided HAT of the audit-paging UI + a sample of the migrated specs.
 
 ### Checkpoints
 - [ ] Chrome specs migrated (groups a + b) — green live on the admin surface.
@@ -103,24 +104,25 @@ Migrate the **~7–8 surface-compatible Group-B chrome/guest specs** (`unified-t
 ### Legs
 > **Note:** Tentative; created one at a time as the flight progresses. May merge/split.
 
-- [ ] `migrate-chrome-specs-a` — `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` → admin MCP surface. (DD1)
-- [ ] `migrate-chrome-specs-b` — `menu-dismissal`, `tab-scheme-guard`, `settings-controls` → admin MCP surface. (DD1)
-- [ ] `migrate-settings-automation` — dual target: chrome indicator via `getChromeTarget`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`. (DD1)
-- [ ] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
-- [ ] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
-- [ ] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3)
-- [ ] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1)
-- [ ] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6)
+- [x] `presskey-modifier-chords` — *(source; added in-flight)* `pressKey(wcId, name, modifiers)` for `Ctrl+M`/`Ctrl+Shift+P` shortcut checkpoints. (flight-log Decisions 2026-06-16)
+- [x] `migrate-chrome-specs-a` — `unified-tab-controls`, `responsive-tab-strip`, `toolbar-pins` → admin MCP surface. (DD1)
+- [x] `migrate-chrome-specs-b` — `menu-dismissal`, `tab-scheme-guard`, `settings-controls` → admin MCP surface. (DD1)
+- [x] `migrate-settings-automation` — dual target: chrome indicator via `getChromeTarget`; settings-guest viewer via admin `allowInternal` `enumerateTabs`→internal `wcId`. (DD1)
+- [x] `migrate-core-browsing-shields` — admin spec: guest nav via `openTab` + chrome privacy-panel read via `getChromeTarget`. (DD2)
+- [x] `audit-log-paging` — 20/page, in-memory; replace the 50-cap. (DD4)
+- [x] `harden-ungated-path` — narrow `--remote-allow-origins`; trim `.mcp.json`; devtools-cdp-conflict re-eval. (DD3) — landed `http://127.0.0.1:9222`, WS probe-confirmed (arm1=101, arm2=403, arm3=101; a11y attaches).
+- [x] `verify-integration` — migrated specs live + full gates + deferred-path regression check. (DD1) — FD-driven live pass (admin MCP client; 17 tools; `:9222` confound-free); leg-1 `Ctrl+M` chord `{ok:true}` live; 709 gates green.
+- [x] `hat-and-alignment` *(optional — included)* — guided HAT (audit paging + sample specs). (DD6) — caught + fixed the audit-paging 404 render bug + numbered-pagination UX directive; operator-confirmed; dogfooded via the real `mcp__goldfinch__*` MCP. AC4 (zero-state) deferred to F8.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (PR onto `main`)
-- [ ] Tests passing (audit-paging renderer change + any migration-driven unit deltas + typecheck + lint)
-- [ ] Documentation updated (`docs/mcp-automation.md` if the audit-paging contract changes; CLAUDE.md if `dev:debug` hardening changes the dev workflow note)
+- [x] All legs completed
+- [ ] Code merged (PR onto `main`) — PR #51 marked ready for review (merge is the operator's call)
+- [x] Tests passing (audit-paging renderer change + any migration-driven unit deltas + typecheck + lint) — 709 pass / 0 fail; typecheck + lint clean
+- [x] Documentation updated (`docs/mcp-automation.md` if the audit-paging contract changes; CLAUDE.md if `dev:debug` hardening changes the dev workflow note) — CLAUDE.md `dev:debug` bullet updated for the narrowed `--remote-allow-origins` (leg 7); audit-paging is renderer-only (broadcast data contract unchanged), so `docs/mcp-automation.md` needed no change
 - [ ] Flight debrief written (separate `/flight-debrief` step)
 
 ### Verification

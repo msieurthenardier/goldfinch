@@ -569,3 +569,45 @@ main section p {
 .activity-empty {
   margin: 6px 0;
 }
+
+/* ---- Activity pager (Flight 7 / Leg 9): standard numbered pagination ---- */
+
+/* ‹ 1 2 3 … 7 › — conventional numbered pager below the log. The freeze contract
+   (page 1 live, higher pages frozen) lives underneath but is invisible here. */
+.activity-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 4px;
+}
+.pager-btn {
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled):not(.current) {
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pager-btn.current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.pager-ellipsis {
+  padding: 3px 4px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  user-select: none;
+}

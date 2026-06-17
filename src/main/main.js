@@ -42,7 +42,12 @@ const INTERNAL_PAGES = {
   settings: {
     '/': path.join(__dirname, '..', 'renderer', 'pages', 'settings.html'),
     '/settings.css': path.join(__dirname, '..', 'renderer', 'pages', 'settings.css'),
-    '/settings.js': path.join(__dirname, '..', 'renderer', 'pages', 'settings.js')
+    '/settings.js': path.join(__dirname, '..', 'renderer', 'pages', 'settings.js'),
+    // Pure pagination/freshness module loaded by settings.html as a same-origin
+    // <script> before settings.js. Kept in src/shared/ for the lint-clean UMD tail
+    // + node-test require(); served here so the goldfinch://settings guest can load
+    // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
+    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js')
   }
 };
 
