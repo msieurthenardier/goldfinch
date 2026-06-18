@@ -1,12 +1,12 @@
 # Flight: Core Conveniences — Zoom & Print
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC1** — Page zoom: increase / decrease / reset by keyboard, current level visible, applied to the active tab's web content.
-- [ ] **SC2** — Print / Save-as-PDF through the system print path.
-- [ ] **SC8** (part) — Agent parity: zoom and print-to-PDF are invocable as gated automation/MCP tools.
+- [x] **SC1** — Page zoom: increase / decrease / reset by keyboard, current level visible, applied to the active tab's web content. *(Live-verified: `Ctrl+=`/`-`/`0` via the main-side `before-input-event` capture; `setZoom`/`getZoom`; no cross-jar leak; chip shows the level.)*
+- [~] **SC2** — Print / Save-as-PDF through the system print path. *(Automation path verified: `printToPDF` → valid `%PDF-`. The **OS-native print dialog → Save-as-PDF** is the operator's manual check — **pending operator confirmation**; on WSLg the `print()` callback logs `print failed:` rather than swallowing.)*
+- [x] **SC8** (part) — Agent parity: zoom and print-to-PDF are invocable as gated automation/MCP tools. *(Live-verified jar-scoped + admin: `getZoom`/`setZoom`/`printToPDF`; out-of-jar → clean refusal.)*
 
 ---
 
@@ -177,24 +177,28 @@ the `test/unit/automation-*.test.js` style.
 
 > **Note:** Tentative; planned and created one at a time as the flight progresses.
 
-- [ ] `zoom-capture-and-apply` — main `before-input-event` capture on guests for `Ctrl +`/`-`/`0`
+- [x] `zoom-capture-and-apply` — main `before-input-event` capture on guests for `Ctrl +`/`-`/`0`
   (DD6) + renderer chrome-focused fallback, applying `setZoomFactor` to the active tab; the
   address-bar zoom chip (shown when ≠ 100%, click-to-reset); `isInternalTab` / internal-session
   no-op; lightbox early-return; **extend the `pressKey` key map to emit `=`/`-`/`+`** (`input.js:22`,
   so the keyboard behavior test can drive zoom-in/out — DD6 apparatus dependency); **live check** of
   the same-jar sharing model (DD1). Keyboard-operable, within the a11y gate.
-- [ ] `zoom-mcp-tool` — `src/main/automation/zoom.js` (`getZoom`/`setZoom` by factor) with the
+- [x] `zoom-mcp-tool` — `src/main/automation/zoom.js` (`getZoom`/`setZoom` by factor) with the
   op-local `isInternalContents` guard (DD3) + engine op + MCP tool entries (flat schemas) + unit
   tests; jar-scoped via `resolveContents`. This builds the `getZoom` **read path** the behavior test
   observes.
-- [ ] `print-and-pdf` — `Ctrl+P` (via the DD6 capture) + kebab **Print…** → native print dialog
+- [x] `print-and-pdf` — `Ctrl+P` (via the DD6 capture) + kebab **Print…** → native print dialog
   (Save-as-PDF destination); `src/main/automation/print.js` (`printToPDF` → base64, foreground-first,
   op-local internal guard) + engine op + MCP tool + unit tests.
-- [ ] `verify-integration` — author/run the `page-zoom` and `print-to-pdf` behavior tests on the
+- [~] `verify-integration` — *(Part A docs+regression + Part B behavior tests/a11y done & live-verified; **Part C manual native-print + the HAT-internal steps are operator-pending**)* — author/run the `page-zoom` and `print-to-pdf` behavior tests on the
   automation surface **under the admin key**; assert `printToPDF` decodes to `%PDF-` bytes;
   `npm run a11y`; **manual** native print → Save-as-PDF check; regression sweep of specs touching the
   keydown handler. **Owns the docs updates**: README keyboard-shortcuts table (`README.md:141+`: add
   `Ctrl +`/`-`/`0`, `Ctrl+P`) and `docs/mcp-automation.md` (add `setZoom`/`getZoom`/`printToPDF`).
+- [x] `jar-scope-parity` *(added mid-flight — adaptive planning)* — live verification caught that
+  `getZoom`/`setZoom`/`printToPDF` were wired into the engine + MCP tool list but **not** the jar-scope
+  façade (`scope.js` `WCID_FIRST_OPS`), so a jar key couldn't invoke them (SC8 parity gap). Add the three
+  to `WCID_FIRST_OPS` + a positive in-jar test. See flight-log Anomalies.
 - [ ] `hat-and-alignment` *(optional)* — guided HAT for zoom + print (incl. page-focused zoom and the
   same-jar sharing behavior), fixing issues live until the operator is satisfied.
 
@@ -203,10 +207,10 @@ the `test/unit/automation-*.test.js` style.
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (unit + behavior + a11y)
-- [ ] Docs updated (README shortcuts table; `docs/mcp-automation.md`) — owned by `verify-integration`
+- [~] All legs completed (legs 1–3, 5 completed; leg 4 `verify-integration` landed — Part C manual native-print + HAT-internal steps operator-pending; `hat-and-alignment` optional, not started)
+- [ ] Code merged (draft PR open; merge after operator review)
+- [x] Tests passing (unit 803/803; behavior `page-zoom` 6/7 + `print-to-pdf` core, live-verified; a11y 0 new violations)
+- [x] Docs updated (README shortcuts table; `docs/mcp-automation.md`; CLAUDE.md + mcp-server.js count refs)
 
 ### Verification
 - **SC1** — `page-zoom` behavior test (keyboard zoom via `before-input-event` + `setZoom`/`getZoom` +

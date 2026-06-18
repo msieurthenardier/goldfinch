@@ -289,6 +289,41 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------------------
+// Page zoom. A discrete ladder mirroring Chrome's familiar steps. applyZoom reads
+// the guest's current factor, steps to the next/prev rung (or resets to 1.0),
+// clamps to [ZOOM_MIN, ZOOM_MAX], applies it, and broadcasts the new level so the
+// renderer's address-bar zoom chip can reflect it (DD1/DD2).
+// ---------------------------------------------------------------------------
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 5.0;
+const ZOOM_LADDER = [
+  0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0
+];
+
+// Resolve the next factor for an action ('in'|'out'|'reset') from the current one.
+function nextZoomFactor(current, action) {
+  if (action === 'reset') return 1.0;
+  // Find the current rung (nearest, since setZoomFactor stores arbitrary floats).
+  let idx = 0;
+  let best = Infinity;
+  for (let i = 0; i < ZOOM_LADDER.length; i++) {
+    const d = Math.abs(ZOOM_LADDER[i] - current);
+    if (d < best) { best = d; idx = i; }
+  }
+  if (action === 'in') idx = Math.min(idx + 1, ZOOM_LADDER.length - 1);
+  else if (action === 'out') idx = Math.max(idx - 1, 0);
+  return ZOOM_LADDER[idx];
+}
+
+function applyZoom(wc, action) {
+  if (!wc || wc.isDestroyed()) return;
+  const current = wc.getZoomFactor();
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoomFactor(current, action)));
+  wc.setZoomFactor(next);
+  if (mainWindow) mainWindow.webContents.send('zoom-changed', { wcId: wc.id, factor: next });
+}
+
+// ---------------------------------------------------------------------------
 // Each <webview> gets the media-scanner preload injected. The webview's
 // `webpreferences` attribute in the renderer references this path indirectly,
 // but we also enforce it here so pages can never opt out.
@@ -314,6 +349,34 @@ app.on('web-contents-created', (_event, contents) => {
         if (!isSafeTabUrl(url)) e.preventDefault();
       }
     });
+    // Page-scoped zoom capture (DD6). This is the path that fires while the PAGE
+    // has focus (the normal case); the renderer keydown handler is the fallback for
+    // when the chrome shell is focused. Skip the internal session entirely (DD3) —
+    // internal pages never zoom.
+    if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
+      contents.on('before-input-event', (event, input) => {
+        if (input.type !== 'keyDown') return;
+        if (!(input.control || input.meta)) return;
+        // Match '=' regardless of shift (US-layout Ctrl+Shift+= → zoom in) and '+'.
+        let action = null;
+        if (input.key === '=' || input.key === '+') action = 'in';
+        else if (input.key === '-') action = 'out';
+        else if (input.key === '0') action = 'reset';
+        // Native print (SC2). Save-as-PDF is a destination within the OS dialog.
+        // print() returns immediately; on WSLg with no CUPS printer it fails
+        // silently, so surface the failureReason via the callback (DD/WSLg note).
+        if (input.key === 'p' || input.key === 'P') {
+          contents.print({}, (ok, reason) => {
+            if (!ok) console.warn('print failed:', reason);
+          });
+          event.preventDefault();
+          return;
+        }
+        if (!action) return;
+        applyZoom(contents, action);
+        event.preventDefault();
+      });
+    }
   }
 });
 
@@ -812,6 +875,27 @@ ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximi
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
 ipcMain.on('app-quit', () => app.quit());
+
+// Renderer fallback zoom path (chrome-focused case). The renderer already filters
+// internal tabs; we guard again here (defense in depth) before applying.
+ipcMain.on('zoom-apply', (_e, { webContentsId, action }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return;
+  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return;
+  applyZoom(wc, action);
+});
+
+// Renderer kebab Print… path (SC2). The renderer already filters internal tabs;
+// we guard again here (defense in depth) before printing. The print() callback
+// surfaces WSLg no-printer failures instead of swallowing them.
+ipcMain.on('print', (_e, { webContentsId }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return;
+  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return;
+  wc.print({}, (ok, reason) => {
+    if (!ok) console.warn('print failed:', reason);
+  });
+});
 
 // Right-click a pinned toolbar icon → native "Unpin {item}" context menu.
 // Writes via `settings.set` + `broadcastToChromeAndInternal` (DD7). Chrome-trusted one-way

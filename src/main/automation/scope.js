@@ -44,6 +44,10 @@ const WCID_FIRST_OPS = [
   // guest is within the jar key's authority — NOT admin-only (unlike captureWindow /
   // getChromeTarget). The internal-session exclusion is enforced op-locally even for admin.
   'openDevTools', 'closeDevTools',
+  // Zoom & print (Flight 1): wcId-first, jar-membership-checked. A jar key may
+  // zoom/print its OWN guests; resolveContentsForJar refuses out-of-jar/internal/chrome.
+  // The op-local internal guard in zoom.js/print.js additionally covers the admin path.
+  'getZoom', 'setZoom', 'printToPDF',
 ];
 
 /**

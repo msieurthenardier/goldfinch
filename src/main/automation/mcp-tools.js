@@ -89,7 +89,7 @@ function imageResult(b64) {
 }
 
 // ---------------------------------------------------------------------------
-// Tool definitions — drive ops (12). Each: { name, description, inputSchema,
+// Tool definitions — drive ops (15). Each: { name, description, inputSchema,
 // call(engine, args) }. `call` is the named→positional seam (kept tiny and
 // explicit); it is internal and is NOT leaked by listTools().
 // ---------------------------------------------------------------------------
@@ -201,6 +201,41 @@ const DRIVE_TOOLS = [
       required: ['wcId'],
     },
     call: (engine, { wcId }) => engine.reload(wcId),
+  },
+  {
+    name: 'getZoom',
+    description: 'Get the current page zoom factor of the tab identified by wcId (1.0 = 100%). Refuses internal goldfinch:// pages.',
+    inputSchema: {
+      type: 'object',
+      properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
+      required: ['wcId'],
+    },
+    call: (engine, { wcId }) => engine.getZoom(wcId),
+  },
+  {
+    name: 'setZoom',
+    description: 'Set the page zoom factor of the tab identified by wcId (1.0 = 100%; clamped to [0.25, 5.0]). Refuses internal goldfinch:// pages. Returns the applied factor.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        factor: { type: 'number', description: 'zoom factor; 1.0 = 100%, clamped to [0.25, 5.0]' },
+      },
+      required: ['wcId', 'factor'],
+    },
+    call: (engine, { wcId, factor }) => engine.setZoom(wcId, factor),
+  },
+  {
+    name: 'printToPDF',
+    description: 'Render the tab identified by wcId to a PDF and return it as base64. Refuses internal goldfinch:// pages. Foreground-first (activates a backgrounded tab before rendering).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+      },
+      required: ['wcId'],
+    },
+    call: (engine, { wcId }) => engine.printToPDF(wcId),
   },
   {
     name: 'click',
@@ -437,9 +472,9 @@ const CHROME_TOOLS = [
   },
 ];
 
-// The full tool table — 12 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
-// chrome-discovery = 21 (Leg 3 + Flight 6 + Flight 9), iterated by buildToolRegistry
-// for both discovery and dispatch.
+// The full tool table — 15 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
+// chrome-discovery = 24 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF),
+// iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS];
 
 // ---------------------------------------------------------------------------

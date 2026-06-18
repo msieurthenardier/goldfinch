@@ -300,6 +300,14 @@ a:focus-visible {
   opacity: 0.35;
   cursor: default;
 }
+/* Zoom chip is a TEXT chip (e.g. "125%"), not a 32px glyph button — widen it so the
+   percentage fits while keeping the .icon-btn color/hover/focus treatment. */
+#zoom-chip {
+  width: auto;
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .text-btn {
   background: var(--bg-2);
   border: 1px solid var(--border);

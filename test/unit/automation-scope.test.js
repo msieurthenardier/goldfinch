@@ -121,6 +121,23 @@ test('scopeEngine: jar wcId-op on an IN-JAR tab reaches the engine', () => {
   assert.deepEqual(engine.__calls, [['navigate', 1, 'https://x']]);
 });
 
+test('scopeEngine: jar getZoom/setZoom/printToPDF on an IN-JAR tab reach the engine (Flight-1 parity)', async () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  // wcId 1 is in-jar for 'personal'. printToPDF is async in the live engine; the
+  // generic wrapper forwards the engine return untouched — await is harmless on the
+  // synchronous fake stub and required by the real op.
+  scoped.getZoom(1);
+  scoped.setZoom(1, 1.5);
+  await scoped.printToPDF(1);
+  assert.deepEqual(engine.__calls, [
+    ['getZoom', 1],
+    ['setZoom', 1, 1.5],
+    ['printToPDF', 1],
+  ]);
+});
+
 test('scopeEngine: jar wcId-op on an OUT-OF-JAR tab throws out-of-jar (engine NOT reached)', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);

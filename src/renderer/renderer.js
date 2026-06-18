@@ -60,7 +60,8 @@ const els = {
   addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
   siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup')),
   automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
-  automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge'))
+  automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge')),
+  zoomChip: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-chip'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -300,8 +301,8 @@ async function addContainer() {
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with two static role="menuitem" items
-// (Settings, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
+// APG menu-button: role="menu" popup with three static role="menuitem" items
+// (Settings, Print…, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
 // exclusion and the APG keyboard contract (trigger keydown + menu keydown) are all
 // owned by the shared menuController (hoisted in leg 1, DD7).
 
@@ -350,6 +351,11 @@ function closeKebabMenu() {
 els.kebabMenu.querySelector('#kebab-settings')?.addEventListener('click', () => {
   closeKebabMenu();
   createTab('goldfinch://settings', null, { trusted: true });
+});
+els.kebabMenu.querySelector('#kebab-print')?.addEventListener('click', () => {
+  closeKebabMenu();
+  const t = activeTab();
+  if (t && !isInternalTab(t) && t.wcId != null) window.goldfinch.print({ webContentsId: t.wcId });
 });
 els.kebabMenu.querySelector('#kebab-exit')?.addEventListener('click', () => {
   closeKebabMenu();
@@ -564,6 +570,7 @@ function activateTab(id) {
   }
   els.address.value = tab.url || '';
   updateAddressChip(tab);
+  renderZoomChip(tab.wcId != null ? (zoomFactors.get(tab.wcId) ?? 1.0) : 1.0);
   renderMedia();
   renderPrivacy();
   updateNavButtons();
@@ -1617,6 +1624,40 @@ window.goldfinch.onSettingsChanged((all) => {
   if (all && all.toolbarPins) applyToolbarPins(all.toolbarPins);
 });
 
+/* ------------------------------------------------------------------ page zoom */
+
+// Last-known zoom factor per webContents id (default 1.0). Main owns the capture
+// (DD1/DD6) and pushes zoom-changed; we mirror it here so the chip can reflect the
+// active tab's level and refresh on tab switch. Stale entries after a tab closes
+// are harmless (never re-read).
+/** @type {Map<number, number>} */
+const zoomFactors = new Map();
+
+/** Hide the chip at 100%, else show the rounded percentage. @param {number} factor */
+function renderZoomChip(factor) {
+  if (factor === 1.0) {
+    els.zoomChip.classList.add('hidden');
+    els.zoomChip.textContent = '';
+    return;
+  }
+  els.zoomChip.textContent = Math.round(factor * 100) + '%';
+  els.zoomChip.classList.remove('hidden');
+}
+
+window.goldfinch.onZoomChanged(({ wcId, factor }) => {
+  zoomFactors.set(wcId, factor);
+  const t = activeTab();
+  if (t && t.wcId === wcId) renderZoomChip(factor);
+});
+
+// Native button activation synthesizes a click on Enter/Space — keyboard-operable
+// without a separate keydown handler.
+els.zoomChip.addEventListener('click', () => {
+  const t = activeTab();
+  if (!t || isInternalTab(t) || t.wcId == null) return;
+  window.goldfinch.zoomApply({ webContentsId: t.wcId, action: 'reset' });
+});
+
 function currentSite() {
   const tab = activeTab();
   if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
@@ -1952,6 +1993,19 @@ window.goldfinch.onOpenTab((url) => createTab(url));
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
+  // Page-zoom fallback (DD6): fires when the CHROME shell is focused (the page-focused
+  // case is captured main-side via before-input-event). Match '='/'+' (zoom in, regardless
+  // of shift), '-' (out), '0' (reset) and route the active web tab's wcId to main.
+  if (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0') {
+    // Don't fight the lightbox's own image zoom when it's open (DD6).
+    if (!els.lightbox.classList.contains('hidden')) return;
+    const t = activeTab();
+    if (!t || isInternalTab(t) || t.wcId == null) return;
+    const action = (e.key === '-') ? 'out' : (e.key === '0') ? 'reset' : 'in';
+    e.preventDefault();
+    window.goldfinch.zoomApply({ webContentsId: t.wcId, action });
+    return;
+  }
   if (e.key === 't') {
     e.preventDefault();
     createTab();

@@ -9,6 +9,8 @@ const tabs = require('./tabs');
 const nav = require('./nav');
 const input = require('./input');
 const observe = require('./observe');
+const zoom = require('./zoom');
+const print = require('./print');
 
 /**
  * Create the automation engine, bound to the live Electron environment.
@@ -72,6 +74,8 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
       input.scroll(wcId, x, y, dx, dy, deps()),
     pressKey: (/** @type {number} */ wcId, /** @type {string} */ name, /** @type {string[]|undefined} */ modifiers) => input.pressKey(wcId, name, modifiers, deps()),
+    getZoom: (/** @type {number} */ wcId) => zoom.getZoom(wcId, deps()),
+    setZoom: (/** @type {number} */ wcId, /** @type {number} */ factor) => zoom.setZoom(wcId, factor, deps()),
     captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),
     captureWindow: () => observe.captureWindow(deps()),
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
@@ -80,6 +84,7 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     injectScript: (/** @type {number} */ wcId, /** @type {string} */ script) => observe.injectScript(wcId, script, deps()),
     openDevTools: (/** @type {number} */ wcId) => observe.openDevTools(wcId, deps()),
     closeDevTools: (/** @type {number} */ wcId) => observe.closeDevTools(wcId, deps()),
+    printToPDF: (/** @type {number} */ wcId) => print.printToPDF(wcId, deps()),
     getChromeTarget: () => {
       const mw = getMainWindow();
       const cc = mw ? mw.webContents : null;

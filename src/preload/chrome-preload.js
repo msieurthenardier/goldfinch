@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld('goldfinch', {
   jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),
   identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
 
+  // --- page zoom ---
+  zoomApply: ({ webContentsId, action }) => ipcRenderer.send('zoom-apply', { webContentsId, action }),
+  onZoomChanged: (cb) => ipcRenderer.on('zoom-changed', (_e, d) => cb(d)),
+
+  // --- native print (Save-as-PDF is a destination in the OS dialog) ---
+  print: ({ webContentsId }) => ipcRenderer.send('print', { webContentsId }),
+
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),

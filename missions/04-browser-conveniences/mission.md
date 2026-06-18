@@ -222,9 +222,9 @@ Emergent blockers discovered during execution go here as flights surface them.
 > as work progresses, and will evolve with discoveries. MCP-parity legs ride inside each feature
 > flight (cross-cutting), per the operator decision.
 
-- [ ] **Flight 1: Core conveniences — zoom & print** — **page zoom** (SC1) and **print /
+- [x] **Flight 1: Core conveniences — zoom & print** *(landed 2026-06-18)* — **page zoom** (SC1) and **print /
   save-as-PDF** (SC2), plus their **MCP parity tools** (`setZoom`/`getZoom`, `printToPDF` — SC8
-  part). *(Scoped at flight design, 2026-06-18: **spellcheck moved to Flight 4** — its suggestions
+  part). *(SC1/SC8 live-verified; SC2 automation path verified, OS-native-dialog manual check operator-pending. Added mid-flight leg `jar-scope-parity`.)* *(Scoped at flight design, 2026-06-18: **spellcheck moved to Flight 4** — its suggestions
   surface through the context menu and it carries the dictionary-egress decision; **native
   notifications dropped from the mission** — already denied-by-default at `main.js` with no grant
   UI, so user-facing enablement is blocked-by-design on the future permissions-manager, not a

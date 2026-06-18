@@ -42,6 +42,7 @@
     <div id="container-menu" class="hidden" role="menu" aria-label="Open new tab in a container"></div>
     <div id="kebab-menu" class="hidden" role="menu" aria-label="More menu">
       <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
+      <button id="kebab-print" class="cm-item" role="menuitem" tabindex="-1">Print…</button>
       <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
     </div>
     <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
@@ -72,6 +73,10 @@
         <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
         <span id="privacy-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
+      <!-- Page-zoom level chip (DD2). Hidden at 100%; shows the percentage when ≠ 100%;
+           click (or Enter/Space, native button activation) resets the active tab to 100%.
+           Self-manages .hidden from zoom-changed (NOT pinnable — applyToolbarPins ignores it). -->
+      <button id="zoom-chip" class="icon-btn hidden" type="button" aria-label="Zoom level, click to reset"></button>
       <!-- Automation session indicator (SC10/DD6). Always present, hidden until ≥1 session
            is connected; self-manages .hidden via the live activity snapshot (NOT a pinnable
            item — applyToolbarPins must never touch it). -->

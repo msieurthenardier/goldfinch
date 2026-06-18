@@ -5,7 +5,7 @@
 //
 // SDK-free + Electron-free: mcp-tools.js imports nothing, so these tests run
 // under plain `node --test` with a fake recording engine (no SDK, no Electron).
-// They pin the discovery contract (12 tool names + schemas, no `call` leak),
+// They pin the discovery contract (14 drive tool names + schemas, no `call` leak),
 // the named→positional dispatch mapping, DD6 success serialization, the
 // openTab-null operational case, every throw→isError class, unknown-tool→isError,
 // and the per-call getEngine discipline.
@@ -21,7 +21,8 @@ const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 
 const DRIVE_NAMES = [
   'enumerateTabs', 'openTab', 'closeTab', 'activateTab', 'navigate',
-  'goBack', 'goForward', 'reload', 'click', 'typeText', 'scroll', 'pressKey',
+  'goBack', 'goForward', 'reload', 'getZoom', 'setZoom', 'printToPDF',
+  'click', 'typeText', 'scroll', 'pressKey',
 ];
 
 const OBSERVE_NAMES = ['captureScreenshot', 'captureWindow', 'readDom', 'readAxTree'];
@@ -35,7 +36,7 @@ const DEVTOOLS_NAMES = ['openDevTools', 'closeDevTools'];
 const ALL_NAMES = [...DRIVE_NAMES, ...OBSERVE_NAMES, ...EVAL_NAMES, ...DEVTOOLS_NAMES];
 
 /**
- * Build a fake engine whose 12 ops record their positional args and return a
+ * Build a fake engine whose ops record their positional args and return a
  * configurable value (or throw a configured error). `returns` / `throws` are
  * keyed by op name.
  */
@@ -67,13 +68,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 21 tools (12 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 24 tools (15 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 21);
-  const allNames21 = [...ALL_NAMES, 'getChromeTarget'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames21].sort());
+  assert.equal(tools.length, 24);
+  const allNames24 = [...ALL_NAMES, 'getChromeTarget'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames24].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -102,6 +103,12 @@ test('input schemas carry the correct required fields per the discovery contract
   }
   // navigate — wcId + url
   assert.deepEqual(req('navigate'), ['wcId', 'url']);
+  // getZoom — wcId only
+  assert.deepEqual(req('getZoom'), ['wcId']);
+  assert.equal(byName.get('getZoom').inputSchema.properties.wcId.type, 'integer');
+  // setZoom — wcId + factor; factor is a number
+  assert.deepEqual(req('setZoom'), ['wcId', 'factor']);
+  assert.equal(byName.get('setZoom').inputSchema.properties.factor.type, 'number');
   // typeText — wcId + text
   assert.deepEqual(req('typeText'), ['wcId', 'text']);
   // click — wcId, x, y required; button/clickCount optional (present in properties)
@@ -142,6 +149,29 @@ test('input schemas carry the correct required fields per the discovery contract
 });
 
 // ---------------------------------------------------------------------------
+// Flat-schema discovery invariant (DD4/SC8) — the zoom tools must carry NO
+// top-level oneOf/allOf/anyOf (pressKey stays the ONLY sanctioned anyOf).
+// ---------------------------------------------------------------------------
+
+test('getZoom/setZoom schemas are flat — no top-level oneOf/allOf/anyOf', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const byName = new Map(reg.listTools().map((t) => [t.name, t]));
+  for (const name of ['getZoom', 'setZoom']) {
+    const schema = byName.get(name).inputSchema;
+    assert.equal(schema.type, 'object', name);
+    assert.equal(schema.anyOf, undefined, name + ' must not declare a top-level anyOf');
+    assert.equal(schema.oneOf, undefined, name + ' must not declare a top-level oneOf');
+    assert.equal(schema.allOf, undefined, name + ' must not declare a top-level allOf');
+  }
+  // pressKey remains the ONLY tool with a sanctioned top-level anyOf.
+  const withAnyOf = reg.listTools().filter((t) => t.inputSchema.anyOf !== undefined).map((t) => t.name);
+  assert.deepEqual(withAnyOf, ['pressKey']);
+  // No tool declares a top-level oneOf or allOf.
+  assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.oneOf !== undefined).map((t) => t.name), []);
+  assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.allOf !== undefined).map((t) => t.name), []);
+});
+
+// ---------------------------------------------------------------------------
 // Dispatch — named → positional mapping
 // ---------------------------------------------------------------------------
 
@@ -164,6 +194,22 @@ test('click without button/clickCount passes an opts object with undefined value
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('click', { wcId: 3, x: 1, y: 2 });
   assert.deepEqual(calls.click[0], [3, 1, 2, { button: undefined, clickCount: undefined }]);
+});
+
+test('getZoom maps named args → positional engine.getZoom(wcId)', async () => {
+  const { engine, calls } = makeFakeEngine({ returns: { getZoom: { factor: 1.25 } } });
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getZoom', { wcId: 7 });
+  assert.deepEqual(calls.getZoom[0], [7]);
+  assert.equal(textOf(result), JSON.stringify({ factor: 1.25 }));
+});
+
+test('setZoom maps named args → positional engine.setZoom(wcId, factor)', async () => {
+  const { engine, calls } = makeFakeEngine({ returns: { setZoom: { factor: 2.0 } } });
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('setZoom', { wcId: 7, factor: 2.0 });
+  assert.deepEqual(calls.setZoom[0], [7, 2.0]);
+  assert.equal(textOf(result), JSON.stringify({ factor: 2.0 }));
 });
 
 test('scroll maps to engine.scroll(wcId, x, y, dx, dy)', async () => {

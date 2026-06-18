@@ -192,6 +192,34 @@ test('keyEvents: single digit "1" resolves to keyCode "1" (AC3)', () => {
   assert.deepEqual(evs[0].modifiers, ['control']);
 });
 
+// Zoom symbols — page-zoom leg widened the printable branch to admit =/-/+ so the
+// keyboard zoom behavior test can drive Ctrl+= / Ctrl+- (Ctrl+0 already worked via
+// the digit regex). Symbols are case-invariant → keyCode is the literal character.
+test('keyEvents: "=" + ["control"] → keyCode "=", modifiers ["control"] (Ctrl+= zoom in)', () => {
+  const evs = keyEvents('=', ['control']);
+  assert.equal(evs.length, 2);
+  assert.equal(evs[0].type, 'keyDown');
+  assert.equal(evs[0].keyCode, '=');
+  assert.deepEqual(evs[0].modifiers, ['control']);
+  assert.equal(evs[1].type, 'keyUp');
+  assert.equal(evs[1].keyCode, '=');
+  assert.deepEqual(evs[1].modifiers, ['control']);
+});
+
+test('keyEvents: "-" resolves to keyCode "-" (Ctrl+- zoom out)', () => {
+  const evs = keyEvents('-', ['control']);
+  assert.equal(evs[0].keyCode, '-');
+  assert.equal(evs[1].keyCode, '-');
+  assert.deepEqual(evs[0].modifiers, ['control']);
+});
+
+test('keyEvents: "+" resolves to keyCode "+" (no unknown-key throw)', () => {
+  const evs = keyEvents('+');
+  assert.equal(evs[0].keyCode, '+');
+  assert.equal(evs[1].keyCode, '+');
+  assert.deepEqual(evs[0].modifiers, []);
+});
+
 test('keyEvents: alias "ctrl" normalizes to "control" (AC2)', () => {
   const evs = keyEvents('M', ['ctrl']);
   assert.deepEqual(evs[0].modifiers, ['control']);
