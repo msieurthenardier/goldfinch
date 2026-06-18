@@ -34,6 +34,13 @@ const { resolveContentsForJar } = require('./resolve');
 // The wcId-first ops a jar key may invoke: membership needs only the first arg
 // (wcId). enumerateTabs (filter), captureWindow (refuse), and openTab (delegate)
 // are special-cased OUTSIDE this set.
+//
+// THREE-PLACE REGISTRATION: any new guest-targeting (wcId-first) automation op must
+// be registered in THREE places — engine.js (dispatch), mcp-tools.js (ToolDef), and
+// HERE (WCID_FIRST_OPS) — plus an op-local isInternalContents guard if it can touch
+// internal pages. Miss this list and jar keys throw "engine.<op> is not a function"
+// (the leg-05 SC8 gap). The automation-scope.test.js three-place-registration guard
+// enforces the WCID_FIRST_OPS half by cross-checking against the MCP tool registry.
 const WCID_FIRST_OPS = [
   'closeTab', 'activateTab',
   'navigate', 'goBack', 'goForward', 'reload',

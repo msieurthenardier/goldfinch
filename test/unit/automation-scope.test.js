@@ -9,6 +9,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { scopeEngine, WCID_FIRST_OPS } = require('../../src/main/automation/scope');
+const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 
 // ---------------------------------------------------------------------------
 // Fake world: jars, interned sessions, tabs, fromId, fromPartition.
@@ -191,6 +192,52 @@ test('scopeEngine: every wcId-first op is membership-gated', () => {
       'op ' + op + ' must be membership-gated'
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// THREE-PLACE-REGISTRATION GUARD (leg-05 / SC8 gap).
+//
+// A new guest-targeting (wcId-first) automation op must be registered in THREE
+// places: engine.js (dispatch), mcp-tools.js (ToolDef), and scope.js
+// (WCID_FIRST_OPS). This flight, getZoom/setZoom/printToPDF were added to the MCP
+// tool list but NOT to WCID_FIRST_OPS — so jar keys hit the generic Proxy/getter
+// path and threw "engine.getZoom is not a function" (SC8). The existing
+// 'every wcId-first op is membership-gated' test only ITERATES WCID_FIRST_OPS, so
+// a MISSING op is invisible to it. This test closes that hole NON-CIRCULARLY by
+// deriving the wcId-first set from the AUTHORITATIVE tool registry and asserting
+// each such tool is present in WCID_FIRST_OPS.
+// ---------------------------------------------------------------------------
+
+test('scopeEngine: every wcId-first MCP tool is registered in WCID_FIRST_OPS (three-place-registration guard)', () => {
+  // listTools() returns the STATIC tool defs — no live engine needed.
+  const reg = buildToolRegistry(() => ({}));
+
+  // A tool is "wcId-first" when its inputSchema has a required `wcId` property.
+  // Tool names map 1:1 to engine op names (asserted by the mcp-tools discovery
+  // test), and WCID_FIRST_OPS holds engine op names, so name-matching is valid.
+  const wcIdFirst = reg.listTools()
+    .filter((t) => {
+      const s = t.inputSchema || {};
+      const req = s.required || [];
+      return s.properties && s.properties.wcId && req.includes('wcId');
+    })
+    .map((t) => t.name);
+
+  // Tools that legitimately take `wcId` but are intentionally NOT jar-scoped
+  // (admin-only). EMPTY today — every wcId-first op is jar-reachable on its own
+  // tabs. A future admin-only wcId-first op would be added here WITH a documented
+  // reason, e.g. `WCID_FIRST_EXEMPT.add('someAdminOnlyOp'); // reason: …`.
+  const WCID_FIRST_EXEMPT = new Set([]);
+
+  const gated = new Set(WCID_FIRST_OPS);
+  const missing = wcIdFirst.filter((n) => !gated.has(n) && !WCID_FIRST_EXEMPT.has(n));
+  assert.deepEqual(
+    missing,
+    [],
+    'wcId-first MCP tool(s) missing from scope.js WCID_FIRST_OPS — jar keys would throw "engine.<op> is not a function": ' +
+      missing.join(', ') +
+      '. Add them to WCID_FIRST_OPS (or to WCID_FIRST_EXEMPT with a reason if intentionally admin-only).'
+  );
 });
 
 // ---------------------------------------------------------------------------
