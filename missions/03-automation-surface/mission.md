@@ -1,6 +1,6 @@
 # Mission: First-Class Browser Automation Surface
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -147,17 +147,17 @@ mission-level commitment.
 
 ## Success Criteria
 
-- [ ] **SC1** — A trusted local client can **attach** to the running browser and **navigate** a tab
+- [x] **SC1** — A trusted local client can **attach** to the running browser and **navigate** a tab
   (open a URL; back / forward / reload), with the result reflected in the live UI
   (*behavior-test-backed*).
-- [ ] **SC2** — The client can deliver **trusted input** — click, type, scroll, key — that fires the
+- [x] **SC2** — The client can deliver **trusted input** — click, type, scroll, key — that fires the
   page's real event handlers and native focus traversal (equivalent to a human, not synthetic
   `dispatchEvent`) (*behavior-test-backed*).
-- [ ] **SC3** — The client can **read a target tab's state**: its DOM and its accessibility tree
+- [x] **SC3** — The client can **read a target tab's state**: its DOM and its accessibility tree
   (*behavior-test-backed*).
-- [ ] **SC4** — The client can **capture a screenshot** of a target tab (and the chrome) on demand
+- [x] **SC4** — The client can **capture a screenshot** of a target tab (and the chrome) on demand
   (*behavior-test-backed*).
-- [ ] **SC5** — The client can **manage tabs**: open, close, switch, and enumerate them, and direct
+- [x] **SC5** — The client can **manage tabs**: open, close, switch, and enumerate them, and direct
   any action at a specific tab (*behavior-test-backed*).
 - [x] **SC6** — The capabilities are exposed over an **MCP-compatible interface**: an external MCP
   client (e.g. a Claude Code session) can **discover and invoke** them as tools and drive the browser
@@ -192,7 +192,7 @@ mission-level commitment.
   (*behavior-test-backed / manual*). *(Met — Flight 4 data layer + Flight 5 visible half: a chrome
   toolbar indicator naming the jar (admin-distinct) + a settings audit-log viewer; live-verified.
   Known limitation fixed in F5 leg 7: ungraceful client disconnects now clear the indicator.)*
-- [ ] **SC11** — Goldfinch's **own behavior tests run against this surface** (dogfooding), and the
+- [x] **SC11** — Goldfinch's **own behavior tests run against this surface** (dogfooding), and the
   dev-only ungated debugging path is **retired or hardened** so it is no longer the verification
   apparatus. This means migrating **all behavior specs (11 at Mission-02 close)**, rewriting the **`scripts/a11y-audit.mjs`**
   gate onto the new surface, and updating/removing **`.mcp.json`** (the Playwright-MCP-at-`:9222`
