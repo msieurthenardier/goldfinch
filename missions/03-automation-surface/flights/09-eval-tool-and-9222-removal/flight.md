@@ -1,6 +1,6 @@
 # Flight: Eval tool + DevTools tool + a11y/farbling migration + final :9222 removal
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Browser Automation Surface](../../mission.md)
 
 ## Contributing to Criteria
