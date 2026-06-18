@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-18
 **Flight**: [Core Conveniences — Zoom & Print](flight.md)
-**Status**: landed
+**Status**: completed
 **Duration**: 2026-06-18 (single session, `/agentic-workflow` + HAT)
 **Legs Completed**: 6 of 6 (5 autonomous + 1 HAT; leg 05 added mid-flight)
 
