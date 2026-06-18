@@ -159,9 +159,13 @@ mission-level commitment.
   (*behavior-test-backed*).
 - [ ] **SC5** — The client can **manage tabs**: open, close, switch, and enumerate them, and direct
   any action at a specific tab (*behavior-test-backed*).
-- [ ] **SC6** — The capabilities are exposed over an **MCP-compatible interface**: an external MCP
+- [x] **SC6** — The capabilities are exposed over an **MCP-compatible interface**: an external MCP
   client (e.g. a Claude Code session) can **discover and invoke** them as tools and drive the browser
-  end to end (*behavior-test-backed*).
+  end to end (*behavior-test-backed*). *(Met — Flight 10. Demonstrated by the-one (native external
+  install) driving Goldfinch end-to-end over the loopback MCP surface; finalized as a documented
+  Consumer Contract + production getting-started in `docs/mcp-automation.md`, the example client fixed
+  to authenticate against the key gate, and the README reframed to control/privacy/automatability. Live
+  example-client re-confirmation operator-waived as low marginal value, 2026-06-17.)*
 - [x] **SC7** — The surface is **local-only**: it binds only to the loopback interface and a
   non-loopback connection attempt cannot reach it; the open web cannot reach it either — which
   requires **Origin/Host allow-listing in addition to the loopback bind** (a `127.0.0.1` server is
@@ -419,11 +423,14 @@ as work reveals.)_
   audit — arbitrary JS in a guest/chrome), migrate `farbling-correctness` + rewrite
   `scripts/a11y-audit.mjs` onto it, unblock/retire the `devtools-cdp-conflict` spec, and **fully
   remove** the hardened `:9222` path. (SC11, the deferred remainder)
-- [ ] **Flight 10: External-consumer enablement (incl. the-one) + README reframe** — finalize the
-  integration contract + docs + an end-to-end drive from an external process; coordinate the
-  the-one-side wiring (tracked in the-one's repo; effectively Linux-host-networking / shim per the
-  reach constraint); and **refresh the README** from the media-panel description to the
-  control / privacy / automatability framing now that the automatability pillar exists to describe.
-  (use cases 2 & 3)
+- [x] **Flight 10: External-consumer enablement (incl. the-one) + README reframe** *(landed 2026-06-17,
+  PR pending)* — finalized the integration contract as a documented **Consumer Contract** + production
+  getting-started in `docs/mcp-automation.md`, **fixed `scripts/mcp-example-client.mjs`** to authenticate
+  against the key gate (it had no auth → would 401), carried the `runSerialized` dev-pattern into
+  `CLAUDE.md`, and **reframed the README** to the control / privacy / automatability framing. **Scoped
+  down from the original line:** the-one live drive was already demonstrated (skipped); the cross-boundary
+  reach/shim is **out of Goldfinch's domain** (binds loopback; reaching it is the consumer's concern —
+  reinforced by the-one now being a native install); `createJar` (jar-lifecycle MCP tool) **deferred** to
+  a later flight. Closes SC6. (use cases 2 & 3)
 - [ ] **Flight 11: Alignment / agent-ergonomics tuning** *(optional)* — interactive vibe session with a
   real agent driving, to tune element addressing, latency feel, and the MCP tool shapes.

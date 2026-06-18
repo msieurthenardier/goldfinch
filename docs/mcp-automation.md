@@ -21,6 +21,67 @@ observe tools, 2 eval tools, 2 devtools tools, and 1 admin chrome-discovery tool
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
 
+## Consumer Contract
+
+These are the stable guarantees an external consumer can build against. Each links to the section
+that documents it in full; the summary below is the authority phrasing from the status block above.
+
+| Guarantee | Detail |
+|---|---|
+| **Off by default / opt-in** | Nothing binds until a human flips the `automationEnabled` toggle on in Settings. There is no programmatic enable path. See *Settings controls* and *Authentication*. |
+| **Per-jar key-gated** | Every request must present `Authorization: Bearer <key>`. Keys are per-jar (a key authorises only its own jar's tabs) and shown once at mint. A separate **admin tier** is available when `GOLDFINCH_AUTOMATION_ADMIN` is set in the environment and an admin key has been minted. See *Authentication*. |
+| **Loopback-only bind** | The server binds `127.0.0.1` only — never `0.0.0.0` or `::`. See *Endpoint*. |
+| **Inject-then-run / no-persistence pairing** | `injectScript` makes no persistence guarantee across subsequent `evaluate` calls; pair them immediately in sequence. See *Eval tools*. |
+| **Internal-session (`goldfinch://settings`) always excluded** | Both eval tools and both DevTools tools refuse the internal session — even for admin. See the security-invariant blocks under *Eval tools* and *DevTools tools*. |
+| **Result / refusal error contract** | `openTab null` and `readAxTree debugger-unavailable` are normal results, not errors. Only a genuine engine throw sets `isError: true`. See *Result and refusal semantics*. |
+
+**Reach boundary.** Goldfinch binds `127.0.0.1` only. Reaching that loopback from the consumer's
+process is the **consumer's concern** — no shim or proxy is provided. When the consumer's process
+runs on the same host as Goldfinch (the typical case), loopback is reachable directly. For
+containerised consumers (WSL2, Docker) the consumer must arrange a route to the host's loopback —
+e.g. the host-gateway IP on Linux Docker, or host network mode.
+
+### Production getting-started
+
+> **This is the production path for an installed Goldfinch binary.** For dev/dogfooding (unpackaged
+> builds, script harnesses), see the [`AUTOMATION_DEV_MINT` mechanism](#dogfooding--dev-key-acquisition-the-automation_dev_mint-mechanism)
+> under *Launch*. The two paths are mutually exclusive — `AUTOMATION_DEV_MINT` is a no-op on a
+> packaged build.
+
+**Steps:**
+
+1. **Enable the automation surface first.** In the running Goldfinch, open `goldfinch://settings` →
+   **Automation** and turn on the **Enable automation surface** toggle. The server binds immediately.
+   The live address appears in the address field below the toggle — copy it from there (see
+   *Settings controls*). **The Keys mint button is disabled while the toggle is off** — you must
+   flip the toggle before minting a key.
+
+2. **Choose your target jar.** Each key authorises one jar's tabs. The `default` jar is the usual
+   starting point. In the **Keys** section of the Automation settings, select the jar you want to
+   automate and mint a key. The plaintext is shown once — copy it immediately (see *Authentication*).
+
+3. **Add a `.mcp.json` entry in your MCP client's config.** Add the following entry to **your own**
+   MCP client config (Claude Code's `.mcp.json`, Cursor's MCP config, etc.) — **not** to Goldfinch's
+   repo `.mcp.json`, which ships with an empty `mcpServers` map by design:
+
+   ```json
+   "goldfinch": { "type": "http", "url": "http://127.0.0.1:49707/mcp" }
+   ```
+
+   Substitute the live port shown in Settings (see *`.mcp.json` registration*). The entry is inert
+   until the surface is enabled and the app is running.
+
+4. **Run your client with the key.** Pass the minted per-jar key to your client via the
+   `GOLDFINCH_MCP_KEY` env var. For the bundled example client (see *Example client*):
+
+   ```bash
+   GOLDFINCH_MCP_KEY=<your-per-jar-key> node scripts/mcp-example-client.mjs
+   ```
+
+   For Claude Code / Cursor, the key is presented in the `.mcp.json` entry or via your client's
+   auth configuration; consult your MCP client's documentation for `Authorization: Bearer` header
+   configuration.
+
 ## Launch
 
 **Production (the installed binary).** The MCP server binds on the **Settings `automationEnabled`
@@ -457,12 +518,18 @@ snapshot, so Flight 5 / a future IPC query can read state without waiting for an
 
 `scripts/mcp-example-client.mjs` is a runnable, SDK-only example: it connects over loopback
 Streamable HTTP, lists the tools, opens a tab, then navigates / screenshots / reads the DOM against
-it. Run it against a live server:
+it. Run it against a live dev server:
 
 ```bash
-npm run dev:automation                      # terminal 1: start the app + server
-node scripts/mcp-example-client.mjs         # terminal 2: drive it
+npm run dev:automation                      # terminal 1: start the app + server (dev)
+GOLDFINCH_MCP_KEY=<key> node scripts/mcp-example-client.mjs  # terminal 2: drive it
 ```
+
+**`GOLDFINCH_MCP_KEY` is required.** The example client reads the per-jar key from this env var and
+attaches `Authorization: Bearer <key>` to every request. Without it the server returns `401`.
+In a dev run, obtain the key via `GOLDFINCH_AUTOMATION_DEV_MINT` (see the
+[`AUTOMATION_DEV_MINT` mechanism](#dogfooding--dev-key-acquisition-the-automation_dev_mint-mechanism));
+in a production run, mint the key in the Settings Keys UI (see *Production getting-started* above).
 
 It honors the same endpoint overrides as documented above (`GOLDFINCH_MCP_PORT`, or
 `GOLDFINCH_MCP_URL` for a full-URL escape hatch). It is **attach-don't-launch** — it does not start
