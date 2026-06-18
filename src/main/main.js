@@ -885,6 +885,21 @@ ipcMain.on('zoom-apply', (_e, { webContentsId, action }) => {
   applyZoom(wc, action);
 });
 
+// Query the guest's ACTUAL current engine zoom (DD1 stale-cache fix). Chromium's
+// per-origin host-zoom map re-zooms ALL same-origin tabs in a jar when ANY one is
+// zoomed, but only the active tab emits zoom-changed — so a cached factor goes stale
+// for non-active same-origin tabs. The renderer queries this on demand (tab switch,
+// load, zoom change) instead of reading the cache, so the address-bar label always
+// reflects the live factor. Distinct from the automation `getZoom` MCP tool (a
+// different layer); this CHROME-IPC channel is named `get-zoom`. Returns null for a
+// dead/missing/internal target (renderer falls back to 1.0 / hides the control).
+ipcMain.handle('get-zoom', (_e, { webContentsId }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return null;
+  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return null;
+  return wc.getZoomFactor();
+});
+
 // Renderer kebab Print… path (SC2). The renderer already filters internal tabs;
 // we guard again here (defense in depth) before printing. The print() callback
 // surfaces WSLg no-printer failures instead of swallowing them.

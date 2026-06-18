@@ -735,6 +735,15 @@ function wireWebview(tab) {
     }
   };
   wv.addEventListener('did-navigate', onNav);
+  // Re-query the zoom label once the load settles. Under Chromium's per-origin host-zoom
+  // map (DD1), committing/navigating to an origin that already has a non-100% level
+  // applies that zoom IMPLICITLY (no zoom-changed fires). dom-ready may run before the
+  // host-zoom level is applied; did-finish-load fires after the main-frame load completes,
+  // so getZoom() reflects the inherited factor. This replaces the prior main-side
+  // did-finish-load → zoom-changed broadcast — one mechanism, the renderer query.
+  wv.addEventListener('did-finish-load', () => {
+    if (tab.id === activeTabId) refreshZoomControl(tab);
+  });
   wv.addEventListener('did-navigate-in-page', () => {
     tab.url = wv.getURL();
     if (tab.id === activeTabId) {
@@ -1636,12 +1645,14 @@ window.goldfinch.onSettingsChanged((all) => {
 
 /* ------------------------------------------------------------------ page zoom */
 
-// Last-known zoom factor per webContents id (default 1.0). Main owns the capture
-// (DD1/DD6) and pushes zoom-changed; we mirror it here so the in-bar zoom control can
-// reflect the active tab's level and refresh on tab switch. Stale entries after a tab
-// closes are harmless (never re-read).
-/** @type {Map<number, number>} */
-const zoomFactors = new Map();
+// The address-bar zoom label is QUERY-DRIVEN, not cache-driven (DD1 stale-cache fix).
+// Chromium's per-origin host-zoom map re-zooms ALL same-origin tabs in a jar when ANY
+// one is zoomed, but only the active tab gets a zoom-changed broadcast — so a cached
+// factor map went stale for non-active same-origin tabs (their label stuck at the last
+// value they happened to be told about). Instead, refreshZoomControl() asks main for
+// the tab's LIVE engine zoom (`window.goldfinch.getZoom`) on every event that can change
+// the displayed value (tab activation, load completion, zoom change). No cache to go
+// stale. onZoomChanged compares wcIds directly to decide "is this the active tab".
 
 // Timer that clears the post-change "peek" reveal of the zoom control. Cleared and
 // restarted on each zoom change so back-to-back changes keep the control visible.
@@ -1651,26 +1662,35 @@ const ZOOM_PEEK_MS = 1500;
 
 /**
  * Sync the in-address-bar zoom control to a tab: hide it entirely on internal tabs,
- * else show the active tab's live factor as a percentage (always — even at 100%).
+ * else QUERY the tab's live engine zoom factor and render it as a percentage (always —
+ * even at 100%). The query is authoritative (the cache is retired) so a non-active
+ * same-origin tab that was implicitly re-zoomed shows the correct shared %.
+ * Race guard: the active tab is captured before the await and the result is dropped if
+ * the user switched tabs while the query was in flight (an async result for a
+ * since-switched tab must not overwrite the now-active tab's label).
  * Visibility/fade is CSS-driven (hover / focus-within / .zoom-control--peek); this
  * only sets the percentage text and the internal-tab hidden state.
  * @param {Tab|null} tab
  */
-function refreshZoomControl(tab) {
+async function refreshZoomControl(tab) {
   if (!tab || isInternalTab(tab) || tab.wcId == null) {
     els.zoomControl.classList.add('hidden');
     return;
   }
   els.zoomControl.classList.remove('hidden');
-  const factor = zoomFactors.get(tab.wcId) ?? 1.0;
-  const pct = Math.round(factor * 100) + '%';
+  const queriedId = tab.id;
+  const factor = await window.goldfinch.getZoom({ webContentsId: tab.wcId });
+  // Drop the result if the active tab changed while the query was in flight.
+  if (queriedId !== activeTabId) return;
+  const pct = Math.round((factor ?? 1.0) * 100) + '%';
   els.zoomPercent.textContent = pct;
   els.zoomPercent.setAttribute('aria-label', `Current zoom ${pct}`);
 }
 
-window.goldfinch.onZoomChanged(({ wcId, factor }) => {
-  zoomFactors.set(wcId, factor);
+window.goldfinch.onZoomChanged(({ wcId }) => {
   const t = activeTab();
+  // Compare wcIds directly — the value is queried live, the broadcast is only the
+  // "something changed, re-query" signal for the active tab.
   if (t && t.wcId === wcId) {
     refreshZoomControl(t);
     // Briefly reveal the control after a change, then fade out. Hover/focus-within

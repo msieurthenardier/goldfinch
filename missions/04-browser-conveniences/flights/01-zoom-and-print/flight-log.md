@@ -363,6 +363,67 @@ the −/+/reset handlers no-op on internal tabs (`applyTabZoom` guard) — mirro
 - Zero new runtime dependencies. Keyboard `Ctrl +/-/0` capture and `zoom-changed`/`zoom-apply` IPC
   untouched (renderer/markup/CSS only).
 
+**HAT bug-fix #3 (2026-06-18, UNCOMMITTED) — zoom label made QUERY-DRIVEN (retires the stale cache).**
+Bug-fix #2's `did-finish-load` broadcast covered inherited-zoom-on-LOAD, but the underlying `zoomFactors`
+`Map<wcId, factor>` cache was still fundamentally stale-prone. Under the per-origin-per-session host-zoom
+model (DD1), zooming ONE tab re-zooms ALL same-origin tabs in the jar, but only the active tab's wcId gets a
+`zoom-changed` — so a non-active same-origin tab's cached factor stayed wrong and only self-corrected if a
+broadcast happened to hit its wcId. The operator-reproducible case: two same-jar same-origin tabs, zoom one,
+switch to the other → its label showed a stale 100% (case (d)). **Fix — the label now QUERIES the active
+tab's live engine zoom on demand instead of reading the cache:**
+- **New chrome IPC `get-zoom`** (`src/main/main.js`, request/response via `ipcMain.handle`): resolves the
+  wcId to a live `webContents`, returns `wc.getZoomFactor()`, or `null` for a dead/missing/internal target.
+  Exposed as `window.goldfinch.getZoom({ webContentsId })` in `src/preload/chrome-preload.js` and typed in
+  `renderer-globals.d.ts`. **This is a CHROME-IPC channel, deliberately named `get-zoom`** to stay distinct
+  from the automation `getZoom` MCP tool (a different layer/trust domain — the MCP `getZoom` is unchanged).
+- **`refreshZoomControl(tab)` is now async + query-driven** (`src/renderer/renderer.js`): hides the control
+  for no-active / internal / null-wcId tab (unchanged); otherwise `await getZoom(...)` and render that factor
+  (fallback 1.0 if null). **Race guard:** captures `tab.id` before the await and drops the result if
+  `activeTabId` changed while the query was in flight (an async result for a since-switched tab must not
+  overwrite the now-active tab's label).
+- **Refreshed on every state change that can affect the displayed value:** tab activation (existing
+  `activateTab` call), webview `dom-ready` (existing) + a NEW webview `did-finish-load` refresh (so an
+  inherited-zoom page shows correctly on load), and `onZoomChanged` for the active tab (also keeps the ~1.5s
+  peek reveal). Because the value is now a live query, switching to a non-active same-origin tab that was
+  implicitly re-zoomed shows the CORRECT shared % — case (d) fixed.
+- **Cache retired:** the `zoomFactors` Map is removed as the label's source of truth; `onZoomChanged`
+  compares wcIds directly to decide "is this the active tab" and treats the broadcast as a "re-query" signal.
+- **Removed bug-fix #2's main-side `did-finish-load` → `zoom-changed` broadcast** — the renderer now refreshes
+  (queries) on load via its own webview `did-finish-load`, so the main broadcast would be a redundant second
+  path. Picked ONE mechanism (the renderer query) per the no-double-path rule. `applyZoom`, `zoom-apply`,
+  keyboard capture, and the lightbox `applyZoom` are all UNCHANGED.
+
+Cases verified by reasoning: (a) zoom active tab → `onZoomChanged` re-queries → label updates; (b) new tab to
+pre-zoomed same-jar origin → `did-finish-load` queries inherited % ; (c) navigate to pre-zoomed origin →
+`did-navigate`/`did-finish-load` query updates; (d) two same-jar same-origin tabs, zoom one, switch → the
+other queries the shared engine factor (not a stale cache); (e) different jar → independent host-zoom map,
+query returns that jar's factor; (f) internal tab → `isInternalTab` guard hides the control (and `get-zoom`
+also returns null for the internal session). `npm test` 803 pass / 0 fail; `npm run lint` clean;
+`npm run typecheck` clean. No renderer unit-test harness exists (renderer has no unit tests; the simple
+`get-zoom` handler mirrors the existing `zoom-apply` guard shape and `automation-zoom.test.js` covers the
+separate MCP layer).
+
+**HAT bug-fix #2 (2026-06-18, SUPERSEDED by #3 — broadcast removed) — stale zoom label on host-zoom-map inheritance.** Operator
+found that opening a NEW tab to an origin that already carries a non-100% level in the same jar (Chromium's
+per-origin-per-session host-zoom map — see DD1) renders the page correctly zoomed but shows the in-bar zoom
+label as "100%". Same stale-label on an existing tab NAVIGATING to a pre-zoomed origin. **Root cause:** the
+renderer label is driven by `zoomFactors` (a `Map<wcId, factor>`) populated from `zoom-changed` broadcasts,
+which `applyZoom` emits ONLY on keyboard/`setZoom` changes. When Chromium applies an origin's existing zoom
+IMPLICITLY to a new/navigating guest, no `zoom-changed` fires → the map has no entry for that wcId →
+`refreshZoomControl` falls back to `1.0` while `wc.getZoomFactor()` is actually e.g. 1.5. **Fix (main-side,
+renderer untouched):** in `src/main/main.js`, in the non-internal branch of the `web-contents-created`
+webview block (beside the leg-1 `before-input-event` listener), attach a `did-finish-load` listener that
+reads `contents.getZoomFactor()` and broadcasts the existing `zoom-changed` IPC
+(`mainWindow.webContents.send('zoom-changed', { wcId: contents.id, factor })`). This reuses the renderer's
+`onZoomChanged` handler, which updates `zoomFactors` + refreshes the active-tab control immediately — so the
+label syncs to the engine's actual (origin-inherited) level. `did-finish-load` was chosen because it fires
+after the main-frame load completes (origin committed → host-zoom level applied), so `getZoomFactor()`
+reliably reflects the inherited level — no stale read, no microtask deferral needed. Guards against a null /
+destroyed `mainWindow` and a destroyed `contents`; one send per load (no broadcast storm). Internal session
+excluded (it has no zoom control). `applyZoom`'s keyboard/`setZoom` broadcast is unchanged — this ADDS the
+load/navigate sync only. `npm test` 803 pass / 0 fail; `npm run lint` clean; `npm run typecheck` clean. No
+renderer / automation change.
+
 **HAT bug-fix (2026-06-18, UNCOMMITTED) — zoom control did not reveal on hover until the first zoom
 change.** Operator HAT found the in-bar `#zoom-control` would only appear on address-bar hover *after* the
 first `Ctrl+`/`zoom-changed` event on a fresh page load. **Root cause:** `refreshZoomControl(tab)`
@@ -396,6 +457,29 @@ _(departures from the planned approach — appended during execution)_
 ---
 
 ## Anomalies
+
+### Stale zoom label on host-zoom-map inheritance (operator-reported, HAT follow-up)
+**Observed**: Opening a NEW tab to an origin that already has a non-100% zoom in the same jar renders the
+page correctly zoomed, but the in-address-bar zoom label shows "100%". Same stale label when an existing
+tab NAVIGATES to a pre-zoomed origin. **And (the case that exposed the deeper defect):** with two same-jar
+same-origin tabs, zooming one and switching to the other showed a stale 100% on the second tab's label.
+**Root cause**: the renderer's zoom label read `zoomFactors` (`Map<wcId, factor>`), populated only by
+`zoom-changed` broadcasts that `applyZoom` emits on keyboard/`setZoom` changes — and a broadcast targets only
+the active tab's wcId. Chromium applies an origin's existing host-zoom-map level IMPLICITLY to a
+new/navigating guest, AND re-zooms all same-origin tabs in a jar when any one is zoomed, in both cases
+without emitting `zoom-changed` for the affected non-active wcIds — so the cached map went stale and the
+label fell back to 1.0 (or a prior value) while `wc.getZoomFactor()` carried the real (shared/inherited)
+factor.
+**Severity**: cosmetic label desync (page render is correct); no security/data impact.
+**Resolution**: HAT follow-up fix #3 (UNCOMMITTED) — the cache is RETIRED; the label now QUERIES the active
+tab's live engine zoom on demand via a new chrome IPC `get-zoom` (`ipcMain.handle` in `src/main/main.js` →
+`window.goldfinch.getZoom`). `refreshZoomControl` (`src/renderer/renderer.js`) became async + query-driven
+with a race guard (drops a result if the active tab changed mid-query) and is called on tab activation, on
+webview `dom-ready` + `did-finish-load`, and on `onZoomChanged` for the active tab. Because the value is now
+a live query rather than a cached map, switching to an implicitly-re-zoomed same-origin tab shows the correct
+shared %. The bug-fix #2 main-side `did-finish-load` → `zoom-changed` broadcast was REMOVED (the renderer
+now queries on load — one mechanism, no double path). The chrome `get-zoom` channel is intentionally distinct
+from the automation `getZoom` MCP tool. See the Leg 06 "HAT bug-fix #3" entry for full detail.
 
 ### SC8 jar-scope parity defect — new tools missing from the jar facade (caught by live verification)
 **Observed**: Under a **jar key**, `getZoom`/`setZoom`/`printToPDF` throw `engine.getZoom is not a

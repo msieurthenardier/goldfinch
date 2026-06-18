@@ -73,6 +73,7 @@ interface GoldfinchBridge {
   // --- page zoom ---
   zoomApply(payload: { webContentsId: number; action: string }): void;
   onZoomChanged(cb: (d: { wcId: number; factor: number }) => void): void;
+  getZoom(payload: { webContentsId: number }): Promise<number | null>;
 
   // --- native print ---
   print(payload: { webContentsId: number }): void;
