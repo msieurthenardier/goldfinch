@@ -1,37 +1,18 @@
 // @ts-check
 'use strict';
-// Dev gates for the automation surface. Two predicates with deliberately different scopes:
-//   - isAutomationDevEnabled — the LEGACY interim dev seam (DD7): true for `--remote-debugging-port`
-//     OR `--automation-dev`. Originally the main process keyed on the CDP port and the chrome
-//     renderer on the injected `--automation-dev` marker (set via the chrome window's
-//     additionalArguments).
-//   - isMcpAutomationEnabled — the NARROWER MCP-transport gate (DD4): true ONLY for `--automation-dev`.
-//     Note `--automation-dev` is now also read in the MAIN process (to gate the MCP server), not only
-//     as the renderer-injected marker it was previously documented as.
-// Both are pure; neither throws.
+// Dev gates for the automation surface.
+//   - isMcpAutomationEnabled — the MCP-transport dev gate (DD4): true ONLY for `--automation-dev`.
+//     Read both in the MAIN process (to gate the MCP server + the dev seam) and surfaced to the
+//     chrome renderer via additionalArguments (`--automation-dev` injected into the renderer argv).
+// Pure; never throws. The legacy browser-process CDP debugging dev gate was removed in F9 along with
+// the ungated CDP debugging path; `--automation-dev` is the sole dev-automation switch.
 
 /**
- * Returns true iff the process was launched in automation-dev mode (legacy seam, DD7):
- * - The main process: carries `--remote-debugging-port` (any value) in argv.
- * - The chrome renderer process: carries the injected `--automation-dev` marker
- *   (set via additionalArguments in the chrome BrowserWindow webPreferences).
- * False for any non-array input or when neither flag is present.
- *
- * @param {unknown} argv  typically process.argv
- * @returns {boolean}
- */
-function isAutomationDevEnabled(argv) {
-  return Array.isArray(argv) && argv.some(
-    (a) => typeof a === 'string' && (a.startsWith('--remote-debugging-port') || a === '--automation-dev')
-  );
-}
-
-/**
- * Returns true iff argv carries the EXACT `--automation-dev` token — the narrower MCP-transport gate
- * (DD4). Deliberately does NOT match `--remote-debugging-port`: gating the MCP server on this predicate
- * keeps it STRUCTURALLY decoupled from the CDP port, so `npm run dev:debug` (which launches with
- * `--remote-debugging-port` but no `--automation-dev`) does NOT start the MCP server. This is what makes
- * the Flight-3 DD10 DevTools test confound-free. `--automation-dev` is read here in the MAIN process.
+ * Returns true iff argv carries the EXACT `--automation-dev` token — the MCP-transport dev gate
+ * (DD4). It is the SOLE dev-automation switch (the legacy CDP debugging gate was removed in F9), and
+ * is structurally independent of any browser-process debugging switch. `--automation-dev` is read
+ * here in the MAIN process and is also injected into the chrome renderer's argv via
+ * additionalArguments so the renderer can gate its dev seam the same way.
  *
  * False for any non-array input, an empty array, or when the exact token is absent (a prefix like
  * `--automation-dev-extra` does not match).
@@ -48,7 +29,7 @@ function isMcpAutomationEnabled(argv) {
  * double-gate predicate behind the auto-mint-to-stdout block in main.js (Flight 4, Leg 5). Both
  * gates must hold:
  *   1. isMcpAutomationEnabled(argv) — i.e. the EXACT `--automation-dev` token (so it can never run
- *      in a shipped build, which never carries that flag, and stays decoupled from `dev:debug`).
+ *      in a shipped build, which never carries that flag).
  *   2. env.GOLDFINCH_AUTOMATION_DEV_MINT === '1' — strict equality against the literal '1', so a
  *      plain `npm run dev:automation` (no env var) stays inert and off-by-default remains observable.
  *
@@ -81,4 +62,4 @@ function shouldBindAutomation({ automationEnabled, devForceBind } = {}) {
   return automationEnabled === true || devForceBind === true;
 }
 
-module.exports = { isAutomationDevEnabled, isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation };
+module.exports = { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation };

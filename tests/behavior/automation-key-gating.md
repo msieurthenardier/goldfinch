@@ -3,7 +3,7 @@
 **Slug**: `automation-key-gating`
 **Status**: draft
 **Created**: 2026-06-17
-**Last Run**: never
+**Last Run**: 2026-06-17-17-23-30 — [run log](./automation-key-gating/runs/2026-06-17-17-23-30.md) (**partial** — toggle-OFF gating contract Steps 1-3 PASS via readDom; live toggle-flip Steps 4-6 carried, apparatus-limited)
 
 ## Intent
 Verify the F8 **DD9** contract in the `goldfinch://settings` Keys subsection: when the automation

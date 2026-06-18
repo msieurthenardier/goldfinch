@@ -61,7 +61,7 @@ and harmless when chosen.
   first.** Use a `captureWindow()` screenshot to locate the click target.
 - **Do NOT select the Exit item with a committing activation** (it quits the app and ends the run).
   Exit is asserted as *present/selectable only*; its quit effect is verified manually outside this test.
-- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`,
+- **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`,
   and `getChromeTarget()` returns a numeric chrome `wcId` before exercising anything.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify — it launches its
   own browser and never touches this app (the standing Goldfinch false-pass trap). The apparatus is
@@ -88,7 +88,7 @@ and harmless when chosen.
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count (via `enumerateTabs` or `readAxTree(wcId)`). | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count (via `enumerateTabs` or `readAxTree(wcId)`). | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
 | 2 | Take a `captureWindow()` screenshot; locate and inspect the **toolbar row** (the row with the address bar, Media, and Shield buttons) and the kebab control. Confirm via `readAxTree(wcId)`. | A single **kebab (⋮) button** sits **immediately to the right of the Shield button** as the **last interactive control in the toolbar** — its left edge is at/after the Shield button's right edge. It has an accessible name, `aria-haspopup="menu"`, and `aria-expanded="false"`. [a11y] |
 | 3 | **Mouse — open:** take a `captureWindow()` screenshot; locate the kebab button's coordinates; call `click(wcId, x, y)` on those coordinates. Then call `readAxTree(wcId)`. | The menu opens: `aria-expanded` becomes `true`; a popup with **`role="menu"`** appears containing **exactly two `role="menuitem"` items**, with accessible names **"Settings"** and **"Exit"** (in that order). No third item. [a11y] |
 | 4 | **Focus on open:** with the menu open (reopen by keyboard if Step 3 left it closed — establish a focus anchor via `click(wcId, x, y)` on the kebab coordinates, then `pressKey(wcId, 'Enter')`), call `readAxTree(wcId)` and inspect the focused node. | Opening the menu moves focus **into the menu** — the first item ("Settings") is the focused node in `readAxTree(wcId)`. Focus is never stranded on `<body>`. [a11y] |

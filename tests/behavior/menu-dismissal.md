@@ -66,7 +66,7 @@ SC8-adjacent for the container menu's APG uplift.)
   - **In-chrome outside-click dismissal (Step 5)** rides the `document` **pointerdown** handler, so it
     stays on the **chrome `wcId`** (`click(chromeWcId, x, y)` on the address-bar / neutral chrome area).
   Targeting the wrong `wcId` would silently fail to dismiss.
-- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`
+- **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`
   and `enumerateTabs`; `getChromeTarget()` returns a numeric chrome `wcId`; `enumerateTabs()` lists at
   least one guest webview `wcId` (the loaded homepage tab). A dead or jar-identity connection otherwise
   surfaces as a confusing mid-test cascade.
@@ -94,7 +94,7 @@ SC8-adjacent for the container menu's APG uplift.)
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()`; call `enumerateTabs()`. | `tools/list` returns **17 tools** including `getChromeTarget` and `enumerateTabs`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a **numeric** chrome `wcId`. `enumerateTabs()` lists **at least one** guest webview with a numeric `wcId`. Record the chrome `wcId` and the active guest `wcId`. If no guest webview, halt — preconditions not met. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()`; call `enumerateTabs()`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget` and `enumerateTabs`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a **numeric** chrome `wcId`. `enumerateTabs()` lists **at least one** guest webview with a numeric `wcId`. Record the chrome `wcId` and the active guest `wcId`. If no guest webview, halt — preconditions not met. |
 | 2 | **Page/webview-click dismissal (kebab):** locate the `⋮` via `captureWindow()` and open the kebab (`click(chromeWcId, x, y)` on `#kebab`); confirm open via `readAxTree(chromeWcId)`. Then take a `captureWindow()`, pick a **neutral region of the loaded page** (dead space, not a link/button) and `click(guestWcId, x, y)` into the active guest webview to move native focus into the page. Read the kebab's state. | The kebab menu **closes** (`#kebab` `aria-expanded="false"`, `#kebab-menu` hidden) when focus crosses into the webview — the chrome `window`-blur dismissal fired. This is a real trusted page click on the guest web-contents. |
 | 3 | **Page/webview-click dismissal (container):** locate the `▾` via a fresh `captureWindow()` and open the container menu (`click(chromeWcId, x, y)` on `#new-tab-menu`); confirm open. Then `click(guestWcId, x, y)` into a neutral region of the active guest webview. Read the container's state. | The container menu **closes** (`#new-tab-menu` `aria-expanded="false"`, `#container-menu` hidden) on the page click. |
 | 4 | **Cross-trigger dismissal:** open the container menu (`click(chromeWcId,…)` on `#new-tab-menu`, re-located); then `click(chromeWcId,…)` on `#kebab`. Read both via `readAxTree(chromeWcId)`. Then `click(chromeWcId,…)` on `#new-tab-menu` again. Read both. | Opening the kebab closes the container (container `aria-expanded="false"`, kebab open); opening the container closes the kebab (kebab `aria-expanded="false"`, container open). Never both open. |

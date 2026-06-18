@@ -278,10 +278,13 @@ const DRIVE_TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tool definitions — observe ops (4). Same thin-adapter discipline as the drive
+// Tool definitions — observe ops (6). Same thin-adapter discipline as the drive
 // tools (DD5): validate input, call engine[op](...), shape the result. The two
 // image ops set `shape: imageResult` (base64 PNG → MCP image content, DD6);
-// readDom + readAxTree ride the default JSON-text serialize.
+// readDom + readAxTree + the two Flight-9 eval ops (evaluate / injectScript) ride
+// the default JSON-text serialize. evaluate / injectScript are debugger-free
+// executeJavaScript ops (ZERO CDP), main-world, with the internal session excluded
+// even for admin.
 // ---------------------------------------------------------------------------
 
 /** @type {ToolDef[]} */
@@ -337,6 +340,84 @@ const OBSERVE_TOOLS = [
     // callTool's try/catch → isError. No custom mapping is needed or wanted here.
     call: (engine, { wcId }) => engine.readAxTree(wcId),
   },
+  {
+    name: 'evaluate',
+    description: 'Evaluate a JavaScript expression in the target tab\'s MAIN WORLD (foreground-first) via webContents.executeJavaScript (no CDP). ' +
+      'A returned Promise is natively awaited, so an async expression like axe.run(document) resolves before its value crosses back. ' +
+      'The RETURN VALUE must be JSON-serializable — it is returned as JSON text. A non-JSON-serializable return (function, DOM node, circular object) ' +
+      'is refused with "automation: evaluate — return value is not JSON-serializable". An in-page throw surfaces as an error result (isError). ' +
+      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        expression: { type: 'string', description: 'JavaScript expression to evaluate in the guest main world; a returned Promise is awaited; the resolved value must be JSON-serializable' },
+      },
+      required: ['wcId', 'expression'],
+    },
+    // No `shape`: the JSON-serializable return value rides the default JSON-text serialize.
+    call: (engine, { wcId, expression }) => engine.evaluate(wcId, expression),
+  },
+  {
+    name: 'injectScript',
+    description: 'Inject and run a script in the target tab\'s MAIN WORLD via webContents.executeJavaScript (no CDP). ' +
+      'VOID: defines globals / patches prototypes (e.g. the axe-core source, a farbling hook) and returns {"ok":true}. ' +
+      'Unlike evaluate it SKIPS foreground-to-act activation (defining a global needs no paint). ' +
+      'It makes NO persistence guarantee — globals it defines are not promised to survive across a later evaluate gap (a navigation clears them); ' +
+      'pair injectScript immediately with one evaluate. An in-page throw surfaces as an error result (isError). ' +
+      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        script: { type: 'string', description: 'JavaScript source to run in the guest main world (defines globals / patches prototypes)' },
+      },
+      required: ['wcId', 'script'],
+    },
+    // No `shape`: void return → {"ok":true} via the default serialize.
+    call: (engine, { wcId, script }) => engine.injectScript(wcId, script),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Tool definitions — devtools ops (2). Same thin-adapter discipline (DD5):
+// validate input, call engine[op](...), ride the default JSON-text serialize
+// (both are void → {"ok":true}). Built on webContents.openDevTools({mode:'detach'})
+// / webContents.closeDevTools() — NO CDP from these ops (the CDP client is
+// Chromium's own DevTools front-end). The internal goldfinch://settings session is
+// excluded even for admin. {mode:'detach'} opens a separate OS window (WSLg-friendly).
+// ---------------------------------------------------------------------------
+
+/** @type {ToolDef[]} */
+const DEVTOOLS_TOOLS = [
+  {
+    name: 'openDevTools',
+    description: 'Open the DevTools front-end (detached OS window — {mode:"detach"}, WSLg-friendly) on the tab identified by wcId. ' +
+      'Returns {"ok":true} (void). Jar-scoped guests / admin chrome; the internal goldfinch://settings session is ALWAYS excluded (even for admin). ' +
+      'Opening DevTools establishes a CDP client on the tab, so a CONCURRENT readAxTree/scroll (which attach the in-process debugger) will surface a ' +
+      '"debugger-unavailable" / attach-failed result — that is EXPECTED, not a regression. By contrast evaluate/injectScript keep working under DevTools ' +
+      '(they use webContents.executeJavaScript, not the debugger). Does NOT bring the tab to the foreground.',
+    inputSchema: {
+      type: 'object',
+      properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
+      required: ['wcId'],
+    },
+    // No `shape`: void return → {"ok":true} via the default serialize.
+    call: (engine, { wcId }) => engine.openDevTools(wcId),
+  },
+  {
+    name: 'closeDevTools',
+    description: 'Close the DevTools front-end on the tab identified by wcId, releasing the CDP client (so a subsequent readAxTree/scroll can attach again). ' +
+      'Returns {"ok":true} (void). IDEMPOTENT — closing when DevTools is not open is a no-op. ' +
+      'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
+    inputSchema: {
+      type: 'object',
+      properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
+      required: ['wcId'],
+    },
+    // No `shape`: void return → {"ok":true} via the default serialize.
+    call: (engine, { wcId }) => engine.closeDevTools(wcId),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -356,9 +437,10 @@ const CHROME_TOOLS = [
   },
 ];
 
-// The full tool table — 12 drive + 4 observe + 1 chrome-discovery (Leg 3 + Flight 6),
-// iterated by buildToolRegistry for both discovery and dispatch.
-const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...CHROME_TOOLS];
+// The full tool table — 12 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
+// chrome-discovery = 21 (Leg 3 + Flight 6 + Flight 9), iterated by buildToolRegistry
+// for both discovery and dispatch.
+const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS];
 
 // ---------------------------------------------------------------------------
 // Registry builder

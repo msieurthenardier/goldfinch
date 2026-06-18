@@ -56,7 +56,7 @@ in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exact
   `click(guestWcId, x, y)`) into the target first.**
 - The build includes the served `settings.css` (+ optional `settings.js`) and the chip/popup/lock code.
 - A reachable web page for the web-chip + lock checks (e.g. `https://example.com/`).
-- **Active-precondition probe** (Step 1): confirm `tools/list` shows 17 tools including `getChromeTarget`,
+- **Active-precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`,
   and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings, confirm the
   `goldfinch://settings` guest is enumerable via `enumerateTabs` (the admin engine's `allowInternal`
   makes it visible; if it is absent, halt).
@@ -79,7 +79,7 @@ in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exact
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()` and record `wcId`. | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Else halt. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; call `getChromeTarget()` and record `wcId`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Else halt. |
 | 2 | Open Settings via the kebab (take a `captureWindow()` screenshot; locate the kebab (⋮) button coordinates; call `click(wcId, x, y)` to open the kebab menu, then `click(wcId, x, y)` on the Settings item coordinates), or the identical trusted path `openTab('goldfinch://settings', null, {trusted:true})` — note which. Wait for load. Then call `enumerateTabs` and identify the `goldfinch://settings` entry; record its `wcId` as `guestWcId`. | A tab opens to `goldfinch://settings`; the active webview's partition is `goldfinch-internal`; the address bar shows the internal URL. `enumerateTabs` includes the `goldfinch://settings` entry (the admin engine's `allowInternal` makes the internal guest enumerable). Record `guestWcId`. |
 | 3 | Call `readDom(guestWcId)` and `readAxTree(guestWcId)` on the `goldfinch://settings` guest; take a `captureWindow()` screenshot. | The guest renders a **persistent left section-nav** with the 5 links (Appearance, Privacy & Shields, On startup / Home page, Downloads, About) and **5 titled `<section>`s** each with an `<h2>` + placeholder content. Recognizable as a settings area. |
 | 4 | In the guest, establish a focus anchor via `click(guestWcId, x, y)` on the nav area (locate via `captureWindow()` or `readDom(guestWcId)`), then move keyboard focus to a section nav link (via `pressKey(guestWcId, 'Tab')`) and activate it (`pressKey(guestWcId, 'Enter')`). Call `readAxTree(guestWcId)` to confirm focus and scroll state. | Focus reaches the nav link (visible focus ring in `captureWindow()`); activating it moves to the corresponding section (the target `<section>`/`<h2>` is scrolled into view / focused per `readAxTree(guestWcId)`). Section nav is keyboard-operable. `[a11y]` |

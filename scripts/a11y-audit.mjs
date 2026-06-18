@@ -1,7 +1,8 @@
-// Accessibility audit harness — injects axe-core into the running app's
-// renderer over CDP and diffs violations against a curated baseline.
-// (Origin: DD3 — CDP `Runtime.evaluate` bypasses the page CSP, which is what
-// lets us inject axe into the running renderer at all.)
+// Accessibility audit harness — injects axe-core into the running app over the
+// loopback MCP automation surface and diffs violations against a curated baseline.
+// (Origin: DD3 — the MCP `injectScript`/`evaluate` tools run in the guest MAIN
+// WORLD via `webContents.executeJavaScript`, which is CSP-immune for direct eval,
+// so we can inject axe into the running renderer without `<script>`-tag CSP.)
 //
 // Baseline-diff gate (DD7): rather than failing on ANY violation, the harness
 // diffs each violation's per-node target selectors against a small, hand-curated
@@ -29,19 +30,34 @@
 // --tags filter the harness runs axe's full default rule set (minus that one),
 // which is what the verify-a11y leg gates on.
 //
-// PREREQUISITE: the GUI must be running with the debug port open
-// (`npm run dev:debug`, which exposes CDP at http://127.0.0.1:9222). This gate
-// is real-environment / verify-only and is NOT part of headless CI.
+// PREREQUISITES — the ATTACH + env-key model (the app is launched out-of-band;
+// this script attaches to its loopback MCP server). This gate is
+// real-environment / verify-only and is NOT part of headless CI.
+//   1. Launch the app with the automation surface bound + a dev key minted:
+//        GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
+//      It prints ONE line:  AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
+//   2. Export the key the audit needs:
+//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 4-state sweep (admin)
+//        export GOLDFINCH_MCP_KEY=<jarKey>           # --target guest mode (jar)
+//   3. Serve the media fixture (tests/behavior/fixtures/a11y-media/) on :8000:
+//        python3 -m http.server 8000 --directory tests/behavior/fixtures/a11y-media
+//   4. npm run a11y
+//   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
+//   same contract as scripts/mcp-example-client.mjs.)
 //
-// Node 22 is assumed (global WebSocket + global fetch) so no runtime deps are
-// added beyond the axe-core devDependency. WebSocket is behind a flag on Node 20.
+// The chrome 4-state sweep needs the ADMIN key (getChromeTarget is admin-only);
+// `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
+// is the INTERNAL session and the eval tool refuses it even for admin, so it
+// CANNOT be audited via `evaluate` (the old CDP path could) — see the
+// findGuestTarget note. The default chrome sweep — what this gate gates on —
+// never depended on a settings-guest run.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { connectAutomation, callTool } from './lib/mcp-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CDP_HTTP = 'http://127.0.0.1:9222';
 const DEFAULT_FIXTURE_URL = 'http://127.0.0.1:8000/';
 
 // ---------- argv ----------
@@ -116,127 +132,80 @@ const ACCEPTED = [
   { id: 'scrollable-region-focusable', selector: '#lightbox-stage', state: 'lightbox', reason: 'lightbox scroll stage not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' }
 ];
 
-// ---------- pick the renderer target ----------
-async function findRendererTarget() {
-  let list;
-  try {
-    const res = await fetch(`${CDP_HTTP}/json`);
-    list = await res.json();
-  } catch (e) {
+// ---------- pick the renderer target (chrome mode, admin) ----------
+// The chrome 4-state sweep drives the app shell, which is reachable only via the
+// admin-only getChromeTarget tool — it returns { wcId, kind: 'chrome', url }.
+async function getChromeWcId(client) {
+  const { value, isError } = await callTool(client, 'getChromeTarget', {});
+  if (isError || !value || typeof value.wcId !== 'number') {
     fail(
-      `cannot reach CDP at ${CDP_HTTP} (${e.message}). ` +
-        'Start the app with `npm run dev:debug` first — this gate needs the live GUI.'
+      'getChromeTarget did not return a chrome wcId' +
+        (isError ? ` (isError: ${JSON.stringify(value)})` : '') +
+        ' — getChromeTarget is ADMIN ONLY, so set GOLDFINCH_MCP_ADMIN_KEY (and launch with ' +
+        'GOLDFINCH_AUTOMATION_ADMIN=1) for the chrome sweep.'
     );
   }
-  // The renderer chrome is loaded from a local index.html; <webview> guests are
-  // http(s) pages. Pick the page target whose url ends with index.html.
-  const target = list.find(
-    (t) => t.type === 'page' && typeof t.url === 'string' && t.url.split('?')[0].endsWith('index.html')
-  );
-  if (!target || !target.webSocketDebuggerUrl) {
-    fail('no renderer target (url ending in index.html) found at :9222 — is the app running?');
-  }
-  return target;
+  return value.wcId;
 }
 
 // ---------- pick a guest target by URL substring (DD7, --target mode) ----------
-// Selects a guest page/<webview> whose URL contains `substring` (e.g.
-// 'goldfinch://settings') instead of the chrome. Assumes the guest is ALREADY
-// loaded — this mode does no fixture navigate and drives none of the chrome's
-// state functions (a guest has no togglePanel/togglePrivacy/openLightbox).
+// Selects a guest tab whose URL contains `substring` (e.g. a fixture host)
+// instead of the chrome. Assumes the guest is ALREADY loaded — this mode does no
+// fixture navigate and drives none of the chrome's state functions (a guest has
+// no togglePanel/togglePrivacy/openLightbox).
 //
-// LEG-6 CAVEAT (live-confirm): the flat CDP `/json` list may NOT surface Electron
-// `<webview>` guests (especially the privileged goldfinch:// internal page) —
-// they can be out-of-process targets reachable only via Target.getTargets /
-// Target.setAutoAttach over the browser-level endpoint. If a goldfinch:// guest
-// doesn't appear in this list, leg 6 must switch to that mechanism; this
-// flat-list find is the statically-correct starting point, not a proven one.
-async function findGuestTarget(substring) {
-  let list;
-  try {
-    const res = await fetch(`${CDP_HTTP}/json`);
-    list = await res.json();
-  } catch (e) {
+// CAVEAT (internal-session exclusion): the eval tool ALWAYS excludes the internal
+// `goldfinch://settings` session (even for admin), so `--target=goldfinch://settings`
+// cannot be audited via `evaluate` — the old CDP path could. enumerateTabs also
+// omits the internal tab for jar keys; a settings-guest a11y audit via the eval
+// tool is out of reach by design. The default chrome sweep never depended on it.
+async function getGuestWcId(client, substring) {
+  const { value: tabs, isError } = await callTool(client, 'enumerateTabs', {});
+  if (isError || !Array.isArray(tabs)) {
+    fail(`enumerateTabs failed${isError ? ` (isError: ${JSON.stringify(tabs)})` : ''}.`);
+  }
+  const tab = tabs.find((t) => t && typeof t.url === 'string' && t.url.includes(substring));
+  if (!tab || typeof tab.wcId !== 'number') {
     fail(
-      `cannot reach CDP at ${CDP_HTTP} (${e.message}). ` +
-        'Start the app with `npm run dev:debug` first — this gate needs the live GUI.'
+      `no guest tab with a url containing "${substring}" found via enumerateTabs — is it loaded? ` +
+        '(the internal goldfinch://settings session is excluded from the eval tool even for admin; ' +
+        'see the getGuestWcId note.)'
     );
   }
-  const target = list.find(
-    (t) =>
-      (t.type === 'page' || t.type === 'webview') &&
-      typeof t.url === 'string' &&
-      t.url.includes(substring)
-  );
-  if (!target || !target.webSocketDebuggerUrl) {
-    fail(
-      `no guest target with a url containing "${substring}" found at :9222 — is it loaded? ` +
-        '(a <webview> guest may not appear in the flat /json list; leg 6 may need ' +
-        'Target.getTargets/setAutoAttach — see the findGuestTarget note.)'
-    );
-  }
-  return target;
-}
-
-// ---------- minimal CDP client over WebSocket ----------
-function connect(wsUrl) {
-  const ws = new WebSocket(wsUrl);
-  let nextId = 1;
-  const pending = new Map();
-
-  ws.addEventListener('message', (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString());
-    } catch {
-      return;
-    }
-    if (msg.id && pending.has(msg.id)) {
-      const { resolve, reject } = pending.get(msg.id);
-      pending.delete(msg.id);
-      if (msg.error) reject(new Error(`${msg.error.message} (${msg.error.code})`));
-      else resolve(msg.result);
-    }
-  });
-
-  const ready = new Promise((resolve, reject) => {
-    ws.addEventListener('open', () => resolve());
-    ws.addEventListener('error', (e) => reject(new Error(`WebSocket error: ${e.message || e}`)));
-  });
-
-  function send(method, params = {}) {
-    const id = nextId++;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ id, method, params }));
-    });
-  }
-
-  return { ready, send, close: () => ws.close() };
-}
-
-// Evaluate an expression in the renderer's main world. CDP Runtime.evaluate
-// bypasses the page CSP, so injecting axe is permitted. `awaitPromise` resolves
-// promises (axe.run returns one); `returnByValue` brings the result back as JSON.
-async function evaluate(cdp, expression, { awaitPromise = false } = {}) {
-  const result = await cdp.send('Runtime.evaluate', {
-    expression,
-    awaitPromise,
-    returnByValue: true
-  });
-  if (result.exceptionDetails) {
-    const ex = result.exceptionDetails;
-    throw new Error(ex.exception?.description || ex.text || 'Runtime.evaluate exception');
-  }
-  return result.result?.value;
+  return tab.wcId;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Evaluate an expression in the target tab's main world via the eval tool. The
+// MCP `evaluate` tool runs `webContents.executeJavaScript` (no CDP), natively
+// awaits a returned Promise, and brings the JSON-serializable result back as JSON
+// text (unwrapped here). An in-page throw surfaces as isError.
+async function evaluate(client, wcId, expression) {
+  const { value, isError } = await callTool(client, 'evaluate', { wcId, expression });
+  if (isError) {
+    throw new Error(`evaluate failed: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 // ---------- run axe in the current DOM state ----------
-async function runAxe(cdp, axeSource, stateLabel) {
-  // (Re)inject axe; idempotent — defines window.axe.
-  await evaluate(cdp, axeSource);
+async function runAxe(client, wcId, axeSource, stateLabel) {
+  // (Re)inject axe per state — injectScript makes NO persistence guarantee
+  // (mcp-tools.js), so the inject-then-run pair (DD2) must be re-done each state
+  // exactly as the old CDP path re-evaluated axeSource every state. Pair the
+  // inject IMMEDIATELY with the run; do not assume window.axe survives a gap.
+  const { isError: injectErr, value: injectVal } = await callTool(client, 'injectScript', {
+    wcId,
+    script: axeSource
+  });
+  if (injectErr) {
+    throw new Error(
+      `injectScript(axe) failed for state "${stateLabel}": ${
+        typeof injectVal === 'string' ? injectVal : JSON.stringify(injectVal)
+      }`
+    );
+  }
   const opts = { rules: { 'nested-interactive': { enabled: false } } };
   if (runOnly) opts.runOnly = runOnly;
   // Capture each node's target SELECTORS (not just a count) so allowlist matching
@@ -248,58 +217,75 @@ async function runAxe(cdp, axeSource, stateLabel) {
     count: v.nodes.length,
     nodes: v.nodes.map(n => n.target.flat(Infinity).join(' '))
   })))`;
-  const violations = await evaluate(cdp, expr, { awaitPromise: true });
+  const violations = await evaluate(client, wcId, expr);
   return (violations || []).map((v) => ({ ...v, state: stateLabel }));
 }
 
 // ---------- drive the UI into each state, audit, aggregate ----------
 async function main() {
-  const target = targetArg ? await findGuestTarget(targetArg) : await findRendererTarget();
-  const cdp = connect(target.webSocketDebuggerUrl);
-  await cdp.ready;
-  await cdp.send('Runtime.enable');
+  let client;
+  try {
+    client = await connectAutomation();
+  } catch (e) {
+    fail(
+      `${e.message} — is the app running with the automation surface? Launch ` +
+        '`GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` and ' +
+        'export the printed key (this gate needs the live GUI).'
+    );
+  }
 
   const axeSource = readFileSync(join(__dirname, '..', 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
 
   const allViolations = [];
 
-  if (targetArg) {
-    // Guest mode (DD7): the target is an already-loaded guest page/<webview>
-    // (e.g. goldfinch://settings). It has none of the chrome's state-driving
-    // functions, so we skip the 4-state sweep entirely — just inject axe and
-    // audit its current DOM once (no fixture navigate, no UI driving).
-    allViolations.push(...(await runAxe(cdp, axeSource, `guest:${targetArg}`)));
-  } else {
-    // Chrome mode: load the media fixture so the media panel has something to
-    // catalog, then drive the renderer into each state and audit.
-    await evaluate(cdp, `navigate(${JSON.stringify(fixtureUrl)})`);
-    await sleep(2500); // let the guest load + the media scan populate
+  try {
+    if (targetArg) {
+      // Guest mode (DD7): the target is an already-loaded guest tab (e.g. a
+      // fixture page). It has none of the chrome's state-driving functions, so we
+      // skip the 4-state sweep entirely — just inject axe and audit its current
+      // DOM once (no fixture navigate, no UI driving).
+      const wcId = await getGuestWcId(client, targetArg);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, `guest:${targetArg}`)));
+    } else {
+      // Chrome mode: acquire the chrome renderer's wcId (admin-only), load the
+      // media fixture so the media panel has something to catalog, then drive the
+      // renderer into each state and audit. Navigation MUST go through the chrome
+      // renderer's own `navigate()` global (which opens a guest tab from the
+      // chrome shell) and then audit the CHROME wcId — NOT the `navigate` MCP
+      // drive tool, which navigates a guest tab by wcId (different semantics).
+      const wcId = await getChromeWcId(client);
 
-    // The media & privacy panels are mutually exclusive (togglePrivacy(true)
-    // closes the media panel) and renderPrivacy() early-returns while collapsed,
-    // so each state must be opened and audited separately — NOT by toggling the
-    // .collapsed class directly. Drive the renderer's own functions.
+      await evaluate(client, wcId, `navigate(${JSON.stringify(fixtureUrl)})`);
+      await sleep(2500); // let the guest load + the media scan populate
 
-    // 1) Base chrome.
-    allViolations.push(...(await runAxe(cdp, axeSource, 'base-chrome')));
+      // The media & privacy panels are mutually exclusive (togglePrivacy(true)
+      // closes the media panel) and renderPrivacy() early-returns while collapsed,
+      // so each state must be opened and audited separately — NOT by toggling the
+      // .collapsed class directly. Drive the renderer's own functions (top-level
+      // fns in src/renderer/renderer.js → window globals, reachable in the main
+      // world by executeJavaScript).
 
-    // 2) Media panel open (media cards / iconBtn / media-pick controls render).
-    await evaluate(cdp, 'togglePanel(true)');
-    await sleep(400);
-    allViolations.push(...(await runAxe(cdp, axeSource, 'media-panel')));
+      // 1) Base chrome.
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'base-chrome')));
 
-    // 3) Privacy panel open (pShields() renders the Shields switches).
-    await evaluate(cdp, 'togglePrivacy(true)');
-    await sleep(400);
-    allViolations.push(...(await runAxe(cdp, axeSource, 'privacy-panel')));
+      // 2) Media panel open (media cards / iconBtn / media-pick controls render).
+      await evaluate(client, wcId, 'togglePanel(true)');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'media-panel')));
 
-    // 4) Lightbox open on a fixture image (dialog + transport controls render).
-    await evaluate(cdp, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
-    await sleep(400);
-    allViolations.push(...(await runAxe(cdp, axeSource, 'lightbox')));
+      // 3) Privacy panel open (pShields() renders the Shields switches).
+      await evaluate(client, wcId, 'togglePrivacy(true)');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'privacy-panel')));
+
+      // 4) Lightbox open on a fixture image (dialog + transport controls render).
+      await evaluate(client, wcId, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'lightbox')));
+    }
+  } finally {
+    await client.close();
   }
-
-  cdp.close();
 
   // ---------- partition: accepted (baseline) vs NEW, PER NODE (DD7) ----------
   // Explode every violation into per-node (id, selector, state) pairs and match

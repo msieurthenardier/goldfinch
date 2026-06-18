@@ -4,8 +4,8 @@ const { resolveContents, classifyContents } = require('./resolve');
 const { withDebuggerSession } = require('./cdp');
 // Trusted input via webContents.sendInputEvent (fires real handlers + native focus
 // traversal). MOUSE RECIPE NOTE: mouseMove→mouseDown→mouseUp is the known-good starting
-// sequence (mirrors the working CDP driver, cdp-driver.mjs:91-93); the live
-// click-on-guest reliability + guest coordinate space are confirmed/tuned in Leg 6.
+// sequence (mirrors the recipe proven by the Flight 1-3 CDP apparatus, since removed); the
+// live click-on-guest reliability + guest coordinate space are confirmed/tuned in Leg 6.
 //
 // DD8 NOTE: `scroll` now uses webContents.debugger via the shared cdp.js session helper
 // (operator-approved boundary crossing). sendInputEvent mouseWheel produced ZERO movement
@@ -115,9 +115,9 @@ function keyEvents(name, modifiers = []) {
  * Build the ordered mouse event array for a synthetic click.
  *
  * mouseMove → mouseDown (buttons:1) → mouseUp (buttons:0).
- * The `buttons` bitmask mirrors the working CDP recipe (cdp-driver.mjs:92-93)
- * so a page's `event.buttons` sees the press. Confirmed live in Flight-1 Leg 6
- * (cdp-driver smoke): the buttons bitmask makes a page's `event.buttons` see the press.
+ * The `buttons` bitmask mirrors the recipe proven by the Flight 1-3 CDP apparatus
+ * (since removed) so a page's `event.buttons` sees the press. Confirmed live in
+ * Flight-1 Leg 6: the buttons bitmask makes a page's `event.buttons` see the press.
  *
  * @param {number} x
  * @param {number} y
@@ -127,8 +127,8 @@ function keyEvents(name, modifiers = []) {
 function mouseClickEvents(x, y, { button = 'left', clickCount = 1 } = {}) {
   return [
     { type: 'mouseMove', x, y },
-    // buttons bitmask (1 down / 0 up) mirrors the working CDP recipe (cdp-driver.mjs:92-93)
-    // so a page's event.buttons sees the press. Confirmed live in Flight-1 Leg 6 (cdp-driver smoke).
+    // buttons bitmask (1 down / 0 up) mirrors the recipe proven by the Flight 1-3 CDP apparatus
+    // (since removed) so a page's event.buttons sees the press. Confirmed live in Flight-1 Leg 6.
     { type: 'mouseDown', x, y, button, clickCount, buttons: 1 },
     { type: 'mouseUp',   x, y, button, clickCount, buttons: 0 },
   ];

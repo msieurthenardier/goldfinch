@@ -1,11 +1,11 @@
 // Example MCP-SDK client for the RUNNING Goldfinch automation server (Flight 3 deliverable).
 //
 // WHAT THIS IS: a minimal, dependency-only-on-the-MCP-SDK consumer that connects to Goldfinch's
-// loopback Streamable-HTTP MCP server, lists its 17 tools, and drives a short end-to-end sequence
-// (open a tab → navigate → screenshot → read DOM). It is the SDK-client sibling of
-// `scripts/cdp-driver.mjs` and `scripts/a11y-audit.mjs` (same attach-don't-launch, Node-script
-// pattern) — but over the real MCP consumer path (the SDK client + StreamableHTTPClientTransport),
-// not raw CDP. It demonstrates the exact surface an external agent would use.
+// loopback Streamable-HTTP MCP server, lists its tools, and drives a short end-to-end sequence
+// (open a tab → navigate → screenshot → read DOM). It is the SDK-client successor to the Flight 1-3
+// CDP apparatus (since removed) and a sibling of `scripts/a11y-audit.mjs` (same attach-don't-launch,
+// Node-script pattern) — but over the real MCP consumer path (the SDK client +
+// StreamableHTTPClientTransport), not raw CDP. It demonstrates the exact surface an external agent would use.
 //
 // PRECONDITION: the app is running with the automation server exposed — `npm run dev:automation`
 // (`electron . --no-sandbox --automation-dev`). This script does NOT launch the app; it ATTACHES

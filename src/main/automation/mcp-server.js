@@ -145,6 +145,13 @@ const BODY_TOO_LARGE = Symbol('body-too-large');
  * match its validator) > default 49707 (DD1). A missing/invalid env value falls
  * through to the setting, and a missing/invalid/unavailable setting falls
  * through to the default — never throws.
+ *
+ * WARNING: `honorEnv` defaults to `true`, which HONORS the GOLDFINCH_MCP_PORT env var.
+ * Packaged/main-process callers MUST pass `honorEnv: !app.isPackaged` — forgetting it
+ * leaks the env override into a production build (a process-environment port override
+ * reachable in the installed binary, DD6). The env is a DEV-ONLY escape hatch; never
+ * let it reach production. All current callers are explicit — keep them so.
+ *
  * @param {() => { get: (k: string) => any }} [getSettings] lazy settings accessor.
  * @param {{ honorEnv?: boolean }} [opts] when `honorEnv` is false (packaged build,
  *   DD6), GOLDFINCH_MCP_PORT is NOT read — the port comes from the setting/default
@@ -318,7 +325,7 @@ function createMcpServer(opts = {}) {
   const sessions = new Map();
 
   /**
-   * Build a fresh MCP Server with the 17 tools wired over a per-session,
+   * Build a fresh MCP Server with the 21 tools wired over a per-session,
    * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
    *   - wrapped by scopeEngine(engine, identity, ctx) — admin → unchanged; jar →

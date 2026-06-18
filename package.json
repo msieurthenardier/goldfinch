@@ -1,6 +1,6 @@
 {
   "name": "goldfinch",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
   "author": "msieurthenardier <msieurthenardier@gmail.com>",
@@ -8,7 +8,6 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
-    "dev:debug": "electron . --enable-logging --no-sandbox --remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222",
     "dev:automation": "electron . --enable-logging --no-sandbox --automation-dev",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",

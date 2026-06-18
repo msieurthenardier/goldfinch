@@ -56,7 +56,7 @@ synthetic events faithfully model "a user can actually open these tabs and see w
   `click(wcId, x, y)` located via a `captureWindow()` screenshot. There are no CSS selectors over
   the MCP surface; the pill's `+`/`▾`, the container menu entries, and the tab buttons are all
   located by reading a `captureWindow()` frame.
-- **Active precondition probe** (Step 1): confirm `tools/list` shows 17 tools including
+- **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId` before exercising
   anything.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify — it launches its
@@ -83,7 +83,7 @@ synthetic events faithfully model "a user can actually open these tabs and see w
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count via `readAxTree(wcId)`. | `tools/list` returns **17 tools** including `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Note the current tab count via `readAxTree(wcId)`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId` and the tab count. If not, halt — preconditions not met. |
 | 2 | Inspect the control region **immediately to the right of the open tabs** (between the tabs and the draggable region / window controls) via `readAxTree(wcId)` / `readDom(wcId)` and a `captureWindow()` screenshot. | A single **pill-shaped control with the golden (`--accent`) background** sits **immediately to the right of the open tabs** (adjacent/hugging them, left-aligned in the strip — not at the far-right window-controls end). It contains two operable controls: a **new-tab** button (accessible name ≈ "New tab") and a **container/menu** button (accessible name ≈ "New tab in a container", `aria-haspopup="menu"`, `aria-expanded="false"`). [a11y] |
 | 3 | **Mouse — new tab:** take a `captureWindow()` screenshot to locate the `+` (new-tab) control, then `click(wcId, x, y)` on it. | Tab count increases by exactly one; the new tab becomes active. The new tab has **no** jar dot (default container — confirmed via `readDom(wcId)`). |
 | 4 | **Mouse — container tab:** locate the `▾` (container) control via `captureWindow()` and `click(wcId, x, y)` on it; in the menu that opens, locate a **named container** entry (not the default) via a fresh `captureWindow()` and `click(wcId, x, y)` on it. | The `▾` control's `aria-expanded` was `true` while the menu was open (via `readAxTree(wcId)`); choosing a container opens a new tab whose strip button shows a **jar dot** (`.tab-jar`, via `readDom(wcId)`) matching that container's color. Tab count increased by one. |
