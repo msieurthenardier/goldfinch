@@ -4,10 +4,13 @@
 
 # Goldfinch
 
-A Chromium-based desktop browser (built on Electron) with the standard browsing
-essentials **plus an expandable media panel** that catalogs every image, video,
-audio file, and embed on the current page so you can preview, play, or download
-each one independently.
+A Chromium-based desktop browser (built on Electron) built around **privacy**
+(Shields, fingerprint farbling, container jars), **operator control** (per-site
+policy, persistent preferences, a settings surface for every meaningful toggle),
+and **AI-automatability** (a gated, loopback-only, MCP-compatible automation
+surface). It also ships an expandable media panel that catalogs every image,
+video, audio file, and embed on the current page so you can preview, play, or
+download each one independently.
 
 ## Download
 
@@ -111,6 +114,13 @@ or download **v0.5.1** directly:
   - **Download** any item individually — using the page's own session so
     cookies/referer/auth are preserved — or **Download all** in the current
     filter into a folder (one prompt, silent concurrency-capped batch).
+- **Automation surface** (MCP-compatible, loopback-only): exposes drive, observe,
+  and eval tools over a Streamable HTTP interface bound to `127.0.0.1`. **Off by
+  default** — the operator enables it via the **Settings `automationEnabled`
+  toggle** (`goldfinch://settings` → Automation). Once enabled, every request
+  must carry a per-jar API key. The surface is strictly local; no remote or
+  background driving. See [`docs/mcp-automation.md`](docs/mcp-automation.md) for
+  the full consumer reference.
 
 ## Run
 

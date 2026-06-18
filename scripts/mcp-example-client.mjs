@@ -13,8 +13,15 @@
 // (Note: the automation surface is dev-gated and ships in no release before Flight 4.)
 //
 // Usage:
-//   npm run dev:automation                              # in one terminal: start the app + server
-//   node scripts/mcp-example-client.mjs                 # in another: run this client
+//   GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation   # terminal 1: start app + server; mints a
+//                                                            #   dev key, printed as AUTOMATION_DEV_MINT
+//   GOLDFINCH_MCP_KEY=<per-jar-key> node scripts/mcp-example-client.mjs   # terminal 2: run client (the
+//                                                                        #   client is what needs the key)
+//
+//   To get a per-jar key:
+//     • Production: Settings → Keys UI → create a per-jar key.
+//     • Dev: launch with GOLDFINCH_AUTOMATION_DEV_MINT=1 and read the AUTOMATION_DEV_MINT line
+//       from the server log (see docs/mcp-automation.md "Dogfooding / dev key acquisition").
 //
 // Endpoint override (mirrors the server's own GOLDFINCH_MCP_PORT contract in mcp-server.js):
 //   GOLDFINCH_MCP_PORT=8888 node scripts/mcp-example-client.mjs       # compose against another port
@@ -23,6 +30,20 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+// Read the per-jar key — required; the server rejects every request (incl. initialize) without it.
+// To get a key: Settings → Keys UI (production) or read the AUTOMATION_DEV_MINT log line (dev —
+// launch with GOLDFINCH_AUTOMATION_DEV_MINT=1; see docs/mcp-automation.md).
+const key = process.env.GOLDFINCH_MCP_KEY;
+if (!key) {
+  console.error(
+    'GOLDFINCH_MCP_KEY is not set. This script requires a per-jar key.\n' +
+      '  • Production: Settings → Keys UI → create a per-jar key.\n' +
+      '  • Dev: launch with GOLDFINCH_AUTOMATION_DEV_MINT=1 and read the AUTOMATION_DEV_MINT\n' +
+      '    line from the server log (see docs/mcp-automation.md "Dogfooding / dev key acquisition").'
+  );
+  process.exit(1);
+}
 
 // Resolve the endpoint: GOLDFINCH_MCP_URL (full URL) wins; else compose from GOLDFINCH_MCP_PORT
 // (the same env var mcp-server.js's resolvePort honors), defaulting to the documented :49707/mcp.
@@ -56,16 +77,20 @@ function printResult(label, result) {
 
 async function main() {
   const client = new Client({ name: 'goldfinch-example-client', version: '1.0.0' });
-  const transport = new StreamableHTTPClientTransport(endpoint);
+  // Attach the per-jar Bearer key on the transport — required by the Flight-4+ key gate.
+  // This is the exact pattern an external consumer copies (no internal helpers needed).
+  const transport = new StreamableHTTPClientTransport(endpoint, {
+    requestInit: { headers: { Authorization: 'Bearer ' + key } },
+  });
 
   console.log(`Connecting to ${endpoint.href} …`);
   await client.connect(transport); // performs the MCP initialize handshake
 
   try {
-    // 1) Discover: list the tools the server advertises (expect the 17 Goldfinch tools).
-    //    This client connects without auth — listTools is not identity-filtered, so all 17 tools
-    //    appear in discovery. getChromeTarget (the 17th) is admin-only and only *callable* by an
-    //    admin-keyed client; calling it unauthenticated will be refused at the handler level.
+    // 1) Discover: list the tools the server advertises (expect the 21 Goldfinch tools).
+    //    listTools is not identity-filtered, so all 21 tools appear in discovery even with a
+    //    per-jar key. getChromeTarget (the 21st) is admin-only and is refused for a jar key
+    //    because the jar key lacks admin scope — it is not called by this example.
     const { tools } = await client.listTools();
     console.log(`\nTools (${tools.length}):`);
     for (const t of tools) console.log(`  - ${t.name}`);
@@ -128,5 +153,6 @@ function parseWcId(result) {
 main().catch((err) => {
   console.error('Example client failed:', err?.message ?? err);
   console.error('Is the app running with `npm run dev:automation`?');
+  console.error('If GOLDFINCH_MCP_KEY is set but rejected, the key may be wrong or revoked.');
   process.exit(1);
 });
