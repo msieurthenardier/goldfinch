@@ -61,7 +61,11 @@ const els = {
   siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup')),
   automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
   automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge')),
-  zoomChip: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-chip'))
+  zoomControl: /** @type {HTMLElement} */ (document.getElementById('zoom-control')),
+  zoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-out')),
+  zoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-in')),
+  zoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-reset')),
+  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -570,7 +574,7 @@ function activateTab(id) {
   }
   els.address.value = tab.url || '';
   updateAddressChip(tab);
-  renderZoomChip(tab.wcId != null ? (zoomFactors.get(tab.wcId) ?? 1.0) : 1.0);
+  refreshZoomControl(tab);
   renderMedia();
   renderPrivacy();
   updateNavButtons();
@@ -666,6 +670,12 @@ function wireWebview(tab) {
       /* not ready */
     }
     updateNavButtons();
+    // On the active tab, mount the in-bar zoom control into its faded-but-hoverable
+    // steady state now that wcId is live. activateTab() ran at createTab() time with
+    // tab.wcId still null (refreshZoomControl early-returns to .hidden then), so without
+    // this the control stays display:none — and thus un-hoverable — until the first
+    // zoom-changed event. Refresh here so address-bar hover reveals it from initial load.
+    if (tab.id === activeTabId) refreshZoomControl(tab);
     // If the Shields panel was opened before this webview's dom-ready, tab.wcId was
     // null when fetchCookies() first ran (it early-returns on null wcId), leaving the
     // Cookies section stuck on "Loading…". Now that wcId is set, fetch them.
@@ -1627,36 +1637,66 @@ window.goldfinch.onSettingsChanged((all) => {
 /* ------------------------------------------------------------------ page zoom */
 
 // Last-known zoom factor per webContents id (default 1.0). Main owns the capture
-// (DD1/DD6) and pushes zoom-changed; we mirror it here so the chip can reflect the
-// active tab's level and refresh on tab switch. Stale entries after a tab closes
-// are harmless (never re-read).
+// (DD1/DD6) and pushes zoom-changed; we mirror it here so the in-bar zoom control can
+// reflect the active tab's level and refresh on tab switch. Stale entries after a tab
+// closes are harmless (never re-read).
 /** @type {Map<number, number>} */
 const zoomFactors = new Map();
 
-/** Hide the chip at 100%, else show the rounded percentage. @param {number} factor */
-function renderZoomChip(factor) {
-  if (factor === 1.0) {
-    els.zoomChip.classList.add('hidden');
-    els.zoomChip.textContent = '';
+// Timer that clears the post-change "peek" reveal of the zoom control. Cleared and
+// restarted on each zoom change so back-to-back changes keep the control visible.
+/** @type {ReturnType<typeof setTimeout>|null} */
+let zoomPeekTimer = null;
+const ZOOM_PEEK_MS = 1500;
+
+/**
+ * Sync the in-address-bar zoom control to a tab: hide it entirely on internal tabs,
+ * else show the active tab's live factor as a percentage (always — even at 100%).
+ * Visibility/fade is CSS-driven (hover / focus-within / .zoom-control--peek); this
+ * only sets the percentage text and the internal-tab hidden state.
+ * @param {Tab|null} tab
+ */
+function refreshZoomControl(tab) {
+  if (!tab || isInternalTab(tab) || tab.wcId == null) {
+    els.zoomControl.classList.add('hidden');
     return;
   }
-  els.zoomChip.textContent = Math.round(factor * 100) + '%';
-  els.zoomChip.classList.remove('hidden');
+  els.zoomControl.classList.remove('hidden');
+  const factor = zoomFactors.get(tab.wcId) ?? 1.0;
+  const pct = Math.round(factor * 100) + '%';
+  els.zoomPercent.textContent = pct;
+  els.zoomPercent.setAttribute('aria-label', `Current zoom ${pct}`);
 }
 
 window.goldfinch.onZoomChanged(({ wcId, factor }) => {
   zoomFactors.set(wcId, factor);
   const t = activeTab();
-  if (t && t.wcId === wcId) renderZoomChip(factor);
+  if (t && t.wcId === wcId) {
+    refreshZoomControl(t);
+    // Briefly reveal the control after a change, then fade out. Hover/focus-within
+    // CSS rules still win while the peek is active, so the control stays put if the
+    // pointer is over the bar or a button holds focus.
+    els.zoomControl.classList.add('zoom-control--peek');
+    if (zoomPeekTimer) clearTimeout(zoomPeekTimer);
+    zoomPeekTimer = setTimeout(() => {
+      els.zoomControl.classList.remove('zoom-control--peek');
+      zoomPeekTimer = null;
+    }, ZOOM_PEEK_MS);
+  }
 });
 
-// Native button activation synthesizes a click on Enter/Space — keyboard-operable
-// without a separate keydown handler.
-els.zoomChip.addEventListener('click', () => {
+// −/+/reset reuse the leg-1 zoom-apply IPC. Native button activation synthesizes a
+// click on Enter/Space, so these are keyboard-operable without a separate keydown
+// handler. All guarded by an active, non-internal tab with a live wcId.
+/** @param {'in'|'out'|'reset'} action */
+function applyTabZoom(action) {
   const t = activeTab();
   if (!t || isInternalTab(t) || t.wcId == null) return;
-  window.goldfinch.zoomApply({ webContentsId: t.wcId, action: 'reset' });
-});
+  window.goldfinch.zoomApply({ webContentsId: t.wcId, action });
+}
+els.zoomOut.addEventListener('click', () => applyTabZoom('out'));
+els.zoomIn.addEventListener('click', () => applyTabZoom('in'));
+els.zoomReset.addEventListener('click', () => applyTabZoom('reset'));
 
 function currentSite() {
   const tab = activeTab();

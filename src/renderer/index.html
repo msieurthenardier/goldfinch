@@ -63,6 +63,17 @@
           autocomplete="off"
           aria-label="Address and search bar"
         />
+        <!-- In-address-bar page-zoom control (HAT redesign, replaces the old toolbar #zoom-chip).
+             Right-justified inside the rounded address field. Faded out at steady state; revealed
+             on #address-wrap:hover / :focus-within and briefly after each zoom change (.zoom-control--peek).
+             Hidden entirely on internal goldfinch:// tabs. The − / % / + / reset reuse the leg-1
+             zoom-apply IPC; the % reflects the active tab's live factor (shown even at 100%). -->
+        <div id="zoom-control" aria-hidden="false">
+          <button id="zoom-out" class="zoom-btn" type="button" aria-label="Zoom out">−</button>
+          <span id="zoom-percent" role="status" aria-live="off">100%</span>
+          <button id="zoom-in" class="zoom-btn" type="button" aria-label="Zoom in">+</button>
+          <button id="zoom-reset" class="zoom-btn" type="button" title="Reset zoom to 100%" aria-label="Reset zoom to 100%">⟳</button>
+        </div>
       </div>
       <!-- Icons: Lucide (ISC license) — inline SVG path data, CSP-safe -->
       <button id="toggle-media" class="icon-btn" title="Toggle media panel (Ctrl+M)" aria-label="Media" aria-expanded="false">
@@ -73,10 +84,6 @@
         <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
         <span id="privacy-count" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
-      <!-- Page-zoom level chip (DD2). Hidden at 100%; shows the percentage when ≠ 100%;
-           click (or Enter/Space, native button activation) resets the active tab to 100%.
-           Self-manages .hidden from zoom-changed (NOT pinnable — applyToolbarPins ignores it). -->
-      <button id="zoom-chip" class="icon-btn hidden" type="button" aria-label="Zoom level, click to reset"></button>
       <!-- Automation session indicator (SC10/DD6). Always present, hidden until ≥1 session
            is connected; self-manages .hidden via the live activity snapshot (NOT a pinnable
            item — applyToolbarPins must never touch it). -->

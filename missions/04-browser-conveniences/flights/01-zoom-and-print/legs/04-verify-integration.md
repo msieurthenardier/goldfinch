@@ -1,6 +1,6 @@
 # Leg: verify-integration
 
-**Status**: landed (Part A — docs + regression — complete; Parts B & C OUTSTANDING, Flight-Director/operator-gated — see flight-log Leg 04 entry)
+**Status**: completed (Part A docs+regression; Part B behavior tests + a11y live-verified; Part C native-print operator-confirmed + internal-tab steps HAT-confirmed — see flight-log + `hat-and-alignment`)
 **Flight**: [Core Conveniences — Zoom & Print](../flight.md)
 
 ## Objective

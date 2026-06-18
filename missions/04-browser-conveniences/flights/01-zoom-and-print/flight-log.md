@@ -55,6 +55,16 @@ Flight in execution via `/agentic-workflow`. Log entries appended during executi
   unit-proven). Added mid-flight leg `05-jar-scope-parity` (adaptive planning — scope grew when live
   verification caught the façade gap; rationale in Anomalies).
 
+- **2026-06-18 — HAT complete; flight fully landed.** Operator confirmed SC2 native print dialog →
+  Save-as-PDF. Ran the optional `hat-and-alignment` leg: all checkpoints passed. Two changes landed
+  during the HAT — (1) **alignment**: the toolbar zoom chip reworked into an **in-address-bar zoom
+  control** `[−] % [+] ⟳` (hover-reveal/auto-fade, available at 100%, inert on internal tabs) per
+  operator request; (2) **bug fix**: the new control didn't reveal on hover until the first zoom change
+  (mounted `display:none` before `wcId` landed) — fixed by refreshing on `dom-ready`. Internal-tab no-op
+  (zoom + print) HAT-confirmed on `goldfinch://settings` (the automation-unreachable case). All legs
+  (1–6) complete; `npm test` 803/803, lint/typecheck clean. HAT changes committed; PR #58 → ready for
+  review. Flight debrief (`/flight-debrief`) will transition the flight to `completed`.
+
 ---
 
 ## Leg Progress
@@ -299,6 +309,74 @@ ops were already admin-callable; this leg only restores the intended jar-scoped 
   membership test now exercises the three ops).
 - `npm run lint` — clean. `npm run typecheck` — clean.
 - Zero new runtime dependencies.
+
+---
+
+### Leg 06 — `hat-and-alignment` (HAT-alignment, 2026-06-18, UNCOMMITTED)
+
+**Scope:** Operator HAT-alignment change on top of the landed flight. Redesigned the zoom indicator from
+the leg-1 toolbar `#zoom-chip` (hidden at 100%, click-to-reset) into a richer **in-address-bar zoom
+control**. Renderer/markup/CSS-only — **no change** to the keyboard `Ctrl +/-/0` capture (main-side
+`before-input-event`) or the `zoom-changed`/`zoom-apply` IPC; the leg-1 IPC is reused verbatim.
+
+**What changed:**
+- `src/renderer/index.html` — removed the toolbar `#zoom-chip` button; added `#zoom-control` **inside**
+  `#address-wrap` (right-justified inside the rounded address field). Layout L→R: zoom-out `−`, live
+  `#zoom-percent` text, zoom-in `+`, reset `⟳` (matching the toolbar `#reload` glyph convention). Each
+  button has an `aria-label` ("Zoom out" / "Zoom in" / "Reset zoom to 100%"); the `%` span carries a live
+  `aria-label` ("Current zoom 125%").
+- `src/renderer/styles.css` — removed the `#zoom-chip` rule. Added `#zoom-control` (absolute, right edge,
+  `z-index:2`) + `.zoom-btn` + `#zoom-percent`. **Visibility is CSS-driven**: steady state is `opacity:0;
+  pointer-events:none` (faded + inert, even at 100%); revealed by `#address-wrap:hover`,
+  `#address-wrap:focus-within`, `#zoom-control:focus-within` (keyboard users can reach −/%/+/reset without
+  it fading), and `.zoom-control--peek` (post-change flash). `transition: opacity .25s` for the fade; each
+  reveal restores `pointer-events:auto`. `#zoom-control.hidden { display:none }` for internal tabs.
+  `:focus-visible` ring on every button. `#address` right-padding bumped to `132px` so long URLs don't
+  slide under the revealed control.
+- `src/renderer/renderer.js` — replaced `renderZoomChip` with `refreshZoomControl(tab)`: hides the control
+  entirely on internal/no-wcId tabs, else shows the active tab's live factor **always** (incl. `100%`).
+  `onZoomChanged` now refreshes the control and adds `.zoom-control--peek`, clearing/restarting a single
+  `~1.5s setTimeout` so back-to-back changes keep it visible; hover/focus CSS rules win over the peek. The
+  −/+/reset buttons call `applyTabZoom('out'|'in'|'reset')` → `zoomApply({ webContentsId, action })`, all
+  guarded by `activeTab()` present, `!isInternalTab(t)`, `t.wcId != null`. `els` gained
+  `zoomControl/zoomOut/zoomIn/zoomReset/zoomPercent`; `zoomChip` removed. (The pre-existing lightbox
+  `applyZoom()` is unrelated — the new function is named `applyTabZoom` to avoid the collision.)
+
+**Visibility logic (summary):** faded-out steady state → reveal on address-bar hover OR focus-within (bar
+or control) OR a 1.5s peek after each zoom change; internal tabs hide it entirely (`display:none`). Hover
+and focus-within always override the fade so keyboard navigation never loses the control.
+
+**Internal tabs:** `refreshZoomControl` adds `.hidden` when `isInternalTab(tab)` (or `wcId == null`), and
+the −/+/reset handlers no-op on internal tabs (`applyTabZoom` guard) — mirroring the leg-1 chip behavior.
+
+**Test results:**
+- `npm test` — **803 pass / 0 fail / 0 skipped** (renderer change; no test deltas — UI behavior is
+  verified live, not in the unit suite per the project's test policy).
+- `npm run lint` — clean. `npm run typecheck` — clean.
+- `npm run a11y` — **NOT RUN / re-check needed.** The harness needs a dedicated
+  `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation` launch + an exported
+  `GOLDFINCH_MCP_ADMIN_KEY`. The app instance running during this session was launched plain (`npm run dev`,
+  no automation surface, no mint) and holds the operator's window, which won't hot-reload these renderer
+  changes — running the audit would either need the operator's instance disturbed or would audit stale,
+  unmodified chrome. Flagged for the Flight Director to run after relaunch. Per the leg brief, the
+  un-runnable a11y harness is **not** a leg failure; the unit suite was run instead (green).
+- Zero new runtime dependencies. Keyboard `Ctrl +/-/0` capture and `zoom-changed`/`zoom-apply` IPC
+  untouched (renderer/markup/CSS only).
+
+**HAT bug-fix (2026-06-18, UNCOMMITTED) — zoom control did not reveal on hover until the first zoom
+change.** Operator HAT found the in-bar `#zoom-control` would only appear on address-bar hover *after* the
+first `Ctrl+`/`zoom-changed` event on a fresh page load. **Root cause:** `refreshZoomControl(tab)`
+early-returns and adds `.hidden` (`display:none !important`, which cannot receive `:hover`) when
+`tab.wcId == null`. At startup, `createTab()` calls `activateTab()` synchronously while `tab.wcId` is still
+null (it lands later at the webview's `dom-ready`), so the control mounted `.hidden`. Nothing re-ran
+`refreshZoomControl` after `dom-ready`, so the control stayed `display:none` — un-hoverable — until the
+first `zoom-changed` (the only other refresh path for the active tab) removed `.hidden`. **Fix
+(renderer-only):** in `wireWebview`'s `dom-ready` handler (`src/renderer/renderer.js`), after setting
+`tab.wcId`, call `refreshZoomControl(tab)` for the active tab. This mounts the control into its
+faded-but-hoverable steady state (`opacity:0; pointer-events:none`, still in layout — already correct in
+CSS, no CSS change needed) from initial load. Internal `goldfinch://` tabs remain `display:none` via the
+unchanged `isInternalTab` guard. `npm test` 803 pass / 0 fail; `npm run lint` clean; `npm run typecheck`
+clean. No change to main.js / IPC / automation.
 
 ---
 
