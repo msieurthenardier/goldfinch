@@ -16,7 +16,7 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **21 tools** — 12 drive tools, 4
+binds to **loopback only** (`127.0.0.1`), and advertises **24 tools** — 15 drive tools, 4
 observe tools, 2 eval tools, 2 devtools tools, and 1 admin chrome-discovery tool. Tools are a thin adapter over Goldfinch's
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
@@ -287,7 +287,8 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
     *says* another jar but whose session is in-jar **is** included; a tab labelled in-jar but whose
     session is elsewhere is **excluded**.
   - Every tab-targeting op (`closeTab`, `activateTab`, `navigate`, `goBack`, `goForward`, `reload`,
-    `click`, `typeText`, `scroll`, `pressKey`, `captureScreenshot`, `readDom`, `readAxTree`) refuses
+    `click`, `typeText`, `scroll`, `pressKey`, `getZoom`, `setZoom`, `printToPDF`,
+    `captureScreenshot`, `readDom`, `readAxTree`) refuses
     an out-of-jar `wcId` with an `automation: out-of-jar` error.
   - **Burner tabs are unautomatable.** A burner jar (`burner:N`) is renderer-only and matches no
     persistent jar — its tabs are dropped from `enumerateTabs` and refused on every op. No key can be
@@ -319,11 +320,11 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 21 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
+All 24 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`.
 
-### Drive tools (12)
+### Drive tools (15)
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
@@ -339,6 +340,15 @@ or (for the chrome renderer) `getChromeTarget`.
 | `typeText` | `{ wcId: integer, text: string }` *(required)* | JSON text `{"ok":true}` — types char-by-char into the focused element (for named keys, use `pressKey`) |
 | `scroll` | `{ wcId: integer, x: number, y: number, dx: number, dy: number }` *(required)* | JSON text `{"ok":true}` — synthetic wheel event at `(x, y)` by pixel deltas `(dx, dy)` |
 | `pressKey` | `{ wcId: integer, name: string, modifiers?: ("control"\|"shift"\|"alt"\|"meta")[] }` *(`wcId` required; `name` or its alias `key` required)* | JSON text `{"ok":true}` — presses one key, optionally as a modifier chord. Known `name` values: `Tab, Enter, Escape, Space, ArrowRight, ArrowLeft, ArrowDown, ArrowUp, Home, End, Delete, Backspace, ShiftTab`, **or a single printable letter/digit** (e.g. `"M"`, `"1"`) for chord use. Pass `modifiers` to hold modifier keys during the press — accepted values are `control`, `shift`, `alt`, `meta`. **Example — Ctrl+M:** `{ "wcId": 42, "name": "M", "modifiers": ["control"] }`; **Ctrl+Shift+P:** `{ "wcId": 42, "name": "P", "modifiers": ["control", "shift"] }`. An unknown modifier is rejected (the call errors) rather than silently dropped. |
+| `getZoom` | `{ wcId: integer }` *(required)* | JSON text: `{"factor":n}` — the tab's current page zoom factor (`1.0` = 100%) |
+| `setZoom` | `{ wcId: integer, factor: number }` *(required)* | JSON text: the applied `{"factor":n}` — `factor` is clamped to `[0.25, 5.0]`, so the returned value may differ from the requested one |
+| `printToPDF` | `{ wcId: integer }` *(required)* | JSON text: a base64-encoded PDF string. Foreground-first (a backgrounded tab is activated before rendering). Decode the base64 and verify it begins with `%PDF-` |
+
+> **Security invariant — internal session always excluded.** `getZoom`, `setZoom`, and `printToPDF`
+> refuse the internal `goldfinch://settings` session with an op-local
+> `automation: <op> — internal-session excluded` refusal **before** touching the page, regardless of
+> identity (admin included) — matching the eval/devtools internal-exclusion guards. Page zoom and
+> print are web-content affordances; the privileged internal chrome is never a target.
 
 ### Observe tools (4)
 
@@ -421,8 +431,10 @@ from *genuine errors*:
 - **JSON text** — every other tool returns one text block whose `text` is JSON. Void ops
   (`navigate`, `goBack`, `goForward`, `reload`, `click`, `typeText`, `scroll`, `pressKey`)
   serialize to the single consistent shape `{"ok":true}`. Ops with a real return value
-  (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `readDom`, `readAxTree`) serialize their
-  actual value (array / number / boolean / `null` / object).
+  (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `getZoom`, `setZoom`, `printToPDF`,
+  `readDom`, `readAxTree`) serialize their
+  actual value (array / number / boolean / `null` / object / string — `getZoom`/`setZoom` return
+  `{factor}`, `printToPDF` returns a base64 string).
 - **Refusal-as-normal-result** — two outcomes are **normal results the agent should read and react
   to**, *not* errors:
   - `openTab` returning `null` (URL rejected renderer-side, or no handle within the timeout).

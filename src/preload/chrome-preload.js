@@ -54,6 +54,16 @@ contextBridge.exposeInMainWorld('goldfinch', {
   jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),
   identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
 
+  // --- page zoom ---
+  zoomApply: ({ webContentsId, action }) => ipcRenderer.send('zoom-apply', { webContentsId, action }),
+  onZoomChanged: (cb) => ipcRenderer.on('zoom-changed', (_e, d) => cb(d)),
+  // Query the guest's live engine zoom factor (request/response). Authoritative source
+  // for the address-bar label — distinct from the automation `getZoom` MCP tool.
+  getZoom: ({ webContentsId }) => ipcRenderer.invoke('get-zoom', { webContentsId }),
+
+  // --- native print (Save-as-PDF is a destination in the OS dialog) ---
+  print: ({ webContentsId }) => ipcRenderer.send('print', { webContentsId }),
+
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),

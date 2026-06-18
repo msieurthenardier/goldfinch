@@ -70,6 +70,14 @@ interface GoldfinchBridge {
   automationGetActivity(): Promise<AutomationActivity>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): void;
 
+  // --- page zoom ---
+  zoomApply(payload: { webContentsId: number; action: string }): void;
+  onZoomChanged(cb: (d: { wcId: number; factor: number }) => void): void;
+  getZoom(payload: { webContentsId: number }): Promise<number | null>;
+
+  // --- native print ---
+  print(payload: { webContentsId: number }): void;
+
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
   jarsAdd(payload: any): Promise<any>;

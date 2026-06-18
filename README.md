@@ -148,10 +148,17 @@ released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for th
 | `Ctrl+M`        | Toggle media panel  |
 | `Ctrl+Shift+P`  | Toggle privacy panel|
 | `Ctrl+R`        | Reload              |
+| `Ctrl +`        | Zoom in (page content) |
+| `Ctrl -`        | Zoom out (page content) |
+| `Ctrl 0`        | Reset zoom (100%)   |
+| `Ctrl+P`        | Print / save as PDF |
 | `←` / `→`       | Move between tabs (when a tab is focused) |
 | `Home` / `End`  | First / last tab    |
 | `Delete` / `Backspace` | Close the focused tab |
 | `Esc`           | Close an open menu / panel |
+
+Zoom shows a chip in the toolbar when the level is not 100%, and applies to web
+content only (not `goldfinch://` internal pages).
 
 ## Architecture
 

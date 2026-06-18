@@ -85,10 +85,12 @@ function keyEvents(name, modifiers = []) {
   const intrinsic = [];
   if (name === 'ShiftTab') { keyCode = 'Tab'; intrinsic.push('shift'); }
   else if (KEY_MAP[name]) { keyCode = KEY_MAP[name]; }
-  else if (typeof name === 'string' && /^[a-z0-9]$/i.test(name)) {
-    // Single printable letter/digit → Electron Accelerator keyCode for chord use.
-    // Letters use the uppercase form (Accelerator convention); digits stay as-is.
-    keyCode = name.toUpperCase();
+  else if (typeof name === 'string' && /^[a-z0-9=+-]$/i.test(name)) {
+    // Single printable letter/digit/zoom-symbol → Electron Accelerator keyCode for chord use.
+    // Letters use the uppercase form (Accelerator convention); digits stay as-is; the zoom
+    // symbols (=/-/+) are case-invariant so they flow through as their literal character
+    // (so Ctrl+= for zoom-in builds correctly — the keyboard zoom behavior test needs this).
+    keyCode = /[a-z]/i.test(name) ? name.toUpperCase() : name;
   }
   if (!keyCode) throw new Error(
     'automation: unknown key ' + name +

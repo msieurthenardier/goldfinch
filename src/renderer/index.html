@@ -42,6 +42,7 @@
     <div id="container-menu" class="hidden" role="menu" aria-label="Open new tab in a container"></div>
     <div id="kebab-menu" class="hidden" role="menu" aria-label="More menu">
       <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
+      <button id="kebab-print" class="cm-item" role="menuitem" tabindex="-1">Print…</button>
       <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
     </div>
     <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
@@ -62,6 +63,17 @@
           autocomplete="off"
           aria-label="Address and search bar"
         />
+        <!-- In-address-bar page-zoom control (HAT redesign, replaces the old toolbar #zoom-chip).
+             Right-justified inside the rounded address field. Faded out at steady state; revealed
+             on #address-wrap:hover / :focus-within and briefly after each zoom change (.zoom-control--peek).
+             Hidden entirely on internal goldfinch:// tabs. The − / % / + / reset reuse the leg-1
+             zoom-apply IPC; the % reflects the active tab's live factor (shown even at 100%). -->
+        <div id="zoom-control" aria-hidden="false">
+          <button id="zoom-out" class="zoom-btn" type="button" aria-label="Zoom out">−</button>
+          <span id="zoom-percent" role="status" aria-live="off">100%</span>
+          <button id="zoom-in" class="zoom-btn" type="button" aria-label="Zoom in">+</button>
+          <button id="zoom-reset" class="zoom-btn" type="button" title="Reset zoom to 100%" aria-label="Reset zoom to 100%">⟳</button>
+        </div>
       </div>
       <!-- Icons: Lucide (ISC license) — inline SVG path data, CSP-safe -->
       <button id="toggle-media" class="icon-btn" title="Toggle media panel (Ctrl+M)" aria-label="Media" aria-expanded="false">
