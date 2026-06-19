@@ -1,6 +1,6 @@
 # Flight: Find in Page
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria

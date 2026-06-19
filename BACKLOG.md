@@ -75,7 +75,7 @@ is a **native view the main process positions** in the window — the same model
 Views tree. Migrating aligns Goldfinch with the supported architecture and unlocks capabilities
 `<webview>` structurally cannot provide.
 
-### Why (the evidence — it has bitten twice)
+### Why (the evidence — it has bitten three times)
 1. **Extensions (M03 planning).** Chrome-extension support in Electron is weakest for `<webview>`
    guests — content-script injection and several `chrome.*` APIs have gaps with the tag. (Tier 3
    future mission.)
@@ -84,6 +84,17 @@ Views tree. Migrating aligns Goldfinch with the supported architecture and unloc
    region for the DevTools front-end. M04 ships DevTools as a **native detached/docked window** as a
    result (see M04 `SC5`); integrated, in-window docked DevTools would come essentially "for free"
    post-migration via `setDevToolsWebContents` into a composed view.
+3. **Find-in-page event delivery (M04 Flight 2 — Deviation D1).** Chromium delivers the
+   `found-in-page` event **only to the renderer-side `<webview>` DOM element, never to the
+   corresponding main-process `webContents`** for guests. The automation `findInPage` op therefore
+   could not observe its own find result main-side and had to be rebuilt to route through the chrome
+   renderer via `chromeContents.executeJavaScript` on the tag — a working but indirect path, plus a
+   WSLg cold-start retry workaround (see M04 Flight-2 debrief / Known Issue). With `WebContentsView`,
+   each tab is a real main-process `webContents` the embedder owns, so `webContents.on('found-in-page')`
+   would fire directly — no renderer round-trip, and the cold-start workaround likely disappears. Same
+   class of constraint as docked DevTools: the renderer-DOM guest hides behavior the main process
+   should own. (Generalize: any `<webview>`-guest DOM event the automation surface needs to observe —
+   selection, paint-timing, future media events — hits this same wall today.)
 
 The difference is exactly Chrome's mechanism: the embedder that **owns the native view tree** can
 lay out the page contents and the DevTools front-end side-by-side in one window. `<webview>` puts the
