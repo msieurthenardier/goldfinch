@@ -600,6 +600,17 @@ function activateTab(id) {
   renderPrivacy();
   updateNavButtons();
 
+  // Tab-scoped toolbar disable (HAT polish). The pinnable buttons (Media, Shields,
+  // DevTools) act on the active tab's web content, so they are functionally inert on
+  // goldfinch:// internal tabs. Drive the native `disabled` property from the active
+  // tab type so the existing `.icon-btn:disabled` style dims them automatically.
+  // This is SEPARATE from applyToolbarPins (pin-driven visibility, DD5) — disabled
+  // state is tab-activation-driven. Switching back to a web tab re-enables all three.
+  const internal = isInternalTab(tab);
+  els.toggleMedia.disabled = internal;
+  els.togglePrivacy.disabled = internal;
+  els.toggleDevtools.disabled = internal;
+
   // DevTools pressed-state reconcile (DD3 rebuild trigger (b): tab activation).
   // Query the newly-active tab's live open state; the activeTabId === tab.id re-check
   // guards the async isDevtoolsOpen promise against a fast double-switch painting the

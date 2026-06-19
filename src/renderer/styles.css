@@ -1134,6 +1134,7 @@ a:focus-visible {
    Flex centering aligns the SVG glyph within the button box. */
 #toggle-media,
 #toggle-privacy,
+#toggle-devtools,
 #automation-indicator {
   position: relative;
   width: 36px; /* slightly wider than the 32px default to give the badge room */
@@ -1177,6 +1178,17 @@ a:focus-visible {
 #toggle-privacy.alert .tb-badge {
   background: #ff6b6b;
   color: #1e1f25;
+}
+
+/* DevTools toggle pressed/open state (DD3). Unlike Media/Shields — whose open
+   in-app PANEL is itself the visual cue — DevTools opens a DETACHED OS window
+   (no in-app cue, and under WSLg it can be behind/offscreen), so the button must
+   carry the open-state signal itself. Solid gold fill matches the established
+   "active toggle" treatment (.filter.active); color recolors the
+   stroke="currentColor" glyph to read against the fill (same as .alert). */
+#toggle-devtools.active {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* Automation indicator (SC10/DD6). Visible only when ≥1 session is connected.

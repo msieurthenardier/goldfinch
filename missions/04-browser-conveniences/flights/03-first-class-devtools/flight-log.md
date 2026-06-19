@@ -38,7 +38,23 @@ This log captures runtime decisions, deviations, and anomalies during execution.
   inconclusive tolerated`. One prior banner said "deferred to Flight 6" — if the operator intended it to
   stay deferred, override; the live flight spec directed the re-stage. Prior M03 run log preserved.
 
-## Leg Entries
+### 2026-06-19 — HAT pivot: DD5 reframed — pinnable toolbar buttons are TAB-SCOPED (operator)
+- **Pivot (supersedes DD5's reasoning, recorded not rewritten):** DD5 chose "inert, not hidden, not
+  disabled" on internal tabs and justified it as *avoiding* active-tab-type coupling
+  (`applyToolbarPins` stays pin-driven only). The HAT surfaced the opposite truth: the pinnable toolbar
+  buttons (Media, Shields, DevTools) are **all inherently tab-scoped** — they act on the *active tab's*
+  content — so coupling their **enabled/disabled** state to the active tab type is the CORRECT model, not
+  a violation. Operator decision (AskUserQuestion): **dim/disable all three on `goldfinch://` internal
+  tabs.** This intentionally couples button state to tab type — the reverse of DD5's stated rationale.
+  (DD5's *visibility* contract still holds: `applyToolbarPins` stays pin-driven; the new disabled-state is
+  a SEPARATE tab-activation-driven mechanism, not folded into pin visibility.)
+- **Durable architecture principle (carry to debrief + CLAUDE.md):** keep the toolbar's pinnable area
+  **tab-scoped only** — do NOT intermingle tab-scoped and application-scoped controls there. The kebab
+  menu is the lone app-scoped exception. Any future **app-scoped** buttons belong elsewhere (e.g. a menu
+  bar), not in the pinnable toolbar. This guides the eventual context-menu / downloads / WebContentsView
+  work.
+- Scope note: this pulls the **M02** Media/Shields controls into a Flight-3 polish change (their
+  disabled-on-internal state is new). Justified by the principle above; implemented in HAT leg 4.
 
 ### Leg 1 — devtools-launch (landed 2026-06-19)
 
@@ -231,6 +247,25 @@ reachable globals).
 on this machine port 49707 could not bind (the dev-pin is bind-exactly-or-fail-loudly). Ran the live app +
 a11y on **49717** instead — no functional impact. Launched electron instances were cleaned up afterward;
 the `:8000` media fixture server was already running pre-session and was left as-is.
+
+### Leg 4 — hat-and-alignment (completed 2026-06-19)
+
+Operator-driven guided HAT on WSLg (FD launched the app, operator drove the GUI, FD drove the H9 MCP
+probes). **Outcome: PASS — operator signed off ("ship it").** Full per-step record in the leg artifact
+(`legs/04-hat-and-alignment.md`).
+
+- **H1–H8, H10 PASS.** H3 carries a documented caveat (a 2nd `F12` from *inside* the focused detached
+  DevTools window doesn't toggle — Chromium-native window focus; macOS-authoritative). H8 changed by
+  operator decision (dim-all-3, see the DD5-reframe pivot in FD Notes).
+- **H9 — recorded finding (WSLg-inconclusive).** DevTools open on the web tab (opened via the new `F12`
+  affordance) → `readAxTree` STILL succeeded (no `attach-failed`), `evaluate` worked, close left it
+  working. Reproduces the M03 WSLg finding via the new human path; the CDP single-client refusal stays
+  unit-tested-only; definitive live obs is macOS-authoritative (DD8). Not a fail (recorded finding by
+  spec/DD7).
+- **Three inline fixes** (all gates green — 841 tests / typecheck / lint), committed with the flight:
+  (1) `#toggle-devtools.active` pressed-state CSS; (2) DevTools glyph centering (added to the toolbar
+  flex-centering selector group); (3) dim/disable all 3 pinnable buttons on internal tabs (`activateTab`,
+  reusing `.icon-btn:disabled`) + the tab-scoped-toolbar principle in CLAUDE.md.
 
 ## Deviations
 
