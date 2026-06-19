@@ -116,13 +116,14 @@ primary path).
 | 11 | Read `userData/settings.json` (filesystem). Then read the chrome toolbar `#toggle-devtools` via `readDom(wcId)`/`captureWindow()` on the chrome `wcId`. | `toolbarPins.devtools === true` — the pin **persisted**. The `#toggle-devtools` icon is now **visible** (no longer `.hidden`) — the toolbar reflects the pin **live** (two-way). It is a **toggle button** with `aria-pressed` (NOT `aria-expanded` — DevTools has no in-page panel), currently `aria-pressed="false"` (DevTools window closed). `[a11y]` |
 | 12 | **(Unpinned shortcut still opens DevTools.)** First UNPIN DevTools again from the Appearance toggle (`click(guestWcId, x, y)` / keyboard-activate) so `toolbarPins.devtools === false` and `#toggle-devtools` is `.hidden`. Then, on a **normal web tab** (open/activate `https://example.com/`), establish a chrome focus anchor with `click(wcId, x, y)` and fire **`F12`** (`pressKey(wcId, 'F12')` — no modifier; the leg-1 modifier-less branch) — or the alternate `Ctrl+Shift+I` (`pressKey(wcId, 'I', ['control','shift'])`). Confirm DevTools opened via the `is-devtools-open` IPC / `isDevToolsOpened()` for that tab's `wcId` (and, if the button is re-pinned to read it, `#toggle-devtools` `aria-pressed="true"`). | DevTools **opens** for the active web tab even though the toolbar button is **unpinned** (`toolbarPins.devtools === false`) — the shortcut is independent of pin state (DD2/DD4). `isDevToolsOpened()` for that `wcId` is **true**. (Close DevTools again — `F12` toggles — before continuing; the button, if visible, returns to `aria-pressed="false"` live via `devtools-state-changed`.) |
 | 13 | **(Inert, NOT hidden, on internal tabs — DD5.)** Re-pin DevTools (Appearance toggle → `toolbarPins.devtools === true`, `#toggle-devtools` visible). Activate the `goldfinch://settings` internal tab. Read the chrome toolbar (`readDom(wcId)`/`captureWindow()`). Then `click(wcId, x, y)` the `#toggle-devtools` button and fire `F12` (`pressKey(wcId, 'F12')`) with the internal tab active. Re-read the toolbar + confirm via `is-devtools-open`/`isDevToolsOpened()` that no DevTools opened for the internal guest. | `#toggle-devtools` remains **visible** on the internal tab (visibility is pin-driven only — it is **inert, not hidden**, DD5); its click is a **no-op** (`aria-pressed` stays `false`, no DevTools window) and `F12` opens **nothing** on `goldfinch://` (web-content-only guard). The button does not throw or toggle. `[a11y]` |
-| 14 | **(Right-click → native Unpin DevTools.)** *(HAT-only — see Out of Scope.)* Right-click `#toggle-devtools` in the chrome toolbar; the native context menu shows **"Unpin DevTools"**; selecting it sets `toolbarPins.devtools === false`, hides the button, and broadcasts. | Native menu offers "Unpin DevTools"; selection persists `devtools: false` and removes the toolbar icon — equivalent to the Appearance-toggle unpin. **HAT-verified** (native Electron menu is not in the renderer DOM, not drivable over the MCP surface — same as Media/Shields right-click). |
+| 14 | **(Right-click → Unpin DevTools — in-DOM custom menu, MCP-drivable.)** Right-click `#toggle-devtools` in the chrome toolbar (`click(wcId, x, y, { button: 'right' })`); read the chrome via `readDom(wcId)`/`captureWindow()`; `click(wcId, x, y)` the **"Unpin DevTools"** menu item; re-read the toolbar + `userData/settings.json`. | The **custom `#page-context-menu`** opens (anchored just below the button) with a single **"Unpin DevTools"** `cm-item role="menuitem"` — the in-DOM on-brand menu (the Leg-5 migration off the native `Menu.popup`), **not** a native Electron menu. Activating it sets `toolbarPins.devtools === false` (filesystem), hides the button live, broadcasts the change, and focuses the address bar — equivalent to the Appearance-toggle unpin. *(Full toolbar-Unpin coverage — Media/Shields/DevTools + persistence + focus — lives in `page-context-menu.md`; this row is the DevTools cross-check.)* |
 
 **Row conventions**: `[a11y]`-marked rows are accessibility-relevant. Step 6 is the "unpinned keeps its
 shortcut" assertion (Media); step 8 is the "Site settings → opens the settings page, not the panel"
 assertion. Steps 10–13 are the **DevTools** coverage (pin via Settings → Appearance with live button
 un-hide + persistence; unpinned `F12`/`Ctrl+Shift+I` still opening DevTools; inert-not-hidden on internal);
-step 14 is the DevTools right-click unpin (HAT-only, like the Media/Shields right-click). **Step 9 is NOT on
+step 14 is the DevTools right-click unpin (now the in-DOM custom `#page-context-menu`, MCP-drivable since
+the Leg-5 migration — see `page-context-menu.md` for the full toolbar-Unpin coverage). **Step 9 is NOT on
 the MCP surface** — `npm run a11y` is the F8-deferred axe-injection harness (`scripts/a11y-audit.mjs`),
 invoked as a shell command and run separately against the hardened DevTools port; it is left verbatim (the
 MCP surface has no axe-rule evaluation), not migrated to MCP tools. **The harness's new `devtools-button`
@@ -131,11 +132,14 @@ DevTools-pinned chrome under axe; this spec exercises the pin/persist/shortcut/i
 MCP surface. Neither supersedes the other.
 
 ## Out of Scope
-- **Right-click → native "Unpin" context menu** (DD6/DD7) — a **native Electron menu** is not in the renderer
-  DOM, so its "Unpin" click (for Media, Shields, **or DevTools**) is **not drivable over the MCP surface**; it
-  is **HAT-verified** (step 14 documents the DevTools case). (This test covers pin/unpin via the settings
-  Appearance pin toggle, which is the drivable path; both write `toolbarPins` + broadcast, so the
-  store/toolbar effect is equivalent.)
+- **The full right-click → "Unpin" context-menu coverage** (for Media, Shields, **and** DevTools) — owned by
+  **`page-context-menu.md`**. Since the Leg-5 migration, the toolbar Unpin renders the **in-DOM custom
+  `#page-context-menu`** (a single "Unpin {item}" `cm-item role="menuitem"`), so it **is** drivable over the
+  MCP surface (`getChromeTarget` → `readDom` → coordinate `click` on the menu item) — it is **no longer** a
+  native Electron menu and **no longer** HAT-only. This spec keeps the pin/unpin coverage via the settings
+  Appearance pin toggle (both paths write `toolbarPins` + broadcast, so the store/toolbar effect is
+  equivalent) and cross-checks the DevTools right-click in step 14; the exhaustive right-click-Unpin
+  behavior is in `page-context-menu.md` to avoid duplication.
 - **The live detached DevTools window + the CDP single-client conflict** (DevTools open ⇒ `readAxTree`
   refused) — **macOS-authoritative**, covered by `devtools-cdp-conflict` (re-staged M04 Flight 3). This spec
   asserts DevTools open/closed state via `isDevToolsOpened()`/the button's `aria-pressed`, not the

@@ -256,7 +256,7 @@ Emergent blockers discovered during execution go here as flights surface them.
   open/close helper landed; pin/shortcut/internal-no-op live-verified on WSLg; the detached
   DevTools-window materialization + the live CDP conflict (`devtools-cdp-conflict` re-staged) are
   **macOS-authoritative**, WSLg-inconclusive-tolerated. No MCP tool-count change (26). SC5.)
-- [ ] **Flight 4: Custom page context menu + spellcheck** — reusable, on-brand, keyboard-operable
+- [x] **Flight 4: Custom page context menu + spellcheck** *(landed 2026-06-19)* — reusable, on-brand, keyboard-operable
   context-menu component for page content (link/image/selection/editable/Inspect actions); migrate
   the toolbar Unpin off the native menu and graduate `menuController` if taken (closes the M02
   Known Issue). **Includes in-field spellcheck (SC3)** — squiggles (`webPreferences.spellcheck` +

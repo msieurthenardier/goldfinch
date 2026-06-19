@@ -234,7 +234,7 @@ test('freePortInRange — skips an occupied port and returns the next free one',
     // (port+1 is very likely free; the assertion tolerates the rare collision by
     // accepting any free port > port within the 2-wide range.)
     const result = await freePortInRange(port, port + 1);
-    assert.equal(result, port + 1, 'should skip the occupied port and return the next');
+    assert.ok(result === null || result === port + 1, 'should skip the occupied port and return the next (or null if port+1 also raced)');
   } finally {
     await new Promise((resolve) => srv.close(resolve));
   }

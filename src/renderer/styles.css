@@ -1324,6 +1324,39 @@ a:focus-visible {
   min-width: 160px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
+/* Custom page context menu (SC6/DD2/DD3) — reuses the container/kebab chrome and the
+   .cm-item button style. Anchored at the cursor (top/left set inline by
+   positionPageContextMenu, clamped to the viewport); lives at the menu tier (z-index:60),
+   below the z-index:100 lightbox. tabindex="-1" + outline:none keeps the menu node itself
+   from showing a focus ring when onOpen self-focuses it (the blur-race defensive mitigation);
+   the focusable items still carry the .cm-item:focus-visible gold ring. */
+#page-context-menu {
+  position: absolute;
+  z-index: 60;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+/* Section separator between context-menu groups (link / image / selection / editable /
+   suggestions / Inspect). Same top-border idiom as .cm-item.add. */
+#page-context-menu .cm-sep {
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+/* Disabled affordance (e.g. "No suggestions") — dim, non-interactive. Edit items are
+   OMITTED rather than disabled (kept out of the roving set), so this is only used for
+   the rare informational placeholder. */
+#page-context-menu .cm-item[aria-disabled='true'] {
+  color: var(--fg-dim);
+  cursor: default;
+}
+#page-context-menu .cm-item[aria-disabled='true']:hover {
+  background: transparent;
+}
 .cm-title {
   font-size: 10px;
   text-transform: uppercase;

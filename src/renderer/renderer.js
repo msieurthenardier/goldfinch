@@ -60,6 +60,7 @@ const els = {
   kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu')),
   addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
   siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup')),
+  pageContextMenu: /** @type {HTMLElement} */ (document.getElementById('page-context-menu')),
   automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
   automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge')),
   zoomControl: /** @type {HTMLElement} */ (document.getElementById('zoom-control')),
@@ -119,7 +120,8 @@ let tabSeq = 0;
  *   menu: HTMLElement,
  *   items?: () => HTMLElement[],
  *   onOpen?: (startIndex?: number) => void,
- *   onClose?: () => void
+ *   onClose?: () => void,
+ *   focusReturn?: () => void
  * }} MenuEntry
  */
 
@@ -169,11 +171,16 @@ const menuController = (() => {
       if (e.key === 'Escape') {
         e.preventDefault();
         closeEntry(entry);
-        entry.trigger.focus();
+        // Focus-return: an entry may supply an additive focusReturn() (the page context menu, which
+        // has no persistent trigger button — DD3/step-3a); else default to focusing the trigger
+        // exactly as before. The 3 toolbar consumers omit focusReturn and keep entry.trigger.focus().
+        if (entry.focusReturn) entry.focusReturn();
+        else entry.trigger.focus();
       } else if (e.key === 'Tab') {
         e.preventDefault();
         closeEntry(entry);
-        entry.trigger.focus(); // Tab/Shift+Tab close the menu and return focus to the trigger
+        if (entry.focusReturn) entry.focusReturn(); // Tab/Shift+Tab close the menu and return focus
+        else entry.trigger.focus();
       } else {
         // Arrow/Home/End require items; guard before calling focusItem (wrap formula
         // NaN-s on an empty list — cheap safety net even though an open menu always has items).
@@ -481,6 +488,352 @@ els.siteInfoPopup.addEventListener('keydown', (e) => {
     els.addressChip.focus();
   }
 });
+
+/* ------------------------------------------------- page context menu (SC6/DD2/DD3) */
+// The custom web-content context menu, rendered via the menuController as its 4th consumer
+// (registered IN PLACE — NOT graduated, DD3). It subscribes to the Leg-1 onPageContextMenu IPC
+// ({ wcId, params }) forwarded from the guest's main-side context-menu listener (internal
+// goldfinch:// guests auto-excluded main-side, DD6 — so no renderer-side internal gate is needed).
+// Items are built per-invocation from the forwarded params (like the container picker); the menu
+// opens at the cursor position and supplies focus-return via the additive focusReturn? option.
+
+/** @returns {HTMLElement[]} */
+function pageContextItems() {
+  return /** @type {HTMLElement[]} */ ([...els.pageContextMenu.querySelectorAll('[role="menuitem"]')]);
+}
+
+// Module-scoped state: the LAST forwarded { wcId, params }, the cursor coords to open at, and the
+// focus-return target captured at open. Acted-on wcId is the one captured at right-click (TOCTOU —
+// never re-resolved via activeTab() for dispatch). `keyboard` marks a chrome-focused Shift+F10/
+// ContextMenu invocation (vs. a guest right-click) so focus-return branches correctly.
+/** @type {{ wcId: number|null, params: any, x: number, y: number, returnFocus: HTMLElement|null, keyboard: boolean, toolbarItem: ('media'|'shields'|'devtools'|null) }} */
+const pageCtx = { wcId: null, params: null, x: 0, y: 0, returnFocus: null, keyboard: false,
+  toolbarItem: null };  // 'media' | 'shields' | 'devtools' | null  (null = page-content mode)
+
+/** Truncate a string for an inline menu label. */
+function truncateLabel(s, n = 40) {
+  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n - 1) + '…' : t;
+}
+
+/** Derive a download filename from a media URL's basename (mirrors media-panel naming). */
+function basenameFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split('/').filter(Boolean).pop();
+    return last || u.hostname || 'image';
+  } catch {
+    return 'image';
+  }
+}
+
+/**
+ * Build the context-appropriate sections from the captured params into the (empty) menu node.
+ * A target may match several sections (e.g. a linked image, or an editable field with a
+ * selection) — every applicable section is included, in order, with a separator between groups;
+ * Inspect is always last. Edit items are OMITTED when their editFlags flag is falsy (kept out of
+ * the roving set) — render-only-if-truthy, never disabled. Caller shows the node before measuring.
+ * In toolbar-mode (ctx.toolbarItem set) it short-circuits to a single "Unpin {item}" item (Leg 5).
+ * @param {{ wcId: number|null, params: any, toolbarItem?: ('media'|'shields'|'devtools'|null) }} ctx
+ */
+function buildPageContextSections(ctx) {
+  const m = els.pageContextMenu;
+  m.innerHTML = '';
+  const p = ctx.params || {};
+  let needSep = false;
+
+  /** Append a thin separator before the next section (skipped before the first). */
+  const sep = () => {
+    if (!needSep) return;
+    const s = document.createElement('div');
+    s.className = 'cm-sep';
+    s.setAttribute('role', 'separator');
+    m.appendChild(s);
+  };
+  /**
+   * @param {string} label  visible text (already plain — set via textContent, no HTML injection)
+   * @param {() => void} onClick  action; every handler closes the menu first so focus-return runs
+   */
+  const item = (label, onClick) => {
+    const b = document.createElement('button');
+    b.className = 'cm-item';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closePageContextMenu();
+      onClick();
+    });
+    m.appendChild(b);
+    needSep = true;
+  };
+
+  // --- toolbar-mode: single "Unpin {item}" item (Leg 5) — short-circuit; no page sections. ---
+  if (ctx.toolbarItem) {
+    const itm = ctx.toolbarItem;            // capture: ctx.toolbarItem may be reset before the click fires
+    const label = 'Unpin ' + (itm === 'media' ? 'Media'
+      : itm === 'shields' ? 'Shields' : 'DevTools');
+    // Reuse the existing item(label, onClick) helper so the menuitem markup, cm-item class, role,
+    // textContent, and close-then-act wiring are IDENTICAL to the page-menu items.
+    item(label, () => {
+      window.goldfinch.unpinToolbarItem(itm);
+      // FOCUS FIX (design-review HIGH): unpinning HIDES the button this menu was anchored to, so the
+      // close-path focus-return (onClose → button.focus()) would focus an about-to-be-hidden element
+      // and strand focus on <body>. Route focus to the address bar explicitly here, in the action,
+      // AFTER the unpin send. Runs on both the mouse and keyboard close paths.
+      els.address.focus();
+    });
+    return;  // toolbar-mode is single-item: no page sections, no Inspect
+  }
+
+  // --- link ---
+  if (p.linkURL) {
+    sep();
+    item('Open link in new tab', () => createTab(p.linkURL));
+    item('Copy link', () => window.goldfinch.clipboardWriteText(p.linkURL));
+  }
+
+  // --- image (prefer srcURL, fall back to imageURL) ---
+  const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
+  if (imgSrc) {
+    sep();
+    item('Open image in new tab', () => createTab(imgSrc));
+    item('Copy image address', () => window.goldfinch.clipboardWriteText(imgSrc));
+    item('Save image', () => {
+      const r = window.goldfinch.downloadMedia({
+        webContentsId: ctx.wcId,
+        url: imgSrc,
+        suggestedName: basenameFromUrl(imgSrc)
+      });
+      Promise.resolve(r).then((res) => {
+        if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
+      }).catch(() => toast('Download failed', 'Unknown error'));
+    });
+  }
+
+  // --- selection ---
+  if (p.selectionText) {
+    sep();
+    item('Copy', () => window.goldfinch.clipboardWriteText(p.selectionText));
+    item(`Search for "${truncateLabel(p.selectionText, 30)}"`, () => createTab(toUrl(p.selectionText)));
+  }
+
+  // --- editable (edit-actions gated by editFlags; render only if truthy — OMIT otherwise) ---
+  if (p.isEditable) {
+    const f = p.editFlags || {};
+    const acts = [];
+    if (f.canCut) acts.push(['Cut', 'cut']);
+    if (f.canCopy) acts.push(['Copy', 'copy']);
+    if (f.canPaste) acts.push(['Paste', 'paste']);
+    if (f.canUndo) acts.push(['Undo', 'undo']);
+    if (f.canRedo) acts.push(['Redo', 'redo']);
+    if (acts.length) {
+      sep();
+      for (const [label, action] of acts) {
+        item(label, () => window.goldfinch.pageContextAction({ webContentsId: ctx.wcId, action }));
+      }
+    }
+  }
+
+  // --- spelling suggestions (Leg-2 spellcheck ON populates these on the guest event) ---
+  if (p.misspelledWord) {
+    sep();
+    const sugg = Array.isArray(p.dictionarySuggestions) ? p.dictionarySuggestions.slice(0, 8) : [];
+    if (sugg.length) {
+      for (const word of sugg) {
+        item(word, () => window.goldfinch.correctMisspelling({ webContentsId: ctx.wcId, word }));
+      }
+    } else {
+      // Informational placeholder (the only disabled affordance — not in the roving set).
+      const none = document.createElement('div');
+      none.className = 'cm-item';
+      none.setAttribute('aria-disabled', 'true');
+      none.textContent = 'No suggestions';
+      m.appendChild(none);
+      needSep = true;
+    }
+  }
+
+  // --- always: Inspect (routes through toggle-devtools; web-only by construction, DD6) ---
+  sep();
+  item('Inspect', () => window.goldfinch.toggleDevtools({ webContentsId: ctx.wcId }));
+}
+
+/**
+ * Position the menu at the cursor. params.x/y are GUEST-page coords relative to the active
+ * <webview>'s top-left (the click happened inside the guest); map to chrome-overlay client coords
+ * via the active webview's live getBoundingClientRect() (correct whether the media panel is open
+ * or the window resized), then clamp inside the viewport. Measure after the node is shown (real
+ * offsetWidth/offsetHeight). For a chrome-focused keyboard invocation, x/y are already chrome
+ * client coords (derived from the focused element) and the webview offset is skipped (keyboard).
+ */
+function positionPageContextMenu(px, py, keyboard) {
+  const wv = activeTab() && activeTab().webview;
+  const r = (!keyboard && wv) ? wv.getBoundingClientRect() : { left: 0, top: 0 };
+  const m = els.pageContextMenu;
+  const mw = m.offsetWidth;
+  const mh = m.offsetHeight;
+  let x = r.left + px;
+  let y = r.top + py;
+  x = Math.min(x, window.innerWidth - mw - 4);   // clamp right edge
+  y = Math.min(y, window.innerHeight - mh - 4);  // clamp bottom edge
+  m.style.left = Math.max(4, x) + 'px';
+  m.style.top = Math.max(4, y) + 'px';
+  m.style.right = 'auto';
+}
+
+const pageContextEntry = menuController.register({
+  // No persistent trigger button — the menu node is its own `trigger` purely so the controller's
+  // trigger-keydown wiring has a target (it is harmless here: a hidden menu never receives the
+  // open chord). Focus-return goes through `focusReturn` (step 3a), NOT entry.trigger.focus().
+  trigger: els.pageContextMenu,
+  menu: els.pageContextMenu,
+  items: pageContextItems,
+  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last) */
+  onOpen(startIndex = 0) {
+    buildPageContextSections(pageCtx);
+    els.pageContextMenu.classList.remove('hidden');
+    // Defensive blur-race mitigation (step 0): pull focus to the chrome menu node so the chrome
+    // window is focused while the menu is up. Verified harmless — the WSLg ordering has the guest
+    // right-click's window blur fire ~26ms BEFORE the page-context-menu IPC arrives (so closeAll
+    // runs on an empty controller, before open()), but self-focus + the microtask-deferred open in
+    // the subscription guard against a different ordering on other platforms.
+    els.pageContextMenu.focus();
+    positionPageContextMenu(pageCtx.x, pageCtx.y, pageCtx.keyboard);
+    const items = pageContextItems();
+    if (items.length) focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+  },
+  onClose() {
+    els.pageContextMenu.classList.add('hidden');
+    const ret = pageCtx.returnFocus;
+    pageCtx.returnFocus = null;
+    if (ret && typeof ret.focus === 'function') ret.focus();
+  },
+  // Focus-return (delivered via the additive option, NOT entry.trigger.focus() — which would
+  // strand focus on the hidden menu node). Branch on invocation source: a guest right-click /
+  // in-page ContextMenu returns focus to the active <webview> (back to where the user was working;
+  // document.activeElement is the chrome <body>/webview, not a useful target); a chrome-focused
+  // Shift+F10 returns to the captured activeElement. Fall back to els.address. Never the hidden node.
+  focusReturn() {
+    const ret = pageCtx.returnFocus;
+    pageCtx.returnFocus = null;
+    if (!pageCtx.keyboard) {
+      const wv = activeTab() && activeTab().webview;
+      if (wv && typeof wv.focus === 'function') { wv.focus(); return; }
+    }
+    if (ret && ret !== document.body && typeof ret.focus === 'function') { ret.focus(); return; }
+    els.address.focus();
+  }
+});
+// Thin public wrapper — delegates to the controller. DISTINCT from onClose above.
+function closePageContextMenu() {
+  menuController.close(pageContextEntry);
+}
+
+// Subscription: the guest right-click flows guest -> main -> this IPC ({ wcId, params }). Store
+// state, capture coords + focus-return, then open. The open is deferred to a microtask so any
+// chrome `window` blur from the right-click (which closeAll()s menus, renderer.js blur listener)
+// has settled before open() runs — defensive against the step-0 blur race (observed NOT to bite on
+// WSLg, where blur precedes the IPC, but harmless and platform-robust). menuController.open
+// closeAll()s first, so a second right-click re-opens with fresh params.
+window.goldfinch.onPageContextMenu(({ wcId, params }) => {
+  pageCtx.wcId = wcId;
+  pageCtx.params = params;
+  pageCtx.x = (params && typeof params.x === 'number') ? params.x : 0;
+  pageCtx.y = (params && typeof params.y === 'number') ? params.y : 0;
+  pageCtx.keyboard = false;
+  pageCtx.toolbarItem = null;              // page-content mode — never leak a stale toolbar Unpin
+  // Guest right-click: activeElement is the chrome <body>/webview, not a useful return target —
+  // focusReturn() will route to the webview. Capture anyway for completeness.
+  pageCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
+  queueMicrotask(() => menuController.open(pageContextEntry, 0));
+});
+
+// Shift+F10 / ContextMenu key — menu-specific invocation, wired HERE (NOT in the Leg-3
+// keydownToAction mapper, DD5). FINDING (recorded for the flight log): when focus is INSIDE the
+// guest <webview>, Chromium synthesizes a real `context-menu` event on the guest webContents for
+// both Shift+F10 and the ContextMenu key — that flows through Leg-1's main-side listener and the
+// onPageContextMenu subscription above exactly like a right-click (with real params + caret-derived
+// x/y), so the in-page case needs NO synthetic handling here. This chrome-side handler therefore
+// only covers the CHROME-focused case (focus on a toolbar/chrome element), where no guest event
+// fires: derive x/y from the focused element's rect and open a minimal (Inspect-only, plus any
+// last params) menu anchored there. Guarded so it never double-fires when the event originated in
+// the guest (those don't bubble to the chrome document anyway — the webview is a separate contents).
+document.addEventListener('keydown', (e) => {
+  const isContextKey = e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10');
+  if (!isContextKey) return;
+  // Don't hijack the address bar / find input / a text field's own context affordance, and don't
+  // fight the lightbox modal. Only act for a genuine chrome-element focus.
+  if (!els.lightbox.classList.contains('hidden')) return;
+  const target = /** @type {HTMLElement|null} */ (document.activeElement);
+  if (!target || target === document.body) return;
+  // Gate (Leg 5): a focused toolbar pin button + ContextMenu key double-fires deterministically
+  // (both a `contextmenu` event AND this keydown reach their listeners). The toolbar `contextmenu`
+  // listener already opens the toolbar Unpin menu; return early here so only that path opens.
+  if (target === els.toggleMedia || target === els.togglePrivacy || target === els.toggleDevtools) return;
+  e.preventDefault();
+  const r = target.getBoundingClientRect();
+  pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
+  // A chrome-focused invocation has no fresh guest params → an Inspect-only minimal menu on the
+  // active web tab. (params null → buildPageContextSections renders just Inspect.)
+  pageCtx.params = null;
+  pageCtx.x = Math.round(r.left);
+  pageCtx.y = Math.round(r.bottom);
+  pageCtx.keyboard = true;                 // chrome client coords; skip the webview offset
+  pageCtx.toolbarItem = null;              // page-content mode — never leak a stale toolbar Unpin
+  pageCtx.returnFocus = target;            // return to the chrome element on close
+  menuController.open(pageContextEntry, 0);
+});
+
+/**
+ * Toolbar-mode invocation of the page context menu: a single "Unpin {item}" item anchored at the
+ * right-clicked toolbar button. Reuses the Leg-4 component (pageContextEntry / positioning / keyboard
+ * contract / focus-return) — no second menu, no second registration.
+ * @param {'media'|'shields'|'devtools'} item
+ * @param {HTMLElement} anchorEl  the toolbar button right-clicked
+ */
+function openToolbarContextMenu(item, anchorEl) {
+  const r = anchorEl.getBoundingClientRect();
+  pageCtx.toolbarItem = item;
+  pageCtx.params = null;
+  pageCtx.wcId = null;                 // toolbar Unpin needs no guest wcId (chrome-only write)
+  pageCtx.x = Math.round(r.left);      // chrome client coords (keyboard-mode skips the webview offset)
+  pageCtx.y = Math.round(r.bottom);    // open just below the button
+  pageCtx.keyboard = true;             // positionPageContextMenu treats x/y as chrome client coords
+  pageCtx.returnFocus = anchorEl;      // focusReturn() returns to the button (keyboard-mode branch)
+  menuController.open(pageContextEntry, 0);
+}
+
+/**
+ * Test/audit hook (Leg 6): open the page context menu with a representative synthetic params payload so
+ * the `npm run a11y` harness — which cannot fire a guest `context-menu` event, and for which the menu's
+ * real open path is gated behind the unreachable `const pageCtx`/`pageContextEntry`/`menuController`
+ * (classic-script `const`s are NOT main-world globals; only top-level `function` declarations are) — can
+ * audit the open `#page-context-menu`. Builds a full-section menu (link + selection + editable +
+ * spelling-suggestions + Inspect) at a fixed chrome coord. NOT wired to any UI; reachable in the guest
+ * main world by the MCP `evaluate`/`injectScript` tools (top-level `function` ⇒ `window` global).
+ */
+// Reachable ONLY at runtime via the MCP eval tool (the a11y harness), never called in-tree by design,
+// so eslint's no-unused-vars cannot see a reference — it IS a live entry point, not dead code.
+// eslint-disable-next-line no-unused-vars
+function openPageContextMenuForAudit() {
+  pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
+  pageCtx.params = {
+    linkURL: 'https://example.com/',
+    selectionText: 'sample',
+    isEditable: true,
+    editFlags: { canCut: true, canCopy: true, canPaste: true, canUndo: true, canRedo: true },
+    misspelledWord: 'teh',
+    dictionarySuggestions: ['the', 'ten', 'tea'],
+    x: 80,
+    y: 80
+  };
+  pageCtx.x = 80;
+  pageCtx.y = 80;
+  pageCtx.keyboard = true;       // treat x/y as chrome client coords (skip the webview offset)
+  pageCtx.toolbarItem = null;    // page-content mode (full sections, not the single Unpin item)
+  pageCtx.returnFocus = els.address;
+  menuController.open(pageContextEntry, 0);
+}
 
 /* ------------------------------------------------------------------ tabs */
 
@@ -985,7 +1338,7 @@ function togglePanel(force) {
   }
 }
 els.toggleMedia.addEventListener('click', () => togglePanel());
-els.toggleMedia.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('media'); });
+els.toggleMedia.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('media', els.toggleMedia); });
 els.mediaClose.addEventListener('click', () => togglePanel(false));
 // Non-modal: Escape closes the media panel; togglePanel restores focus to the toggle.
 els.panel.addEventListener('keydown', (e) => {
@@ -1564,7 +1917,7 @@ function togglePrivacy(force) {
 }
 
 els.togglePrivacy.addEventListener('click', () => togglePrivacy());
-els.togglePrivacy.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('shields'); });
+els.togglePrivacy.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('shields', els.togglePrivacy); });
 
 /* ------------------------------------------------------------------ devtools toggle */
 
@@ -1588,7 +1941,7 @@ els.toggleDevtools.addEventListener('click', async () => {
   const open = await window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
   setDevtoolsPressed(!!open);
 });
-els.toggleDevtools.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('devtools'); });
+els.toggleDevtools.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('devtools', els.toggleDevtools); });
 
 // Live update from the Leg-1 devtools-state-changed event (catches a DevTools-window-
 // initiated close). Apply only when the change targets the currently-active tab.
@@ -2254,71 +2607,78 @@ window.goldfinch.onOpenTab((url) => createTab(url));
 /* --------------------------------------------------------------- shortcuts */
 
 document.addEventListener('keydown', (e) => {
-  const mod = e.ctrlKey || e.metaKey;
-  // DevTools F12 (SC5 / DD2) — chrome-focused fallback (the page-focused case is captured main-side
-  // in before-input-event). MODIFIER-LESS, so it MUST sit BEFORE the `if (!mod) return;` gate below
-  // (else it never fires). Guards mirror Ctrl+F: defer when a lightbox is open, no-op on internal
-  // tabs / a tab with no live wcId (DD5). The DOM keydown fires once per press (no auto-repeat
-  // exposure for a toggle here — that guard is main-side only).
-  if (e.key === 'F12') {
-    if (!els.lightbox.classList.contains('hidden')) return;
-    const t = activeTab();
-    if (!t || isInternalTab(t) || t.wcId == null) return;
-    e.preventDefault();
-    window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
-    return;
-  }
-  if (!mod) return;
-  // Page-zoom fallback (DD6): fires when the CHROME shell is focused (the page-focused
-  // case is captured main-side via before-input-event). Match '='/'+' (zoom in, regardless
-  // of shift), '-' (out), '0' (reset) and route the active web tab's wcId to main.
-  if (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0') {
-    // Don't fight the lightbox's own image zoom when it's open (DD6).
-    if (!els.lightbox.classList.contains('hidden')) return;
-    const t = activeTab();
-    if (!t || isInternalTab(t) || t.wcId == null) return;
-    const action = (e.key === '-') ? 'out' : (e.key === '0') ? 'reset' : 'in';
-    e.preventDefault();
-    window.goldfinch.zoomApply({ webContentsId: t.wcId, action });
-    return;
-  }
-  if (e.key === 'f' || e.key === 'F') {
-    // Chrome-focused Ctrl+F fallback (DD2 / AC2). The page-focused case is handled
-    // main-side via before-input-event. Guard: no bar on internal tabs or open lightbox.
-    if (!els.lightbox.classList.contains('hidden')) return;
-    const t = activeTab();
-    if (!t || isInternalTab(t) || t.wcId == null) return;
-    e.preventDefault();
-    openFind(t);
-  } else if (e.key === 't') {
-    e.preventDefault();
-    createTab();
-  } else if (e.key === 'w') {
-    e.preventDefault();
-    if (activeTabId) closeTab(activeTabId);
-  } else if (e.key === 'l') {
-    e.preventDefault();
-    els.address.focus();
-    els.address.select();
-  } else if (e.key === 'm') {
-    e.preventDefault();
-    togglePanel();
-  } else if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
-    e.preventDefault();
-    togglePrivacy();
-  } else if (e.shiftKey && (e.key === 'I' || e.key === 'i')) {
-    // DevTools Ctrl+Shift+I (SC5 / DD2) — chrome-focused fallback, the alternate to F12. A CHAIN
-    // member (not a separate `if`) so it cannot double-handle; the 'I'/'i' key letter disambiguates
-    // it from the Shift+P branch above, so chain order is safe. Same guards as F12.
-    if (!els.lightbox.classList.contains('hidden')) return;
-    const t = activeTab();
-    if (!t || isInternalTab(t) || t.wcId == null) return;
-    e.preventDefault();
-    window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
-  } else if (e.key === 'r') {
-    e.preventDefault();
-    const t = activeTab();
-    if (t) t.webview.reload();
+  // The pure decision — "given (key, mods, lightboxOpen), which action?" — lives in
+  // keydownToAction (../shared/keydown-action.js, a bare global; same dual-export
+  // route as isSafeTabUrl). It reproduces the live gating exactly: F12 before the
+  // modifier gate, mod = ctrl||meta, zoom/find/F12/Ctrl+Shift+I lightbox-deferred,
+  // the t/w/l/m/Shift+P/r chain not lightbox-gated, Ctrl+Shift+I vs Shift+P by key
+  // letter. The IMPURE dispatch below (active-tab resolution, internal-tab / null-wcId
+  // guards, preventDefault, IPC / DOM ops) stays here unchanged — behavior-preserving.
+  const action = keydownToAction({
+    key: e.key,
+    ctrl: e.ctrlKey,
+    meta: e.metaKey,
+    shift: e.shiftKey,
+    lightboxOpen: !els.lightbox.classList.contains('hidden'),
+  });
+  if (!action) return;
+
+  switch (action) {
+    // DevTools (F12 and Ctrl+Shift+I) — chrome-focused fallback (the page-focused case is
+    // captured main-side in before-input-event). No-op on internal tabs / a tab with no live wcId.
+    case 'devtools': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return;
+      e.preventDefault();
+      window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
+      return;
+    }
+    // Page-zoom fallback (DD6): route the active web tab's wcId to main.
+    case 'zoom-in':
+    case 'zoom-out':
+    case 'zoom-reset': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return;
+      const zoom = (action === 'zoom-out') ? 'out' : (action === 'zoom-reset') ? 'reset' : 'in';
+      e.preventDefault();
+      window.goldfinch.zoomApply({ webContentsId: t.wcId, action: zoom });
+      return;
+    }
+    // Chrome-focused Ctrl+F fallback (DD2 / AC2): no bar on internal tabs.
+    case 'find': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return;
+      e.preventDefault();
+      openFind(t);
+      return;
+    }
+    case 'new-tab':
+      e.preventDefault();
+      createTab();
+      return;
+    case 'close-tab':
+      e.preventDefault();
+      if (activeTabId) closeTab(activeTabId);
+      return;
+    case 'focus-address':
+      e.preventDefault();
+      els.address.focus();
+      els.address.select();
+      return;
+    case 'toggle-panel':
+      e.preventDefault();
+      togglePanel();
+      return;
+    case 'toggle-privacy':
+      e.preventDefault();
+      togglePrivacy();
+      return;
+    case 'reload': {
+      e.preventDefault();
+      const t = activeTab();
+      if (t) t.webview.reload();
+      return;
+    }
   }
 });
 

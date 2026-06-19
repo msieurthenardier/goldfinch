@@ -236,6 +236,33 @@ async function copyText(text, messageEl) {
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
 
+/* ---- spellcheck controller ---- */
+
+(function () {
+  // Guard: only run when the internal bridge is present (goldfinch://settings origin).
+  if (!window.goldfinchInternal) return;
+
+  const el = /** @type {HTMLInputElement|null} */ (document.getElementById('spellcheck-enabled'));
+  if (!el) return;
+
+  // Populate from the persisted setting on load. Assign .checked directly — never
+  // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
+  window.goldfinchInternal.settingsGet('spellcheck').then((v) => { el.checked = v === true; }).catch(() => {});
+
+  // Write a real boolean (the internal-settings-set side-effect uses value === true, so a
+  // non-boolean truthy value would not silently enable — but we send a clean boolean anyway).
+  el.addEventListener('change', () => {
+    window.goldfinchInternal.settingsSet('spellcheck', !!el.checked).catch(() => {});
+  });
+
+  // Re-sync when another surface changes the setting. Capture the handle so we can remove
+  // this listener on pagehide (DD5: prevents accumulation across reloads).
+  const h = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && typeof all.spellcheck === 'boolean') el.checked = all.spellcheck;
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
+})();
+
 /* ---- automation controller ---- */
 
 (function () {
