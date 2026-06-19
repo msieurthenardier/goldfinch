@@ -1,4 +1,4 @@
-# Behavior Test: Pinnable toolbar items (Media + Shields)
+# Behavior Test: Pinnable toolbar items (Media + Shields + DevTools)
 
 **Slug**: `toolbar-pins`
 **Status**: draft
@@ -9,10 +9,19 @@ Verify the **pin/unpin** system for toolbar items: a pinned item shows in the to
 badge**; unpinning (from the settings Appearance section) **removes the toolbar icon** but leaves its
 **keyboard shortcut** working; the pin state **persists** (`settings.json` `toolbarPins`) and the toolbar
 reflects changes **live** (two-way with settings); and the site-info popup's **"Site settings →"** opens the
-**settings page** (Privacy & Shields) rather than the slide-out panel. This needs a behavior test, not a unit
-test: the assertions are real-environment, cross-process UI — the pin toggle lives in a `<webview>` guest on
-a privileged scheme, the toolbar lives in the chrome renderer and reflects the active pin state via an IPC
-broadcast, and persistence is a file the main process writes.
+**settings page** (Privacy & Shields) rather than the slide-out panel. **DevTools** (M04 Flight 3) is the
+**third pinnable item** alongside Media and Shields — but, unlike them, it defaults **UNPINNED**
+(`toolbarPins.devtools === false`, DD4): a power-user tool, opt-in via right-click / Settings → Appearance,
+with `F12`/`Ctrl+Shift+I` shortcuts that work **regardless of pin state**. The DevTools toggle is also a
+**toggle button** (`aria-pressed` reflecting the external detached DevTools window's open/closed state, NOT
+`aria-expanded` — it has no in-page panel), and is **inert-not-hidden** on internal `goldfinch://` tabs
+(DD5). This needs a behavior test, not a unit test: the assertions are real-environment, cross-process UI —
+the pin toggle lives in a `<webview>` guest on a privileged scheme, the toolbar lives in the chrome renderer
+and reflects the active pin state via an IPC broadcast, persistence is a file the main process writes, and
+the DevTools button's pressed state is driven by a `devtools-state-changed` event the main process forwards
+(Leg-1 spike POSITIVE — the event fires reliably, so the button reflects open/closed **live**, including a
+DevTools-window-initiated close; the on-activation `isDevtoolsOpen` reconcile is the backstop, not the
+primary path).
 
 ## Preconditions
 - **Apparatus — admin MCP surface.** Goldfinch is running via `npm run dev:automation` with
@@ -37,8 +46,9 @@ broadcast, and persistence is a file the main process writes.
   internal guest (admin engine built with `{ allowInternal: true }`).
 - **Two distinct targets (dual-target spec — keep them straight):**
   - **Chrome target** (`getChromeTarget()` → chrome `wcId`): the chrome toolbar
-    (`#toggle-media`/`#toggle-privacy` presence/visibility/badge), the panels, and the `Ctrl+M` /
-    `Ctrl+Shift+P` shortcut. Read via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`; drive via
+    (`#toggle-media`/`#toggle-privacy`/`#toggle-devtools` presence/visibility/badge), the panels, and the
+    `Ctrl+M` / `Ctrl+Shift+P` / `F12` / `Ctrl+Shift+I` shortcuts. Read via
+    `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`; drive via
     `click(wcId, x, y)`/`pressKey(wcId, name, modifiers)`.
   - **Internal guest target** (from `enumerateTabs` → the entry with `url: 'goldfinch://settings'` →
     its `wcId` as `guestWcId`): the settings **Appearance** pin toggles. Read via
@@ -53,8 +63,16 @@ broadcast, and persistence is a file the main process writes.
   keyboard; Step 6 shortcut), establish a focus anchor by sending a `click` into the target first**
   — `click(guestWcId, x, y)` on the Appearance area for the guest toggle, `click(wcId, x, y)` in the
   chrome for the `Ctrl+M`/`Ctrl+Shift+P` shortcut.
-- The build includes the `toolbarPins` store key, the icon toolbar + pin-apply, the Appearance pin toggles,
-  and the "Site settings →" rewire.
+- The build includes the `toolbarPins` store key (now `{ media, shields, devtools }`), the icon toolbar +
+  pin-apply, the Appearance pin toggles (Media + Shields + **DevTools**), the "Site settings →" rewire, and
+  the M04 Flight-3 DevTools affordance (`#toggle-devtools` button, `F12`/`Ctrl+Shift+I`, the
+  `toggle-devtools`/`is-devtools-open` IPC).
+- **DevTools default UNPINNED (load-bearing for the initial assertions, DD4).** A fresh / upgraded
+  `settings.json` normalizes `toolbarPins.devtools` to `false` — so on first launch `#toggle-devtools`
+  carries `.hidden` in the chrome toolbar and the Settings → Appearance DevTools pin reads
+  `aria-pressed="false"`. The DevTools steps below open from that unpinned baseline (the inverse of
+  Media/Shields, which default pinned). If a prior run left `devtools: true` in `settings.json`, reset it
+  (delete the file or set `devtools: false`) before running so the default-unpinned assertions hold.
 - `userData/settings.json` is readable on the filesystem; a reachable web page (e.g. `https://example.com/`).
 - **Active-precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings,
@@ -69,11 +87,14 @@ broadcast, and persistence is a file the main process writes.
 
 ## Observables Required
 - mcp (admin MCP tools — measured via the admin MCP client connected with the admin Bearer header):
-  the chrome toolbar (`#toggle-media`/`#toggle-privacy` presence/`hidden` + icon + count badge) and
-  panel `aria-expanded`/visibility via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()` on the
-  **chrome** `wcId`; the settings guest's Appearance pin toggles (`aria-pressed`) via
+  the chrome toolbar (`#toggle-media`/`#toggle-privacy`/`#toggle-devtools` presence/`hidden` + icon +
+  count badge; the DevTools button's `aria-pressed` open/closed state) and panel
+  `aria-expanded`/visibility via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()` on the **chrome**
+  `wcId`; the settings guest's Appearance pin toggles (`aria-pressed`) via
   `readDom(guestWcId)`/`readAxTree(guestWcId)`/`captureWindow()` on the **guest** `wcId`; the active
-  tab's URL + the internal-guest entry via `enumerateTabs`)
+  tab's URL + the internal-guest entry via `enumerateTabs`; the DevTools open/closed state via the
+  `#toggle-devtools` `aria-pressed` attribute, driven live by the `devtools-state-changed` event
+  (Leg-1 spike POSITIVE))
 - filesystem (`userData/settings.json` `toolbarPins` — measured via Read/Bash)
 - shell (precondition probes: `tools/list` count + `getChromeTarget`; and Step 9's `npm run a11y`
   harness — measured via Bash)
@@ -82,7 +103,7 @@ broadcast, and persistence is a file the main process writes.
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then `getChromeTarget()` and record the chrome `wcId`. Read the chrome toolbar via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`: `#toggle-media` + `#toggle-privacy`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`; `getChromeTarget()` returns a **numeric** chrome `wcId`. Both toolbar controls render as **icons with a count badge** (not text "Media"/"Shield"); both are visible (default pinned). If the probe fails, halt. |
+| 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then `getChromeTarget()` and record the chrome `wcId`. Read the chrome toolbar via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`: `#toggle-media` + `#toggle-privacy` + `#toggle-devtools`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`; `getChromeTarget()` returns a **numeric** chrome `wcId`. The Media + Shields controls render as **icons with a count badge** (not text "Media"/"Shield"); both are **visible** (default pinned). `#toggle-devtools` is present in the DOM but **`.hidden`** — DevTools defaults **UNPINNED** (`toolbarPins.devtools === false`, DD4). If the probe fails, halt. |
 | 2 | Open Settings (take a `captureWindow()` to locate the kebab (⋮), `click(wcId, x, y)` to open it, then `click(wcId, x, y)` on the Settings item — or the identical trusted path `openTab('goldfinch://settings', null, {trusted:true})`); wait for load; call `enumerateTabs` and record the `goldfinch://settings` entry's `wcId` as `guestWcId`. Read the **Appearance** section via `readDom(guestWcId)`/`readAxTree(guestWcId)`/`captureWindow()`. | The Appearance section shows a **pin-icon toggle button** for **Media** and **Shields** (pushpin glyph, `aria-pressed`), both **pinned** (`aria-pressed="true"`, filled). `enumerateTabs` includes the `goldfinch://settings` entry. `[a11y]` |
 | 3 | In the settings guest, establish a focus anchor with `click(guestWcId, x, y)` on the Appearance area (located via `captureWindow()`), then move keyboard focus to the **Media** pin-icon toggle (`pressKey(guestWcId, 'Tab')`) and activate it by keyboard (`pressKey(guestWcId, 'Enter')`/`'Space'`) to UNPIN it. Re-read via `readAxTree(guestWcId)`. | The Media pin toggles to unpinned (`aria-pressed="false"`, outline glyph); keyboard-operable. `[a11y]` |
 | 4 | Read `userData/settings.json` (filesystem). | `toolbarPins.media === false` — the change **persisted**. |
@@ -90,22 +111,41 @@ broadcast, and persistence is a file the main process writes.
 | 6 | With Media unpinned, fire **Ctrl+M** at the **chrome** target: establish a focus anchor with `click(wcId, x, y)` in the chrome, then `pressKey(wcId, 'M', ['control'])` (the leg-1 modifier-chord capability) — the shortcut is a chrome `document` keydown, independent of the toolbar button. | The media panel still **opens** (confirmed via `readDom(wcId)`/`readAxTree(wcId)`/`captureWindow()`) — unpinning removed the toolbar icon only; the keyboard shortcut remains active. |
 | 7 | Re-pin Media from the settings Appearance toggle (back ON): `click(guestWcId, x, y)` (located via `captureWindow()`) or keyboard-activate the Media pin toggle. Re-read `settings.json` (filesystem) and the chrome toolbar (`readDom(wcId)`). | `settings.json` `toolbarPins.media === true`; the Media icon **returns** to the toolbar. |
 | 8 | Open a normal web tab (`https://example.com/`); take a `captureWindow()` to locate the web chip and `click(wcId, x, y)` on it; in the site-info popup, locate **"Site settings →"** via a fresh `captureWindow()` and `click(wcId, x, y)` on it. Read the chrome via `readDom(wcId)`/`readAxTree(wcId)`. | A **`goldfinch://settings/#privacy`** tab opens or an existing settings tab is activated + navigated to it (active webview `src`/address contains `#privacy`); the **slide-out panel does NOT open**. The popup closes. |
-| 9 | Run `npm run a11y` (chrome) and `npm run a11y -- --target=goldfinch://settings`; read both results. | **No NEW** violations vs the pinned `ACCEPTED` baseline — the icon toolbar (chrome) and the Appearance pin toggles (guest) introduce no new WCAG A/AA violations. `[a11y]` |
+| 9 | Run `npm run a11y` (chrome) and `npm run a11y -- --target=goldfinch://settings`; read both results. | **No NEW** violations vs the pinned `ACCEPTED` baseline — the icon toolbar (chrome) and the Appearance pin toggles (guest) introduce no new WCAG A/AA violations. (The chrome run also exercises the new `devtools-button` audit state — it pins DevTools, un-hides `#toggle-devtools`, and audits the button's static a11y. See the note below.) `[a11y]` |
+| 10 | **(DevTools pin — default-unpinned baseline → pin via Settings → Appearance.)** In the settings guest, read the **Appearance** section (`readDom(guestWcId)`/`readAxTree(guestWcId)`/`captureWindow()`) and confirm a **DevTools** pin-icon toggle is present. Establish a focus anchor with `click(guestWcId, x, y)` on the Appearance area, then activate the **DevTools** pin toggle (`click(guestWcId, x, y)` on its glyph, or keyboard: anchor → `Tab` to it → `Enter`/`Space`) to **PIN** it. Re-read `readAxTree(guestWcId)`. | The Appearance section shows a **DevTools** pin-icon toggle (pushpin glyph, `aria-pressed`), initially **unpinned** (`aria-pressed="false"`, outline glyph) — unlike Media/Shields. After activation it toggles to **pinned** (`aria-pressed="true"`, filled); keyboard-operable. `[a11y]` |
+| 11 | Read `userData/settings.json` (filesystem). Then read the chrome toolbar `#toggle-devtools` via `readDom(wcId)`/`captureWindow()` on the chrome `wcId`. | `toolbarPins.devtools === true` — the pin **persisted**. The `#toggle-devtools` icon is now **visible** (no longer `.hidden`) — the toolbar reflects the pin **live** (two-way). It is a **toggle button** with `aria-pressed` (NOT `aria-expanded` — DevTools has no in-page panel), currently `aria-pressed="false"` (DevTools window closed). `[a11y]` |
+| 12 | **(Unpinned shortcut still opens DevTools.)** First UNPIN DevTools again from the Appearance toggle (`click(guestWcId, x, y)` / keyboard-activate) so `toolbarPins.devtools === false` and `#toggle-devtools` is `.hidden`. Then, on a **normal web tab** (open/activate `https://example.com/`), establish a chrome focus anchor with `click(wcId, x, y)` and fire **`F12`** (`pressKey(wcId, 'F12')` — no modifier; the leg-1 modifier-less branch) — or the alternate `Ctrl+Shift+I` (`pressKey(wcId, 'I', ['control','shift'])`). Confirm DevTools opened via the `is-devtools-open` IPC / `isDevToolsOpened()` for that tab's `wcId` (and, if the button is re-pinned to read it, `#toggle-devtools` `aria-pressed="true"`). | DevTools **opens** for the active web tab even though the toolbar button is **unpinned** (`toolbarPins.devtools === false`) — the shortcut is independent of pin state (DD2/DD4). `isDevToolsOpened()` for that `wcId` is **true**. (Close DevTools again — `F12` toggles — before continuing; the button, if visible, returns to `aria-pressed="false"` live via `devtools-state-changed`.) |
+| 13 | **(Inert, NOT hidden, on internal tabs — DD5.)** Re-pin DevTools (Appearance toggle → `toolbarPins.devtools === true`, `#toggle-devtools` visible). Activate the `goldfinch://settings` internal tab. Read the chrome toolbar (`readDom(wcId)`/`captureWindow()`). Then `click(wcId, x, y)` the `#toggle-devtools` button and fire `F12` (`pressKey(wcId, 'F12')`) with the internal tab active. Re-read the toolbar + confirm via `is-devtools-open`/`isDevToolsOpened()` that no DevTools opened for the internal guest. | `#toggle-devtools` remains **visible** on the internal tab (visibility is pin-driven only — it is **inert, not hidden**, DD5); its click is a **no-op** (`aria-pressed` stays `false`, no DevTools window) and `F12` opens **nothing** on `goldfinch://` (web-content-only guard). The button does not throw or toggle. `[a11y]` |
+| 14 | **(Right-click → native Unpin DevTools.)** *(HAT-only — see Out of Scope.)* Right-click `#toggle-devtools` in the chrome toolbar; the native context menu shows **"Unpin DevTools"**; selecting it sets `toolbarPins.devtools === false`, hides the button, and broadcasts. | Native menu offers "Unpin DevTools"; selection persists `devtools: false` and removes the toolbar icon — equivalent to the Appearance-toggle unpin. **HAT-verified** (native Electron menu is not in the renderer DOM, not drivable over the MCP surface — same as Media/Shields right-click). |
 
 **Row conventions**: `[a11y]`-marked rows are accessibility-relevant. Step 6 is the "unpinned keeps its
-shortcut" assertion; step 8 is the "Site settings → opens the settings page, not the panel" assertion.
-**Step 9 is NOT on the MCP surface** — `npm run a11y` is the F8-deferred axe-injection harness
-(`scripts/a11y-audit.mjs`), invoked as a shell command and run separately against the hardened DevTools
-port; it is left verbatim (the MCP surface has no axe-rule evaluation), not migrated to MCP tools.
+shortcut" assertion (Media); step 8 is the "Site settings → opens the settings page, not the panel"
+assertion. Steps 10–13 are the **DevTools** coverage (pin via Settings → Appearance with live button
+un-hide + persistence; unpinned `F12`/`Ctrl+Shift+I` still opening DevTools; inert-not-hidden on internal);
+step 14 is the DevTools right-click unpin (HAT-only, like the Media/Shields right-click). **Step 9 is NOT on
+the MCP surface** — `npm run a11y` is the F8-deferred axe-injection harness (`scripts/a11y-audit.mjs`),
+invoked as a shell command and run separately against the hardened DevTools port; it is left verbatim (the
+MCP surface has no axe-rule evaluation), not migrated to MCP tools. **The harness's new `devtools-button`
+state (Leg 3) and this spec's own DevTools steps are complementary** — the harness audits the
+DevTools-pinned chrome under axe; this spec exercises the pin/persist/shortcut/inert *behaviors* over the
+MCP surface. Neither supersedes the other.
 
 ## Out of Scope
-- **Right-click → native "Unpin" context menu** (DD7) — a **native Electron menu** is not in the renderer DOM,
-  so its "Unpin" click is **not drivable over the MCP surface**; it is **HAT-verified**. (This test covers unpin via the
-  settings Appearance pin toggle, which is the drivable path; both write `toolbarPins` + broadcast, so the
+- **Right-click → native "Unpin" context menu** (DD6/DD7) — a **native Electron menu** is not in the renderer
+  DOM, so its "Unpin" click (for Media, Shields, **or DevTools**) is **not drivable over the MCP surface**; it
+  is **HAT-verified** (step 14 documents the DevTools case). (This test covers pin/unpin via the settings
+  Appearance pin toggle, which is the drivable path; both write `toolbarPins` + broadcast, so the
   store/toolbar effect is equivalent.)
+- **The live detached DevTools window + the CDP single-client conflict** (DevTools open ⇒ `readAxTree`
+  refused) — **macOS-authoritative**, covered by `devtools-cdp-conflict` (re-staged M04 Flight 3). This spec
+  asserts DevTools open/closed state via `isDevToolsOpened()`/the button's `aria-pressed`, not the
+  detached-window materialization or the CDP conflict (which were inconclusive under WSLg).
 - **Per-site Shields overrides** (more-strict-only) — a future flight (mission Known Issues).
 - The Shields/home wiring itself — covered by `settings-controls` (run as a regression).
 - The `goldfinch://` boundary — covered by `tab-scheme-guard` (regression).
 
 ## Variants (optional)
 - Repeat the pin/unpin (steps 3–7) for **Shields** (`toolbarPins.shields`; Ctrl+Shift+P for step 6).
+- DevTools restart-persistence: after step 11 (DevTools pinned), restart the app (`npm run dev:automation`
+  fresh) and confirm `#toggle-devtools` is still visible / `toolbarPins.devtools === true` survived — the
+  pin persists across restart (the inverse default of Media/Shields, which persist *pinned*).

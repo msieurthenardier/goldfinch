@@ -2,6 +2,7 @@
 'use strict';
 const { resolveContents, classifyContents, isInternalContents } = require('./resolve');
 const { withDebuggerSession } = require('./cdp');
+const { setDevTools } = require('../devtools');
 // Automation engine — READ half (observe). Foreground-first, debugger-free screenshots
 // via webContents.capturePage() (DD1): a guest is brought to front before capture or it
 // returns blank (Flight-1 spike). Results are base64 PNG strings (NativeImage.toPNG().
@@ -436,7 +437,7 @@ async function openDevTools(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: openDevTools — internal-session excluded');
   }
-  wc.openDevTools({ mode: 'detach' });          // void contract → returns undefined
+  setDevTools(wc, true);                         // shared helper: wc.openDevTools({mode:'detach'}); void contract → undefined
 }
 
 /**
@@ -464,7 +465,7 @@ async function closeDevTools(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: closeDevTools — internal-session excluded');
   }
-  wc.closeDevTools();                            // idempotent no-op when not open; void contract
+  setDevTools(wc, false);                        // shared helper: wc.closeDevTools(); idempotent no-op when not open; void contract
 }
 
 module.exports = { captureScreenshot, readDom, captureWindow, readAxTree, evaluate, injectScript, openDevTools, closeDevTools };

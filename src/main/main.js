@@ -18,6 +18,12 @@ const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
 const { makeAutomationToggle } = require('./automation/toggle');
+// DevTools human-path: import the SHARED open/close helper (Flight-3 DD1, one code path with the
+// M03 ops) and the SHARED internal-session predicate. The sibling chrome handlers (zoom/print)
+// inline `wc.session?.__goldfinchInternal`; this handler imports isInternalContents so the human
+// path and the MCP ops single-source the SAME internal-detection function (it is ELECTRON-FREE).
+const { toggleDevTools } = require('./devtools');
+const { isInternalContents } = require('./automation/resolve');
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -356,6 +362,16 @@ app.on('web-contents-created', (_event, contents) => {
     if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
       contents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown') return;
+        // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
+        // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
+        // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
+        // skip (~:356) already excludes internal sessions (DD5). Guard isAutoRepeat so a HELD F12
+        // doesn't rapid-toggle (main-side before-input-event repeats keyDown while held).
+        if (input.key === 'F12') {
+          if (!input.isAutoRepeat) toggleDevTools(contents);  // contents IS the guest wc — pre-guarded by the outer skip
+          event.preventDefault();
+          return;
+        }
         if (!(input.control || input.meta)) return;
         // Match '=' regardless of shift (US-layout Ctrl+Shift+= → zoom in) and '+'.
         let action = null;
@@ -383,10 +399,29 @@ app.on('web-contents-created', (_event, contents) => {
           if (mainWindow) mainWindow.webContents.send('open-find');
           return;
         }
+        // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
+        // section. Same isAutoRepeat guard so a held chord doesn't rapid-toggle. contents is the
+        // guest wc, pre-guarded by the outer __goldfinchInternal skip (DD5).
+        if (input.control && input.shift && (input.key === 'I' || input.key === 'i')) {
+          if (!input.isAutoRepeat) toggleDevTools(contents);
+          event.preventDefault();
+          return;
+        }
         if (!action) return;
         applyZoom(contents, action);
         event.preventDefault();
       });
+      // DevTools live-state broadcast (Flight-3 DD3). The leg-1 spike was POSITIVE: both
+      // devtools-opened/devtools-closed fire on the main-process guest webContents (unlike
+      // found-in-page, which fired only on the renderer <webview> tag — Flight-2 D1). We wire the
+      // GUEST side here and forward to the chrome renderer (mirrors the zoom-changed broadcast) so
+      // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
+      // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
+      const sendDevtoolsState = (open) => {
+        if (mainWindow) mainWindow.webContents.send('devtools-state-changed', { wcId: contents.id, open });
+      };
+      contents.on('devtools-opened', () => sendDevtoolsState(true));
+      contents.on('devtools-closed', () => sendDevtoolsState(false));
     }
   }
 });
@@ -923,13 +958,34 @@ ipcMain.on('print', (_e, { webContentsId }) => {
   });
 });
 
+// DevTools human path (Flight-3 DD1). Two-way invoke (over zoom's one-way send) because the
+// renderer button reflects the AUTHORITATIVE open/closed state. Acts on the PASSED webContentsId,
+// NEVER re-resolving via activeTab() — the active tab can change mid-round-trip, and the user
+// targeted the tab whose wcId the renderer captured at call time (TOCTOU guard, DD1). Guards a
+// dead/missing target (return false, no throw) and refuses an internal-session target via the
+// SHARED isInternalContents predicate (DD5 — never DevTools on goldfinch://). The actual
+// open/close mechanics live in the shared toggleDevTools helper, also called by the M03 MCP ops.
+ipcMain.handle('toggle-devtools', (_e, { webContentsId }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return false;
+  if (isInternalContents(wc)) return false;             // DD5; never on goldfinch://
+  return toggleDevTools(wc);                            // shared helper → post-toggle isDevToolsOpened()
+});
+// On-demand open-state read for the on-activation reconcile (DD3). Exposed for Leg 2's button.
+ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return false;
+  if (isInternalContents(wc)) return false;
+  return wc.isDevToolsOpened();
+});
+
 // Right-click a pinned toolbar icon → native "Unpin {item}" context menu.
 // Writes via `settings.set` + `broadcastToChromeAndInternal` (DD7). Chrome-trusted one-way
 // send (same trust domain as window-minimize/app-quit — no origin-check needed).
 ipcMain.on('toolbar-context-menu', (_e, item) => {
   if (!mainWindow) return;
-  if (item !== 'media' && item !== 'shields') return;
-  const label = 'Unpin ' + (item === 'media' ? 'Media' : 'Shields');
+  if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;
+  const label = 'Unpin ' + (item === 'media' ? 'Media' : item === 'shields' ? 'Shields' : 'DevTools');
   const menu = Menu.buildFromTemplate([
     { label, click: () => {
       const pins = { ...settings.get('toolbarPins'), [item]: false };

@@ -40,6 +40,7 @@ const els = {
   lightboxZoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-out')),
   lightboxZoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-reset')),
   togglePrivacy: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-privacy')),
+  toggleDevtools: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-devtools')),
   privacyCount: /** @type {HTMLElement} */ (document.getElementById('privacy-count')),
   privacyPanel: /** @type {HTMLElement} */ (document.getElementById('privacy-panel')),
   privacyBody: /** @type {HTMLElement} */ (document.getElementById('privacy-body')),
@@ -598,6 +599,18 @@ function activateTab(id) {
   renderMedia();
   renderPrivacy();
   updateNavButtons();
+
+  // DevTools pressed-state reconcile (DD3 rebuild trigger (b): tab activation).
+  // Query the newly-active tab's live open state; the activeTabId === tab.id re-check
+  // guards the async isDevtoolsOpen promise against a fast double-switch painting the
+  // wrong tab's state. Internal / no-wcId tabs force pressed false (button is inert there).
+  if (!isInternalTab(tab) && tab.wcId != null) {
+    window.goldfinch.isDevtoolsOpen({ webContentsId: tab.wcId })
+      .then((open) => { if (activeTabId === tab.id) setDevtoolsPressed(!!open); })
+      .catch(() => {});
+  } else {
+    setDevtoolsPressed(false);
+  }
 }
 
 function activeTab() {
@@ -1541,6 +1554,37 @@ function togglePrivacy(force) {
 
 els.togglePrivacy.addEventListener('click', () => togglePrivacy());
 els.togglePrivacy.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('shields'); });
+
+/* ------------------------------------------------------------------ devtools toggle */
+
+// The #toggle-devtools button is a toggle reflecting the active web tab's DevTools
+// open state (aria-pressed + .active styling — NOT aria-expanded; it controls no
+// in-page panel). Open state's source of truth is wc.isDevToolsOpened() main-side
+// (DD3); the pressed state is driven by (a) the post-toggle return of toggleDevtools,
+// (b) the devtools-state-changed event, and (c) the isDevtoolsOpen reconcile on tab
+// activation. Never cached.
+
+/** @param {boolean} open */
+function setDevtoolsPressed(open) {
+  els.toggleDevtools.setAttribute('aria-pressed', String(open));
+  els.toggleDevtools.classList.toggle('active', open);
+}
+
+els.toggleDevtools.addEventListener('click', async () => {
+  const t = activeTab();
+  // Inert on internal / no-wcId tabs (DD5) — never opens DevTools on goldfinch:// chrome.
+  if (!t || isInternalTab(t) || t.wcId == null) return;
+  const open = await window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
+  setDevtoolsPressed(!!open);
+});
+els.toggleDevtools.addEventListener('contextmenu', (e) => { e.preventDefault(); window.goldfinch.toolbarContextMenu('devtools'); });
+
+// Live update from the Leg-1 devtools-state-changed event (catches a DevTools-window-
+// initiated close). Apply only when the change targets the currently-active tab.
+window.goldfinch.onDevtoolsStateChanged(({ wcId, open }) => {
+  const t = activeTab();
+  if (t && t.wcId === wcId) setDevtoolsPressed(!!open);
+});
 els.privacyClose.addEventListener('click', () => togglePrivacy(false));
 // Non-modal: Escape closes the privacy panel; togglePrivacy restores focus to the toggle.
 els.privacyPanel.addEventListener('keydown', (e) => {
@@ -1676,11 +1720,14 @@ window.goldfinch.onAutomationActivity(updateAutomationIndicator);
  * Unpinned → button hidden (`.hidden`); keyboard shortcuts remain active.
  * NOTE: the automation indicator is deliberately NOT touched here — it self-manages
  * its `.hidden` state from the live session count (SC10/DD6), and is not pinnable.
- * @param {{ media: boolean, shields: boolean }} pins
+ * @param {{ media: boolean, shields: boolean, devtools: boolean }} pins
  */
 function applyToolbarPins(pins) {
   els.toggleMedia.classList.toggle('hidden', !pins.media);
   els.togglePrivacy.classList.toggle('hidden', !pins.shields);
+  // DD5: pin-state-driven only — never coupled to the active tab type. The button
+  // stays visible on internal tabs (its click no-ops via the isInternalTab guard).
+  els.toggleDevtools.classList.toggle('hidden', !pins.devtools);
 }
 
 window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {});
@@ -2197,6 +2244,19 @@ window.goldfinch.onOpenTab((url) => createTab(url));
 
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
+  // DevTools F12 (SC5 / DD2) — chrome-focused fallback (the page-focused case is captured main-side
+  // in before-input-event). MODIFIER-LESS, so it MUST sit BEFORE the `if (!mod) return;` gate below
+  // (else it never fires). Guards mirror Ctrl+F: defer when a lightbox is open, no-op on internal
+  // tabs / a tab with no live wcId (DD5). The DOM keydown fires once per press (no auto-repeat
+  // exposure for a toggle here — that guard is main-side only).
+  if (e.key === 'F12') {
+    if (!els.lightbox.classList.contains('hidden')) return;
+    const t = activeTab();
+    if (!t || isInternalTab(t) || t.wcId == null) return;
+    e.preventDefault();
+    window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
+    return;
+  }
   if (!mod) return;
   // Page-zoom fallback (DD6): fires when the CHROME shell is focused (the page-focused
   // case is captured main-side via before-input-event). Match '='/'+' (zoom in, regardless
@@ -2235,6 +2295,15 @@ document.addEventListener('keydown', (e) => {
   } else if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
     e.preventDefault();
     togglePrivacy();
+  } else if (e.shiftKey && (e.key === 'I' || e.key === 'i')) {
+    // DevTools Ctrl+Shift+I (SC5 / DD2) — chrome-focused fallback, the alternate to F12. A CHAIN
+    // member (not a separate `if`) so it cannot double-handle; the 'I'/'i' key letter disambiguates
+    // it from the Shift+P branch above, so chain order is safe. Same guards as F12.
+    if (!els.lightbox.classList.contains('hidden')) return;
+    const t = activeTab();
+    if (!t || isInternalTab(t) || t.wcId == null) return;
+    e.preventDefault();
+    window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
   } else if (e.key === 'r') {
     e.preventDefault();
     const t = activeTab();

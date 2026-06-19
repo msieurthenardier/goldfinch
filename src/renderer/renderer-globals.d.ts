@@ -78,6 +78,11 @@ interface GoldfinchBridge {
   // --- native print ---
   print(payload: { webContentsId: number }): void;
 
+  // --- devtools (human path; DD1) ---
+  toggleDevtools(payload: { webContentsId: number }): Promise<boolean>;
+  isDevtoolsOpen(payload: { webContentsId: number }): Promise<boolean>;
+  onDevtoolsStateChanged(cb: (d: { wcId: number; open: boolean }) => void): void;
+
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
   jarsAdd(payload: any): Promise<any>;

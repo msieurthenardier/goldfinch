@@ -64,6 +64,18 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // --- native print (Save-as-PDF is a destination in the OS dialog) ---
   print: ({ webContentsId }) => ipcRenderer.send('print', { webContentsId }),
 
+  // --- devtools (human path; the agent path is the MCP openDevTools/closeDevTools ops, DD1) ---
+  // Two-way invoke (over zoom's one-way send) because the toolbar button (Leg 2) must reflect the
+  // AUTHORITATIVE open/closed state: toggleDevtools resolves to the POST-toggle wc.isDevToolsOpened().
+  // isDevtoolsOpen serves the on-activation reconcile (DD3) — exposed here, consumed by Leg 2.
+  // The explicit webContentsId is captured at call time; main acts on THAT id, never activeTab() (TOCTOU).
+  toggleDevtools: ({ webContentsId }) => ipcRenderer.invoke('toggle-devtools', { webContentsId }),
+  isDevtoolsOpen: ({ webContentsId }) => ipcRenderer.invoke('is-devtools-open', { webContentsId }),
+  // Fired by main's guest devtools-opened/devtools-closed listener (leg-1 spike POSITIVE — both the
+  // guest contents and the <webview> tag fire; we wire the guest side). Mirrors onZoomChanged; Leg 2
+  // subscribes for live button updates. Payload { wcId, open }.
+  onDevtoolsStateChanged: (cb) => ipcRenderer.on('devtools-state-changed', (_e, d) => cb(d)),
+
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),
