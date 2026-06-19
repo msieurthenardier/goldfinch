@@ -87,6 +87,8 @@ interface GoldfinchBridge {
   onDownloadProgress(cb: (data: any) => void): void;
   onDownloadDone(cb: (data: any) => void): void;
   onOpenTab(cb: (url: string) => void): void;
+  /** Fired by the main-side Ctrl+F before-input-event capture (SC4/DD2). No payload. */
+  onOpenFind(cb: () => void): void;
 
   // Absolute file:// path to the webview preload script.
   webviewPreloadPath: string;

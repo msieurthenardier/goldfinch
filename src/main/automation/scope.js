@@ -55,6 +55,9 @@ const WCID_FIRST_OPS = [
   // zoom/print its OWN guests; resolveContentsForJar refuses out-of-jar/internal/chrome.
   // The op-local internal guard in zoom.js/print.js additionally covers the admin path.
   'getZoom', 'setZoom', 'printToPDF',
+  // Find in page (Flight 2 / Mission 4): wcId-first, jar-membership-checked. A jar key
+  // may find in its OWN guests. The op-local internal guard in find.js covers admin.
+  'findInPage', 'stopFindInPage',
 ];
 
 /**

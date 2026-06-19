@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),
   onOpenTab: (cb) => ipcRenderer.on('open-tab', (_e, url) => cb(url)),
+  // Fired by main's before-input-event Ctrl+F capture (DD2/SC4). No payload —
+  // the renderer resolves the active tab via activeTab(). Mirrors onOpenTab.
+  onOpenFind: (cb) => ipcRenderer.on('open-find', () => cb()),
 
   // Absolute path to the webview preload, so the renderer can set it on
   // <webview webpreferences> / preload attribute.

@@ -527,6 +527,7 @@ a:focus-visible {
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative; /* anchors #find-bar overlay */
 }
 #webviews {
   flex: 1;
@@ -541,6 +542,64 @@ a:focus-visible {
 }
 #webviews webview.hidden {
   display: none;
+}
+
+/* ---------- Find bar ----------
+   Floating top-right overlay anchored to the webview region.
+   Absolutely positioned over #webviews; z-index keeps it above webview content.
+   Default hidden via .hidden { display: none }. */
+#find-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+#find-bar.hidden {
+  display: none;
+}
+#find-input {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 13px;
+  padding: 3px 7px;
+  width: 180px;
+  outline: none;
+  /* suppress browser default search-input decoration */
+  -webkit-appearance: none;
+}
+#find-input:focus {
+  border-color: var(--accent);
+}
+/* Suppress the native "×" clear button on search inputs */
+#find-input::-webkit-search-cancel-button {
+  display: none;
+}
+#find-count {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.find-nav-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+}
+#find-bar .icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ---------- Media panel ---------- */

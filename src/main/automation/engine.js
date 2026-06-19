@@ -11,6 +11,7 @@ const input = require('./input');
 const observe = require('./observe');
 const zoom = require('./zoom');
 const print = require('./print');
+const find = require('./find');
 
 /**
  * Create the automation engine, bound to the live Electron environment.
@@ -85,6 +86,8 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
     openDevTools: (/** @type {number} */ wcId) => observe.openDevTools(wcId, deps()),
     closeDevTools: (/** @type {number} */ wcId) => observe.closeDevTools(wcId, deps()),
     printToPDF: (/** @type {number} */ wcId) => print.printToPDF(wcId, deps()),
+    findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) => find.findInPage(wcId, text, deps(), opts),
+    stopFindInPage: (/** @type {number} */ wcId) => find.stopFindInPage(wcId, deps()),
     getChromeTarget: () => {
       const mw = getMainWindow();
       const cc = mw ? mw.webContents : null;

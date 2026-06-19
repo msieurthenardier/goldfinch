@@ -372,6 +372,17 @@ app.on('web-contents-created', (_event, contents) => {
           event.preventDefault();
           return;
         }
+        // Find in page (SC4 / DD2). Suppress Chromium's native find and open the
+        // renderer-side floating find bar. Modelled on the zoom-changed broadcast:
+        // send to the chrome renderer where the bar lives (NOT on the open-tab path
+        // inside setWindowOpenHandler). No payload — the renderer infers via activeTab().
+        // The __goldfinchInternal skip at ~:356 (outer guard) already excludes internal
+        // sessions, satisfying DD5.
+        if (input.key === 'f' || input.key === 'F') {
+          event.preventDefault();
+          if (mainWindow) mainWindow.webContents.send('open-find');
+          return;
+        }
         if (!action) return;
         applyZoom(contents, action);
         event.preventDefault();

@@ -65,7 +65,14 @@ const els = {
   zoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-out')),
   zoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-in')),
   zoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-reset')),
-  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent'))
+  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent')),
+  // Find bar (SC4/DD1)
+  findBar: /** @type {HTMLElement} */ (document.getElementById('find-bar')),
+  findInput: /** @type {HTMLInputElement} */ (document.getElementById('find-input')),
+  findCount: /** @type {HTMLElement} */ (document.getElementById('find-count')),
+  findPrev: /** @type {HTMLButtonElement} */ (document.getElementById('find-prev')),
+  findNext: /** @type {HTMLButtonElement} */ (document.getElementById('find-next')),
+  findClose: /** @type {HTMLButtonElement} */ (document.getElementById('find-close'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -85,7 +92,9 @@ document.documentElement.classList.add(`platform-${window.goldfinch?.platform ??
  *   wcId: number | null,
  *   privacy: { net: any, fp: { canvas: number, webgl: number, audio: number }, permissions: any[], cookies: any },
  *   container: { id: string, name: string, color: string, partition: string, burner?: boolean },
- *   btn?: HTMLElement
+ *   btn?: HTMLElement,
+ *   findOpen?: boolean,
+ *   findText?: string
  * }} Tab
  */
 
@@ -575,6 +584,17 @@ function activateTab(id) {
   els.address.value = tab.url || '';
   updateAddressChip(tab);
   refreshZoomControl(tab);
+  // Per-tab find restore (AC8 / DD3). Re-show the bar and re-issue findInPage so
+  // the live count refreshes (intent only was cached; counts are always live-queried).
+  // Tabs without findOpen stay hidden — new tabs have findOpen falsy, safe no-op.
+  if (tab.findOpen && !isInternalTab(tab)) {
+    els.findBar.classList.remove('hidden');
+    els.findInput.value = tab.findText || '';
+    runFind(tab, { findNext: false });
+  } else {
+    els.findBar.classList.add('hidden');
+    els.findCount.textContent = '';
+  }
   renderMedia();
   renderPrivacy();
   updateNavButtons();
@@ -733,6 +753,18 @@ function wireWebview(tab) {
       renderMedia();
       renderPrivacy();
     }
+    // Find invalidation on did-navigate (AC9 / DD3). A new document means the previous
+    // query is stale and the highlight is gone. Always clear intent + stop the engine,
+    // but only hide the DOM bar when this tab is the active one — did-navigate can fire
+    // on a backgrounded tab whose state still needs resetting.
+    if (tab.findOpen) {
+      tab.findOpen = false;
+      try { wv.stopFindInPage('clearSelection'); } catch { /* webview gone */ }
+      if (tab.id === activeTabId) {
+        els.findBar.classList.add('hidden');
+        els.findCount.textContent = '';
+      }
+    }
   };
   wv.addEventListener('did-navigate', onNav);
   // Re-query the zoom label once the load settles. Under Chromium's per-origin host-zoom
@@ -766,6 +798,21 @@ function wireWebview(tab) {
 
   wv.addEventListener('did-fail-load', (e) => {
     if (e.errorCode === -3) return; // aborted (normal during fast nav)
+  });
+
+  // Found-in-page result stream (SC4 / DD1 / DD3).
+  // Attached per-webview so a backgrounded tab's late finalUpdate is not lost.
+  // Repaint guards (AC10 / DD3):
+  //   1. tab.id === activeTabId  — race-guard (mirrors refreshZoomControl)
+  //   2. tab.findOpen            — no-flash guard: a trailing matches:0 after
+  //      stopFindInPage must not paint "0/0" into a just-closed bar.
+  wv.addEventListener('found-in-page', (e) => {
+    const { activeMatchOrdinal, matches } = e.result;
+    // Always keep the tab's UI intent current (the cache is intent, not a count).
+    // Repaint only when this tab is active AND the bar is logically open.
+    if (tab.id === activeTabId && tab.findOpen) {
+      els.findCount.textContent = matches ? `${activeMatchOrdinal}/${matches}` : '0/0';
+    }
   });
 }
 
@@ -1718,6 +1765,104 @@ els.zoomOut.addEventListener('click', () => applyTabZoom('out'));
 els.zoomIn.addEventListener('click', () => applyTabZoom('in'));
 els.zoomReset.addEventListener('click', () => applyTabZoom('reset'));
 
+/* ----------------------------------------------------------------- find in page (SC4 / DD1–DD3 / DD5) */
+
+/**
+ * Run findInPage on the given tab's webview for the current findText.
+ * Empty findText → no search issued (blank count, no highlight).
+ * @param {Tab} tab
+ * @param {{ findNext?: boolean, forward?: boolean }} [opts]
+ */
+function runFind(tab, opts = {}) {
+  const text = tab.findText || '';
+  if (!text) {
+    els.findCount.textContent = '';
+    return;
+  }
+  try {
+    tab.webview.findInPage(text, { findNext: false, forward: true, matchCase: false, ...opts });
+  } catch {
+    // webview not yet ready — ignore; the next input event will retry
+  }
+}
+
+/**
+ * Open the find bar for the given tab (or the current active tab if omitted).
+ * Guards: no bar on internal tabs, no bar when the lightbox is open.
+ * @param {Tab|null} [tab]
+ */
+function openFind(tab) {
+  const t = tab || activeTab();
+  if (!t || isInternalTab(t) || t.wcId == null) return;
+  // Don't fight the lightbox (DD2 / AC6).
+  if (!els.lightbox.classList.contains('hidden')) return;
+  t.findOpen = true;
+  els.findBar.classList.remove('hidden');
+  if (t.findText) {
+    els.findInput.value = t.findText;
+    runFind(t, { findNext: false });
+  } else {
+    els.findInput.value = '';
+    els.findCount.textContent = '';
+  }
+  els.findInput.focus();
+  els.findInput.select();
+}
+
+/**
+ * Close the find bar: clear the highlight, hide the bar, and restore focus to the page.
+ * @param {Tab|null} [tab]
+ */
+function closeFind(tab) {
+  const t = tab || activeTab();
+  els.findBar.classList.add('hidden');
+  els.findCount.textContent = '';
+  if (t) {
+    t.findOpen = false;
+    try {
+      t.webview.stopFindInPage('clearSelection');
+    } catch { /* webview gone */ }
+    // Restore keyboard focus to the page (AC5 — explicit a11y item).
+    try {
+      t.webview.focus();
+    } catch { /* webview gone */ }
+  }
+}
+
+// Wire find-bar UI events.
+els.findInput.addEventListener('input', () => {
+  const t = activeTab();
+  if (!t || !t.findOpen) return;
+  t.findText = els.findInput.value;
+  runFind(t, { findNext: false });
+});
+
+els.findInput.addEventListener('keydown', (e) => {
+  const t = activeTab();
+  if (!t) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (!t.findText) return;
+    runFind(t, { findNext: true, forward: !e.shiftKey });
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeFind(t);
+  }
+});
+
+els.findNext.addEventListener('click', () => {
+  const t = activeTab();
+  if (t && t.findText) runFind(t, { findNext: true, forward: true });
+});
+els.findPrev.addEventListener('click', () => {
+  const t = activeTab();
+  if (t && t.findText) runFind(t, { findNext: true, forward: false });
+});
+els.findClose.addEventListener('click', () => closeFind(activeTab()));
+
+// Main-side Ctrl+F capture → open find (page-focused path, DD2).
+window.goldfinch.onOpenFind(() => openFind());
+
 function currentSite() {
   const tab = activeTab();
   if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
@@ -2066,7 +2211,15 @@ document.addEventListener('keydown', (e) => {
     window.goldfinch.zoomApply({ webContentsId: t.wcId, action });
     return;
   }
-  if (e.key === 't') {
+  if (e.key === 'f' || e.key === 'F') {
+    // Chrome-focused Ctrl+F fallback (DD2 / AC2). The page-focused case is handled
+    // main-side via before-input-event. Guard: no bar on internal tabs or open lightbox.
+    if (!els.lightbox.classList.contains('hidden')) return;
+    const t = activeTab();
+    if (!t || isInternalTab(t) || t.wcId == null) return;
+    e.preventDefault();
+    openFind(t);
+  } else if (e.key === 't') {
     e.preventDefault();
     createTab();
   } else if (e.key === 'w') {
