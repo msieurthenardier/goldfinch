@@ -152,10 +152,12 @@ released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for th
 | `Ctrl -`        | Zoom out (page content) |
 | `Ctrl 0`        | Reset zoom (100%)   |
 | `Ctrl+P`        | Print / save as PDF |
+| `Ctrl+F`        | Find in page        |
+| `Enter` / `Shift+Enter` | Next / previous match (find bar) |
 | `←` / `→`       | Move between tabs (when a tab is focused) |
 | `Home` / `End`  | First / last tab    |
 | `Delete` / `Backspace` | Close the focused tab |
-| `Esc`           | Close an open menu / panel |
+| `Esc`           | Close an open menu / panel / find bar |
 
 Zoom shows a chip in the toolbar when the level is not 100%, and applies to web
 content only (not `goldfinch://` internal pages).

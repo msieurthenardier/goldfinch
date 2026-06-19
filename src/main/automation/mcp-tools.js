@@ -238,6 +238,33 @@ const DRIVE_TOOLS = [
     call: (engine, { wcId }) => engine.printToPDF(wcId),
   },
   {
+    name: 'findInPage',
+    description: 'Search for text in the tab identified by wcId; returns { activeMatchOrdinal, matches }. Use findNext:true to step (forward:true/false) through matches; matchCase for case-sensitive. Refuses internal goldfinch:// pages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        text: { type: 'string', description: 'text to search for' },
+        forward: { type: 'boolean', description: 'step direction when findNext; default true' },
+        findNext: { type: 'boolean', description: 'true = step to next/prev match; false/omitted = new search; default false' },
+        matchCase: { type: 'boolean', description: 'case-sensitive match; default false' },
+      },
+      required: ['wcId', 'text'],
+    },
+    call: (engine, { wcId, text, forward, findNext, matchCase }) =>
+      engine.findInPage(wcId, text, { forward, findNext, matchCase }),
+  },
+  {
+    name: 'stopFindInPage',
+    description: 'Clear the find session on the tab identified by wcId (clearSelection). Returns {"ok":true}. Refuses internal goldfinch:// pages.',
+    inputSchema: {
+      type: 'object',
+      properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
+      required: ['wcId'],
+    },
+    call: (engine, { wcId }) => engine.stopFindInPage(wcId),
+  },
+  {
     name: 'click',
     description: 'Synthetic mouse click at (x, y) in the target tab\'s viewport. Coordinates are guest-viewport-relative.',
     inputSchema: {
@@ -472,8 +499,8 @@ const CHROME_TOOLS = [
   },
 ];
 
-// The full tool table — 15 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
-// chrome-discovery = 24 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF),
+// The full tool table — 17 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
+// chrome-discovery = 26 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find),
 // iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS];
 

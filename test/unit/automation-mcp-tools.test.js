@@ -22,6 +22,7 @@ const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 const DRIVE_NAMES = [
   'enumerateTabs', 'openTab', 'closeTab', 'activateTab', 'navigate',
   'goBack', 'goForward', 'reload', 'getZoom', 'setZoom', 'printToPDF',
+  'findInPage', 'stopFindInPage',
   'click', 'typeText', 'scroll', 'pressKey',
 ];
 
@@ -68,13 +69,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 24 tools (15 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 26 tools (17 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 24);
-  const allNames24 = [...ALL_NAMES, 'getChromeTarget'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames24].sort());
+  assert.equal(tools.length, 26);
+  const allNames26 = [...ALL_NAMES, 'getChromeTarget'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames26].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -210,6 +211,32 @@ test('setZoom maps named args → positional engine.setZoom(wcId, factor)', asyn
   const result = await reg.callTool('setZoom', { wcId: 7, factor: 2.0 });
   assert.deepEqual(calls.setZoom[0], [7, 2.0]);
   assert.equal(textOf(result), JSON.stringify({ factor: 2.0 }));
+});
+
+test('findInPage maps full named args → positional engine.findInPage(wcId, text, { forward, findNext, matchCase })', async () => {
+  const match = { activeMatchOrdinal: 2, matches: 5 };
+  const { engine, calls } = makeFakeEngine({ returns: { findInPage: match } });
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('findInPage', { wcId: 7, text: 'hello', forward: false, findNext: true, matchCase: true });
+  assert.deepEqual(calls.findInPage[0], [7, 'hello', { forward: false, findNext: true, matchCase: true }]);
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(JSON.parse(textOf(result)), match);
+});
+
+test('findInPage minimal args (wcId + text only) threads undefined opts fields to engine', async () => {
+  const { engine, calls } = makeFakeEngine({ returns: { findInPage: { activeMatchOrdinal: 1, matches: 1 } } });
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('findInPage', { wcId: 3, text: 'word' });
+  assert.deepEqual(calls.findInPage[0], [3, 'word', { forward: undefined, findNext: undefined, matchCase: undefined }]);
+});
+
+test('stopFindInPage maps { wcId } → engine.stopFindInPage(wcId), void → {"ok":true}', async () => {
+  const { engine, calls } = makeFakeEngine(); // returns undefined → void op
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('stopFindInPage', { wcId: 7 });
+  assert.deepEqual(calls.stopFindInPage[0], [7]);
+  assert.equal(result.isError, undefined);
+  assert.equal(textOf(result), '{"ok":true}');
 });
 
 test('scroll maps to engine.scroll(wcId, x, y, dx, dy)', async () => {

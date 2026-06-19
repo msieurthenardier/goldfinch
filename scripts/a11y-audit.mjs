@@ -37,7 +37,7 @@
 //        GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
 //      It prints ONE line:  AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
 //   2. Export the key the audit needs:
-//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 4-state sweep (admin)
+//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 5-state sweep (admin)
 //        export GOLDFINCH_MCP_KEY=<jarKey>           # --target guest mode (jar)
 //   3. Serve the media fixture (tests/behavior/fixtures/a11y-media/) on :8000:
 //        python3 -m http.server 8000 --directory tests/behavior/fixtures/a11y-media
@@ -45,7 +45,7 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The chrome 4-state sweep needs the ADMIN key (getChromeTarget is admin-only);
+// The chrome 5-state sweep needs the ADMIN key (getChromeTarget is admin-only);
 // `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
 // is the INTERNAL session and the eval tool refuses it even for admin, so it
 // CANNOT be audited via `evaluate` (the old CDP path could) — see the
@@ -133,7 +133,7 @@ const ACCEPTED = [
 ];
 
 // ---------- pick the renderer target (chrome mode, admin) ----------
-// The chrome 4-state sweep drives the app shell, which is reachable only via the
+// The chrome 5-state sweep drives the app shell, which is reachable only via the
 // admin-only getChromeTarget tool — it returns { wcId, kind: 'chrome', url }.
 async function getChromeWcId(client) {
   const { value, isError } = await callTool(client, 'getChromeTarget', {});
@@ -242,7 +242,7 @@ async function main() {
     if (targetArg) {
       // Guest mode (DD7): the target is an already-loaded guest tab (e.g. a
       // fixture page). It has none of the chrome's state-driving functions, so we
-      // skip the 4-state sweep entirely — just inject axe and audit its current
+      // skip the 5-state sweep entirely — just inject axe and audit its current
       // DOM once (no fixture navigate, no UI driving).
       const wcId = await getGuestWcId(client, targetArg);
       allViolations.push(...(await runAxe(client, wcId, axeSource, `guest:${targetArg}`)));
@@ -282,6 +282,15 @@ async function main() {
       await evaluate(client, wcId, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'lightbox')));
+
+      // 5) Find bar open (focus order, aria-live count, button labels — AC2).
+      // openFind() guards against the lightbox being open, so close it first.
+      // openFind() also requires an active non-internal tab (guarded internally).
+      await evaluate(client, wcId, 'closeLightbox()');
+      await sleep(200);
+      await evaluate(client, wcId, 'openFind()');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'find-bar')));
     }
   } finally {
     await client.close();

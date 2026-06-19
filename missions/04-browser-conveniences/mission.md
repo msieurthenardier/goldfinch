@@ -214,7 +214,19 @@ absolute internal-session exclusion for jar keys, and loopback-only binding.
 
 Emergent blockers discovered during execution go here as flights surface them.
 
-- [ ] *(none yet — populated during execution)*
+- [ ] **Find-in-page cold-start returns `{0,0}` on WSLg** — discovered in Flight 2
+  (`find-mcp-tools` / behavior test). The FIRST `findInPage` on a freshly-loaded `<webview>` reports
+  zero matches in the WSLg dev environment (Chromium cold-start: a cold `<webview>` only reports match
+  counts via `findNext:true`); subsequent finds are correct. The op is architecturally fixed
+  (renderer-routed, Flight-2 Deviation D1) and verified correct for warm/stepping finds. **Affects
+  SC8 live verification on WSLg only — confirm on macOS** (the mission already plans macOS verification
+  for print-dialog / DevTools docking). **Confirmed in the Flight-2 HAT to also affect the SC4 UI
+  find bar**: live search-as-you-type (each keystroke issues `findNext:false`) does not update the
+  `n/m` count on WSLg, but pressing **Enter** (`findNext:true`) searches correctly and shows the
+  count + stepping. The find-bar code is correctly wired for per-keystroke search (renderer.js:1833);
+  the degradation is purely the `findNext:false`/WSLg cold quirk. SC4 is functionally satisfied on
+  WSLg via Enter (search, visible count, forward/back stepping, close, focus-restore, per-tab restore,
+  internal no-op, lightbox guard all HAT-confirmed); live-incremental-search to be confirmed on macOS.
 
 ## Flights
 
@@ -229,8 +241,13 @@ Emergent blockers discovered during execution go here as flights surface them.
   notifications dropped from the mission** — already denied-by-default at `main.js` with no grant
   UI, so user-facing enablement is blocked-by-design on the future permissions-manager, not a
   conveniences wire-up.)*
-- [ ] **Flight 2: Find in page** — the find-bar UI component (`findInPage`/`found-in-page`
-  wiring, match count/position, `Ctrl+F`/`Esc`, a11y) plus an MCP find tool. (SC4, SC8 part)
+- [x] **Flight 2: Find in page** *(landed 2026-06-19)* — the find-bar UI component
+  (`findInPage`/`found-in-page` wiring, match count/position, `Ctrl+F`/`Esc`, a11y) plus MCP find
+  tools (`findInPage`/`stopFindInPage`, surface 24→26). (SC4, SC8 part) *(SC4 HAT-confirmed + SC8
+  stepping/warm parity live-verified; **mid-flight Deviation D1**: the MCP find was rebuilt to route
+  through the chrome renderer's `<webview>` tag after the behavior test proved `found-in-page` never
+  fires on a main-process guest `webContents`. New Known Issue: WSLg cold-start `findInPage`/live-type
+  returns no count — `findNext:true`/Enter works — pending macOS confirmation.)*
 - [ ] **Flight 3: First-class DevTools** *(issue #39)* — pinnable toolbar button via `toolbarPins`
   (right-click + Settings→Appearance pin, persisted), `F12`/`Ctrl+Shift+I` working when unpinned,
   web-content-only targeting, **native detached/docked DevTools window** (not in-panel — see SC5),
