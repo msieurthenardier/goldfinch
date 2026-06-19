@@ -62,8 +62,15 @@ jobs:
               file: repo/ci/tasks/lint.yml
             - task: audit
               file: repo/ci/tasks/audit.yml
-            - task: package-linux
-              file: repo/ci/tasks/package-linux.yml
+      # package-linux runs SERIALLY after the fast checks. It downloads + unpacks
+      # Electron (~200 MB) and copies node_modules (asar:false) — far heavier than
+      # the other tasks. Run inside the in_parallel block alongside four other
+      # `npm ci`-heavy tasks on a single worker, its Electron download+pack was
+      # killed under contention (no clean error, just "failed" — builds #12–#14).
+      # It passes standalone (`fly execute`); serializing it removes the
+      # over-subscription while keeping the fast checks parallel.
+      - task: package-linux
+        file: repo/ci/tasks/package-linux.yml
 
   - name: build-linux
     plan:
