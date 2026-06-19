@@ -248,11 +248,14 @@ Emergent blockers discovered during execution go here as flights surface them.
   through the chrome renderer's `<webview>` tag after the behavior test proved `found-in-page` never
   fires on a main-process guest `webContents`. New Known Issue: WSLg cold-start `findInPage`/live-type
   returns no count — `findNext:true`/Enter works — pending macOS confirmation.)*
-- [ ] **Flight 3: First-class DevTools** *(issue #39)* — pinnable toolbar button via `toolbarPins`
-  (right-click + Settings→Appearance pin, persisted), `F12`/`Ctrl+Shift+I` working when unpinned,
-  web-content-only targeting, **native detached/docked DevTools window** (not in-panel — see SC5),
-  and the surfaced automation debugger-lock interaction (closes the M03 `devtools-cdp-conflict`
-  loop). (SC5)
+- [x] **Flight 3: First-class DevTools** *(landed 2026-06-19)* *(issue #39)* — pinnable toolbar button
+  via `toolbarPins` (right-click + Settings→Appearance pin, persisted), `F12`/`Ctrl+Shift+I` working
+  when unpinned, web-content-only targeting, **native detached/docked DevTools window** (not in-panel —
+  see SC5), and the surfaced automation debugger-lock interaction (closes the M03 `devtools-cdp-conflict`
+  loop). (SC5) *(Pinnable `#toggle-devtools` button + `F12`/`Ctrl+Shift+I` + shared main-side
+  open/close helper landed; pin/shortcut/internal-no-op live-verified on WSLg; the detached
+  DevTools-window materialization + the live CDP conflict (`devtools-cdp-conflict` re-staged) are
+  **macOS-authoritative**, WSLg-inconclusive-tolerated. No MCP tool-count change (26). SC5.)
 - [ ] **Flight 4: Custom page context menu + spellcheck** — reusable, on-brand, keyboard-operable
   context-menu component for page content (link/image/selection/editable/Inspect actions); migrate
   the toolbar Unpin off the native menu and graduate `menuController` if taken (closes the M02

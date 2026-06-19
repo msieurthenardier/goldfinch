@@ -153,6 +153,8 @@ released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for th
 | `Ctrl 0`        | Reset zoom (100%)   |
 | `Ctrl+P`        | Print / save as PDF |
 | `Ctrl+F`        | Find in page        |
+| `F12`           | Open/close DevTools (active web tab) |
+| `Ctrl+Shift+I`  | Open/close DevTools (active web tab) |
 | `Enter` / `Shift+Enter` | Next / previous match (find bar) |
 | `←` / `→`       | Move between tabs (when a tab is focused) |
 | `Home` / `End`  | First / last tab    |
@@ -161,6 +163,12 @@ released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for th
 
 Zoom shows a chip in the toolbar when the level is not 100%, and applies to web
 content only (not `goldfinch://` internal pages).
+
+DevTools targets **web content only** (the shortcuts and the toolbar button are inert
+on `goldfinch://` internal pages) and opens in Chromium's **native detached window**.
+A pinnable `DevTools` toolbar button is also available — **default unpinned**; pin it
+from Settings → Appearance or by right-clicking the toolbar. The `F12` / `Ctrl+Shift+I`
+shortcuts work whether or not the button is pinned.
 
 ## Architecture
 

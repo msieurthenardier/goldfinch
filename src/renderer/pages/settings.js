@@ -192,21 +192,22 @@ async function copyText(text, messageEl) {
 
   const btns = {
     media: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-media')),
-    shields: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-shields'))
+    shields: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-shields')),
+    devtools: /** @type {HTMLButtonElement|null} */ (document.getElementById('pin-devtools'))
   };
-  if (!btns.media || !btns.shields) return;
+  if (!btns.media || !btns.shields || !btns.devtools) return;
 
-  /** @type {{ media: boolean, shields: boolean }} */
-  let current = { media: true, shields: true };
+  /** @type {{ media: boolean, shields: boolean, devtools: boolean }} */
+  let current = { media: true, shields: true, devtools: false };
 
   /**
    * Apply a toolbarPins object to the toggle buttons: sets aria-pressed on each
    * and caches the value for use by the click handler's spread.
-   * @param {{ media: boolean, shields: boolean }} pins
+   * @param {{ media: boolean, shields: boolean, devtools: boolean }} pins
    */
   function apply(pins) {
     current = pins;
-    for (const k of /** @type {Array<'media'|'shields'>} */ (['media', 'shields'])) {
+    for (const k of /** @type {Array<'media'|'shields'|'devtools'>} */ (['media', 'shields', 'devtools'])) {
       btns[k].setAttribute('aria-pressed', String(!!pins[k]));
     }
   }
@@ -217,7 +218,7 @@ async function copyText(text, messageEl) {
   // Click handler: flip the pin for the clicked key, write the full map.
   // settingsSet resolves to the full config object, not the toolbarPins value, so apply
   // the locally-computed `next` (a clean {media,shields} map) — never the resolution.
-  for (const k of /** @type {Array<'media'|'shields'>} */ (['media', 'shields'])) {
+  for (const k of /** @type {Array<'media'|'shields'|'devtools'>} */ (['media', 'shields', 'devtools'])) {
     btns[k].addEventListener('click', () => {
       const next = { ...current, [k]: !current[k] };
       window.goldfinchInternal.settingsSet('toolbarPins', next)

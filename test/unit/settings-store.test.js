@@ -332,8 +332,8 @@ test('toolbarPins — default on first load (no settings.json)', () => {
   try {
     const store = freshStore();
     const result = store.load(dir);
-    assert.deepEqual(result.toolbarPins, { media: true, shields: true });
-    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
+    assert.deepEqual(result.toolbarPins, { media: true, shields: true, devtools: false });
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
   } finally {
     removeTempDir(dir);
   }
@@ -345,17 +345,17 @@ test('toolbarPins — set full map persists and reloads', () => {
   try {
     const store = freshStore();
     store.load(dir);
-    store.set('toolbarPins', { media: false, shields: true });
+    store.set('toolbarPins', { media: false, shields: true, devtools: false });
 
     const result = store.load(dir);
-    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
-    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true, devtools: false });
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true, devtools: false });
   } finally {
     removeTempDir(dir);
   }
 });
 
-// Test: set partial {media:false} → normalized to {media:false, shields:true}
+// Test: set partial {media:false} → normalized to full map (missing keys → defaults)
 test('toolbarPins — set partial map normalizes to full map', () => {
   const dir = makeTempDir();
   try {
@@ -364,12 +364,38 @@ test('toolbarPins — set partial map normalizes to full map', () => {
     store.set('toolbarPins', { media: false });
 
     // After set, both get and getAll should return the normalized full map
-    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
-    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true, devtools: false });
+    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true, devtools: false });
 
     // Also verify persistence: reload should preserve the normalized value
     const result = store.load(dir);
-    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true, devtools: false });
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// Test: devtools defaults to false; a settings file written before this leg (only
+// {media,shields}, no devtools) auto-populates devtools:false via the normalizer
+// (forward-compat — no version bump, no migration). And a devtools:true write
+// persists across a reload (the pin-state-persists-across-restart contract).
+test('toolbarPins — devtools default false + persistence round-trip', () => {
+  const dir = makeTempDir();
+  try {
+    // Simulate a pre-leg settings file lacking the devtools key.
+    const store = freshStore();
+    store.load(dir);
+    store.set('toolbarPins', { media: true, shields: false });
+    // Reload: the normalizer fills the missing devtools key with its default (false).
+    let result = store.load(dir);
+    assert.equal(result.toolbarPins.devtools, false);
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: false, devtools: false });
+
+    // Pin DevTools and reload: the pinned state survives the round-trip.
+    store.set('toolbarPins', { media: true, shields: false, devtools: true });
+    result = store.load(dir);
+    assert.equal(result.toolbarPins.devtools, true);
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: false, devtools: true });
   } finally {
     removeTempDir(dir);
   }
@@ -456,10 +482,11 @@ test('toolbarPins — load stored partial map merges with defaults (forward-comp
     const store = freshStore();
     const result = store.load(dir);
 
-    // Both get() and getAll() must return the fully-merged map
-    assert.deepEqual(result.toolbarPins, { media: false, shields: true });
-    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true });
-    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true });
+    // Both get() and getAll() must return the fully-merged map (missing shields AND
+    // devtools both filled from DEFAULTS — devtools defaults to false, shields true)
+    assert.deepEqual(result.toolbarPins, { media: false, shields: true, devtools: false });
+    assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true, devtools: false });
+    assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true, devtools: false });
   } finally {
     removeTempDir(dir);
   }
@@ -475,8 +502,8 @@ test('toolbarPins — load malformed toolbarPins falls back to default', () => {
     const store = freshStore();
     const result = store.load(dir);
 
-    assert.deepEqual(result.toolbarPins, { media: true, shields: true });
-    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
+    assert.deepEqual(result.toolbarPins, { media: true, shields: true, devtools: false });
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
   } finally {
     removeTempDir(dir);
   }
@@ -495,8 +522,8 @@ test('toolbarPins — getAll returns a fresh nested object', () => {
     snapshot.toolbarPins.shields = false;
 
     // Store must be unaffected
-    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true });
-    assert.deepEqual(store.getAll().toolbarPins, { media: true, shields: true });
+    assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
+    assert.deepEqual(store.getAll().toolbarPins, { media: true, shields: true, devtools: false });
   } finally {
     removeTempDir(dir);
   }

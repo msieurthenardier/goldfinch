@@ -291,6 +291,22 @@ async function main() {
       await evaluate(client, wcId, 'openFind()');
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'find-bar')));
+
+      // 6) DevTools button visible (pin it; default is unpinned so the toolbar button is .hidden).
+      // Audits the button's static a11y — accessible name + valid aria-pressed (NOT aria-expanded).
+      // The find-bar state (state 5) leaves the find bar OPEN; close it so unrelated find nodes
+      // don't pollute this state. closeFind REQUIRES the active-tab arg (renderer.js) — passing
+      // none is a silent no-op, so pass activeTab(). applyToolbarPins is a top-level renderer fn
+      // (window global, like togglePanel/openFind/closeLightbox) and toggles .hidden on
+      // els.toggleDevtools per pins.devtools (Leg 2), so pinning un-hides the button for axe.
+      // We do NOT open DevTools (no detached window in the gate) — the unpressed static a11y is
+      // the target. This last state mutates live toolbar visibility and does not restore the
+      // default pin map afterward — harmless, since the client closes immediately below.
+      await evaluate(client, wcId, 'closeFind(activeTab())');
+      await sleep(200);
+      await evaluate(client, wcId, "applyToolbarPins({ media: true, shields: true, devtools: true })");
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
     }
   } finally {
     await client.close();

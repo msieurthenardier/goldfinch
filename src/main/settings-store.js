@@ -28,7 +28,7 @@ const { isSafeTabUrl } = require('../shared/url-safety');
  * @typedef {{
  *   version: number,
  *   homePage: string,
- *   toolbarPins: { media: boolean, shields: boolean },
+ *   toolbarPins: { media: boolean, shields: boolean, devtools: boolean },
  *   automationEnabled: boolean,
  *   automationKeyHashes: Record<string, string>,
  *   automationAdminKeyHash: string,
@@ -40,7 +40,7 @@ const { isSafeTabUrl } = require('../shared/url-safety');
 const DEFAULTS = {
   version: 1,
   homePage: 'https://www.google.com',
-  toolbarPins: { media: true, shields: true },
+  toolbarPins: { media: true, shields: true, devtools: false },
   // Automation surface gating (Flight 4). off-by-default: the MCP surface binds
   // under --automation-dev but the auth gate 401s everything until this is true
   // AND a valid key is presented. Additive keys — no schema version bump (load()
