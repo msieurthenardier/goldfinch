@@ -1,6 +1,6 @@
 # Flight: Custom Page Context Menu + Spellcheck
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria
