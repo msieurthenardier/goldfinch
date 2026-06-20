@@ -544,3 +544,16 @@ re-run that the leg-3 agent could not perform.
   `mission.md`. Committed `2841e16` (46 files; **excluded a stray untracked `src/renderer/assets/goldfinch_new.png`**
   not part of this flight — left untracked, flagged for the operator). Branch pushed; **draft PR #66**
   opened with the leg checklist. Optional `hat-and-alignment` left for the operator. `[COMPLETE:flight]`.
+- **2026-06-20** — **Optional `hat-and-alignment` leg run** (operator-guided, post-landing). Entry, silent
+  save, live progress, cancel/retry/clear/remove(history-only)/pause-resume all confirmed PASS. **Three
+  real defects found and fixed inline** (see leg 07 notes): (1) **double-download** on address-bar
+  navigation to a file URL — `renderer.js` `navigate()` `.catch` re-navigated via `src` on the
+  download-conversion `ERR_FAILED` reject, firing a 2nd `will-download`; removed the re-navigation
+  (vestigial). (2) **wrong displayed filename** — record `filename` used `item.getFilename()` (original)
+  instead of `basename(getSavePath())` (the deduped+sanitized on-disk name); now sourced from the saved
+  path. (3) **pause/resume had no UI feedback / Resume unreachable** — Electron keeps state `progressing`
+  while paused (pause = `isPaused()` boolean); made `paused` first-class in the broadcast + action
+  re-broadcast + `downloads.js`/toast rendering. Post-fix: **938 tests pass**, typecheck + lint clean.
+  **Environment caveats (not defects):** downloads land in `$HOME` (no XDG dir on this WSL env → Electron
+  fallback); Open/Show-in-folder non-functional under WSLg (no Linux file manager) — both work on native.
+  HAT fixes committed at HAT close. Leg 07 → `completed`.

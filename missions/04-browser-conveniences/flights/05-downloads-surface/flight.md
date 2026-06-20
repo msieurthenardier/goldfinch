@@ -441,7 +441,7 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
   (`Ctrl+J`); `docs/mcp-automation.md` (`downloadsList`); the **CLAUDE.md kebab prose** (`:23`, add
   Downloads — currently stale, also missing Print) and the new internal page in the internal-page list;
   the tool-count refs in all three sites (DD6). `npm run a11y` clean.
-- [ ] `hat-and-alignment` *(optional)* — guided HAT for `goldfinch://downloads`: trigger real downloads,
+- [x] `hat-and-alignment` *(optional)* — guided HAT for `goldfinch://downloads`: trigger real downloads,
   watch live progress, exercise every control (open file, show in folder, pause/resume, cancel, remove,
   clear all, retry), the kebab + `Ctrl+J` entry, internal-tab no-op, and the a11y sweep — fixing issues
   live until the operator is satisfied.

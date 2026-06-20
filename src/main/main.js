@@ -555,12 +555,17 @@ function wireDownloadHandler(sess) {
       item.setSavePath(uniquePath(app.getPath('downloads'), suggested));
     }
 
+    // getSavePath() is now final (set above). Use its basename as the display name so
+    // the UI and "Show in folder" reflect the actual file on disk — getFilename() is
+    // the original server-suggested name and does not include uniquePath's " (n)" dedup.
+    const savedName = path.basename(item.getSavePath());
+
     // Register in the app-level model. Module-scoped manager (assigned at store-load
     // time); guard defensively in case a will-download somehow fires before load.
     const id = downloadsManager
       ? downloadsManager.register({
           url,
-          filename: item.getFilename(),
+          filename: savedName,
           savePath: item.getSavePath(),
           mime: item.getMimeType?.(),
           startTime: Date.now()
@@ -582,10 +587,11 @@ function wireDownloadHandler(sess) {
       broadcastToChromeAndInternal('download-progress', {
         id,
         url,
-        filename: item.getFilename(),
+        filename: savedName,
         state,
         received,
-        total
+        total,
+        paused: item.isPaused?.()
       });
     });
 
@@ -599,7 +605,7 @@ function wireDownloadHandler(sess) {
       broadcastToChromeAndInternal('download-done', {
         id,
         url,
-        filename: item.getFilename(),
+        filename: savedName,
         state,
         savePath
       });
@@ -959,7 +965,30 @@ registerInternalHandler(ipcMain, 'internal-downloads-action', (_e, payload) => {
     case 'cancel': {
       // Live-item-only ops: act on the DownloadItem registry. No-op on a missing id.
       const item = liveDownloadItems.get(id);
-      if (item) item[action]();
+      if (item) {
+        item[action]();
+        // pause() and resume() do not reliably emit 'updated', so push an explicit
+        // broadcast so the downloads page can flip the Pause↔Resume button immediately.
+        // cancel() fires 'done' which already broadcasts — skip it.
+        if (action !== 'cancel') {
+          const received = item.getReceivedBytes();
+          const total = item.getTotalBytes();
+          const state = item.getState?.() || 'progressing';
+          const paused = item.isPaused?.();
+          if (downloadsManager) {
+            downloadsManager.update(id, { state, received, total, paused });
+          }
+          broadcastToChromeAndInternal('download-progress', {
+            id,
+            url: item.getURL(),
+            filename: path.basename(item.getSavePath()),
+            state,
+            received,
+            total,
+            paused
+          });
+        }
+      }
       break;
     }
     case 'remove':

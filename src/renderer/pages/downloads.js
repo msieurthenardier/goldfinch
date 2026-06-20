@@ -70,7 +70,13 @@
     }
     if (state === 'cancelled') return 'Cancelled';
     if (state === 'interrupted') return 'Failed';
-    if (state === 'paused') return 'Paused';
+    // Electron keeps state='progressing' while paused; check the boolean.
+    if (rec.paused) {
+      const size = rec.total > 0
+        ? fmtSize(rec.received) + ' of ' + fmtSize(rec.total)
+        : fmtSize(rec.received);
+      return size ? 'Paused · ' + size : 'Paused';
+    }
     // progressing
     if (rec.total > 0) {
       return 'Downloading · ' + fmtSize(rec.received) + ' of ' + fmtSize(rec.total);
@@ -110,6 +116,7 @@
     li.className = 'download-row';
     li.dataset.id = String(rec.id);
     li.dataset.state = rec.state;
+    li.dataset.paused = rec.paused ? 'true' : 'false';
 
     const main = document.createElement('div');
     main.className = 'download-main';
@@ -166,11 +173,9 @@
       addBtn('Open', 'open', true);
       addBtn('Show in folder', 'show');
     }
-    if (rec.state === 'progressing') {
-      addBtn('Pause', 'pause');
-      addBtn('Cancel', 'cancel');
-    } else if (rec.state === 'paused') {
-      addBtn('Resume', 'resume');
+    if (IN_PROGRESS_STATES.has(rec.state)) {
+      // Electron keeps state='progressing' while paused; use the paused boolean.
+      addBtn(rec.paused ? 'Resume' : 'Pause', rec.paused ? 'resume' : 'pause');
       addBtn('Cancel', 'cancel');
     }
     if (RETRY_STATES.has(rec.state)) {
@@ -231,16 +236,19 @@
       status.textContent = statusLine({
         state: payload.state,
         received: payload.received,
-        total: payload.total
+        total: payload.total,
+        paused: payload.paused
       });
     }
     const fill = /** @type {HTMLElement|null} */ (row.querySelector('.download-progress-fill'));
     if (fill && payload.total > 0) {
       fill.style.width = Math.min(100, Math.round((payload.received / payload.total) * 100)) + '%';
     }
-    // A pause/resume changes the gated control set, so rebuild the row when the state
-    // flips between progressing/paused.
-    if (payload.state && row.dataset.state !== payload.state && IN_PROGRESS_STATES.has(payload.state)) {
+    // A pause/resume changes the gated control set (Pause↔Resume button). Electron keeps
+    // state='progressing' while paused, so compare the paused boolean, not the state string.
+    const payloadPaused = Boolean(payload.paused);
+    const rowPaused = row.dataset.paused === 'true';
+    if (payloadPaused !== rowPaused) {
       refresh();
     }
   }

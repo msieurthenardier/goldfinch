@@ -1105,7 +1105,15 @@ function navigate(input) {
     // never free-navigate the internal tab via the address bar.
     return;
   }
-  tab.webview.loadURL(url).catch(() => tab.webview.setAttribute('src', url));
+  tab.webview.loadURL(url).catch((err) => {
+    // Do NOT re-navigate on failure. A navigation that converts into a download rejects
+    // with ERR_FAILED/ERR_ABORTED; re-issuing (incl. via the src attribute, which calls
+    // loadURL internally) re-triggers the download → duplicate DownloadItem. navigate() is
+    // only ever called from the address bar on a ready webview (createTab does the initial
+    // load via the src attribute), so there is no not-ready race to recover here.
+    // did-fail-load surfaces genuine load errors to the user.
+    console.warn('[navigate] loadURL rejected:', err && (err.code || err.message || err));
+  });
 }
 
 function toUrl(input) {
@@ -2463,6 +2471,7 @@ window.goldfinch.onDownloadProgress((d) => {
     toastEls.set(d.url, el);
   }
   el.querySelector('.dl-name').textContent = d.filename;
+  el.querySelector('.toast-title').textContent = d.paused ? 'Paused' : 'Downloading';
   const pct = d.total > 0 ? Math.round((d.received / d.total) * 100) : 0;
   el.querySelector('.bar > span').style.width = `${pct}%`;
 });
