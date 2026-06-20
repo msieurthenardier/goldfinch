@@ -364,6 +364,48 @@ test('scopeEngine: unknown jar calling getChromeTarget throws no-such-jar (requi
   );
 });
 
+// ---------------------------------------------------------------------------
+// downloadsList refusal (admin-only, app-level — outside WCID_FIRST_OPS; the
+// three-place guard does NOT cover app-level ops, so this dedicated test is required)
+// ---------------------------------------------------------------------------
+
+test('scopeEngine: jar getDownloadsList throws admin-only — downloadsList (NOT out-of-jar), engine NOT reached', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getDownloadsList = () => { engine.__calls.push(['getDownloadsList']); return []; };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  assert.throws(
+    () => scoped.getDownloadsList(),
+    (err) => err instanceof Error
+      && /admin-only — downloadsList/.test(err.message)
+      && !err.message.includes('out-of-jar')
+  );
+  assert.equal(engine.__calls.filter((c) => c[0] === 'getDownloadsList').length, 0,
+    'getDownloadsList must never reach the engine for a jar key');
+});
+
+test('scopeEngine: admin getDownloadsList reaches the engine and returns its value (pass-through)', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world, { includeInternal: true });
+  const records = [{ id: 1, filename: 'a.zip', state: 'completed' }];
+  engine.getDownloadsList = () => records;
+  // admin → engine unchanged
+  const scoped = scopeEngine(engine, 'admin', makeCtx(world));
+  assert.equal(scoped, engine, 'admin must return the engine unchanged');
+  assert.equal(scoped.getDownloadsList(), records);
+});
+
+test('scopeEngine: unknown jar calling getDownloadsList throws no-such-jar (requireJar fires first)', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getDownloadsList = () => { throw new Error('should not reach engine'); };
+  const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
+  assert.throws(
+    () => scoped.getDownloadsList(),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-jar')
+  );
+});
+
 test('scopeEngine: a jar DELETED mid-session degrades to all-ops-error', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);

@@ -180,6 +180,7 @@ released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for th
 | `Ctrl 0`        | Reset zoom (100%)   |
 | `Ctrl+P`        | Print / save as PDF |
 | `Ctrl+F`        | Find in page        |
+| `Ctrl+J`        | Open downloads      |
 | `F12`           | Open/close DevTools (active web tab) |
 | `Ctrl+Shift+I`  | Open/close DevTools (active web tab) |
 | `Enter` / `Shift+Enter` | Next / previous match (find bar) |

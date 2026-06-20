@@ -14,8 +14,21 @@ const { isTrustedInternalSender, registerInternalHandler } = require('../../src/
 // isTrustedInternalSender — predicate matrix
 // ---------------------------------------------------------------------------
 
-test('isTrustedInternalSender: exact origin + true → true', () => {
+test('isTrustedInternalSender: settings origin + true → true', () => {
   assert.equal(isTrustedInternalSender('goldfinch://settings', true), true);
+});
+
+test('isTrustedInternalSender: downloads origin + internal session (true) → true', () => {
+  // Flight 5: the allowlist now admits the second internal page.
+  assert.equal(isTrustedInternalSender('goldfinch://downloads', true), true);
+});
+
+test('isTrustedInternalSender: web origin (https://evil.test) + internal session → false', () => {
+  assert.equal(isTrustedInternalSender('https://evil.test', true), false);
+});
+
+test('isTrustedInternalSender: allowlisted (downloads) origin + non-internal session (false) → false', () => {
+  assert.equal(isTrustedInternalSender('goldfinch://downloads', false), false);
 });
 
 test('isTrustedInternalSender: exact origin + false → false', () => {

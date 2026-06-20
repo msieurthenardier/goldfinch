@@ -16,8 +16,9 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **26 tools** — 17 drive tools, 4
-observe tools, 2 eval tools, 2 devtools tools, and 1 admin chrome-discovery tool. Tools are a thin adapter over Goldfinch's
+binds to **loopback only** (`127.0.0.1`), and advertises **27 tools** — 17 drive tools, 4
+observe tools, 2 eval tools, 2 devtools tools, and 2 admin chrome/app-level tools (`getChromeTarget`
++ `downloadsList`). Tools are a thin adapter over Goldfinch's
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
 
@@ -307,11 +308,12 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 - **The admin identity bypasses jar-scoping.** An `admin`-resolved connection enumerates **every**
   jar's guest tabs **and** the internal `goldfinch://settings` tab, can drive/observe any of them
-  (the **sole** relaxation of the internal-session exclusion), and may call `captureWindow` and
-  `getChromeTarget`. Admin is the *only* identity allowed to touch the internal session or discover
-  the chrome renderer. Jar keys calling `getChromeTarget` get `automation: admin-only` (mirroring
-  `captureWindow`). The `wcId` returned by `getChromeTarget` is then passed to the drive/observe
-  tools to act on / read the app shell (tab strip, toolbar, menus).
+  (the **sole** relaxation of the internal-session exclusion), and may call `captureWindow`,
+  `getChromeTarget`, and `downloadsList`. Admin is the *only* identity allowed to touch the internal
+  session, discover the chrome renderer, or read the app-level downloads model. Jar keys calling
+  `getChromeTarget` or `downloadsList` get `automation: admin-only` (mirroring `captureWindow`). The
+  `wcId` returned by `getChromeTarget` is then passed to the drive/observe tools to act on / read
+  the app shell (tab strip, toolbar, menus).
 
 > **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
 > It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging
@@ -321,9 +323,10 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 26 tools below match `src/main/automation/mcp-tools.js` exactly. Every tool addresses a tab
+All 27 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
-or (for the chrome renderer) `getChromeTarget`.
+or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level tools
+(`getChromeTarget`, `downloadsList`) take no `wcId`.
 
 ### Drive tools (17)
 
@@ -411,11 +414,16 @@ the tab to the foreground.
 > `goldfinchInternal` bridge. (Jar-scoped guests / admin chrome are allowed; DevTools on a jar's own guest is
 > within the jar key's authority.)
 
-### Admin discovery (1)
+### Admin chrome / app-level (2)
+
+Both tools are **admin-only** and **app-level** — they take **no `wcId`** (no per-tab target).
+A jar key calling either is refused with `automation: admin-only` (the distinct admin-tier refusal,
+mirroring `captureWindow`).
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `getChromeTarget` | *(none)* | JSON text: `{ wcId, kind: "chrome", url }` — the chrome renderer's automation target. Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). |
+| `downloadsList` | *(none)* | JSON text: the app-level downloads records — an array of `{ id, url, filename, savePath, state, received, total, … }` (in-progress + completed history, persisted across restart). `filename` is the sanitized save name; `savePath` is the real on-disk path (`null` until known); `state` is the download lifecycle (`progressing` / `completed` / `interrupted` / …); `received`/`total` are byte counts. The internal `goldfinch://downloads` **page** that renders this model lives in the internal session and is **not** readable via the eval/observe tools — `downloadsList` is the automation-surface view of the same model. |
 
 > **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring
 > `captureWindow`). Jar keys that attempt to drive the chrome renderer directly by supplying the

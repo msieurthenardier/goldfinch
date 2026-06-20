@@ -28,10 +28,19 @@ export default [
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
   {
+    // Dual-export module that DEFINES menuController/focusItem: CJS export (module)
+    // for the test runner + globalThis branch for the renderer. Matched before the
+    // generic renderer block so it is NOT given menuController/focusItem as injected
+    // globals (it owns the definitions — those would trip no-redeclare).
+    files: ['src/renderer/menu-controller.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser, ...globals.node } }
+  },
+  {
     files: ['src/renderer/**/*.js'], // plain browser script + injected globals
+    ignores: ['src/renderer/menu-controller.js'], // it DEFINES the menu globals (own block above)
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly' }
+      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly' }
     }
   },
   eslintConfigPrettier // last — Prettier owns formatting

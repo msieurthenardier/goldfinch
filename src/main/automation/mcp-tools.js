@@ -497,10 +497,17 @@ const CHROME_TOOLS = [
     inputSchema: { type: 'object', properties: {} }, // no-input, mirrors captureWindow's schema
     call: (engine) => engine.getChromeTarget(),
   },
+  {
+    name: 'downloadsList',
+    description: 'List the app-level downloads (in-progress + completed history). Admin-only.',
+    inputSchema: { type: 'object', properties: {} }, // no input, mirrors getChromeTarget
+    call: (engine) => engine.getDownloadsList(),
+  },
 ];
 
-// The full tool table — 17 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 1
-// chrome-discovery = 26 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find),
+// The full tool table — 17 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 2
+// chrome/app-admin (getChromeTarget + downloadsList) = 27 (Leg 3 + Flight 6 + Flight 9 +
+// Flight 1 zoom + printToPDF + find + Flight 5 downloadsList),
 // iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS];
 

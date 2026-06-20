@@ -283,7 +283,7 @@ Emergent blockers discovered during execution go here as flights surface them.
   flight: new webview→renderer `context-menu` param IPC — rich params incl. `dictionarySuggestions`
   arrive on the main-process event — plus the likely `menuController` graduation; a renderer-infra
   refactor, not just a menu.)* (SC6, SC3)
-- [ ] **Flight 5: Downloads surface** *(ready — spec at `flights/05-downloads-surface/`, 2026-06-20)*
+- [x] **Flight 5: Downloads surface** *(landed 2026-06-20 — spec at `flights/05-downloads-surface/`)*
   — a downloads list/manager UI over the existing `will-download` handling (per-item state/progress, open
   file/folder) plus an MCP downloads-list tool. (SC7, SC8 part) *(Scoped at flight design: **app-level,
   persisted** model — supersedes the mission's session/lightweight lean per operator; surface =

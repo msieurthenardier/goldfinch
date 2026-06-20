@@ -1,9 +1,9 @@
 # Behavior Test: Downloads Surface (automation tool)
 
 **Slug**: `downloads-surface`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-19
-**Last Run**: never (deliverables land in Flight 5 `verify-integration`)
+**Last Run**: 2026-06-20-10-02-09 (pass — scripted live integration smoke; see `downloads-surface/runs/`)
 
 > **Apparatus note.** The `goldfinch://downloads` **page** lives in the internal session, which the
 > automation surface **cannot read even for admin** (the internal-session exclusion). This spec
@@ -27,8 +27,12 @@ the human downloads page (SC7, HAT-verified).
   refusal assertion.
 - The `downloadsList` / `navigate` / `enumerateTabs` tools present in the tool list (the run skill
   confirms discovery — total tool count **27**).
-- A fixture file served with `Content-Disposition: attachment` over a local HTTP server (e.g.
-  `python3 -m http.server` rooted at `tests/behavior/fixtures/`), so navigation triggers a download.
+- A download-triggering fixture served over a local HTTP server. **Primary mechanism:** the binary
+  `tests/behavior/fixtures/downloads/download-fixture.bin` served by `python3 -m http.server` rooted at
+  `tests/behavior/fixtures/` — the `.bin` extension is sent as `application/octet-stream`, which Chromium
+  **downloads** rather than renders, so navigating to it triggers a `will-download`. **Fallback** (only if
+  octet-stream does not trigger a download in the run environment): a tiny custom server (Node/Python) that
+  sets `Content-Disposition: attachment` on the response — record in the run log which mechanism was used.
 - `app.getPath('downloads')` writable; the **silent default-save** (Flight-5 DD5) is in effect so the
   download completes with no native dialog.
 
@@ -46,7 +50,7 @@ the human downloads page (SC7, HAT-verified).
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | With the **admin** key, call `downloadsList` and record the current record count `N` (may be 0 or more from prior runs / persisted history). | Returns an array (possibly empty); no error — the tool is discoverable and the model reads cleanly. (setup baseline.) |
-| 2 | Open a web tab in the **Default** jar and `navigate` it to the fixture URL served with `Content-Disposition: attachment` (a small known file, e.g. `download-fixture.bin`). Wait for the download to settle. | (setup — no judgment; the download fires and saves silently to the OS Downloads folder.) |
+| 2 | Open a web tab in the **Default** jar and `navigate` it to the fixture URL (primary: `http://127.0.0.1:8000/downloads/download-fixture.bin`, served as `application/octet-stream` by `python3 -m http.server`; fallback: a `Content-Disposition: attachment` server). Wait for the download to settle. | (setup — no judgment; the download fires and saves silently to the OS Downloads folder.) |
 | 3 | Call `downloadsList` (admin). | The list now has `N + 1` records; the **new** record has `filename` matching the fixture (sanitized), a terminal `state: 'completed'`, a non-empty `savePath`, and `received === total` (> 0) — the app-level model captured the download. |
 | 4 | `stat` the new record's `savePath` on the filesystem. | The file **exists** with **non-zero size** — `savePath` points at a real on-disk file (the model's `completed`/`savePath` is corroborated, not self-asserted). |
 | 5 | With a **jar key** (not admin), call `downloadsList`. | **Refused** with the distinct **admin-only** error — `downloadsList` is an app-level/admin capability and does not widen the jar surface's reach (SC8 gating half). |

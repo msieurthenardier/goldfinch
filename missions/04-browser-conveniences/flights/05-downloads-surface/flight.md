@@ -1,13 +1,13 @@
 # Flight: Downloads Surface
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC7** — Downloads surface: review in-progress and completed downloads in a dedicated surface,
+- [x] **SC7** — Downloads surface: review in-progress and completed downloads in a dedicated surface,
   see per-item state/progress, and open the downloaded file or its folder (*behavior-test-backed for
   the model/list; the page UI + controls are HAT-verified*).
-- [ ] **SC8** (part) — Agent parity: the downloads **list** is invocable through the automation surface
+- [x] **SC8** (part) — Agent parity: the downloads **list** is invocable through the automation surface
   as a gated, discoverable tool (`downloadsList`), inheriting M03's gating (*behavior-test-backed*).
 
 ---
@@ -289,11 +289,11 @@ gaining the Downloads item — the page-context menu, and the toolbar Unpin) wit
 - [x] `navigate` / `enumerateTabs` tools available (M03) for the behavior-test act path — landed.
 - [x] The env-gated **admin** key available (`GOLDFINCH_AUTOMATION_ADMIN=1` + dev mint) — `downloadsList`
   accepts admin only (DD6). A **jar key** for the refusal assertion. (M03 gating, landed.)
-- [ ] A fixture served with `Content-Disposition: attachment` for the behavior-test download trigger
+- [x] A fixture served with `Content-Disposition: attachment` for the behavior-test download trigger
   (new fixture under `tests/behavior/fixtures/`; `python3 -m http.server`, the a11y-audit pattern) —
   setup task owned by `verify-integration`.
 - [x] Accessibility gate runnable (`npm run a11y`) — landed (first green sweep, Flight 4).
-- [ ] `app.getPath('downloads')` writable in the dev environment (WSLg) — verify at first leg (spike).
+- [x] `app.getPath('downloads')` writable in the dev environment (WSLg) — verify at first leg (spike).
 - [x] **Internal-seam generalization understood** — the three single-origin widenings (DD1:
   `internal-preload.js:20`, `internal-ipc.js:18` `INTERNAL_ORIGIN`, `url-safety.js:109` `isInternalPageUrl`)
   are the real load-bearing edits for a second internal page; owned by the `downloads-page` leg.
@@ -359,18 +359,18 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
 `<script>`, document the contract, regress all consumers (DD8).
 
 ### Checkpoints
-- [ ] `will-download` registers each item in the app-level `DownloadsManager` with a stable id, saves
+- [x] `will-download` registers each item in the app-level `DownloadsManager` with a stable id, saves
   silently to the OS Downloads folder (DD5), persists across restart, and emits id-keyed progress/done;
   the existing media-panel bulk + single toasts still work.
-- [ ] `goldfinch://downloads` renders the persisted list with live per-item progress and the full
+- [x] `goldfinch://downloads` renders the persisted list with live per-item progress and the full
   control set (open/show/pause/resume/cancel/remove/clear/retry); keyboard-operable; `npm run a11y` clean.
-- [ ] Kebab `Downloads` item + `Ctrl+J` open the page (page- and chrome-focused); no-op on internal
+- [x] Kebab `Downloads` item + `Ctrl+J` open the page (page- and chrome-focused); no-op on internal
   tabs; lightbox not fought.
-- [ ] `downloadsList` live over MCP, **admin-only** (jar key refused with the distinct error), `wcId`-less,
+- [x] `downloadsList` live over MCP, **admin-only** (jar key refused with the distinct error), `wcId`-less,
   unit-tested; tool count 27.
-- [ ] `downloads-surface` behavior test green on the automation surface (admin key): a triggered download
+- [x] `downloads-surface` behavior test green on the automation surface (admin key): a triggered download
   appears in `downloadsList` as `completed` with a `savePath` that exists on disk; jar-key call refused.
-- [ ] `menuController` extracted to its own module, documented, all consumers regressed.
+- [x] `menuController` extracted to its own module, documented, all consumers regressed.
 
 ### Adaptation Criteria
 
@@ -394,7 +394,7 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
 
 > **Note:** Tentative; planned and created one at a time as the flight progresses.
 
-- [ ] `downloads-model-store` *(main-side; architect-split from the old `downloads-model`)* — app-level
+- [x] `downloads-model-store` *(main-side; architect-split from the old `downloads-model`)* — app-level
   in-memory `DownloadsManager` + `downloads-store.js` exposing the **narrow repo interface**
   (`list`/`append`/`remove`/`clear`/**`getNextId`**) reusing `settings-store.js`'s **durability discipline**
   (electron-free + injected path, atomic write, corrupt→empty-list, codec seam — **not** its fixed-key
@@ -408,7 +408,7 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
   downloads automatically (DD4). Unit tests for the store (interface incl. `getNextId` monotonicity across
   prune/remove + per-record validator drop + 500-cap prune + corrupt→empty) + path/dedup. **Also seeds the
   `BACKLOG.md` SQLite storage-migration mission (DD9).** (DD3, DD4, DD5, DD9)
-- [ ] `downloads-page` — `goldfinch://downloads` internal page (`src/renderer/pages/downloads.{html,css,js}`
+- [x] `downloads-page` — `goldfinch://downloads` internal page (`src/renderer/pages/downloads.{html,css,js}`
   + `INTERNAL_PAGES` allowlist entry, `main.js:49`), **the three single-origin internal-seam widenings**
   (`internal-preload.js:20`, `internal-ipc.js:18` `INTERNAL_ORIGIN`, `url-safety.js:109` `isInternalPageUrl`
   → internal-host set; update the CLAUDE.md security note for the 2nd trusted internal origin, DD1), list
@@ -418,23 +418,23 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
   folded here where exercised — architect leg-split), list-level **"Clear now"** + the **"files aren't
   deleted" footer note** (DD4), all over the origin-checked internal-IPC pattern (`internal-ipc.js`).
   Keyboard-operable, `aria-live` progress, within the a11y gate. (DD1, DD4)
-- [ ] `downloads-entry` — kebab `#kebab-downloads` item (`index.html:43`) opening `goldfinch://downloads`
+- [x] `downloads-entry` — kebab `#kebab-downloads` item (`index.html:43`) opening `goldfinch://downloads`
   (mirror `#kebab-settings`, `renderer.js:377`) + `Ctrl+J` (keydown mapper + main-side
   `before-input-event` capture + renderer fallback, `isInternalTab` + lightbox guards). (DD2)
-- [ ] `downloads-mcp-tool` — `getDownloadsList()` engine op + `downloadsList` ToolDef (`inputSchema: {}`,
+- [x] `downloads-mcp-tool` — `getDownloadsList()` engine op + `downloadsList` ToolDef (`inputSchema: {}`,
   default JSON-text), **admin-only via an EXPLICIT jar-façade refusal block in `scope.js`** mirroring
   `getChromeTarget` (`src/main/automation/scope.js:168` — NOT merely left out of `WCID_FIRST_OPS`, which would throw the opaque
   "not a function"; DD6), **a dedicated jar-refused unit test** (the three-place guard does not cover
   app-level ops; cf. `automation-scope.test.js:329`) + the admin-returns-list test, tool-count 26 → 27
   across `mcp-tools.js:503`, `automation-mcp-tools.test.js`, `automation-mcp-server.test.js`
   (`EXPECTED_TOOL_COUNT`). (DD6)
-- [ ] `menu-controller-graduation` *(folded-in maintenance, DD8)* — extract the `menuController` IIFE to
+- [x] `menu-controller-graduation` *(folded-in maintenance, DD8)* — extract the `menuController` IIFE to
   `src/renderer/menu-controller.js`, load via `<script>` alongside `keydown-action.js`/`url-safety.js`,
   document the APG contract + `focusReturn?` + `trigger === menu` constraint + the global
   `pointerdown`/`blur` listeners (`docs/renderer-menu.md` or CLAUDE.md), regress all consumers (container
   picker, kebab incl. the new Downloads item, page-context menu, toolbar Unpin). *(Cleanest leg to defer
   to Flight 6 if the flight runs hot.)*
-- [ ] `verify-integration` — author/run the `downloads-surface` behavior test on the automation surface
+- [x] `verify-integration` — author/run the `downloads-surface` behavior test on the automation surface
   (admin key): trigger a download via `navigate` to a `Content-Disposition: attachment` fixture, assert
   the record appears in `downloadsList` as `completed` with a `savePath` that exists on disk, assert the
   jar-key call is refused (admin-only). **Owns the docs + count bumps**: README keyboard-shortcuts table
@@ -451,10 +451,10 @@ distinct admin-only error; unit-tested; tool count 26 → 27 across all ref site
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (unit: store + tool; `downloads-surface` behavior test green; a11y 0 new violations)
-- [ ] Documentation updated (README shortcuts; `docs/mcp-automation.md`; CLAUDE.md kebab prose +
+- [x] All legs completed (6 autonomous; `hat-and-alignment` remains optional/operator-driven)
+- [ ] Code merged (draft PR open; merges after review)
+- [x] Tests passing (unit: store + tool; `downloads-surface` behavior test green; a11y 0 new violations)
+- [x] Documentation updated (README shortcuts; `docs/mcp-automation.md`; CLAUDE.md kebab prose +
   internal-page list + tool count; tool-count test refs)
 
 ### Verification

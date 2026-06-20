@@ -84,6 +84,22 @@ test('Ctrl+r -> reload', () => {
   assert.equal(keydownToAction(desc({ key: 'r', ctrl: true })), 'reload');
 });
 
+test('Ctrl+J (capital) -> downloads', () => {
+  assert.equal(keydownToAction(desc({ key: 'J', ctrl: true })), 'downloads');
+});
+
+test('Ctrl+j (lowercase) -> downloads', () => {
+  assert.equal(keydownToAction(desc({ key: 'j', ctrl: true })), 'downloads');
+});
+
+test('Cmd+J (meta) -> downloads (meta is equivalent to ctrl)', () => {
+  assert.equal(keydownToAction(desc({ key: 'J', meta: true })), 'downloads');
+});
+
+test('j without modifier -> null (modifier-required key, no modifier)', () => {
+  assert.equal(keydownToAction(desc({ key: 'j' })), null);
+});
+
 // ---------------------------------------------------------------------------
 // Meta (Cmd) equivalence — mod = ctrl || meta
 // ---------------------------------------------------------------------------
@@ -159,6 +175,10 @@ test('Ctrl+Shift+P with lightbox open -> toggle-privacy (NOT lightbox-gated)', (
 
 test('Ctrl+r with lightbox open -> reload (NOT lightbox-gated)', () => {
   assert.equal(keydownToAction(desc({ key: 'r', ctrl: true, lightboxOpen: true })), 'reload');
+});
+
+test('Ctrl+J with lightbox open -> downloads (NOT lightbox-gated, app-level like new-tab)', () => {
+  assert.equal(keydownToAction(desc({ key: 'J', ctrl: true, lightboxOpen: true })), 'downloads');
 });
 
 // ---------------------------------------------------------------------------

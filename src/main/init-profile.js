@@ -19,21 +19,24 @@
 const { devUserDataPath } = require('../shared/dev-profile');
 
 /**
- * Run the dev profile redirect (unpackaged only) then load the three stores in order.
+ * Run the dev profile redirect (unpackaged only) then load the stores in order.
  * @param {{ isPackaged: boolean, setPath: (name: string, value: string) => void, getPath: (name: string) => string }} app
- * @param {{ shields: { load: () => void }, settings: { load: (path: string) => void }, jars: { load: () => void } }} stores
+ * @param {{ shields: { load: () => void }, settings: { load: (path: string) => void }, jars: { load: () => void }, downloads: { load: (path: string) => void } }} stores
  */
-function initProfileAndStores(app, { shields, settings, jars }) {
+function initProfileAndStores(app, { shields, settings, jars, downloads }) {
   // DD1: dev runs are profile-isolated from the installed binary. Keyed off
   // app.isPackaged alone — no flag to forget — so a dev launch can never read or
   // write ~/.config/goldfinch. Must run before ANY getPath('userData') consumer
-  // (settings/shields/jars all resolve their store path at load()).
+  // (settings/shields/jars/downloads all resolve their store path at load()).
   if (!app.isPackaged) {
     app.setPath('userData', devUserDataPath(app.getPath('userData')));
   }
   shields.load();
   settings.load(app.getPath('userData'));
   jars.load();
+  // Downloads store (Flight 5, Leg 1). Only hard ordering constraint is "after the
+  // setPath('userData') redirect"; it takes the userData path as an arg like settings.
+  downloads.load(app.getPath('userData'));
 }
 
 module.exports = { initProfileAndStores };

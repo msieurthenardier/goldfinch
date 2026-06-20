@@ -21,15 +21,19 @@ const find = require('./find');
  *
  * @param {() => (Electron.BrowserWindow | null)} getMainWindow
  *   Accessor for the current chrome BrowserWindow (may return null if window is closed).
- * @param {{ allowInternal?: boolean }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null }} [opts]
  *   allowInternal — admin's SOLE relaxation (DD6 / Leg 2): when true, deps carry
  *   allowInternal so resolveContents lets the internal goldfinch://settings
  *   session through. The mcp-server builds the admin engine with
  *   `{ allowInternal: true }`; jar engines (and every other caller) leave it
  *   false. Threaded into deps() and forwarded to EVERY resolveContents call site.
+ *   getDownloads — accessor for the app-level downloads list (Flight 5). When
+ *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
+ *   op returns the merged download records. Absent → getDownloadsList throws a clean
+ *   `downloads-unavailable`. Field named getDownloads to avoid shadowing the op name.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getMainWindow, { allowInternal = false } = {}) {
+function createEngine(getMainWindow, { allowInternal = false, getDownloads = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -93,6 +97,14 @@ function createEngine(getMainWindow, { allowInternal = false } = {}) {
       const cc = mw ? mw.webContents : null;
       if (!cc) throw new Error('automation: chrome-window-unavailable — mainWindow is null (closed or starting up)');
       return { wcId: cc.id, kind: 'chrome', url: cc.getURL() };
+    },
+    // App-level downloads view (Flight 5, DD6): no wcId, admin-only via the scope façade.
+    // Reads the merged download records from the wired accessor; never touches a session.
+    getDownloadsList: () => {
+      if (typeof getDownloads !== 'function') {
+        throw new Error('automation: downloads-unavailable — downloads manager not wired');
+      }
+      return getDownloads();
     },
   };
 }
