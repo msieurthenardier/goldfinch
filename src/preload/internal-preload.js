@@ -15,9 +15,16 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Only expose the bridge when this preload is running in the genuine internal page.
+// The internal-origin allowlist (Flight 5). The trust boundary is "internal page vs
+// web," NOT "settings vs downloads" — every inhabitant is an equally-trusted internal
+// origin, so the SAME bridge (settings + shields + automation + downloads methods) is
+// exposed to each. The downloads methods are inert on the settings page (it never calls
+// them) and the main-side registerInternalHandler origin check gates them regardless.
+const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads']);
+
+// Only expose the bridge when this preload is running in a genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
-if (location.origin === 'goldfinch://settings') {
+if (INTERNAL_ORIGINS.has(location.origin)) {
   // DD5: listener-handle map — lets on() return a numeric handle and off(h) remove
   // the exact wrapper, preventing accumulation across guest reloads (electronmon
   // reloads the goldfinch://settings guest; without off/pagehide cleanup, each reload
@@ -211,7 +218,53 @@ if (location.origin === 'goldfinch://settings') {
      * Call from a pagehide handler to prevent accumulation across reloads.
      * @param {number} h
      */
-    offAutomationActivity: (h) => off(h)
+    offAutomationActivity: (h) => off(h),
+
+    // Downloads surface (Flight 5, Leg 2). The goldfinch://downloads page is the only
+    // caller; these are inert on the settings page. The actionable savePath is NEVER
+    // passed from the renderer — main resolves it by id from the trusted manager/store
+    // for open/show (avoids an arbitrary-open vector).
+
+    /**
+     * Read the full merged downloads list (in-progress + persisted terminal,
+     * deduped by id). Plain records; no live DownloadItem references.
+     * @returns {Promise<Array<object>>}
+     */
+    downloadsList: () => ipcRenderer.invoke('internal-downloads-list'),
+
+    /**
+     * Dispatch a single per-item action by id. `action` ∈
+     * {'pause','resume','cancel','remove','retry','open','show'} (main-side
+     * allowlisted). No-ops on a missing/pruned id.
+     * @param {number} id
+     * @param {string} action
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    downloadsAction: (id, action) => ipcRenderer.invoke('internal-downloads-action', { id, action }),
+
+    /**
+     * Clear the terminal download history (in-progress items stay). Files are
+     * NOT deleted from disk — history only.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    downloadsClear: () => ipcRenderer.invoke('internal-downloads-clear'),
+
+    /**
+     * Subscribe to live downloads changes over the existing id-keyed
+     * download-progress / download-done broadcasts. cb receives the broadcast
+     * payload (carries `id`). Returns a tuple of handles for offDownloadsChanged.
+     * @param {(payload: object) => void} cb
+     * @returns {number[]}
+     */
+    onDownloadsChanged: (cb) => [on('download-progress', cb), on('download-done', cb)],
+
+    /**
+     * Unsubscribe the listeners registered by onDownloadsChanged.
+     * @param {number[]} handles
+     */
+    offDownloadsChanged: (handles) => {
+      if (Array.isArray(handles)) for (const h of handles) off(h);
+    }
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

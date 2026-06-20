@@ -19,9 +19,10 @@
  *     defers while a lightbox is open.
  *   - mod = ctrl || meta; with no modifier (and key !== 'F12'), nothing matches.
  *   - Zoom (=/+/-/0) and find (f/F) defer while a lightbox is open.
- *   - The rest of the chain (t/w/l/m, Shift+P, Ctrl+Shift+I, r) is NOT
+ *   - The rest of the chain (t/w/l/m/j, Shift+P, Ctrl+Shift+I, r) is NOT
  *     lightbox-gated — EXCEPT Ctrl+Shift+I (devtools), which IS lightbox-guarded
- *     in the live handler, matching the F12 devtools entry point.
+ *     in the live handler, matching the F12 devtools entry point. Ctrl+J
+ *     (downloads) is app-level like new-tab, so it is NOT lightbox-gated.
  *   - Ctrl+Shift+I (devtools) vs Ctrl+Shift+P (toggle-privacy) is disambiguated
  *     by the key letter, so chain order cannot double-handle.
  *
@@ -34,7 +35,7 @@
  * }} descriptor
  * @returns {'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'find'
  *   | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
- *   | 'toggle-privacy' | 'reload' | null}
+ *   | 'toggle-privacy' | 'reload' | 'downloads' | null}
  */
 function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
   // F12 (no modifier) — must be decided BEFORE the modifier gate, else it never
@@ -61,6 +62,7 @@ function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
   if (key === 'w') return 'close-tab';
   if (key === 'l') return 'focus-address';
   if (key === 'm') return 'toggle-panel';
+  if (key === 'j' || key === 'J') return 'downloads';
   if (shift && (key === 'P' || key === 'p')) return 'toggle-privacy';
   if (shift && (key === 'I' || key === 'i')) {
     // Ctrl+Shift+I devtools — the alternate to F12; lightbox-guarded like F12.

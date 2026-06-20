@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Downloads — Goldfinch</title>
+    <link rel="stylesheet" href="downloads.css" />
+    <script src="downloads.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <div class="downloads-header">
+        <h1>Downloads</h1>
+        <button id="downloads-clear" class="downloads-btn" type="button">Clear now</button>
+      </div>
+
+      <!-- aria-live region: progress + state updates are announced politely as rows
+           change. The list itself is rebuilt/patched by downloads.js. -->
+      <ul id="downloads-list" class="downloads-list" aria-live="polite" aria-label="Downloads">
+      </ul>
+
+      <p id="downloads-empty" class="downloads-empty" hidden>No downloads yet.</p>
+
+      <p class="downloads-footnote">
+        Removing an item or clearing the list affects history only — downloaded files
+        are not deleted from disk.
+      </p>
+    </main>
+  </body>
+</html>

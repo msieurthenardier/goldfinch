@@ -106,138 +106,6 @@ let activeTabId = null;
 let activeFilter = 'all';
 let tabSeq = 0;
 
-/* ------------------------------------------------------- shared menu controller */
-// One in-file controller owns open/close + mutual-exclusion + outside-dismiss for
-// every dropdown menu (kebab overflow, container picker). Each menu registers an
-// entry whose `onOpen`/`onClose` are its RAW show/hide bodies — never the public
-// `closeX` wrapper (the wrapper delegates back into the controller, so reusing it
-// as `onClose` would recurse: close → onClose → closeX → close → …). The public
-// wrapper and the raw `onClose` are deliberately two distinct functions.
-
-/**
- * @typedef {{
- *   trigger: HTMLElement,
- *   menu: HTMLElement,
- *   items?: () => HTMLElement[],
- *   onOpen?: (startIndex?: number) => void,
- *   onClose?: () => void,
- *   focusReturn?: () => void
- * }} MenuEntry
- */
-
-const menuController = (() => {
-  /** @type {MenuEntry[]} */
-  const entries = [];
-  /** @type {MenuEntry|null} */
-  let open = null; // currently-open entry or null
-  /** @param {MenuEntry} entry @param {number} [startIndex] */
-  function openEntry(entry, startIndex = 0) {
-    closeAll(); // mutual-exclusion: opening one menu dismisses any other
-    entry.onOpen?.(startIndex); // menu-specific: build items, show, position, focus, aria
-    open = entry;
-  }
-  /** @param {MenuEntry} entry */
-  function closeEntry(entry) {
-    entry.onClose?.(); // raw hide body — NOT the public wrapper (avoids recursion)
-    if (open === entry) open = null;
-  }
-  function closeAll() {
-    if (open) closeEntry(open);
-  }
-  /** @param {MenuEntry} entry @returns {MenuEntry} */
-  function register(entry) {
-    entries.push(entry);
-
-    // Controller-level trigger keydown: Enter/Space/ArrowDown → open to first item;
-    // ArrowUp → open to last item (APG menu-button). preventDefault suppresses the
-    // synthetic click so the menu opens exactly once.
-    // Skip when trigger === menu (the page context menu is its OWN trigger node, with no separate
-    // menu-button): otherwise this opener fires on the menu's own Arrow/Enter keydowns and
-    // closeAll()s it mid-navigation. Such consumers open programmatically (right-click / Shift+F10).
-    if (entry.trigger !== entry.menu) {
-      entry.trigger.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-          e.preventDefault();
-          openEntry(entry, 0);
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          openEntry(entry, -1);
-        }
-      });
-    }
-
-    // Controller-level menu keydown: full APG roving-tabindex contract.
-    // Guard `if (!entry.items) return` so a non-menu popup consumer (e.g. the
-    // site-info popup in leg 5) can register without an items-getter and the
-    // roving/arrow contract simply no-ops for it.
-    entry.menu.addEventListener('keydown', (e) => {
-      if (!entry.items) return;
-      const items = entry.items();
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeEntry(entry);
-        // Focus-return: an entry may supply an additive focusReturn() (the page context menu, which
-        // has no persistent trigger button — DD3/step-3a); else default to focusing the trigger
-        // exactly as before. The 3 toolbar consumers omit focusReturn and keep entry.trigger.focus().
-        if (entry.focusReturn) entry.focusReturn();
-        else entry.trigger.focus();
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        closeEntry(entry);
-        if (entry.focusReturn) entry.focusReturn(); // Tab/Shift+Tab close the menu and return focus
-        else entry.trigger.focus();
-      } else {
-        // Arrow/Home/End require items; guard before calling focusItem (wrap formula
-        // NaN-s on an empty list — cheap safety net even though an open menu always has items).
-        if (!items.length) return;
-        const idx = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          focusItem(items, idx + 1);
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          focusItem(items, idx - 1);
-        } else if (e.key === 'Home') {
-          e.preventDefault();
-          focusItem(items, 0);
-        } else if (e.key === 'End') {
-          e.preventDefault();
-          focusItem(items, items.length - 1);
-        }
-      }
-    });
-
-    return entry;
-  }
-  return {
-    register,
-    open: openEntry,
-    close: closeEntry,
-    closeAll,
-    get current() {
-      return open;
-    }
-  };
-})();
-
-// Target-aware outside-dismiss for all registered menus. pointerdown fires before
-// focus shifts, and the menu-dismissal CDP clicks dispatch pointerdown→click, so
-// this catches in-chrome clicks (address bar, neutral chrome). A click inside the
-// open menu or on its own trigger is ignored (item handlers / the trigger's own
-// toggle do their thing); a click on the OTHER trigger is handled by that trigger's
-// open() (which closeAll()s first). Outside-dismiss does NOT restore focus to the
-// trigger — only Escape/Tab do that.
-document.addEventListener('pointerdown', (e) => {
-  const cur = menuController.current;
-  if (!cur) return;
-  const t = /** @type {Node} */ (e.target);
-  if (cur.menu.contains(t) || cur.trigger.contains(t)) return;
-  menuController.closeAll();
-});
-// Page/webview clicks (a separate web-contents the chrome document can't see) and
-// app-switch both fire window blur → close any open menu (DD1, spike-confirmed).
-window.addEventListener('blur', () => menuController.closeAll());
-
 /* ----------------------------------------------------- jars / containers */
 
 const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
@@ -327,20 +195,14 @@ async function addContainer() {
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with three static role="menuitem" items
-// (Settings, Print…, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
+// APG menu-button: role="menu" popup with four static role="menuitem" items
+// (Settings, Downloads, Print…, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/mutual-
 // exclusion and the APG keyboard contract (trigger keydown + menu keydown) are all
 // owned by the shared menuController (hoisted in leg 1, DD7).
 
 /** @returns {HTMLElement[]} */
 function kebabItems() {
   return /** @type {HTMLElement[]} */ ([...els.kebabMenu.querySelectorAll('[role="menuitem"]')]);
-}
-/** @param {HTMLElement[]} items @param {number} i */
-function focusItem(items, i) {
-  const n = ((i % items.length) + items.length) % items.length; // wrap, handles negatives
-  items.forEach((el, j) => (el.tabIndex = j === n ? 0 : -1)); // roving tabindex
-  items[n].focus();
 }
 function positionKebabMenu() {
   const r = els.kebab.getBoundingClientRect();
@@ -373,10 +235,19 @@ function closeKebabMenu() {
   menuController.close(kebabEntry);
 }
 
+// Shared open path for downloads (DD2): kebab click + both Ctrl+J paths converge here.
+function openDownloads() {
+  createTab('goldfinch://downloads', null, { trusted: true });
+}
+
 // Activation: native click on the focused <button> menuitem fires these.
 els.kebabMenu.querySelector('#kebab-settings')?.addEventListener('click', () => {
   closeKebabMenu();
   createTab('goldfinch://settings', null, { trusted: true });
+});
+els.kebabMenu.querySelector('#kebab-downloads')?.addEventListener('click', () => {
+  closeKebabMenu();
+  openDownloads();
 });
 els.kebabMenu.querySelector('#kebab-print')?.addEventListener('click', () => {
   closeKebabMenu();
@@ -1234,7 +1105,15 @@ function navigate(input) {
     // never free-navigate the internal tab via the address bar.
     return;
   }
-  tab.webview.loadURL(url).catch(() => tab.webview.setAttribute('src', url));
+  tab.webview.loadURL(url).catch((err) => {
+    // Do NOT re-navigate on failure. A navigation that converts into a download rejects
+    // with ERR_FAILED/ERR_ABORTED; re-issuing (incl. via the src attribute, which calls
+    // loadURL internally) re-triggers the download → duplicate DownloadItem. navigate() is
+    // only ever called from the address bar on a ready webview (createTab does the initial
+    // load via the src attribute), so there is no not-ready race to recover here.
+    // did-fail-load surfaces genuine load errors to the user.
+    console.warn('[navigate] loadURL rejected:', err && (err.code || err.message || err));
+  });
 }
 
 function toUrl(input) {
@@ -2281,6 +2160,10 @@ els.findClose.addEventListener('click', () => closeFind(activeTab()));
 // Main-side Ctrl+F capture → open find (page-focused path, DD2).
 window.goldfinch.onOpenFind(() => openFind());
 
+// Main-side Ctrl+J capture → open downloads (page-focused path, DD2). No active-internal
+// guard here: this only fires when a web page had focus, so the active tab is web by construction.
+window.goldfinch.onOpenDownloads(() => openDownloads());
+
 function currentSite() {
   const tab = activeTab();
   if (tab && tab.privacy.net && tab.privacy.net.firstParty) return tab.privacy.net.firstParty;
@@ -2588,6 +2471,7 @@ window.goldfinch.onDownloadProgress((d) => {
     toastEls.set(d.url, el);
   }
   el.querySelector('.dl-name').textContent = d.filename;
+  el.querySelector('.toast-title').textContent = d.paused ? 'Paused' : 'Downloading';
   const pct = d.total > 0 ? Math.round((d.received / d.total) * 100) : 0;
   el.querySelector('.bar > span').style.width = `${pct}%`;
 });
@@ -2686,6 +2570,16 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       const t = activeTab();
       if (t) t.webview.reload();
+      return;
+    }
+    // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
+    // in before-input-event → onOpenDownloads). No-op if the active tab is already internal so a
+    // second internal tab isn't stacked (DD2).
+    case 'downloads': {
+      e.preventDefault();
+      const t = activeTab();
+      if (t && isInternalTab(t)) return;
+      openDownloads();
       return;
     }
   }

@@ -104,6 +104,8 @@ interface GoldfinchBridge {
   onOpenTab(cb: (url: string) => void): void;
   /** Fired by the main-side Ctrl+F before-input-event capture (SC4/DD2). No payload. */
   onOpenFind(cb: () => void): void;
+  /** Fired by the main-side Ctrl+J before-input-event capture (DD2). No payload. */
+  onOpenDownloads(cb: () => void): void;
 
   // Absolute file:// path to the webview preload script.
   webviewPreloadPath: string;
@@ -117,7 +119,7 @@ interface GoldfinchBridge {
 
 /**
  * Internal bridge surface exposed by src/preload/internal-preload.js to goldfinch:// pages.
- * Only present when the page's origin is 'goldfinch://settings'.
+ * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads).
  */
 interface GoldfinchInternalBridge {
   version: number;
@@ -141,6 +143,12 @@ interface GoldfinchInternalBridge {
   automationGetActivity(): Promise<AutomationActivity>;
   onAutomationActivity(cb: (snap: AutomationActivity) => void): number;
   offAutomationActivity(h: number): void;
+  // --- downloads surface (Flight 5, Leg 2) ---
+  downloadsList(): Promise<Array<any>>;
+  downloadsAction(id: number, action: string): Promise<{ ok: boolean; error?: string }>;
+  downloadsClear(): Promise<{ ok: boolean }>;
+  onDownloadsChanged(cb: (payload: any) => void): number[];
+  offDownloadsChanged(handles: number[]): void;
 }
 
 interface Window {
@@ -179,7 +187,43 @@ declare function keydownToAction(descriptor: {
   | 'toggle-panel'
   | 'toggle-privacy'
   | 'reload'
+  | 'downloads'
   | null;
+
+/**
+ * One registered dropdown/popup menu for the shared menuController. Injected as a
+ * global type by src/renderer/menu-controller.js (the type lives HERE only — the
+ * module references it ambiently, mirroring the AutomationActivity precedent above).
+ * `items?` getter present → APG roving-tabindex contract is active; absent → the
+ * roving/arrow contract no-ops (popup consumers like the site-info popup). `onOpen`/
+ * `onClose` are the RAW show/hide bodies (never the public closeX wrapper — recursion).
+ * `focusReturn?` overrides the default trigger.focus() on Escape/Tab (page context menu,
+ * which has no persistent trigger button).
+ */
+interface MenuEntry {
+  trigger: HTMLElement;
+  menu: HTMLElement;
+  items?: () => HTMLElement[];
+  onOpen?: (startIndex?: number) => void;
+  onClose?: () => void;
+  focusReturn?: () => void;
+}
+
+/**
+ * Injected by src/renderer/menu-controller.js via the globalThis branch (the shared
+ * menu state machine: open/close + mutual-exclusion + outside-dismiss). Same route
+ * as keydownToAction above; loaded via <script> before renderer.js.
+ */
+declare const menuController: {
+  register(entry: MenuEntry): MenuEntry;
+  open(entry: MenuEntry, startIndex?: number): void;
+  close(entry: MenuEntry): void;
+  closeAll(): void;
+  readonly current: MenuEntry | null;
+};
+
+/** Roving-tabindex helper (wrap math + tabIndex/focus). Injected by menu-controller.js. */
+declare function focusItem(items: HTMLElement[], i: number): void;
 
 /**
  * Injected by src/shared/audit-paging.js via the globalThis branch (the

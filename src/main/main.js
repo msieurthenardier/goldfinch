@@ -13,6 +13,8 @@ const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
+const downloads = require('./downloads-store');
+const { createManager } = require('./downloads-manager');
 const { registerInternalHandler } = require('./internal-ipc');
 const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
@@ -56,6 +58,14 @@ const INTERNAL_PAGES = {
     // + node-test require(); served here so the goldfinch://settings guest can load
     // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
     '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js')
+  },
+  // Second internal page (Flight 5, Leg 2): the app-level downloads surface. Same
+  // allowlist-driven serving as settings — handleInternal/createResolver/INTERNAL_CSP
+  // are unchanged. Adding it here is the explicit edit that registers the page.
+  downloads: {
+    '/': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.html'),
+    '/downloads.css': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.css'),
+    '/downloads.js': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.js')
   }
 };
 
@@ -137,7 +147,7 @@ async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
-    getEngine: (engineOpts) => createEngine(() => mainWindow, engineOpts),
+    getEngine: (engineOpts) => createEngine(() => mainWindow, { ...engineOpts, getDownloads: () => downloadsManager.listAll() }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -405,6 +415,15 @@ app.on('web-contents-created', (_event, contents) => {
           if (mainWindow) mainWindow.webContents.send('open-find');
           return;
         }
+        // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
+        // renderer (onOpenDownloads), mirroring the find path. isAutoRepeat guard is REQUIRED:
+        // this path has no isInternalTab guard, so a HELD Ctrl+J would stack downloads tabs
+        // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
+        if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
+          event.preventDefault();
+          if (mainWindow) mainWindow.webContents.send('open-downloads');
+          return;
+        }
         // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
         // section. Same isAutoRepeat guard so a held chord doesn't rapid-toggle. contents is the
         // guest wc, pre-guarded by the outer __goldfinchInternal skip (DD5).
@@ -453,8 +472,22 @@ app.on('web-contents-created', (_event, contents) => {
 // own session (so cookies / referer / auth are preserved). We resolve the
 // originating webview by its webContents id.
 // ---------------------------------------------------------------------------
-const pendingDownloads = new Map(); // url -> { suggestedName }
+const pendingDownloads = new Map(); // url -> { suggestedName, saveDir }
 const approvedDownloadDirs = new Set(); // session-scoped; populated by choose-download-dir
+
+// App-level downloads model (Flight 5, Leg 1 / DD3). MODULE-SCOPED — not a whenReady
+// local — because wireDownloadHandler is also invoked from the synchronous
+// session-created hook for web jars created before whenReady, so its closure must
+// reference a manager that is already assigned. Instantiated once at store-load time
+// (the initProfileAndStores call site below). A will-download cannot realistically
+// fire before a window exists, but module-scoping removes the undefined-manager hazard.
+/** @type {ReturnType<typeof createManager> | null} */
+let downloadsManager = null;
+// Live DownloadItem references keyed by the manager id. SEAM FOR LEG 2: the
+// pause/resume/cancel/open/show action handlers will look items up here. This leg only
+// keeps the reference; it wires no action IPC channels.
+/** @type {Map<number, Electron.DownloadItem>} */
+const liveDownloadItems = new Map();
 
 ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedName, saveDir }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
@@ -513,36 +546,69 @@ function wireDownloadHandler(sess) {
     const suggested = (meta && meta.suggestedName) || item.getFilename() || 'download';
 
     if (meta && meta.saveDir) {
-      // Bulk / silent download: save straight into the chosen folder, no dialog.
+      // Bulk / media download: save straight into the chosen, pre-approved folder.
       item.setSavePath(uniquePath(meta.saveDir, suggested));
     } else {
-      item.setSaveDialogOptions({
-        defaultPath: path.join(app.getPath('downloads'), suggested)
-      });
+      // Chrome-like SILENT default-save (DD5): drop the native save dialog and write
+      // straight into the OS Downloads folder. Correctness leans on uniquePath's (n)
+      // dedup. setSavePath BEFORE register so getSavePath() is the real target.
+      item.setSavePath(uniquePath(app.getPath('downloads'), suggested));
     }
 
-    item.on('updated', (_e, state) => {
-      if (mainWindow) {
-        mainWindow.webContents.send('download-progress', {
+    // getSavePath() is now final (set above). Use its basename as the display name so
+    // the UI and "Show in folder" reflect the actual file on disk — getFilename() is
+    // the original server-suggested name and does not include uniquePath's " (n)" dedup.
+    const savedName = path.basename(item.getSavePath());
+
+    // Register in the app-level model. Module-scoped manager (assigned at store-load
+    // time); guard defensively in case a will-download somehow fires before load.
+    const id = downloadsManager
+      ? downloadsManager.register({
           url,
-          filename: item.getFilename(),
-          state,
-          received: item.getReceivedBytes(),
-          total: item.getTotalBytes()
-        });
+          filename: savedName,
+          savePath: item.getSavePath(),
+          mime: item.getMimeType?.(),
+          startTime: Date.now()
+        })
+      : -1;
+    if (id !== -1) liveDownloadItems.set(id, item);
+
+    item.on('updated', (_e, state) => {
+      // Hoist the byte getters once so the same bindings feed manager.update AND the
+      // broadcast payload.
+      const received = item.getReceivedBytes();
+      const total = item.getTotalBytes();
+      if (downloadsManager) {
+        downloadsManager.update(id, { state, received, total, paused: item.isPaused?.() });
       }
+      // id-keyed broadcast through the fan-out helper (DD3): the chrome renderer AND
+      // every internal session see it. Carries BOTH id (for the downloads page, leg 2)
+      // AND url (for the renderer's URL-keyed toast/bulk tracker — it has no id).
+      broadcastToChromeAndInternal('download-progress', {
+        id,
+        url,
+        filename: savedName,
+        state,
+        received,
+        total,
+        paused: item.isPaused?.()
+      });
     });
 
     item.once('done', (_e, state) => {
       pendingDownloads.delete(url);
-      if (mainWindow) {
-        mainWindow.webContents.send('download-done', {
-          url,
-          filename: item.getFilename(),
-          state,
-          savePath: state === 'completed' ? item.getSavePath() : null
-        });
+      const savePath = state === 'completed' ? item.getSavePath() : null;
+      if (downloadsManager) {
+        downloadsManager.finalize(id, { state, savePath, endTime: Date.now() });
       }
+      liveDownloadItems.delete(id);
+      broadcastToChromeAndInternal('download-done', {
+        id,
+        url,
+        filename: savedName,
+        state,
+        savePath
+      });
     });
   });
 }
@@ -868,6 +934,101 @@ registerInternalHandler(ipcMain, 'internal-shields-set', (_e, patch) => {
   const cfg = shields.set(patch || {});
   broadcastToChromeAndInternal('shields-changed', cfg);
   return cfg;
+});
+
+// Downloads surface IPC (Flight 5, Leg 2). All origin-checked via
+// registerInternalHandler — the goldfinch://downloads page is the only allowed sender;
+// web content cannot invoke them (no web gate is relaxed). The savePath for open/show
+// is resolved MAIN-SIDE by id from the trusted manager/store — the renderer NEVER
+// supplies a path (avoids an arbitrary-open vector).
+registerInternalHandler(ipcMain, 'internal-downloads-list', () =>
+  downloadsManager ? downloadsManager.listAll() : []
+);
+// Single dispatch surface with a main-side action allowlist (mirrors the
+// page-context-action allowlisted-dispatch pattern): one origin-checked surface, one
+// validation point. Every branch tolerates a missing/pruned id (no-op, no throw — the
+// DD3 cache contract). Returns { ok } so the page can refresh on a no-op.
+const DOWNLOADS_ACTIONS = new Set(['pause', 'resume', 'cancel', 'remove', 'retry', 'open', 'show']);
+registerInternalHandler(ipcMain, 'internal-downloads-action', (_e, payload) => {
+  const id = payload && payload.id;
+  const action = payload && payload.action;
+  if (typeof id !== 'number' || !DOWNLOADS_ACTIONS.has(action) || !downloadsManager) {
+    return { ok: false };
+  }
+
+  // Resolve the trusted record by id main-side (open/show/retry need it).
+  const record = downloadsManager.listAll().find((r) => /** @type {any} */ (r).id === id);
+
+  switch (action) {
+    case 'pause':
+    case 'resume':
+    case 'cancel': {
+      // Live-item-only ops: act on the DownloadItem registry. No-op on a missing id.
+      const item = liveDownloadItems.get(id);
+      if (item) {
+        item[action]();
+        // pause() and resume() do not reliably emit 'updated', so push an explicit
+        // broadcast so the downloads page can flip the Pause↔Resume button immediately.
+        // cancel() fires 'done' which already broadcasts — skip it.
+        if (action !== 'cancel') {
+          const received = item.getReceivedBytes();
+          const total = item.getTotalBytes();
+          const state = item.getState?.() || 'progressing';
+          const paused = item.isPaused?.();
+          if (downloadsManager) {
+            downloadsManager.update(id, { state, received, total, paused });
+          }
+          broadcastToChromeAndInternal('download-progress', {
+            id,
+            url: item.getURL(),
+            filename: path.basename(item.getSavePath()),
+            state,
+            received,
+            total,
+            paused
+          });
+        }
+      }
+      break;
+    }
+    case 'remove':
+      // History-only — never deletes the file. Terminal records only (the page gates
+      // the affordance); manager.remove tolerates a missing id.
+      downloadsManager.remove(id);
+      break;
+    case 'retry': {
+      // Re-issue a FRESH download for a failed/cancelled record. mainWindow uses
+      // session.defaultSession (no partition in webPreferences), which is download-wired
+      // at whenReady, so downloadURL registers through wireDownloadHandler and gets a
+      // NEW id/new record; the old failed record stays visible (DD3). No fallback needed.
+      const url = record ? /** @type {any} */ (record).url : null;
+      if (url && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.downloadURL(url);
+      }
+      break;
+    }
+    case 'open': {
+      // Resolve savePath main-side by id; open only a real path. shell.openPath returns
+      // a non-empty error string when the file is gone — return it so the page can show
+      // an inline notice (don't throw).
+      const savePath = record ? /** @type {any} */ (record).savePath : null;
+      if (savePath) {
+        const error = shell.openPath(savePath);
+        return Promise.resolve(error).then((e) => ({ ok: !e, error: e || undefined }));
+      }
+      return { ok: false };
+    }
+    case 'show': {
+      const savePath = record ? /** @type {any} */ (record).savePath : null;
+      if (savePath) shell.showItemInFolder(savePath);
+      break;
+    }
+  }
+  return { ok: true };
+});
+registerInternalHandler(ipcMain, 'internal-downloads-clear', () => {
+  if (downloadsManager) downloadsManager.clear();
+  return { ok: true };
 });
 
 // Automation bind-status surface (Flight 5 / DD1). The shape is shared with
@@ -1196,7 +1357,11 @@ app.on('session-created', (ses) => {
 });
 
 app.whenReady().then(() => {
-  initProfileAndStores(app, { shields, settings, jars });
+  initProfileAndStores(app, { shields, settings, jars, downloads });
+  // Instantiate the app-level downloads manager ONCE, right after the stores load,
+  // injecting the loaded downloads-store. Module-scoped so the synchronous
+  // session-created hook's wireDownloadHandler closure can reference it. (DD3)
+  downloadsManager = createManager(downloads);
   // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
   applyShields(session.defaultSession);
@@ -1232,7 +1397,7 @@ app.whenReady().then(() => {
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    const engine = createEngine(() => mainWindow);
+    const engine = createEngine(() => mainWindow, { getDownloads: () => downloadsManager.listAll() });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview
@@ -1307,7 +1472,15 @@ app.whenReady().then(() => {
 // Primary MCP stop hook — before-quit fires on a real quit across ALL platforms,
 // including macOS (where window-all-closed does NOT quit). stop() is idempotent,
 // so both this and the window-all-closed secondary firing is safe.
-app.on('before-quit', () => { mcpServer?.stop(); });
+app.on('before-quit', () => {
+  // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
+  // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
+  // guaranteed — a sync handler racing an I/O write — and the contract remains
+  // "in-progress is not durable". The loop is bounded by the in-progress count
+  // (typically 0–few), so the synchronous writes are acceptable quit latency.
+  downloadsManager?.flushInterrupted();
+  mcpServer?.stop();
+});
 
 app.on('window-all-closed', () => {
   // Secondary MCP stop, INSIDE the non-darwin branch: on macOS closing all

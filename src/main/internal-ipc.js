@@ -8,28 +8,41 @@
 // an Electron stub. The ipcMain reference is INJECTED into registerInternalHandler
 // rather than imported here.
 
-// Chromium/Blink serializes a {standard, secure} scheme's frame origin to
-// 'goldfinch://settings' (tuple origin), which is what event.senderFrame.origin
-// returns in-process — the correct value to match. Beware: Node's WHATWG
+// Chromium/Blink serializes a {standard, secure} scheme's frame origin to a tuple
+// origin like 'goldfinch://settings', which is what event.senderFrame.origin returns
+// in-process — the correct value to match. Beware: Node's WHATWG
 // new URL('goldfinch://settings').origin returns the string 'null' (Node doesn't know
 // the scheme is standard, so it treats it as an opaque origin), so a
 // `node -e "console.log(new URL('goldfinch://settings').origin)"` sanity check
-// will mislead. Do NOT "fix" this constant to match Node's output.
-const INTERNAL_ORIGIN = 'goldfinch://settings';
+// will mislead. Do NOT "fix" these values to match Node's output.
+//
+// ALLOWLIST, not a single origin (Flight 5): there are now two trusted internal pages
+// (settings, downloads), each a privileged goldfinch:// origin. The intended consequence
+// is that ANY internal page can call ANY registerInternalHandler channel — the trust
+// boundary is "internal page vs web," NOT "settings vs downloads," consistent with the
+// existing single-trust-domain model. A new internal origin is added here.
+const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads']);
 
 /**
  * Returns true only when both conditions are met:
- *   1. origin is the exact Chromium-serialized tuple origin for goldfinch://settings
+ *   1. origin is the exact Chromium-serialized tuple origin of an allowlisted
+ *      internal page (∈ INTERNAL_ORIGINS)
  *   2. isInternalSession is strictly === true (not just truthy)
  *
- * null/undefined origin → false. Truthy-but-not-true session (e.g. 1) → false.
+ * A web origin (even on the internal session) and a non-internal session (even with an
+ * allowlisted origin) both return false. null/undefined origin → false. Truthy-but-not-
+ * true session (e.g. 1) → false.
  *
  * @param {string | null | undefined} origin
  * @param {unknown} isInternalSession
  * @returns {boolean}
  */
 function isTrustedInternalSender(origin, isInternalSession) {
-  return origin === INTERNAL_ORIGIN && isInternalSession === true;
+  return (
+    typeof origin === 'string' &&
+    INTERNAL_ORIGINS.has(origin) &&
+    isInternalSession === true
+  );
 }
 
 /**
@@ -69,4 +82,4 @@ function registerInternalHandler(ipcMain, channel, handler) {
   });
 }
 
-module.exports = { INTERNAL_ORIGIN, isTrustedInternalSender, registerInternalHandler };
+module.exports = { INTERNAL_ORIGINS, isTrustedInternalSender, registerInternalHandler };

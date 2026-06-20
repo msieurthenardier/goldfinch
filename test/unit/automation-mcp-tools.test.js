@@ -69,13 +69,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 26 tools (17 drive + 4 observe + 2 eval + 2 devtools + 1 chrome-discovery), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 27 tools (17 drive + 4 observe + 2 eval + 2 devtools + 2 chrome/app-admin (getChromeTarget + downloadsList)), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 26);
-  const allNames26 = [...ALL_NAMES, 'getChromeTarget'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames26].sort());
+  assert.equal(tools.length, 27);
+  const allNames27 = [...ALL_NAMES, 'getChromeTarget', 'downloadsList'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames27].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -829,6 +829,44 @@ test('callTool getChromeTarget chrome-window-unavailable throw → isError', asy
   const engine = { getChromeTarget: () => { throw new Error(msg); } };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('getChromeTarget', {});
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+// ---------------------------------------------------------------------------
+// downloadsList — Flight-5 app-level downloads tool (admin-only via scope façade)
+// NOTE: makeFakeEngine only covers ALL_NAMES (drive + observe), so downloadsList
+// tests use plain objects (mirrors the getChromeTarget tests above).
+// ---------------------------------------------------------------------------
+
+test('downloadsList is listed with a no-input inputSchema and no internal call/shape leak', () => {
+  const reg = buildToolRegistry(() => ({ getDownloadsList: () => [] }));
+  const tools = reg.listTools();
+  const t = tools.find((x) => x.name === 'downloadsList');
+  assert.ok(t, 'downloadsList must be in listTools()');
+  assert.equal(t.inputSchema.type, 'object');
+  assert.deepEqual(Object.keys(t.inputSchema.properties ?? {}), [], 'no-input: properties must be empty');
+  assert.deepEqual(Object.keys(t).sort(), ['description', 'inputSchema', 'name']);
+  assert.equal(typeof t.call, 'undefined', 'internal call must not leak');
+});
+
+test('callTool downloadsList over a fake admin engine returns the serialized records (normal result)', async () => {
+  const records = [
+    { id: 1, url: 'https://example.com/a.zip', filename: 'a.zip', savePath: '/d/a.zip', state: 'completed', received: 10, total: 10 },
+    { id: 2, url: 'https://example.com/b.pdf', filename: 'b.pdf', savePath: '/d/b.pdf', state: 'progressing', received: 3, total: 9 },
+  ];
+  const engine = { getDownloadsList: () => records };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('downloadsList', {});
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(JSON.parse(textOf(result)), records);
+});
+
+test('callTool downloadsList over a jar-scoped engine (throws admin-only) → isError with the message', async () => {
+  const msg = 'automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity';
+  const engine = { getDownloadsList: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('downloadsList', {});
   assert.equal(result.isError, true);
   assert.equal(textOf(result), msg);
 });

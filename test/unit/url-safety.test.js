@@ -239,12 +239,28 @@ test('internal: allows goldfinch://settings/ (trailing slash)', () => {
   assert.equal(isInternalPageUrl('goldfinch://settings/'), true);
 });
 
+test('internal: allows goldfinch://downloads (Flight 5 second internal page)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://downloads'), true);
+});
+
+test('internal: allows goldfinch://downloads/ (trailing slash)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://downloads/'), true);
+});
+
+test('internal: rejects goldfinch://downloads/x (sub-path)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://downloads/x'), false);
+});
+
 test('internal: rejects goldfinch://settings/x (sub-path)', () => {
   assert.equal(isInternalPageUrl('goldfinch://settings/x'), false);
 });
 
-test('internal: rejects goldfinch://other host', () => {
+test('internal: rejects goldfinch://other host (unknown internal host)', () => {
   assert.equal(isInternalPageUrl('goldfinch://other'), false);
+});
+
+test('internal: rejects goldfinch://history (unknown internal host — not on the allowlist)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://history'), false);
 });
 
 test('internal: rejects https://settings', () => {

@@ -170,6 +170,15 @@ function scopeEngine(engine, identity, ctx) {
     throw new Error('automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity');
   };
 
+  // downloadsList → REFUSED for jar keys (admin-only, app-level — mirrors getChromeTarget/captureWindow).
+  // An app-level cross-jar view is an admin capability; a jar key must not learn what other jars
+  // downloaded ("new tools must not widen the surface's reach", DD6). Explicit block, NOT a WCID_FIRST_OPS
+  // omission — the latter throws the opaque "engine.getDownloadsList is not a function" (the scope.js:38 gap).
+  facade.getDownloadsList = () => {
+    requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow/getChromeTarget
+    throw new Error('automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity');
+  };
+
   return facade;
 }
 

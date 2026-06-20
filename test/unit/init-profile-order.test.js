@@ -40,6 +40,7 @@ function makeWorld({ isPackaged }) {
     shields: { load: () => order.push('shields.load') },
     settings: { load: (p) => { order.push('settings.load'); order.push(`settings.load:${p}`); } },
     jars: { load: () => order.push('jars.load') },
+    downloads: { load: (p) => { order.push('downloads.load'); order.push(`downloads.load:${p}`); } },
   };
   return { app, stores, order, getUserData: () => userData };
 }
@@ -56,21 +57,26 @@ test('unpackaged — setPath runs before every getPath(userData) consumer', () =
   initProfileAndStores(w.app, w.stores);
 
   const setPathIdx = idx(w.order, 'setPath');
-  // settings ordering signal: the getPath call made to build settings.load's arg. When
-  // unpackaged there are TWO getPath calls — the FIRST feeds setPath's redirect arg
-  // (correctly BEFORE setPath), the LAST feeds settings.load (must be AFTER setPath).
-  // lastIndexOf isolates the settings-feeding read.
-  const settingsGetPathIdx = w.order.lastIndexOf('getPath');
-  assert.notEqual(settingsGetPathIdx, -1, 'expected a getPath feeding settings.load');
-  assert.ok(setPathIdx < settingsGetPathIdx, 'setPath before the getPath that feeds settings.load');
+  // settings/downloads ordering signal: the getPath calls made to build their load args.
+  // When unpackaged the FIRST getPath feeds setPath's redirect arg (correctly BEFORE
+  // setPath); the remaining getPath calls feed settings.load then downloads.load (both
+  // must be AFTER setPath). indexOf of the first POST-setPath getPath isolates them.
+  const firstConsumerGetPathIdx = w.order.indexOf('getPath', setPathIdx);
+  assert.notEqual(firstConsumerGetPathIdx, -1, 'expected a getPath feeding settings/downloads.load');
+  assert.ok(setPathIdx < firstConsumerGetPathIdx, 'setPath before the getPath that feeds settings.load');
   assert.ok(setPathIdx < idx(w.order, 'shields.load'), 'setPath before shields.load');
   assert.ok(setPathIdx < idx(w.order, 'settings.load'), 'setPath before settings.load');
   assert.ok(setPathIdx < idx(w.order, 'jars.load'), 'setPath before jars.load');
+  assert.ok(setPathIdx < idx(w.order, 'downloads.load'), 'setPath before downloads.load');
 
-  // And the redirect actually took effect: settings.load received the -dev path.
+  // And the redirect actually took effect: settings.load AND downloads.load got the -dev path.
   assert.ok(
     w.order.includes(`settings.load:/home/x/.config/goldfinch-dev`),
     'settings.load got the dev-redirected userData path'
+  );
+  assert.ok(
+    w.order.includes(`downloads.load:/home/x/.config/goldfinch-dev`),
+    'downloads.load got the dev-redirected userData path'
   );
 });
 
@@ -83,9 +89,14 @@ test('packaged — setPath is NOT called; consumers still run (invariant vacuous
   assert.ok(w.order.includes('shields.load'), 'shields.load still runs when packaged');
   assert.ok(w.order.includes('settings.load'), 'settings.load still runs when packaged');
   assert.ok(w.order.includes('jars.load'), 'jars.load still runs when packaged');
+  assert.ok(w.order.includes('downloads.load'), 'downloads.load still runs when packaged');
   assert.ok(
     w.order.includes(`settings.load:/home/x/.config/goldfinch`),
     'settings.load got the un-redirected userData path when packaged'
+  );
+  assert.ok(
+    w.order.includes(`downloads.load:/home/x/.config/goldfinch`),
+    'downloads.load got the un-redirected userData path when packaged'
   );
 });
 

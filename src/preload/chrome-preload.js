@@ -112,6 +112,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // Fired by main's before-input-event Ctrl+F capture (DD2/SC4). No payload —
   // the renderer resolves the active tab via activeTab(). Mirrors onOpenTab.
   onOpenFind: (cb) => ipcRenderer.on('open-find', () => cb()),
+  // Fired by main's before-input-event Ctrl+J capture (DD2). No payload — the renderer
+  // opens goldfinch://downloads via openDownloads(). Mirrors onOpenFind.
+  onOpenDownloads: (cb) => ipcRenderer.on('open-downloads', () => cb()),
 
   // Absolute path to the webview preload, so the renderer can set it on
   // <webview webpreferences> / preload attribute.
