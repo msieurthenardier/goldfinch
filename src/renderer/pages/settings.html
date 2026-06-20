@@ -44,11 +44,6 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
           </button>
         </div>
-        <fieldset class="shields-group">
-          <legend class="sr-only">Spellcheck</legend>
-          <label class="shield-row"><span>Spellcheck</span><input type="checkbox" id="spellcheck-enabled" /></label>
-        </fieldset>
-        <p id="spellcheck-note" class="muted">Checks spelling as you type in web text fields. Enabling downloads a one-time dictionary. Applies to new tabs — reload open tabs to enable.</p>
       </section>
       <section id="privacy">
         <h2>Privacy &amp; Shields</h2>
@@ -61,6 +56,11 @@
           <label class="shield-row"><span>Farble fingerprint</span><input type="checkbox" id="shield-farble" /></label>
         </fieldset>
         <p>These are global Shields defaults, applied to every site.</p>
+        <fieldset class="shields-group spellcheck-group">
+          <legend class="sr-only">Spellcheck</legend>
+          <label class="shield-row spellcheck-row"><span>Spellcheck</span><input type="checkbox" id="spellcheck-enabled" /></label>
+        </fieldset>
+        <p id="spellcheck-note" class="muted">Enabling downloads a one-time dictionary from Google. Reload open tabs to enable.</p>
       </section>
       <section id="automation">
         <h2>Automation</h2>

@@ -1062,7 +1062,14 @@ ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return;
   if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
-  if (typeof word === 'string' && word) wc.replaceMisspelling(word);
+  if (typeof word === 'string' && word) {
+    // Re-focus the guest first: opening the chrome context menu pulls focus off the guest editable,
+    // and replaceMisspelling is a no-op unless the guest holds the active editing/misspelling context
+    // (symptom without this: the first suggestion click does nothing, the second works once focus has
+    // returned). Focusing the guest webContents restores the context before the replace.
+    wc.focus();
+    wc.replaceMisspelling(word);
+  }
 });
 
 // Page-context edit-action dispatch (Leg 4 — the cut/copy/paste/undo/redo Leg 1 deferred).

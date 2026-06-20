@@ -84,6 +84,25 @@ HAT's scope (WSLg can't render squiggles / drive the a11y harness non-interactiv
 Legs 2/4/5). SC3/SC6 mission success criteria stay **unchecked** until those runs pass. The flight lands
 code-complete + reviewed; the debrief (run via `/flight-debrief`) transitions it to `completed`.
 
+**2026-06-19 — HAT (`hat-and-alignment`, Leg 7, interactive).** Guided human acceptance test on a real
+display (WSLg). All steps operator-confirmed; SC6/SC3 accepted end-to-end. Six real issues found and fixed
+inline (small renderer/main/CSS edits, no autonomous Developer): (1) **cursor positioning** — `params.x/y`
+are chrome-window client coords, NOT webview-relative as Leg 4 assumed (the spike only confirmed x, which is
+ambiguous on a full-width webview); dropped the webview-rect offset, HAT-verified with instrumentation;
+(2) **menu highlight UX** — Settings-nav style (yellow border/text/tint), full-width, 240px, visible
+dividers, no pre-selection on mouse-open; (3) **arrows dismissed the menu** — page menu's `trigger === menu`
+made the controller's menu-button keydown opener `closeAll()` on its own arrows; guarded with
+`trigger !== menu`; (4) **spellcheck first-click correction no-op** — `wc.focus()` before
+`replaceMisspelling` (also resolves reviewer finding #1 for the correction path); (5) **spellcheck toggle
+moved** to Privacy & Shields (divider + de-indent, trimmed copy); (6) **a11y `.ps-list`** — the first
+successful `npm run a11y` run (prior legs WSLg-inconclusive) surfaced a **pre-existing serious**
+`scrollable-region-focusable` on the Shields-panel scroll lists (not this flight's regression);
+operator-approved quick-fix added `tabIndex=0`. **`npm run a11y` now GREEN** (menu `region` advisory
+baselined with a reasoned entry; menu menuitem roles/names/keyboard raise zero violations). Unit suite 879
+pass / 0 fail, typecheck + lint clean, tool count 26. S8 automated `/behavior-test` runs deferred (specs
+authored `draft`; manual HAT is the human acceptance). These HAT fixes committed in a **separate commit**
+(no amend) on top of the flight commit.
+
 ## Leg Entries
 
 ### `context-menu-ipc` — Status: landed (2026-06-19)

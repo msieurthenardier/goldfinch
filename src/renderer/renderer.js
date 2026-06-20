@@ -151,15 +151,20 @@ const menuController = (() => {
     // Controller-level trigger keydown: Enter/Space/ArrowDown → open to first item;
     // ArrowUp → open to last item (APG menu-button). preventDefault suppresses the
     // synthetic click so the menu opens exactly once.
-    entry.trigger.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        openEntry(entry, 0);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        openEntry(entry, -1);
-      }
-    });
+    // Skip when trigger === menu (the page context menu is its OWN trigger node, with no separate
+    // menu-button): otherwise this opener fires on the menu's own Arrow/Enter keydowns and
+    // closeAll()s it mid-navigation. Such consumers open programmatically (right-click / Shift+F10).
+    if (entry.trigger !== entry.menu) {
+      entry.trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          openEntry(entry, 0);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          openEntry(entry, -1);
+        }
+      });
+    }
 
     // Controller-level menu keydown: full APG roving-tabindex contract.
     // Guard `if (!entry.items) return` so a non-menu popup consumer (e.g. the
@@ -659,23 +664,19 @@ function buildPageContextSections(ctx) {
 }
 
 /**
- * Position the menu at the cursor. params.x/y are GUEST-page coords relative to the active
- * <webview>'s top-left (the click happened inside the guest); map to chrome-overlay client coords
- * via the active webview's live getBoundingClientRect() (correct whether the media panel is open
- * or the window resized), then clamp inside the viewport. Measure after the node is shown (real
- * offsetWidth/offsetHeight). For a chrome-focused keyboard invocation, x/y are already chrome
- * client coords (derived from the focused element) and the webview offset is skipped (keyboard).
+ * Position the menu at the cursor. params.x/y arrive as chrome-WINDOW client coordinates: the guest
+ * <webview> context-menu params are reported relative to the embedder window, not the webview content
+ * (HAT-verified — adding the webview's top offset double-counted it and dropped the menu ~toolbar-height
+ * too low). The keyboard-anchored invocations (Shift+F10 / toolbar Unpin) likewise pass chrome-client
+ * coords derived from an element's getBoundingClientRect(). So NO webview-rect offset is applied; just
+ * clamp inside the viewport. Measure after the node is shown (real offsetWidth/offsetHeight).
  */
-function positionPageContextMenu(px, py, keyboard) {
-  const wv = activeTab() && activeTab().webview;
-  const r = (!keyboard && wv) ? wv.getBoundingClientRect() : { left: 0, top: 0 };
+function positionPageContextMenu(px, py) {
   const m = els.pageContextMenu;
   const mw = m.offsetWidth;
   const mh = m.offsetHeight;
-  let x = r.left + px;
-  let y = r.top + py;
-  x = Math.min(x, window.innerWidth - mw - 4);   // clamp right edge
-  y = Math.min(y, window.innerHeight - mh - 4);  // clamp bottom edge
+  let x = Math.min(px, window.innerWidth - mw - 4);   // clamp right edge
+  let y = Math.min(py, window.innerHeight - mh - 4);  // clamp bottom edge
   m.style.left = Math.max(4, x) + 'px';
   m.style.top = Math.max(4, y) + 'px';
   m.style.right = 'auto';
@@ -697,10 +698,16 @@ const pageContextEntry = menuController.register({
     // right-click's window blur fire ~26ms BEFORE the page-context-menu IPC arrives (so closeAll
     // runs on an empty controller, before open()), but self-focus + the microtask-deferred open in
     // the subscription guard against a different ordering on other platforms.
-    els.pageContextMenu.focus();
-    positionPageContextMenu(pageCtx.x, pageCtx.y, pageCtx.keyboard);
+    els.pageContextMenu.focus();   // focus the CONTAINER (tabindex=-1) — captures keyboard, no item
+    positionPageContextMenu(pageCtx.x, pageCtx.y);
     const items = pageContextItems();
-    if (items.length) focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+    // MOUSE (right-click) open: leave focus on the container so NO item is highlighted (deterministic
+    // — :focus styling needs a focused item). ArrowDown then roves to the first item via the menu
+    // keydown handler (idx -1 → 0). KEYBOARD invocations (Shift+F10 / toolbar Unpin) focus the first/
+    // last item immediately per the APG menu contract.
+    if (pageCtx.keyboard && items.length) {
+      focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
+    }
   },
   onClose() {
     els.pageContextMenu.classList.add('hidden');
@@ -2521,6 +2528,7 @@ function pGroupStatus(cat, entries) {
   d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${entries.length})</div>`;
   const list = document.createElement('div');
   list.className = 'ps-list';
+  list.tabIndex = 0;   // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
   for (const e of entries) {
     const item = document.createElement('div');
     item.className = 'ps-item status';
@@ -2535,6 +2543,7 @@ function pGroupStatus(cat, entries) {
 function pList(items) {
   const l = document.createElement('div');
   l.className = 'ps-list';
+  l.tabIndex = 0;   // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
   l.innerHTML = items.map((i) => `<div class="ps-item">${escapeHtml(i)}</div>`).join('');
   return l;
 }

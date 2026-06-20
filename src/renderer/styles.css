@@ -1329,22 +1329,28 @@ a:focus-visible {
    positionPageContextMenu, clamped to the viewport); lives at the menu tier (z-index:60),
    below the z-index:100 lightbox. tabindex="-1" + outline:none keeps the menu node itself
    from showing a focus ring when onOpen self-focuses it (the blur-race defensive mitigation);
-   the focusable items still carry the .cm-item:focus-visible gold ring. */
+   the focusable items show the selected-row highlight (yellow left border + text + tint)
+   defined below, modelled on the Settings left-nav active style. */
 #page-context-menu {
   position: absolute;
   z-index: 60;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 6px;
-  min-width: 200px;
+  padding: 6px 0;            /* no horizontal padding — highlighted rows span edge to edge */
+  min-width: 240px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   outline: none;
+  overflow: hidden;          /* clip the square row corners against the rounded container */
+}
+/* Full-width rows: square corners so the highlight reaches the menu's left/right inner edges. */
+#page-context-menu .cm-item {
+  border-radius: 0;
 }
 /* Section separator between context-menu groups (link / image / selection / editable /
    suggestions / Inspect). Same top-border idiom as .cm-item.add. */
 #page-context-menu .cm-sep {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(230, 231, 234, 0.16);   /* lighter than --border so the divider reads */
   margin: 4px 0;
 }
 /* Disabled affordance (e.g. "No suggestions") — dim, non-interactive. Edit items are
@@ -1356,6 +1362,21 @@ a:focus-visible {
 }
 #page-context-menu .cm-item[aria-disabled='true']:hover {
   background: transparent;
+}
+/* Highlighted item — modelled on the Settings left-nav active style (yellow left border + yellow
+   text + lighter row) rather than the outward gold ring (which overflowed into adjacent items).
+   Hover and keyboard-focus share the SAME look — there is no distinct "selected" state, and the
+   menu opens with nothing highlighted (mouse open does not pre-focus an item; see onOpen). A 3px
+   transparent left border on the base keeps the text from shifting when highlighted. */
+#page-context-menu .cm-item {
+  border-left: 3px solid transparent;
+}
+#page-context-menu .cm-item:not([aria-disabled='true']):hover,
+#page-context-menu .cm-item:not([aria-disabled='true']):focus {
+  outline: none;
+  border-left-color: var(--accent);
+  color: var(--accent);
+  background: rgba(245, 197, 24, 0.12);
 }
 .cm-title {
   font-size: 10px;

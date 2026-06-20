@@ -328,9 +328,11 @@ tool-count change.**
   `npm run a11y` — to audit the menu-open state it needs a **chrome-side state-driver fn** (like
   `openLightbox`/`togglePanel`; the audit can't fire a guest `context-menu` event), add one if warranted;
   regression sweep of the keydown/`before-input-event` handlers. **No MCP tool-count change (26).**
-- [ ] `hat-and-alignment` *(optional)* — guided HAT: the menu's feel/placement/keyboard (incl. Shift+F10
+- [x] `hat-and-alignment` *(optional)* — guided HAT: the menu's feel/placement/keyboard (incl. Shift+F10
   + focus-return), each context section (link/image/selection/editable/Inspect), the toolbar-Unpin
   migration, and spellcheck (squiggles + right-click suggestions + correction) — fixing issues inline.
+  *(Completed 2026-06-19: 6 inline fixes incl. cursor positioning, menu UX, arrow-dismiss, correction
+  first-click, spellcheck relocation, a11y `.ps-list`; `npm run a11y` GREEN; SC6/SC3 operator-accepted.)*
 
 ---
 

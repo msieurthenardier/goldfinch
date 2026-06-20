@@ -122,6 +122,7 @@ const ACCEPTED = [
   { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#page-context-menu', state: 'page-context-menu', reason: 'transient role="menu" popup overlay (Flight 4 custom page context menu); a floating menu is not document content requiring a landmark — same accepted-chrome-exception class as #tabs/#brand. Its menuitem roles/names/keyboard nav raise no violations.' },
   { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
   { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
   // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a

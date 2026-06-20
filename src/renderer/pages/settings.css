@@ -197,6 +197,16 @@ main section p {
   padding-left: 14px;
 }
 
+/* Spellcheck is a standalone Privacy control, not a Shields child: divider above + no indent so it
+   reads as separate from the Shields group. */
+.spellcheck-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+}
+.shield-row.spellcheck-row {
+  padding-left: 0;
+}
+
 /* Pill switch — mirrors .switch in src/renderer/styles.css exactly:
    34×18px track, border-radius 9px, OFF #7c7f8a + border, ON var(--accent).
    Native <input type="checkbox"> kept for accessibility/behavior; appearance:none
