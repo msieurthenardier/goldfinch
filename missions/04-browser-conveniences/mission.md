@@ -283,9 +283,14 @@ Emergent blockers discovered during execution go here as flights surface them.
   flight: new webview→renderer `context-menu` param IPC — rich params incl. `dictionarySuggestions`
   arrive on the main-process event — plus the likely `menuController` graduation; a renderer-infra
   refactor, not just a menu.)* (SC6, SC3)
-- [ ] **Flight 5: Downloads surface** — a downloads list/manager UI over the existing
-  `will-download` handling (per-item state/progress, open file/folder) plus an MCP downloads-list
-  tool. (SC7, SC8 part)
+- [ ] **Flight 5: Downloads surface** *(ready — spec at `flights/05-downloads-surface/`, 2026-06-20)*
+  — a downloads list/manager UI over the existing `will-download` handling (per-item state/progress, open
+  file/folder) plus an MCP downloads-list tool. (SC7, SC8 part) *(Scoped at flight design: **app-level,
+  persisted** model — supersedes the mission's session/lightweight lean per operator; surface =
+  `goldfinch://downloads` internal page reached from the **kebab menu + `Ctrl+J`** (no toolbar pin — pins
+  are tab-level); **full browser-parity** controls; `downloadsList` MCP tool **admin-only**; **silent
+  Chrome-like default-save** to OS Downloads, no per-download dialog; folds in the **`menuController`
+  graduation** maintenance leg from the Flight-4 debrief.)*
 - [ ] **Flight 6: Polish & MCP hygiene** — fix the side-panel open-animation glitch (#27,
   composite a `transform` instead of animating `width`; keep the top chrome stationary) and the
   `press_key` top-level `anyOf` schema bug (#56, flatten the schema; audit peers). (SC9, SC10)
