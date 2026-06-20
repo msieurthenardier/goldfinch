@@ -529,3 +529,18 @@ re-run that the leg-3 agent could not perform.
   confirmed all resolutions and **definitively answered the retry session-wiring** (mainWindow uses
   `defaultSession`, wired at `main.js:1248`, so `mainWindow.webContents.downloadURL` works with no
   fallback). Leg 2 → `ready`. `[HANDOFF:review-needed]`.
+- **2026-06-20** — Legs 3–6 each designed via `/leg`, design-reviewed by a Developer agent (1 cycle each;
+  all *approve with changes*, applied), then implemented by a Developer agent and set `landed`
+  (commit deferred). Highlights: **leg 3** `Ctrl+J` two-path (chrome keydown + main `before-input-event`,
+  `isAutoRepeat`-guarded); **leg 4** `downloadsList` admin-only via explicit `scope.js` façade refusal,
+  tool count 26→27, `getDownloads` folded into the engine opts bag; **leg 5** `menuController` extracted
+  verbatim to `menu-controller.js` (+15 unit tests, `MenuEntry` type → d.ts only, eslint globals updated);
+  **leg 6** live SC7/SC8 scripted smoke **PASS** (downloadsList `completed` record + 4096-byte on-disk
+  `savePath`; jar key refused), docs (README/mcp-automation/CLAUDE.md kebab prose), spec → `active`.
+- **2026-06-20** — **Flight-level review + commit (deferred-commit model).** Reviewer agent (Sonnet) over
+  all uncommitted changes → **[HANDOFF:confirmed]**, no blocking issues; 3 non-blocking stale-comment fixes
+  (renderer.js kebab comment, renderer-globals.d.ts JSDoc, docs/renderer-menu.md) applied by a Developer.
+  All 6 legs → `completed`, checked off in `flight.md`; flight → `landed`; Flight 5 checked off in
+  `mission.md`. Committed `2841e16` (46 files; **excluded a stray untracked `src/renderer/assets/goldfinch_new.png`**
+  not part of this flight — left untracked, flagged for the operator). Branch pushed; **draft PR #66**
+  opened with the leg checklist. Optional `hat-and-alignment` left for the operator. `[COMPLETE:flight]`.
