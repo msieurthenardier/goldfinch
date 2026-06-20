@@ -46,6 +46,11 @@
       <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
     </div>
     <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
+    <!-- Custom page context menu (SC6/DD2/DD3). Empty at rest — items built per-invocation
+         from the forwarded guest context-menu params (Leg 1 onPageContextMenu), rendered via the
+         menuController 4th consumer. tabindex="-1" lets onOpen self-focus the chrome (blur-race
+         defensive mitigation) without joining the natural tab order. -->
+    <div id="page-context-menu" class="hidden" role="menu" aria-label="Page actions" tabindex="-1"></div>
 
     <!-- Toolbar -->
     <div id="toolbar">
@@ -205,6 +210,7 @@
     </div>
 
     <script src="../shared/url-safety.js"></script>
+    <script src="../shared/keydown-action.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

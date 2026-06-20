@@ -32,7 +32,8 @@ const { isSafeTabUrl } = require('../shared/url-safety');
  *   automationEnabled: boolean,
  *   automationKeyHashes: Record<string, string>,
  *   automationAdminKeyHash: string,
- *   automationPort: number
+ *   automationPort: number,
+ *   spellcheck: boolean
  * }} Settings
  */
 
@@ -54,7 +55,15 @@ const DEFAULTS = {
   // Configurable MCP listen port (DD1). Default moved off the squatted 7777 into
   // the IANA dynamic range. GOLDFINCH_MCP_PORT env overrides this at resolve time;
   // a change takes effect on next launch (no live rebind).
-  automationPort: 49707
+  automationPort: 49707,
+  // In-field spellcheck for web content (Flight 4 / DD1). Opt-in, default OFF so
+  // nothing fetches the Chromium Hunspell dictionary until the user enables it.
+  // Additive boolean — no schema version bump, no migration. It rides the no-validator
+  // typeof-match fallback in load() (typeof false === typeof DEFAULTS.spellcheck), so a
+  // settings file written before this leg auto-populates to false. Gated at the SESSION
+  // layer in main.js (setSpellCheckerLanguages), never at will-attach-webview (immutable
+  // after attach), so the toggle can reach already-open tabs.
+  spellcheck: false
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.

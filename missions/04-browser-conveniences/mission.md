@@ -227,6 +227,24 @@ Emergent blockers discovered during execution go here as flights surface them.
   the degradation is purely the `findNext:false`/WSLg cold quirk. SC4 is functionally satisfied on
   WSLg via Enter (search, visible count, forward/back stepping, close, focus-restore, per-tab restore,
   internal no-op, lightbox guard all HAT-confirmed); live-incremental-search to be confirmed on macOS.
+- [ ] **`menuController` graduation now overdue** — discovered in Flight 4. The shared renderer menu
+  controller (`renderer.js`) has 4 consumers and accumulated two consumer-specific workarounds this flight
+  (the additive `focusReturn?` option; the `trigger !== menu` guard) plus an inter-consumer state field
+  (`toolbarItem` on the shared `pageCtx`). DD3 deferred graduation "until the next mission touches it"; the
+  Flight-4 debrief reclassifies it as a **named end-of-mission maintenance leg**: extract the IIFE to
+  `src/renderer/menu-controller.js`, load via `<script>` alongside `keydown-action.js`/`url-safety.js`,
+  document the APG contract + `focusReturn?` + the `trigger === menu` constraint + the global
+  `pointerdown`/`blur` listeners, regress all 4 consumers (net now exists). Affects renderer maintainability.
+- [ ] **macOS verification apparatus needed — now 3 deferred specs deep** — carried from the Flight-3
+  debrief, more urgent after Flight 4. macOS-authoritative paths with no decided run apparatus:
+  `devtools-cdp-conflict` (F3); spellcheck squiggle render + native-`NSSpellChecker` suggestions (F4,
+  SC3); page-context-menu DevTools-window materialization + in-guest Shift+F10 render + native-menu
+  suppression (F4, SC6). The session-layer spellcheck toggle is API-confirmed and HAT-confirmed-rendering
+  on the WSLg dev display, but the native-speller suggestion content is macOS-authoritative.
+- [ ] **Flight-4 behavior specs authored but not yet run** — `tests/behavior/page-context-menu.md` and
+  `tests/behavior/spellcheck.md` are `draft`; the manual Flight-4 HAT is the human acceptance of SC6/SC3.
+  Run `/behavior-test {slug}` to promote them `draft → active` and move SC6/SC3 off "formally unchecked"
+  (the WSLg-runnable observables; macOS-authoritative paths stay deferred per the item above).
 
 ## Flights
 
@@ -256,7 +274,7 @@ Emergent blockers discovered during execution go here as flights surface them.
   open/close helper landed; pin/shortcut/internal-no-op live-verified on WSLg; the detached
   DevTools-window materialization + the live CDP conflict (`devtools-cdp-conflict` re-staged) are
   **macOS-authoritative**, WSLg-inconclusive-tolerated. No MCP tool-count change (26). SC5.)
-- [ ] **Flight 4: Custom page context menu + spellcheck** — reusable, on-brand, keyboard-operable
+- [x] **Flight 4: Custom page context menu + spellcheck** *(landed 2026-06-19)* — reusable, on-brand, keyboard-operable
   context-menu component for page content (link/image/selection/editable/Inspect actions); migrate
   the toolbar Unpin off the native menu and graduate `menuController` if taken (closes the M02
   Known Issue). **Includes in-field spellcheck (SC3)** — squiggles (`webPreferences.spellcheck` +

@@ -40,7 +40,7 @@ interface GoldfinchBridge {
   windowToggleMaximize(): void;
   windowClose(): void;
   appQuit(): void;
-  toolbarContextMenu(item: string): void;
+  unpinToolbarItem(item: string): void;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
 
@@ -82,6 +82,16 @@ interface GoldfinchBridge {
   toggleDevtools(payload: { webContentsId: number }): Promise<boolean>;
   isDevtoolsOpen(payload: { webContentsId: number }): Promise<boolean>;
   onDevtoolsStateChanged(cb: (d: { wcId: number; open: boolean }) => void): void;
+
+  // --- page context menu (Leg 1 bridges + Leg 4 edit/clipboard, SC6/DD2) ---
+  /** Subscription: main's guest context-menu listener forwards { wcId, params }. */
+  onPageContextMenu(cb: (d: { wcId: number; params: any }) => void): void;
+  /** Spelling correction round-trip (chrome -> main -> guest replaceMisspelling). */
+  correctMisspelling(payload: { webContentsId: number; word: string }): void;
+  /** Allowlisted edit-action dispatch on the targeted guest (cut/copy/paste/undo/redo). */
+  pageContextAction(payload: { webContentsId: number; action: string }): void;
+  /** Narrow chrome-trusted OS-clipboard string write (Copy link / image address / selection). */
+  clipboardWriteText(text: string): void;
 
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
@@ -146,6 +156,30 @@ interface Window {
 declare function isSafeTabUrl(url: any): boolean;
 declare function isSafePosterUrl(url: any): boolean;
 declare function isInternalPageUrl(url: any): boolean;
+
+/**
+ * Injected by src/shared/keydown-action.js via the globalThis branch (the pure
+ * chrome-shortcut keydown mapper — DD5). Same route as isSafeTabUrl above.
+ */
+declare function keydownToAction(descriptor: {
+  key: string;
+  ctrl: boolean;
+  meta: boolean;
+  shift: boolean;
+  lightboxOpen: boolean;
+}):
+  | 'devtools'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
+  | 'find'
+  | 'new-tab'
+  | 'close-tab'
+  | 'focus-address'
+  | 'toggle-panel'
+  | 'toggle-privacy'
+  | 'reload'
+  | null;
 
 /**
  * Injected by src/shared/audit-paging.js via the globalThis branch (the

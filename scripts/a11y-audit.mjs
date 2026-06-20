@@ -37,7 +37,7 @@
 //        GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
 //      It prints ONE line:  AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
 //   2. Export the key the audit needs:
-//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 5-state sweep (admin)
+//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 7-state sweep (admin)
 //        export GOLDFINCH_MCP_KEY=<jarKey>           # --target guest mode (jar)
 //   3. Serve the media fixture (tests/behavior/fixtures/a11y-media/) on :8000:
 //        python3 -m http.server 8000 --directory tests/behavior/fixtures/a11y-media
@@ -45,7 +45,7 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The chrome 5-state sweep needs the ADMIN key (getChromeTarget is admin-only);
+// The chrome 7-state sweep needs the ADMIN key (getChromeTarget is admin-only);
 // `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
 // is the INTERNAL session and the eval tool refuses it even for admin, so it
 // CANNOT be audited via `evaluate` (the old CDP path could) — see the
@@ -122,6 +122,7 @@ const ACCEPTED = [
   { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
+  { id: 'region', selector: '#page-context-menu', state: 'page-context-menu', reason: 'transient role="menu" popup overlay (Flight 4 custom page context menu); a floating menu is not document content requiring a landmark — same accepted-chrome-exception class as #tabs/#brand. Its menuitem roles/names/keyboard nav raise no violations.' },
   { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
   { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
   // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a
@@ -133,7 +134,7 @@ const ACCEPTED = [
 ];
 
 // ---------- pick the renderer target (chrome mode, admin) ----------
-// The chrome 5-state sweep drives the app shell, which is reachable only via the
+// The chrome 7-state sweep drives the app shell, which is reachable only via the
 // admin-only getChromeTarget tool — it returns { wcId, kind: 'chrome', url }.
 async function getChromeWcId(client) {
   const { value, isError } = await callTool(client, 'getChromeTarget', {});
@@ -242,7 +243,7 @@ async function main() {
     if (targetArg) {
       // Guest mode (DD7): the target is an already-loaded guest tab (e.g. a
       // fixture page). It has none of the chrome's state-driving functions, so we
-      // skip the 5-state sweep entirely — just inject axe and audit its current
+      // skip the multi-state chrome sweep entirely — just inject axe and audit its current
       // DOM once (no fixture navigate, no UI driving).
       const wcId = await getGuestWcId(client, targetArg);
       allViolations.push(...(await runAxe(client, wcId, axeSource, `guest:${targetArg}`)));
@@ -307,6 +308,20 @@ async function main() {
       await evaluate(client, wcId, "applyToolbarPins({ media: true, shields: true, devtools: true })");
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
+
+      // 7) Page context menu open (Leg 6). The harness cannot fire a guest
+      // `context-menu` event, and the menu's real open path is gated behind
+      // unreachable `const pageCtx`/`pageContextEntry`/`menuController`, so we
+      // call the additive top-level driver `openPageContextMenuForAudit()`
+      // (renderer.js → window global) which opens #page-context-menu with a
+      // representative full-section synthetic params payload (link + selection +
+      // editable + spelling-suggestions + Inspect). Audits the open menu's a11y:
+      // role="menu" node, role="menuitem" buttons with accessible names,
+      // role="separator" between sections, roving tabindex. Reuses the
+      // already-a11y-passing #container-menu markup, so expect NO new violations.
+      await evaluate(client, wcId, 'openPageContextMenuForAudit()');
+      await sleep(400);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'page-context-menu')));
     }
   } finally {
     await client.close();

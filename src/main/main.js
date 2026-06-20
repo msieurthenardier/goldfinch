@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -277,6 +277,12 @@ function createWindow() {
       webPreferences.contextIsolation = true;
       webPreferences.nodeIntegration = false;
       webPreferences.sandbox = true;
+      // Defense-in-depth (DD1): goldfinch:// internal pages never spellcheck and never
+      // trigger the dictionary CDN fetch. The session-layer applier already excludes the
+      // internal session; this belt-and-suspenders also disables it at attach. The WEB
+      // branch is left at Electron's default (do NOT set spellcheck there — it is immutable
+      // after attach, so the session-layer applier owns the live web toggle).
+      webPreferences.spellcheck = false;
       return;
     }
     webPreferences.contextIsolation = false;
@@ -422,6 +428,22 @@ app.on('web-contents-created', (_event, contents) => {
       };
       contents.on('devtools-opened', () => sendDevtoolsState(true));
       contents.on('devtools-closed', () => sendDevtoolsState(false));
+      // Custom page context menu (DD2/DD6/DD8). Leg-1 spike POSITIVE on BOTH sides: the
+      // context-menu event fires on the main-process guest webContents AND on the renderer
+      // <webview> tag, each carrying the full rich params (linkURL/imageURL/srcURL/mediaType/
+      // selectionText/isEditable/misspelledWord/dictionarySuggestions/x/y/editFlags) for
+      // link/image/editable/selection targets. We wire the GUEST side (the DD2 primary design):
+      // it sits inside the !__goldfinchInternal guard, so internal goldfinch:// guests never get
+      // the custom menu (DD6) — no renderer-side internal-ness gate needed (unlike the tag path).
+      // Suppress the native OS menu and forward the WHOLE params object to the chrome renderer
+      // keyed by wcId (mirrors the zoom-changed / devtools-state-changed broadcast). Leg 4 renders
+      // #page-context-menu from it and decides which fields to surface.
+      contents.on('context-menu', (event, params) => {
+        event.preventDefault();                                  // retire the native OS menu (SC6)
+        if (mainWindow) {
+          mainWindow.webContents.send('page-context-menu', { wcId: contents.id, params });
+        }
+      });
     }
   }
 });
@@ -654,6 +676,21 @@ function tabFirstParty(id) {
   return agg ? agg.firstParty : '';
 }
 
+// Spellcheck is opt-in and gated at the SESSION layer (DD1 architect [HIGH]):
+// setSpellCheckerLanguages is session-scoped, so it reaches already-attached guests
+// (webPreferences.spellcheck is immutable after attach). Web sessions only — NEVER the
+// internal session (goldfinch:// has no business spellchecking, and we never want it to
+// trigger the dictionary CDN fetch). Premise-audit (flight-log Leg 2) confirmed at the API
+// level: a web session defaults to enabled+['en-US']; setSpellCheckerLanguages([]) disables
+// (isSpellCheckerEnabled()===false) and ['en-US'] re-enables, live on an already-open guest.
+// IDEMPOTENT BY NATURE: unlike applyShields (which wires webRequest hooks exactly once and
+// therefore carries a __goldfinchShields guard), setSpellCheckerLanguages is safe to re-call
+// on whenReady + every toggle + every session-created — do NOT add a __goldfinchSpellcheck guard.
+function applySpellcheck(ses, enabled) {
+  if (!ses || ses.__goldfinchInternal) return; // DD1: never the internal session
+  ses.setSpellCheckerLanguages(enabled ? ['en-US'] : []);
+}
+
 // Applied to EVERY session/jar (via app.on('session-created')). One handler per
 // webRequest event: it both records privacy data (observe) and enforces the
 // active Shields (block / strip / isolate).
@@ -801,6 +838,29 @@ registerInternalHandler(ipcMain, 'internal-settings-set', async (_e, key, value)
   if (key === 'automationEnabled') {
     await applyAutomationEnabledChange(value === true);
   }
+  // Spellcheck live side-effect (DD1 architect [HIGH]): drive EVERY live web session so the
+  // toggle reaches already-open tabs. setSpellCheckerLanguages is an imperative per-session
+  // push with NO lazy-read fallback (unlike shields' webRequest hooks that lazily read global
+  // state), so driving only the two base sessions would leave an already-open per-jar /
+  // container / burner tab stale. webContents.getAllWebContents() is the only live-session
+  // route (the broadcastToChromeAndInternal precedent above); applySpellcheck no-ops the
+  // internal session belt-and-suspenders. NOTE (premise-audit, flight-log Leg 2): the API-level
+  // toggle is confirmed live, but squiggle RENDERING was inconclusive under WSLg — the toggle
+  // help + behavior spec carry the conservative new-tabs-only wording pending macOS/HAT.
+  if (key === 'spellcheck') {
+    const enabled = value === true;
+    // Base web sessions (always present).
+    applySpellcheck(session.defaultSession, enabled);
+    applySpellcheck(session.fromPartition(PAGE_PARTITION), enabled);
+    // Every live web jar/container/burner session (already-open tabs).
+    const seen = new Set();
+    for (const wc of webContents.getAllWebContents()) {
+      const ses = wc.session;
+      if (!ses || /** @type {any} */ (ses).__goldfinchInternal || seen.has(ses)) continue;
+      seen.add(ses);
+      applySpellcheck(ses, enabled);
+    }
+  }
   return cfg;
 });
 registerInternalHandler(ipcMain, 'internal-shields-get', () => shields.get());
@@ -922,6 +982,16 @@ ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximi
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
 ipcMain.on('app-quit', () => app.quit());
 
+// OS-clipboard string write for the page context menu's Copy link / Copy image address /
+// Copy selection (Leg 4). Chrome-trusted one-way send — same trust domain as window-minimize/
+// app-quit (no origin-check needed). Distinct from the internal-origin-gated `clipboard:write`
+// (settings page only): the chrome renderer cannot reach that one, and navigator.clipboard is
+// unreliable from a file:// doc right after a guest context-menu steals focus. Writes a STRING
+// only (coerced) — not a guest mutation, no general-write concern.
+ipcMain.on('chrome-clipboard-write', (_e, text) => {
+  clipboard.writeText(String(text == null ? '' : text));
+});
+
 // Renderer fallback zoom path (chrome-focused case). The renderer already filters
 // internal tabs; we guard again here (defense in depth) before applying.
 ipcMain.on('zoom-apply', (_e, { webContentsId, action }) => {
@@ -979,21 +1049,57 @@ ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
   return wc.isDevToolsOpened();
 });
 
-// Right-click a pinned toolbar icon → native "Unpin {item}" context menu.
-// Writes via `settings.set` + `broadcastToChromeAndInternal` (DD7). Chrome-trusted one-way
-// send (same trust domain as window-minimize/app-quit — no origin-check needed).
-ipcMain.on('toolbar-context-menu', (_e, item) => {
-  if (!mainWindow) return;
-  if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;
-  const label = 'Unpin ' + (item === 'media' ? 'Media' : item === 'shields' ? 'Shields' : 'DevTools');
-  const menu = Menu.buildFromTemplate([
-    { label, click: () => {
-      const pins = { ...settings.get('toolbarPins'), [item]: false };
-      settings.set('toolbarPins', pins);
-      broadcastToChromeAndInternal('settings-changed', settings.getAll());
-    } }
-  ]);
-  menu.popup({ window: mainWindow });
+// Spelling correction round-trip (DD2/DD6). chrome -> main -> guest. Acts on the PASSED
+// webContentsId (never activeTab() — the active tab can change mid-round-trip; the user
+// targeted the tab whose wcId the renderer captured at right-click time, TOCTOU guard).
+// Refuses the internal session via the SHARED isInternalContents predicate (DD6 — never write
+// into a goldfinch:// guest). NOT a general write primitive: it performs replaceMisspelling
+// ONLY, a single narrowly-typed action gated on a non-empty string word. (Edit-action
+// correction — cut/copy/paste/undo/redo — is Leg 4's to add with its own action-allowlist.)
+// Dead/destroyed targets return safely; replaceMisspelling is itself a no-op outside an active
+// misspelling/editing context, so the main side never throws.
+ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return;
+  if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
+  if (typeof word === 'string' && word) {
+    // Re-focus the guest first: opening the chrome context menu pulls focus off the guest editable,
+    // and replaceMisspelling is a no-op unless the guest holds the active editing/misspelling context
+    // (symptom without this: the first suggestion click does nothing, the second works once focus has
+    // returned). Focusing the guest webContents restores the context before the replace.
+    wc.focus();
+    wc.replaceMisspelling(word);
+  }
+});
+
+// Page-context edit-action dispatch (Leg 4 — the cut/copy/paste/undo/redo Leg 1 deferred).
+// Mirrors page-context-correct's trust discipline EXACTLY: acts on the PASSED webContentsId
+// (never activeTab() — the user targeted the tab whose wcId the renderer captured at right-click
+// time, TOCTOU guard), guards a dead/missing target, and refuses the internal session (DD6 —
+// never drive edit methods on a goldfinch:// guest). NOT a general "run any method" primitive:
+// `action` is restricted to a FIXED allowlist; anything else is ignored. A separate channel
+// (rather than widening page-context-correct's narrow `word`-string contract) keeps each
+// surface's audited trust contract self-evident. wc.paste() reads the OS clipboard into the
+// guest — same as a native menu Paste, the user-invoked intended behavior, not a new exfil path.
+const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
+ipcMain.on('page-context-action', (_e, { webContentsId, action }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return;
+  if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
+  if (!PAGE_CONTEXT_ACTIONS.has(action)) return;        // fixed allowlist — not a verb dispatcher
+  wc[action]();                                          // wc.cut()/copy()/paste()/undo()/redo()
+});
+
+// Unpin a toolbar item from the custom toolbar-mode context menu (Leg 5; replaces the retired
+// native Electron popup-menu handler). Chrome-trusted one-way send — same trust domain as
+// window-minimize/app-quit/chrome-clipboard-write (no origin check). NOT a general settings-write
+// surface: item-allowlisted, writes only toolbarPins[item] = false. Same write+broadcast the native
+// handler did, so applyToolbarPins' settings-changed reaction keeps the toolbar in sync live.
+ipcMain.on('unpin-toolbar-item', (_e, item) => {
+  if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;  // fixed allowlist
+  const pins = { ...settings.get('toolbarPins'), [item]: false };             // READ-MERGE current
+  settings.set('toolbarPins', pins);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
 });
 
 // --- cookie jars / container identities ---
@@ -1080,6 +1186,13 @@ app.on('session-created', (ses) => {
   }
   applyShields(ses);
   wireDownloadHandler(ses);
+  // Apply the current spellcheck setting to this fresh web jar (DD1 session-layer gating).
+  // Read defensively: a session-created can fire before initProfileAndStores loads the store
+  // (settings.get would then throw on null dir) — treat an unreadable store as OFF. whenReady
+  // re-applies the correct state to defaultSession/pageSession after stores load anyway.
+  let spellcheckOn;
+  try { spellcheckOn = settings.get('spellcheck') === true; } catch { spellcheckOn = false; }
+  applySpellcheck(ses, spellcheckOn);
 });
 
 app.whenReady().then(() => {
@@ -1087,9 +1200,11 @@ app.whenReady().then(() => {
   // Cover the sessions that may already exist before the hook was attached.
   wireDownloadHandler(session.defaultSession);
   applyShields(session.defaultSession);
+  applySpellcheck(session.defaultSession, settings.get('spellcheck'));
   const pageSession = session.fromPartition(PAGE_PARTITION);
   wireDownloadHandler(pageSession);
   applyShields(pageSession);
+  applySpellcheck(pageSession, settings.get('spellcheck'));
 
   // Dedicated internal session for `goldfinch://` pages. Set the flag BEFORE fromPartition
   // so the synchronous `session-created` hook skips applyShields + wireDownloadHandler for

@@ -76,6 +76,15 @@ or download **v0.5.1** directly:
     paused-sites list persists across restarts.
   - Shields apply automatically to every container and burner tab via
     `app.on('session-created')` — no per-jar configuration needed.
+  - **Spellcheck dictionary download (opt-in only).** Spellcheck is **off by
+    default**, so **nothing is fetched** while it is off. After you enable it
+    (Settings → Appearance), the first time you focus an editable field on
+    **Linux or Windows**, Chromium fetches a **one-time per-language Hunspell
+    dictionary** (`.bdic`) from the Chromium dictionary CDN
+    (`redirector.gvt1.com/edgedl/chrome/dict/…`). On **macOS** the OS-native
+    speller (`NSSpellChecker`) is used and **no download occurs**. This is the
+    only network egress spellcheck introduces, it happens only after explicit
+    opt-in, and it is documented here per Goldfinch's no-silent-egress posture.
 - **Containers / cookie jars** (click the `▾` next-to-new-tab button):
   - Four built-in isolated containers — **Default**, **Personal**, **Work**, and
     **Banking** — each backed by its own Electron session partition (separate
@@ -87,14 +96,32 @@ or download **v0.5.1** directly:
   - **New Identity** (in the Shield panel → Jar section) — wipes the current
     jar's cookies and storage, rerolls its fingerprint seed, and reloads the
     page so the site cannot link the new session to the old one.
-- **Pinnable toolbar icons** — the Media and Shields toolbar buttons are now icon
-  buttons (with a count badge) that can be pinned or unpinned:
-  - **Pinned** (the default): the icon appears in the toolbar. Click it to open
-    the panel; right-click it to get an **Unpin** menu item.
-  - **Unpinned**: the icon is removed from the toolbar. The panel can still be
-    opened with its keyboard shortcut (`Ctrl+M` / `Ctrl+Shift+P`). To restore the
-    icon, go to **Settings → Appearance** and toggle the pin button for that item.
+- **Pinnable toolbar icons** — the **Media**, **Shields**, and **DevTools** toolbar
+  buttons are icon buttons (Media/Shields carry a count badge) that can be pinned
+  or unpinned:
+  - **Pinned**: the icon appears in the toolbar. Click it to open the panel (Media/
+    Shields) or DevTools; right-click it to open Goldfinch's **custom on-brand
+    context menu** with a single **Unpin** item. Media and Shields are pinned by
+    default; **DevTools defaults unpinned** (a power-user tool — opt-in).
+  - **Unpinned**: the icon is removed from the toolbar. The panel / DevTools can
+    still be opened with its keyboard shortcut (`Ctrl+M` / `Ctrl+Shift+P` /
+    `F12` · `Ctrl+Shift+I`). To restore the icon, go to **Settings → Appearance**
+    and toggle the pin button for that item.
   - Pin state is persisted across restarts.
+- **Custom page context menu** — right-click web content to open Goldfinch's own
+  on-brand, keyboard-operable context menu (not the native OS menu) with
+  context-appropriate actions: **link** (open in new tab / copy link), **image**
+  (open / copy address / save), **selected text** (copy / search for it),
+  **editable fields** (cut/copy/paste/undo/redo), spelling suggestions (when
+  spellcheck is on), and **Inspect** (opens DevTools for the active web tab).
+  Navigable by arrow keys / Home / End / Esc, and openable from the keyboard with
+  Shift+F10 or the Context-Menu key. It is a **no-op on `goldfinch://` internal
+  pages**, and the toolbar right-click **Unpin** uses the same menu.
+- **Opt-in spellcheck** — **off by default**; enable it in **Settings →
+  Appearance**. Once on, misspelled words in editable fields are flagged and
+  spelling suggestions appear in the right-click context menu; choosing one
+  corrects the word. See **Privacy & Shields** below for the one-time dictionary
+  download this triggers (Linux/Windows only, after you opt in).
 - **Privacy panel** (toggle with the *Shields* icon or `Ctrl+Shift+P`):
   displays live per-tab privacy stats — tracker counts (blocked/allowed by
   category), third-party domains contacted, cookie inventory with clear actions,

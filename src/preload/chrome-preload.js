@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('goldfinch', {
   windowToggleMaximize: () => ipcRenderer.send('window-toggle-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),
   appQuit: () => ipcRenderer.send('app-quit'),
-  toolbarContextMenu: (item) => ipcRenderer.send('toolbar-context-menu', item),
+  unpinToolbarItem: (item) => ipcRenderer.send('unpin-toolbar-item', item),
   windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   onWindowMaximizedChange: (cb) => ipcRenderer.on('window-maximized-change', (_e, isMax) => cb(isMax)),
 
@@ -75,6 +75,35 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // guest contents and the <webview> tag fire; we wire the guest side). Mirrors onZoomChanged; Leg 2
   // subscribes for live button updates. Payload { wcId, open }.
   onDevtoolsStateChanged: (cb) => ipcRenderer.on('devtools-state-changed', (_e, d) => cb(d)),
+
+  // --- page context menu (human/page path; rendered by the chrome menuController, Leg 4) ---
+  // Subscription: fired by main's guest context-menu listener (Leg-1 spike POSITIVE on both the
+  // guest contents and the <webview> tag — we wire the guest side, which is auto-guarded for
+  // internal goldfinch:// guests, DD6). Mirrors onZoomChanged / onDevtoolsStateChanged. Payload
+  // { wcId, params }. Leg 4 renders #page-context-menu from it.
+  onPageContextMenu: (cb) => ipcRenderer.on('page-context-menu', (_e, d) => cb(d)),
+  // Correction round-trip: chrome -> main -> guest replaceMisspelling. One-way send (no return),
+  // mirroring zoomApply / print. Main acts on the PASSED webContentsId (never activeTab() —
+  // TOCTOU) and refuses the internal session (DD6). The correction path is main-side either way,
+  // independent of which side delivers the params.
+  correctMisspelling: ({ webContentsId, word }) =>
+    ipcRenderer.send('page-context-correct', { webContentsId, word }),
+  // Edit-action dispatch for the page context menu (Cut/Copy/Paste/Undo/Redo). One-way send,
+  // mirroring correctMisspelling's discipline. Main acts on the PASSED webContentsId (never
+  // activeTab() — TOCTOU), refuses the internal session (DD6), and restricts `action` to a
+  // fixed allowlist {cut,copy,paste,undo,redo} (NOT a run-any-method primitive). Leg 1
+  // deferred these explicitly — they are NOT misspelling corrections and cannot ride
+  // page-context-correct (whose narrow `word`-string contract is part of its audited surface).
+  pageContextAction: ({ webContentsId, action }) =>
+    ipcRenderer.send('page-context-action', { webContentsId, action }),
+  // OS-clipboard write for the page menu's Copy link / Copy image address / Copy selection.
+  // The chrome renderer is contextIsolation/nodeIntegration-off (no require('electron')) and the
+  // clipboard:write IPC is internal-origin-gated (settings page only), so neither is reachable
+  // here; navigator.clipboard.writeText is unreliable from a file:// doc right after a guest
+  // context-menu steals focus. This narrow one-way bridge writes a STRING to the OS clipboard via
+  // main's clipboard.writeText — same chrome-only trust domain as window-minimize/zoom-apply
+  // (writing a string is not a guest mutation). NOT origin-gated.
+  clipboardWriteText: (text) => ipcRenderer.send('chrome-clipboard-write', text),
 
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),

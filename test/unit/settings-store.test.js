@@ -793,3 +793,61 @@ test('automationPort — load malformed/out-of-range value is repaired to defaul
     removeTempDir(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// spellcheck (Flight 4 / DD1) — additive boolean, default OFF, no version bump,
+// no validator/normalizer (rides the typeof-match fallback in load()).
+// ---------------------------------------------------------------------------
+
+test('spellcheck — default on first load is false (no settings.json)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.spellcheck, false);
+    assert.equal(store.get('spellcheck'), false);
+    // Additive key must NOT bump the schema version.
+    assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive spellcheck key');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('spellcheck — set true persists and reloads (round-trip)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('spellcheck', true);
+    const result = store.load(dir);
+    assert.equal(result.spellcheck, true);
+    assert.equal(store.get('spellcheck'), true);
+
+    // Toggle back OFF and confirm it round-trips too.
+    store.set('spellcheck', false);
+    const result2 = store.load(dir);
+    assert.equal(result2.spellcheck, false);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('spellcheck — config written before this leg (no spellcheck key) loads with false (forward-compat)', () => {
+  const dir = makeTempDir();
+  try {
+    // Simulate a pre-leg settings file that predates the spellcheck key entirely.
+    const preLeg = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: { media: true, shields: true, devtools: false } });
+    fs.writeFileSync(path.join(dir, 'settings.json'), preLeg, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    // The merge-with-repair loop fills the missing additive key from DEFAULTS (false).
+    assert.equal(result.spellcheck, false);
+    assert.equal(store.get('spellcheck'), false);
+    // Sibling keys from the pre-leg file are preserved.
+    assert.equal(result.homePage, 'https://www.google.com');
+  } finally {
+    removeTempDir(dir);
+  }
+});
