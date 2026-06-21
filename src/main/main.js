@@ -15,6 +15,7 @@ const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
 const { createManager } = require('./downloads-manager');
+const { buildRegisterRecord, buildProgressPayload, buildDonePayload } = require('./downloads-payload');
 const { registerInternalHandler } = require('./internal-ipc');
 const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
@@ -555,60 +556,43 @@ function wireDownloadHandler(sess) {
       item.setSavePath(uniquePath(app.getPath('downloads'), suggested));
     }
 
-    // getSavePath() is now final (set above). Use its basename as the display name so
-    // the UI and "Show in folder" reflect the actual file on disk — getFilename() is
-    // the original server-suggested name and does not include uniquePath's " (n)" dedup.
-    const savedName = path.basename(item.getSavePath());
-
+    // getSavePath() is now final (set above). The record + payloads are built by the
+    // electron-free downloads-payload helper, which reads the display name as
+    // basename(getSavePath()) (NOT getFilename()) and `paused` from isPaused(). The live
+    // `item` is passed whole as the accessor bag (it structurally satisfies the accessors).
     // Register in the app-level model. Module-scoped manager (assigned at store-load
     // time); guard defensively in case a will-download somehow fires before load.
-    const id = downloadsManager
-      ? downloadsManager.register({
-          url,
-          filename: savedName,
-          savePath: item.getSavePath(),
-          mime: item.getMimeType?.(),
-          startTime: Date.now()
-        })
-      : -1;
+    const record = buildRegisterRecord(item, { url, startTime: Date.now() });
+    const id = downloadsManager ? downloadsManager.register(record) : -1;
     if (id !== -1) liveDownloadItems.set(id, item);
 
     item.on('updated', (_e, state) => {
-      // Hoist the byte getters once so the same bindings feed manager.update AND the
-      // broadcast payload.
-      const received = item.getReceivedBytes();
-      const total = item.getTotalBytes();
+      // Single-source assembly: the helper hoists the byte getters and reads isPaused()
+      // once, and the manager.update patch reuses those values — so the same bindings feed
+      // manager.update AND the broadcast (byte-identical to the prior inline payload).
+      const payload = buildProgressPayload(item, { id, url, state });
       if (downloadsManager) {
-        downloadsManager.update(id, { state, received, total, paused: item.isPaused?.() });
+        downloadsManager.update(id, {
+          state: payload.state,
+          received: payload.received,
+          total: payload.total,
+          paused: payload.paused
+        });
       }
       // id-keyed broadcast through the fan-out helper (DD3): the chrome renderer AND
       // every internal session see it. Carries BOTH id (for the downloads page, leg 2)
       // AND url (for the renderer's URL-keyed toast/bulk tracker — it has no id).
-      broadcastToChromeAndInternal('download-progress', {
-        id,
-        url,
-        filename: savedName,
-        state,
-        received,
-        total,
-        paused: item.isPaused?.()
-      });
+      broadcastToChromeAndInternal('download-progress', payload);
     });
 
     item.once('done', (_e, state) => {
       pendingDownloads.delete(url);
-      const savePath = state === 'completed' ? item.getSavePath() : null;
+      const payload = buildDonePayload(item, { id, url, state });
       if (downloadsManager) {
-        downloadsManager.finalize(id, { state, savePath, endTime: Date.now() });
+        downloadsManager.finalize(id, { state, savePath: payload.savePath, endTime: Date.now() });
       }
       liveDownloadItems.delete(id);
-      broadcastToChromeAndInternal('download-done', {
-        id,
-        url,
-        filename: savedName,
-        state,
-        savePath
-      });
+      broadcastToChromeAndInternal('download-done', payload);
     });
   });
 }
@@ -971,22 +955,25 @@ registerInternalHandler(ipcMain, 'internal-downloads-action', (_e, payload) => {
         // broadcast so the downloads page can flip the Pause↔Resume button immediately.
         // cancel() fires 'done' which already broadcasts — skip it.
         if (action !== 'cancel') {
-          const received = item.getReceivedBytes();
-          const total = item.getTotalBytes();
-          const state = item.getState?.() || 'progressing';
-          const paused = item.isPaused?.();
-          if (downloadsManager) {
-            downloadsManager.update(id, { state, received, total, paused });
-          }
-          broadcastToChromeAndInternal('download-progress', {
+          // Route through the same progress builder so the shape has one definition. The
+          // `state || 'progressing'` fallback is computed here (the helper takes state as
+          // given); the helper reads url/received/total/paused/filename off the live item.
+          // Single-source assembly: isPaused() is read once in the helper and the
+          // manager.update patch reuses payload.paused (byte-identical to the prior inline).
+          const payload = buildProgressPayload(item, {
             id,
             url: item.getURL(),
-            filename: path.basename(item.getSavePath()),
-            state,
-            received,
-            total,
-            paused
+            state: item.getState?.() || 'progressing'
           });
+          if (downloadsManager) {
+            downloadsManager.update(id, {
+              state: payload.state,
+              received: payload.received,
+              total: payload.total,
+              paused: payload.paused
+            });
+          }
+          broadcastToChromeAndInternal('download-progress', payload);
         }
       }
       break;

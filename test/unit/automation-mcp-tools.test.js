@@ -5,7 +5,7 @@
 //
 // SDK-free + Electron-free: mcp-tools.js imports nothing, so these tests run
 // under plain `node --test` with a fake recording engine (no SDK, no Electron).
-// They pin the discovery contract (14 drive tool names + schemas, no `call` leak),
+// They pin the discovery contract (17 drive tool names + schemas, no `call` leak),
 // the named→positional dispatch mapping, DD6 success serialization, the
 // openTab-null operational case, every throw→isError class, unknown-tool→isError,
 // and the per-call getEngine discipline.
@@ -126,10 +126,12 @@ test('input schemas carry the correct required fields per the discovery contract
   assert.equal(scrollProps.dx.type, 'number');
   assert.equal(scrollProps.dy.type, 'number');
   // pressKey — wcId always required; the key arrives as `name` (preferred) or `key`
-  // (alias), expressed as an anyOf so exactly one of the two satisfies the schema.
+  // (alias), but "at least one of name/key" is enforced at RUNTIME in the tool
+  // `call` — NOT via a top-level schema combinator (strict MCP consumers reject
+  // those; #56/SC9). The schema therefore carries no top-level anyOf.
   const pressKeySchema = byName.get('pressKey').inputSchema;
   assert.deepEqual(req('pressKey'), ['wcId']);
-  assert.deepEqual(pressKeySchema.anyOf, [{ required: ['name'] }, { required: ['key'] }]);
+  assert.equal(pressKeySchema.anyOf, undefined, 'pressKey must not declare a top-level anyOf (#56/SC9)');
   const pkProps = pressKeySchema.properties;
   assert.equal(pkProps.name.type, 'string');
   assert.equal(pkProps.key.type, 'string'); // alias property, same string type
@@ -151,7 +153,8 @@ test('input schemas carry the correct required fields per the discovery contract
 
 // ---------------------------------------------------------------------------
 // Flat-schema discovery invariant (DD4/SC8) — the zoom tools must carry NO
-// top-level oneOf/allOf/anyOf (pressKey stays the ONLY sanctioned anyOf).
+// top-level oneOf/allOf/anyOf. After #56/SC9, NO tool carries a top-level
+// combinator (pressKey's former anyOf was flattened to a runtime guard).
 // ---------------------------------------------------------------------------
 
 test('getZoom/setZoom schemas are flat — no top-level oneOf/allOf/anyOf', () => {
@@ -164,12 +167,25 @@ test('getZoom/setZoom schemas are flat — no top-level oneOf/allOf/anyOf', () =
     assert.equal(schema.oneOf, undefined, name + ' must not declare a top-level oneOf');
     assert.equal(schema.allOf, undefined, name + ' must not declare a top-level allOf');
   }
-  // pressKey remains the ONLY tool with a sanctioned top-level anyOf.
+  // No tool carries a top-level anyOf — pressKey's was flattened to a runtime guard (#56/SC9).
   const withAnyOf = reg.listTools().filter((t) => t.inputSchema.anyOf !== undefined).map((t) => t.name);
-  assert.deepEqual(withAnyOf, ['pressKey']);
+  assert.deepEqual(withAnyOf, []);
   // No tool declares a top-level oneOf or allOf.
   assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.oneOf !== undefined).map((t) => t.name), []);
   assert.deepEqual(reg.listTools().filter((t) => t.inputSchema.allOf !== undefined).map((t) => t.name), []);
+});
+
+test('no tool inputSchema carries a top-level anyOf/oneOf/allOf/not (SC9 hygiene — count-agnostic)', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const offenders = [];
+  for (const t of reg.listTools()) {
+    for (const combinator of ['anyOf', 'oneOf', 'allOf', 'not']) {
+      if (t.inputSchema[combinator] !== undefined) {
+        offenders.push(t.name + '.' + combinator);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], 'strict MCP consumers reject top-level schema combinators (#56/SC9)');
 });
 
 // ---------------------------------------------------------------------------
@@ -308,6 +324,15 @@ test('pressKey forwards modifiers (chord) to engine.pressKey(wcId, name, modifie
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('pressKey', { wcId: 7, name: 'M', modifiers: ['control'] });
   assert.deepEqual(calls.pressKey[0], [7, 'M', ['control']]);
+});
+
+test('pressKey with neither name nor key → distinct isError, engine not called (#56/SC9)', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('pressKey', { wcId: 1 });
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), "automation: pressKey requires 'name' or 'key'");
+  assert.equal(calls.pressKey.length, 0); // guard short-circuits before the engine
 });
 
 test('callTool with undefined arguments defaults to {} (no destructuring throw)', async () => {

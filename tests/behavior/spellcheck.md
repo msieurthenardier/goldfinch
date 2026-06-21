@@ -47,7 +47,7 @@ cross-process round-trip (guest `context-menu` params → chrome menu → `page-
 - **Coordinate-click rule** (same as `toolbar-pins.md` / `page-context-menu.md`): locate targets in a
   `captureWindow()` frame; clicks are coordinate-based.
 - **STATE-proxy discipline (load-bearing — see the Default-OFF step + Out of Scope).** Goldfinch's MCP
-  surface has **no network-observation tool** (the 26-tool surface is drive/observe/eval/devtools/discovery
+  surface has **no network-observation tool** (the 27-tool surface is drive/observe/eval/devtools/discovery
   only), and `evaluate` runs in the **guest main world**, so it **cannot** read the main-process
   `session.getSpellCheckerLanguages()` / `isSpellCheckerEnabled()`. The spec therefore asserts the **state
   proxy** — `settings.json` `spellcheck` + whether the forwarded `params` carry spellcheck engagement —

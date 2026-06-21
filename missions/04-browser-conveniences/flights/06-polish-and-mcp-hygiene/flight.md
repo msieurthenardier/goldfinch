@@ -265,32 +265,35 @@ draft specs (DD5).
 
 > **Note:** Tentative; planned and created one at a time as the flight progresses.
 
-- [ ] `side-panel-animation` — #27: rework `#media-panel`/`#privacy-panel` to a `transform`-composited
+- [x] `side-panel-animation` — #27: rework `#media-panel`/`#privacy-panel` to a `transform`-composited
   slide (DD1), remove `width`/`margin` transitions, keep top chrome stationary + reduced-motion honored.
   **Two prongs (DD1):** (a) the CSS transform fix for both panels; (b) the **Shields-specific** fix —
   decouple `renderPrivacy()`/`fetchCookies()` (`renderer.js:1785`/`:2309`) from the open frame so content
   doesn't pop-in/reflow mid-slide (Media is already smooth; Shields is not, because of this synchronous
   rebuild). Renderer-CSS + a scoped `renderer.js` toggle/render-timing change. (SC10)
-- [ ] `presskey-schema-hygiene` — #56: flatten `pressKey` `inputSchema` (drop top-level `anyOf`),
+- [x] `presskey-schema-hygiene` — #56: flatten `pressKey` `inputSchema` (drop top-level `anyOf`),
   handler-side name-or-key guard with a distinct error, schema-hygiene unit test (no top-level
   combinator on any tool) + pressKey both-missing test (DD2). (SC9)
-- [ ] `settings-cleanup` — remove `#downloads` nav link + section, fix the `:63` spellcheck-note copy,
+- [x] `settings-cleanup` — remove `#downloads` nav link + section, fix the `:63` spellcheck-note copy,
   keep the scrollspy consistent (DD3). Renderer-HTML.
-- [ ] `downloads-handler-refactor` — extract `wireDownloadHandler` payload construction into a pure
+- [x] `downloads-handler-refactor` — extract `wireDownloadHandler` payload construction into a pure
   electron-free helper, unit-test filename + paused behaviors, document the Electron paused/getState
   fact (DD4). Main-process + tests. *(Behavior-preserving; no functional change.)*
-- [ ] `app-icon` — wire `goldfinch_new.png` to the resolved target (window/build icon and/or the
+- [x] `app-icon` — wire `goldfinch_new.png` to the resolved target (window/build icon and/or the
   `#brand` UI image), satisfy electron-builder format constraints (DD5 / Open Question). *(HAT/visual-only
   — no automated assertion owed; verified by eye in the HAT leg.)*
-- [ ] `verify-and-behavior-tests` — harden `downloads-surface.md` (dedup-required + exactly-one-record);
-  run `page-context-menu.md` + `spellcheck.md` with **per-row disposition** (runnable rows → `active`;
-  native-render rows → INCONCLUSIVE-on-WSLg/macOS-deferred, recorded); re-run `downloads-surface`;
-  reconcile the tool-count drift (`spellcheck.md:51` says 26 vs the live 27); full suite + typecheck +
-  lint + `npm run a11y` (the SC9 schema-hygiene test is a chrome-sweep-independent unit test). (DD5)
-  *(verify-integration leg.)*
-- [ ] `hat-and-alignment` *(optional)* — guided HAT: eyeball the panel open/close (no jank, chrome
-  stationary, reduced-motion), confirm the settings cleanup, sanity-check the new app icon, and accept any
-  HAT-only behavior specs from the verify leg — fixing issues live until the operator is satisfied.
+- [~] `verify-and-behavior-tests` — **deterministic subset DONE** (`landed`): hardened `downloads-surface.md`
+  (dedup-required step + sharpened exactly-one-record assertion); reconciled the drift (`settings-shell.md`
+  nav inventory → 5 links/5 sections; tool counts → 27/17 in `spellcheck.md`/`automation-mcp-tools.test.js`/
+  `mcp-server.js`); docs confirmed clean; full suite + typecheck + lint green; PART-D run-log skeletons
+  pre-written. **PART D deferred to the HAT leg** (apparatus-gated): live behavior-test runs
+  (`downloads-surface` re-run, `page-context-menu` + `spellcheck` per-row disposition → flip `draft→active`)
+  + `npm run a11y`. (DD5) *(verify-integration leg.)*
+- [ ] `hat-and-alignment` **(non-optional for this flight — sole home for SC10 visual verification, the
+  app-icon eyeball, and the deferred PART-D live behavior runs + a11y)** — guided HAT: eyeball the panel
+  open/close (no jank, chrome stationary, reduced-motion; **Shields specifically** since it had the 2nd
+  glitch source), confirm the settings cleanup, sanity-check the new app icon, run the deferred behavior
+  tests + a11y from the verify leg — fixing issues live until the operator is satisfied.
 
 ---
 
