@@ -291,6 +291,11 @@ Emergent blockers discovered during execution go here as flights surface them.
   are tab-level); **full browser-parity** controls; `downloadsList` MCP tool **admin-only**; **silent
   Chrome-like default-save** to OS Downloads, no per-download dialog; folds in the **`menuController`
   graduation** maintenance leg from the Flight-4 debrief.)*
-- [ ] **Flight 6: Polish & MCP hygiene** — fix the side-panel open-animation glitch (#27,
-  composite a `transform` instead of animating `width`; keep the top chrome stationary) and the
-  `press_key` top-level `anyOf` schema bug (#56, flatten the schema; audit peers). (SC9, SC10)
+- [ ] **Flight 6: Polish & MCP hygiene** *(ready 2026-06-20 — spec at `flights/06-polish-and-mcp-hygiene/`)* —
+  fix the side-panel open-animation glitch (#27, composite a `transform` instead of animating `width`;
+  keep the top chrome stationary) and the `press_key` top-level `anyOf` schema bug (#56, flatten the
+  schema; audit peers). (SC9, SC10) *(Closing flight; folds in operator-selected carry-forward debt:
+  settings Downloads-placeholder removal, `wireDownloadHandler` payload-helper extraction, app-icon
+  wire-up, and behavior-test debt resolution. Planning HAT found a 2nd Shields glitch source — content
+  rebuild on open — so #27 is a two-prong fix. macOS verification apparatus deferred to
+  routine-maintenance.)*
