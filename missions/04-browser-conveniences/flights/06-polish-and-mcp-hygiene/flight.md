@@ -1,6 +1,6 @@
 # Flight: Polish & MCP Hygiene
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria
@@ -285,28 +285,28 @@ draft specs (DD5).
 - [x] `app-icon` — wire `goldfinch_new.png` to the resolved target (window/build icon and/or the
   `#brand` UI image), satisfy electron-builder format constraints (DD5 / Open Question). *(HAT/visual-only
   — no automated assertion owed; verified by eye in the HAT leg.)*
-- [~] `verify-and-behavior-tests` — **deterministic subset DONE** (`landed`): hardened `downloads-surface.md`
+- [x] `verify-and-behavior-tests` — **deterministic subset DONE** (completed): hardened `downloads-surface.md`
   (dedup-required step + sharpened exactly-one-record assertion); reconciled the drift (`settings-shell.md`
   nav inventory → 5 links/5 sections; tool counts → 27/17 in `spellcheck.md`/`automation-mcp-tools.test.js`/
-  `mcp-server.js`); docs confirmed clean; full suite + typecheck + lint green; PART-D run-log skeletons
-  pre-written. **PART D deferred to the HAT leg** (apparatus-gated): live behavior-test runs
-  (`downloads-surface` re-run, `page-context-menu` + `spellcheck` per-row disposition → flip `draft→active`)
-  + `npm run a11y`. (DD5) *(verify-integration leg.)*
-- [ ] `hat-and-alignment` **(non-optional for this flight — sole home for SC10 visual verification, the
-  app-icon eyeball, and the deferred PART-D live behavior runs + a11y)** — guided HAT: eyeball the panel
-  open/close (no jank, chrome stationary, reduced-motion; **Shields specifically** since it had the 2nd
-  glitch source), confirm the settings cleanup, sanity-check the new app icon, run the deferred behavior
-  tests + a11y from the verify leg — fixing issues live until the operator is satisfied.
+  `mcp-server.js`); docs confirmed clean; full suite + typecheck + lint green; **a11y gate green** (0 new
+  violations). **PART D (live behavior-test runs) DEFERRED** to a follow-up (operator decision after the #27
+  detour): `downloads-surface` re-run + `page-context-menu`/`spellcheck` `draft→active` — recorded in mission
+  Known Issues. (DD5 partially met.) *(verify-integration leg.)*
+- [x] `hat-and-alignment` — **completed.** Caught the #27 regression → reverted/deferred (its purpose
+  served). a11y gate green; app-icon + settings eyeballs non-blocking (icon wired+verified; settings
+  a11y-clean + spec-reconciled); PART-D behavior runs deferred with leg 6.
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed (6 autonomous; `hat-and-alignment` optional/operator-driven)
-- [ ] Code merged
-- [ ] Tests passing (unit: schema-hygiene + pressKey + payload-helper; behavior: hardened
-  `downloads-surface` + resolved Flight-4 specs; a11y 0 new violations)
+- [x] Legs resolved: 2/3/4/5 `completed`; 6 `completed` (deterministic; PART-D behavior runs deferred);
+  7 (HAT) `completed`; **1 `aborted` (#27 reverted, SC10 deferred)**
+- [ ] Code merged (draft PR #67 — ready for review after landing)
+- [x] Tests passing (unit: schema-hygiene + pressKey + payload-helper — 950 pass; typecheck + lint clean;
+  a11y 0 new violations). *Deferred: the `downloads-surface`/`page-context-menu`/`spellcheck` behavior runs.*
+- [x] Documentation updated (tool-count reconciles; settings copy; #27 + Ctrl+M deferrals in Known Issues)
 - [ ] Documentation updated (Electron paused fact; any icon/docs notes)
 
 ### Verification

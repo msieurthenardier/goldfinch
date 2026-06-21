@@ -1,7 +1,13 @@
 # Leg: hat-and-alignment
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [Polish & MCP Hygiene](../flight.md)
+
+> **Closed 2026-06-21.** Outcome: the #27 animation (AC1–AC4) **failed HAT and was reverted/deferred** (see
+> notes + flight-log). a11y gate **green** (AC10). App-icon (AC5) + settings-cleanup (AC6) eyeballs are
+> non-blocking (icon wired+verified; settings a11y-clean + spec-reconciled). The PART-D behavior-test runs
+> (AC7–AC9) were **deferred** with leg 6 (operator decision). The HAT served its purpose — it caught the
+> #27 regression before merge.
 
 ## Objective
 

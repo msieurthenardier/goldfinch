@@ -311,7 +311,12 @@ Emergent blockers discovered during execution go here as flights surface them.
   are tab-level); **full browser-parity** controls; `downloadsList` MCP tool **admin-only**; **silent
   Chrome-like default-save** to OS Downloads, no per-download dialog; folds in the **`menuController`
   graduation** maintenance leg from the Flight-4 debrief.)*
-- [ ] **Flight 6: Polish & MCP hygiene** *(ready 2026-06-20 — spec at `flights/06-polish-and-mcp-hygiene/`)* —
+- [x] **Flight 6: Polish & MCP hygiene** *(landed 2026-06-21 — spec at `flights/06-polish-and-mcp-hygiene/`; PR #67)* —
+  Landed **4 of its items**: SC9 `pressKey` schema flatten + standing schema-hygiene test (#56), settings
+  Downloads-placeholder removal + copy fix, `wireDownloadHandler` payload-helper extraction, app-icon wire-up.
+  **#27/SC10 reverted at HAT and DEFERRED** (Electron `<webview>`+WSLg compositing — see Known Issues).
+  Behavior-test runs (`downloads-surface` re-run, `page-context-menu`/`spellcheck` → active) deferred to a
+  follow-up. Original scope:
   fix the side-panel open-animation glitch (#27, composite a `transform` instead of animating `width`;
   keep the top chrome stationary) and the `press_key` top-level `anyOf` schema bug (#56, flatten the
   schema; audit peers). (SC9, SC10) *(Closing flight; folds in operator-selected carry-forward debt:

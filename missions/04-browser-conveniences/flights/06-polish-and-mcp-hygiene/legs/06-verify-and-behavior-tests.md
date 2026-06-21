@@ -1,7 +1,13 @@
 # Leg: verify-and-behavior-tests
 
-**Status**: landed
+**Status**: completed (deterministic scope; PART-D live behavior runs deferred — operator decision)
 **Flight**: [Polish & MCP Hygiene](../flight.md)
+
+> **Closed 2026-06-21.** PARTS A/B/C (spec hardening, drift reconciles, unit/typecheck/lint, a11y gate
+> green) DONE. **PART D (live behavior-test runs) DEFERRED** by operator decision after the #27 HAT detour:
+> the `downloads-surface` re-run + `page-context-menu`/`spellcheck` `draft→active` flips are carried to a
+> focused follow-up (recorded in the mission Known Issues). The four landed wins are unit-/a11y-/review-backed
+> without them; DD5 is therefore only partially met (specs remain `draft`).
 
 ## Objective
 

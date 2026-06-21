@@ -364,4 +364,13 @@ The operator ran the live HAT (`npm run dev:automation` under WSLg). Sequence:
   (both the committed leg-1 changes and the HAT-attempt working-tree changes); leg 01 → `aborted`; SC10 →
   deferred (not met this flight). `npm test` 950 pass after revert, typecheck + lint clean. #27 carried to
   the macOS/Windows verification pass (where `<webview>` composites differently) / a dedicated flight — see
-  mission Known Issues.
+  mission Known Issues. Committed `7394ef6`.
+- **2026-06-21 — `[COMPLETE:flight]`. Flight landed.** a11y gate re-run against the live app → **green**
+  (0 new chrome-sweep violations). Operator chose to **defer the PART-D behavior-test runs** (downloads-surface
+  re-run, page-context-menu/spellcheck `draft→active`) to a focused follow-up given the #27 detour — recorded
+  in mission Known Issues; the four landed wins are unit-/a11y-/review-backed without them (DD5 partially met).
+  App-icon + settings-cleanup eyeballs left non-blocking (icon wired+verified; settings a11y-clean +
+  spec-reconciled). Legs: 2/3/4/5 `completed`, 6 `completed` (deterministic), 7 (HAT) `completed`, 1
+  `aborted`. Flight → **`landed`**; Flight 6 checked off in `mission.md`; draft PR #67 → ready for review.
+  **Net delivery: SC9 met; SC10 deferred; settings cleanup + downloads refactor + app icon shipped.**
+  `/flight-debrief` next (will transition the flight to `completed`).
