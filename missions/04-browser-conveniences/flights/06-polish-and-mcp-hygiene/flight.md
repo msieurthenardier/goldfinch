@@ -4,11 +4,13 @@
 **Mission**: [Standard Browser Conveniences](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC9** — MCP schema hygiene: the automation surface's tool schemas are accepted by strict MCP
+- [x] **SC9** — MCP schema hygiene: the automation surface's tool schemas are accepted by strict MCP
   consumers. Fix the `pressKey` top-level `anyOf` (#56) and assert no peer tool reintroduces a
-  top-level schema combinator (*unit-test-backed*).
-- [ ] **SC10** — Side-panel animation polish: opening/closing a side panel (Media / Shields) animates
-  smoothly with no chrome jump (#27) (*HAT-verified; reduced-motion respected*).
+  top-level schema combinator (*unit-test-backed*). **MET.**
+- [ ] **SC10** — Side-panel animation polish (#27) — **DEFERRED (not met this flight).** Reverted at HAT:
+  three mechanism attempts all failed under WSLg due to the Electron `<webview>` native surface
+  mis-positioning on panel open (DOM geometry correct, render shifts). Deferred to the macOS/Windows
+  verification pass / a dedicated flight (see mission Known Issues; leg 01 reverted).
 
 > **Closing flight for Mission 04.** This is the final flight; it also clears the deck of carry-forward
 > debt before `/mission-debrief`. Items beyond SC9/SC10 are debt cleanup, not new mission criteria, and
@@ -265,7 +267,8 @@ draft specs (DD5).
 
 > **Note:** Tentative; planned and created one at a time as the flight progresses.
 
-- [x] `side-panel-animation` — #27: rework `#media-panel`/`#privacy-panel` to a `transform`-composited
+- [~] `side-panel-animation` — **REVERTED at HAT, #27/SC10 DEFERRED** (see leg 01 + mission Known Issues).
+  Original scope follows: #27: rework `#media-panel`/`#privacy-panel` to a `transform`-composited
   slide (DD1), remove `width`/`margin` transitions, keep top chrome stationary + reduced-motion honored.
   **Two prongs (DD1):** (a) the CSS transform fix for both panels; (b) the **Shields-specific** fix —
   decouple `renderPrivacy()`/`fetchCookies()` (`renderer.js:1785`/`:2309`) from the open frame so content
@@ -308,6 +311,7 @@ draft specs (DD5).
 
 ### Verification
 - **SC9** — `pressKey` `inputSchema` carries no top-level combinator; name-or-key enforced at runtime;
-  the schema-hygiene unit test guards every tool against reintroducing one.
-- **SC10** — the Media/Shields panels open/close smoothly with the top chrome stationary and no per-frame
-  reflow; **HAT-confirmed**; `prefers-reduced-motion` still neutralizes the animation.
+  the schema-hygiene unit test guards every tool against reintroducing one. **MET (unit-test-backed).**
+- **SC10** — **DEFERRED (not met).** The transform/overlay rework failed live HAT under WSLg (Electron
+  `<webview>` native surface mis-positions on panel open; DOM geometry correct, render shifts). Leg 01
+  reverted to pre-flight; #27 carried to the macOS/Windows verification pass / a dedicated flight.

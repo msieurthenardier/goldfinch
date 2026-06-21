@@ -1,7 +1,19 @@
 # Leg: side-panel-animation
 
-**Status**: completed
+**Status**: aborted (reverted at HAT — #27/SC10 deferred)
 **Flight**: [Polish & MCP Hygiene](../flight.md)
+
+> **REVERTED 2026-06-21 (Flight-6 HAT, operator decision).** This leg landed in the autonomous pass but
+> **failed live HAT verification** and was reverted in full (`src/renderer/renderer.js` +
+> `src/renderer/styles.css` restored to pre-flight `main`). Three clean mechanism attempts — (1) the
+> committed transform + discrete-width-swap, (2) an absolute overlay, (3) a clipped absolute overlay
+> (`#main { overflow:hidden }`) — **all failed the same way**: on panel *open* the page content shifts/clips
+> and the panel mis-anchors (the "third column"), even though the DOM geometry reads correct. Root cause is
+> the **Electron `<webview>` native compositing surface mis-positioning when the layout changes around it
+> under WSLg** — not a CSS/DOM bug (boot/at-rest is pixel-correct; only the layout-change-on-open breaks).
+> This is environment-specific and disproportionate to debug blind for a polish item. **#27/SC10 deferred**
+> to the planned macOS/Windows verification pass (where `<webview>` composites differently) or a dedicated
+> flight — see the mission Known Issues. The design analysis below is retained for that future effort.
 
 ## Objective
 

@@ -610,18 +610,12 @@ a:focus-visible {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  /* Compositor-driven slide: only `transform` is transitioned, never width/margin,
-     so the open/close motion never reflows #webviews or the chrome above (#27/DD1).
-     The layout box (width) is swapped discretely in JS (slidePanel) around the
-     transform — see renderer.js. */
-  transition: transform 0.18s ease;
-  will-change: transform;
+  transition:
+    width 0.18s ease,
+    margin-right 0.18s ease;
 }
 #media-panel.collapsed {
-  /* Slide fully off the right edge. Width is NOT set here — slidePanel() owns the
-     discrete width swap (open = --panel-w, closed = 0) so the box is released at
-     rest while the transform animates against the open width. */
-  transform: translateX(100%);
+  width: 0;
   overflow: hidden;
   border-left: none;
 }
@@ -1038,13 +1032,12 @@ a:focus-visible {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  /* Compositor-driven slide — see #media-panel above and slidePanel() in renderer.js. */
-  transition: transform 0.18s ease;
-  will-change: transform;
+  transition:
+    width 0.18s ease,
+    margin-right 0.18s ease;
 }
 #privacy-panel.collapsed {
-  /* Width owned by slidePanel(); see #media-panel.collapsed. */
-  transform: translateX(100%);
+  width: 0;
   overflow: hidden;
   border-left: none;
 }

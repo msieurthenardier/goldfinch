@@ -338,3 +338,30 @@ MCP admin key in the headless agent env — consistent with the leg-1/3/5 a11y d
 - **Deferred to HAT (recorded, not skipped):** AC7 (a11y), AC8 (downloads re-run), AC9 (page-context-menu →
   active), AC10 (spellcheck → active for runnable rows), AC11 (no-spec-draft), AC12 (evidence). Land inside
   the flight's commit after HAT. Design: 1 review cycle, *approve* (3 [low] notes honored).
+
+#### HAT session — #27/SC10 reverted and deferred (2026-06-20→21, operator-driven)
+
+The operator ran the live HAT (`npm run dev:automation` under WSLg). Sequence:
+- **`Ctrl+M` minimizes the window** instead of toggling Media — pre-existing (no custom app menu → Electron
+  default menu owns `Ctrl+M`; no page-focus forwarding branch). Out of scope → logged in mission Known
+  Issues (operator decision). Not a Flight-6 regression.
+- **#27 animation broke on open.** Operator: clicking Media → panel snaps in while the chrome + page content
+  "slide in from left to right"; then "a whole third column." Flight Director reproduced live via the MCP
+  admin surface (`getChromeTarget` + `evaluate` + `captureWindow`) and diagnosed:
+  - The committed leg-1 mechanism (transform + JS discrete-width-swap) snapped (rAF coalescing) and the
+    `<webview>` re-rastered on the width reflow → the visible content "slide."
+  - A 2nd attempt (absolute overlay) and a 3rd (clipped overlay, `#main { overflow:hidden }`) were tried.
+    The clip fixed the **at-rest/boot** state (verified pixel-correct: `body.scrollWidth` 1398, `#main`
+    0..1400, both panels off-screen). **But panel *open* still broke**: content shifts/clips, panels
+    mis-anchor (the "third column") — even though `getComputedStyle`/`getBoundingClientRect` report the
+    boxes correct (`#main` 1..1399, panels `position:absolute right:0`, `#webviews` 1398).
+  - **Root cause: the Electron `<webview>` native compositing surface mis-positions when the DOM layout
+    changes around it under WSLg** — a native-surface/environment issue, NOT a CSS/DOM bug (boot is correct;
+    only layout-change-on-open breaks). Confirmed by the DOM-geometry-correct / render-shifted gap across
+    all three mechanisms. Evidence screenshots at `/tmp/gf-hat/*.png` (ephemeral, not committed).
+- **Operator decision (2026-06-21): revert #27 entirely, land the other four wins, defer #27.** Leg 01
+  reverted in full — `src/renderer/renderer.js` + `src/renderer/styles.css` restored to pre-flight `main`
+  (both the committed leg-1 changes and the HAT-attempt working-tree changes); leg 01 → `aborted`; SC10 →
+  deferred (not met this flight). `npm test` 950 pass after revert, typecheck + lint clean. #27 carried to
+  the macOS/Windows verification pass (where `<webview>` composites differently) / a dedicated flight — see
+  mission Known Issues.

@@ -1203,97 +1203,12 @@ els.tabs.addEventListener('keydown', (e) => {
   }
 });
 
-/* ----------------------------------------------------- shared panel slide (#27/DD1) */
-
-// Both right-side panels (#media-panel, #privacy-panel) slide via a compositor-owned
-// `transform` transition (styles.css), NOT an animated width/margin — so opening or
-// closing never reflows #webviews or the chrome above per frame (#27, DD1 Prong A).
-// The layout box (width) is swapped DISCRETELY here, synchronized to the transform:
-// open before the slide-in, released to 0 on the slide-out's transitionend. Every
-// collapse/expand call site routes through this one helper (AC11) so the box is
-// always released at rest — including the mutual-exclusion cross-panel switch.
-//
-// Frame ordering (AC11, design-review [medium]):
-//   Open:  width := --panel-w (still .collapsed → 360px wide AND translated off-screen)
-//          → force reflow read → next rAF: remove .collapsed → only transform animates in.
-//   Close: add .collapsed (transform animates out) → on transitionend (or fallback
-//          timeout): width := 0 to release the box, re-reading live intended state.
-const SLIDE_MS = 180; // matches the `transform 0.18s` transition in styles.css
-const slideState = new WeakMap(); // el -> { timer, onEnd } so a new toggle cancels a stale one
-
-/**
- * Drive a right-side panel's open/close: owns ONLY the width/transform/transitionend
- * mechanism. Callers keep their own aria/.active/focus/.hidden logic.
- * @param {HTMLElement} el panel element
- * @param {boolean} show true = open (slide in), false = close (slide out)
- * @param {{ beforeReveal?: () => void }} [opts] beforeReveal runs in the pre-paint
- *   window (width set, .collapsed still present) before the slide-in rAF — used by the
- *   privacy open path to populate content before it is visible (AC7, Prong B handoff).
- */
-function slidePanel(el, show, opts) {
-  // Cancel any in-flight transitionend/fallback from a previous toggle so a stale
-  // close can't release width under a freshly-opened panel (AC11 guard iii).
-  const prev = slideState.get(el);
-  if (prev) {
-    if (prev.timer) clearTimeout(prev.timer);
-    if (prev.onEnd) el.removeEventListener('transitionend', prev.onEnd);
-    slideState.delete(el);
-  }
-
-  if (show) {
-    // 1) Give the panel its open layout box while still translated off-screen
-    //    (.collapsed present → translateX(100%) against a 360px width = fully offscreen).
-    el.style.width = 'var(--panel-w)';
-    // 2) Pre-paint window: populate now, before anything is visible (AC7).
-    if (opts && opts.beforeReveal) opts.beforeReveal();
-    // 3) Force a synchronous reflow so the width write is committed before the class flip.
-    void el.offsetWidth;
-    // 4) Next frame: drop .collapsed so ONLY transform animates in (never coalesced
-    //    into one paint with the width write — that would snap, the old jump).
-    requestAnimationFrame(() => {
-      el.classList.remove('collapsed');
-    });
-  } else {
-    // Slide out: transform animates to translateX(100%); release the box afterwards.
-    el.classList.add('collapsed');
-    const release = () => {
-      // Act on LIVE state, not this closure's: a re-open may have landed first.
-      if (el.classList.contains('collapsed')) el.style.width = '0px';
-    };
-    const onEnd = (e) => {
-      if (e.target !== el || e.propertyName !== 'transform') return; // guard (i)
-      el.removeEventListener('transitionend', onEnd);
-      const s = slideState.get(el);
-      if (s && s.timer) clearTimeout(s.timer);
-      slideState.delete(el);
-      release(); // guard (ii): re-reads live state
-    };
-    // Fallback timeout (guard iii): release even if transitionend never fires (transform
-    // value unchanged, element hidden, etc.). Slack beyond the transition duration.
-    const timer = setTimeout(() => {
-      el.removeEventListener('transitionend', onEnd);
-      slideState.delete(el);
-      release();
-    }, SLIDE_MS + 60);
-    slideState.set(el, { timer, onEnd });
-    el.addEventListener('transitionend', onEnd);
-  }
-}
-
-// Both panels boot `.collapsed` (index.html). Since `.collapsed` no longer carries
-// `width:0` (slidePanel owns width), seed the at-rest collapsed box to 0 so #webviews
-// has the full width on first paint (AC3) — otherwise the default #media-panel
-// `width: var(--panel-w)` would reserve 360px behind the off-screen transform.
-for (const p of [els.panel, els.privacyPanel]) {
-  if (p.classList.contains('collapsed')) p.style.width = '0px';
-}
-
 /* --------------------------------------------------------------- media panel */
 
 function togglePanel(force) {
   const collapsed = els.panel.classList.contains('collapsed');
   const show = force != null ? force : collapsed;
-  slidePanel(els.panel, show); // owns width/transform/transitionend (AC11)
+  els.panel.classList.toggle('collapsed', !show);
   els.toggleMedia.classList.toggle('active', show);
   els.toggleMedia.setAttribute('aria-expanded', String(show));
   if (show) {
@@ -1860,7 +1775,7 @@ function findTabByWcId(id) {
 }
 
 function closePrivacyPanel() {
-  slidePanel(els.privacyPanel, false); // owns width/transform/transitionend (AC11)
+  els.privacyPanel.classList.add('collapsed');
   els.togglePrivacy.classList.remove('active');
   // Opening the media panel calls this directly, so sync aria-expanded here too
   // or the privacy toggle would keep a stale "true" after being collapsed.
@@ -1870,35 +1785,20 @@ function closePrivacyPanel() {
 function togglePrivacy(force) {
   const collapsed = els.privacyPanel.classList.contains('collapsed');
   const show = force != null ? force : collapsed;
+  els.privacyPanel.classList.toggle('collapsed', !show);
   els.togglePrivacy.classList.toggle('active', show);
   els.togglePrivacy.setAttribute('aria-expanded', String(show));
   if (show) {
     togglePanel(false); // close the media panel
-    // Prong B: populate Shields content in slidePanel's pre-paint window (width set,
-    // still .collapsed → off-screen) BEFORE the slide reveals it — no empty body, no
-    // mid-slide rebuild (AC7). updatePrivacyBadge() runs too (renderPrivacy does it;
-    // populatePrivacy doesn't, so call it explicitly to keep the toolbar badge fresh).
-    slidePanel(els.privacyPanel, true, {
-      beforeReveal: () => {
-        updatePrivacyBadge();
-        populatePrivacy();
-      }
-    });
-    // Defer the async cookie fetch's re-render past the slide so the "Loading…" →
-    // count swap lands at rest, never mid-slide (AC8). First paint shows "Loading…"
-    // already placed by populatePrivacy above.
-    setTimeout(fetchCookies, SLIDE_MS + 20);
+    fetchCookies(); // cookies are fetched on demand
+    renderPrivacy();
     els.privacyClose.focus(); // only move focus when actually opening
-  } else {
-    const focusWasInside = els.privacyPanel.contains(document.activeElement);
-    slidePanel(els.privacyPanel, false); // slide out + release box (AC11)
-    if (focusWasInside) {
-      // Closing while focus is inside the (now zero-width) panel would strand it:
-      // restore focus to the toggle. Guard avoids stealing focus on programmatic closes.
-      // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
-      // silent no-op that strands focus on <body> — skip it when the button is hidden.
-      if (!els.togglePrivacy.classList.contains('hidden')) els.togglePrivacy.focus();
-    }
+  } else if (els.privacyPanel.contains(document.activeElement)) {
+    // Closing while focus is inside the (now zero-width) panel would strand it:
+    // restore focus to the toggle. Guard avoids stealing focus on programmatic closes.
+    // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
+    // silent no-op that strands focus on <body> — skip it when the button is hidden.
+    if (!els.togglePrivacy.classList.contains('hidden')) els.togglePrivacy.focus();
   }
 }
 
@@ -2406,21 +2306,9 @@ async function newIdentity() {
   }
 }
 
-// Event-driven re-render entry point: badge always; the heavy body rebuild only when
-// the panel is open. The collapsed early-return is load-bearing — it keeps net/
-// permission/shields-config/tab-nav events from rebuilding a closed panel (AC9).
 function renderPrivacy() {
   updatePrivacyBadge();
   if (els.privacyPanel.classList.contains('collapsed')) return;
-  populatePrivacy();
-}
-
-// The full #privacy-body rebuild, with NO collapsed guard, so the open path can
-// populate content while the panel is still .collapsed (laid out off-screen) BEFORE
-// the slide reveals it (AC7, Prong B). Direct callers other than renderPrivacy must
-// only invoke this when the panel has its open layout box (width set) — i.e. from
-// slidePanel's beforeReveal.
-function populatePrivacy() {
   const tab = activeTab();
   const p = tab ? tab.privacy : null;
   const net = p && p.net;
