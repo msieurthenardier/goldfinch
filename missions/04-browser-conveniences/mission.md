@@ -245,8 +245,28 @@ Emergent blockers discovered during execution go here as flights surface them.
   `tests/behavior/spellcheck.md` are `draft`; the manual Flight-4 HAT is the human acceptance of SC6/SC3.
   Run `/behavior-test {slug}` to promote them `draft → active` and move SC6/SC3 off "formally unchecked"
   (the WSLg-runnable observables; macOS-authoritative paths stay deferred per the item above).
-
-## Flights
+- [ ] **`Ctrl+M` minimizes the window instead of toggling the Media panel (on web-page focus)** —
+  discovered in the Flight-6 HAT, 2026-06-20. **Pre-existing, not introduced by Flight 6** (`keydown-action.js`
+  + the `main.js` `before-input-event` block are unchanged this flight). Root cause: the app sets **no custom
+  application menu**, so Electron's **default menu** owns `Ctrl+M` as the Minimize accelerator; the Media
+  toggle (`'m' → toggle-panel`, `keydown-action.js:64`) only reaches the panel when the chrome has focus —
+  the page-focused `before-input-event` forwards zoom/find/downloads/DevTools but has **no `Ctrl+M` branch**
+  (unlike those), so on a web page the default minimize accelerator wins. Fix needs a custom menu that
+  drops/rebinds the minimize accelerator (or registers the Media toggle as a real menu accelerator) +
+  a page-focus forwarding branch — its own small design+test, **deferred** to a future keybinding/menu pass
+  or the next maintenance flight (operator decision, Flight-6 HAT). Workaround: use the toolbar Media button.
+- [ ] **#27 side-panel open-animation — DEFERRED after Flight 6 (deep `<webview>`+WSLg issue)** — Flight 6
+  attempted #27/SC10 (smooth panel slide, chrome stationary) and **reverted it at HAT** after three clean
+  mechanism attempts (transform+discrete-width-swap; absolute overlay; clipped overlay) all failed the same
+  way **on this WSLg environment**: on panel *open* the page content shifts/clips and the panel mis-anchors,
+  **even though the DOM geometry (`getComputedStyle`/`getBoundingClientRect`) reads correct**. Root cause:
+  the **Electron `<webview>` native compositing surface mis-positions when the DOM layout changes around it
+  under WSLg** — a native-surface/environment problem, not a CSS/DOM bug (the at-rest/boot state is
+  pixel-correct; only the layout-change-on-open breaks). **Recommendation: re-attempt on native
+  macOS/Windows** (where `<webview>` composites differently and the mission already plans verification). The
+  reverted design analysis lives in `flights/06-polish-and-mcp-hygiene/legs/01-side-panel-animation.md`; the
+  live diagnosis (DOM-correct/render-shifted evidence) is in that flight's log HAT-session note. Until then
+  the panels keep the original pre-flight behavior. SC10 remains unmet.
 
 > **Note:** Tentative suggestions, not commitments. Flights are planned and created one at a time
 > as work progresses, and will evolve with discoveries. MCP-parity legs ride inside each feature
@@ -291,6 +311,16 @@ Emergent blockers discovered during execution go here as flights surface them.
   are tab-level); **full browser-parity** controls; `downloadsList` MCP tool **admin-only**; **silent
   Chrome-like default-save** to OS Downloads, no per-download dialog; folds in the **`menuController`
   graduation** maintenance leg from the Flight-4 debrief.)*
-- [ ] **Flight 6: Polish & MCP hygiene** — fix the side-panel open-animation glitch (#27,
-  composite a `transform` instead of animating `width`; keep the top chrome stationary) and the
-  `press_key` top-level `anyOf` schema bug (#56, flatten the schema; audit peers). (SC9, SC10)
+- [x] **Flight 6: Polish & MCP hygiene** *(landed 2026-06-21 — spec at `flights/06-polish-and-mcp-hygiene/`; PR #67)* —
+  Landed **4 of its items**: SC9 `pressKey` schema flatten + standing schema-hygiene test (#56), settings
+  Downloads-placeholder removal + copy fix, `wireDownloadHandler` payload-helper extraction, app-icon wire-up.
+  **#27/SC10 reverted at HAT and DEFERRED** (Electron `<webview>`+WSLg compositing — see Known Issues).
+  Behavior-test runs (`downloads-surface` re-run, `page-context-menu`/`spellcheck` → active) deferred to a
+  follow-up. Original scope:
+  fix the side-panel open-animation glitch (#27, composite a `transform` instead of animating `width`;
+  keep the top chrome stationary) and the `press_key` top-level `anyOf` schema bug (#56, flatten the
+  schema; audit peers). (SC9, SC10) *(Closing flight; folds in operator-selected carry-forward debt:
+  settings Downloads-placeholder removal, `wireDownloadHandler` payload-helper extraction, app-icon
+  wire-up, and behavior-test debt resolution. Planning HAT found a 2nd Shields glitch source — content
+  rebuild on open — so #27 is a two-prong fix. macOS verification apparatus deferred to
+  routine-maintenance.)*

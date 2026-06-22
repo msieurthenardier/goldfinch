@@ -329,13 +329,22 @@ const DRIVE_TOOLS = [
         },
       },
       // wcId is always required; the key may arrive as `name` (preferred) or `key`
-      // (alias). anyOf expresses "at least one of name/key" cleanly under JSON-schema
-      // validation without coupling the two into a single required slot.
+      // (alias). The "at least one of name/key" contract is enforced in `call`
+      // (runtime guard) rather than a top-level schema combinator, which strict
+      // MCP consumers reject (#56/SC9).
       required: ['wcId'],
-      anyOf: [{ required: ['name'] }, { required: ['key'] }],
     },
     // name primary, key alias (??: an explicit `name` wins; falls back to `key`).
-    call: (engine, args) => engine.pressKey(args.wcId, args.name ?? args.key, args.modifiers),
+    call: (engine, args) => {
+      // Flattened schema (#56/SC9): enforce "at least one of name/key" here.
+      // Throw a clean, DISTINCT error rather than passing undefined to the engine
+      // (which would throw the confusing "unknown key undefined"). The throw is
+      // caught by callTool's try/catch → isError tool result (NOT a crash).
+      if (args.name == null && args.key == null) {
+        throw new Error("automation: pressKey requires 'name' or 'key'");
+      }
+      return engine.pressKey(args.wcId, args.name ?? args.key, args.modifiers);
+    },
   },
 ];
 
