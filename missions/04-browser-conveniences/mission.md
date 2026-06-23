@@ -1,6 +1,6 @@
 # Mission: Standard Browser Conveniences
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -83,18 +83,18 @@ absolute internal-session exclusion for jar keys, and loopback-only binding.
 > accessibility gate (`npm run a11y`). Criteria marked *behavior-test-backed* are verified
 > against the running app via Goldfinch's own automation surface (the M03 apparatus).
 
-- [ ] **SC1 — Page zoom.** The operator can increase, decrease, and reset the current page's
+- [x] **SC1 — Page zoom.** The operator can increase, decrease, and reset the current page's
   zoom by keyboard (conventional `Ctrl +` / `Ctrl -` / `Ctrl 0`) and see the current zoom level,
   with the change applied to the active tab's web content (*behavior-test-backed*).
-- [ ] **SC2 — Print / Save-as-PDF.** The operator can print the current page and save it as a
+- [x] **SC2 — Print / Save-as-PDF.** The operator can print the current page and save it as a
   PDF through the system print path (*manually verified — the print dialog is OS-native and
   outside the in-app test apparatus*).
-- [ ] **SC3 — Spellcheck.** Misspelled words typed into editable web fields are flagged, and
+- [x] **SC3 — Spellcheck.** Misspelled words typed into editable web fields are flagged, and
   spelling suggestions are reachable (*behavior-test-backed*).
-- [ ] **SC4 — Find in page.** The operator can search for text within the current page, step
+- [x] **SC4 — Find in page.** The operator can search for text within the current page, step
   forward/backward through matches with a visible match count/position, and dismiss the search —
   all keyboard-operable (conventional `Ctrl+F` to open, `Esc` to close) (*behavior-test-backed*).
-- [ ] **SC5 — First-class DevTools.** The operator can open Chromium DevTools for the **active
+- [x] **SC5 — First-class DevTools.** The operator can open Chromium DevTools for the **active
   web tab** as a **first-class tool**: a **pinnable toolbar button** consistent with Media and
   Shields (driven by the existing `toolbarPins` mechanism, pin state persisted across restart,
   pinnable/unpinnable from right-click and from Settings → Appearance), **plus** a conventional
@@ -108,23 +108,23 @@ absolute internal-session exclusion for jar keys, and loopback-only binding.
   no opaque failure; note the lock semantics already exist and are documented at the MCP layer
   (M03), so the new work here is the **user-facing affordance + finally staging the M03
   `devtools-cdp-conflict` observation**, not building the lock (*behavior-test-backed / manual*).
-- [ ] **SC6 — Custom page context menu.** Right-clicking page content opens an **on-brand,
+- [x] **SC6 — Custom page context menu.** Right-clicking page content opens an **on-brand,
   keyboard-operable** custom context menu (not the native OS menu) offering context-appropriate
   actions (e.g. link / image / selection / editable-field actions, and an Inspect entry point).
   The existing toolbar right-click (**Unpin**) is migrated onto the same component, retiring the
   native menu and closing the M02 Known Issue (*behavior-test-backed / a11y*).
-- [ ] **SC7 — Downloads surface.** The operator can review in-progress and completed downloads in
+- [x] **SC7 — Downloads surface.** The operator can review in-progress and completed downloads in
   a dedicated surface, see per-item state/progress, and open the downloaded file or its folder
   (*behavior-test-backed*).
-- [ ] **SC8 — Agent parity (MCP).** Each newly added capability an agent could reasonably drive
+- [x] **SC8 — Agent parity (MCP).** Each newly added capability an agent could reasonably drive
   (at minimum: zoom, find-in-page, print-to-PDF, and the downloads list) is **invocable through
   the automation surface as a discoverable tool**, inheriting M03's gating and jar-scoping
   (*behavior-test-backed*).
-- [ ] **SC9 — MCP schema hygiene.** The automation surface's tool schemas are accepted by strict
+- [x] **SC9 — MCP schema hygiene.** The automation surface's tool schemas are accepted by strict
   MCP consumers: no tool is rejected for a top-level `oneOf`/`allOf`/`anyOf` the Anthropic
   Messages API forbids (issue #56 fixed; `press_key` and any peers flattened) (*verified by a
   schema audit / behavior-test-backed*).
-- [ ] **SC10 — Side-panel animation polish.** Opening a side panel (Media / Shields / the new
+- [ ] **SC10 — Side-panel animation polish.** *(DEFERRED — not met; #27 reverted at Flight-6 HAT, downstream of the WebContentsView migration; see Known Issues + mission-debrief.)* Opening a side panel (Media / Shields / the new
   DevTools panel) animates as **smoothly as closing it**, and the top chrome (tab strip +
   address bar) **does not shift** during the animation (issue #27 resolved) (*manually verified —
   motion-dependent, outside the reduced-motion test path*).
