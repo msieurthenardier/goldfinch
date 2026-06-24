@@ -1,6 +1,6 @@
 # Flight: Spike & Decision Gate
 
-**Status**: ready
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
@@ -225,12 +225,12 @@ The probes, in dependency order:
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All five probes run with pixel evidence captured
-- [ ] Decision (go / review-together) recorded inline in the flight log
-- [ ] macOS stance recorded; mac-authoritative items flagged unknown (not "pass")
-- [ ] Prototype branch discarded; mission branch carries only planning artifacts + the decision
-- [ ] If go: Flight 2 (Window shell) is unblocked. If review: mission Known Issues + open options recorded
-- [ ] Mission `flights` checklist updated; mission Known Issues updated if blockers surfaced
+- [x] All probes run with pixel evidence / direct assertion captured (Legs 1–6, all PASS)
+- [x] Decision recorded inline in the flight log — **GO (clean)**
+- [x] macOS stance recorded; mac-authoritative items flagged unknown (not "pass")
+- [x] Prototype branch discarded; mission branch carries only planning artifacts + the decision
+- [x] GO → Flight 2 (Window shell) is unblocked
+- [x] Mission `flights` checklist updated; no blockers surfaced (Known Issues unchanged)
 
 ### Verification
 

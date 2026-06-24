@@ -42,7 +42,8 @@ follow-on work.
 - [ ] **SC1 — Native guest surface.** Web tabs and internal `goldfinch://` pages render via
   `WebContentsView` on a `BaseWindow`; no `<webview>` tag remains in the tab/guest path. *(Verified:
   source absence + app launches and browses.)*
-- [ ] **SC2 — Spike-gated commitment, verified on pixels.** Before any migration leg is built, a spike
+- [x] **SC2 — Spike-gated commitment, verified on pixels.** ✅ MET (Flight 1, 2026-06-23/24): all six
+  probes passed on pixels/assertion; clean **GO** recorded. Before any migration leg is built, a spike
   validates frameless + drag-region + **panel-overlay-as-native-view** on the target Electron, and
   re-verifies the migration-fragile renderer-consumed events (esp. `found-in-page`). Because this stack's
   documented failure mode is "DOM-correct ≠ render-correct" (`CLAUDE.md`), the spike's acceptance signal
@@ -153,7 +154,10 @@ follow-on work.
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a
 > time as work progresses, each branched off the mission branch. This list will evolve with discoveries.
 
-- [ ] **Flight 1: Spike & decision gate (alignment / hands-on)** — run as an interactive alignment
+- [x] **Flight 1: Spike & decision gate (alignment / hands-on)** — ✅ LANDED, clean GO (2026-06-23/24).
+  All probes passed; #27 mis-composite does not reproduce under native views; SC7 looks free; D1 find
+  workaround deletable; farble + partition-identity + drag all hold on Linux/WSLg (mac deferred). —
+  run as an interactive alignment
   session, since this is the riskiest, most judgment-heavy step. `WebContentsView` + `BaseWindow` on
   Electron 42: prove frameless + drag-region + **panel-overlay-as-native-view** (acceptance signal =
   pixels), prototype the tab view-hosting model (one-per-tab vs. reused — the open design fork), and
