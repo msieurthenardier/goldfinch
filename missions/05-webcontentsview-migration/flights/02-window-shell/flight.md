@@ -1,6 +1,6 @@
 # Flight: Window Shell
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
@@ -175,7 +175,7 @@ than Flight 3's — the real risk is the wide re-point surface (silent dead-`web
 > its end — no non-runnable intermediate, per the `/agentic-workflow` single-review model). Executed via
 > `/agentic-workflow`; Leg 3 is the interactive HAT.
 
-- [ ] `basewindow-chrome-shell` - **Atomic shell swap — app must run at the end.** Swap
+- [x] `basewindow-chrome-shell` - **Atomic shell swap — app must run at the end.** Swap
   `BrowserWindow`→`BaseWindow`; create the chrome `WebContentsView` (`webviewTag:true`, chrome-preload,
   `contextIsolation:true`, `sandbox:false`, dev `additionalArguments`); `win.contentView.addChildView(chromeView)`
   (**not** `win.addChildView`); `chromeView.webContents.loadFile(index.html)` (**`loadFile` is on
@@ -186,7 +186,7 @@ than Flight 3's — the real risk is the wide re-point surface (silent dead-`web
   contract** (`createEngine` at `main.js:151` + `1387` → contents accessor; `engine.js` + JSDoc). **Gate:
   app runs, tabs browse via `<webview>`, `npm run typecheck` + `npm run lint` green.** (SC8 foundation +
   SC6 preservation.)
-- [ ] `window-controls-parity` - Re-point `window-minimize`/`window-toggle-maximize`/`window-close`/
+- [x] `window-controls-parity` - Re-point `window-minimize`/`window-toggle-maximize`/`window-close`/
   `window-is-maximized` + the `maximize`/`unmaximize` forwarding to the `BaseWindow`; fix
   `app.on('activate')` → `BaseWindow.getAllWindows()` (DD7); verify drag + controls + maximize-state sync. (SC8.)
 - [ ] `verify-shell-hat` *(guided HAT / alignment)* - Walk the operator through the frameless shell, drag,

@@ -19,8 +19,8 @@ const find = require('./find');
  * engine.js itself uses no webContents.debugger (DD8); it wires ./observe, whose readAxTree is
  * the engine's sole debugger user.
  *
- * @param {() => (Electron.BrowserWindow | null)} getMainWindow
- *   Accessor for the current chrome BrowserWindow (may return null if window is closed).
+ * @param {() => (Electron.WebContents | null)} getChromeContents
+ *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
  * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null }} [opts]
  *   allowInternal — admin's SOLE relaxation (DD6 / Leg 2): when true, deps carry
  *   allowInternal so resolveContents lets the internal goldfinch://settings
@@ -33,7 +33,7 @@ const find = require('./find');
  *   `downloads-unavailable`. Field named getDownloads to avoid shadowing the op name.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getMainWindow, { allowInternal = false, getDownloads = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -44,11 +44,10 @@ function createEngine(getMainWindow, { allowInternal = false, getDownloads = nul
    * `activate` of its own — avoids any accidental recursion.
    */
   const deps = () => {
-    const mw = getMainWindow();
-    const chromeContents = mw ? mw.webContents : null;
+    const chromeContents = getChromeContents();
     const executeInRenderer = (/** @type {string} */ code) => {
-      if (!mw) throw new Error('automation: chrome window unavailable');
-      return mw.webContents.executeJavaScript(code);
+      if (!chromeContents) throw new Error('automation: chrome window unavailable');
+      return chromeContents.executeJavaScript(code);
     };
     // allowInternal (DD6 / Leg 2): admin's sole relaxation, forwarded to every
     // resolveContents call site via deps. fromPartition (session.fromPartition)
@@ -93,9 +92,8 @@ function createEngine(getMainWindow, { allowInternal = false, getDownloads = nul
     findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) => find.findInPage(wcId, text, deps(), opts),
     stopFindInPage: (/** @type {number} */ wcId) => find.stopFindInPage(wcId, deps()),
     getChromeTarget: () => {
-      const mw = getMainWindow();
-      const cc = mw ? mw.webContents : null;
-      if (!cc) throw new Error('automation: chrome-window-unavailable — mainWindow is null (closed or starting up)');
+      const cc = getChromeContents();
+      if (!cc) throw new Error('automation: chrome-window-unavailable — chrome contents is null (closed or starting up)');
       return { wcId: cc.id, kind: 'chrome', url: cc.getURL() };
     },
     // App-level downloads view (Flight 5, DD6): no wcId, admin-only via the scope façade.
