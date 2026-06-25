@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -27,6 +27,18 @@ const { makeAutomationToggle } = require('./automation/toggle');
 // path and the MCP ops single-source the SAME internal-detection function (it is ELECTRON-FREE).
 const { toggleDevTools } = require('./devtools');
 const { isInternalContents } = require('./automation/resolve');
+
+// A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
+// truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
+// write throw EPIPE. With no handler that surfaces as a modal "main process" crash dialog. Swallow
+// EPIPE; surface anything else via emitWarning — NOT throw (a throw inside an 'error' listener re-raises
+// as uncaught, the very crash we're preventing) and NOT console.* (routes back to the broken stream).
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (err) => {
+    if (err && err.code === 'EPIPE') return;
+    process.emitWarning(err);
+  });
+}
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -118,6 +130,15 @@ async function handleInternal(request) {
 }
 
 let mainWindow = null;
+// The chrome WebContentsView hosted inside the BaseWindow (DD2). mainWindow is now a
+// BaseWindow with no `.webContents`; ALL chrome-renderer access routes through chromeView's
+// webContents via getChromeContents() below. Null until createWindow() runs / after close.
+/** @type {Electron.WebContentsView | null} */
+let chromeView = null;
+// The single canonical chrome-contents accessor (DD2). Returns the chrome view's webContents
+// or null when the view is absent (startup/teardown). EVERY former chrome-renderer webContents
+// site routes through this; the engine + scope-ctx seams point at this same accessor.
+const getChromeContents = () => (chromeView ? chromeView.webContents : null);
 // The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
 // hooks (before-quit / window-all-closed) can reach it. Stays null until the
 // surface binds: in production the Settings `automationEnabled` toggle is the sole
@@ -148,7 +169,7 @@ async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
-    getEngine: (engineOpts) => createEngine(() => mainWindow, { ...engineOpts, getDownloads: () => downloadsManager.listAll() }),
+    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll() }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -156,7 +177,7 @@ async function startMcpServerInstance() {
       jars,
       fromId: (id) => webContents.fromId(id),
       fromPartition: (partition) => session.fromPartition(partition),
-      getChromeContents: () => (mainWindow ? mainWindow.webContents : null),
+      getChromeContents,
     },
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
@@ -243,19 +264,31 @@ function currentAutomationStatus() {
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
-  /** @type {Electron.BrowserWindowConstructorOptions} */
+  /** @type {Electron.BaseWindowConstructorOptions} */
   const frameOpts = isMac
     ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } } // mac inset — recheck on a mac (open question)
     : { frame: false };
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+  // DD1/DD2: the window host is now a BaseWindow (no webPreferences, no `.webContents`).
+  // The chrome (index.html + renderer.js) is hosted in a child WebContentsView; ALL
+  // renderer access goes through getChromeContents(). backgroundColor/min size/icon/title
+  // and the per-platform frameOpts carry over unchanged (DD4/DD6).
+  const initialWidth = 1400;
+  const initialHeight = 900;
+  mainWindow = new BaseWindow({
+    width: initialWidth,
+    height: initialHeight,
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#1e1f25',
     title: 'Goldfinch',
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     ...frameOpts,
+  });
+
+  // The chrome WebContentsView carries the webPreferences that used to live on the
+  // BrowserWindow (DD1/DD2). webviewTag:true keeps guest tabs as <webview> INSIDE the
+  // chrome doc this flight (their migration to per-tab views is Flight 3 — premise-verified).
+  chromeView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
@@ -273,7 +306,18 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  // DD6: match the BaseWindow background so the frameless launch shows no white flash
+  // before the chrome doc paints (belt-and-suspenders with the chrome doc's own #1e1f25).
+  chromeView.setBackgroundColor('#1e1f25');
+  // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
+  // the window itself (DD3).
+  mainWindow.contentView.addChildView(chromeView);
+  // DD3: chrome view fills the window. Set initial bounds from the constructed size (not
+  // getContentBounds() at the construction instant, which can lag the requested size on some
+  // platforms and flash a gap); steady-state geometry is owned by the resize handler below.
+  chromeView.setBounds({ x: 0, y: 0, width: initialWidth, height: initialHeight });
+
+  chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   // Run each <webview> preload in the page's MAIN world so the privacy hooks
   // can wrap fingerprinting APIs directly (CSP-immune). nodeIntegration stays
@@ -283,7 +327,7 @@ function createWindow() {
   // partition) runs CONTEXT-ISOLATED + sandboxed with no node — it's privileged
   // local chrome, not untrusted web content, and its minimal preload uses only
   // contextBridge (sandbox-compatible). (DD5 / leg 3)
-  mainWindow.webContents.on('will-attach-webview', (_e, webPreferences, params) => {
+  getChromeContents().on('will-attach-webview', (_e, webPreferences, params) => {
     if (params.partition === INTERNAL_PARTITION) {
       webPreferences.contextIsolation = true;
       webPreferences.nodeIntegration = false;
@@ -303,12 +347,24 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    chromeView = null;
+  });
+
+  // DD3: keep the chrome view sized to the window. No-op if the view is already gone
+  // (resize can fire during teardown).
+  mainWindow.on('resize', () => {
+    if (!chromeView) return;
+    const { width, height } = mainWindow.getContentBounds();
+    chromeView.setBounds({ x: 0, y: 0, width, height });
   });
 
   // Forward maximize state to the renderer so the custom window controls can
   // sync their label/icon/data-state (DD7 read path).
-  mainWindow.on('maximize', () => mainWindow.webContents.send('window-maximized-change', true));
-  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window-maximized-change', false));
+  // Leg 1 re-points only the .send payload through the chrome contents (required for AC7's
+  // zero-match grep). The maximize/unmaximize event REGISTRATION stays on mainWindow — a
+  // BaseWindow still emits these — and is Leg 2's concern (DD4 window-control re-point).
+  mainWindow.on('maximize', () => getChromeContents()?.send('window-maximized-change', true));
+  mainWindow.on('unmaximize', () => getChromeContents()?.send('window-maximized-change', false));
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +399,7 @@ function applyZoom(wc, action) {
   const current = wc.getZoomFactor();
   const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoomFactor(current, action)));
   wc.setZoomFactor(next);
-  if (mainWindow) mainWindow.webContents.send('zoom-changed', { wcId: wc.id, factor: next });
+  getChromeContents()?.send('zoom-changed', { wcId: wc.id, factor: next });
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +412,7 @@ app.on('web-contents-created', (_event, contents) => {
     // Open target=_blank / window.open as new tabs in our own UI instead of
     // spawning native Electron windows.
     contents.setWindowOpenHandler(({ url }) => {
-      if (mainWindow) mainWindow.webContents.send('open-tab', url);
+      getChromeContents()?.send('open-tab', url);
       return { action: 'deny' };
     });
     // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
@@ -413,7 +469,7 @@ app.on('web-contents-created', (_event, contents) => {
         // sessions, satisfying DD5.
         if (input.key === 'f' || input.key === 'F') {
           event.preventDefault();
-          if (mainWindow) mainWindow.webContents.send('open-find');
+          getChromeContents()?.send('open-find');
           return;
         }
         // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
@@ -422,7 +478,7 @@ app.on('web-contents-created', (_event, contents) => {
         // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
         if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
           event.preventDefault();
-          if (mainWindow) mainWindow.webContents.send('open-downloads');
+          getChromeContents()?.send('open-downloads');
           return;
         }
         // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
@@ -444,7 +500,7 @@ app.on('web-contents-created', (_event, contents) => {
       // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
       // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
       const sendDevtoolsState = (open) => {
-        if (mainWindow) mainWindow.webContents.send('devtools-state-changed', { wcId: contents.id, open });
+        getChromeContents()?.send('devtools-state-changed', { wcId: contents.id, open });
       };
       contents.on('devtools-opened', () => sendDevtoolsState(true));
       contents.on('devtools-closed', () => sendDevtoolsState(false));
@@ -460,9 +516,7 @@ app.on('web-contents-created', (_event, contents) => {
       // #page-context-menu from it and decides which fields to surface.
       contents.on('context-menu', (event, params) => {
         event.preventDefault();                                  // retire the native OS menu (SC6)
-        if (mainWindow) {
-          mainWindow.webContents.send('page-context-menu', { wcId: contents.id, params });
-        }
+        getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
       });
     }
   }
@@ -492,7 +546,7 @@ const liveDownloadItems = new Map();
 
 ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedName, saveDir }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  const downloader = wc || (mainWindow && mainWindow.webContents);
+  const downloader = wc || getChromeContents();
   if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
 
   if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
@@ -678,8 +732,9 @@ function schedulePrivacySend(id) {
     setTimeout(() => {
       privacySendTimers.delete(id);
       const agg = privacyByTab.get(id);
-      if (agg && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
+      const cc = getChromeContents();
+      if (agg && cc && !cc.isDestroyed()) {
+        cc.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
       }
     }, 350)
   );
@@ -821,8 +876,9 @@ function applyShields(ses) {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     const granted = !SENSITIVE_PERMISSIONS.has(permission);
     const id = wc ? wc.id : null;
-    if (mainWindow && id != null && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('privacy-permission', { webContentsId: id, permission, granted });
+    const cc = getChromeContents();
+    if (cc && id != null && !cc.isDestroyed()) {
+      cc.send('privacy-permission', { webContentsId: id, permission, granted });
     }
     callback(granted);
   });
@@ -836,7 +892,7 @@ ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.g
 
 /**
  * Broadcast a channel+payload to both audiences that need settings/shields change events:
- *  1. The chrome renderer (`mainWindow.webContents`, a file:// BrowserWindow) — sent separately
+ *  1. The chrome renderer (`getChromeContents()`, the file:// chrome WebContentsView) — sent separately
  *     because the __goldfinchInternal filter below intentionally excludes it (it is not an
  *     internal-session webContents).
  *  2. Every webContents whose session carries __goldfinchInternal === true (the settings guest
@@ -846,8 +902,9 @@ ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.g
  * @param {unknown} payload
  */
 function broadcastToChromeAndInternal(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
+  const cc = getChromeContents();
+  if (cc && !cc.isDestroyed()) {
+    cc.send(channel, payload);
   }
   for (const wc of webContents.getAllWebContents()) {
     if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
@@ -984,13 +1041,14 @@ registerInternalHandler(ipcMain, 'internal-downloads-action', (_e, payload) => {
       downloadsManager.remove(id);
       break;
     case 'retry': {
-      // Re-issue a FRESH download for a failed/cancelled record. mainWindow uses
+      // Re-issue a FRESH download for a failed/cancelled record. The chrome contents uses
       // session.defaultSession (no partition in webPreferences), which is download-wired
       // at whenReady, so downloadURL registers through wireDownloadHandler and gets a
       // NEW id/new record; the old failed record stays visible (DD3). No fallback needed.
       const url = record ? /** @type {any} */ (record).url : null;
-      if (url && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.downloadURL(url);
+      const cc = getChromeContents();
+      if (url && cc && !cc.isDestroyed()) {
+        cc.downloadURL(url);
       }
       break;
     }
@@ -1380,16 +1438,16 @@ app.whenReady().then(() => {
   // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
   // Registered ONCE at startup, after createWindow() so mainWindow exists.
   // Never registered in production: gated on the dev flag AND !app.isPackaged (DD4).
-  // The identity check (event.sender === mainWindow.webContents) isolates the seam to the
+  // The identity check (event.sender === getChromeContents()) isolates the seam to the
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    const engine = createEngine(() => mainWindow, { getDownloads: () => downloadsManager.listAll() });
+    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll() });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview
       // has a different webContents than mainWindow's, so the identity check fully isolates it.
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
+      if (event.sender !== getChromeContents()) {
         throw new Error('automation: dev-seam is chrome-renderer-only');
       }
       if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
@@ -1452,7 +1510,7 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BaseWindow.getAllWindows().length === 0) createWindow();
   });
 });
 

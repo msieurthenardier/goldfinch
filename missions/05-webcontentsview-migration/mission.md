@@ -163,8 +163,11 @@ follow-on work.
   pixels), prototype the tab view-hosting model (one-per-tab vs. reused — the open design fork), and
   re-verify `found-in-page` delivery on the new surface. Record the macOS apparatus decision. Output:
   clean → go; not-clean → operator options-review. *(Satisfies SC2; gates everything after.)*
-- [ ] **Flight 2: Window shell** — `BaseWindow` + a chrome `WebContentsView`; frameless, drag regions,
-  and per-platform window controls at parity. Chrome renders on the new shell. *(SC8.)*
+- [x] **Flight 2: Window shell** — ✅ LANDED (2026-06-24/25). `BaseWindow` + chrome `WebContentsView`;
+  frameless, per-platform window controls + maximize-state at parity; chrome renders on the new shell; the
+  full DD2 re-point + engine accessor-contract change verified live (27 MCP tools, tabs browse,
+  `captureWindow` composites the guest); EPIPE robustness guard added. macOS unverified (DD5). HAT wrapped
+  early by operator (drag/minimize/close + full behavior corpus deferred — low risk). *(SC8.)*
 - [ ] **Flight 3: Tab surface** — guest tabs as `WebContentsView`s driven by main-process geometry;
   per-tab partition/preload reproduced with farbling preserved; navigation, popups-as-tabs, persistent
   sessions. *(SC1, SC3, SC5-part.)*
