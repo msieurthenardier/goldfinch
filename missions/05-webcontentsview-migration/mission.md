@@ -170,15 +170,19 @@ follow-on work.
   early by operator (drag/minimize/close + full behavior corpus deferred — low risk). *(SC8.)*
 - [ ] **Flight 3: Tab surface** — guest tabs as `WebContentsView`s driven by main-process geometry;
   per-tab partition/preload reproduced with farbling preserved; navigation, popups-as-tabs, persistent
-  sessions. *(SC1, SC3, SC5-part.)*
+  sessions. **Scope expanded (planning, 2026-06-25):** by operator decision this flight migrates **both
+  web AND internal `goldfinch://` tabs** (internal-page migration pulled forward from Flight 5) so the
+  `<webview>` machinery (`webviewTag`/`will-attach-webview`) can be removed in one flight; it also fixes
+  the `captureWindow` composite that the sibling-view change breaks. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
 - [ ] **Flight 4: Conveniences & event-seam re-architecture** — re-home the renderer↔`<webview>`-element
   seams to the main-process `webContents` (delete/replace `find.js`'s D1 find workaround; re-wire the
   renderer's `found-in-page`, media-rescan, and privacy-stream listeners), then re-verify zoom, print,
   find, DevTools, context menu, spellcheck, downloads on the native surface; update the `<webview>`-assuming
   specs. *(SC4. Larger than a re-verify pass — budgeted as a rewrite.)*
-- [ ] **Flight 5: Internal pages & automation parity** — internal `goldfinch://` pages on the new surface
-  with the trust model intact; full MCP end-to-end parity via the `mcp-*` behavior-test corpus. *(SC1,
-  SC5, SC6.)*
+- [ ] **Flight 5: Automation parity sweep** — full MCP end-to-end parity via the `mcp-*` behavior-test
+  corpus on the new surface. **Scope reduced (planning, 2026-06-25):** internal `goldfinch://` page
+  migration moved to **Flight 3** (DD0); this flight is now the automation parity sweep, with the internal
+  trust model already on views from F3. *(SC6; SC1/SC5 internal-page parts land in F3.)*
 - [ ] **Flight 6: Panel composition, parity sweep & land** — media/privacy panel as a native overlay;
   claim #27/SC10 if free (SC7); run the full active behavior-test corpus as the parity benchmark; macOS
   build-readiness check; merge the mission branch to `main`. *(SC3, SC7, SC8, mission landing.)*
