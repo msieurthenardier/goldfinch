@@ -103,6 +103,25 @@ Changes to `src/main/main.js` (built on the uncommitted Leg 1 working tree; not 
   `console.*` (re-enters the broken stream) → use `process.emitWarning` for non-EPIPE; semantic placement
   (not a literal line); leave the line-277 comment as-is.
 
+### Leg 3 — verify-shell-hat (interactive HAT)
+**Status**: completed — HAT PASS (qualified); flight landed on this leg.
+
+#### What was verified
+- **a11y (AC7)**: `npm run a11y` against the migrated shell → **no NEW violations** (all nodes in the accepted baseline).
+- **Frameless render (AC1) + tab browse (AC2)**: operator confirmed the on-screen window renders correctly at normal and maximized size; `<webview>` tabs browse real pages (live `readDom` of example.org; `captureWindow` guest composite).
+- **DD7 maximize-state read path / window controls (AC4)**: the maximize control's `data-state` flips `normal→maximized` with label `→ Restore`; operator confirmed on-screen maximize/unmaximize work. (Minimize/close not clicked — close is harness-destructive; identical `BaseWindow` methods, parity by construction.)
+- **EPIPE guard (AC5)**: every `--enable-logging` launch this session logged **EPIPE 0**; no crash dialog. (The original operator crash reproduced only with a broken stdout pipe pre-guard.)
+- **Behavior corpus (AC6)** — `responsive-tab-strip` run via `/behavior-test` (Witnessed: Executor a4fd68fb…, Validator af90fc31…, both Sonnet): **Steps 1–3 PASS** (responsive shrink/grow confirmed — tab width tracks available strip width: 110px floor+scroll @1400px vs 226px+no-scroll @2560px; favicon/close visible + ellipsis at floor `[a11y]`). Run log: `tests/behavior/responsive-tab-strip/runs/2026-06-24-23-02-18.md`. Steps 4–8 + the other two specs not exercised (operator wrapped after migration-relevant assertions; renderer-internal, untouched by the host swap).
+
+#### Anomaly: WSLg captureWindow distortion (apparatus, not a product bug)
+During the behavior test, `captureWindow()` at un-maximized 1400×900 returned the whole chrome compressed into the top-left (stable across recaptures) while the DOM read correct at full size; maximizing cleared it. **Operator confirmed the on-screen render is correct** (maximize/unmaximize + page content all respond) — so this is a WSLg `capturePage` artifact, **not** a migration render bug. Caveat for future captureWindow-based behavior tests: prefer maximized capture or the `evaluate()` numeric read. (My own earlier 1400×900 captures this session were clean — the distortion is intermittent compositor state after heavy tab churn.)
+
+#### Not explicitly eyeballed (low-risk, operator-deferred)
+Window drag-by-hand (AC3 — `-webkit-app-region` CSS, unchanged by the host swap), minimize/close clicks (AC4), and the full corpus (AC6 remainder). Operator chose `Wrap now — enough confirmed`; recorded honestly rather than claimed.
+
+#### Spec-drift to fold back (from the Witnessed agents)
+`responsive-tab-strip` spec assumes "no in-page numeric read", but `evaluate()` IS available and is a cleaner observable than screenshot deltas; the spec should adopt it + a captureWindow→evaluate WSLg fallback + an active fixture-distinctness probe. Recommendation only (not done this flight).
+
 ## Deviations
 
 _None this flight. (D-EPIPE is a recorded scope addition, not a deviation — see Decisions.)_
@@ -145,6 +164,20 @@ recur during the Leg 3 HAT and any `--enable-logging` run. Verified at the HAT (
   stays **in-flight**: Leg 3 (`verify-shell-hat`, interactive HAT) remains. PR/push deferred until after the
   HAT and operator go-ahead (outward-facing; mission keeps `main` stable, flight branches off the mission
   branch).
+
+### 2026-06-25 — Leg 3 HAT + flight landing
+- Ran the HAT mostly Flight-Director-driven (the operator opted "I run automated checks first"): `npm run a11y`
+  green; `responsive-tab-strip` Steps 1–3 PASS via the Witnessed `/behavior-test` crew; runtime evidence from
+  the Leg-1 verification carried forward (engine, browse, capture-composite, DD7 read).
+- Operator adjudicated the WSLg captureWindow distortion as a capture-path artifact (on-screen render correct),
+  then chose `Wrap now — enough confirmed`. Recorded the deferred items honestly (drag/minimize/close clicks,
+  full corpus) rather than claiming them.
+- **Flight LANDED**: Leg 3 → completed; flight.md → landed; SC8 checked (Linux/WSLg, mac per DD5); Flight 2
+  checked off in mission.md. Landing commit bundles the Leg 3 artifact, the behavior-test run log, and the
+  artifact updates. `[COMPLETE:flight]`.
+- **Still open (operator decision)**: push `flight/02-window-shell` + open the PR (outward-facing), and merge
+  the flight branch into the mission branch. Held for explicit go-ahead. The flight debrief (`/flight-debrief`)
+  is the separate next step and transitions the flight `landed → completed`.
 
 ### 2026-06-24 — Flight start (`/agentic-workflow`)
 - Loaded crew phase file `leg-execution.md` (well-formed: Crew / Interaction Protocol / Prompts present).
