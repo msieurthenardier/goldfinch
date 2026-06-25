@@ -178,3 +178,49 @@ assumed yes. **The zero-dep path is open today**: Electron `^42` bundles Node �
   the file) so existing users keep their settings + download history.
 - Decide the dependency posture (`node:sqlite` vs vendored) up front (the zero-dep go/no-go).
 - Add crash-survivable in-progress downloads once on SQLite (closes the M04 Flight 5 accepted gap).
+
+---
+
+## Tab strip: Chrome-style shrink, no scrollbar (small fix — not a mission)
+
+**Status:** small deferred fix — **routed to the post-mission routine-maintenance pass** (operator,
+2026-06-25). **Not a regression** (the current build behaves this way too); **explicitly kept OUT of
+Mission 05 / Flight 3** — it's renderer chrome (the tab *button* strip), orthogonal to the
+`<webview>` → `WebContentsView` guest migration, and Mission 05 is parity-only by constraint.
+**Captured:** 2026-06-25, while planning Mission 05 Flight 3.
+
+### The annoyance
+The tab strip's horizontal scrollbar doesn't work and isn't wanted, and tabs stop shrinking too early.
+Target is Chrome's behavior: tabs **shrink much smaller** (toward favicon-only) and the strip should
+**never really show a scrollbar**.
+
+### Current behavior (exact anchors)
+- `src/renderer/styles.css:153–158` — `#tabs { overflow-x: auto; min-width: 0; }` → this is the
+  (unwanted, semi-broken) scrollbar.
+- `src/renderer/styles.css:198–206` — `.tab { width: 240px; min-width: 88px; overflow: hidden; }` →
+  the 88px floor is too high; tabs stop shrinking there, then the strip scrolls. Step 3 of the
+  `responsive-tab-strip` HAT run (Flight-2, 2026-06-24) measured the ~110px-floor-then-scroll behavior.
+
+### Target behavior
+- Lower the `.tab` floor toward **favicon-only (~30–36px)**; progressively drop the title, then the
+  close button, on **inactive** tabs as they tighten (Chrome keeps the close affordance on the active
+  tab). 
+- Switch `#tabs` from `overflow-x: auto` to `overflow: hidden` — kills the scrollbar (and moots the
+  broken-scroll bug); reserve any scroll as an absolute last resort, if at all.
+- Keep the `#tabstrip-drag` grab area intact (`styles.css:163–165`).
+
+### Acceptance / scope notes
+- There is **already a behavior-test spec** for this surface: `tests/behavior/responsive-tab-strip.md`,
+  whose Intent is "shrink/grow to fit — no always-on scrollbar — scroll only past the floor." This fix
+  is a refinement: **lower the floor + no-scroll target**. Update that spec's floor expectations as
+  part of the fix.
+- **Fold in the spec updates already deferred from the Flight-2 HAT** (same authoring pass):
+  adopt `evaluate()` numeric reads as a first-class observable; add the `captureWindow → evaluate()`
+  WSLg-distortion fallback; add an active fixture-distinctness probe (duplicate page titles made the
+  Flight-2 run's "slid-left" check ambiguous).
+- **Size:** ~one leg / a small flight (CSS + minor JS for the progressive title/close hide + the spec
+  update). If promoted, it wants its own small home (e.g. a chrome-polish mini-mission or the
+  routine-maintenance mission), **not** Mission 05.
+- **Sequencing caveat:** do it cleanly **before or after** Flight 3, never *inside* it —
+  `responsive-tab-strip` is a Flight 3 HAT acceptance gate, so changing tab-strip behavior mid-flight
+  would move the regression baseline under the migration.
