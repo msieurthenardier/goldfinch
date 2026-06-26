@@ -172,7 +172,7 @@ function collect() {
 
 function send() {
   try {
-    ipcRenderer.sendToHost('media-list', collect());
+    ipcRenderer.send('guest-media-list', collect());
   } catch {
     /* page navigated away mid-scan */
   }
@@ -216,7 +216,7 @@ function bumpFp(kind) {
   fpTimer = setTimeout(() => {
     fpTimer = null;
     try {
-      ipcRenderer.sendToHost('privacy-fp', fpCounts);
+      ipcRenderer.send('guest-privacy-fp', fpCounts);
     } catch {
       /* ipc unavailable */
     }

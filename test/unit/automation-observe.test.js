@@ -444,22 +444,28 @@ test('readDom: passes the exact READ_DOM_SNIPPET string to executeJavaScript', a
 // captureWindow — whole-window path + nullish-chrome throw
 // ---------------------------------------------------------------------------
 
-test('captureWindow: calls chromeContents.capturePage() and returns the base64 shape', async () => {
-  const chromeWc = makeGuestWc(1);
-
-  const result = await captureWindow({ chromeContents: chromeWc });
-
-  assert.equal(chromeWc._captureCount, 1, 'chromeContents.capturePage must be called');
+test('captureWindow: calls grabWindow() and returns its result', async () => {
+  let called = false;
+  const grabWindow = async () => { called = true; return EXPECTED_B64; };
+  const result = await captureWindow({ grabWindow });
+  assert.ok(called, 'grabWindow must be called');
   assert.equal(result, EXPECTED_B64);
 });
 
-test('captureWindow: nullish chromeContents → throws "automation: chrome window unavailable" verbatim', async () => {
+test('captureWindow: nullish grabWindow → throws "automation: chrome window unavailable" verbatim', async () => {
   await assert.rejects(
-    () => captureWindow({ chromeContents: null }),
+    () => captureWindow({ grabWindow: null }),
     (err) => err instanceof Error && err.message === 'automation: chrome window unavailable'
   );
   await assert.rejects(
-    () => captureWindow({ chromeContents: undefined }),
+    () => captureWindow({ grabWindow: undefined }),
+    (err) => err instanceof Error && err.message === 'automation: chrome window unavailable'
+  );
+});
+
+test('captureWindow: grabWindow returning null → throws "automation: chrome window unavailable"', async () => {
+  await assert.rejects(
+    () => captureWindow({ grabWindow: async () => null }),
     (err) => err instanceof Error && err.message === 'automation: chrome window unavailable'
   );
 });

@@ -261,7 +261,6 @@ html.platform-darwin #window-controls {
 .switch:focus-visible,
 .icon-action:focus-visible,
 #player-controls button:focus-visible,
-.cm-item:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -532,7 +531,7 @@ a:focus-visible {
 #webviews {
   flex: 1;
   position: relative;
-  background: #fff;
+  background: #fff; /* white default so page content doesn't flash dark before first paint */
 }
 #webviews webview {
   position: absolute;
@@ -1297,120 +1296,56 @@ a:focus-visible {
   font-size: 11px;
   width: 22px;
 }
-#container-menu {
-  position: absolute;
-  top: 36px;
-  /* left is set inline by openContainerMenu() — the pill now moves with the tab count,
-     so the menu is anchored under the ▾ trigger dynamically. This is the fallback. */
-  left: 6px;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 210px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-/* Kebab (overflow) menu — reuses the container-menu chrome, but is anchored
-   dynamically to the kebab button's rect (top/right set inline by
-   positionKebabMenu()); right-aligned so it never overflows the viewport. */
-#kebab-menu {
-  position: absolute;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 160px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-/* Custom page context menu (SC6/DD2/DD3) — reuses the container/kebab chrome and the
-   .cm-item button style. Anchored at the cursor (top/left set inline by
-   positionPageContextMenu, clamped to the viewport); lives at the menu tier (z-index:60),
-   below the z-index:100 lightbox. tabindex="-1" + outline:none keeps the menu node itself
-   from showing a focus ring when onOpen self-focuses it (the blur-race defensive mitigation);
-   the focusable items show the selected-row highlight (yellow left border + text + tint)
-   defined below, modelled on the Settings left-nav active style. */
-#page-context-menu {
-  position: absolute;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 0;            /* no horizontal padding — highlighted rows span edge to edge */
-  min-width: 240px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  outline: none;
-  overflow: hidden;          /* clip the square row corners against the rounded container */
-}
-/* Full-width rows: square corners so the highlight reaches the menu's left/right inner edges. */
-#page-context-menu .cm-item {
-  border-radius: 0;
-}
-/* Section separator between context-menu groups (link / image / selection / editable /
-   suggestions / Inspect). Same top-border idiom as .cm-item.add. */
-#page-context-menu .cm-sep {
-  border-top: 1px solid rgba(230, 231, 234, 0.16);   /* lighter than --border so the divider reads */
-  margin: 4px 0;
-}
-/* Disabled affordance (e.g. "No suggestions") — dim, non-interactive. Edit items are
-   OMITTED rather than disabled (kept out of the roving set), so this is only used for
-   the rare informational placeholder. */
-#page-context-menu .cm-item[aria-disabled='true'] {
-  color: var(--fg-dim);
-  cursor: default;
-}
-#page-context-menu .cm-item[aria-disabled='true']:hover {
-  background: transparent;
-}
-/* Highlighted item — modelled on the Settings left-nav active style (yellow left border + yellow
-   text + lighter row) rather than the outward gold ring (which overflowed into adjacent items).
-   Hover and keyboard-focus share the SAME look — there is no distinct "selected" state, and the
-   menu opens with nothing highlighted (mouse open does not pre-focus an item; see onOpen). A 3px
-   transparent left border on the base keeps the text from shifting when highlighted. */
-#page-context-menu .cm-item {
-  border-left: 3px solid transparent;
-}
-#page-context-menu .cm-item:not([aria-disabled='true']):hover,
-#page-context-menu .cm-item:not([aria-disabled='true']):focus {
-  outline: none;
-  border-left-color: var(--accent);
-  color: var(--accent);
-  background: rgba(245, 197, 24, 0.12);
-}
-.cm-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--fg-dim);
-  padding: 4px 8px;
-}
-.cm-item {
+/* #container-menu and #kebab-menu removed — now native Electron Menu.popup() (Flight 3 Leg 2) */
+/* #page-context-menu, .cm-item, .cm-title, .cm-sep removed — all menus are now native (Flight 3 Leg 2) */
+
+/* ---------- New container inline dialog (Flight 3, Leg 2 sub-step 2) ----------
+   Shown when "New container…" is selected in the native picker (window.prompt unavailable).
+   Full-screen dimmed backdrop with a small centered card for the name input. */
+.new-container-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--fg);
-  padding: 7px 8px;
-  border-radius: 6px;
-  cursor: pointer;
+  justify-content: center;
+}
+.new-container-inner {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px 16px;
+  min-width: 260px;
+  max-width: 340px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.new-container-label {
   font-size: 12px;
-}
-.cm-item:hover {
-  background: var(--bg);
-}
-.cm-item.add {
   color: var(--fg-dim);
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
+  font-weight: 500;
 }
-.cm-item em {
-  color: var(--fg-dim);
-  font-style: normal;
-  font-size: 10px;
+.new-container-input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.new-container-input:focus {
+  border-color: var(--accent);
+}
+.new-container-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ---------- Site-info popup ---------- */

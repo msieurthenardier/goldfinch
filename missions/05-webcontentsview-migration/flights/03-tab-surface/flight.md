@@ -1,6 +1,6 @@
 # Flight: Tab Surface
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
@@ -184,17 +184,26 @@ on guest tabs.
     `classList.toggle('hidden')` (`renderer.js:811`) → main-side `setVisible` (DD1).
   - **Convenience callsites whose only substrate is the `<webview>` element** — `findInPage`/`stopFindInPage`
     (`renderer.js:~2080`), `webview.send('rescan-media')` (`renderer.js:~1239`), and the
-    `ipc-message`/`found-in-page`/`did-fail-load` DOM listeners (`renderer.js:1044–1064`) — are
-    **guarded-inert** in Leg 1 (the element they call no longer exists) and **re-homed in Flight 4** to
-    `tabView.webContents` sends/events. **Features temporarily dark between F3 and F4: in-page find, the
-    media-panel rescan (the signature media catalog stops live-updating on navigation), and the
-    privacy-stream live counters.** This is the direct cost of the operator's "F3 = tab-strip essentials
-    only" scope choice; it is bounded to one flight and restored in F4. *(See Flight Director Notes / the
-    operator flag — if the media-panel-dark transient is unacceptable, the minimal send-target re-point
-    for `rescan-media` + `found-in-page` can be pulled into F3 without the full F4 rewrite.)*
-- Rationale: Operator-scoped F3/F4 boundary — F3 does the minimum for "the tab surface works"; F4 owns
-  the event-seam rewrite the mission already budgets there.
-- Trade-off: Three convenience features inert for one flight (named above), re-verified in F4.
+    `ipc-message`/`found-in-page`/`did-fail-load` DOM listeners (`renderer.js:1044–1064`). Disposition by
+    feature (operator decision at flight start, 2026-06-25 — "pull the minimal re-point into F3"):
+    - **`rescan-media` + the media-list return path, and `found-in-page` (in-page find) → MINIMAL
+      send-target re-point IN LEG 1.** Swap only the transport so these keep working on the view surface:
+      `webview.send('rescan-media')` → renderer→main IPC → `tabView.webContents.send('rescan-media')`; the
+      guest preload's `ipcRenderer.sendToHost(media-list/found-in-page)` → `ipcRenderer.send` to main →
+      forward to the chrome renderer (mirroring the existing `zoom-changed` broadcast). This is a transport
+      swap, **NOT** the full F4 event-seam rewrite. **The signature media panel keeps live-scanning on
+      navigation and in-page find keeps working through Flight 3.**
+    - **The `find.js` D1 renderer-routed workaround (its deletion/replacement) and the privacy-stream
+      re-architecture stay in Flight 4.** Privacy-panel live counts come from main→chrome sends
+      (`privacy-net`/`privacy-permission`, already on `getChromeContents()` since Flight 2 — they survive);
+      any guest-preload→renderer privacy signal that rode `sendToHost` stays inert until F4. Leg 1 design
+      must confirm nothing user-visible regresses from leaving privacy-stream for F4 (likely nothing, given
+      the counts ride the surviving main→chrome path).
+- Rationale: Operator-scoped F3/F4 boundary — F3 does the minimum for "the tab surface works" PLUS the
+  minimal media-rescan/found-in-page transport re-point (operator pulled it forward to keep the signature
+  media panel + find alive); F4 owns the full event-seam rewrite the mission already budgets there.
+- Trade-off: Leg 1 modestly enlarged by the two-feature transport re-point; the `find.js` D1 workaround
+  and privacy-stream re-architecture remain F4 (privacy counts survive via the main→chrome path).
 
 **DD6a — Per-tab Shields first-party attribution survives unchanged (Architect LOW).**
 - Choice/Note: `applyShields`/`tabFirstParty` key privacy aggregation and block decisions on
@@ -257,6 +266,36 @@ on guest tabs.
   is the forced subset.
 - Trade-off: A capture-path change verified by **reading the captured PNG** at the HAT (agent-reads-PNG
   loop), not a live-eyeball-only check — same divert-trigger discipline as Flight 2's carried unknown.
+
+**DD12 — Chrome popups go NATIVE (`Menu.popup`) + find-inset (REVISED 2026-06-25 after the overlay approach failed 3×).**
+- **Revised choice:** replace the custom-HTML menus (page context menu, container picker, kebab) with native
+  Electron `Menu.popup()` (OS-composited above all views, zero occlusion, free a11y — *how Chrome does it*);
+  the find bar uses **guest-top-inset** (page stays live); site-info is a small popup/inset. Trade-off: those
+  menus become OS-styled (the Flight-2 custom-HTML menu look is given up — operator-accepted, "do it right").
+- **Why revised:** the original overlay approach below failed at runtime three times (transparency→black;
+  in-window `WebContentsView` overlay → not-showing + a white-launch regression). Root cause: HTML chrome
+  can't float over a native content view (CSS z-index can't cross views); Chrome/Edge avoid this by using
+  native chrome + native menu widgets, never HTML-over-native-view. Native menus are the platform's built-in,
+  robust answer. See flight log "Leg 2 — PIVOT to native menus."
+- **Superseded original (kept for history):** ↓
+
+**DD12-orig (SUPERSEDED) — Chrome popups render as per-popup top-most overlay views (D-OVERLAY, 2026-06-25 from the Leg-1 runtime smoke).**
+- Context: an opaque guest `WebContentsView` occludes the custom-HTML chrome popups (page context menu,
+  new-tab/container dropdown, find bar, site-info popup, kebab) that draw over the content region. The
+  runtime smoke proved the quick fix is impossible here: a **transparent** chrome view layered over the
+  guest renders **black** on Electron 42/WSLg (no sibling-below compositing). DD5 had noted only
+  find-bar/context-menu occlusion as "F4-deferred"; in reality it breaks **core UI** and must be solved in
+  this flight.
+- Choice (operator decision): render each transient chrome popup in its **own small opaque top-most
+  `WebContentsView`** sized to the popup, positioned over the guest at the popup location, so the live page
+  stays visible (and interactive) behind/around it. The guest view stays on top by default (page input);
+  popups get their own views above it; dismiss-on-outside-click handled. Fix the context-menu coordinate
+  alignment in the same leg.
+- Rationale: the only approach that preserves the custom-HTML chrome AND keeps the page visible. Two
+  quicker attempts (transparency, z-order toggle) failed → this gets a dedicated leg (`chrome-overlay-views`)
+  with full design + review.
+- Trade-off: real work (a separate popup-render path + dismiss plumbing); but it's the parity-correct
+  solution. Verified by runtime smoke (operator eyeball) before the flight's HAT.
 
 ### Prerequisites
 - [ ] Flight-3 branch created off `mission/05-webcontentsview-migration` (the long-running mission branch).
@@ -355,15 +394,24 @@ reference survives" check, not by "tabs render."
   zoom/find/devtools/context-menu); drive geometry with all five DD5 requirements (DPR→DIP, initial seed,
   set-bounds-before-reveal, debounce strategy, overlay-occlusion) + `setVisible` show/hide (DD1); re-point
   the renderer navigation/control verbs (`loadURL`/`reload`/`stop`/`goBack`/`goForward`/`getURL`/`focus`,
-  the open-tab / createTab / activateTab / close paths) off `<webview>` onto views (DD8) and
-  **guard-inert the find/media-rescan/privacy-stream callsites** (DD6); re-home the tab-strip-essential
-  events (DD6); re-point `download-media` to `getActiveTabContents()` (DD7); fix `captureWindow` (DD11).
-  Internal tabs still `<webview>` at this point (`webviewTag` stays on; `will-attach-webview` still fires
-  for them). **Gate: web tabs open/browse/switch/close as views; strip reflects nav/title/favicon;
+  the open-tab / createTab / activateTab / close paths) off `<webview>` onto views (DD8); **minimal
+  transport re-point of `rescan-media` + `found-in-page`** so the media panel + in-page find stay alive
+  (DD6, operator decision — NOT the full F4 rewrite; privacy-stream + `find.js` D1 cleanup stay F4);
+  re-home the tab-strip-essential events (DD6); re-point `download-media` to `getActiveTabContents()`
+  (DD7); fix `captureWindow` (DD11). Internal tabs still `<webview>` at this point (`webviewTag` stays
+  on; `will-attach-webview` still fires for them). **Gate: web tabs open/browse/switch/close as views;
+  strip reflects nav/title/favicon; the media panel re-scans on navigation and in-page find works;
   geometry correct at DPR≠1 and across a panel toggle; `captureWindow` composites the guest (PNG read);
   and the guest wiring is proven to FIRE on a tab view — a popup-opens-as-tab + a blocked-unsafe-nav + a
   DevTools-toggle + a context-menu smoke, not just "one MCP op" (Architect); `typecheck`/`lint` green.**
   (SC1-part, SC3, SC5-part, SC6.)
+- [ ] `chrome-overlay-views` *(added 2026-06-25, DD12; REVISED to native menus after the overlay approach
+  failed 3×)* — **Replace the custom-HTML chrome popups with native Electron menus + find-inset** so they
+  render above the opaque guest views (the Chrome way; HTML can't float over a native content view).
+  Page context menu + kebab + container picker → native `Menu.popup()`; find bar → guest-top-inset (page
+  stays live); site-info → small popup/inset. Fix the context-menu coordinate alignment. **Gate: each popup
+  renders ABOVE the page; menus work + dismiss; find shows over a live page; no black; no white-launch.**
+  (SC3 parity. Trade-off: menus become OS-styled.)
 - [ ] `internal-tabs-as-views` — Construct internal `goldfinch://` tab views with byte-exact internal
   `webPreferences` (DD3-internal: `contextIsolation:true`/`sandbox:true`/`spellcheck:false`,
   internal preload, `INTERNAL_PARTITION`); verify the internal session (`__goldfinchInternal` marker),

@@ -15,13 +15,12 @@
       <div id="tabs" role="tablist" aria-label="Open tabs"></div>
       <div id="newtab-pill">
         <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+        <!-- new-tab-menu: native Menu.popup() (no in-page popup; aria-haspopup removed, Flight 3 Leg 2) -->
         <button
           id="new-tab-menu"
           class="icon-btn"
           title="New tab in a jar / container"
           aria-label="New tab in a container"
-          aria-haspopup="menu"
-          aria-expanded="false"
         >
           ▾
         </button>
@@ -39,19 +38,23 @@
         <button id="win-close" class="icon-btn win-ctrl win-close" title="Close" aria-label="Close"></button>
       </div>
     </div>
-    <div id="container-menu" class="hidden" role="menu" aria-label="Open new tab in a container"></div>
-    <div id="kebab-menu" class="hidden" role="menu" aria-label="More menu">
-      <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
-      <button id="kebab-downloads" class="cm-item" role="menuitem" tabindex="-1">Downloads</button>
-      <button id="kebab-print" class="cm-item" role="menuitem" tabindex="-1">Print…</button>
-      <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
+    <!-- #container-menu and #kebab-menu removed — now native Electron Menu.popup() (Flight 3 Leg 2) -->
+
+    <!-- Inline "New container" name input — shown when "New container…" is selected
+         in the native container picker (window.prompt unavailable in this renderer). -->
+    <div id="new-container-dialog" class="hidden new-container-dialog" role="dialog" aria-modal="true" aria-label="New container">
+      <div class="new-container-inner">
+        <label for="new-container-name" class="new-container-label">New container name</label>
+        <input id="new-container-name" class="new-container-input" type="text" maxlength="24" placeholder="e.g. Shopping" autocomplete="off" spellcheck="false" />
+        <div class="new-container-actions">
+          <button id="new-container-ok" class="text-btn small" type="button">Create</button>
+          <button id="new-container-cancel" class="text-btn small" type="button">Cancel</button>
+        </div>
+      </div>
     </div>
     <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
-    <!-- Custom page context menu (SC6/DD2/DD3). Empty at rest — items built per-invocation
-         from the forwarded guest context-menu params (Leg 1 onPageContextMenu), rendered via the
-         menuController 4th consumer. tabindex="-1" lets onOpen self-focus the chrome (blur-race
-         defensive mitigation) without joining the natural tab order. -->
-    <div id="page-context-menu" class="hidden" role="menu" aria-label="Page actions" tabindex="-1"></div>
+    <!-- Page context menu is now a native Electron Menu.popup() built in main (Flight 3, Leg 2 revised).
+         No HTML menu element; the renderer no longer handles it. -->
 
     <!-- Toolbar -->
     <div id="toolbar">
@@ -103,13 +106,12 @@
         <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
         <span id="automation-indicator-badge" class="tb-badge hidden" aria-hidden="true"></span>
       </button>
+      <!-- kebab: native Menu.popup() (no in-page popup; aria-haspopup removed, Flight 3 Leg 2) -->
       <button
         id="kebab"
         class="icon-btn"
         title="More"
         aria-label="More"
-        aria-haspopup="menu"
-        aria-expanded="false"
       >⋮</button>
     </div>
 

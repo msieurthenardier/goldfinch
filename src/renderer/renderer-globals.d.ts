@@ -83,15 +83,23 @@ interface GoldfinchBridge {
   isDevtoolsOpen(payload: { webContentsId: number }): Promise<boolean>;
   onDevtoolsStateChanged(cb: (d: { wcId: number; open: boolean }) => void): void;
 
-  // --- page context menu (Leg 1 bridges + Leg 4 edit/clipboard, SC6/DD2) ---
-  /** Subscription: main's guest context-menu listener forwards { wcId, params }. */
-  onPageContextMenu(cb: (d: { wcId: number; params: any }) => void): void;
-  /** Spelling correction round-trip (chrome -> main -> guest replaceMisspelling). */
-  correctMisspelling(payload: { webContentsId: number; word: string }): void;
-  /** Allowlisted edit-action dispatch on the targeted guest (cut/copy/paste/undo/redo). */
-  pageContextAction(payload: { webContentsId: number; action: string }): void;
-  /** Narrow chrome-trusted OS-clipboard string write (Copy link / image address / selection). */
-  clipboardWriteText(text: string): void;
+  // --- toolbar Unpin native context menu (Leg 2 — native Menu.popup() in main) ---
+  /** Right-click on a pinned toolbar icon — main pops a native "Unpin {item}" menu. */
+  toolbarContextMenu(item: 'media' | 'shields' | 'devtools'): void;
+
+  // --- native kebab + container picker (Flight 3, Leg 2 sub-step 2) ---
+  /** ⋮ button click — main pops a native kebab menu (Settings/Downloads/Print/Exit). */
+  openKebabMenu(): void;
+  /** ▾ button click — sends the containers list; main pops a native container picker. */
+  openContainerMenu(containers: Array<{ id: string; name: string; color: string; partition: string; burner?: boolean }>): void;
+  /** Create a new container by name; main calls jars.add and signals back chrome-new-tab-in-container. */
+  newContainerCreate(name: string): Promise<{ id: string; name: string; color: string; partition: string } | null>;
+  /** Main signals: open an internal tab at this URL via trusted createTab. */
+  onChromeOpenInternal(cb: (url: string) => void): void;
+  /** Main signals: open a new tab in the container identified by jarId. */
+  onChromeNewTabInContainer(cb: (jarId: string) => void): void;
+  /** Main signals: prompt the user for a new container name (inline input). */
+  onChromeNewContainerPrompt(cb: () => void): void;
 
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
@@ -115,6 +123,44 @@ interface GoldfinchBridge {
 
   // The internal `goldfinch://` partition string (single source of truth).
   internalPartition: string;
+
+  // --- site-info freeze-frame (Flight 3, Leg 2 sub-step 5) ---
+  /** Capture the active web guest as a PNG data URL for freeze-frame behind site-info popup. Returns null if no active web guest. */
+  captureActiveGuest(): Promise<string | null>;
+
+  // --- tab lifecycle (Flight 3, Leg 1 — web tab WebContentsView substrate) ---
+  /** Create a web tab view in main; returns the guest wcId (invoke). */
+  tabCreate(payload: { url: string; partition: string; trusted: boolean }): Promise<number>;
+  /** Close/destroy a web tab view (fire-and-forget). */
+  tabClose(wcId: number): void;
+  /** Hide a web tab view without closing (fire-and-forget). */
+  tabHide(wcId: number): void;
+  /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */
+  tabNavigate(payload: { wcId: number; verb: string; args?: any[] }): void;
+  /** Atomic activation: set-bounds + show incoming, hide outgoing (fire-and-forget). */
+  tabSetActive(wcId: number, bounds: { x: number; y: number; width: number; height: number }): void;
+  /** Update bounds of a web tab view (fire-and-forget). */
+  tabSetBounds(wcId: number, bounds: { x: number; y: number; width: number; height: number }): void;
+  /** findInPage / stopFindInPage on a web tab view (fire-and-forget). */
+  tabFind(payload: { wcId: number; text?: string; options?: any; stop?: boolean }): void;
+  /** Send rescan-media to a specific web tab view (fire-and-forget). */
+  rescanMedia(payload: { wcId: number }): void;
+
+  // FIX 1 belt-and-suspenders: main triggers an immediate bounds re-send on maximize/unmaximize/resize.
+  onTriggerSendBounds(cb: () => void): void;
+
+  // --- tab event subscriptions (pushed from main) ---
+  onTabDidNavigate(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
+  onTabDidNavigateInPage(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
+  onTabTitle(cb: (d: { wcId: number; title: string }) => void): void;
+  onTabFavicon(cb: (d: { wcId: number; favicons: string[] }) => void): void;
+  onTabLoading(cb: (d: { wcId: number; loading: boolean }) => void): void;
+  onTabDidFinishLoad(cb: (d: { wcId: number }) => void): void;
+  onTabDomReady(cb: (d: { wcId: number }) => void): void;
+  onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
+  onTabFoundInPage(cb: (d: { wcId: number; result: any }) => void): void;
+  onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
+  onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 
 /**
