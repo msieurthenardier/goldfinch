@@ -1,24 +1,24 @@
 # Flight: Tab Surface
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC1 — Native guest surface.** Every tab — web AND internal `goldfinch://` — renders via a
+- [x] **SC1 — Native guest surface.** Every tab — web AND internal `goldfinch://` — renders via a
   per-tab `WebContentsView`; **no `<webview>` tag remains anywhere** in the tab/guest path
   (`webviewTag:true` and the `will-attach-webview` hook are removed). *(This flight fully meets SC1's
   source-absence half; the "browses" half rides SC3.)*
-- [ ] **SC3 — Browser-behavior parity (tab surface).** Multi-tab browsing, tab switch/close,
+- [x] **SC3 — Browser-behavior parity (tab surface).** Multi-tab browsing, tab switch/close,
   back/forward/reload, address-bar sync, favicons, titles, persistent sessions, and popups-as-tabs all
   work on the per-tab-view surface. *(Verified: active browsing/tab behavior tests on the new surface.)*
-- [ ] **SC5 — Privacy & trust model preserved (partition identity + farble + internal trust).** Each
+- [x] **SC5 — Privacy & trust model preserved (partition identity + farble + internal trust).** Each
   tab's jar/container/burner/default partition is reproduced **byte-exact** at view construction (the
   security-critical move off `<webview partition>` onto `webPreferences.partition`); fingerprint farbling
   (main-world, non-context-isolated preload) still runs per tab on directly-constructed views; and the
   internal-page trust model (the four gates, the internal session, the origin-checked bridge) holds on
   the internal `WebContentsView`. *(Verified: `internal-session-exclusion` + `mcp-jar-scoping` first,
   then `farbling-correctness` / `core-browsing-shields`.)*
-- [ ] **SC6 — Automation parity (forced subset only).** `captureWindow` is re-homed so it still
+- [x] **SC6 — Automation parity (forced subset only).** `captureWindow` is re-homed so it still
   composites the guest once guests are sibling views (a regression this flight *introduces* and must
   fix); the by-`webContents`-id addressing the rest of the MCP surface uses is unchanged. *(Broad MCP
   end-to-end parity remains the **Flight 5** sweep; this flight only repairs what the tab-surface change
@@ -386,7 +386,7 @@ reference survives" check, not by "tabs render."
 > removal) can only run after Leg 2 (internal tabs migrated), because the machinery can't be removed while
 > any tab is still a `<webview>`. Leg 4 is the interactive HAT.
 
-- [ ] `web-tabs-as-views` — **Atomic core; app must run (web tabs browse as views) at the end.** Introduce
+- [x] `web-tabs-as-views` — **Atomic core; app must run (web tabs browse as views) at the end.** Introduce
   the tab-view registry + `getTabContents`/`getActiveTabContents` accessor (DD2); construct web tab views
   with byte-exact web `webPreferences` at construction (DD3-web, DD10 farble); **swap the
   `web-contents-created` `getType()==='webview'` filter to the registry-membership predicate** so the new
@@ -405,7 +405,7 @@ reference survives" check, not by "tabs render."
   and the guest wiring is proven to FIRE on a tab view — a popup-opens-as-tab + a blocked-unsafe-nav + a
   DevTools-toggle + a context-menu smoke, not just "one MCP op" (Architect); `typecheck`/`lint` green.**
   (SC1-part, SC3, SC5-part, SC6.)
-- [ ] `chrome-overlay-views` *(added 2026-06-25, DD12; REVISED to native menus after the overlay approach
+- [x] `chrome-overlay-views` *(added 2026-06-25, DD12; REVISED to native menus after the overlay approach
   failed 3×)* — **Replace the custom-HTML chrome popups with native Electron menus + find-inset** so they
   render above the opaque guest views (the Chrome way; HTML can't float over a native content view).
   Page context menu + kebab + container picker → native `Menu.popup()`; find bar → guest-top-inset (page
@@ -413,7 +413,7 @@ reference survives" check, not by "tabs render."
   renders ABOVE the page; menus work + dismiss; find shows over a live page; no black; no white-launch.**
   (SC3 parity. Trade-off: menus become OS-styled.) *(Menus SUPERSEDED by `02b` — see below; find-inset +
   site-info freeze-frame from this leg are retained.)*
-- [ ] `02b` `freeze-frame-html-menus` *(added 2026-06-26; DD12 revised AGAIN — supersedes Leg 2's native
+- [x] `02b` `freeze-frame-html-menus` *(added 2026-06-26; DD12 revised AGAIN — supersedes Leg 2's native
   menus)* — **Revert the three guest-overlapping menus (page context menu + toolbar-Unpin mode, kebab,
   container picker) from native `Menu.popup()` back to styled HTML**, rendered over a **freeze-frame** still
   of the guest (the proven site-info technique) so HTML z-index works above the opaque guest view. Restore
@@ -423,18 +423,18 @@ reference survives" check, not by "tabs render."
   **Gate: each menu renders styled ABOVE the page over a freeze; every dismiss restores the live guest;
   capture latency beats native (gating smoke); `test`/`typecheck`/`lint`/`a11y` green (a11y broken→fixed).**
   (SC3 parity. Operator: native menus look bad + lag on WSLg and can't be styled.)
-- [ ] `internal-tabs-as-views` — Construct internal `goldfinch://` tab views with byte-exact internal
+- [x] `internal-tabs-as-views` — Construct internal `goldfinch://` tab views with byte-exact internal
   `webPreferences` (DD3-internal: `contextIsolation:true`/`sandbox:true`/`spellcheck:false`,
   internal preload, `INTERNAL_PARTITION`); verify the internal session (`__goldfinchInternal` marker),
   session-scoped `protocol.handle`, the four gates, and the origin-checked bridge hold on the view.
   **Gate: `goldfinch://settings` + `downloads` load as views with the trust model intact; no internal
   `<webview>` path remains.** (SC1-part, SC5-internal.)
-- [ ] `remove-webview-machinery` — With no tab a `<webview>`: remove `webviewTag:true` (`main.js:297`) +
+- [x] `remove-webview-machinery` — With no tab a `<webview>`: remove `webviewTag:true` (`main.js:297`) +
   the now-never-fired `will-attach-webview` hook (`main.js:330–346`, DD4 Leg-3 half). **Gate: grep shows
   zero `<webview>`/`webviewTag` in the tab path; app runs; tabs browse; engine + the (re-bound) guest
   wiring still live.** (SC1 source-absence; cleanup.) *(The guest-event predicate swap and the
   `download-media` re-point already landed in Leg 1 — this leg is purely the machinery deletion.)*
-- [ ] `verify-tab-surface-hat` *(guided HAT / alignment)* — Run `internal-session-exclusion` +
+- [x] `verify-tab-surface-hat` *(guided HAT / alignment)* — Run `internal-session-exclusion` +
   `mcp-jar-scoping` **first** (byte-exact partition guard, SC5), then `farbling-correctness`,
   `core-browsing-shields`, `mcp-drive-end-to-end`, and the Flight-2-deferred corpus (`responsive-tab-strip`
   full, `tab-keyboard-operability`, `settings-shell`); visual HAT for tab switch / view bounds / the #27
@@ -445,17 +445,24 @@ reference survives" check, not by "tabs render."
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed (1 `web-tabs-as-views`, 2 `internal-tabs-as-views`, 3 `remove-webview-machinery`,
-  4 `verify-tab-surface-hat`)
-- [ ] Every tab (web + internal) renders as a per-tab `WebContentsView`; no `<webview>`/`webviewTag`
-  remains (grep clean)
-- [ ] Per-tab partition identity byte-exact; `internal-session-exclusion` + `mcp-jar-scoping` PASS;
-  farbling preserved
-- [ ] `captureWindow` composites the guest on the sibling-view surface (PNG-verified); one+ MCP op live
-- [ ] Tab-strip-essential events re-homed; browsing/tab corpus + a11y green; mac shipped unverified (DD9)
-- [ ] No production code merged to `main` (work on `flight/03-tab-surface`, branched off the mission branch)
-- [ ] Flight branch merged to the mission branch; mission `flights` checklist updated
-- [ ] Tests passing (`npm test`, `npm run typecheck`, `npm run lint`)
+- [x] All legs completed (`web-tabs-as-views`, `chrome-overlay-views`→`02b freeze-frame-html-menus`,
+  `internal-tabs-as-views`, `remove-webview-machinery`, `verify-tab-surface-hat`)
+- [x] Every tab (web + internal) renders as a per-tab `WebContentsView`; no `<webview>`/`webviewTag`
+  remains (grep clean — Leg 4)
+- [x] Per-tab partition identity byte-exact; jar-scoping confinement PASS (live MCP); farbling preserved
+  (Flight-1 spike-proven; per-jar session preserved) — *pragmatic live smoke; formal
+  `internal-session-exclusion` Witnessed run deferred to Flight 6 per the spec's own header; resolve-time
+  internal rejection is unit-tested (`automation-resolve`)*
+- [x] `captureWindow` composites the guest on the sibling-view surface (PNG-verified in Leg 1, 46KB
+  composite); admin-gating re-confirmed live this HAT; many MCP ops live (drive/observe corpus)
+- [x] Tab-strip-essential events re-homed; browsing/tab corpus + a11y green; mac shipped unverified (DD9)
+- [x] No production code merged to `main` (work on `flight/03-tab-surface`, branched off the mission branch)
+- [ ] Flight branch merged to the mission branch; mission `flights` checklist updated *(pending — flight
+  landed locally; merge offered to operator, matching the Flight-2 local-only pattern)*
+- [x] Tests passing (`npm test` 951/951, `npm run typecheck` 0, `npm run lint` 0, `npm run a11y` 0 new)
+
+> **Known issues carried (operator-accepted, WSLg-class, non-blocking — see flight log Leg-5 HAT):**
+> tiny menu-open blip on internal tabs; maximize reaches only ~bottom 2/3 of the screen.
 
 ### Verification
 

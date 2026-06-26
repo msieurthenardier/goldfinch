@@ -1,6 +1,6 @@
 # Leg: chrome-overlay-views — Native chrome popups (REVISED)
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Tab Surface](../flight.md)
 
 > **Design history:** this leg first attempted a custom-HTML overlay `WebContentsView` to float the popups

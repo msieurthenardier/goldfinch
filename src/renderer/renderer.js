@@ -1040,15 +1040,24 @@ function sendActiveBounds() {
   requestAnimationFrame(() => {
     rafGeometryPending = false;
     const t = activeTab();
-    if (t && !t.trusted && t.wcId != null) {
+    // All active views (web AND internal) need geometry updates on resize/panel-toggle —
+    // internal tabs are WebContentsViews now (Leg 3), not <webview> elements. Excluding
+    // internal here stranded them at stale bounds until a tabSetActive (tab switch) re-bounded
+    // them. measureWebviewsSlotWithInsetDIP returns the full slot for internal (find is web-only
+    // → inset 0). The guestFrozen early-return above still correctly skips a frozen view.
+    if (t && t.wcId != null) {
       window.goldfinch.tabSetBounds(t.wcId, measureWebviewsSlotWithInsetDIP());
     }
   });
 }
 
 /**
- * Freeze the active web guest: capture a still frame, set it as the #webviews background,
- * hide the live guest view. Returns true if the freeze was applied, false otherwise.
+ * Freeze the active guest (web or internal): capture a still frame, set it as the #webviews
+ * background, hide the live guest view. Returns true if the freeze was applied, false otherwise.
+ * After Leg 3, internal goldfinch:// tabs are opaque WebContentsViews too, so they also occlude
+ * the HTML chrome menus and must be freezable — the guard keys on the active view's wcId, not on
+ * trust. (visibleWebTabWcId is web-only bookkeeping and is NOT used here; the freeze hides t.wcId
+ * directly so it works for internal tabs whose wcId is never tracked in visibleWebTabWcId.)
  * @param {(() => boolean) | null} [stillOpen]  optional liveness check — if provided and
  *   returns false after the async capture, the freeze is aborted (popup was closed before
  *   the capture resolved).
@@ -1056,20 +1065,25 @@ function sendActiveBounds() {
  */
 async function freezeGuest(stillOpen) {
   const t = activeTab();
-  if (!t || t.trusted || t.wcId == null || visibleWebTabWcId == null) return false;
+  if (!t || t.wcId == null) return false;
   const dataURL = await window.goldfinch.captureActiveGuest();
   if (!dataURL) return false;
   if (stillOpen && !stillOpen()) return false;
+  // Decode the still before hiding the live view so it paints in the same frame —
+  // avoids a one-frame flash of empty #webviews (esp. visible on light internal pages).
+  try { const img = new Image(); img.src = dataURL; await img.decode(); } catch { /* decode unsupported/failed → proceed; worst case the prior brief flash */ }
+  if (stillOpen && !stillOpen()) return false;   // re-check liveness after the decode await
   els.webviews.style.backgroundImage = `url('${dataURL}')`;
   els.webviews.style.backgroundSize = '100% 100%';
-  window.goldfinch.tabHide(visibleWebTabWcId);
+  window.goldfinch.tabHide(t.wcId);
   guestFrozen = true;
   return true;
 }
 
 /**
- * Unfreeze: clear the still background and re-show the active web guest.
- * No-ops if no freeze is active.
+ * Unfreeze: clear the still background and re-show the active guest (web or internal).
+ * No-ops if no freeze is active. Re-shows whichever view is active; only the web-only
+ * visibleWebTabWcId bookkeeping is updated for web tabs.
  */
 function unfreezeGuest() {
   if (!guestFrozen) return;
@@ -1077,9 +1091,9 @@ function unfreezeGuest() {
   els.webviews.style.backgroundImage = '';
   els.webviews.style.backgroundSize = '';
   const t = activeTab();
-  if (t && !t.trusted && t.wcId != null) {
+  if (t && t.wcId != null) {
     window.goldfinch.tabSetActive(t.wcId, measureWebviewsSlotWithInsetDIP());
-    visibleWebTabWcId = t.wcId;
+    if (!t.trusted) visibleWebTabWcId = t.wcId;
   }
 }
 

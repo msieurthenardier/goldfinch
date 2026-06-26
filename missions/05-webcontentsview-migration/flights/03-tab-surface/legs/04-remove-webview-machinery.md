@@ -1,6 +1,6 @@
 # Leg: remove-webview-machinery — Delete the now-vestigial `<webview>` machinery
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Tab Surface](../flight.md)
 
 > **Cleanup leg (DD4 Leg-3 half / SC1 source-absence).** With Leg 3 done, **no tab is a `<webview>`**

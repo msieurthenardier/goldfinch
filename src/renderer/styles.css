@@ -532,7 +532,12 @@ a:focus-visible {
 #webviews {
   flex: 1;
   position: relative;
-  background: #fff; /* white default so page content doesn't flash dark before first paint */
+  /* Dark shell color (matches the chrome WebContentsView background #1e1f25 = --bg) so any
+     residual gap frame during the freeze-frame swap reads dark-on-dark (invisible) rather
+     than a white flash — most visible on light internal goldfinch:// pages. The opaque active
+     view covers #webviews normally; the still covers it during freeze; this is only ever seen
+     in the one-frame gap (now also mitigated by decoding the still before hiding the view). */
+  background: var(--bg);
 }
 #webviews webview {
   position: absolute;

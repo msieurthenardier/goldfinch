@@ -1,6 +1,6 @@
 # Leg: freeze-frame-html-menus — Styled HTML chrome menus over a freeze-frame
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Tab Surface](../flight.md)
 
 > **Supersedes Leg 2's native-menu choice (DD12 revised again, 2026-06-26).** Leg 2 converted the page

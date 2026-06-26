@@ -1,6 +1,6 @@
 # Leg: web-tabs-as-views
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Tab Surface](../flight.md)
 
 ## Objective

@@ -1,6 +1,6 @@
 # Leg: internal-tabs-as-views — Internal `goldfinch://` tabs as WebContentsViews (trust model intact)
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Tab Surface](../flight.md)
 
 > **Security-critical leg (DD0 / DD3-internal).** Migrates internal `goldfinch://` pages (settings,

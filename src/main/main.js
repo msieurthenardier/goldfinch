@@ -1508,17 +1508,22 @@ ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
 
 // Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.
 // Called by the renderer before hiding the guest and showing the freeze image.
-// Returns a data URL string, or null if no active web guest is available.
+// Returns a data URL string, or null if no active guest is available.
 //
-// Defense-in-depth (both-sides internal guard — Leg 3): the renderer's !t.trusted guard
-// is the primary caller gate; this main-side guard is belt-and-suspenders, matching the
-// discipline used by toggle-devtools / print / get-zoom / page-context-* which all refuse
-// the internal session on BOTH sides. Internal tabs are now WebContentsViews; without this
-// guard getActiveTabContents() could return the internal session view and capturePage() it.
+// INTERNAL CAPTURE IS REQUIRED (Leg 3 HAT fix): after Leg 3, internal goldfinch:// tabs are
+// opaque WebContentsViews — they occlude the HTML chrome menus (kebab/container/site-info)
+// exactly like web tabs. So the freeze-frame must be able to capture an internal page too,
+// or those menus render behind the opaque internal view. The earlier "never capture internal"
+// guard rested on the now-invalid "internal never freezes" premise.
+//
+// Why this is safe (NOT a leak, NOT an automation op): the ONLY caller is the trusted chrome
+// renderer's freeze helper — `captureActiveGuest` is exposed solely on chrome-preload, never on
+// any guest preload. It captures, as a still, a page the chrome ALREADY displays in its own
+// #webviews region; nothing crosses a trust boundary that the chrome doesn't already hold.
+// (`isInternalContents` is intentionally NOT applied here; it remains used elsewhere in main.js.)
 ipcMain.handle('capture-active-guest', async () => {
   const wc = getActiveTabContents();
   if (!wc || wc.isDestroyed()) return null;
-  if (isInternalContents(wc)) return null;  // Defense-in-depth: never capture internal session
   try {
     const img = await wc.capturePage();
     // toDataURL returns a data: URI (PNG, base64-encoded).
