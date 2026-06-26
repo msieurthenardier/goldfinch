@@ -83,23 +83,20 @@ interface GoldfinchBridge {
   isDevtoolsOpen(payload: { webContentsId: number }): Promise<boolean>;
   onDevtoolsStateChanged(cb: (d: { wcId: number; open: boolean }) => void): void;
 
-  // --- toolbar Unpin native context menu (Leg 2 — native Menu.popup() in main) ---
-  /** Right-click on a pinned toolbar icon — main pops a native "Unpin {item}" menu. */
-  toolbarContextMenu(item: 'media' | 'shields' | 'devtools'): void;
-
-  // --- native kebab + container picker (Flight 3, Leg 2 sub-step 2) ---
-  /** ⋮ button click — main pops a native kebab menu (Settings/Downloads/Print/Exit). */
-  openKebabMenu(): void;
-  /** ▾ button click — sends the containers list; main pops a native container picker. */
-  openContainerMenu(containers: Array<{ id: string; name: string; color: string; partition: string; burner?: boolean }>): void;
+  // --- new container create (renderer collects name, main creates jar) ---
   /** Create a new container by name; main calls jars.add and signals back chrome-new-tab-in-container. */
   newContainerCreate(name: string): Promise<{ id: string; name: string; color: string; partition: string } | null>;
-  /** Main signals: open an internal tab at this URL via trusted createTab. */
-  onChromeOpenInternal(cb: (url: string) => void): void;
-  /** Main signals: open a new tab in the container identified by jarId. */
-  onChromeNewTabInContainer(cb: (jarId: string) => void): void;
-  /** Main signals: prompt the user for a new container name (inline input). */
-  onChromeNewContainerPrompt(cb: () => void): void;
+
+  // --- HTML page context menu (main → renderer) ---
+  /** Main fires with { wcId, params } — renderer opens the HTML context menu and applies its
+   *  own freeze-frame via freezeGuest()/captureActiveGuest() (Option A; no main-side capture). */
+  onPageContextMenu(cb: (d: { wcId: number; params: any }) => void): void;
+  /** Write text to the system clipboard (invoked from the HTML context menu Copy action). */
+  clipboardWriteText(text: string): Promise<void>;
+  /** Replace a misspelled word with the chosen suggestion (context menu spelling correction). */
+  correctMisspelling(payload: { webContentsId: number | null; word: string }): Promise<void>;
+  /** Execute an edit action (cut/copy/paste/undo/redo) on a guest WebContents. */
+  pageContextAction(payload: { webContentsId: number | null; action: string }): Promise<void>;
 
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;

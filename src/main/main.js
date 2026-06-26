@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, Menu } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -639,118 +639,19 @@ function wireGuestContents(contents) {
     };
     contents.on('devtools-opened', () => sendDevtoolsState(true));
     contents.on('devtools-closed', () => sendDevtoolsState(false));
-    // Native page context menu (DD2/DD6, revised Leg 2). The context-menu event fires on
-    // the main-process guest webContents carrying the full rich params. We wire the GUEST
-    // side, inside the !__goldfinchInternal guard, so internal goldfinch:// guests never get
-    // a menu (DD6). We suppress the native OS menu and build a native Electron Menu.popup()
-    // from the params — it renders at the OS level above all WebContentsViews, so the
-    // coordinate-misalignment problem is gone (popup at cursor, no view-relative offset needed).
+    // HTML page context menu (DD2/DD6, Leg 2b — freeze-frame approach, Option A). The
+    // context-menu event fires on the main-process guest webContents. We forward ONLY the
+    // params; the chrome renderer applies the freeze-frame via its own proven
+    // freezeGuest()/captureActiveGuest() path on menu open (the same path the kebab/container
+    // menus use and the operator confirmed working). An event-time capturePage() here proved
+    // unreliable on WSLg (intermittently threw/returned empty → freeze skipped → live guest
+    // occluded the HTML menu), so we deliberately do NOT capture in this handler. Internal
+    // goldfinch:// guests are excluded by the !__goldfinchInternal guard (DD6).
     contents.on('context-menu', (event, params) => {
-      event.preventDefault(); // suppress the default OS menu
+      event.preventDefault();
       if (!mainWindow) return;
-
-      /** @type {Electron.MenuItemConstructorOptions[]} */
-      const template = [];
-      const wcId = contents.id;
-
-      // --- link ---
-      if (params.linkURL) {
-        template.push({
-          label: 'Open link in new tab',
-          click: () => { getChromeContents()?.send('open-tab', params.linkURL); }
-        });
-        template.push({
-          label: 'Copy link address',
-          click: () => { clipboard.writeText(params.linkURL); }
-        });
-        template.push({ type: 'separator' });
-      }
-
-      // --- image (prefer srcURL, fall back to imageURL) ---
-      const imgSrc = params.mediaType === 'image' ? (params.srcURL || params.imageURL) : null;
-      if (imgSrc) {
-        template.push({
-          label: 'Copy image',
-          click: () => { contents.copyImageAt(params.x, params.y); }
-        });
-        template.push({
-          label: 'Save image…',
-          click: () => {
-            const suggestedName = (() => {
-              try {
-                const last = new URL(imgSrc).pathname.split('/').filter(Boolean).pop();
-                return last || 'image';
-              } catch { return 'image'; }
-            })();
-            pendingDownloads.set(imgSrc, { suggestedName, saveDir: null });
-            try { contents.downloadURL(imgSrc); } catch { pendingDownloads.delete(imgSrc); }
-          }
-        });
-        template.push({ type: 'separator' });
-      }
-
-      // --- selection ---
-      if (params.selectionText) {
-        template.push({ label: 'Copy', role: /** @type {const} */ ('copy') });
-        template.push({ type: 'separator' });
-      }
-
-      // --- editable (gated by editFlags; only render flags that are true) ---
-      if (params.isEditable) {
-        const f = params.editFlags || {};
-        /** @type {Electron.MenuItemConstructorOptions[]} */
-        const editItems = [];
-        if (f.canCut) editItems.push({ label: 'Cut', role: /** @type {const} */ ('cut') });
-        if (f.canCopy) editItems.push({ label: 'Copy', role: /** @type {const} */ ('copy') });
-        if (f.canPaste) editItems.push({ label: 'Paste', role: /** @type {const} */ ('paste') });
-        if (f.canSelectAll) editItems.push({ label: 'Select All', role: /** @type {const} */ ('selectAll') });
-        if (editItems.length) {
-          template.push(...editItems);
-          template.push({ type: 'separator' });
-        }
-      }
-
-      // --- spellcheck suggestions ---
-      if (params.misspelledWord) {
-        const suggs = Array.isArray(params.dictionarySuggestions) ? params.dictionarySuggestions.slice(0, 8) : [];
-        if (suggs.length) {
-          for (const word of suggs) {
-            const w = word;
-            template.push({
-              label: w,
-              click: () => {
-                const wc = webContents.fromId(wcId);
-                if (wc && !wc.isDestroyed()) { wc.focus(); wc.replaceMisspelling(w); }
-              }
-            });
-          }
-        } else {
-          template.push({ label: 'No suggestions', enabled: false });
-        }
-        template.push({
-          label: 'Add to dictionary',
-          click: () => {
-            const wc = webContents.fromId(wcId);
-            if (wc && !wc.isDestroyed()) {
-              wc.session.addWordToSpellCheckerDictionary(params.misspelledWord);
-            }
-          }
-        });
-        template.push({ type: 'separator' });
-      }
-
-      // --- always: Inspect / DevTools ---
-      template.push({
-        label: 'Inspect element',
-        click: () => {
-          const wc = webContents.fromId(wcId);
-          if (wc && !wc.isDestroyed() && !isInternalContents(wc)) toggleDevTools(wc);
-        }
-      });
-
-      if (template.length === 0) return;
-      const menu = Menu.buildFromTemplate(template);
-      menu.popup({ window: mainWindow });
+      if (isInternalContents(contents)) return;
+      getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
     });
   }
 }
@@ -1477,115 +1378,15 @@ ipcMain.on('app-quit', () => app.quit());
 // (settings page only): the chrome renderer cannot reach that one, and navigator.clipboard is
 // unreliable from a file:// doc right after a guest context-menu steals focus. Writes a STRING
 // only (coerced) — not a guest mutation, no general-write concern.
-ipcMain.on('chrome-clipboard-write', (_e, text) => {
+ipcMain.handle('chrome-clipboard-write', (_e, text) => {
   clipboard.writeText(String(text == null ? '' : text));
 });
 
-// ---------------------------------------------------------------------------
-// Toolbar Unpin context menu (Flight 3, Leg 2 — native Menu.popup() replacement).
-// The renderer's toolbar contextmenu handlers send this when the user right-clicks
-// a pinned toolbar icon. Pops a native menu with a single "Unpin {item}" item above
-// all views. Chrome-trusted one-way send — same trust domain as window-minimize.
-// ---------------------------------------------------------------------------
-ipcMain.on('toolbar-context-menu', (_event, item) => {
-  if (!mainWindow) return;
-  if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;
-  const label = 'Unpin ' + (item === 'media' ? 'Media' : item === 'shields' ? 'Shields' : 'DevTools');
-  const menu = Menu.buildFromTemplate([{
-    label,
-    click: () => {
-      const pins = { ...settings.get('toolbarPins'), [item]: false };
-      settings.set('toolbarPins', pins);
-      broadcastToChromeAndInternal('settings-changed', settings.getAll());
-    }
-  }]);
-  menu.popup({ window: mainWindow });
-});
-
-// ---------------------------------------------------------------------------
-// Native kebab menu (Flight 3, Leg 2 — sub-step 2).
-// The renderer's ⋮ button click sends this IPC; main builds and pops the native menu.
-// Actions that open internal tabs (Settings, Downloads) signal the renderer back via
-// 'chrome-open-internal' so createTab() runs in the renderer (which owns tab creation).
-// Print acts on the active web tab directly in main. Exit calls app.quit().
-// Chrome-trusted one-way send — same trust domain as window-minimize/app-quit.
-// ---------------------------------------------------------------------------
-ipcMain.on('open-kebab-menu', () => {
-  if (!mainWindow) return;
-  const cc = getChromeContents();
-  const menu = Menu.buildFromTemplate([
-    {
-      label: 'Settings',
-      click: () => { if (cc && !cc.isDestroyed()) cc.send('chrome-open-internal', 'goldfinch://settings'); }
-    },
-    {
-      label: 'Downloads',
-      click: () => { if (cc && !cc.isDestroyed()) cc.send('chrome-open-internal', 'goldfinch://downloads'); }
-    },
-    {
-      label: 'Print…',
-      click: () => {
-        const wc = getActiveTabContents();
-        if (!wc || wc.isDestroyed()) return;
-        if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return;
-        wc.print({}, (ok, reason) => { if (!ok) console.warn('print failed:', reason); });
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Exit',
-      click: () => app.quit()
-    }
-  ]);
-  menu.popup({ window: mainWindow });
-});
-
-// ---------------------------------------------------------------------------
-// Native container picker (▾ next to new-tab +) (Flight 3, Leg 2 — sub-step 2).
-// The renderer sends the current containers list so main builds the menu without a
-// separate jars-list call. Selecting a container signals the renderer back via
-// 'chrome-new-tab-in-container' with the jarId (renderer owns createTab + its container
-// object lookup).
-// "New container…": Electron's dialog has no plain text-input field. The simplest native
-// approach is to signal the renderer ('chrome-new-container-prompt'), which shows an inline
-// <input> dialog in the chrome (unoccluded by the guest), then sends 'new-container-create'
-// back to main with the entered name → jars.add() → 'chrome-new-tab-in-container'.
-// Chrome-trusted one-way send — same trust domain as window-minimize/app-quit.
-// ---------------------------------------------------------------------------
-ipcMain.on('open-container-menu', (_event, { containers }) => {
-  if (!mainWindow) return;
-  const cc = getChromeContents();
-  if (!Array.isArray(containers)) return;
-
-  /** @type {Electron.MenuItemConstructorOptions[]} */
-  const template = containers.map((c) => ({
-    label: c.name || 'Container',
-    click: () => {
-      if (cc && !cc.isDestroyed()) cc.send('chrome-new-tab-in-container', c.id);
-    }
-  }));
-
-  // Separator before special items
-  if (template.length > 0) template.push({ type: 'separator' });
-
-  template.push({
-    label: 'New container…',
-    click: () => {
-      if (cc && !cc.isDestroyed()) cc.send('chrome-new-container-prompt');
-    }
-  });
-
-  const menu = Menu.buildFromTemplate(template);
-  menu.popup({ window: mainWindow });
-});
-
 // New container creation: renderer collected the name (via inline input) and sends it here.
-// We create the jar and signal the renderer to open a new tab in it.
+// We create the jar and return it; the renderer calls createTab directly with the container object.
 ipcMain.handle('new-container-create', async (_event, { name }) => {
   if (!name || typeof name !== 'string') return null;
-  const cc = getChromeContents();
   const c = jars.add(name);
-  if (cc && !cc.isDestroyed()) cc.send('chrome-new-tab-in-container', c.id);
   return c;
 });
 
@@ -1826,7 +1627,7 @@ ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
 // correction — cut/copy/paste/undo/redo — is Leg 4's to add with its own action-allowlist.)
 // Dead/destroyed targets return safely; replaceMisspelling is itself a no-op outside an active
 // misspelling/editing context, so the main side never throws.
-ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
+ipcMain.handle('page-context-correct', (_e, { webContentsId, word }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return;
   if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
@@ -1850,7 +1651,7 @@ ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
 // surface's audited trust contract self-evident. wc.paste() reads the OS clipboard into the
 // guest — same as a native menu Paste, the user-invoked intended behavior, not a new exfil path.
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
-ipcMain.on('page-context-action', (_e, { webContentsId, action }) => {
+ipcMain.handle('page-context-action', (_e, { webContentsId, action }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return;
   if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://

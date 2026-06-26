@@ -653,3 +653,260 @@ All five chrome popups no longer occluded by the guest views:
 - Site-info → freeze-frame float (capture guest → frozen image behind → live restore on close), operator-confirmed float + restore.
 
 White-launch (Leg-1 async-activation bug) fixed + confirmed. Static gates green throughout (951/951 tests, typecheck, lint). a11y (`npm run a11y`) + full behavior corpus deferred to the Leg-5 HAT. **Leg 2 status → `landed`.** Next: Leg 3 (internal `goldfinch://` tabs → views), Leg 4 (remove `<webview>` machinery), Leg 5 (HAT).
+
+---
+
+### Flight Director Notes — PIVOT: native menus → freeze-frame HTML menus (Leg 02b added, 2026-06-26)
+
+**Operator decision.** After Leg 2 landed, the operator reported the native `Menu.popup()` menus
+(page context menu, kebab, container picker) "really look terrible, and are a bit laggy" on WSLg, and
+asked whether to roll back the whole mission, whether the look is a Linux thing, and whether native
+menus can be styled.
+
+**Findings surfaced to the operator:**
+- **Native Electron menus cannot be styled** — the `Menu`/`MenuItem` API exposes only
+  label/icon/accelerator/role/type; rendering is the OS toolkit (GTK on Linux). No fonts/colors/
+  spacing/corners.
+- The ugliness + lag are **largely a WSLg artifact** (GTK fallback theme + the Wayland/RDP popup
+  pipeline); the same menus render cleanly on macOS/Windows. But the operator runs WSLg.
+- A **third option** beyond "ugly native" vs "roll back the mission": render the *styled HTML* menus
+  over a **freeze-frame** still of the guest — the exact technique site-info already uses and the
+  operator already verified ("Floats + restores correctly"). This recovers the styled look + in-process
+  snappiness while keeping the entire migration (rolling back would discard Flights 2–3 and abandon the
+  migration's purpose — `<webview>` is deprecated/removal-signaled by Electron).
+
+**Operator chose: freeze-frame HTML menus.** (AskUserQuestion, 2026-06-26.)
+
+**DD12 revised AGAIN → freeze-frame HTML menus** for the three guest-overlapping menus. DD12's prior
+native-menu choice (and DD12-orig overlay) are kept for history; this is the live menu disposition
+going forward. Leg 2 stays `landed` and is NOT rewritten (immutability) — the revision lands in a new
+leg, **02b-freeze-frame-html-menus**, executed next (before Leg 3 internal-tabs; the menus are
+chrome-doc HTML, independent of the internal-tab and machinery-removal work). The find-bar inset and
+the site-info freeze-frame from Leg 2 are unchanged (find stays inset; site-info migrates onto the
+shared freeze helper).
+
+**Design review disposition.** The pivot was scoped via an interactive plan (plan mode) whose design
+was cross-referenced against current code by a Plan agent — it surfaced load-bearing drift (the a11y
+audit is currently broken because `openPageContextMenuForAudit()` was removed in the pivot; most
+main-side handlers the HTML menus call already survive; the `menu-controller.js` extraction +
+`window.prompt`/kebab-Downloads drift). That codebase-validated review stands in for the Phase-2a
+Developer design review for this leg; recorded here per the agentic-workflow Flight Director decision log.
+
+**Key technical insight (carried):** the menus are restorable verbatim from commit **`83b18ad`** (last
+commit before the native pivot) via `git show`. Restoration is mostly renderer/preload/markup + native
+handler removal; the bulk of main-side plumbing already survives. Approach: one-message capture for the
+context menu (main captures in the `context-menu` handler and forwards `{wcId, params, dataURL}` in a
+single IPC → lowest latency). **Gating risk:** `capturePage`-on-open latency must beat native lag — a
+latency smoke is the FIRST implementation step, with a divert if median > ~80–100 ms.
+
+---
+
+### Leg 02b — freeze-frame HTML menus (2026-06-26)
+
+**Leg objective:** Revert the three chrome menus (page context menu, kebab ⋮, container picker ▾) from native `Menu.popup()` back to styled HTML, rendered over a freeze-frame still of the active guest `WebContentsView`. Restore from commit `83b18ad`; generalize the site-info freeze helper into shared `freezeGuest`/`unfreezeGuest`; fix the broken a11y audit.
+
+---
+
+#### Step 1 — Latency smoke (GATING)
+
+The `capture-active-guest` IPC handler (`capturePage().toDataURL()`) could not be timed interactively from this non-interactive agent context (no live app session available). However, the operator already verified the site-info freeze-frame (which uses the same handler) as "Floats + restores correctly" in Leg 2, confirming the path is perceptually acceptable. Proceeding on that basis. **Divert threshold not triggered.** Operator is asked to verify perceived latency at runtime (HAT / on-screen smoke, Task #7).
+
+---
+
+#### Step 2 — Freeze-frame generalized (renderer.js)
+
+- `let siteInfoFreezeActive = false` **replaced** with `let guestFrozen = false` — single flag for all menus.
+- `async function freezeGuest(stillOpen?)` added near the geometry block: web-tab guard → `captureActiveGuest()` → optional liveness check (`stillOpen()`) → set `#webviews` background image + size → `tabHide(visibleWebTabWcId)` → `guestFrozen = true`. Returns `boolean`.
+- `function unfreezeGuest()` added: early-return if not frozen; clear flag + bg image/size → `tabSetActive(t.wcId, measureWebviewsSlotWithInsetDIP())` → restore `visibleWebTabWcId`.
+- `sendActiveBounds()` — **early-return when `guestFrozen`** (don't move a hidden guest).
+- `onTriggerSendBounds` subscription — **no-op when `guestFrozen`** (unfreezeGuest re-measures on dismiss).
+- `siteInfoEntry.onOpen/onClose` **migrated** to call `freezeGuest(() => !els.siteInfoPopup.classList.contains('hidden'))` / `unfreezeGuest()`. Behavior identical to prior sub-step 5 code.
+
+---
+
+#### Step 3 — HTML skeleton restored (index.html, styles.css, renderer.js els)
+
+**index.html:**
+- Restored `#container-menu` (empty div, role="menu"), `#kebab-menu` (4 static items: Settings, Downloads, Print…, Exit), `#page-context-menu` (empty div, role="menu", tabindex="-1") from `83b18ad`.
+- Removed the `<!-- native Menu.popup() -->` placeholder comments.
+- `new-container-dialog` comment updated (no longer triggered by native `chrome-new-container-prompt`).
+
+**styles.css:**
+- Restored `#container-menu`, `#kebab-menu`, `#page-context-menu` blocks and `.cm-item`, `.cm-sep`, `.cm-title` rule sets from `83b18ad`. Did NOT duplicate `.cm-dot` (already present from Leg 2) or site-info CSS.
+
+**renderer.js els:**
+- Restored: `containerMenu`, `kebabMenu`, `pageContextMenu` bindings.
+- Removed the `// removed — native Electron Menu.popup()` comments on those entries.
+
+---
+
+#### Step 4 — Bridge restore (preload + d.ts)
+
+**chrome-preload.js:**
+- **Removed:** `toolbarContextMenu`, `openKebabMenu`, `openContainerMenu`, `onChromeOpenInternal`, `onChromeNewTabInContainer`, `onChromeNewContainerPrompt`.
+- **Added:** `onPageContextMenu` (carries `dataURL`), `clipboardWriteText`, `correctMisspelling`, `pageContextAction` — all as `ipcRenderer.invoke` matching the existing `ipcMain.handle` handlers in main.js.
+
+**renderer-globals.d.ts:**
+- Same removals and additions, typed correctly. `onPageContextMenu` carries `dataURL?: string | null`.
+
+**Gate:** `npm run typecheck` → 0 errors.
+
+---
+
+#### Step 5 — Kebab + container HTML menus restored (renderer.js)
+
+- Restored `kebabItems()`, `positionKebabMenu()`, `kebabEntry` (menuController registration with `onOpen`/`onClose`), `closeKebabMenu()`.
+- **Drift applied — Downloads:** added `#kebab-downloads` item + click handler (`closeKebabMenu()` + `openDownloads()`). `openDownloads()` moved to be collocated with the kebab section (was after BURNER_SENTINEL in the native version).
+- **Drift applied — no inline menuController/focusItem:** the restored code uses the global `menuController` and `focusItem` from `menu-controller.js` — no duplicate declarations.
+- **Drift applied — freeze-frame:** kebab `onOpen` → `freezeGuest(() => !els.kebabMenu.classList.contains('hidden'))`; `onClose` → `unfreezeGuest()`. *(Note: this is async; the menu shows then freezes, similar to the prior site-info approach. On the next leg, the onOpen can be made async if the freeze-then-show pattern is preferred.)*
+- Restored `containerItems()`, `containerEntry`, `closeContainerMenu()`.
+- **Drift applied — New container…:** the "New container…" button in `containerEntry.onOpen` now calls `document.getElementById('new-container-dialog').classList.remove('hidden'); document.getElementById('new-container-name').focus()` — NOT `window.prompt`. The inline `#new-container-dialog` + `initNewContainerDialog()` handle the rest.
+- **Drift applied — burner:** burner click calls `createTab(currentHomePage(), makeBurner())` directly.
+- **Drift applied — BURNER_SENTINEL removed:** no longer needed (was only for native picker round-trip).
+- Container `onOpen`/`onClose` → same freeze/unfreeze wiring as kebab.
+- Replaced native `els.kebab.addEventListener('click', ...)` (was `window.goldfinch.openKebabMenu()`) with controller toggle.
+- Replaced native `els.newTabMenu.addEventListener('click', ...)` (was `window.goldfinch.openContainerMenu(...)`) with controller toggle.
+
+---
+
+#### Step 6 — Page context menu restored (renderer.js + main.js)
+
+**renderer.js:**
+- Restored `pageContextItems()`, `pageCtx` module-level state object, `truncateLabel()`, `basenameFromUrl()`, `buildPageContextSections()`, `positionPageContextMenu()`, `pageContextEntry` (menuController registration), `closePageContextMenu()`.
+- **Drift applied — dataURL freeze:** `onPageContextMenu({ wcId, params, dataURL })` subscription applies the freeze directly from the `dataURL` provided by main (synchronous path — no async wait needed). Sets background image + `tabHide` + `guestFrozen = true` **before** `queueMicrotask(() => menuController.open(...))`.
+- `pageContextEntry.onClose` → `unfreezeGuest()`.
+- Restored Shift+F10/ContextMenu key handler (chrome-focused case).
+- **Drift applied — no duplicate menuController/focusItem:** uses globals.
+
+**main.js (context-menu handler):**
+- Replaced the `Menu.buildFromTemplate`/`menu.popup` block with: `event.preventDefault()` → `isInternalContents(contents)` guard → `await contents.capturePage().toDataURL()` (try/catch → null) → `getChromeContents()?.send('page-context-menu', { wcId: contents.id, params, dataURL })`.
+
+---
+
+#### Step 7 — Toolbar Unpin mode restored (renderer.js)
+
+- Replaced 1-arg `openToolbarContextMenu(item)` (which called `window.goldfinch.toolbarContextMenu(item)`) with 2-arg `openToolbarContextMenu(item, anchorEl)` from `83b18ad`.
+- Re-pointed the three `contextmenu` listeners on `toggleMedia`, `togglePrivacy`, `toggleDevtools` to pass `els.toggleMedia`, `els.togglePrivacy`, `els.toggleDevtools` as `anchorEl`.
+- Toolbar-Unpin mode anchors over chrome (not the guest) — no freeze needed; `onClose` calls `unfreezeGuest()` which no-ops when `guestFrozen === false`.
+
+---
+
+#### Step 8 — Native main handlers removed (main.js)
+
+- Deleted `ipcMain.on('toolbar-context-menu', ...)` block.
+- Deleted `ipcMain.on('open-kebab-menu', ...)` block.
+- Deleted `ipcMain.on('open-container-menu', ...)` block.
+- **Removed `Menu` from Electron `require()` destructure** (line 3). Confirmed `grep "Menu\." src/main/main.js` → 0 results.
+- `new-container-create` handler simplified: no longer signals `chrome-new-tab-in-container` back — just creates the jar and returns the object; the renderer opens the tab directly from the resolved container.
+
+---
+
+#### Step 9 — Dead renderer subs removed (renderer.js)
+
+- Deleted `window.goldfinch.onChromeOpenInternal(...)` subscription (Settings/Downloads were signaled from native kebab — now the HTML menu calls `createTab` directly).
+- Deleted `window.goldfinch.onChromeNewTabInContainer(...)` subscription (was the native container selection path).
+- Deleted `window.goldfinch.onChromeNewContainerPrompt(...)` subscription (was the native "New container…" path).
+- `initNewContainerDialog()` kept — it now handles the full inline dialog flow for both the container menu's "New container…" button and the `new-container-create` IPC round-trip.
+
+---
+
+#### Gate results
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Typecheck | `npm run typecheck` | **PASS** — 0 errors |
+| Lint | `npm run lint` | **PASS** — 0 errors |
+| Tests | `npm test` | **PASS** — 951/951 |
+| Menu. grep | `grep -n "Menu\." src/main/main.js` | **PASS** — 0 results |
+| Dead native symbols | `grep -rn "openKebabMenu\|openContainerMenu\|..."` | **PASS** — 0 results |
+| a11y | `npm run a11y` | **PENDING** — requires live app session (MCP harness); `openPageContextMenuForAudit()` is restored and the function reference that was broken is satisfied. Operator to verify at on-screen smoke. |
+
+**Runtime smoke:** Could not be performed from this non-interactive agent context (no live app session, no MCP harness access). Visual confirmation that the styled HTML menus render above page content over the freeze-frame still is **pending operator on-screen verification (Task #7)**. This covers AC2, AC3, AC4, AC5 (runtime dismiss paths), and AC6 (geometry guard under resize).
+
+---
+
+#### Drift summary
+
+1. **menuController/focusItem are globals** — dropped inline IIFE + function from restored code (no duplicate declarations).
+2. **Kebab Downloads** — added `#kebab-downloads` item (was missing in `83b18ad`).
+3. **Container "New container…"** — wired to inline dialog (not `window.prompt`).
+4. **BURNER_SENTINEL removed** — no longer needed without the native picker round-trip.
+5. **new-container-create return path** — main now just returns the container; renderer opens tab directly.
+6. **Page-context dataURL** — renderer applies freeze synchronously from `dataURL` forwarded by main (one round-trip vs. prior two-round-trip async capture path).
+7. **onOpen freeze async** — for kebab/container, `freezeGuest` is async but `onOpen` is not `await`ed by the controller; the freeze applies after the menu is already visible (same behavior as the prior site-info implementation). Acceptable per the "accept + log" edge-case note.
+
+**Leg status → `landed` (NOT committed).**
+
+---
+
+#### Leg 02b — fix-review continuation: latent Leg-1 a11y regression (dangling `aria-controls`)
+
+Restoring `openPageContextMenuForAudit()` un-broke the a11y audit (`#page-context-menu` now appears in the audit, as intended). With the audit running again, it surfaced **7 new critical `aria-valid-attr-value` violations on `.tab`** (one per scenario) — a **latent Leg-1 regression** that had been masked since the Leg-2 native pivot broke the audit.
+
+**Root cause (Leg 1, not Leg 02b):** `createTab()` set every tab button's `aria-controls` to `webview-${id}`. Pre-migration each tab had a real `<webview id="webview-${id}">` DOM node, so the IDREF resolved. Leg 1 migrated **web (untrusted) tabs** to native `WebContentsView`s with **no per-tab DOM node** — but the `aria-controls="webview-${id}"` line ran unconditionally for all tabs, so for view-backed web tabs the IDREF dangled → invalid attribute value → critical axe violation.
+
+**Fix (`src/renderer/renderer.js`):** point the tab button's `aria-controls` at the shared content region `#webviews` (`<div id="webviews">` in `index.html`) instead of a per-tab id. `#webviews` is the single content container both tab kinds use — native web views are composited over it; internal tabs keep a `<webview>` CHILD of it — so it is the one element common to both and the only non-dangling target. All tabs controlling the one content region is valid and semantically correct (there is no per-tab DOM node anymore).
+
+**Grep sweep for other dangling IDREFs from the view migration** (`grep -rn "webview-" src/renderer/` + `aria-controls`/`aria-labelledby`/`aria-describedby`/`aria-owns`/`for=`/`htmlFor`/`getElementById('webview-...')`):
+- `renderer.js:716` — `webview.id = \`webview-${id}\`` is still set, but ONLY inside the `if (trusted)` branch that genuinely creates a `<webview>` element for internal tabs → the id is on a real element, not dangling; left untouched (no aria refs it).
+- `renderer.js:752` — the now-fixed `aria-controls="webviews"` (the only `aria-controls` in the renderer).
+- Other `webview-` hits are all `webview-preload.js` file-path references (preload/main), unrelated to IDREFs.
+- No `aria-labelledby`/`aria-describedby`/`aria-owns`/`for=`/`htmlFor`/`getElementById('webview-...')` references the removed per-tab element. **Sweep clean — this was the only dangling IDREF.**
+
+**Gates after fix:** `npm run typecheck` → 0 errors; `npm run lint` → 0 errors. The live `npm run a11y` re-run (to confirm the 7 violations are cleared) is the operator's — they will restart the app against fresh code. AC8's a11y line stays "pending operator `a11y` run" until that confirms 0 new violations.
+
+---
+
+#### Leg 02b — HAT inline fix: page context menu (positioning + freeze path)
+
+Operator HAT passed kebab, container, latency, and dismiss-restores. The **page context menu failed** two ways: it rendered BEHIND the live guest in the content region, and was misaligned ~89px too high. Two root causes, both fixed inline (no commit).
+
+**Bug B — positioning (`positionPageContextMenu`, renderer.js).** The offset used `activeTab().webview.getBoundingClientRect()`. Web tabs are native `WebContentsView`s now and have **no `.webview` element** → `wv` falsy → offset fell back to `{left:0,top:0}` → the guest-view-relative `params.x/y` were applied at the chrome origin instead of the content region's top-left (~89px too high; visible when right-clicking near the top, over the chrome band). **Fix:** for the non-keyboard (mouse) case, offset by `els.webviews.getBoundingClientRect()` when there is no `.webview` element; internal tabs (which still have a `<webview>`) keep using its rect; keyboard (chrome-focused Shift+F10) coords stay un-offset.
+
+**Bug A — freeze not applying ("behind" symptom): Option B → Option A switch.** The context menu was the only one using an **event-time main-side capture** (`contents.capturePage()` in the `context-menu` handler, forwarding `dataURL`), freezing only `if (dataURL)`. On WSLg that capture intermittently threw/returned empty at right-click time → `dataURL` null → freeze skipped → the opaque live guest occluded the HTML menu. Kebab/container never had this because they freeze via the renderer's proven `freezeGuest()`/`captureActiveGuest()` path (operator-confirmed working). **Deliberate switch from the plan's "Option B single-message" to "Option A" (the proven renderer path):**
+- `main.js` `context-menu` handler: dropped the `capturePage()`/`dataURL` entirely; now synchronous — `preventDefault` → internal guard → `send('page-context-menu', { wcId, params })`.
+- `renderer.js` `onPageContextMenu`: removed the `dataURL` destructure + the inline freeze block; just sets `pageCtx` + `queueMicrotask(open)`.
+- `renderer.js` `pageContextEntry.onOpen`: applies the freeze via `freezeGuest(() => menuController.current === pageContextEntry)`, gated to the mouse-on-guest case only (`!pageCtx.toolbarItem && !pageCtx.keyboard`) — toolbar-Unpin anchors over chrome and keyboard Shift+F10 originates from a chrome element, neither needs a guest freeze. Fire-and-forget, mirroring kebab/container exactly.
+- `renderer-globals.d.ts`: `onPageContextMenu` payload narrowed to `{ wcId, params }` (no `dataURL`).
+
+**Rationale recorded:** the plan's Option B (one-message event-time capture for lowest latency) is abandoned for the context menu because the event-time `capturePage()` is unreliable on WSLg; all four menus now share the single proven `freezeGuest`/`captureActiveGuest` open-time path. Latency was already operator-confirmed acceptable on that path.
+
+**Gates after fix:** `npm run typecheck` → 0 errors; `npm run lint` → 0 errors; `npm test` → 951/951. Operator to restart and re-test the page context menu on-screen.
+
+---
+
+#### Leg 02b — HAT inline fix #2: toolbar-Unpin + keyboard page-context were occluded (freeze made unconditional)
+
+After the context-menu fix, the operator confirmed the mouse page context menu works on screen. New finding: the **toolbar-Unpin menu** (right-click a pinned media/shields/devtools toggle) only appeared when a side panel was open.
+
+**Root cause — earlier assumption wrong.** I had gated the page-context freeze to `!pageCtx.toolbarItem && !pageCtx.keyboard`, on the assumption that toolbar-Unpin "anchors over chrome." In fact the Unpin dropdown extends **DOWN into the guest content region**, so with no side panel open the opaque native guest occludes it; with a panel open that region is chrome HTML (the panel, not a native view) so it showed. The keyboard Shift+F10 page-context case had the same latent exposure.
+
+**Fix (`src/renderer/renderer.js`, `pageContextEntry.onOpen`).** Made the freeze **unconditional**. `freezeGuest()` already self-gates to web tabs (no-ops for internal/no-guest), so toolbar-Unpin and keyboard invocations freeze too when a web guest is present:
+```js
+// was:
+if (!pageCtx.toolbarItem && !pageCtx.keyboard) {
+  freezeGuest(() => menuController.current === pageContextEntry);
+}
+// now:
+freezeGuest(() => menuController.current === pageContextEntry);
+```
+Positioning is unaffected — `positionPageContextMenu` still branches on `pageCtx.keyboard` for the coordinate offset; the freeze only hides the live guest and paints the still. `onClose` already calls `unfreezeGuest()` unconditionally, so the freeze stays balanced across all three invocation modes (mouse / toolbar-Unpin / keyboard).
+
+**Gates after fix:** `npm run typecheck` → 0 errors; `npm run lint` → 0 errors. Operator to re-test toolbar-Unpin (no side panel open) + keyboard Shift+F10 on screen.
+
+---
+
+#### Leg 02b — Flight Director: live verification complete + checkpoint
+
+**a11y (Flight Director ran it live).** Launched `dev:automation` (admin key minted), ran `npm run a11y` against the running app. First run after restoring the audit surfaced the 7 critical `aria-controls` violations (logged above); after the `aria-controls="webviews"` fix and an app restart, the re-run reported **"No NEW violations — every violation node is in the ACCEPTED baseline. ✅"**. The audit exercises `#page-context-menu` (via the restored `openPageContextMenuForAudit()`), confirming the page context menu opens with valid roles/landmark. **AC8 a11y now GREEN** (and a previously-invisible critical regression is cleared — the audit had been broken since the Leg-2 pivot).
+
+**Operator HAT (on-screen, WSLg) — PASS for all menus.** After two inline fixes (context-menu position+freeze; toolbar-Unpin/keyboard freeze made unconditional), the operator confirmed on the real screen:
+- Page context menu (mouse): styled, aligned at the cursor, over the frozen page; items work; dismiss restores the live page. ✅
+- Kebab ⋮ and container picker ▾: styled, above the page. ✅
+- Toolbar-Unpin (right-click a pinned toggle) with **no side panel open**: now shows. ✅
+- Latency: as snappy or snappier than the native menus it replaced (original complaint resolved). ✅
+- Dismiss restores the live guest cleanly. ✅
+
+**Final gates (Flight Director, clean checkpoint):** `npm run typecheck` → 0; `npm run lint` → 0; `npm test` → 951/951; `npm run a11y` → 0 new violations; `grep "Menu\." src/main/main.js` → 0.
+
+**All AC1–AC8 satisfied** (AC1 latency confirmed by operator feel on the proven `freezeGuest`/`captureActiveGuest` path). **Leg 02b checkpoint-committed (local, not pushed)** — mirroring the Legs 1 & 2 WIP checkpoint; leg stays `landed` (flight-end Reviewer pass + `completed` status happen when the flight lands). Next (operator pace): resume Leg 3 (internal `goldfinch://` tabs → views), Leg 4 (remove `<webview>` machinery), Leg 5 (HAT).

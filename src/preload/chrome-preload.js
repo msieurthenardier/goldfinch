@@ -76,37 +76,24 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // subscribes for live button updates. Payload { wcId, open }.
   onDevtoolsStateChanged: (cb) => ipcRenderer.on('devtools-state-changed', (_e, d) => cb(d)),
 
-  // --- toolbar Unpin context menu (Leg 2 — native Menu.popup() in main) ---
-  // Right-clicking a pinned toolbar icon sends this; main builds a native menu with
-  // "Unpin {item}" and pops it at the cursor above all WebContentsViews. Chrome-trusted
-  // one-way send — same trust domain as window-minimize/app-quit (no origin-check needed).
-  toolbarContextMenu: (item) => ipcRenderer.send('toolbar-context-menu', item),
-
-  // --- native kebab menu (Flight 3, Leg 2 — sub-step 2) ---
-  // ⋮ button click: pops a native menu (Settings/Downloads/Print/Exit) above all views.
-  openKebabMenu: () => ipcRenderer.send('open-kebab-menu'),
-
-  // --- native container picker (Flight 3, Leg 2 — sub-step 2) ---
-  // ▾ button click: sends the current containers snapshot; main builds + pops the native menu.
-  openContainerMenu: (containers) => ipcRenderer.send('open-container-menu', { containers }),
+  // --- new container create (renderer collects name, main creates jar) ---
   // After "New container…": renderer collected the name via inline input; main creates the
   // jar and signals back 'chrome-new-tab-in-container'. Returns the new container object.
   newContainerCreate: (name) => ipcRenderer.invoke('new-container-create', { name }),
 
-  // --- main → renderer: open an internal tab (chrome-open-internal) ---
-  // Fired by main's kebab Settings/Downloads native menu items. The renderer calls
-  // createTab(url, null, { trusted: true }) which owns the trusted tab creation path.
-  onChromeOpenInternal: (cb) => ipcRenderer.on('chrome-open-internal', (_e, url) => cb(url)),
+  // --- main → renderer: page context menu (with optional freeze-frame dataURL) ---
+  // Fired by main's guest context-menu listener with the params + an optional freeze-frame
+  // dataURL (captured from the guest before opening). Renderer opens the HTML context menu.
+  onPageContextMenu: (cb) => ipcRenderer.on('page-context-menu', (_e, d) => cb(d)),
 
-  // --- main → renderer: open a new tab in a specific container ---
-  // Fired after container selection in the native picker or after new-container-create.
-  // The renderer maps jarId to its container object and calls createTab(currentHomePage(), container).
-  onChromeNewTabInContainer: (cb) => ipcRenderer.on('chrome-new-tab-in-container', (_e, jarId) => cb(jarId)),
+  // --- clipboard (renderer-side context-menu actions that need main-process clipboard) ---
+  clipboardWriteText: (text) => ipcRenderer.invoke('chrome-clipboard-write', text),
 
-  // --- main → renderer: prompt for new container name ---
-  // Fired by main when the user picks "New container…" in the native picker.
-  // The renderer shows an inline input to collect the name, then calls newContainerCreate.
-  onChromeNewContainerPrompt: (cb) => ipcRenderer.on('chrome-new-container-prompt', () => cb()),
+  // --- spellcheck correction (renderer context menu "Fix" action) ---
+  correctMisspelling: (word) => ipcRenderer.invoke('page-context-correct', word),
+
+  // --- page context action (cut/copy/paste/undo/redo on the guest) ---
+  pageContextAction: (action) => ipcRenderer.invoke('page-context-action', action),
 
   // FIX 1 belt-and-suspenders: main pushes this after maximize/unmaximize/resize so the
   // renderer immediately re-measures and re-sends the #webviews slot bounds to the active

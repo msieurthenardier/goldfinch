@@ -411,7 +411,18 @@ reference survives" check, not by "tabs render."
   Page context menu + kebab + container picker → native `Menu.popup()`; find bar → guest-top-inset (page
   stays live); site-info → small popup/inset. Fix the context-menu coordinate alignment. **Gate: each popup
   renders ABOVE the page; menus work + dismiss; find shows over a live page; no black; no white-launch.**
-  (SC3 parity. Trade-off: menus become OS-styled.)
+  (SC3 parity. Trade-off: menus become OS-styled.) *(Menus SUPERSEDED by `02b` — see below; find-inset +
+  site-info freeze-frame from this leg are retained.)*
+- [ ] `02b` `freeze-frame-html-menus` *(added 2026-06-26; DD12 revised AGAIN — supersedes Leg 2's native
+  menus)* — **Revert the three guest-overlapping menus (page context menu + toolbar-Unpin mode, kebab,
+  container picker) from native `Menu.popup()` back to styled HTML**, rendered over a **freeze-frame** still
+  of the guest (the proven site-info technique) so HTML z-index works above the opaque guest view. Restore
+  the menus from pre-pivot commit `83b18ad`; generalize the site-info freeze into shared
+  `freezeGuest`/`unfreezeGuest` helpers; remove the native-menu machinery. Executes **next** (before
+  `internal-tabs-as-views`; menus are chrome-doc HTML, independent of internal-tab/machinery work).
+  **Gate: each menu renders styled ABOVE the page over a freeze; every dismiss restores the live guest;
+  capture latency beats native (gating smoke); `test`/`typecheck`/`lint`/`a11y` green (a11y broken→fixed).**
+  (SC3 parity. Operator: native menus look bad + lag on WSLg and can't be styled.)
 - [ ] `internal-tabs-as-views` — Construct internal `goldfinch://` tab views with byte-exact internal
   `webPreferences` (DD3-internal: `contextIsolation:true`/`sandbox:true`/`spellcheck:false`,
   internal preload, `INTERNAL_PARTITION`); verify the internal session (`__goldfinchInternal` marker),
