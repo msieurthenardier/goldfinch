@@ -168,7 +168,7 @@ follow-on work.
   full DD2 re-point + engine accessor-contract change verified live (27 MCP tools, tabs browse,
   `captureWindow` composites the guest); EPIPE robustness guard added. macOS unverified (DD5). HAT wrapped
   early by operator (drag/minimize/close + full behavior corpus deferred — low risk). *(SC8.)*
-- [x] **Flight 3: Tab surface** — ✅ LANDED (2026-06-26). Guest tabs as `WebContentsView`s driven by
+- [x] **Flight 3: Tab surface** — ✅ COMPLETED (2026-06-26). Guest tabs as `WebContentsView`s driven by
   main-process geometry; per-tab partition/preload reproduced byte-exact with farbling preserved;
   navigation, popups-as-tabs, persistent sessions. **Scope expanded (planning, 2026-06-25):** by operator
   decision this flight migrated **both web AND internal `goldfinch://` tabs** (internal-page migration
@@ -177,8 +177,9 @@ follow-on work.
   Six legs (web-tabs, chrome-popups→freeze-frame-HTML-menus `02b`, internal-tabs, remove-machinery,
   HAT). Verified: security gate (internal-exclusion + jar-confinement, live), MCP drive corpus, a11y,
   951/951 tests; render-correctness HAT operator-confirmed on screen. Two WSLg-class known issues logged
-  (menu blip on internal tabs; maximize 2/3). Landed on `flight/03-tab-surface` (local); pending merge to
-  the mission branch + `/flight-debrief`. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
+  (menu blip on internal tabs; maximize 2/3). Debriefed (three reusable patterns + the
+  substrate-guard-audit / harness-liveness / HTML-over-native-view lessons). Merged to
+  `mission/05-webcontentsview-migration` locally; `main` untouched. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
 - [ ] **Flight 4: Conveniences & event-seam re-architecture** — re-home the renderer↔`<webview>`-element
   seams to the main-process `webContents` (delete/replace `find.js`'s D1 find workaround; re-wire the
   renderer's `found-in-page`, media-rescan, and privacy-stream listeners), then re-verify zoom, print,
