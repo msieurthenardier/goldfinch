@@ -406,15 +406,13 @@ function createWindow() {
   });
 
   // The chrome WebContentsView carries the webPreferences that used to live on the
-  // BrowserWindow (DD1/DD2). webviewTag:true keeps guest tabs as <webview> INSIDE the
-  // chrome doc this flight (their migration to per-tab views is Flight 3 — premise-verified).
+  // BrowserWindow (DD1/DD2). Guest tabs are per-tab WebContentsViews wired explicitly
+  // in tab-create (Flight 3 — all <webview> machinery removed in Leg 4).
   chromeView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // <webview> tag is how we embed real Chromium web pages as tabs.
-      webviewTag: true,
       sandbox: false,
       // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
       // can gate the automationDevInvoke bridge method. The chrome renderer's own process.argv
@@ -439,32 +437,6 @@ function createWindow() {
 
   chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-
-  // Run each <webview> preload in the page's MAIN world so the privacy hooks
-  // can wrap fingerprinting APIs directly (CSP-immune). nodeIntegration stays
-  // off, so pages get no Node; the preload's vars stay module-scoped.
-  //
-  // EXCEPTION: the trusted internal `goldfinch://` webview (identified by its
-  // partition) runs CONTEXT-ISOLATED + sandboxed with no node — it's privileged
-  // local chrome, not untrusted web content, and its minimal preload uses only
-  // contextBridge (sandbox-compatible). (DD5 / leg 3)
-  getChromeContents().on('will-attach-webview', (_e, webPreferences, params) => {
-    if (params.partition === INTERNAL_PARTITION) {
-      webPreferences.contextIsolation = true;
-      webPreferences.nodeIntegration = false;
-      webPreferences.sandbox = true;
-      // Defense-in-depth (DD1): goldfinch:// internal pages never spellcheck and never
-      // trigger the dictionary CDN fetch. The session-layer applier already excludes the
-      // internal session; this belt-and-suspenders also disables it at attach. The WEB
-      // branch is left at Electron's default (do NOT set spellcheck there — it is immutable
-      // after attach, so the session-layer applier owns the live web toggle).
-      webPreferences.spellcheck = false;
-      return;
-    }
-    webPreferences.contextIsolation = false;
-    webPreferences.sandbox = false;
-    webPreferences.nodeIntegration = false;
-  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -655,12 +627,6 @@ function wireGuestContents(contents) {
     });
   }
 }
-
-app.on('web-contents-created', (_event, contents) => {
-  if (contents.getType() === 'webview') {
-    wireGuestContents(contents);
-  }
-});
 
 // Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
 // Forwards did-navigate / title / favicon / loading / find to the chrome renderer.
@@ -1395,21 +1361,43 @@ ipcMain.handle('new-container-create', async (_event, { name }) => {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
+  // -----------------------------------------------------------------------
+  // Pick webPreferences by trust level (Leg 3).
+  //
+  // INTERNAL (trusted=true): byte-exact webPreferences matching will-attach-webview's
+  // internal branch. The partition MUST come from the INTERNAL_PARTITION constant —
+  // any literal drift silently resolves a different session → marker absent → gates,
+  // protocol.handle, bridge, and automation exclusion all fail open. (DD0 / security)
+  //
+  // WEB (trusted=false): web prefs — contextIsolation:false so the farbling preload runs
+  // in the page main world (required). NO spellcheck key — the session-layer applier
+  // (applySpellcheck) owns the live web toggle; a constructed view's spellcheck pref is
+  // immutable after attach, so inheriting the session default is correct. (DD3)
+  // -----------------------------------------------------------------------
+  let preloadPath;
+  let webPreferencesObj;
   if (trusted) {
-    // Internal tabs stay <webview> this leg
-    return null;
-  }
-  const webviewPreloadPath = path.join(__dirname, '..', 'preload', 'webview-preload.js');
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: webviewPreloadPath,
+    preloadPath = path.join(__dirname, '..', 'preload', 'internal-preload.js');
+    webPreferencesObj = {
+      preload: preloadPath,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      partition: INTERNAL_PARTITION,
+      spellcheck: false,
+    };
+  } else {
+    preloadPath = path.join(__dirname, '..', 'preload', 'webview-preload.js');
+    webPreferencesObj = {
+      preload: preloadPath,
       contextIsolation: false,
       sandbox: false,
       nodeIntegration: false,
       partition: partition,
       // NO spellcheck key — see will-attach-webview for the web branch
-    }
-  });
+    };
+  }
+  const view = new WebContentsView({ webPreferences: webPreferencesObj });
   mainWindow.contentView.addChildView(view);
 
   // Seed initial bounds
@@ -1420,7 +1408,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   view.setVisible(false);
 
   const wcId = view.webContents.id;
-  tabViews.set(wcId, { view, partition, trusted: false, active: false });
+  tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
 
   // Explicit construction-time wiring: web-contents-created fires synchronously
   // during new WebContentsView(), so the global handler cannot identify the view yet.
@@ -1518,14 +1506,19 @@ ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
   }
 });
 
-// Site-info freeze-frame: capture the active guest page as a PNG data URL.
+// Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.
 // Called by the renderer before hiding the guest and showing the freeze image.
-// Returns a data URL string, or null if no active web guest is available
-// (internal tabs use <webview> in the chrome doc — not occluding — so the
-// freeze-frame is not needed and callers skip it when this returns null).
+// Returns a data URL string, or null if no active web guest is available.
+//
+// Defense-in-depth (both-sides internal guard — Leg 3): the renderer's !t.trusted guard
+// is the primary caller gate; this main-side guard is belt-and-suspenders, matching the
+// discipline used by toggle-devtools / print / get-zoom / page-context-* which all refuse
+// the internal session on BOTH sides. Internal tabs are now WebContentsViews; without this
+// guard getActiveTabContents() could return the internal session view and capturePage() it.
 ipcMain.handle('capture-active-guest', async () => {
   const wc = getActiveTabContents();
   if (!wc || wc.isDestroyed()) return null;
+  if (isInternalContents(wc)) return null;  // Defense-in-depth: never capture internal session
   try {
     const img = await wc.capturePage();
     // toDataURL returns a data: URI (PNG, base64-encoded).

@@ -141,14 +141,6 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
-  // Absolute path to the webview preload, so the renderer can set it on
-  // <webview webpreferences> / preload attribute.
-  webviewPreloadPath: `file://${require('path').join(__dirname, 'webview-preload.js')}`,
-
-  // Absolute path to the TRUSTED internal-page preload, set on the Settings webview's
-  // preload attribute (distinct surface from webviewPreloadPath; runs context-isolated).
-  internalPreloadPath: `file://${require('path').join(__dirname, 'internal-preload.js')}`,
-
   // The internal partition string (single source of truth, src/shared/internal-page.js),
   // set as the trusted webview's `partition` attribute so it matches the main-process
   // internal session byte-for-byte.

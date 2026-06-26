@@ -112,12 +112,6 @@ interface GoldfinchBridge {
   /** Fired by the main-side Ctrl+J before-input-event capture (DD2). No payload. */
   onOpenDownloads(cb: () => void): void;
 
-  // Absolute file:// path to the webview preload script.
-  webviewPreloadPath: string;
-
-  // Absolute file:// path to the trusted internal-page preload script.
-  internalPreloadPath: string;
-
   // The internal `goldfinch://` partition string (single source of truth).
   internalPartition: string;
 

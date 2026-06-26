@@ -910,3 +910,231 @@ Positioning is unaffected — `positionPageContextMenu` still branches on `pageC
 **Final gates (Flight Director, clean checkpoint):** `npm run typecheck` → 0; `npm run lint` → 0; `npm test` → 951/951; `npm run a11y` → 0 new violations; `grep "Menu\." src/main/main.js` → 0.
 
 **All AC1–AC8 satisfied** (AC1 latency confirmed by operator feel on the proven `freezeGuest`/`captureActiveGuest` path). **Leg 02b checkpoint-committed (local, not pushed)** — mirroring the Legs 1 & 2 WIP checkpoint; leg stays `landed` (flight-end Reviewer pass + `completed` status happen when the flight lands). Next (operator pace): resume Leg 3 (internal `goldfinch://` tabs → views), Leg 4 (remove `<webview>` machinery), Leg 5 (HAT).
+
+---
+
+### Leg 3 — internal-tabs-as-views (2026-06-26)
+
+**Scope:** Migrated internal `goldfinch://` tabs (settings, downloads) from renderer `<webview>` elements to directly-constructed main-process `WebContentsViews`, reproducing the internal trust boundary byte-exact at construction. Retired all `tab.trusted && tab.webview` renderer couplings. Added a both-sides `capture-active-guest` internal guard. No `<webview>` construction remains anywhere in the codebase.
+
+---
+
+#### Step 1 — Main: `tab-create` internal-view construction
+
+**Byte-exact internal `webPreferences` (the load-bearing fact):**
+
+```js
+{
+  preload: path.join(__dirname, '..', 'preload', 'internal-preload.js'),
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+  partition: INTERNAL_PARTITION,   // ← from require('../shared/internal-page'), never a literal
+  spellcheck: false,
+}
+```
+
+The trusted early-return-null (`main.js:1400`) was replaced by a branch that selects web vs internal `webPreferences` based on the `trusted` flag. The `INTERNAL_PARTITION` constant is already imported at the top of `main.js` — no new import needed. The web branch is byte-identical to before (NO `spellcheck` key on web — owned by the session-layer applier). All construction steps (addChildView, seed bounds, setVisible(false), tabViews register with `trusted`, wireGuestContents then wireTabViewEvents then loadURL) mirror the web path exactly. Returns `wcId` for both trusted and untrusted.
+
+**`tabViews` registration:** `{ view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false }` — the `trusted` flag is now stored in the registry for any future consumer.
+
+---
+
+#### Step 2 — Renderer: `createTab` trusted branch → view IPC
+
+- Removed `<webview>` creation (the `document.createElement('webview')` block with src/preload/partition/allowpopups attributes).
+- `tab.webview = null` always (field kept for type compat; Leg 4 removes it).
+- Both trusted and untrusted now call `window.goldfinch.tabCreate({ url, partition: jar.partition, trusted })`.
+- In the `.then(wcId => ...)` callback, when the tab is still active: calls `tabSetActive(tab.wcId, measureWebviewsSlotWithInsetDIP())` (same as web), and ONLY sets `visibleWebTabWcId = tab.wcId` when `!trusted` — internal tabs never participate in the freeze-frame path.
+- The `activateTab` path for internal tabs with wcId now calls `tabSetActive` (so switching back to an already-open internal tab makes it visible — the key AC7 correctness fix).
+
+---
+
+#### Step 3 — Renderer: all `tab.trusted && tab.webview` couplings retired
+
+Every coupling found and updated (AC7):
+
+| Site | Action |
+|------|--------|
+| `createTab` (`:728–735`) | `<webview>` creation block removed |
+| `closeTab` (`:816–821`) | Both branches unified: `tab.wcId != null` → `tabClose` (internal uses same path as web) |
+| `activateTab` for-loop (`:829–832`) | `t.trusted && t.webview` CSS toggle removed; all tab visibility via tab-set-active IPC |
+| `activateTab` IPC branch (`:856–868`) | `!tab.trusted && tab.wcId != null` → unified `tab.wcId != null` with sub-branch for `!trusted` to set `visibleWebTabWcId`; internal branch sends `tabSetActive` |
+| `updateNavButtons` (`:1228`) | `tab.trusted && tab.webview` → `tab.trusted` → explicitly disable back/forward (no nav history) |
+| `navigate()` (`:1256–1268`) | Dead `tab.trusted && tab.webview` loadURL branch removed; `isInternalTab` early-return covers internal |
+| `els.back` click | Dead `t.trusted && t.webview` branch removed; `!t.trusted && t.wcId != null` only |
+| `els.forward` click | Same |
+| `els.reload` click | Dead `t.trusted && t.webview` branch removed |
+| Keyboard Ctrl+R reload | Dead `t.trusted && t.webview` branch removed |
+| Shields "Reload to apply" | Dead `t.trusted && t.webview` branch removed |
+| `newIdentity` | Dead `tab.trusted && tab.webview` branch removed |
+| `runFind` | Dead `tab.trusted && tab.webview` branch removed; `openFind`'s `isInternalTab` guard prevents internal tabs from reaching here |
+| `closeFind` | Same |
+| `els.mediaRescan` click | Dead `t.trusted && t.webview` branch removed; guarded by `t.trusted` early-return |
+| `__goldfinchAutomation.openTab` | Dead `tab.trusted && tab.webview` dom-ready poll branch removed; all tabs use the wcId-poll path |
+| `wireWebview(...)` call (`:787`) | Removed (replaced by the unified tabCreate IPC path) |
+| `wireWebview` function (`:1089–1220`) | Removed entirely (fully unused after the call site was removed; grep confirmed 0 call sites) |
+| `buildSiteInfo` "Site settings →" (`:329`) | `existing.webview.loadURL(...)` replaced with `tabNavigate({ verb: 'loadURL', args: [...] })` IPC |
+| `positionPageContextMenu` (`:558`) | Dead `t.webview` reference removed; always uses `els.webviews.getBoundingClientRect()` (correct for all tabs) |
+| `pageContextEntry.focusReturn` (`:609`) | Dead `wv.focus()` on `t.webview` removed; fallback to `ret` or `els.address.focus()` |
+
+`isInternalTab(tab)` is substrate-independent (keys on `container.id === 'internal' || container.partition === internalPartition`) — kept unchanged.
+
+**Post-removal grep:** `grep -n "createElement('webview')\|tab\.webview\|wireWebview" src/renderer/renderer.js` → shows only comments. **AC7 clean.**
+
+---
+
+#### Step 4 — Defensive internal guard on `capture-active-guest`
+
+Added `if (isInternalContents(wc)) return null;` to the main-side `ipcMain.handle('capture-active-guest', ...)` handler after the `wc` resolve. Updated the stale comment: the old text said "internal tabs use `<webview>` in the chrome doc — not occluding — so the freeze-frame is not needed"; corrected to describe the both-sides internal-guard discipline (matching `toggle-devtools`/`print`/`get-zoom`/`page-context-*`). The renderer `!t.trusted` guard in `freezeGuest` is the primary gate; this main-side check is defense-in-depth.
+
+---
+
+#### Trust-transfer analysis (gates, protocol.handle, bridge, exclusion)
+
+All four trust mechanisms key on **session identity** (`wc.session.__goldfinchInternal === true`) or partition — not on the `<webview>` substrate. A constructed view with `partition: INTERNAL_PARTITION` resolves the existing internal session (created at startup, marker already set); no re-creation occurs.
+
+| Mechanism | Transfer status |
+|-----------|----------------|
+| **Session-created hook** (shields/downloads/spellcheck exemption, `main.js:1746–1765`) | Transfers automatically — the view resolves the same session object whose `session-created` already fired at startup. No change to gate code. |
+| **`will-navigate` guard** (`main.js:558–566`) | Transfers automatically — keys on `contents.session.__goldfinchInternal`. |
+| **`setWindowOpenHandler`** (`main.js:550–553`) | Transfers automatically — wired by `wireGuestContents` which is called explicitly on the internal view in `tab-create`. |
+| **`before-input-event`** zoom/F12/print (`main.js:571–621`) | Transfers automatically — the listener is wired by `wireGuestContents`; the handler checks `__goldfinchInternal`. |
+| **`protocol.handle`** | Transfers automatically — registered on the internal session object; byte-exact partition → same handler. Page renders (AC4) pending runtime verification. |
+| **Origin-checked bridge** (`registerInternalHandler` + preload `location.origin` check) | Transfers automatically — checks `event.sender.session.__goldfinchInternal` (session marker) + `event.senderFrame.origin` (scheme-derived, same as before). Settings get/set, downloads, shields all pending runtime verification (AC5). |
+| **Automation exclusion** (`isInternalContents` in `resolve.js`) | Transfers automatically — keys on `wc.session.__goldfinchInternal === true` (strict equality). `enumerate` filter (`main.js:1094`) and `resolveContents` exclusion both survive. Pending runtime smoke (AC6). |
+
+**None of the gate code was modified.** Trust transfer is structural, not mechanical — it works because the session identity is preserved, which is guaranteed by using `INTERNAL_PARTITION` (the constant, never a literal).
+
+---
+
+#### Tests
+
+No existing unit test pinned the `trusted → null` behavior from `tab-create` (confirmed by grep). The unit tests for `internal-ipc`, `automation-resolve`, `internal-assets`, `automation-tabs`, `automation-scope`, `automation-input`, `automation-print` are all substrate-independent (keyed on session/origin markers via `makeInternalWc`) — they pass without modification.
+
+**`npm test` → 951/951 pass** (unchanged count; no tests required inversion or deletion).
+
+---
+
+#### Post-Leg note for Leg 4
+
+After this leg, **no tab is a `<webview>`** — `tab.webview` is always `null`, `wireWebview` is removed, and no `document.createElement('webview')` call exists in the renderer. Leg 4 can now safely remove:
+- `webviewTag: true` from chrome view `webPreferences`
+- `will-attach-webview` hook (its internal branch's work is now done at construction time in `tab-create`)
+- The `tab.webview` field declaration and any remaining null-check references
+- `window.goldfinch.internalPreloadPath` / `internalPreloadPath` global (main now owns the preload path; the renderer no longer sets it on any element)
+- The `getType() === 'webview'` filter in `web-contents-created` (no `<webview>` elements remain; the global handler sees no webview guests)
+
+---
+
+#### Runtime verification
+
+**Static gates (all run, all green):**
+- `npm run typecheck` → 0 errors
+- `npm run lint` → 0 errors
+- `npm test` → 951/951 pass
+- `grep -n "createElement('webview')\|tab\.webview\|wireWebview" src/renderer/renderer.js` → comments only (AC7 clean)
+
+**Runtime verification (AC2–AC6, AC9 a11y) — PENDING FD/operator verification.** This leg was implemented in a non-interactive agent context with no live app session or MCP harness access. The following ACs require operator on-screen smoke:
+
+- **AC2** — `goldfinch://settings` + `goldfinch://downloads` open, render real content, are visible/switchable/closable as views; `#webviews` has no `<webview>` child.
+- **AC3** — Four gates fire on the view: disallowed nav blocked, `window.open` opens a tab, zoom/F12 inert, no shields/download wiring on internal session.
+- **AC4** — `protocol.handle` serves the view (page renders, not a 404).
+- **AC5** — Origin-checked bridge works: settings get/set round-trips, downloads list renders, shield calls succeed; non-internal sender still rejected.
+- **AC6** — Automation: `enumerate` does not list internal; direct internal `wcId` returns `automation: internal-session` for jar keys.
+- **AC9 a11y** — `npm run a11y` against the running app.
+
+The trust transfer analysis above is structural (verified by reading the code) — runtime observation is required to close AC2–AC6 as "verified" rather than "expected by construction."
+
+**Leg 3 status → `landed` (NOT committed). ACs AC1/AC7/AC8 verified statically; AC2–AC6/AC9 pending FD/operator on-screen verification.**
+
+#### Leg 3 — Flight Director verification (2026-06-26)
+
+**Design review disposition.** Leg 3 was design-reviewed by a Developer agent (approve-with-changes); it surfaced the both-sides `capture-active-guest` guard (HIGH), the `updateNavButtons` degeneration (HIGH), and the full set of `tab.trusted && tab.webview` couplings beyond the initial list. All were folded into the leg before implementation; the FD skipped a second design-review cycle since the changes were direct incorporations of the reviewer's concrete fixes (flight-end Reviewer is the backstop).
+
+**FD self-serve (live app, Leg-3 code):** clean boot (no errors from the internal-view construction); **`npm run a11y` → 0 new violations (AC9 ✅)**.
+
+**Operator HAT (on-screen, WSLg) — PASS:** `goldfinch://settings` and `goldfinch://downloads` load as views with real content (AC2/AC4 ✅); a settings change persists (origin-checked bridge works on the constructed view — AC5 ✅); back/forward disabled on internal pages (AC7 nav-button fix ✅); switch/close work. The byte-exact `INTERNAL_PARTITION` carried the entire trust boundary onto the views.
+
+**Deferred to Leg 5 HAT (as the flight planned):** the full automation-exclusion + trust corpus — `internal-session-exclusion` + `mcp-jar-scoping` (run FIRST), then `farbling-correctness` / `core-browsing-shields` / `mcp-drive-end-to-end`. The jar-key rejection path (`automation: internal-session`) is already covered by `automation-resolve` unit tests; AC6 closes fully at Leg 5.
+
+**No tab is a `<webview>` anymore** → **Leg 4 (remove `webviewTag`/`will-attach-webview`) is unblocked.** Leg 3 will be checkpoint-committed together with Leg 4 (tightly coupled: Leg 4 removes the machinery Leg 3 made unused).
+
+---
+
+### Leg 4 — remove-webview-machinery
+
+**Date:** 2026-06-26  
+**Status:** landed (NOT committed — checkpoint commit covers Legs 3+4 together per Leg 3 FD note)
+
+#### What was removed
+
+**AC1 — `webviewTag: true` (main.js ~line 411):** Removed the `webviewTag: true` key from the `chromeView` `webPreferences` block. Updated the surrounding comment block to drop the `<webview>` rationale and note that guest tabs are now per-tab `WebContentsView`s wired explicitly in `tab-create`.
+
+**AC2 — `will-attach-webview` hook (main.js ~lines 443–467):** Removed the entire `getChromeContents().on('will-attach-webview', …)` callback and its comment block (8-line comment explaining main-world preload and the internal-branch contextIsolation exception). The hook never fires — no `<webview>` is ever attached now. The webPreferences it was setting (contextIsolation, sandbox, nodeIntegration, spellcheck) are now set at construction time in `tab-create` for both the internal branch (via `webPreferencesObj` with `contextIsolation: true`, `sandbox: true`, `spellcheck: false`) and the web branch.
+
+**AC3 — Dead `web-contents-created` handler (main.js ~lines 659–663):** Removed the `app.on('web-contents-created', (_event, contents) => { if (contents.getType() === 'webview') wireGuestContents(contents); })` handler entirely. A constructed `WebContentsView` reports `getType() === 'window'`; this branch could never match. The `wireGuestContents` function definition remains (lines ~514–656); the explicit call in `tab-create` (`wireGuestContents(view.webContents)`) remains untouched.
+
+**AC4 — Unused bridge globals (chrome-preload.js:146–150, renderer-globals.d.ts:116–119):**
+
+Confirm-dead grep BEFORE removal:
+```
+grep -rn "webviewPreloadPath|internalPreloadPath" src/renderer/ src/main/
+→ src/renderer/renderer-globals.d.ts:116  webviewPreloadPath: string;
+→ src/renderer/renderer-globals.d.ts:119  internalPreloadPath: string;
+```
+Zero live renderer consumers (no `window.goldfinch.webviewPreloadPath` or `window.goldfinch.internalPreloadPath` usage in `renderer.js` or any renderer file). Safe to remove.
+
+Removed:
+- `webviewPreloadPath: \`file://…webview-preload.js\`` and its comment block from `chrome-preload.js`
+- `internalPreloadPath: \`file://…internal-preload.js\`` and its comment block from `chrome-preload.js`
+- `webviewPreloadPath: string` type from `renderer-globals.d.ts`
+- `internalPreloadPath: string` type from `renderer-globals.d.ts`
+
+The files themselves (`webview-preload.js`, `internal-preload.js`) are **untouched** — main uses them directly via `path.join(__dirname, …)` in `tab-create`.
+
+#### Explicit tab-create wiring confirmed intact
+
+After removal of the dead `web-contents-created` handler, the only `wireGuestContents` call site is the explicit one in `tab-create` (confirmed by grep):
+```
+grep -rn "wireGuestContents" src/
+→ src/main/main.js:514   // wireGuestContents — wires event listeners…
+→ src/main/main.js:519   function wireGuestContents(contents) {
+→ src/main/main.js:1416  wireGuestContents(view.webContents);   ← explicit tab-create call (KEPT)
+```
+Every web tab and internal tab view is wired at construction before `loadURL` — no guest is left unwired.
+
+#### AC6 — `find.js` automation-find deferral (DD6)
+
+`src/main/automation/find.js` is **unchanged**. Lines 120 and 170 still contain `document.querySelectorAll('webview')` — a query that now returns an empty NodeList (no `<webview>` elements exist in the chrome doc). The automation `findInPage` MCP op is therefore non-functional on the view surface: the D1 workaround (injecting the listener onto a `<webview>` element) finds nothing.
+
+Per flight DD6, the `find.js` D1 workaround + the full MCP automation parity rework are deferred to **mission Flight 4/5** (the automation parity sweep). The user-facing find **bar** is unaffected (Leg 1 re-pointed the `found-in-page` transport for views). This is a known, tracked deferral — not a regression of existing behavior.
+
+#### SC1 source-absence — MET
+
+Post-removal greps (all run, all clean):
+- `grep -rn "webviewTag\|will-attach-webview" src/` → only incidental comments in non-tab-path files (`internal-preload.js:4` historical note, `settings-store.js:64` historical note, `main.js` two historical comments, `renderer.js:1089` changelog comment). Zero live keys or handlers.
+- `grep -rn "getType() === 'webview'\|getType()==='webview'" src/` → 0.
+- `grep -rn "webviewPreloadPath\|internalPreloadPath" src/` → 0.
+
+No `<webview>` can be constructed (the tag is off; the enabling key is gone from chromeView `webPreferences`). SC1's source-absence half is met.
+
+#### Static gates (verified)
+
+- `npm run typecheck` → 0 errors
+- `npm run lint` → 0 errors
+- `npm test` → **951/951 pass**
+
+#### Runtime verification — pending FD
+
+`npm run a11y` and the on-screen smoke (web tab + Settings + Downloads open/browse/switch/close as views; popup opens as tab; unsafe nav blocked; internal gates hold) require the live app with the MCP automation surface attached. These were not run in this agent context (no live GUI/MCP harness). The Flight Director should run `npm run a11y` and the HAT smoke before the checkpoint commit.
+
+#### Leg 4 — Flight Director verification (2026-06-26)
+
+Ran against the live app on the Leg-4 code (all `<webview>` machinery removed):
+- **Clean boot** — no errors/ReferenceErrors from the deletions.
+- **`npm run a11y` → 0 new violations.**
+- **MCP view-surface smoke (goldfinch automation, jar-scoped key):** `openTab https://example.com` → view constructed (`wcId 5`); `enumerateTabs` → `{wcId:5, title:"Example Domain", active:true}` (loaded, dom-ready, drivable); `navigate(5, https://example.net)` → `{ok:true}`, `enumerateTabs` → url updated to `example.net` (tab-navigate IPC + `did-navigate` event re-homing intact). `captureWindow` correctly refused for the jar key (`admin-only`) — exclusion still enforced. The engine drives the view end-to-end with no `<webview>` machinery present.
+
+Combined with Leg-3's operator-confirmed internal tabs (Leg 4 only deleted dead code that never fired for views), AC5 (app runs, tabs browse as views) and AC7 (gates green) are satisfied. **Leg 4 `landed` — verified.** Legs 3 + 4 checkpoint-committed together next.
+
