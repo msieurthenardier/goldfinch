@@ -83,15 +83,20 @@ interface GoldfinchBridge {
   isDevtoolsOpen(payload: { webContentsId: number }): Promise<boolean>;
   onDevtoolsStateChanged(cb: (d: { wcId: number; open: boolean }) => void): void;
 
-  // --- page context menu (Leg 1 bridges + Leg 4 edit/clipboard, SC6/DD2) ---
-  /** Subscription: main's guest context-menu listener forwards { wcId, params }. */
+  // --- new container create (renderer collects name, main creates jar) ---
+  /** Create a new container by name; main calls jars.add and signals back chrome-new-tab-in-container. */
+  newContainerCreate(name: string): Promise<{ id: string; name: string; color: string; partition: string } | null>;
+
+  // --- HTML page context menu (main → renderer) ---
+  /** Main fires with { wcId, params } — renderer opens the HTML context menu and applies its
+   *  own freeze-frame via freezeGuest()/captureActiveGuest() (Option A; no main-side capture). */
   onPageContextMenu(cb: (d: { wcId: number; params: any }) => void): void;
-  /** Spelling correction round-trip (chrome -> main -> guest replaceMisspelling). */
-  correctMisspelling(payload: { webContentsId: number; word: string }): void;
-  /** Allowlisted edit-action dispatch on the targeted guest (cut/copy/paste/undo/redo). */
-  pageContextAction(payload: { webContentsId: number; action: string }): void;
-  /** Narrow chrome-trusted OS-clipboard string write (Copy link / image address / selection). */
-  clipboardWriteText(text: string): void;
+  /** Write text to the system clipboard (invoked from the HTML context menu Copy action). */
+  clipboardWriteText(text: string): Promise<void>;
+  /** Replace a misspelled word with the chosen suggestion (context menu spelling correction). */
+  correctMisspelling(payload: { webContentsId: number | null; word: string }): Promise<void>;
+  /** Execute an edit action (cut/copy/paste/undo/redo) on a guest WebContents. */
+  pageContextAction(payload: { webContentsId: number | null; action: string }): Promise<void>;
 
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
@@ -107,14 +112,46 @@ interface GoldfinchBridge {
   /** Fired by the main-side Ctrl+J before-input-event capture (DD2). No payload. */
   onOpenDownloads(cb: () => void): void;
 
-  // Absolute file:// path to the webview preload script.
-  webviewPreloadPath: string;
-
-  // Absolute file:// path to the trusted internal-page preload script.
-  internalPreloadPath: string;
-
   // The internal `goldfinch://` partition string (single source of truth).
   internalPartition: string;
+
+  // --- site-info freeze-frame (Flight 3, Leg 2 sub-step 5) ---
+  /** Capture the active web guest as a PNG data URL for freeze-frame behind site-info popup. Returns null if no active web guest. */
+  captureActiveGuest(): Promise<string | null>;
+
+  // --- tab lifecycle (Flight 3, Leg 1 — web tab WebContentsView substrate) ---
+  /** Create a web tab view in main; returns the guest wcId (invoke). */
+  tabCreate(payload: { url: string; partition: string; trusted: boolean }): Promise<number>;
+  /** Close/destroy a web tab view (fire-and-forget). */
+  tabClose(wcId: number): void;
+  /** Hide a web tab view without closing (fire-and-forget). */
+  tabHide(wcId: number): void;
+  /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */
+  tabNavigate(payload: { wcId: number; verb: string; args?: any[] }): void;
+  /** Atomic activation: set-bounds + show incoming, hide outgoing (fire-and-forget). */
+  tabSetActive(wcId: number, bounds: { x: number; y: number; width: number; height: number }): void;
+  /** Update bounds of a web tab view (fire-and-forget). */
+  tabSetBounds(wcId: number, bounds: { x: number; y: number; width: number; height: number }): void;
+  /** findInPage / stopFindInPage on a web tab view (fire-and-forget). */
+  tabFind(payload: { wcId: number; text?: string; options?: any; stop?: boolean }): void;
+  /** Send rescan-media to a specific web tab view (fire-and-forget). */
+  rescanMedia(payload: { wcId: number }): void;
+
+  // FIX 1 belt-and-suspenders: main triggers an immediate bounds re-send on maximize/unmaximize/resize.
+  onTriggerSendBounds(cb: () => void): void;
+
+  // --- tab event subscriptions (pushed from main) ---
+  onTabDidNavigate(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
+  onTabDidNavigateInPage(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
+  onTabTitle(cb: (d: { wcId: number; title: string }) => void): void;
+  onTabFavicon(cb: (d: { wcId: number; favicons: string[] }) => void): void;
+  onTabLoading(cb: (d: { wcId: number; loading: boolean }) => void): void;
+  onTabDidFinishLoad(cb: (d: { wcId: number }) => void): void;
+  onTabDomReady(cb: (d: { wcId: number }) => void): void;
+  onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
+  onTabFoundInPage(cb: (d: { wcId: number; result: any }) => void): void;
+  onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
+  onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 
 /**

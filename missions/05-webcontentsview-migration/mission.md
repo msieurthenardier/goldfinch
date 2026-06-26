@@ -168,12 +168,18 @@ follow-on work.
   full DD2 re-point + engine accessor-contract change verified live (27 MCP tools, tabs browse,
   `captureWindow` composites the guest); EPIPE robustness guard added. macOS unverified (DD5). HAT wrapped
   early by operator (drag/minimize/close + full behavior corpus deferred — low risk). *(SC8.)*
-- [ ] **Flight 3: Tab surface** — guest tabs as `WebContentsView`s driven by main-process geometry;
-  per-tab partition/preload reproduced with farbling preserved; navigation, popups-as-tabs, persistent
-  sessions. **Scope expanded (planning, 2026-06-25):** by operator decision this flight migrates **both
-  web AND internal `goldfinch://` tabs** (internal-page migration pulled forward from Flight 5) so the
-  `<webview>` machinery (`webviewTag`/`will-attach-webview`) can be removed in one flight; it also fixes
-  the `captureWindow` composite that the sibling-view change breaks. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
+- [x] **Flight 3: Tab surface** — ✅ COMPLETED (2026-06-26). Guest tabs as `WebContentsView`s driven by
+  main-process geometry; per-tab partition/preload reproduced byte-exact with farbling preserved;
+  navigation, popups-as-tabs, persistent sessions. **Scope expanded (planning, 2026-06-25):** by operator
+  decision this flight migrated **both web AND internal `goldfinch://` tabs** (internal-page migration
+  pulled forward from Flight 5) so the `<webview>` machinery (`webviewTag`/`will-attach-webview`) is
+  removed in one flight; it also fixed the `captureWindow` composite the sibling-view change breaks.
+  Six legs (web-tabs, chrome-popups→freeze-frame-HTML-menus `02b`, internal-tabs, remove-machinery,
+  HAT). Verified: security gate (internal-exclusion + jar-confinement, live), MCP drive corpus, a11y,
+  951/951 tests; render-correctness HAT operator-confirmed on screen. Two WSLg-class known issues logged
+  (menu blip on internal tabs; maximize 2/3). Debriefed (three reusable patterns + the
+  substrate-guard-audit / harness-liveness / HTML-over-native-view lessons). Merged to
+  `mission/05-webcontentsview-migration` locally; `main` untouched. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
 - [ ] **Flight 4: Conveniences & event-seam re-architecture** — re-home the renderer↔`<webview>`-element
   seams to the main-process `webContents` (delete/replace `find.js`'s D1 find workaround; re-wire the
   renderer's `found-in-page`, media-rescan, and privacy-stream listeners), then re-verify zoom, print,

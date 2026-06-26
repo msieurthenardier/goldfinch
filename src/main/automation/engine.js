@@ -21,7 +21,7 @@ const find = require('./find');
  *
  * @param {() => (Electron.WebContents | null)} getChromeContents
  *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null }} [opts]
  *   allowInternal — admin's SOLE relaxation (DD6 / Leg 2): when true, deps carry
  *   allowInternal so resolveContents lets the internal goldfinch://settings
  *   session through. The mcp-server builds the admin engine with
@@ -31,9 +31,13 @@ const find = require('./find');
  *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
  *   op returns the merged download records. Absent → getDownloadsList throws a clean
  *   `downloads-unavailable`. Field named getDownloads to avoid shadowing the op name.
+ *   grabWindow — async function returning a base64 PNG of the whole window, or null
+ *   on failure. Injected from main.js (Flight 3, Leg 1); kept out of observe.js so
+ *   that module stays Electron-free and unit-testable. Absent → captureWindow throws
+ *   'automation: chrome window unavailable' (same as before injection).
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -54,7 +58,7 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // is carried so the engine and the scope façade share ONE Session→partition
     // resolver — the membership compare in resolveContentsForJar uses the same
     // interned Session that resolveContents sees, so they cannot diverge.
-    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition };
+    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.

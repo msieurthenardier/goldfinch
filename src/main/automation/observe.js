@@ -202,17 +202,19 @@ async function readDom(wcId, deps) {
  * Whole-window (chrome + composited guests) capture (DD1). Its own export / dispatch key —
  * NOT a null-wcId overload of captureScreenshot. Takes no wcId and never activates.
  *
- * A nullish chromeContents throws the EXISTING 'automation: chrome window unavailable'
+ * A nullish or null-returning grabWindow throws the EXISTING 'automation: chrome window unavailable'
  * message verbatim (the same string engine.js:34 throws for the same null-window condition —
- * reused, not a new variant).
+ * reused, not a new variant). grabWindow is injected from main.js (Flight 3, Leg 1) and keeps
+ * observe.js Electron-free.
  *
- * @param {{ chromeContents: any }} deps
+ * @param {{ grabWindow: (() => Promise<string|null>) | null }} deps
  * @returns {Promise<string>} base64-encoded PNG
  */
-async function captureWindow({ chromeContents }) {
-  if (!chromeContents) throw new Error('automation: chrome window unavailable');
-  const image = await chromeContents.capturePage();
-  return image.toPNG().toString('base64');
+async function captureWindow({ grabWindow }) {
+  if (!grabWindow) throw new Error('automation: chrome window unavailable');
+  const result = await grabWindow();
+  if (!result) throw new Error('automation: chrome window unavailable');
+  return result;
 }
 
 /**

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -139,6 +139,26 @@ let chromeView = null;
 // or null when the view is absent (startup/teardown). EVERY former chrome-renderer webContents
 // site routes through this; the engine + scope-ctx seams point at this same accessor.
 const getChromeContents = () => (chromeView ? chromeView.webContents : null);
+
+// Tab-view registry: keyed by guest webContents.id → { view, partition, trusted, active }
+const tabViews = new Map();
+// Active tab's wcId (null when no web tab is active)
+let activeTabWcId = null;
+
+
+// Returns the guest webContents for a tab view by its wcId (or null if not found/destroyed).
+function getTabContents(wcId) {
+  const entry = tabViews.get(wcId);
+  if (!entry) return null;
+  const wc = entry.view.webContents;
+  return (wc && !wc.isDestroyed()) ? wc : null;
+}
+
+// Returns the active web tab's webContents (or null).
+function getActiveTabContents() {
+  return activeTabWcId != null ? getTabContents(activeTabWcId) : null;
+}
+
 // The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
 // hooks (before-quit / window-all-closed) can reach it. Stays null until the
 // surface binds: in production the Settings `automationEnabled` toggle is the sole
@@ -159,6 +179,106 @@ let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, e
 // human-written value. Never active in a packaged build.
 let devEnableOverride = false;
 
+// Grab a screenshot of the main window as a base64 PNG (Flight 3, Leg 1).
+// Tries desktopCapturer first (with correct thumbnailSize); falls back to a
+// chrome+guest canvas composite on WSLg (dep-free, via executeJavaScript).
+// Injected into the engine via deps.grabWindow so observe.js stays Electron-free.
+async function grabWindow() {
+  if (!mainWindow) return null;
+  try {
+    const bounds = mainWindow.getBounds();
+    // FIX 2(a): request thumbnail at the actual window content size so we get a
+    // full-resolution capture, not the 150px-wide default thumbnail.
+    const { width: cw, height: ch } = mainWindow.getContentBounds();
+    const sources = await desktopCapturer.getSources({
+      types: ['window'],
+      fetchWindowIcons: false,
+      thumbnailSize: { width: cw, height: ch },
+    });
+    let best = null;
+    let bestScore = -1;
+    for (const src of sources) {
+      if (!src.thumbnail) continue;
+      const size = src.thumbnail.getSize();
+      if (!size || !size.width || !size.height) continue;
+      const score = Math.min(size.width, bounds.width) * Math.min(size.height, bounds.height);
+      if (score > bestScore) { bestScore = score; best = src; }
+    }
+    if (best && best.thumbnail) {
+      return best.thumbnail.toPNG().toString('base64');
+    }
+  } catch {
+    /* desktopCapturer unavailable */
+  }
+  // FIX 2(b) — WSLg / Wayland fallback: build a REAL chrome+guest composite in the
+  // chrome renderer via executeJavaScript. Steps:
+  //   1. capturePage() on chrome and active guest in parallel.
+  //   2. Ask the chrome renderer for the #webviews bounding rect (the guest's offset).
+  //   3. Draw chrome first, then guest at its offset, on an offscreen <canvas>;
+  //      return the composite as a data URL.
+  // This is dep-free and avoids shipping a broken chrome-only screenshot.
+  try {
+    const cc = getChromeContents();
+    const atc = getActiveTabContents();
+    if (!cc || cc.isDestroyed()) return null;
+
+    // Capture both views in parallel.
+    const [chromeImg, tabImg] = await Promise.all([
+      cc.capturePage(),
+      atc && !atc.isDestroyed() ? atc.capturePage() : Promise.resolve(null),
+    ]);
+    if (!chromeImg) return null;
+
+    const chromeB64 = chromeImg.toPNG().toString('base64');
+    const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
+
+    if (!tabB64) {
+      // No active guest — chrome-only capture.
+      return chromeB64;
+    }
+
+    // Get the #webviews slot bounds from the chrome renderer so we know
+    // where to draw the guest PNG on the composite canvas.
+    const guestBoundsJson = await cc.executeJavaScript(
+      'JSON.stringify(document.getElementById("webviews")?.getBoundingClientRect() ?? null)'
+    );
+    const guestBounds = guestBoundsJson ? JSON.parse(guestBoundsJson) : null;
+
+    if (!guestBounds) {
+      // Can't locate the slot — return chrome PNG only.
+      return chromeB64;
+    }
+
+    // Composite in the chrome renderer: draw chrome, then guest at the slot offset.
+    const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, tabDataUrl, gx, gy, gw, gh) {
+      return new Promise(function(resolve, reject) {
+        var chromeImg = new Image();
+        chromeImg.onload = function() {
+          var tabImg = new Image();
+          tabImg.onload = function() {
+            var canvas = document.createElement('canvas');
+            canvas.width = chromeImg.naturalWidth;
+            canvas.height = chromeImg.naturalHeight;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(chromeImg, 0, 0);
+            ctx.drawImage(tabImg, Math.round(gx), Math.round(gy), Math.round(gw), Math.round(gh));
+            resolve(canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, ''));
+          };
+          tabImg.onerror = function() { resolve(null); };
+          tabImg.src = tabDataUrl;
+        };
+        chromeImg.onerror = function() { reject(new Error('chrome img load failed')); };
+        chromeImg.src = chromeDataUrl;
+      });
+    })('data:image/png;base64,${chromeB64}', 'data:image/png;base64,${tabB64}', ${guestBounds.x}, ${guestBounds.y}, ${guestBounds.width}, ${guestBounds.height})`);
+
+    return compositeB64 || chromeB64;
+  } catch {
+    /* fallback failed */
+  }
+  return null;
+}
+
 // Create + start a fresh MCP server instance, capturing bind-status into mcpStatus
 // (Flight 5 / DD1 + Leg 7). NO explicit `port` is passed, so createMcpServer runs
 // resolvePort (env GOLDFINCH_MCP_PORT > persisted automationPort > default) — which
@@ -169,7 +289,7 @@ async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
-    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll() }),
+    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll(), grabWindow }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -286,15 +406,13 @@ function createWindow() {
   });
 
   // The chrome WebContentsView carries the webPreferences that used to live on the
-  // BrowserWindow (DD1/DD2). webviewTag:true keeps guest tabs as <webview> INSIDE the
-  // chrome doc this flight (their migration to per-tab views is Flight 3 — premise-verified).
+  // BrowserWindow (DD1/DD2). Guest tabs are per-tab WebContentsViews wired explicitly
+  // in tab-create (Flight 3 — all <webview> machinery removed in Leg 4).
   chromeView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // <webview> tag is how we embed real Chromium web pages as tabs.
-      webviewTag: true,
       sandbox: false,
       // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
       // can gate the automationDevInvoke bridge method. The chrome renderer's own process.argv
@@ -306,12 +424,12 @@ function createWindow() {
     }
   });
 
-  // DD6: match the BaseWindow background so the frameless launch shows no white flash
-  // before the chrome doc paints (belt-and-suspenders with the chrome doc's own #1e1f25).
-  chromeView.setBackgroundColor('#1e1f25');
   // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
   // the window itself (DD3).
   mainWindow.contentView.addChildView(chromeView);
+  // Opaque dark background matching the shell (Flight-2 DD6): prevents a white flash
+  // before the chrome renderer paints its first frame on slow/WSLg starts.
+  chromeView.setBackgroundColor('#1e1f25');
   // DD3: chrome view fills the window. Set initial bounds from the constructed size (not
   // getContentBounds() at the construction instant, which can lag the requested size on some
   // platforms and flash a gap); steady-state geometry is owned by the resize handler below.
@@ -319,31 +437,6 @@ function createWindow() {
 
   chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  // Run each <webview> preload in the page's MAIN world so the privacy hooks
-  // can wrap fingerprinting APIs directly (CSP-immune). nodeIntegration stays
-  // off, so pages get no Node; the preload's vars stay module-scoped.
-  //
-  // EXCEPTION: the trusted internal `goldfinch://` webview (identified by its
-  // partition) runs CONTEXT-ISOLATED + sandboxed with no node — it's privileged
-  // local chrome, not untrusted web content, and its minimal preload uses only
-  // contextBridge (sandbox-compatible). (DD5 / leg 3)
-  getChromeContents().on('will-attach-webview', (_e, webPreferences, params) => {
-    if (params.partition === INTERNAL_PARTITION) {
-      webPreferences.contextIsolation = true;
-      webPreferences.nodeIntegration = false;
-      webPreferences.sandbox = true;
-      // Defense-in-depth (DD1): goldfinch:// internal pages never spellcheck and never
-      // trigger the dictionary CDN fetch. The session-layer applier already excludes the
-      // internal session; this belt-and-suspenders also disables it at attach. The WEB
-      // branch is left at Electron's default (do NOT set spellcheck there — it is immutable
-      // after attach, so the session-layer applier owns the live web toggle).
-      webPreferences.spellcheck = false;
-      return;
-    }
-    webPreferences.contextIsolation = false;
-    webPreferences.sandbox = false;
-    webPreferences.nodeIntegration = false;
-  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -352,10 +445,15 @@ function createWindow() {
 
   // DD3: keep the chrome view sized to the window. No-op if the view is already gone
   // (resize can fire during teardown).
+  // FIX 1 belt-and-suspenders: after the chrome view bounds are updated, push
+  // 'trigger-send-bounds' to the renderer so it immediately re-measures #webviews
+  // and resends the active guest's bounds. Belt-and-suspenders alongside the
+  // renderer-side ResizeObserver (which fires per CSS layout frame during transitions).
   mainWindow.on('resize', () => {
     if (!chromeView) return;
     const { width, height } = mainWindow.getContentBounds();
     chromeView.setBounds({ x: 0, y: 0, width, height });
+    getChromeContents()?.send('trigger-send-bounds');
   });
 
   // Forward maximize state to the renderer so the custom window controls can
@@ -363,8 +461,14 @@ function createWindow() {
   // Leg 1 re-points only the .send payload through the chrome contents (required for AC7's
   // zero-match grep). The maximize/unmaximize event REGISTRATION stays on mainWindow — a
   // BaseWindow still emits these — and is Leg 2's concern (DD4 window-control re-point).
-  mainWindow.on('maximize', () => getChromeContents()?.send('window-maximized-change', true));
-  mainWindow.on('unmaximize', () => getChromeContents()?.send('window-maximized-change', false));
+  mainWindow.on('maximize', () => {
+    getChromeContents()?.send('window-maximized-change', true);
+    getChromeContents()?.send('trigger-send-bounds');
+  });
+  mainWindow.on('unmaximize', () => {
+    getChromeContents()?.send('window-maximized-change', false);
+    getChromeContents()?.send('trigger-send-bounds');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -407,120 +511,166 @@ function applyZoom(wc, action) {
 // `webpreferences` attribute in the renderer references this path indirectly,
 // but we also enforce it here so pages can never opt out.
 // ---------------------------------------------------------------------------
-app.on('web-contents-created', (_event, contents) => {
-  if (contents.getType() === 'webview') {
-    // Open target=_blank / window.open as new tabs in our own UI instead of
-    // spawning native Electron windows.
-    contents.setWindowOpenHandler(({ url }) => {
-      getChromeContents()?.send('open-tab', url);
-      return { action: 'deny' };
-    });
-    // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
-    // navigate only within its own allowlist; every web-origin webview keeps the
-    // stricter web rule (still rejects goldfinch://, file:, data:, javascript:, …).
-    // Optional access → a missing/falsy session falls through to the stricter web branch.
-    contents.on('will-navigate', (e, url) => {
-      if (/** @type {any} */ (contents.session)?.__goldfinchInternal) {
-        // Internal session: only ever on the internal allowlist (goldfinch://settings).
-        if (!isInternalPageUrl(url)) e.preventDefault();
-      } else {
-        // Web session: unchanged.
-        if (!isSafeTabUrl(url)) e.preventDefault();
-      }
-    });
-    // Page-scoped zoom capture (DD6). This is the path that fires while the PAGE
-    // has focus (the normal case); the renderer keydown handler is the fallback for
-    // when the chrome shell is focused. Skip the internal session entirely (DD3) —
-    // internal pages never zoom.
-    if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
-      contents.on('before-input-event', (event, input) => {
-        if (input.type !== 'keyDown') return;
-        // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
-        // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
-        // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
-        // skip (~:356) already excludes internal sessions (DD5). Guard isAutoRepeat so a HELD F12
-        // doesn't rapid-toggle (main-side before-input-event repeats keyDown while held).
-        if (input.key === 'F12') {
-          if (!input.isAutoRepeat) toggleDevTools(contents);  // contents IS the guest wc — pre-guarded by the outer skip
-          event.preventDefault();
-          return;
-        }
-        if (!(input.control || input.meta)) return;
-        // Match '=' regardless of shift (US-layout Ctrl+Shift+= → zoom in) and '+'.
-        let action = null;
-        if (input.key === '=' || input.key === '+') action = 'in';
-        else if (input.key === '-') action = 'out';
-        else if (input.key === '0') action = 'reset';
-        // Native print (SC2). Save-as-PDF is a destination within the OS dialog.
-        // print() returns immediately; on WSLg with no CUPS printer it fails
-        // silently, so surface the failureReason via the callback (DD/WSLg note).
-        if (input.key === 'p' || input.key === 'P') {
-          contents.print({}, (ok, reason) => {
-            if (!ok) console.warn('print failed:', reason);
-          });
-          event.preventDefault();
-          return;
-        }
-        // Find in page (SC4 / DD2). Suppress Chromium's native find and open the
-        // renderer-side floating find bar. Modelled on the zoom-changed broadcast:
-        // send to the chrome renderer where the bar lives (NOT on the open-tab path
-        // inside setWindowOpenHandler). No payload — the renderer infers via activeTab().
-        // The __goldfinchInternal skip at ~:356 (outer guard) already excludes internal
-        // sessions, satisfying DD5.
-        if (input.key === 'f' || input.key === 'F') {
-          event.preventDefault();
-          getChromeContents()?.send('open-find');
-          return;
-        }
-        // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
-        // renderer (onOpenDownloads), mirroring the find path. isAutoRepeat guard is REQUIRED:
-        // this path has no isInternalTab guard, so a HELD Ctrl+J would stack downloads tabs
-        // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
-        if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
-          event.preventDefault();
-          getChromeContents()?.send('open-downloads');
-          return;
-        }
-        // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
-        // section. Same isAutoRepeat guard so a held chord doesn't rapid-toggle. contents is the
-        // guest wc, pre-guarded by the outer __goldfinchInternal skip (DD5).
-        if (input.control && input.shift && (input.key === 'I' || input.key === 'i')) {
-          if (!input.isAutoRepeat) toggleDevTools(contents);
-          event.preventDefault();
-          return;
-        }
-        if (!action) return;
-        applyZoom(contents, action);
-        event.preventDefault();
-      });
-      // DevTools live-state broadcast (Flight-3 DD3). The leg-1 spike was POSITIVE: both
-      // devtools-opened/devtools-closed fire on the main-process guest webContents (unlike
-      // found-in-page, which fired only on the renderer <webview> tag — Flight-2 D1). We wire the
-      // GUEST side here and forward to the chrome renderer (mirrors the zoom-changed broadcast) so
-      // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
-      // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
-      const sendDevtoolsState = (open) => {
-        getChromeContents()?.send('devtools-state-changed', { wcId: contents.id, open });
-      };
-      contents.on('devtools-opened', () => sendDevtoolsState(true));
-      contents.on('devtools-closed', () => sendDevtoolsState(false));
-      // Custom page context menu (DD2/DD6/DD8). Leg-1 spike POSITIVE on BOTH sides: the
-      // context-menu event fires on the main-process guest webContents AND on the renderer
-      // <webview> tag, each carrying the full rich params (linkURL/imageURL/srcURL/mediaType/
-      // selectionText/isEditable/misspelledWord/dictionarySuggestions/x/y/editFlags) for
-      // link/image/editable/selection targets. We wire the GUEST side (the DD2 primary design):
-      // it sits inside the !__goldfinchInternal guard, so internal goldfinch:// guests never get
-      // the custom menu (DD6) — no renderer-side internal-ness gate needed (unlike the tag path).
-      // Suppress the native OS menu and forward the WHOLE params object to the chrome renderer
-      // keyed by wcId (mirrors the zoom-changed / devtools-state-changed broadcast). Leg 4 renders
-      // #page-context-menu from it and decides which fields to surface.
-      contents.on('context-menu', (event, params) => {
-        event.preventDefault();                                  // retire the native OS menu (SC6)
-        getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
-      });
+// wireGuestContents — wires event listeners onto a guest webContents. Called for
+// <webview> elements from the global app.on('web-contents-created') handler AND
+// explicitly for new WebContentsViews in ipcMain.handle('tab-create') (because
+// web-contents-created fires SYNCHRONOUSLY during new WebContentsView(), before the
+// tabViews registry entry can be set — so the global handler cannot identify them).
+function wireGuestContents(contents) {
+  // Open target=_blank / window.open as new tabs in our own UI instead of
+  // spawning native Electron windows.
+  contents.setWindowOpenHandler(({ url }) => {
+    getChromeContents()?.send('open-tab', url);
+    return { action: 'deny' };
+  });
+  // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
+  // navigate only within its own allowlist; every web-origin webview keeps the
+  // stricter web rule (still rejects goldfinch://, file:, data:, javascript:, …).
+  // Optional access → a missing/falsy session falls through to the stricter web branch.
+  contents.on('will-navigate', (e, url) => {
+    if (/** @type {any} */ (contents.session)?.__goldfinchInternal) {
+      // Internal session: only ever on the internal allowlist (goldfinch://settings).
+      if (!isInternalPageUrl(url)) e.preventDefault();
+    } else {
+      // Web session: unchanged.
+      if (!isSafeTabUrl(url)) e.preventDefault();
     }
+  });
+  // Page-scoped zoom capture (DD6). This is the path that fires while the PAGE
+  // has focus (the normal case); the renderer keydown handler is the fallback for
+  // when the chrome shell is focused. Skip the internal session entirely (DD3) —
+  // internal pages never zoom.
+  if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
+      // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
+      // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
+      // skip already excludes internal sessions (DD5). Guard isAutoRepeat so a HELD F12
+      // doesn't rapid-toggle (main-side before-input-event repeats keyDown while held).
+      if (input.key === 'F12') {
+        if (!input.isAutoRepeat) toggleDevTools(contents);  // contents IS the guest wc — pre-guarded by the outer skip
+        event.preventDefault();
+        return;
+      }
+      if (!(input.control || input.meta)) return;
+      // Match '=' regardless of shift (US-layout Ctrl+Shift+= → zoom in) and '+'.
+      let action = null;
+      if (input.key === '=' || input.key === '+') action = 'in';
+      else if (input.key === '-') action = 'out';
+      else if (input.key === '0') action = 'reset';
+      // Native print (SC2). Save-as-PDF is a destination within the OS dialog.
+      // print() returns immediately; on WSLg with no CUPS printer it fails
+      // silently, so surface the failureReason via the callback (DD/WSLg note).
+      if (input.key === 'p' || input.key === 'P') {
+        contents.print({}, (ok, reason) => {
+          if (!ok) console.warn('print failed:', reason);
+        });
+        event.preventDefault();
+        return;
+      }
+      // Find in page (SC4 / DD2). Suppress Chromium's native find and open the
+      // renderer-side floating find bar. Modelled on the zoom-changed broadcast:
+      // send to the chrome renderer where the bar lives (NOT on the open-tab path
+      // inside setWindowOpenHandler). No payload — the renderer infers via activeTab().
+      // The __goldfinchInternal skip already excludes internal sessions, satisfying DD5.
+      if (input.key === 'f' || input.key === 'F') {
+        event.preventDefault();
+        getChromeContents()?.send('open-find');
+        return;
+      }
+      // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
+      // renderer (onOpenDownloads), mirroring the find path. isAutoRepeat guard is REQUIRED:
+      // this path has no isInternalTab guard, so a HELD Ctrl+J would stack downloads tabs
+      // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
+      if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
+        event.preventDefault();
+        getChromeContents()?.send('open-downloads');
+        return;
+      }
+      // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
+      // section. Same isAutoRepeat guard so a held chord doesn't rapid-toggle. contents is the
+      // guest wc, pre-guarded by the outer __goldfinchInternal skip (DD5).
+      if (input.control && input.shift && (input.key === 'I' || input.key === 'i')) {
+        if (!input.isAutoRepeat) toggleDevTools(contents);
+        event.preventDefault();
+        return;
+      }
+      if (!action) return;
+      applyZoom(contents, action);
+      event.preventDefault();
+    });
+    // DevTools live-state broadcast (Flight-3 DD3). The leg-1 spike was POSITIVE: both
+    // devtools-opened/devtools-closed fire on the main-process guest webContents (unlike
+    // found-in-page, which fired only on the renderer <webview> tag — Flight-2 D1). We wire the
+    // GUEST side here and forward to the chrome renderer (mirrors the zoom-changed broadcast) so
+    // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
+    // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
+    const sendDevtoolsState = (open) => {
+      getChromeContents()?.send('devtools-state-changed', { wcId: contents.id, open });
+    };
+    contents.on('devtools-opened', () => sendDevtoolsState(true));
+    contents.on('devtools-closed', () => sendDevtoolsState(false));
+    // HTML page context menu (DD2/DD6, Leg 2b — freeze-frame approach, Option A). The
+    // context-menu event fires on the main-process guest webContents. We forward ONLY the
+    // params; the chrome renderer applies the freeze-frame via its own proven
+    // freezeGuest()/captureActiveGuest() path on menu open (the same path the kebab/container
+    // menus use and the operator confirmed working). An event-time capturePage() here proved
+    // unreliable on WSLg (intermittently threw/returned empty → freeze skipped → live guest
+    // occluded the HTML menu), so we deliberately do NOT capture in this handler. Internal
+    // goldfinch:// guests are excluded by the !__goldfinchInternal guard (DD6).
+    contents.on('context-menu', (event, params) => {
+      event.preventDefault();
+      if (!mainWindow) return;
+      if (isInternalContents(contents)) return;
+      getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
+    });
   }
-});
+}
+
+// Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
+// Forwards did-navigate / title / favicon / loading / find to the chrome renderer.
+function wireTabViewEvents(view, wcId) {
+  const wc = view.webContents;
+  const sendToChrome = (channel, payload) => {
+    const cc = getChromeContents();
+    if (cc && !cc.isDestroyed()) cc.send(channel, payload);
+  };
+  // guard: wraps a handler so it no-ops if the webContents is already destroyed.
+  // Uses rest args to forward all event arguments through unchanged.
+  const guard = (fn) => (...args) => { if (!wc.isDestroyed()) fn(...args); };
+
+  wc.on('did-navigate', guard(() => {
+    sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
+    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+  }));
+  wc.on('did-navigate-in-page', guard(() => {
+    sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
+    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+  }));
+  wc.on('page-title-updated', guard((_e, title) => {
+    sendToChrome('tab-title', { wcId, title });
+  }));
+  wc.on('page-favicon-updated', guard((_e, favicons) => {
+    sendToChrome('tab-favicon', { wcId, favicons });
+  }));
+  wc.on('did-start-loading', guard(() => {
+    sendToChrome('tab-loading', { wcId, loading: true });
+  }));
+  wc.on('did-stop-loading', guard(() => {
+    sendToChrome('tab-loading', { wcId, loading: false });
+  }));
+  wc.on('did-finish-load', guard(() => {
+    sendToChrome('tab-did-finish-load', { wcId });
+    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+  }));
+  wc.on('dom-ready', guard(() => {
+    sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
+  }));
+  wc.on('found-in-page', guard((_e, result) => {
+    sendToChrome('tab-found-in-page', { wcId, result });
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Downloads. The renderer asks us to download a media URL using the *page's*
@@ -546,7 +696,7 @@ const liveDownloadItems = new Map();
 
 ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedName, saveDir }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  const downloader = wc || getChromeContents();
+  const downloader = wc || getActiveTabContents() || getChromeContents();
   if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
 
   if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
@@ -1194,8 +1344,219 @@ ipcMain.on('app-quit', () => app.quit());
 // (settings page only): the chrome renderer cannot reach that one, and navigator.clipboard is
 // unreliable from a file:// doc right after a guest context-menu steals focus. Writes a STRING
 // only (coerced) — not a guest mutation, no general-write concern.
-ipcMain.on('chrome-clipboard-write', (_e, text) => {
+ipcMain.handle('chrome-clipboard-write', (_e, text) => {
   clipboard.writeText(String(text == null ? '' : text));
+});
+
+// New container creation: renderer collected the name (via inline input) and sends it here.
+// We create the jar and return it; the renderer calls createTab directly with the container object.
+ipcMain.handle('new-container-create', async (_event, { name }) => {
+  if (!name || typeof name !== 'string') return null;
+  const c = jars.add(name);
+  return c;
+});
+
+// ---------------------------------------------------------------------------
+// Tab view IPC handlers (Flight 3, Leg 1 — web tab lifecycle via WebContentsView)
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
+  // -----------------------------------------------------------------------
+  // Pick webPreferences by trust level (Leg 3).
+  //
+  // INTERNAL (trusted=true): byte-exact webPreferences matching will-attach-webview's
+  // internal branch. The partition MUST come from the INTERNAL_PARTITION constant —
+  // any literal drift silently resolves a different session → marker absent → gates,
+  // protocol.handle, bridge, and automation exclusion all fail open. (DD0 / security)
+  //
+  // WEB (trusted=false): web prefs — contextIsolation:false so the farbling preload runs
+  // in the page main world (required). NO spellcheck key — the session-layer applier
+  // (applySpellcheck) owns the live web toggle; a constructed view's spellcheck pref is
+  // immutable after attach, so inheriting the session default is correct. (DD3)
+  // -----------------------------------------------------------------------
+  let preloadPath;
+  let webPreferencesObj;
+  if (trusted) {
+    preloadPath = path.join(__dirname, '..', 'preload', 'internal-preload.js');
+    webPreferencesObj = {
+      preload: preloadPath,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      partition: INTERNAL_PARTITION,
+      spellcheck: false,
+    };
+  } else {
+    preloadPath = path.join(__dirname, '..', 'preload', 'webview-preload.js');
+    webPreferencesObj = {
+      preload: preloadPath,
+      contextIsolation: false,
+      sandbox: false,
+      nodeIntegration: false,
+      partition: partition,
+      // NO spellcheck key — see will-attach-webview for the web branch
+    };
+  }
+  const view = new WebContentsView({ webPreferences: webPreferencesObj });
+  mainWindow.contentView.addChildView(view);
+
+  // Seed initial bounds
+  if (mainWindow) {
+    const { width, height } = mainWindow.getContentBounds();
+    view.setBounds({ x: 0, y: 0, width, height });
+  }
+  view.setVisible(false);
+
+  const wcId = view.webContents.id;
+  tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
+
+  // Explicit construction-time wiring: web-contents-created fires synchronously
+  // during new WebContentsView(), so the global handler cannot identify the view yet.
+  // Wire explicitly here so all guest event listeners are installed before loadURL.
+  wireGuestContents(view.webContents);
+
+  // Tab-strip event forwarding
+  wireTabViewEvents(view, wcId);
+
+  view.webContents.loadURL(url).catch((err) => {
+    console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
+  });
+  return wcId;
+});
+
+ipcMain.on('tab-close', (_event, wcId) => {
+  const entry = tabViews.get(wcId);
+  if (!entry) return;
+  mainWindow.contentView.removeChildView(entry.view);
+  if (!entry.view.webContents.isDestroyed()) {
+    entry.view.webContents.destroy();
+  }
+  tabViews.delete(wcId);
+  if (activeTabWcId === wcId) activeTabWcId = null;
+});
+
+ipcMain.on('tab-hide', (_event, wcId) => {
+  const entry = tabViews.get(wcId);
+  if (!entry) return;
+  if (!entry.view.webContents.isDestroyed()) {
+    entry.view.setVisible(false);
+  }
+  entry.active = false;
+  if (activeTabWcId === wcId) activeTabWcId = null;
+});
+
+ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
+  const wc = getTabContents(wcId);
+  if (!wc || wc.isDestroyed()) return;
+  if (verb === 'loadURL' && args && args[0]) {
+    wc.loadURL(args[0]).catch((err) => {
+      console.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
+    });
+  } else if (verb === 'reload') {
+    wc.reload();
+  } else if (verb === 'stop') {
+    wc.stop();
+  } else if (verb === 'goBack') {
+    wc.goBack();
+  } else if (verb === 'goForward') {
+    wc.goForward();
+  }
+});
+
+ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
+  // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
+  const entry = tabViews.get(wcId);
+  if (entry) {
+    if (bounds) {
+      entry.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
+    }
+    if (!entry.view.webContents.isDestroyed()) {
+      entry.view.setVisible(true);
+    }
+    entry.active = true;
+    // Raise the active guest view to the top so page input works.
+    if (mainWindow) {
+      mainWindow.contentView.addChildView(entry.view);
+    }
+  }
+  // Hide old active tab
+  if (activeTabWcId !== null && activeTabWcId !== wcId) {
+    const oldEntry = tabViews.get(activeTabWcId);
+    if (oldEntry && !oldEntry.view.webContents.isDestroyed()) {
+      oldEntry.view.setVisible(false);
+    }
+    if (oldEntry) oldEntry.active = false;
+  }
+  activeTabWcId = wcId;
+});
+
+ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
+  const entry = tabViews.get(wcId);
+  if (!entry || entry.view.webContents.isDestroyed()) return;
+  entry.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
+});
+
+ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
+  const wc = getTabContents(wcId);
+  if (!wc || wc.isDestroyed()) return;
+  if (stop) {
+    wc.stopFindInPage(options || 'clearSelection');
+  } else if (text) {
+    wc.findInPage(text, options || {});
+  }
+});
+
+// Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.
+// Called by the renderer before hiding the guest and showing the freeze image.
+// Returns a data URL string, or null if no active guest is available.
+//
+// INTERNAL CAPTURE IS REQUIRED (Leg 3 HAT fix): after Leg 3, internal goldfinch:// tabs are
+// opaque WebContentsViews — they occlude the HTML chrome menus (kebab/container/site-info)
+// exactly like web tabs. So the freeze-frame must be able to capture an internal page too,
+// or those menus render behind the opaque internal view. The earlier "never capture internal"
+// guard rested on the now-invalid "internal never freezes" premise.
+//
+// Why this is safe (NOT a leak, NOT an automation op): the ONLY caller is the trusted chrome
+// renderer's freeze helper — `captureActiveGuest` is exposed solely on chrome-preload, never on
+// any guest preload. It captures, as a still, a page the chrome ALREADY displays in its own
+// #webviews region; nothing crosses a trust boundary that the chrome doesn't already hold.
+// (`isInternalContents` is intentionally NOT applied here; it remains used elsewhere in main.js.)
+ipcMain.handle('capture-active-guest', async () => {
+  const wc = getActiveTabContents();
+  if (!wc || wc.isDestroyed()) return null;
+  try {
+    const img = await wc.capturePage();
+    // toDataURL returns a data: URI (PNG, base64-encoded).
+    return img.toDataURL();
+  } catch {
+    return null;
+  }
+});
+
+// Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
+// Web <WebContentsView> tabs send via ipcRenderer.send (not sendToHost).
+ipcMain.on('guest-media-list', (event, mediaList) => {
+  const wcId = event.sender.id;
+  const cc = getChromeContents();
+  if (cc && !cc.isDestroyed()) {
+    cc.send('tab-media-list', { wcId, mediaList });
+  }
+});
+
+ipcMain.on('guest-privacy-fp', (event, fpCounts) => {
+  const wcId = event.sender.id;
+  const cc = getChromeContents();
+  if (cc && !cc.isDestroyed()) {
+    cc.send('tab-privacy-fp', { wcId, fpCounts });
+  }
+});
+
+// rescan-media for WebContentsView tabs (push from chrome → tab wc).
+ipcMain.on('rescan-media', (_event, { wcId } = {}) => {
+  if (wcId == null) return;
+  const wc = getTabContents(wcId);
+  if (!wc || wc.isDestroyed()) return;
+  wc.send('rescan-media');
 });
 
 // Renderer fallback zoom path (chrome-focused case). The renderer already filters
@@ -1264,7 +1625,7 @@ ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
 // correction — cut/copy/paste/undo/redo — is Leg 4's to add with its own action-allowlist.)
 // Dead/destroyed targets return safely; replaceMisspelling is itself a no-op outside an active
 // misspelling/editing context, so the main side never throws.
-ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
+ipcMain.handle('page-context-correct', (_e, { webContentsId, word }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return;
   if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
@@ -1288,7 +1649,7 @@ ipcMain.on('page-context-correct', (_e, { webContentsId, word }) => {
 // surface's audited trust contract self-evident. wc.paste() reads the OS clipboard into the
 // guest — same as a native menu Paste, the user-invoked intended behavior, not a new exfil path.
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
-ipcMain.on('page-context-action', (_e, { webContentsId, action }) => {
+ipcMain.handle('page-context-action', (_e, { webContentsId, action }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return;
   if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
@@ -1442,7 +1803,7 @@ app.whenReady().then(() => {
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll() });
+    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll(), grabWindow });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview

@@ -76,34 +76,30 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // subscribes for live button updates. Payload { wcId, open }.
   onDevtoolsStateChanged: (cb) => ipcRenderer.on('devtools-state-changed', (_e, d) => cb(d)),
 
-  // --- page context menu (human/page path; rendered by the chrome menuController, Leg 4) ---
-  // Subscription: fired by main's guest context-menu listener (Leg-1 spike POSITIVE on both the
-  // guest contents and the <webview> tag — we wire the guest side, which is auto-guarded for
-  // internal goldfinch:// guests, DD6). Mirrors onZoomChanged / onDevtoolsStateChanged. Payload
-  // { wcId, params }. Leg 4 renders #page-context-menu from it.
+  // --- new container create (renderer collects name, main creates jar) ---
+  // After "New container…": renderer collected the name via inline input; main creates the
+  // jar and signals back 'chrome-new-tab-in-container'. Returns the new container object.
+  newContainerCreate: (name) => ipcRenderer.invoke('new-container-create', { name }),
+
+  // --- main → renderer: page context menu (with optional freeze-frame dataURL) ---
+  // Fired by main's guest context-menu listener with the params + an optional freeze-frame
+  // dataURL (captured from the guest before opening). Renderer opens the HTML context menu.
   onPageContextMenu: (cb) => ipcRenderer.on('page-context-menu', (_e, d) => cb(d)),
-  // Correction round-trip: chrome -> main -> guest replaceMisspelling. One-way send (no return),
-  // mirroring zoomApply / print. Main acts on the PASSED webContentsId (never activeTab() —
-  // TOCTOU) and refuses the internal session (DD6). The correction path is main-side either way,
-  // independent of which side delivers the params.
-  correctMisspelling: ({ webContentsId, word }) =>
-    ipcRenderer.send('page-context-correct', { webContentsId, word }),
-  // Edit-action dispatch for the page context menu (Cut/Copy/Paste/Undo/Redo). One-way send,
-  // mirroring correctMisspelling's discipline. Main acts on the PASSED webContentsId (never
-  // activeTab() — TOCTOU), refuses the internal session (DD6), and restricts `action` to a
-  // fixed allowlist {cut,copy,paste,undo,redo} (NOT a run-any-method primitive). Leg 1
-  // deferred these explicitly — they are NOT misspelling corrections and cannot ride
-  // page-context-correct (whose narrow `word`-string contract is part of its audited surface).
-  pageContextAction: ({ webContentsId, action }) =>
-    ipcRenderer.send('page-context-action', { webContentsId, action }),
-  // OS-clipboard write for the page menu's Copy link / Copy image address / Copy selection.
-  // The chrome renderer is contextIsolation/nodeIntegration-off (no require('electron')) and the
-  // clipboard:write IPC is internal-origin-gated (settings page only), so neither is reachable
-  // here; navigator.clipboard.writeText is unreliable from a file:// doc right after a guest
-  // context-menu steals focus. This narrow one-way bridge writes a STRING to the OS clipboard via
-  // main's clipboard.writeText — same chrome-only trust domain as window-minimize/zoom-apply
-  // (writing a string is not a guest mutation). NOT origin-gated.
-  clipboardWriteText: (text) => ipcRenderer.send('chrome-clipboard-write', text),
+
+  // --- clipboard (renderer-side context-menu actions that need main-process clipboard) ---
+  clipboardWriteText: (text) => ipcRenderer.invoke('chrome-clipboard-write', text),
+
+  // --- spellcheck correction (renderer context menu "Fix" action) ---
+  correctMisspelling: (word) => ipcRenderer.invoke('page-context-correct', word),
+
+  // --- page context action (cut/copy/paste/undo/redo on the guest) ---
+  pageContextAction: (action) => ipcRenderer.invoke('page-context-action', action),
+
+  // FIX 1 belt-and-suspenders: main pushes this after maximize/unmaximize/resize so the
+  // renderer immediately re-measures and re-sends the #webviews slot bounds to the active
+  // guest, bypassing the rAF coalescing guard. Used only for geometry correction; the rAF
+  // path remains the primary debounce for user-paced events (panel toggle, window drag).
+  onTriggerSendBounds: (cb) => ipcRenderer.on('trigger-send-bounds', () => cb()),
 
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
@@ -116,13 +112,34 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // opens goldfinch://downloads via openDownloads(). Mirrors onOpenFind.
   onOpenDownloads: (cb) => ipcRenderer.on('open-downloads', () => cb()),
 
-  // Absolute path to the webview preload, so the renderer can set it on
-  // <webview webpreferences> / preload attribute.
-  webviewPreloadPath: `file://${require('path').join(__dirname, 'webview-preload.js')}`,
+  // --- site-info freeze-frame (Flight 3, Leg 2 sub-step 5) ---
+  // Capture the active web guest as a PNG data URL so the renderer can show a
+  // still image while the guest is hidden behind the site-info popup. Returns
+  // null when no active web guest is available (internal tabs need no freeze).
+  captureActiveGuest: () => ipcRenderer.invoke('capture-active-guest'),
 
-  // Absolute path to the TRUSTED internal-page preload, set on the Settings webview's
-  // preload attribute (distinct surface from webviewPreloadPath; runs context-isolated).
-  internalPreloadPath: `file://${require('path').join(__dirname, 'internal-preload.js')}`,
+  // --- web tab lifecycle (Flight 3, Leg 1) ---
+  tabCreate: (payload) => ipcRenderer.invoke('tab-create', payload),
+  tabClose: (wcId) => ipcRenderer.send('tab-close', wcId),
+  tabHide: (wcId) => ipcRenderer.send('tab-hide', wcId),
+  tabNavigate: (payload) => ipcRenderer.send('tab-navigate', payload),
+  tabSetActive: (wcId, bounds) => ipcRenderer.send('tab-set-active', { wcId, bounds }),
+  tabSetBounds: (wcId, bounds) => ipcRenderer.send('tab-set-bounds', { wcId, bounds }),
+  tabFind: (payload) => ipcRenderer.send('tab-find', payload),
+  rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
+
+  // Push subscriptions from main for tab events
+  onTabDidNavigate: (cb) => ipcRenderer.on('tab-did-navigate', (_e, d) => cb(d)),
+  onTabDidNavigateInPage: (cb) => ipcRenderer.on('tab-did-navigate-in-page', (_e, d) => cb(d)),
+  onTabTitle: (cb) => ipcRenderer.on('tab-title', (_e, d) => cb(d)),
+  onTabFavicon: (cb) => ipcRenderer.on('tab-favicon', (_e, d) => cb(d)),
+  onTabLoading: (cb) => ipcRenderer.on('tab-loading', (_e, d) => cb(d)),
+  onTabDidFinishLoad: (cb) => ipcRenderer.on('tab-did-finish-load', (_e, d) => cb(d)),
+  onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
+  onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
+  onTabFoundInPage: (cb) => ipcRenderer.on('tab-found-in-page', (_e, d) => cb(d)),
+  onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
+  onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
   // The internal partition string (single source of truth, src/shared/internal-page.js),
   // set as the trusted webview's `partition` attribute so it matches the main-process
