@@ -1364,8 +1364,8 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   // -----------------------------------------------------------------------
   // Pick webPreferences by trust level (Leg 3).
   //
-  // INTERNAL (trusted=true): byte-exact webPreferences matching will-attach-webview's
-  // internal branch. The partition MUST come from the INTERNAL_PARTITION constant —
+  // INTERNAL (trusted=true): byte-exact webPreferences set at construction time on the
+  // trusted `tab-create` path. The partition MUST come from the INTERNAL_PARTITION constant —
   // any literal drift silently resolves a different session → marker absent → gates,
   // protocol.handle, bridge, and automation exclusion all fail open. (DD0 / security)
   //
@@ -1394,7 +1394,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
       sandbox: false,
       nodeIntegration: false,
       partition: partition,
-      // NO spellcheck key — see will-attach-webview for the web branch
+      // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
     };
   }
   const view = new WebContentsView({ webPreferences: webPreferencesObj });

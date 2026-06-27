@@ -215,18 +215,19 @@ not a divert condition.)*
 
 > **Note:** Tentative; planned one at a time as the flight progresses.
 
-- [ ] `find-rehome` — delete the D1 renderer-injection in `find.js` (the `querySelectorAll('webview')`
+- [x] `find-rehome` — delete the D1 renderer-injection in `find.js` (the `querySelectorAll('webview')`
   body at `:120,:170`); serve the MCP `findInPage`/`stopFindInPage` ops from the main-process
   `found-in-page` event correlated by `requestId`, keyed on the resolved guest `wcId`; preserve jar-scope
   + internal guards; **rewrite the injection-coupled `test/unit/automation-find.test.js`** to the
   event-listener model; re-verify the WSLg cold-start quirk (re-port the retry to the main listener if it
   reproduces); update `find-in-page.md` to the new surface. *(The user find bar needs no change — already
-  on the migrated path.)*
-- [ ] `active-view-consolidation` — replace `visibleWebTabWcId` + raw `!t.trusted` bookkeeping with a
+  on the migrated path.)* — landed + reviewed (live find re-verify in Leg 4).
+- [x] `active-view-consolidation` — replace `visibleWebTabWcId` + raw `!t.trusted` bookkeeping with a
   single active-view concept + consistent `isWebTab()`/`!isInternalTab()` predicate; run the
   substrate-guard audit (grep + confirm every old-substrate-keyed guard), verifying the outgoing-web-tab
-  hide-on-switch-to-internal transition explicitly. *(Depth per Phase-6 operator re-confirmation.)*
-- [ ] `docs-and-spec-cleanup` — update `CLAUDE.md` tab-architecture (all stale `<webview>` lines —
+  hide-on-switch-to-internal transition explicitly. *(Depth per Phase-6 operator re-confirmation.)* —
+  landed + reviewed (live freeze/geometry re-verify in Leg 4/5).
+- [x] `docs-and-spec-cleanup` — update `CLAUDE.md` tab-architecture (all stale `<webview>` lines —
   `:21,23,27,28,33,56,65,66,72,75,78,104`; add freeze-frame pattern, `capture-active-guest` chrome-only
   contract, `INTERNAL_PARTITION` import-never-derive rule); fix the `farbling-correctness.md` drifted
   citation (`:51` → `renderer.js:2327`/`tabNavigate`); verify/clarify the `capture-active-guest` comment

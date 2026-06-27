@@ -106,8 +106,9 @@ const tabs = new Map();
 let activeTabId = null;
 let activeFilter = 'all';
 let tabSeq = 0;
-// Track the last visible web tab wcId so we can hide it when switching to an internal tab.
-let visibleWebTabWcId = null;
+// wcId of the view main is currently showing (web or internal); used to hide the outgoing
+// view when switching to a not-yet-ready tab.
+let activeViewWcId = null;
 // RAF pending flag for debounced geometry sends.
 let rafGeometryPending = false;
 // Whether a freeze-frame is currently active (guest hidden, still image shown in #webviews background).
@@ -777,7 +778,6 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   // For internal tabs: trusted:true causes main to construct with internal webPreferences
   // (internal-preload.js, contextIsolation:true, sandbox:true, partition:INTERNAL_PARTITION).
   // For web tabs: trusted:false → web prefs (webview-preload.js, contextIsolation:false).
-  // visibleWebTabWcId is web-only — internal tabs never freeze and never set it.
   window.goldfinch.tabCreate({ url, partition: jar.partition, trusted }).then((wcId) => {
     if (!tabs.has(id)) return; // tab was closed before wcId arrived
     tab.wcId = wcId;
@@ -787,10 +787,8 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
       // activateTab() ran synchronously in createTab() with wcId still null,
       // so the tab-set-active IPC was skipped — send it here to show the view.
       window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotWithInsetDIP());
-      if (!trusted) {
-        // Internal tabs never participate in the freeze-frame path (visibleWebTabWcId is web-only).
-        visibleWebTabWcId = tab.wcId;
-      }
+      // Track the now-visible view (web or internal) for the outgoing-hide path.
+      activeViewWcId = tab.wcId;
       updateNavButtons();
       refreshZoomControl(tab);
       if (!els.privacyPanel.classList.contains('collapsed')) {
@@ -808,7 +806,7 @@ function closeTab(id) {
   if (!tab) return;
   // All tabs are WebContentsViews (Leg 3). Internal tabs (trusted) use tabClose just like web tabs.
   if (tab.wcId != null) {
-    if (tab.wcId === visibleWebTabWcId) visibleWebTabWcId = null;
+    if (tab.wcId === activeViewWcId) activeViewWcId = null;
     window.goldfinch.tabClose(tab.wcId);
   }
   tab.btn.remove();
@@ -852,28 +850,17 @@ function activateTab(id) {
   }
 
   if (tab.wcId != null) {
-    // Send tab-set-active with bounds (main handles visibility + hides previous web tab).
+    // Send tab-set-active with bounds (main handles visibility + hides the previous view).
     // tabSetActive is sent after the find-bar visibility update above so that
     // measureWebviewsSlotWithInsetDIP() uses the correct inset for this tab.
     window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotWithInsetDIP());
-    if (!tab.trusted) {
-      // Internal tabs never participate in the freeze-frame path (visibleWebTabWcId is web-only).
-      visibleWebTabWcId = tab.wcId;
-    }
-  } else if (tab.trusted) {
-    // Internal tab: wcId not yet arrived — hide any previously-visible web tab while we wait.
-    // The tabCreate .then() callback will call tabSetActive once wcId is available.
-    if (visibleWebTabWcId != null) {
-      window.goldfinch.tabHide(visibleWebTabWcId);
-    }
-    visibleWebTabWcId = null;
+    // Track the now-visible view (web or internal) for the outgoing-hide path.
+    activeViewWcId = tab.wcId;
   } else {
-    // Web tab: wcId not yet arrived — hide any previously-visible web tab while we wait.
-    // The tabCreate .then() callback will call tabSetActive once wcId is available.
-    if (visibleWebTabWcId != null) {
-      window.goldfinch.tabHide(visibleWebTabWcId);
-    }
-    visibleWebTabWcId = null;
+    // wcId not yet arrived — hide the outgoing view while we wait; the tabCreate .then()
+    // sends tabSetActive once wcId is available. Read the tracker BEFORE clearing.
+    if (activeViewWcId != null) window.goldfinch.tabHide(activeViewWcId);
+    activeViewWcId = null;
   }
   renderMedia();
   renderPrivacy();
@@ -917,6 +904,9 @@ function isInternalTab(tab) {
     (tab.container.id === 'internal' || tab.container.partition === window.goldfinch.internalPartition)
   );
 }
+
+/** @param {Tab|null} tab @returns {boolean} */
+function isWebTab(tab) { return !isInternalTab(tab); }
 
 /**
  * Update the address-bar chip and read-only state from the given tab.
@@ -1056,8 +1046,8 @@ function sendActiveBounds() {
  * background, hide the live guest view. Returns true if the freeze was applied, false otherwise.
  * After Leg 3, internal goldfinch:// tabs are opaque WebContentsViews too, so they also occlude
  * the HTML chrome menus and must be freezable — the guard keys on the active view's wcId, not on
- * trust. (visibleWebTabWcId is web-only bookkeeping and is NOT used here; the freeze hides t.wcId
- * directly so it works for internal tabs whose wcId is never tracked in visibleWebTabWcId.)
+ * trust. (activeViewWcId is not used here; the freeze hides t.wcId directly so it works for any
+ * active view, web or internal.)
  * @param {(() => boolean) | null} [stillOpen]  optional liveness check — if provided and
  *   returns false after the async capture, the freeze is aborted (popup was closed before
  *   the capture resolved).
@@ -1082,8 +1072,8 @@ async function freezeGuest(stillOpen) {
 
 /**
  * Unfreeze: clear the still background and re-show the active guest (web or internal).
- * No-ops if no freeze is active. Re-shows whichever view is active; only the web-only
- * visibleWebTabWcId bookkeeping is updated for web tabs.
+ * No-ops if no freeze is active. Re-shows whichever view is active and updates the
+ * unified activeViewWcId tracker to reflect the now-visible view.
  */
 function unfreezeGuest() {
   if (!guestFrozen) return;
@@ -1093,7 +1083,7 @@ function unfreezeGuest() {
   const t = activeTab();
   if (t && t.wcId != null) {
     window.goldfinch.tabSetActive(t.wcId, measureWebviewsSlotWithInsetDIP());
-    if (!t.trusted) visibleWebTabWcId = t.wcId;
+    activeViewWcId = t.wcId;
   }
 }
 
@@ -1105,7 +1095,7 @@ function unfreezeGuest() {
 function updateNavButtons() {
   const tab = activeTab();
   if (!tab) { els.back.disabled = true; els.forward.disabled = true; return; }
-  if (tab.trusted) {
+  if (isInternalTab(tab)) {
     // Internal tabs never have navigation history — disable both buttons explicitly.
     // (No webview to query; tab-nav-state IPC is not sent for internal views.)
     els.back.disabled = true;
@@ -1134,7 +1124,7 @@ function navigate(input) {
     return;
   }
   // Internal tabs are handled by the isInternalTab early-return above; only web tabs reach here.
-  if (!tab.trusted && tab.wcId != null) {
+  if (isWebTab(tab) && tab.wcId != null) {
     window.goldfinch.tabNavigate({ wcId: tab.wcId, verb: 'loadURL', args: [url] });
   }
 }
@@ -1157,19 +1147,19 @@ els.back.addEventListener('click', () => {
   const t = activeTab();
   if (!t) return;
   // Internal tabs have back disabled; web tabs use the view IPC path.
-  if (!t.trusted && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goBack', args: [] }); }
+  if (isWebTab(t) && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goBack', args: [] }); }
 });
 els.forward.addEventListener('click', () => {
   const t = activeTab();
   if (!t) return;
   // Internal tabs have forward disabled; web tabs use the view IPC path.
-  if (!t.trusted && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goForward', args: [] }); }
+  if (isWebTab(t) && t.wcId != null) { window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'goForward', args: [] }); }
 });
 els.reload.addEventListener('click', () => {
   const t = activeTab();
   if (!t) return;
   // Internal tabs: reload button is not wired (no navigation history to stop/reload).
-  if (!t.trusted && t.wcId != null) {
+  if (isWebTab(t) && t.wcId != null) {
     if (els.reload.textContent === '✕') window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'stop', args: [] });
     else window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
   }
@@ -1256,8 +1246,8 @@ els.panel.addEventListener('keydown', (e) => {
 });
 els.mediaRescan.addEventListener('click', () => {
   const t = activeTab();
-  // Internal tabs (trusted) are excluded by the disabled button state (tab-scoped toolbar disable).
-  if (!t || t.wcId == null || t.trusted) return;
+  // Internal tabs are excluded by the disabled button state (tab-scoped toolbar disable).
+  if (!t || t.wcId == null || isInternalTab(t)) return;
   window.goldfinch.rescanMedia({ wcId: t.wcId });
 });
 
@@ -2096,7 +2086,7 @@ function runFind(tab, opts = {}) {
     return;
   }
   // Internal tabs are excluded by openFind's isInternalTab guard; only web tabs reach here.
-  if (!tab.trusted && tab.wcId != null) {
+  if (isWebTab(tab) && tab.wcId != null) {
     window.goldfinch.tabFind({ wcId: tab.wcId, text, options: { findNext: false, forward: true, matchCase: false, ...opts } });
   }
 }
@@ -2141,7 +2131,7 @@ function closeFind(tab) {
   if (t) {
     t.findOpen = false;
     // Internal tabs are excluded by openFind's isInternalTab guard; only web tabs reach here.
-    if (!t.trusted && t.wcId != null) {
+    if (isWebTab(t) && t.wcId != null) {
       window.goldfinch.tabFind({ wcId: t.wcId, stop: true, options: 'clearSelection' });
     }
   }
@@ -2279,7 +2269,7 @@ function pShields() {
     const t = activeTab();
     if (!t) return;
     // Internal tabs are excluded by disabled button state; only web tabs reach here.
-    if (!t.trusted && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+    if (isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
   });
   foot.appendChild(reload);
   s.appendChild(foot);
@@ -2324,7 +2314,7 @@ async function newIdentity() {
   if (res && res.ok) {
     toast('New identity', 'Jar wiped + fingerprint rerolled');
     // Internal tabs are excluded by the New Identity button's tab-scoped disable; only web tabs reach here.
-    if (!tab.trusted && tab.wcId != null) window.goldfinch.tabNavigate({ wcId: tab.wcId, verb: 'reload', args: [] });
+    if (isWebTab(tab) && tab.wcId != null) window.goldfinch.tabNavigate({ wcId: tab.wcId, verb: 'reload', args: [] });
   } else {
     toast('New identity failed', (res && res.error) || '');
   }
@@ -2595,7 +2585,7 @@ document.addEventListener('keydown', (e) => {
       const t = activeTab();
       if (!t) return;
       // Internal tabs: reload keyboard shortcut is a no-op (internal pages are static).
-      if (!t.trusted && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+      if (isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
       return;
     }
     // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
