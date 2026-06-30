@@ -2152,11 +2152,27 @@ els.findInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (!t.findText) return;
     runFind(t, { findNext: true, forward: !e.shiftKey });
+  } else if (e.key === 'ArrowDown') {
+    // Step to next match — mirrors the #find-next (↓) button.
+    e.preventDefault();
+    if (!t.findText) return;
+    runFind(t, { findNext: true, forward: true });
+  } else if (e.key === 'ArrowUp') {
+    // Step to previous match — mirrors the #find-prev (↑) button.
+    e.preventDefault();
+    if (!t.findText) return;
+    runFind(t, { findNext: true, forward: false });
   } else if (e.key === 'Escape') {
     e.preventDefault();
     closeFind(t);
   }
 });
+
+// Prevent the nav buttons from stealing DOM focus away from findInput so the
+// user can keep typing without re-clicking the input after each step.
+// (mousedown focus-steal suppression — standard find-bar button pattern.)
+els.findNext.addEventListener('mousedown', (e) => e.preventDefault());
+els.findPrev.addEventListener('mousedown', (e) => e.preventDefault());
 
 els.findNext.addEventListener('click', () => {
   const t = activeTab();

@@ -1,6 +1,6 @@
 # Flight: Conveniences & Event-Seam Re-architecture
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
@@ -159,7 +159,7 @@ but not resolved here — the macOS landing gate is Flight 6.
 ### Pre-Flight Checklist
 - [x] All open questions resolved or assigned to a leg
 - [x] Design decisions documented
-- [ ] Prerequisites verified
+- [x] Prerequisites verified
 - [x] Validation approach defined
 - [x] Legs defined
 
@@ -179,19 +179,21 @@ its chrome-only/no-exfiltration invariant. Verification runs the full convenienc
 rendered-state specs as Witnessed runs, then an interactive HAT.
 
 ### Checkpoints
-- [ ] `find.js` MCP ops re-homed to the main-process `found-in-page` event (correlated by `requestId`);
-  **no `querySelectorAll('webview')` remains anywhere in `src/`**; `findInPage` MCP op returns real match
-  counts; jar-scope + internal-tab guards preserved; the injection-coupled `automation-find.test.js`
-  rewritten to the event model and green. *(User find bar unchanged — already migrated.)*
-- [ ] Active-view concept consolidated (consistent `isWebTab()`/`!isInternalTab()` predicate; single
+- [x] `find.js` MCP ops re-homed to the main-process `found-in-page` event (correlated by `requestId`);
+  **no `querySelectorAll('webview')` remains anywhere in `src/`**; jar-scope + internal-tab guards
+  preserved; the injection-coupled `automation-find.test.js` rewritten to the event model and green.
+  *(User find bar unchanged — already migrated. Live `findInPage` match-count re-verify deferred with the
+  Leg-4 corpus.)*
+- [x] Active-view concept consolidated (consistent `isWebTab()`/`!isInternalTab()` predicate; single
   `wcId` tracker; outgoing-web-tab hide-on-switch-to-internal preserved); substrate-guard audit clean;
-  `npm test` / `typecheck` / `lint` / `a11y` all green.
-- [ ] `CLAUDE.md` tab-architecture section updated (WebContentsView, freeze-frame pattern,
+  `npm test` / `typecheck` / `lint` green. *(`a11y` is a live gate — deferred with the Leg-4 corpus.)*
+- [x] `CLAUDE.md` tab-architecture section updated (WebContentsView, freeze-frame pattern,
   `capture-active-guest` chrome-only contract, `INTERNAL_PARTITION` import-never-derive rule);
-  `farbling-correctness.md` citation corrected; `capture-active-guest` comment states its invariant.
-- [ ] Full convenience corpus + `tab-surface-geometry` + `internal-tab-menus` run as Witnessed runs —
-  each PASS or operator-accepted known issue with disposition recorded.
-- [ ] HAT passed; the two carried WSLg known issues re-checked.
+  `farbling-correctness.md` citation corrected; `capture-active-guest` comment confirmed correct.
+- [ ] Full convenience corpus + `tab-surface-geometry` + `internal-tab-menus` as Witnessed runs —
+  **DEFERRED (apparatus)**; SC4 accepted via the HAT. Carried forward to an admin@flight-4 session.
+- [x] HAT passed (all steps); the two carried WSLg known issues re-checked (operator: acceptable). A
+  Flight-3 find-focus regression was surfaced + fixed inline during the HAT.
 
 ### Adaptation Criteria
 
@@ -232,24 +234,24 @@ not a divert condition.)*
   contract, `INTERNAL_PARTITION` import-never-derive rule); fix the `farbling-correctness.md` drifted
   citation (`:51` → `renderer.js:2327`/`tabNavigate`); verify/clarify the `capture-active-guest` comment
   invariant (`main.js:1513-1534` may already be substantially correct — confirm, don't double-write).
-- [ ] `verify-convenience-corpus` — first validate the two new specs (`tab-surface-geometry`,
-  `internal-tab-menus`) as a gating sub-step, then run the full convenience corpus (`page-zoom`,
-  `print-to-pdf`, `find-in-page`, `devtools-cdp-conflict`, `page-context-menu`, `kebab-menu`,
-  `menu-dismissal`, `spellcheck`, `downloads-surface`) as Witnessed runs (Flight Director drives
-  `/behavior-test`); record each run log.
-- [ ] `hat-and-alignment` *(optional — operator opted in)* — guided HAT: find bar, menu freeze/restore
+- [ ] `verify-convenience-corpus` — **DEFERRED (apparatus).** The formal Witnessed corpus + `npm run
+  a11y` gate could not run (session MCP jar-authed against a foreign instance; admin-only observables
+  refused). SC4 accepted via the HAT for this landing; corpus + a11y carried forward to a session wired
+  admin@flight-4. See flight log.
+- [x] `hat-and-alignment` *(optional — operator opted in)* — guided HAT: find bar, menu freeze/restore
   on web + internal tabs, panel-resizes-guest, geometry on resize/maximize; fix inline; re-check the two
-  carried WSLg known issues.
+  carried WSLg known issues. **All steps pass** — surfaced + fixed a Flight-3 find-focus regression
+  inline; raised the overlay-find-bar idea (spun out to Flight 7).
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (flight branch → mission branch, local; `main` untouched per mission constraint)
-- [ ] Tests passing (`npm test` / `typecheck` / `lint` / `a11y`)
-- [ ] Documentation updated (`CLAUDE.md`, the two new specs, corrected citations)
+- [x] Legs 1-3 + 5 completed; Leg 4 (formal corpus + a11y) DEFERRED (apparatus) — carried forward
+- [x] Code merged (flight branch → mission branch, local; `main` untouched per mission constraint)
+- [x] Tests passing (`npm test` 947/947 / `typecheck` / `lint`; `a11y` is a live gate — deferred)
+- [x] Documentation updated (`CLAUDE.md`, corrected citations; the two new specs authored at planning)
 
 ### Verification
 SC4 is met when the full convenience behavior-test corpus + the two new rendered-state specs pass on the

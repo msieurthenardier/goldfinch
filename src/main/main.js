@@ -576,6 +576,13 @@ function wireGuestContents(contents) {
       // The __goldfinchInternal skip already excludes internal sessions, satisfying DD5.
       if (input.key === 'f' || input.key === 'F') {
         event.preventDefault();
+        // Move OS keyboard focus to the chrome view BEFORE sending open-find.
+        // Without this, the guest WebContentsView keeps native focus; the
+        // renderer's findInput.focus() is DOM-only, so keystrokes keep routing
+        // to the page (same symptom as the replaceMisspelling case at line ~1637:
+        // "first action does nothing until focus returns"). Focus-then-act ensures
+        // the input element actually receives keystrokes after the bar opens.
+        getChromeContents()?.focus();
         getChromeContents()?.send('open-find');
         return;
       }

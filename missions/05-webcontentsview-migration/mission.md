@@ -180,11 +180,17 @@ follow-on work.
   (menu blip on internal tabs; maximize 2/3). Debriefed (three reusable patterns + the
   substrate-guard-audit / harness-liveness / HTML-over-native-view lessons). Merged to
   `mission/05-webcontentsview-migration` locally; `main` untouched. *(SC1 fully, SC3, SC5-part, SC6-forced.)*
-- [ ] **Flight 4: Conveniences & event-seam re-architecture** — re-home the renderer↔`<webview>`-element
-  seams to the main-process `webContents` (delete/replace `find.js`'s D1 find workaround; re-wire the
-  renderer's `found-in-page`, media-rescan, and privacy-stream listeners), then re-verify zoom, print,
-  find, DevTools, context menu, spellcheck, downloads on the native surface; update the `<webview>`-assuming
-  specs. *(SC4. Larger than a re-verify pass — budgeted as a rewrite.)*
+- [x] **Flight 4: Conveniences & event-seam re-architecture** — ✅ LANDED (2026-06-30). Recon found F3
+  already re-homed almost every seam, so the flight reshaped to: re-home the lone live seam (`find.js` MCP
+  ops → main-process `found-in-page`/`requestId`, D1 injection deleted, unit test rewritten); full
+  active-view consolidation (`visibleWebTabWcId`→`activeViewWcId` + `isWebTab`/`isInternalTab`, 14 sites);
+  docs/spec cleanup (CLAUDE.md WebContentsView sweep, drifted citation). SC4 accepted via an on-screen
+  **HAT** (all steps pass; surfaced + fixed a Flight-3 find-focus regression inline). The formal Witnessed
+  convenience corpus + `npm run a11y` gate were **DEFERRED** (in-loop MCP apparatus jar-authed against a
+  foreign instance) — carried forward to an admin-wired session. A floating-overlay-find-bar idea raised
+  in the HAT was proven by spike + spun out to **Flight 7**. Merged to `mission/05` locally; `main`
+  untouched. *(SC4 via HAT; SC6-partial code-complete, live re-verify deferred.)* — *original tentative
+  framing (commentary): re-home the renderer↔`<webview>`-element seams; budgeted as a rewrite.*
 - [ ] **Flight 5: Automation parity sweep** — full MCP end-to-end parity via the `mcp-*` behavior-test
   corpus on the new surface. **Scope reduced (planning, 2026-06-25):** internal `goldfinch://` page
   migration moved to **Flight 3** (DD0); this flight is now the automation parity sweep, with the internal
@@ -192,6 +198,18 @@ follow-on work.
 - [ ] **Flight 6: Panel composition, parity sweep & land** — media/privacy panel as a native overlay;
   claim #27/SC10 if free (SC7); run the full active behavior-test corpus as the parity benchmark; macOS
   build-readiness check; merge the mission branch to `main`. *(SC3, SC7, SC8, mission landing.)*
+
+- [ ] **Flight 7 (new — surfaced in the Flight-4 HAT): Floating overlay find bar** — replace the inset
+  (push-down) find bar with a floating **overlay `WebContentsView`** stacked above the live guest, so the
+  bar floats over the page instead of insetting it. **Feasibility PROVEN** by an in-goldfinch WSLg spike
+  (the overlay paints its web content above the live guest, takes keyboard input, page stays live).
+  A first design + design-review exists (Flight-4 flight log, "Flight-7 seed"): a dedicated overlay view
+  + preload; position-sync centralized in main's guest-bounds path; find routing reuses the existing
+  `found-in-page` path. Review verdict: flight-sized + needs rework — stage as scaffold+position →
+  find-routing+count → cutover+HAT; pin down the count-forwarding path (main→overlay direct), the
+  renderer↔main↔overlay IPC channel set, and the freeze/find-open interaction (hide overlay during a menu
+  freeze). The same overlay technique could later **retire the freeze-frame hack for menus** — a possible
+  follow-on. *(SC4-adjacent UX; not required for mission landing.)*
 
 > The alignment / vibe-coding session is folded into **Flight 1** (above) rather than a standalone flight —
 > the spike is the natural home for hands-on, judgment-heavy exploration.

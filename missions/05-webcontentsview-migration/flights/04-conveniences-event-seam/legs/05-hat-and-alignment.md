@@ -1,8 +1,13 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Conveniences & Event-Seam Re-architecture](../flight.md)
 **Type**: interactive HAT *(optional — operator opted in; DD5)*
+
+> **Outcome (2026-06-29/30): all steps pass.** Step 1 surfaced + fixed a Flight-3-migration find-focus
+> regression inline; Steps 2-6 confirmed menu freeze/restore (web + internal), the Leg-2 internal→new-tab
+> delta, panel reflow, and geometry/maximize on screen. The overlay-find-bar idea raised here was spun
+> out to Flight 7 (proven spike). See the flight log Leg-5 entry.
 
 ## Objective
 

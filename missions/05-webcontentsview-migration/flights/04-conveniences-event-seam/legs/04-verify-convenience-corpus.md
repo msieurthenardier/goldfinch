@@ -1,7 +1,14 @@
 # Leg: verify-convenience-corpus
 
-**Status**: ready
+**Status**: ready *(DEFERRED this session — apparatus blocker)*
 **Flight**: [Conveniences & Event-Seam Re-architecture](../flight.md)
+
+> **Deferred (2026-06-27, apparatus blocker).** The in-loop session's goldfinch MCP client is jar-authed
+> and connected to a pre-existing instance, not an admin connection to the flight-4 instance — the
+> admin-only observables this leg requires (`getChromeTarget`, `captureWindow`) are refused. The formal
+> Witnessed corpus + `npm run a11y` gate are carried forward to a session wired admin@flight-4. SC4 is
+> accepted for this landing via the **Leg 5 HAT** (operator decision). See the flight log Anomalies +
+> Deviations.
 
 ## Objective
 

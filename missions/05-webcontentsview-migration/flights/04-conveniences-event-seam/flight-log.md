@@ -217,6 +217,47 @@ no-exfiltration invariant is fully stated. Left unchanged. Recorded here per spe
 
 ---
 
+### Leg 4: verify-convenience-corpus — 2026-06-27 — DEFERRED (apparatus)
+
+The formal Witnessed convenience corpus + `npm run a11y` gate could not run: the in-loop session's
+goldfinch MCP client is jar-authed and wired to a pre-existing instance, so the admin-only observables
+the specs need (`getChromeTarget`, `captureWindow`) are refused (see Anomalies + Deviations). Operator
+chose to accept SC4 via the Leg-5 HAT for this landing and carry the formal corpus + a11y gate forward
+to a session wired admin@flight-4. Leg status left `ready` (deferred), not `completed`.
+
+---
+
+### Leg 5: hat-and-alignment — 2026-06-29/30 — completed
+
+Guided on-screen HAT on the flight-4 instance (WSLg). **All steps pass.**
+
+- **Step 1 (find bar):** initially FAILED — Ctrl+F didn't focus the input, search wasn't incremental,
+  stepping sluggish. Diagnosed a Flight-3-migration focus regression and **fixed inline** (see Flight
+  Director Notes 2026-06-29): `getChromeContents()?.focus()` before `open-find` (`main.js` ~:583) +
+  ↑/↓ keyboard stepping and button focus-steal suppression (`renderer.js` ~:2155). Operator re-verified:
+  "working well." Residual rapid-click step coalescing = inherent Chromium `findInPage` async, documented.
+- **Step 2 (web-tab menu freeze/restore):** kebab + container render above the frozen still; restore +
+  scroll correct. PASS.
+- **Step 3 (internal-tab menu freeze/restore):** kebab + container render **above** on
+  `goldfinch://settings` and `goldfinch://downloads` — the Flight-3 occlusion regression class stays
+  fixed. PASS.
+- **Step 4 (internal → new-tab, Leg-2 behavior delta):** no flash/black-band on the switch. PASS —
+  confirms the uniform `activeViewWcId` tracking is correct on screen.
+- **Step 5 (panel-resizes-guest):** media + privacy panels reflow the guest on web AND internal tabs,
+  no overlap/gap/clip, restore on close. PASS.
+- **Step 6 (geometry on resize/maximize):** active view tracks the slot; the two carried WSLg known
+  issues (internal-tab menu blip; maximize ~2/3) re-checked — operator reported all acceptable. PASS.
+
+**HAT-fix verification basis:** the inline find-focus fix (~20 lines, `main.js` + `renderer.js`) was
+verified by the unit suite (947/947), typecheck + lint green, and the operator's on-screen re-verify —
+landed without a separate Reviewer pass (proportionate to a small, thrice-verified inline HAT fix).
+
+**Also during the HAT:** operator-directed exploration of a floating overlay find bar → in-goldfinch
+spike GREEN → spun out to **Flight 7** (see Flight Director Notes + the Flight-7 seed). Not built in
+Flight 4.
+
+---
+
 ## Decisions
 
 ### Flight Director Notes
@@ -240,18 +281,102 @@ no-exfiltration invariant is fully stated. Left unchanged. Recorded here per spe
   Also: CLAUDE.md staleness wider than recon (added `:27,28,65,72,75,78`); 2 new specs run as a gating
   sub-step before the 9-spec corpus. A second Architect pass was skipped — the edits directly implement
   the review's own recommendations. Flight set to `ready`.
+- **2026-06-27 — Execution via `/agentic-workflow`.** Flight branch `flight/04-conveniences-event-seam`
+  cut off the mission branch; planning baseline committed (`6274ea8`). Legs 1-3 designed (each
+  design-reviewed by a Developer (Sonnet) → approve-with-changes, all incorporated; second design pass
+  skipped each time as edits implemented the review directly), implemented by Developer agents under the
+  deferred-commit model, then reviewed together by an independent Reviewer (Sonnet, never Opus) →
+  `[HANDOFF:confirmed]`, no blocking issues. Committed as `76fb7e4` (legs 1-3 code + artifacts; `npm
+  test` 947/947, typecheck + lint green). Legs 4-5 designed + committed (`f0f55c2`). No push / no PR —
+  per the mission's long-running-local-branch constraint (Flight-3 precedent: land by local merge into
+  the mission branch, `main` untouched).
+- **2026-06-27 — Leg 4 (automated convenience corpus) DEFERRED — apparatus blocker.** Launched a
+  flight-4 instance on `127.0.0.1:49710` (admin + jar keys minted). But the in-loop session's
+  `mcp__goldfinch__*` client is **jar-authed and wired to a different, pre-existing instance** (enumerate
+  showed an unrelated `work`-jar tab), so the admin-only observables the two new specs require
+  (`getChromeTarget`, `captureWindow`) are refused — the Witnessed corpus cannot run through the
+  pre-wired apparatus this session. **Operator decision: pivot to the Leg 5 HAT** (on-screen, no admin
+  MCP needed) as the SC4 acceptance gate for this landing; the formal Witnessed corpus + `npm run a11y`
+  gate are carried forward as a follow-up to run in a properly-wired (admin@flight-4) session. The
+  flight debrief carries this forward. See Anomalies.
+- **2026-06-29 — HAT (Leg 5) surfaced + fixed a find-bar focus regression (SC4).** On-screen HAT Step 1:
+  Ctrl+F did not move OS keyboard focus to the find input (keystrokes went to the page), incremental
+  search appeared dead ("had to hit Enter"), and stepping was sluggish. Root cause (code-confirmed): the
+  guest `before-input-event` Ctrl+F branch (`main.js` ~:577) sent `open-find` to the chrome but never
+  moved OS focus to the chrome view — the guest `WebContentsView` kept native focus, so the renderer's
+  `findInput.focus()` was DOM-only. A genuine Flight-3-migration regression (find bar untouched by Legs
+  1-3). **Fixed inline:** `getChromeContents()?.focus()` before `send('open-find')` (mirrors the
+  `main.js:1637` spellcheck focus precedent) + wired ↑/↓ keyboard stepping in the find input
+  (`renderer.js`), and `mousedown preventDefault` on the step buttons to keep the input focused. Operator
+  re-verified Step 1 on screen: "working well." Residual: very-rapid step-button clicks coalesce —
+  inherent Chromium `findInPage` async behavior, documented not over-engineered. (Tests 947/947,
+  typecheck/lint green.) These fixes land with Flight 4.
+- **2026-06-29 — Overlay find bar spun out to a new flight (Flight 7); Flight 4 lands without it.**
+  During the HAT the operator asked to make the find bar *float* over the live guest. A live HTML bar
+  can't composite over an opaque guest `WebContentsView` (native layer wins) — which is why the bar
+  currently insets the guest. Per the project's own "spike webview-region mechanisms first" rule, ran a
+  spike: a standalone Electron spike was inconclusive (WSLg GPU init differed from goldfinch), but an
+  **in-goldfinch env-gated spike was GREEN** — a small overlay `WebContentsView` added after the guest
+  z-orders above it, paints its web content over the live guest, takes keyboard input, page stays live
+  (operator-confirmed on screen). Spike reverted (find-focus fix preserved). A first leg design
+  (`legs/06-find-overlay-view.md`, since removed) was design-reviewed → **needs-rework + flight-sized**.
+  **Operator decision: make it Flight 7, land Flight 4 now.** See the **Flight-7 seed** below.
+
+### Flight-7 seed — floating overlay find bar (proven; reviewed; deferred)
+
+Carry-forward design input for planning Flight 7 via `/flight`:
+- **Primitive (proven on WSLg, in-goldfinch):** a dedicated overlay `WebContentsView`,
+  `mainWindow.contentView.addChildView(overlay)` AFTER the active guest so it z-orders on top; positioned
+  over the guest's top strip; the guest is NOT inset. Paints + takes input live.
+- **Architecture sketch:** new `find-overlay.html`/`.js`/`-preload.js` (chrome-class file:// trust);
+  main owns lifecycle/positioning/focus/teardown.
+- **Position-sync (centralize):** reposition the overlay wherever main sets the active guest's bounds
+  (`tab-set-active` + `tab-set-bounds`) — that path already receives every renderer-computed geometry
+  change (resize/maximize/panel-toggle/tab-switch via `sendActiveBounds`→those handlers). Re-`addChildView`
+  the overlay after the guest on `tab-set-active` (guest re-add there would otherwise bury it). Reuse the
+  Flight-3 DPR→DIP discipline.
+- **Review rework points to resolve at design (design-review verdict):** (1) count delivery — main's
+  per-tab `wireTabViewEvents` `found-in-page` should send the count **directly** to the overlay
+  webContents (path B, single-hop) when find is overlay-active, not via a renderer round-trip; (2) specify
+  the IPC channel set (open/close overlay carrying `{wcId, findText}`; overlay→main `query`; main→overlay
+  `count`/`init`); (3) freeze/find-open interaction — **hide the overlay during a menu freeze, restore in
+  `unfreezeGuest`** (note `sendActiveBounds` early-returns when `guestFrozen`, so the restore must live in
+  `unfreezeGuest`, not the bounds handler) — this also satisfies the operator's "find should hide when a
+  context menu appears" instinct; (4) retarget the Ctrl+F focus to `overlayView.webContents.focus()`;
+  (5) carry the ↑/↓ stepping + per-tab restore + internal-tab exclusion + a11y (`role=search`,
+  `aria-live` count) into the overlay. **Stage:** scaffold+position → find-routing+count → cutover+HAT.
+- **Stretch:** the same overlay tech could host the kebab/container/context menus, **retiring the
+  freeze-frame hack** — a possible Flight-7 follow-on or its own flight.
 
 ---
 
 ## Deviations
 
-_(none yet)_
+### Leg 4 automated corpus → HAT (apparatus-driven)
+**Planned**: run the two new rendered-state specs + the nine-spec convenience corpus + `npm run a11y` as
+Witnessed runs (Leg 4), then the HAT (Leg 5).
+**Actual**: the session's goldfinch MCP apparatus is jar-authed against a pre-existing instance, not an
+admin connection to the flight-4 instance — admin-only observables refused. Pivoted to the Leg 5 HAT as
+the SC4 acceptance gate; deferred the formal corpus + a11y gate to a follow-up session with admin MCP
+wired to the flight-4 instance.
+**Reason**: apparatus wiring is a session-environment fact outside the flight's code; the HAT verifies
+the same SC4 rendered surface (find bar, menu freeze/restore web+internal, panel-resizes-guest,
+geometry) directly on screen without needing admin MCP.
 
 ---
 
 ## Anomalies
 
-_(none yet)_
+### Session goldfinch MCP apparatus jar-authed against a foreign instance
+**Observed**: with a flight-4 instance running on `:49710` (admin key minted), the session's
+`mcp__goldfinch__*` tools returned `automation: admin-only` for `getChromeTarget` and `captureWindow`,
+and `enumerateTabs` listed an unrelated `work`-jar tab (`http://localhost:8485/#admin/providers/...`) —
+i.e. the MCP client is jar-scoped and connected to a *different*, pre-existing goldfinch, not the
+flight-4 instance.
+**Severity**: degraded (blocks the automated Witnessed corpus this session; does not affect the shipped
+code, which the HAT verifies on screen).
+**Resolution**: deferred the formal corpus + a11y gate to a session where the goldfinch MCP is wired to
+the flight-4 instance with the admin key; SC4 accepted via the Leg 5 HAT for this landing.
 
 ---
 
