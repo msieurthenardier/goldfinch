@@ -576,6 +576,13 @@ function wireGuestContents(contents) {
       // The __goldfinchInternal skip already excludes internal sessions, satisfying DD5.
       if (input.key === 'f' || input.key === 'F') {
         event.preventDefault();
+        // Move OS keyboard focus to the chrome view BEFORE sending open-find.
+        // Without this, the guest WebContentsView keeps native focus; the
+        // renderer's findInput.focus() is DOM-only, so keystrokes keep routing
+        // to the page (same symptom as the replaceMisspelling case at line ~1637:
+        // "first action does nothing until focus returns"). Focus-then-act ensures
+        // the input element actually receives keystrokes after the bar opens.
+        getChromeContents()?.focus();
         getChromeContents()?.send('open-find');
         return;
       }
@@ -1364,8 +1371,8 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   // -----------------------------------------------------------------------
   // Pick webPreferences by trust level (Leg 3).
   //
-  // INTERNAL (trusted=true): byte-exact webPreferences matching will-attach-webview's
-  // internal branch. The partition MUST come from the INTERNAL_PARTITION constant —
+  // INTERNAL (trusted=true): byte-exact webPreferences set at construction time on the
+  // trusted `tab-create` path. The partition MUST come from the INTERNAL_PARTITION constant —
   // any literal drift silently resolves a different session → marker absent → gates,
   // protocol.handle, bridge, and automation exclusion all fail open. (DD0 / security)
   //
@@ -1394,7 +1401,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
       sandbox: false,
       nodeIntegration: false,
       partition: partition,
-      // NO spellcheck key — see will-attach-webview for the web branch
+      // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
     };
   }
   const view = new WebContentsView({ webPreferences: webPreferencesObj });

@@ -23,8 +23,8 @@
 /**
  * Open or close DevTools (detached) on a pre-guarded webContents.
  *
- * Detached mode only — <webview> guests have no native host region for docked
- * DevTools (the WebContentsView migration constraint, BACKLOG.md). closeDevTools()
+ * Detached mode only — in-window docked DevTools via setDevToolsWebContents is a
+ * BACKLOG item (not yet implemented); detached is the shipped mode. closeDevTools()
  * on a contents whose DevTools is not open is a no-op in Electron (does not throw),
  * so this is safe to call unconditionally.
  *

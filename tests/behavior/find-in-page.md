@@ -6,12 +6,15 @@
 **Last Run**: 2026-06-19-03-05-57 (partial — stepping/warm finds verified; cold-first-find
 WSLg-blocked; see `find-in-page/runs/2026-06-19-03-05-57.md`)
 
-> **Known environment limitation (WSLg).** The FIRST `findInPage` on a freshly-loaded `<webview>`
-> returns `{matches:0, activeMatchOrdinal:0}` in the WSLg dev environment — a Chromium cold-start
-> quirk (a cold `<webview>` only reports counts via `findNext:true`, never a fresh `findNext:false`).
-> The next find returns correct counts. Step 2 below therefore fails on WSLg and is an accepted
-> known issue pending macOS confirmation. The fix (renderer-routed find, Flight-2 Deviation D1) is
-> verified correct for warm/stepping finds. **When re-running on macOS, expect step 2 to pass.**
+> **Known environment limitation (WSLg).** The FIRST `findInPage` on a freshly-loaded guest may
+> return `{matches:0, activeMatchOrdinal:0}` in the WSLg dev environment — a Chromium cold-start
+> quirk where the first `found-in-page` event from the main-process `wc.findInPage()` arrives with
+> `finalUpdate:true, matches:0` before the real count populates. The automation op handles this via
+> a main-process `requestId`-correlated retry: on a `finalUpdate:true, matches:0` event it records
+> `last` and re-issues the find (up to 5 times, every 500 ms, within the overall 3 s timeout).
+> Whether this quirk still reproduces under `WebContentsView` (vs. the prior `<webview>` surface)
+> is re-verified by this run on the new surface. Step 2 below may still fail on WSLg if the
+> cold-start still manifests; **when re-running on macOS, expect step 2 to pass.**
 
 ## Intent
 
