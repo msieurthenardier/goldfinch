@@ -295,6 +295,35 @@ override on :8123 handled it; no goldfinch change needed.
 
 ---
 
+### Leg 4 — `hat-and-alignment` (2026-07-02) — completed
+
+**Guided HAT (steps 1–11, operator on physical input):** 10 pass, 1 skipped (step 10 DPR≠1 — not-run
+on this rig, recorded), 0 open defects. Highlights: float tell + focus-on-open + count-from-first-
+character confirmed (step 1); stepping incl. button focus-retention (2); no-match `0/0` + deletion
+blank (3); Esc and ✕ close with highlight-clear + guest refocus (4); per-tab restore with live text +
+no ghost reopen, restore-at-first-match accepted as designed (5); chrome-focused Ctrl+F focuses the
+find input (6); internal tab fully excluded, switch flicker classified pre-existing Flight-3 family
+(7); freeze-hide/restore across kebab + context menu + container picker, unfreeze non-refocus
+ACCEPTED as correct (8); geometry tracking across resize/maximize/panels (9); theming ACCEPTED (11).
+**HAT-1 defect found at step 1, fixed inline (`e5daeca`)** — see Anomalies; the fix also RESOLVED the
+longstanding WSLg cold-start blank-count issue (operator-confirmed: count populates from the first
+character).
+
+**Step 12 — `/behavior-test find-overlay-geometry`: PASS 6/6** (run log
+`tests/behavior/find-overlay-geometry/runs/2026-07-02-18-12-25.md`; spec `draft` → `active`).
+Witnessed two-agent run, live mode, cold cache, wiring litmus passed; every verdict on
+Validator-inspected pixels. One Executor re-spawn (context loss after step 6) recovered per protocol
+with no evidence degradation. Spec errata candidates recorded in the run log (probe-direction,
+pixel-tolerance band, absence-authoritativeness rule, menu DOM-bracketing) — debrief input.
+
+**Step 13 — `npm run a11y`: GREEN** (6-state sweep post-cutover, WCAG 2.1 A/AA tags, fixture on
+:8123 per the port-squat contingency; no NEW violations).
+
+**Flight open question resolved** (overlay readDom vs capture+tell) — recorded in flight.md with the
+hidden≠destroyed observable caveat.
+
+---
+
 ## Decisions
 
 ### Flight Director Notes
@@ -415,8 +444,74 @@ override on :8123 handled it; no goldfinch change needed.
   superseded by this mission's recorded branch model (mission constraint "Long-running mission
   branch" + flight.md Post-Flight: flight branch → mission branch, LOCAL; `main` untouched; no
   GitHub PR — consistent with Flights 2–4). The leg-checklist PR body convention is preserved in the
-  commit message body instead. Remaining before landing: Leg 4 `hat-and-alignment` (guided HAT +
-  `/behavior-test find-overlay-geometry` + `npm run a11y`, apparatus litmus first).
+  commit message body instead. Committed as `433755b` (27 files, +2621/−321). Remaining before
+  landing: Leg 4 `hat-and-alignment` (guided HAT + `/behavior-test find-overlay-geometry` +
+  `npm run a11y`, apparatus litmus first).
+- **2026-07-02 — Leg 4 (`hat-and-alignment`) designed + design-reviewed → approve with changes; all
+  incorporated; leg `ready`.** Three mediums caught: (1) the WSLg cold-start anomaly had no HAT
+  disposition and could false-fail steps 1/5/7 — a warm-then-judge disposition note added; (2) a11y
+  Setup was incomplete (admin-key export, fixture serving, the Leg-3 `--url=` port-squat
+  contingency); (3) the `find-overlay-geometry` spec under-specified driving the overlay's input —
+  the overlay-wcId-probe technique (established Legs 2–3) written INTO the spec's apparatus notes.
+  One low: the flight's last Open Question (overlay `readDom` vs capture+tell) assigned to Leg 4 had
+  no step — Completion bullet added (Legs 2–3 already produced the answer: the overlay IS directly
+  drivable by probed wcId). Suggestions adopted (container-picker freeze repeat; explicit
+  focus-on-open expectation in step 1; spec Status/Last Run reminder). HAT is 13 steps; handing to
+  the operator.
+- **2026-07-02 — HAT step 1 (operator, live on :37833): PARTIAL + one new defect.** Float tell PASS
+  (no push-down); focus-on-open PASS (typed without clicking). Cold-start CONFIRMED interactively
+  (count blank on first query; Enter populates; warm-correct) — disposition applied, recorded as the
+  known WSLg anomaly data point, not a failure. **NEW DEFECT (HAT-1):** after Enter, editing the
+  query (backspace or added letter) ADVANCES to the next instance instead of re-searching; the
+  search only updates on the next Enter. Page + main layers verified passing parity-correct args
+  (`findNext:false`, fresh text) — suspicion: Chromium find-session semantics (new session searches
+  from current selection ≈ perceived advance) possibly masked further by the cold-start count quirk;
+  regression-vs-pre-existing unresolved. Developer spawned to reproduce on an isolated instance, A/B
+  against the pre-F7 baseline (`fc75517`), fix if ours / fix-for-UX if pre-existing (operator flagged
+  it as wrong either way), and commit as a HAT-fix commit. Operator continues with edit-independent
+  steps meanwhile (2, 4, 6-11); steps 3 and 5 wait on the fix.
+- **2026-07-02 — HAT steps 2/4/6/7/8/9/11 PASS; 10 skipped (not-run, no scale change available).**
+  Judgments settled: unfreeze non-refocus ACCEPTED as correct; theming ACCEPTED as-is. Step 7
+  observation: switch-to-internal flicker — operator identifies as long-standing; classified into the
+  Flight-3 WSLg-class "blip on internal tabs" known-issue family, carried (not an F7 defect).
+- **2026-07-02 — HAT-1 RESOLVED (`e5daeca`): root cause = inverted `findNext` semantics;
+  classification = PRE-EXISTING (A/B-proven at `fc75517` — the old inset bar behaved byte-identically;
+  the overlay carried the defect as faithful parity).** Electron's `findNext:true` = "new session"
+  (not "step") — the inverse of the legacy reading. Fix: main-side last-query-text tracking maps the
+  chrome-bar-shaped step/edit intent onto correct engine semantics; page-side stale-count guard on
+  empty input. Bonus: plausibly roots the WSLg cold-start blank-count family — post-fix, cold first
+  query populated immediately (operator re-verify pending; `find-in-page.md`'s automation-op caveat
+  deliberately left standing — the MCP op's own retry path is untouched and separately re-verifiable).
+  See Anomalies (HAT-1) for the Developer's full entry. **Incident (disclosed by the Developer):** its
+  cleanup `pkill` pattern matched the shared electron command line and killed the operator's live HAT
+  instance on :37833 alongside its own — a violation of the isolation instruction, no data lost,
+  instance relaunched on the fixed build. Debrief item: agent cleanup instructions should mandate
+  PID-scoped kills (never pattern kills) when parallel instances are in play.
+- **2026-07-02 — Operator icon refresh committed separately (`0c357fc`)**: `goldfinch_color.png`
+  updated (brand image, still referenced), unused `goldfinch_mono.png` removed (zero references,
+  grep-verified). Operator-provided content, kept out of the flight's find-overlay commits; the
+  Windows `Zone.Identifier` download stray left untracked. HAT instance relaunched on :37833 with
+  `e5daeca` + `0c357fc`; re-verification of steps 1 (cold-start + edit), 3, 5 handed to the operator.
+- **2026-07-02 — HAT steps 1/3/5 re-verified on the fixed build: ALL PASS.** Operator confirms:
+  (1) count populates immediately from the FIRST character — **the longstanding WSLg cold-start
+  blank-count issue is RESOLVED** by the HAT-1 `findNext` fix (pre-dated this flight; carried in
+  mission Known Issues family since M04); Enter iterates, backspace/edit re-search as expected.
+  (3) no-match `0/0` + delete-to-empty blank both correct. (5) per-tab restore with live text
+  correct; observation: switch-back restores at the FIRST match (fresh-session semantics of the
+  restore query) — operator-ACCEPTED as designed behavior. On-screen HAT (steps 1-11) complete:
+  10 pass, 1 skipped (DPR≠1, not-run), 0 open defects. Proceeding to step 12
+  (`/behavior-test find-overlay-geometry`, litmus first) and step 13 (`npm run a11y`).
+- **2026-07-02 — Steps 12+13 complete; FLIGHT LANDED.** Witnessed run PASS 6/6 (orchestrated per the
+  behavior-test skill: live two-agent mode, Sonnet crew, cold cache; one Executor re-spawn recovered
+  per the context-loss protocol — the mandatory CURRENT-STATE re-spawn block proved its worth and is
+  a debrief recommendation). a11y gate green on the wired session. Leg 4 → completed (12/13, step 10
+  skipped/not-run). All 4 legs completed; flight status → landed; flight checked off in mission.md.
+  HAT commit + local merge `flight/07-find-overlay-view` → `mission/05-webcontentsview-migration`
+  (`main` untouched). `[COMPLETE:flight]`. Debrief to follow via `/flight-debrief` (inputs flagged:
+  spec errata candidates from the run log; the pkill isolation incident → PID-scoped-kill crew rule;
+  the findNext-inversion class — check other Electron option semantics carried from the `<webview>`
+  era; cold-start root-cause resolution should be reflected in `find-in-page.md`'s caveat + mission
+  Known Issues at debrief).
 - **2026-07-02 — Leg 3 implemented and landed (Developer agent).** All 11 ACs verified; the live E2E
   ran on the DEFAULT path (no env var) with the overlay webContents driven directly — restore
   round-trip, deletion sync, sender-based close refocus, no-ghost, internal no-op, freeze-survival,
@@ -485,8 +580,8 @@ _(none yet)_
   re-searched (`2/2` — 2 genuine matches); → `foo` → `2/5`; Enter/Shift+Enter step `3/5→4/5→3/5`;
   delete-to-empty → count blank and stays blank; retype `alpha` → `1/1`. Leg 2/3 contracts preserved
   (sender validation, deletion sync via find-overlay-text, count path B, focus semantics).
-  `npm test` 953/0, typecheck + lint clean. Commit: see the HAT-fix commit on
-  `flight/07-find-overlay-view` (`flight/07: HAT fix — find re-searches on input edits`).
+  `npm test` 953/0, typecheck + lint clean. Commit: `e5daeca`
+  (`flight/07: HAT fix — find re-searches on input edits (findNext semantics)`).
 
 ---
 

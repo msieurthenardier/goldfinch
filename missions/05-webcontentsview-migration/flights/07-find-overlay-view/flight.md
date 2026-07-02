@@ -1,6 +1,6 @@
 # Flight: Floating Overlay Find Bar
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
@@ -42,9 +42,12 @@ re-confirmed every integration point against current post-Flight-4 code — see 
 - [x] Sequencing vs the deferred Flight-4 corpus? → **Operator: proceed with F7 now**; fold the find
   verification in (update `tab-surface-geometry`'s find-bar step to float-not-inset); the rest of the F4
   corpus (unaffected by F7) runs later in an admin-wired session. See DD10.
-- [ ] Does the overlay's own `webContents` need `readDom` access for the behavior spec, or is
-  `captureWindow` + the guest-bounds tell sufficient? → resolved during the `find-overlay-geometry` spec's
-  first run (apparatus-calibration). Recorded in Leg 4.
+- [x] Does the overlay's own `webContents` need `readDom` access for the behavior spec, or is
+  `captureWindow` + the guest-bounds tell sufficient? → **RESOLVED (Leg 4, first `find-overlay-geometry`
+  run, 2026-07-02)**: the overlay wc IS directly drivable/readable by probed wcId (the `fromId`-based
+  resolver accepts non-tab wcIds) — used as corroborating evidence; `captureWindow` pixels remain
+  authoritative. Caveat recorded: the overlay DOM can never serve as a "find is closed" observable
+  (hidden ≠ destroyed; stale state persists by design).
 
 ### Design Decisions
 
@@ -182,7 +185,7 @@ litmus first).
   Esc/close; count via path B; per-tab restore; focus lands in the overlay input on open.
 - [x] Chrome `#find-bar` retired; guest no longer inset for find; no dead inset code; `find-in-page.md`
   + `tab-surface-geometry` find-bar step updated. `npm test`/`typecheck`/`lint` green.
-- [ ] HAT passed + `find-overlay-geometry` PASS (or operator-accepted known issue) in an admin-wired
+- [x] HAT passed + `find-overlay-geometry` PASS (or operator-accepted known issue) in an admin-wired
   session; `npm run a11y` green on the new surface.
 
 ### Adaptation Criteria
@@ -220,7 +223,7 @@ litmus first).
   DD6); remove the find inset — **simplify `computeTopInsetDIP`/`measureWebviewsSlotWithInsetDIP` to
   `measureWebviewsSlotDIP()`** (DD8); update `find-in-page.md` + `tab-surface-geometry`'s find-bar step
   (float-not-inset).
-- [ ] `hat-and-alignment` *(optional — operator opted in)* — guided HAT (float-not-inset, position-sync,
+- [x] `hat-and-alignment` *(optional — operator opted in)* — guided HAT (float-not-inset, position-sync,
   internal-tab hidden, freeze-hide/restore, focus, stepping) + run `/behavior-test find-overlay-geometry`
   (apparatus-wiring litmus first) + `npm run a11y` on the new surface.
 
@@ -229,11 +232,12 @@ litmus first).
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged (flight branch → mission branch, local; `main` untouched)
-- [ ] Tests passing (`npm test` / `typecheck` / `lint`; `a11y` on the wired session)
-- [ ] Documentation updated (`find-overlay.*` surface; `find-in-page.md` + `tab-surface-geometry` steps;
-  CLAUDE.md find-bar architecture note → overlay)
+- [x] All legs completed *(4/4; leg 4 HAT: 12/13 pass, step 10 DPR≠1 skipped/not-run on this rig)*
+- [x] Code merged (flight branch → mission branch, local; `main` untouched)
+- [x] Tests passing (`npm test` 953/953 / `typecheck` / `lint`; `a11y` green on the wired session
+  2026-07-02)
+- [x] Documentation updated (`find-overlay.*` surface; `find-in-page.md` + `tab-surface-geometry` steps;
+  CLAUDE.md find-bar architecture note → overlay; `docs/mcp-automation.md` stopFindInPage row)
 
 ### Verification
 The overlay find bar floats over the live guest (guest not inset), tracks geometry across

@@ -1,9 +1,10 @@
 # Behavior Test: Find-overlay geometry — float-not-inset, position-sync, internal-hidden, freeze-hide
 
 **Slug**: `find-overlay-geometry`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-01
-**Last Run**: never
+**Last Run**: 2026-07-02-18-12-25 (PASS 6/6 — see `find-overlay-geometry/runs/2026-07-02-18-12-25.md`;
+spec errata candidates recorded in that run log's Validator closing)
 
 > **Why this spec exists.** Flight 7 replaces the inset (push-down) find bar with a floating overlay
 > `WebContentsView` stacked above the guest. The load-bearing, pixel-only properties — the bar **floats**
@@ -45,6 +46,15 @@ properties (the mission's SC2 "DOM-correct ≠ render-correct" class), asserted 
   observable. **Note:** the overlay is a **separate `WebContentsView`**, not an enumerable tab and not the
   chrome — its own DOM/AX is not reachable through the standard MCP surface, so the overlay's *internal*
   state is not directly readable; `captureWindow` pixels are the authoritative observable for this spec.
+
+> **Apparatus technique — driving the overlay's input (established Legs 2–3, F7).** Steps that type
+> into or send keys to the find bar cannot target it via `enumerateTabs` (see Note above). The working
+> technique: **probe for the overlay's wcId directly** — the drive-op resolver is `fromId`-based, so
+> ops accept any live wcId; probe the small id-space above the known chrome/guest ids (`readDom(id)`
+> succeeding with the find-bar markup identifies it; a failed probe on a non-existent id is a normal
+> refused result, and `activateTab` on a non-tab wcId returns false harmlessly). Once identified,
+> `typeText`/`pressKey` against that wcId drive the bar for real. Without this technique the Executor
+> would type into the guest and every input-dependent step would false-fail.
 
 > **Apparatus caveat — `captureWindow` on the WSLg fallback path.** `captureWindow` has two paths: an OS
 > window grab (`desktopCapturer`, primary — composites ALL views incl. the overlay) and a **WSLg/Wayland

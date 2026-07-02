@@ -199,7 +199,14 @@ follow-on work.
   claim #27/SC10 if free (SC7); run the full active behavior-test corpus as the parity benchmark; macOS
   build-readiness check; merge the mission branch to `main`. *(SC3, SC7, SC8, mission landing.)*
 
-- [ ] **Flight 7 (new — surfaced in the Flight-4 HAT): Floating overlay find bar** — replace the inset
+- [x] **Flight 7 (new — surfaced in the Flight-4 HAT): Floating overlay find bar** — ✅ LANDED
+  (2026-07-02). Overlay `WebContentsView` find bar shipped at full parity+ (float-not-inset,
+  position-sync, DD7 internal exclusion, DD5 freeze-hide/restore, per-tab restore with live text);
+  chrome `#find-bar` + inset retired; verified by guided HAT (12/13, DPR≠1 not-run) +
+  `find-overlay-geometry` Witnessed PASS 6/6 + a11y green. **Bonus: the longstanding WSLg find
+  cold-start blank-count issue (M04 family) was root-caused and FIXED** — inverted Electron
+  `findNext` semantics carried from the `<webview>` era (pre-existing, A/B-proven), corrected in the
+  HAT-fix commit. Merged to `mission/05` locally; `main` untouched. — replace the inset
   (push-down) find bar with a floating **overlay `WebContentsView`** stacked above the live guest, so the
   bar floats over the page instead of insetting it. **Feasibility PROVEN** by an in-goldfinch WSLg spike
   (the overlay paints its web content above the live guest, takes keyboard input, page stays live).
