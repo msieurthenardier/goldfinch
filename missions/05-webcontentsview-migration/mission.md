@@ -218,5 +218,16 @@ follow-on work.
   freeze). The same overlay technique could later **retire the freeze-frame hack for menus** — a possible
   follow-on. *(SC4-adjacent UX; not required for mission landing.)*
 
+- [ ] **Flight 8 (new — F7 follow-on, planned 2026-07-02): Menu overlay sheet** — retire the
+  freeze-frame menu mechanism using the Flight-7 overlay primitive: a single transparent full-guest
+  overlay `WebContentsView` (the "sheet") hosts all five menu surfaces (kebab, container, page context,
+  toolbar-unpin, site-info) over the **live** guest; freeze apparatus
+  (`freezeGuest`/`capture-active-guest`/stills) deleted at cutover. Retires the WSLg internal-tab menu
+  blip, capture latency, and frozen-page staleness; simplifies Flight-9 (panel) by removing the freeze
+  interplay. Gated by a Leg-1 WSLg full-guest-transparency pixel probe (fallback: sized-to-menu views).
+  The F7 debrief's "investigate pause-hit-testing first" note recorded as considered-and-overridden
+  (operator decision). *(SC3/SC4-adjacent parity-on-better-mechanism; not required for mission
+  landing.)*
+
 > The alignment / vibe-coding session is folded into **Flight 1** (above) rather than a standalone flight —
 > the spike is the natural home for hands-on, judgment-heavy exploration.
