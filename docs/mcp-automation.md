@@ -348,7 +348,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 | `setZoom` | `{ wcId: integer, factor: number }` *(required)* | JSON text: the applied `{"factor":n}` — `factor` is clamped to `[0.25, 5.0]`, so the returned value may differ from the requested one |
 | `printToPDF` | `{ wcId: integer }` *(required)* | JSON text: a base64-encoded PDF string. Foreground-first (a backgrounded tab is activated before rendering). Decode the base64 and verify it begins with `%PDF-` |
 | `findInPage` | `{ wcId: integer, text: string, forward?: boolean, findNext?: boolean, matchCase?: boolean }` *(`wcId` and `text` required)* | JSON text: `{"activeMatchOrdinal":n,"matches":m}` — the current match index (1-based) and total match count. Foreground-first. Refuses the internal `goldfinch://settings` session. |
-| `stopFindInPage` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (void op). Clears the active find session and removes any match highlights on the page content. Does not affect the renderer-side find bar UI. Refuses the internal `goldfinch://settings` session. |
+| `stopFindInPage` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (void op). Clears the active find session and removes any match highlights on the page content. Does not affect the find-overlay UI (the floating find bar is a separate main-owned `WebContentsView`, not chrome DOM). Refuses the internal `goldfinch://settings` session. |
 
 > **Security invariant — internal session always excluded.** `getZoom`, `setZoom`, `printToPDF`, `findInPage`, and `stopFindInPage`
 > refuse the internal `goldfinch://settings` session with an op-local

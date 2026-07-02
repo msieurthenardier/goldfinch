@@ -128,6 +128,17 @@ contextBridge.exposeInMainWorld('goldfinch', {
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
   rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
 
+  // --- find overlay (M05 Flight 7) ---
+  // The find bar is a main-owned chrome-class WebContentsView floating over the
+  // guest (not chrome DOM). The chrome drives open (openFind / per-tab restore)
+  // and close (navigation-close; main resolves NO refocus for a chrome sender),
+  // and subscribes to per-tab state sync: text on every overlay query (empty
+  // included — deletion sync), closed ONLY on an overlay-side user Esc/✕.
+  findOverlayOpen: ({ wcId, findText }) => ipcRenderer.send('find-overlay:open', { wcId, findText }),
+  findOverlayClose: () => ipcRenderer.send('find-overlay:close'),
+  onFindOverlayClosed: (cb) => ipcRenderer.on('find-overlay-closed', (_e, d) => cb(d)),
+  onFindOverlayText: (cb) => ipcRenderer.on('find-overlay-text', (_e, d) => cb(d)),
+
   // Push subscriptions from main for tab events
   onTabDidNavigate: (cb) => ipcRenderer.on('tab-did-navigate', (_e, d) => cb(d)),
   onTabDidNavigateInPage: (cb) => ipcRenderer.on('tab-did-navigate-in-page', (_e, d) => cb(d)),
@@ -137,7 +148,6 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabDidFinishLoad: (cb) => ipcRenderer.on('tab-did-finish-load', (_e, d) => cb(d)),
   onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
-  onTabFoundInPage: (cb) => ipcRenderer.on('tab-found-in-page', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 

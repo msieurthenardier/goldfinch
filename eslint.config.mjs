@@ -5,7 +5,9 @@ export default [
   { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs'] }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
-    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'test/**', '*.config.{js,mjs}'],
+    // find-overlay-preload.js is chrome-class (DD1, M05 Flight 7) — it stays in this
+    // node-globals block alongside chrome-preload.js (Leg 2 grows it with ipcRenderer).
+    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },

@@ -109,6 +109,16 @@ interface GoldfinchBridge {
   onOpenTab(cb: (url: string) => void): void;
   /** Fired by the main-side Ctrl+F before-input-event capture (SC4/DD2). No payload. */
   onOpenFind(cb: () => void): void;
+
+  // --- find overlay (M05 Flight 7 — main-owned floating find WebContentsView) ---
+  /** Open (or restore) the overlay find session for a web tab, seeding its input. */
+  findOverlayOpen(payload: { wcId: number; findText: string }): void;
+  /** Chrome-initiated close (navigation-close). Main resolves refocusGuest:false from the sender — no focus move. */
+  findOverlayClose(): void;
+  /** Overlay-side user close (Esc/✕) — clear the tab's findOpen so switch-back doesn't ghost-reopen. */
+  onFindOverlayClosed(cb: (d: { wcId: number }) => void): void;
+  /** Per-tab text sync — fired on every overlay query, empty text included (deletion sync). */
+  onFindOverlayText(cb: (d: { wcId: number; text: string }) => void): void;
   /** Fired by the main-side Ctrl+J before-input-event capture (DD2). No payload. */
   onOpenDownloads(cb: () => void): void;
 
@@ -149,7 +159,6 @@ interface GoldfinchBridge {
   onTabDidFinishLoad(cb: (d: { wcId: number }) => void): void;
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
-  onTabFoundInPage(cb: (d: { wcId: number; result: any }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }

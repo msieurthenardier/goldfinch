@@ -1,4 +1,4 @@
-# Behavior Test: Tab-surface geometry — freeze/restore, panel-resizes-guest, find-bar inset
+# Behavior Test: Tab-surface geometry — freeze/restore, panel-resizes-guest, find-overlay float
 
 **Slug**: `tab-surface-geometry`
 **Status**: draft
@@ -17,8 +17,10 @@ Flight-3 migration introduced and that no unit test can reach: (1) the **freeze-
 a chrome menu paints a still of the guest into the chrome `#webviews` layer and hides the live guest
 view so HTML chrome renders **above** it, and dismissing restores the live view at correct bounds;
 (2) **panel-resizes-guest** — opening/closing the media (or privacy) side panel reflows the guest view
-to the remaining region with no clip, overlap, or dead band; (3) **find-bar inset** — the find overlay
-renders above the guest without breaking its layout. These are *rendered-surface* properties (the
+to the remaining region with no clip, overlap, or dead band; (3) **find-overlay float (not inset)** —
+since M05 Flight 7 the find bar is a main-owned overlay `WebContentsView` composited above the guest;
+opening it must **not** change the guest's bounds (the guest keeps the full `#webviews` slot — the old
+find inset was removed at the F7 cutover). These are *rendered-surface* properties (the
 mission's "DOM-correct ≠ render-correct" class), so the test asserts `captureWindow` pixels corroborated
 by the chrome's own `#webviews` style — never DOM geometry alone.
 
@@ -29,8 +31,9 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
   (pick a free loopback port; prior sessions used 49707/49710). Capture the `adminKey` from the
   `AUTOMATION_DEV_MINT` stdout line. The admin key is required — a jar key is refused `getChromeTarget`
   (`admin-only`) and cannot drive the chrome renderer.
-- **This test drives the chrome renderer** (toolbar, menus, panel, find bar live in the chrome) and
-  observes the **composited window**. `getChromeTarget()` returns the chrome `wcId`.
+- **This test drives the chrome renderer** (toolbar, menus, and panel live in the chrome; the find
+  overlay is a separate main-owned `WebContentsView` — NOT in the chrome DOM/AX tree and not
+  MCP-enumerable) and observes the **composited window**. `getChromeTarget()` returns the chrome `wcId`.
 - **Coordinate-click rule:** all clicks are coordinate-based — `click(wcId, x, y)` located via a
   `captureWindow()` screenshot. No CSS selectors over the MCP surface.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does NOT qualify (it launches its own
@@ -44,9 +47,10 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
   chrome `wcId`; `readAxTree(chromeWcId)` for menu/panel open state (`aria-expanded`); `enumerateTabs`
   for the active web tab `wcId`.
 - **browser / rendered window — CORROBORATING for freeze, AUTHORITATIVE for geometry** (`captureWindow()`).
-  Use it as the primary observable for **panel-resizes-guest** and **find-bar inset** (a real guest-bounds
-  change the window grab shows directly). For the **freeze / menu-above** checks treat it as
-  *corroborating only*: see the apparatus caveat below.
+  Use it as the primary observable for **panel-resizes-guest** and **find-overlay float** (the panel case
+  is a real guest-bounds change the window grab shows directly; the find case pairs pixels with a
+  guest-bounds probe proving the bounds did NOT change). For the **freeze / menu-above** checks treat it
+  as *corroborating only*: see the apparatus caveat below.
 
 > **Apparatus caveat — `captureWindow` on the WSLg fallback path.** `captureWindow` has two paths: an OS
 > window grab (`desktopCapturer`, primary) and a **WSLg/Wayland fallback** that composites the
@@ -69,8 +73,8 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
 | 4 | **Restore on dismiss:** `pressKey(wcId, 'Escape')`. Take `readDom(chromeWcId)` (authoritative) and a `captureWindow()`. Optionally `scroll` the guest to pixel-confirm the live view is back. | **Authoritative:** `#webviews` `backgroundImage` is cleared (`''`/`none`) — `unfreezeGuest` ran and restored the live view at full bounds. The menu is gone (`aria-expanded="false"`). Optional pixel confirm: the guest scrolls (a frozen still would not). A sub-frame WSLg blip during the swap is recorded, not failed. |
 | 5 | **Panel-resizes-guest (open):** locate and open the media side panel via `captureWindow()` + `click(wcId, x, y)`. Take a `captureWindow()`. | The guest view **reflows to the region beside the panel** — the panel and the guest tile the content area with **no overlap, no gap/dead band, and no clipping** of the guest; the guest content visibly re-lays-out to the narrower width. [render-correct] |
 | 6 | **Panel-resizes-guest (close):** close the panel via `captureWindow()` + `click(wcId, x, y)`. Take a `captureWindow()`. | The guest view restores to the **full** `#webviews` region; no residual inset, no dead band where the panel was. |
-| 7 | **Find-bar inset (open):** establish a focus anchor with `click(wcId, x, y)` into the chrome, then open find with `pressKey(wcId, 'Control+f')` (or the find affordance). Take a `captureWindow()` and `readAxTree(chromeWcId)`. | The find-bar overlay renders **above** the guest (the `[ input ] n/m [↑][↓][✕]` bar is visible in the screenshot); the guest remains rendered and is not broken/clipped behind the bar; the find input is present and focusable per `readAxTree`. [a11y] |
-| 8 | **Find-bar inset (close):** `pressKey(wcId, 'Escape')`. Take a `captureWindow()`. | The find bar is gone; the guest is restored to its full bounds with no residual inset. |
+| 7 | **Find-overlay float (open):** record the active guest's bounds (bounds probe / `enumerateTabs`-adjacent geometry read) and the `#webviews` rect, then open find (`pressKey` Ctrl+F on the guest, or drive the chrome's `openFind()`). Take a `captureWindow()` and re-probe the guest bounds. | **Primary tell:** the find bar is composited **over** a FULL-bounds guest — the guest-bounds probe equals the full `#webviews` rect, **identical to the pre-open probe** (the bar floats; the guest is never inset). The `[ input ] n/m [↑][↓][✕]` bar is visible in the screenshot above the guest, which is not broken/clipped behind it. **AX re-scope:** the find input is NOT in the chrome AX tree (`readAxTree(chromeWcId)`) — the overlay is a separate webContents; do not assert it there (the overlay's own a11y is HAT-covered per DD12). [render-correct] |
+| 8 | **Find-overlay float (close):** close find (Esc in the overlay input, or the ✕). Take a `captureWindow()` and re-probe the guest bounds. | The find bar is gone; the guest bounds are **UNCHANGED** from steps 1/7 (they never shrank — nothing to restore; the float never inset the guest). |
 
 **Row conventions:** Row 1 is setup (no judgment). Rows 2–8 each assert one rendered-state checkpoint.
 `[render-correct]` flags the SC2 rendered-vs-DOM checks; `[a11y]` flags accessibility-relevant checks.
@@ -80,7 +84,9 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
 - **Menus on internal `goldfinch://` tabs** (kebab/container freeze-above + restore while *on* Settings
   / Downloads, and internal-view resize) — `internal-tab-menus.md`.
 - **The find *engine result*** (match counts, stepping, jar-scoping) — `find-in-page.md` (this spec
-  asserts only the bar's inset/rendering, not its results).
+  asserts only the bar's float/rendering and the guest's unchanged bounds, not its results).
+- **Find-overlay geometry tracking** (position-sync across resize/panel/tab-switch, internal-tab
+  removal, freeze-hide/restore) — `find-overlay-geometry.md`.
 - **Menu items, keyboard operation, dismissal semantics** — `kebab-menu.md`, `page-context-menu.md`,
   `menu-dismissal.md`.
 - **macOS rendering** — WSLg is the in-loop venue this mission; macOS is the Flight-6 landing gate.

@@ -17,6 +17,7 @@ const downloads = require('./downloads-store');
 const { createManager } = require('./downloads-manager');
 const { buildRegisterRecord, buildProgressPayload, buildDonePayload } = require('./downloads-payload');
 const { registerInternalHandler } = require('./internal-ipc');
+const { computeFindOverlayBounds } = require('./find-overlay-geometry');
 const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
@@ -144,6 +145,200 @@ const getChromeContents = () => (chromeView ? chromeView.webContents : null);
 const tabViews = new Map();
 // Active tab's wcId (null when no web tab is active)
 let activeTabWcId = null;
+
+// --- Find-overlay view state (M05 Flight 7, DD1/DD2) ---------------------------------
+// The floating find bar is a dedicated chrome-class WebContentsView stacked above the
+// active guest. Lazy singleton: created on first show, reused via add/removeChildView,
+// destroyed only at window `closed`. Module-level is load-bearing — DD3 (Leg 2) reads
+// `overlayView` at found-in-page event time, not captured at tab construction.
+// NOTE: the overlay's webContents never enters `tabViews`, so automation enumerateTabs
+// is unaffected by construction (no MCP-enumerable drift).
+/** @type {Electron.WebContentsView | null} */
+let overlayView = null;
+// Tracks stack presence (removeChildView of a non-child is undefined behavior — gate on this).
+let overlayVisible = false;
+// Latest active-guest DIP bounds, for (re)positioning the overlay on show.
+let lastGuestBounds = null;
+// Overlay find session: wcId of the tab the overlay currently targets (null = closed).
+// Single source of "overlay find is open, targeting tab X". DD9: per-tab
+// findText/findOpen stay in the renderer; main holds ONLY the live session.
+let findOverlayTabWcId = null;
+function isFindOverlayActive(wcId) { return wcId != null && wcId === findOverlayTabWcId; }
+// Last text actually issued to wc.findInPage for the live overlay session (null = none
+// yet / reset). HAT-1 (M05 F7 Leg 4): Electron's FindInPageOptions.findNext means
+// "begin a NEW find session" (true) vs "follow-up in the current session" (false) —
+// the INVERSE of the legacy <webview>-era reading the retired chrome bar used. A
+// follow-up request does NOT re-search when the text changed (Chromium keeps advancing
+// the old session), so main tracks the last-queried text and forces a new session on
+// any text change. See the find-overlay:query handler for the mapping.
+let findOverlayLastQueryText = null;
+// Overlay page readiness (AC7 init race): flipped by the construction-time
+// did-finish-load listener; reset whenever overlayView is nulled/recreated.
+let overlayReady = false;
+// At most ONE queued init seed ({ findText }, latest wins), delivered (with focus)
+// by did-finish-load when the open raced the first page load. Cleared on session
+// close so a stale seed never fires against a closed session.
+let pendingOverlayInit = null;
+
+// Full overlay teardown (AC7 crash recovery + shared by window `closed`): destroy the
+// webContents if still alive, drop the view, reset visibility/readiness, clear any
+// queued init AND the find session — the next open recreates cleanly.
+function teardownFindOverlayView() {
+  if (overlayView) {
+    if (overlayVisible && mainWindow) {
+      mainWindow.contentView.removeChildView(overlayView);
+    }
+    if (!overlayView.webContents.isDestroyed()) {
+      // destroy() is real but absent from the public WebContents type — any-cast
+      // (same repo-precedented pattern as the tab-close path).
+      /** @type {any} */ (overlayView.webContents).destroy();
+    }
+  }
+  overlayView = null;
+  overlayVisible = false;
+  overlayReady = false;
+  pendingOverlayInit = null;
+  findOverlayTabWcId = null;
+  findOverlayLastQueryText = null;
+}
+
+// Lazy-construct the overlay view. Chrome-class webPreferences (mirrors chromeView).
+function ensureFindOverlayView() {
+  // Destroyed-recreate guard: a destroyed webContents means the view is dead — null it
+  // so a fresh one is built (ready flag/init queue reset with it).
+  if (overlayView && overlayView.webContents.isDestroyed()) {
+    overlayView = null;
+    overlayVisible = false;
+    overlayReady = false;
+    pendingOverlayInit = null;
+  }
+  if (overlayView) return overlayView;
+  overlayReady = false;
+  overlayView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'find-overlay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  // AC7 readiness + init-race handling: the listener is installed at construction on
+  // THIS webContents, so a queued one-shot init always attaches to the live page.
+  overlayView.webContents.on('did-finish-load', () => {
+    overlayReady = true;
+    if (pendingOverlayInit && findOverlayTabWcId != null) {
+      const seed = pendingOverlayInit;
+      pendingOverlayInit = null;
+      deliverOverlayInit(seed.findText);
+    } else {
+      pendingOverlayInit = null;
+    }
+  });
+  // AC7 crash recovery: after render-process-gone the WebContents object is ALIVE
+  // (isDestroyed() stays false), so the recreate guard above never fires for a crash —
+  // this listener is what guarantees the next open rebuilds instead of re-showing a
+  // dead view.
+  overlayView.webContents.on('render-process-gone', () => {
+    teardownFindOverlayView();
+  });
+  // Transparent so the guest shows through around the rounded bar; if the platform
+  // compositor renders it opaque (WSLg caveat), the opaque themed rect is the
+  // flight-accepted variation.
+  overlayView.setBackgroundColor('#00000000');
+  overlayView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'find-overlay.html')).catch((err) => {
+    console.warn('[find-overlay] loadFile rejected:', err && (err.code || err.message || err));
+  });
+  return overlayView;
+}
+
+// Show = position (when guest bounds are known) + addChildView + setVisible(true).
+// The re-add of an existing child RAISES it — the same idiom the guest re-add uses in
+// tab-set-active. DD2 invariant: callers in tab-set-active must call this strictly
+// AFTER the guest addChildView, or the guest buries the overlay.
+function showFindOverlay() {
+  const view = ensureFindOverlayView();
+  if (!mainWindow) return;
+  if (lastGuestBounds) {
+    // Guard required: computeFindOverlayBounds does not tolerate null. If no guest
+    // bounds have ever been seen, skip — the next tab-set-bounds corrects it.
+    view.setBounds(computeFindOverlayBounds(lastGuestBounds));
+  }
+  mainWindow.contentView.addChildView(view);
+  view.setVisible(true);
+  overlayVisible = true;
+}
+
+// Hide = removeChildView — NEVER setVisible(false)-only (DD7: a hidden-but-present
+// sibling still occupies the compositing stack). The view is kept for reuse.
+function hideFindOverlay() {
+  if (!overlayVisible) return;
+  if (mainWindow && overlayView) {
+    mainWindow.contentView.removeChildView(overlayView);
+  }
+  overlayVisible = false;
+}
+
+// Send the init seed + focus the overlay (DD6: overlayView.webContents.focus() here;
+// the page focuses/selects its input in its onInit handler). Callers must have checked
+// readiness — openFindOverlaySession queues via pendingOverlayInit when not ready.
+function deliverOverlayInit(findText) {
+  if (!overlayView || overlayView.webContents.isDestroyed()) return;
+  overlayView.webContents.send('find-overlay:init', { findText });
+  overlayView.webContents.focus();
+}
+
+// Open the overlay find session for a web tab (DD4). Shared entry for the
+// `find-overlay:open` IPC handler and the dev-gated Ctrl+F stimulus.
+function openFindOverlaySession(wcId, findText) {
+  const entry = tabViews.get(wcId);
+  // Find is web-tab-only (DD4): refuse absent, internal (trusted), or destroyed targets.
+  if (!entry || entry.trusted || entry.view.webContents.isDestroyed()) return;
+  if (isFindOverlayActive(wcId)) {
+    // AC6e: re-open on the already-targeted tab re-focuses WITHOUT re-seeding init —
+    // re-init would wipe whatever the user has typed in the overlay input.
+    if (overlayView && !overlayView.webContents.isDestroyed()) {
+      overlayView.webContents.focus();
+    }
+    return;
+  }
+  if (findOverlayTabWcId != null) {
+    // Defensive retarget: a session open for a DIFFERENT tab is closed first (clears
+    // the old guest's highlight; no refocus). Unreachable via this leg's Ctrl+F
+    // stimulus (it fires on the focused/active guest) but makes the seam safe for
+    // Leg 3's renderer-driven opens.
+    closeFindOverlaySession({ refocusGuest: false });
+  }
+  findOverlayTabWcId = wcId;
+  findOverlayLastQueryText = null; // fresh session target — first query must begin a new engine session
+  showFindOverlay();
+  const seed = typeof findText === 'string' ? findText : '';
+  if (overlayReady) {
+    deliverOverlayInit(seed);
+  } else {
+    // AC7 first-open init race: the page hasn't finished loading — queue exactly one
+    // seed (latest wins); the construction-time did-finish-load delivers init + focus.
+    pendingOverlayInit = { findText: seed };
+  }
+}
+
+// Close the overlay find session. `refocusGuest` MUST be true ONLY on the explicit
+// close path (Esc / ✕ → `find-overlay:close`). Every implicit close — tab-switch,
+// tab-close, window teardown — passes false: refocusing there would land OS focus on
+// a hidden/destroyed view and steal focus from tab-strip keyboard navigation (a
+// pinned keyboard-nav contract). (AC5)
+function closeFindOverlaySession({ refocusGuest }) {
+  if (findOverlayTabWcId == null) return;
+  const wc = getTabContents(findOverlayTabWcId); // null when destroyed/mid-destruction
+  if (wc) {
+    // Chrome-bar closeFind parity: clear the highlight on close.
+    wc.stopFindInPage('clearSelection');
+    if (refocusGuest) wc.focus();
+  }
+  hideFindOverlay();
+  findOverlayTabWcId = null;
+  findOverlayLastQueryText = null;
+  pendingOverlayInit = null;
+}
 
 
 // Returns the guest webContents for a tab view by its wcId (or null if not found/destroyed).
@@ -441,6 +636,10 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
     chromeView = null;
+    // Find-overlay teardown (DD1): destroys the lazy singleton and clears the find
+    // session + ready flag + queued init (AC6f — no refocus concern, everything is
+    // tearing down; teardownFindOverlayView never refocuses).
+    teardownFindOverlayView();
   });
 
   // DD3: keep the chrome view sized to the window. No-op if the view is already gone
@@ -569,20 +768,17 @@ function wireGuestContents(contents) {
         event.preventDefault();
         return;
       }
-      // Find in page (SC4 / DD2). Suppress Chromium's native find and open the
-      // renderer-side floating find bar. Modelled on the zoom-changed broadcast:
-      // send to the chrome renderer where the bar lives (NOT on the open-tab path
-      // inside setWindowOpenHandler). No payload — the renderer infers via activeTab().
-      // The __goldfinchInternal skip already excludes internal sessions, satisfying DD5.
+      // Find in page (SC4 / DD2, M05 F7). Suppress Chromium's native find and tell
+      // the chrome renderer to open the floating find OVERLAY (a main-owned
+      // chrome-class WebContentsView, not chrome DOM): the renderer's openFind
+      // resolves per-tab state and drives find-overlay:open back into main. No
+      // payload — the renderer infers via activeTab(). The __goldfinchInternal
+      // skip already excludes internal sessions, satisfying DD5.
       if (input.key === 'f' || input.key === 'F') {
         event.preventDefault();
-        // Move OS keyboard focus to the chrome view BEFORE sending open-find.
-        // Without this, the guest WebContentsView keeps native focus; the
-        // renderer's findInput.focus() is DOM-only, so keystrokes keep routing
-        // to the page (same symptom as the replaceMisspelling case at line ~1637:
-        // "first action does nothing until focus returns"). Focus-then-act ensures
-        // the input element actually receives keystrokes after the bar opens.
-        getChromeContents()?.focus();
+        // No chrome focus here (DD6): main focuses the overlay webContents in
+        // openFindOverlaySession when the renderer drives find-overlay:open —
+        // a chrome-view focus would actively fight that.
         getChromeContents()?.send('open-find');
         return;
       }
@@ -636,7 +832,8 @@ function wireGuestContents(contents) {
 }
 
 // Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
-// Forwards did-navigate / title / favicon / loading / find to the chrome renderer.
+// Forwards did-navigate / title / favicon / loading to the chrome renderer; the
+// found-in-page count fans out to the find-overlay webContents (path B, DD3).
 function wireTabViewEvents(view, wcId) {
   const wc = view.webContents;
   const sendToChrome = (channel, payload) => {
@@ -675,7 +872,19 @@ function wireTabViewEvents(view, wcId) {
     sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
   }));
   wc.on('found-in-page', guard((_e, result) => {
-    sendToChrome('tab-found-in-page', { wcId, result });
+    // Count path B (DD3, M05 Flight 7): when the overlay find session targets THIS
+    // tab, fan the count directly to the overlay webContents — no renderer round-trip
+    // (the old chrome fan-out was retired at the F7 cutover; the chrome count display
+    // was its only consumer).
+    // `overlayView` is the module-level ref resolved at event time (never captured at
+    // tab construction — the overlay is lazy). The isFindOverlayActive(wcId) guard
+    // also drops stale results from a non-target tab after a fast tab switch.
+    if (isFindOverlayActive(wcId) && overlayView && !overlayView.webContents.isDestroyed()) {
+      overlayView.webContents.send('find-overlay:count', {
+        activeMatchOrdinal: result.activeMatchOrdinal,
+        matches: result.matches
+      });
+    }
   }));
 }
 
@@ -1434,15 +1643,32 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
 ipcMain.on('tab-close', (_event, wcId) => {
   const entry = tabViews.get(wcId);
   if (!entry) return;
+  // Captured BEFORE the null-out below — one line lower and this is always false.
+  const wasActive = activeTabWcId === wcId;
   mainWindow.contentView.removeChildView(entry.view);
   if (!entry.view.webContents.isDestroyed()) {
     entry.view.webContents.destroy();
   }
   tabViews.delete(wcId);
   if (activeTabWcId === wcId) activeTabWcId = null;
+  // Find-overlay session teardown (AC6d): the session target is being destroyed —
+  // close the session with NO refocus (nothing sensible to focus; the stopFind inside
+  // close tolerates the mid-destruction guest via getTabContents' guards, and the
+  // entry is already deleted above so it resolves null). Placed with the Leg-1
+  // overlay lines, AFTER tabViews.delete.
+  if (wcId === findOverlayTabWcId) closeFindOverlaySession({ refocusGuest: false });
+  // Belt-and-suspenders (DD1, Leg 1): closing the active tab, or the last web tab
+  // (all-internal remaining), removes the overlay from the stack even sessionless.
+  if (wasActive) hideFindOverlay();
+  const anyWebTabLeft = [...tabViews.values()].some((e) => e.trusted === false);
+  if (!anyWebTabLeft) hideFindOverlay();
 });
 
 ipcMain.on('tab-hide', (_event, wcId) => {
+  // Find-overlay freeze-hide (DD5): hiding the active guest (menu freeze — and the
+  // pending-activation hide) takes the overlay out of the stack too. Restore needs no
+  // code here — unfreeze/late-activation both land in tab-set-active's re-add.
+  if (wcId === activeTabWcId) hideFindOverlay();
   const entry = tabViews.get(wcId);
   if (!entry) return;
   if (!entry.view.webContents.isDestroyed()) {
@@ -1474,8 +1700,12 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
   // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
   const entry = tabViews.get(wcId);
   if (entry) {
-    if (bounds) {
-      entry.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
+    // Hoisted rounded bounds so the guest setBounds and lastGuestBounds share one object.
+    const rounded = bounds
+      ? { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) }
+      : null;
+    if (rounded) {
+      entry.view.setBounds(rounded);
     }
     if (!entry.view.webContents.isDestroyed()) {
       entry.view.setVisible(true);
@@ -1484,6 +1714,23 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
     // Raise the active guest view to the top so page input works.
     if (mainWindow) {
       mainWindow.contentView.addChildView(entry.view);
+    }
+    // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
+    // above, or the guest buries the overlay. Do not "optimize" this away when the
+    // overlay is already visible — every guest re-add raises the guest.
+    if (findOverlayTabWcId != null && wcId !== findOverlayTabWcId) {
+      // AC6a: activating a DIFFERENT tab (internal or web alike — also covers DD7)
+      // CLOSES the session: stopFind clearSelection on the old guest, hide, clear
+      // state. NO refocus — the new guest was already added/raised above; refocusing
+      // the OLD guest would land OS focus on a view about to be hidden and steal
+      // focus from tab-strip keyboard navigation (AC5).
+      closeFindOverlaySession({ refocusGuest: false });
+    } else if (isFindOverlayActive(wcId)) {
+      // AC6b / DD5 unfreeze restore: re-activating the session's own tab re-shows the
+      // overlay (unfreezeGuest rides tabSetActive) — the session survives freeze.
+      // isFindOverlayActive(wcId) implies !entry.trusted (open refuses trusted).
+      if (rounded) lastGuestBounds = rounded;
+      showFindOverlay();
     }
   }
   // Hide old active tab
@@ -1500,7 +1747,17 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
 ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
   const entry = tabViews.get(wcId);
   if (!entry || entry.view.webContents.isDestroyed()) return;
-  entry.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) });
+  const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  entry.view.setBounds(rounded);
+  // Find-overlay position-sync (DD2): the overlay tracks the ACTIVE guest's bounds —
+  // resize/maximize/panel toggles all funnel here via sendActiveBounds/ResizeObserver/
+  // trigger-send-bounds.
+  if (wcId === activeTabWcId) {
+    lastGuestBounds = rounded;
+    if (overlayVisible && overlayView) {
+      overlayView.setBounds(computeFindOverlayBounds(rounded));
+    }
+  }
 });
 
 ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
@@ -1511,6 +1768,70 @@ ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
   } else if (text) {
     wc.findInPage(text, options || {});
   }
+});
+
+// --- Find-overlay DD4 IPC (M05 Flight 7). Chrome-class trust domain, but every
+// handler still validates event.sender — a guest page must never be able to open or
+// drive the overlay. Open/close route through the shared session functions above. ------
+
+// Sender: the chrome webContents ONLY (the renderer's openFind / activateTab restore).
+ipcMain.on('find-overlay:open', (event, payload) => {
+  if (event.sender !== getChromeContents()) return;
+  const { wcId, findText } = payload || {};
+  openFindOverlaySession(wcId, typeof findText === 'string' ? findText : '');
+});
+
+// Sender: chrome OR the overlay itself. The SENDER resolves the close semantics
+// (design decision, Leg 3 — no payload flag, nothing to spoof):
+// - overlay sender = the user explicitly closed the bar (Esc/✕) → refocus the guest
+//   (AC5, the only refocusing close path) AND notify the chrome (find-overlay-closed)
+//   so it clears the tab's findOpen — otherwise switch-back would ghost-reopen.
+// - chrome sender = programmatic navigation-close → NO focus move (a page-initiated
+//   redirect must not yank OS focus into the guest, e.g. mid-typing in the address
+//   bar) and NO notification (the chrome initiated it; no echo needed).
+ipcMain.on('find-overlay:close', (event) => {
+  const overlayWc = overlayView && !overlayView.webContents.isDestroyed() ? overlayView.webContents : null;
+  const fromOverlay = overlayWc != null && event.sender === overlayWc;
+  if (!fromOverlay && event.sender !== getChromeContents()) return;
+  // Notify BEFORE closing — closeFindOverlaySession nulls findOverlayTabWcId.
+  if (fromOverlay && findOverlayTabWcId != null) {
+    getChromeContents()?.send('find-overlay-closed', { wcId: findOverlayTabWcId });
+  }
+  closeFindOverlaySession({ refocusGuest: fromOverlay });
+});
+
+// Sender: the overlay ONLY. Forwards the query text to the chrome for per-tab state
+// sync (DD9 — EVERY query, empty included: deletion sync, so tab.findText tracks a
+// delete-to-empty and switch-back restores a blank bar, not resurrected text), then
+// resolves the session's target guest and runs findInPage. Empty text skips findInPage
+// (the page blanks its own count; NO stopFindInPage — the highlight persists until
+// close). A frozen (hidden-but-live) guest is allowed — counts land when the overlay
+// re-shows. A stale/destroyed target resolves null → no-op.
+//
+// FLAG MAPPING (HAT-1 fix): the payload's `findNext` keeps the chrome-bar shape
+// ("this is a STEP request"), but Electron's FindInPageOptions.findNext means "begin a
+// NEW find session" — the inverse. A step continues the engine session (Electron
+// findNext:false) ONLY when the text is unchanged since the last issued query; every
+// text change — incremental typing, backspace edits — and every first query of a
+// session begins a NEW session (Electron findNext:true) so the edited term re-searches
+// immediately instead of advancing the stale session. (The pre-F7 inset bar had the
+// same inversion — pre-existing defect, not carried contract.)
+ipcMain.on('find-overlay:query', (event, payload) => {
+  if (!overlayView || overlayView.webContents.isDestroyed() || event.sender !== overlayView.webContents) return;
+  const wc = getTabContents(findOverlayTabWcId);
+  if (!wc) return;
+  const { text, findNext, forward, matchCase } = payload || {};
+  if (typeof text !== 'string') return;
+  getChromeContents()?.send('find-overlay-text', { wcId: findOverlayTabWcId, text });
+  if (!text) {
+    // Deleted-to-empty: no engine call (highlight persists), but the session text is
+    // gone — the next non-empty query must begin a new engine session.
+    findOverlayLastQueryText = null;
+    return;
+  }
+  const isStep = !!findNext && text === findOverlayLastQueryText;
+  findOverlayLastQueryText = text;
+  wc.findInPage(text, { findNext: !isStep, forward: forward !== false, matchCase: !!matchCase });
 });
 
 // Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.

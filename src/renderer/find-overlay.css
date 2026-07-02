@@ -1,0 +1,99 @@
+/* Find-overlay page styles (M05 Flight 7, DD1) — adapted from the chrome #find-bar
+   blocks (styles.css "Find bar" section). The overlay VIEW is the floating rect, so
+   the absolute positioning / z-index / .hidden toggle are dropped: the bar simply
+   fills this standalone document. Theme tokens are literal copies of the chrome
+   :root values — this document does not load styles.css. */
+
+:root {
+  --bg-2: #282a32;
+  --bg-3: #32343d;
+  --fg: #e6e7ea;
+  --fg-dim: #9a9ca6;
+  --accent: #f5c518;
+  --border: #3a3c46;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  /* Transparent so the guest shows through around the rounded bar; if the platform
+     compositor renders it opaque (WSLg caveat), an opaque themed rect is the
+     accepted variation — theming refined at HAT. */
+  background: transparent;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+#find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  margin: 0 2px; /* room for the shadow inside the view rect */
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+#find-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  font-size: 13px;
+  padding: 3px 7px;
+  outline: none;
+  /* suppress browser default search-input decoration */
+  -webkit-appearance: none;
+}
+#find-input:focus {
+  border-color: var(--accent);
+}
+/* Suppress the native "×" clear button on search inputs */
+#find-input::-webkit-search-cancel-button {
+  display: none;
+}
+#find-count {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.find-nav-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+}
+#find-bar .icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

@@ -67,14 +67,7 @@ const els = {
   zoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-out')),
   zoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-in')),
   zoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-reset')),
-  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent')),
-  // Find bar (SC4/DD1)
-  findBar: /** @type {HTMLElement} */ (document.getElementById('find-bar')),
-  findInput: /** @type {HTMLInputElement} */ (document.getElementById('find-input')),
-  findCount: /** @type {HTMLElement} */ (document.getElementById('find-count')),
-  findPrev: /** @type {HTMLButtonElement} */ (document.getElementById('find-prev')),
-  findNext: /** @type {HTMLButtonElement} */ (document.getElementById('find-next')),
-  findClose: /** @type {HTMLButtonElement} */ (document.getElementById('find-close'))
+  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent'))
 };
 
 // Tag <html> with the OS platform so window-chrome CSS can branch (mac native
@@ -786,7 +779,8 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
       // Make the WebContentsView visible now that its wcId has arrived.
       // activateTab() ran synchronously in createTab() with wcId still null,
       // so the tab-set-active IPC was skipped — send it here to show the view.
-      window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotWithInsetDIP());
+      // Full slot: find never insets the guest (DD8 — the overlay floats).
+      window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
       // Track the now-visible view (web or internal) for the outgoing-hide path.
       activeViewWcId = tab.wcId;
       updateNavButtons();
@@ -835,27 +829,23 @@ function activateTab(id) {
   els.address.value = tab.url || '';
   updateAddressChip(tab);
   refreshZoomControl(tab);
-  // Per-tab find restore (AC8 / DD3). Re-show the bar and re-issue findInPage so
-  // the live count refreshes (intent only was cached; counts are always live-queried).
-  // Tabs without findOpen stay hidden — new tabs have findOpen falsy, safe no-op.
-  // NOTE: find-bar visibility is updated HERE before tabSetActive so that
-  // measureWebviewsSlotWithInsetDIP() reads the correct inset for the incoming tab.
-  if (tab.findOpen && !isInternalTab(tab)) {
-    els.findBar.classList.remove('hidden');
-    els.findInput.value = tab.findText || '';
-    runFind(tab, { findNext: false });
-  } else {
-    els.findBar.classList.add('hidden');
-    els.findCount.textContent = '';
-  }
 
   if (tab.wcId != null) {
-    // Send tab-set-active with bounds (main handles visibility + hides the previous view).
-    // tabSetActive is sent after the find-bar visibility update above so that
-    // measureWebviewsSlotWithInsetDIP() uses the correct inset for this tab.
-    window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotWithInsetDIP());
+    // Send tab-set-active with bounds (main handles visibility + hides the previous
+    // view — and closes any prior overlay find session on a switch). Full slot: find
+    // never insets the guest (DD8 — the overlay floats over it).
+    window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
     // Track the now-visible view (web or internal) for the outgoing-hide path.
     activeViewWcId = tab.wcId;
+    // Per-tab find restore (DD9): re-open the overlay session with this tab's saved
+    // text. MUST be sent AFTER tabSetActive — same sender, so IPC delivery order is
+    // guaranteed, and main's tab-set-active switch-close then precedes this reopen.
+    // Do NOT defer into a .then()/rAF: interleaving with a second fast switch would
+    // break the ordering that makes an A→B→A double-switch safe. Tabs without
+    // findOpen need no else-branch — main already closed the session on the switch.
+    if (tab.findOpen && !isInternalTab(tab)) {
+      window.goldfinch.findOverlayOpen({ wcId: tab.wcId, findText: tab.findText || '' });
+    }
   } else {
     // wcId not yet arrived — hide the outgoing view while we wait; the tabCreate .then()
     // sends tabSetActive once wcId is available. Read the tracker BEFORE clearing.
@@ -978,48 +968,10 @@ function measureWebviewsSlotDIP() {
   return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
 }
 
-/**
- * Compute the top inset (in CSS px == DIP) to apply to the active guest view so that
- * the find bar (a top-anchored chrome popup) is not occluded by the guest.
- *
- * Only the find bar contributes to the inset. Site-info uses the freeze-frame approach
- * instead (sub-step 5): the guest is hidden while site-info is open, so no inset is
- * needed for it. Keeping site-info out of this function prevents a double-geometry-send
- * on open/close.
- *
- * @returns {number} inset in DIP pixels (≥ 0)
- */
-function computeTopInsetDIP() {
-  const webviewsTop = els.webviews.getBoundingClientRect().top;
-  let inset = 0;
-
-  // Find bar: visible when #find-bar does NOT have the 'hidden' class.
-  if (!els.findBar.classList.contains('hidden')) {
-    const fb = els.findBar.getBoundingClientRect();
-    // fb.bottom is viewport-coord; subtract webviewsTop to get depth into the guest area.
-    // Add a 4px breathing gap below the bar.
-    inset = Math.max(inset, Math.ceil(fb.bottom - webviewsTop) + 4);
-  }
-
-  return Math.max(0, inset);
-}
-
-/**
- * Like measureWebviewsSlotDIP() but shrinks the guest from the top by the current
- * top inset (find bar or site-info popup height). When no popup is open the inset
- * is 0 and this is identical to measureWebviewsSlotDIP().
- * @returns {{ x: number, y: number, width: number, height: number }}
- */
-function measureWebviewsSlotWithInsetDIP() {
-  const base = measureWebviewsSlotDIP();
-  const topInset = computeTopInsetDIP();
-  return {
-    x: base.x,
-    y: base.y + topInset,
-    width: base.width,
-    height: base.height - topInset,
-  };
-}
+// The guest is never inset (DD8, M05 F7): find — formerly the only inset contributor
+// (computeTopInsetDIP/measureWebviewsSlotWithInsetDIP, deleted at the F7 cutover) —
+// now floats as a main-owned overlay WebContentsView above the full-bounds guest.
+// Site-info uses the freeze-frame approach (guest hidden, no inset needed).
 
 // Debounced geometry send: sends the active web tab's bounds after a rAF,
 // coalescing multiple rapid calls (resize, panel toggle) into one send.
@@ -1033,10 +985,10 @@ function sendActiveBounds() {
     // All active views (web AND internal) need geometry updates on resize/panel-toggle —
     // internal tabs are WebContentsViews now (Leg 3), not <webview> elements. Excluding
     // internal here stranded them at stale bounds until a tabSetActive (tab switch) re-bounded
-    // them. measureWebviewsSlotWithInsetDIP returns the full slot for internal (find is web-only
-    // → inset 0). The guestFrozen early-return above still correctly skips a frozen view.
+    // them. Always the full slot: find never insets the guest (DD8 — the overlay floats).
+    // The guestFrozen early-return above still correctly skips a frozen view.
     if (t && t.wcId != null) {
-      window.goldfinch.tabSetBounds(t.wcId, measureWebviewsSlotWithInsetDIP());
+      window.goldfinch.tabSetBounds(t.wcId, measureWebviewsSlotDIP());
     }
   });
 }
@@ -1082,7 +1034,9 @@ function unfreezeGuest() {
   els.webviews.style.backgroundSize = '';
   const t = activeTab();
   if (t && t.wcId != null) {
-    window.goldfinch.tabSetActive(t.wcId, measureWebviewsSlotWithInsetDIP());
+    // Full slot (DD8). Main's tab-set-active re-adds the guest AND re-shows the find
+    // overlay above it when a session is open — the DD5 unfreeze-restore path.
+    window.goldfinch.tabSetActive(t.wcId, measureWebviewsSlotDIP());
     activeViewWcId = t.wcId;
   }
 }
@@ -2071,29 +2025,16 @@ els.zoomOut.addEventListener('click', () => applyTabZoom('out'));
 els.zoomIn.addEventListener('click', () => applyTabZoom('in'));
 els.zoomReset.addEventListener('click', () => applyTabZoom('reset'));
 
-/* ----------------------------------------------------------------- find in page (SC4 / DD1–DD3 / DD5) */
+/* ----------------------------------------------------------- find in page → overlay (SC4 / M05 F7) */
+// The find UI is a main-owned chrome-class WebContentsView (find-overlay.html) floating
+// over the full-bounds guest — NOT chrome DOM. openFind() drives it via findOverlayOpen;
+// typing/stepping/Esc/✕ live in the overlay page; per-tab findText/findOpen sync back
+// via the onFindOverlayText/onFindOverlayClosed subscriptions (see the onTab* block).
 
 /**
- * Run findInPage on the given tab's webview for the current findText.
- * Empty findText → no search issued (blank count, no highlight).
- * @param {Tab} tab
- * @param {{ findNext?: boolean, forward?: boolean }} [opts]
- */
-function runFind(tab, opts = {}) {
-  const text = tab.findText || '';
-  if (!text) {
-    els.findCount.textContent = '';
-    return;
-  }
-  // Internal tabs are excluded by openFind's isInternalTab guard; only web tabs reach here.
-  if (isWebTab(tab) && tab.wcId != null) {
-    window.goldfinch.tabFind({ wcId: tab.wcId, text, options: { findNext: false, forward: true, matchCase: false, ...opts } });
-  }
-}
-
-/**
- * Open the find bar for the given tab (or the current active tab if omitted).
- * Guards: no bar on internal tabs, no bar when the lightbox is open.
+ * Open the overlay find bar for the given tab (or the current active tab if omitted).
+ * Guards: no find on internal tabs, none when the lightbox is open. Main shows,
+ * positions, seeds, and focuses the overlay (DD6) — the guest keeps full bounds (DD8).
  * @param {Tab|null} [tab]
  */
 function openFind(tab) {
@@ -2102,87 +2043,8 @@ function openFind(tab) {
   // Don't fight the lightbox (DD2 / AC6).
   if (!els.lightbox.classList.contains('hidden')) return;
   t.findOpen = true;
-  els.findBar.classList.remove('hidden');
-  // Inset the guest from the top so the find bar (which lives in the chrome doc
-  // and is now visible) is not occluded by the opaque native WebContentsView.
-  // sendActiveBounds reads computeTopInsetDIP() which detects the bar is visible.
-  sendActiveBounds();
-  if (t.findText) {
-    els.findInput.value = t.findText;
-    runFind(t, { findNext: false });
-  } else {
-    els.findInput.value = '';
-    els.findCount.textContent = '';
-  }
-  els.findInput.focus();
-  els.findInput.select();
+  window.goldfinch.findOverlayOpen({ wcId: t.wcId, findText: t.findText || '' });
 }
-
-/**
- * Close the find bar: clear the highlight, hide the bar, and restore focus to the page.
- * @param {Tab|null} [tab]
- */
-function closeFind(tab) {
-  const t = tab || activeTab();
-  els.findBar.classList.add('hidden');
-  els.findCount.textContent = '';
-  // Restore the guest's full bounds now that the find bar is hidden (inset = 0 from it).
-  sendActiveBounds();
-  if (t) {
-    t.findOpen = false;
-    // Internal tabs are excluded by openFind's isInternalTab guard; only web tabs reach here.
-    if (isWebTab(t) && t.wcId != null) {
-      window.goldfinch.tabFind({ wcId: t.wcId, stop: true, options: 'clearSelection' });
-    }
-  }
-}
-
-// Wire find-bar UI events.
-els.findInput.addEventListener('input', () => {
-  const t = activeTab();
-  if (!t || !t.findOpen) return;
-  t.findText = els.findInput.value;
-  runFind(t, { findNext: false });
-});
-
-els.findInput.addEventListener('keydown', (e) => {
-  const t = activeTab();
-  if (!t) return;
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    if (!t.findText) return;
-    runFind(t, { findNext: true, forward: !e.shiftKey });
-  } else if (e.key === 'ArrowDown') {
-    // Step to next match — mirrors the #find-next (↓) button.
-    e.preventDefault();
-    if (!t.findText) return;
-    runFind(t, { findNext: true, forward: true });
-  } else if (e.key === 'ArrowUp') {
-    // Step to previous match — mirrors the #find-prev (↑) button.
-    e.preventDefault();
-    if (!t.findText) return;
-    runFind(t, { findNext: true, forward: false });
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    closeFind(t);
-  }
-});
-
-// Prevent the nav buttons from stealing DOM focus away from findInput so the
-// user can keep typing without re-clicking the input after each step.
-// (mousedown focus-steal suppression — standard find-bar button pattern.)
-els.findNext.addEventListener('mousedown', (e) => e.preventDefault());
-els.findPrev.addEventListener('mousedown', (e) => e.preventDefault());
-
-els.findNext.addEventListener('click', () => {
-  const t = activeTab();
-  if (t && t.findText) runFind(t, { findNext: true, forward: true });
-});
-els.findPrev.addEventListener('click', () => {
-  const t = activeTab();
-  if (t && t.findText) runFind(t, { findNext: true, forward: false });
-});
-els.findClose.addEventListener('click', () => closeFind(activeTab()));
 
 // Main-side Ctrl+F capture → open find (page-focused path, DD2).
 window.goldfinch.onOpenFind(() => openFind());
@@ -2708,13 +2570,13 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
   }
   if (tab.findOpen) {
     tab.findOpen = false;
+    // Stop the navigated tab's stale highlight — works for BACKGROUND tabs too, which
+    // the overlay session never targeted (tabFind's one surviving renderer use).
     window.goldfinch.tabFind({ wcId, stop: true, options: 'clearSelection' });
-    if (tab.id === activeTabId) {
-      els.findBar.classList.add('hidden');
-      els.findCount.textContent = '';
-      // Restore the guest's full bounds now that the find bar is hidden on navigate.
-      sendActiveBounds();
-    }
+    // Chrome-initiated close: main resolves refocusGuest:false from the SENDER — a
+    // page-initiated redirect must never yank OS focus into the guest (e.g. while
+    // typing in the address bar). No find-overlay-closed echo comes back (we know).
+    if (tab.id === activeTabId) window.goldfinch.findOverlayClose();
   }
 });
 
@@ -2790,13 +2652,21 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   if (tab.id === activeTabId) renderMedia();
 });
 
-window.goldfinch.onTabFoundInPage(({ wcId, result }) => {
+// Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
+// EVERY overlay query — empty included (deletion sync: switch-back must restore a
+// blank bar, not resurrected text). Closed arrives ONLY when the user closed the bar
+// overlay-side (Esc/✕); implicit closes (tab switch) stay silent so findOpen survives
+// and switch-back restores. Both tolerate an already-closed tab (miss → drop).
+window.goldfinch.onFindOverlayText(({ wcId, text }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
-  const { activeMatchOrdinal, matches } = result;
-  if (tab.id === activeTabId && tab.findOpen) {
-    els.findCount.textContent = matches ? `${activeMatchOrdinal}/${matches}` : '0/0';
-  }
+  tab.findText = text;
+});
+
+window.goldfinch.onFindOverlayClosed(({ wcId }) => {
+  const tab = findTabByWcId(wcId);
+  if (!tab) return;
+  tab.findOpen = false;
 });
 
 window.goldfinch.onTabPrivacyFp(({ wcId, fpCounts }) => {
