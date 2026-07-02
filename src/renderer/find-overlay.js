@@ -25,6 +25,11 @@
   let text = '';
 
   // Chrome-bar default find options (runFind parity), overridden per call.
+  // NOTE: `findNext` here is the chrome-bar payload shape — "this is a STEP request" —
+  // NOT Electron's FindInPageOptions.findNext (which means "begin a new session", the
+  // inverse). Main's find-overlay:query handler owns the mapping (HAT-1 fix): a step
+  // continues the engine session only when the text is unchanged; any text change
+  // begins a new session so edits re-search immediately.
   const runQuery = (opts) => {
     bridge.query({ text, findNext: false, forward: true, matchCase: false, ...opts });
   };
@@ -101,7 +106,12 @@
   });
 
   // Count path B (DD3): `n/m` or `0/0` — same format the retired chrome bar used.
+  // Empty-text guard (HAT-1): now that every edit re-searches (new engine session per
+  // text change), a delete-to-empty can race a late found-in-page event from the last
+  // pre-empty query — dropping counts while the input is empty keeps the blanked count
+  // blank (deletion-sync contract) instead of resurrecting a stale `n/m`.
   bridge.onCount(({ activeMatchOrdinal, matches }) => {
+    if (!text) return;
     count.textContent = matches ? `${activeMatchOrdinal}/${matches}` : '0/0';
   });
 })();

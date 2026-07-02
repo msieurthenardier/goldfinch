@@ -164,6 +164,14 @@ let lastGuestBounds = null;
 // findText/findOpen stay in the renderer; main holds ONLY the live session.
 let findOverlayTabWcId = null;
 function isFindOverlayActive(wcId) { return wcId != null && wcId === findOverlayTabWcId; }
+// Last text actually issued to wc.findInPage for the live overlay session (null = none
+// yet / reset). HAT-1 (M05 F7 Leg 4): Electron's FindInPageOptions.findNext means
+// "begin a NEW find session" (true) vs "follow-up in the current session" (false) —
+// the INVERSE of the legacy <webview>-era reading the retired chrome bar used. A
+// follow-up request does NOT re-search when the text changed (Chromium keeps advancing
+// the old session), so main tracks the last-queried text and forces a new session on
+// any text change. See the find-overlay:query handler for the mapping.
+let findOverlayLastQueryText = null;
 // Overlay page readiness (AC7 init race): flipped by the construction-time
 // did-finish-load listener; reset whenever overlayView is nulled/recreated.
 let overlayReady = false;
@@ -191,6 +199,7 @@ function teardownFindOverlayView() {
   overlayReady = false;
   pendingOverlayInit = null;
   findOverlayTabWcId = null;
+  findOverlayLastQueryText = null;
 }
 
 // Lazy-construct the overlay view. Chrome-class webPreferences (mirrors chromeView).
@@ -300,6 +309,7 @@ function openFindOverlaySession(wcId, findText) {
     closeFindOverlaySession({ refocusGuest: false });
   }
   findOverlayTabWcId = wcId;
+  findOverlayLastQueryText = null; // fresh session target — first query must begin a new engine session
   showFindOverlay();
   const seed = typeof findText === 'string' ? findText : '';
   if (overlayReady) {
@@ -326,6 +336,7 @@ function closeFindOverlaySession({ refocusGuest }) {
   }
   hideFindOverlay();
   findOverlayTabWcId = null;
+  findOverlayLastQueryText = null;
   pendingOverlayInit = null;
 }
 
@@ -1792,10 +1803,19 @@ ipcMain.on('find-overlay:close', (event) => {
 // Sender: the overlay ONLY. Forwards the query text to the chrome for per-tab state
 // sync (DD9 — EVERY query, empty included: deletion sync, so tab.findText tracks a
 // delete-to-empty and switch-back restores a blank bar, not resurrected text), then
-// resolves the session's target guest and runs findInPage with the chrome-bar option
-// shape. Empty text skips findInPage (the page blanks its own count; NO stopFindInPage
-// — the highlight persists until close). A frozen (hidden-but-live) guest is allowed —
-// counts land when the overlay re-shows. A stale/destroyed target resolves null → no-op.
+// resolves the session's target guest and runs findInPage. Empty text skips findInPage
+// (the page blanks its own count; NO stopFindInPage — the highlight persists until
+// close). A frozen (hidden-but-live) guest is allowed — counts land when the overlay
+// re-shows. A stale/destroyed target resolves null → no-op.
+//
+// FLAG MAPPING (HAT-1 fix): the payload's `findNext` keeps the chrome-bar shape
+// ("this is a STEP request"), but Electron's FindInPageOptions.findNext means "begin a
+// NEW find session" — the inverse. A step continues the engine session (Electron
+// findNext:false) ONLY when the text is unchanged since the last issued query; every
+// text change — incremental typing, backspace edits — and every first query of a
+// session begins a NEW session (Electron findNext:true) so the edited term re-searches
+// immediately instead of advancing the stale session. (The pre-F7 inset bar had the
+// same inversion — pre-existing defect, not carried contract.)
 ipcMain.on('find-overlay:query', (event, payload) => {
   if (!overlayView || overlayView.webContents.isDestroyed() || event.sender !== overlayView.webContents) return;
   const wc = getTabContents(findOverlayTabWcId);
@@ -1803,8 +1823,15 @@ ipcMain.on('find-overlay:query', (event, payload) => {
   const { text, findNext, forward, matchCase } = payload || {};
   if (typeof text !== 'string') return;
   getChromeContents()?.send('find-overlay-text', { wcId: findOverlayTabWcId, text });
-  if (!text) return;
-  wc.findInPage(text, { findNext: !!findNext, forward: forward !== false, matchCase: !!matchCase });
+  if (!text) {
+    // Deleted-to-empty: no engine call (highlight persists), but the session text is
+    // gone — the next non-empty query must begin a new engine session.
+    findOverlayLastQueryText = null;
+    return;
+  }
+  const isStep = !!findNext && text === findOverlayLastQueryText;
+  findOverlayLastQueryText = text;
+  wc.findInPage(text, { findNext: !isStep, forward: forward !== false, matchCase: !!matchCase });
 });
 
 // Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.

@@ -456,6 +456,37 @@ _(none yet)_
   existing `tab-close` destroy reaches it through an untyped Map entry, so `npm run typecheck` never
   saw it; the overlay's typed `overlayView` needed a `/** @type {any} */` cast (repo-precedented
   pattern) at the window-`closed` teardown. Cosmetic; no behavior impact.
+- **2026-07-02 (Leg 4 / HAT-1) — Overlay find advanced the OLD term on input edits instead of
+  re-searching (PRE-EXISTING; FIXED).** **Root cause:** inverted `findNext` semantics. Electron's
+  `FindInPageOptions.findNext` means "begin a NEW find session" (`true`) vs "follow-up in the current
+  session" (`false`) — the inverse of the legacy `<webview>`-era reading the find path has used since
+  the inset bar. Every input edit went out as a follow-up (`findNext:false`), which Chromium services
+  by advancing the existing session *without re-reading the text*; Enter's `findNext:true` was
+  actually starting a new session anchored after the current selection — which masqueraded as
+  stepping and is why the edited term only applied on Enter. **Classification: PRE-EXISTING, not an
+  F7 regression** — A/B on a worktree at `fc75517` (pre-F7 inset `#find-bar`), identical drive
+  (type `foobar` → Enter → backspace edits), byte-identical behavior at every step (typing → no
+  count; Enter → `1/2`; backspace → `2/2` advance of the old term; Enter → new term applies). The
+  overlay carried the old bar's defect faithfully as "parity". **Fix:** main-side, the
+  `find-overlay:query` handler now tracks the last-issued session text (`findOverlayLastQueryText`,
+  reset on session open/close/teardown/delete-to-empty) and maps the payload's chrome-bar-shaped
+  `findNext` ("this is a step request") onto Electron semantics: a step continues the engine session
+  (`findNext:false`) only when the text is unchanged; any text change — and the first query of a
+  session — begins a new session (`findNext:true`), so edits re-search immediately. Page-side
+  companion (`find-overlay.js`): `onCount` drops events while the input text is empty — with every
+  edit now genuinely re-searching, delete-to-empty could race a late `found-in-page` from the last
+  pre-empty query and resurrect a stale count. **Side observation:** with the first query issued as
+  a genuine new session, the count populated immediately on a cold fresh page in verification —
+  the "issue a follow-up with no session" call pattern is plausibly the root of (or a contributor
+  to) the WSLg cold-start anomaly family; the automation op (`src/main/automation/find.js`,
+  own requestId+retry path) is deliberately untouched, so its documented cold-start caveat stands
+  until separately re-verified. **Verified live** (isolated instance :45911, overlay driven via the
+  probed-wcId technique): type `foobar` → `1/2` immediately; Enter → `2/2`; backspace → `fooba`
+  re-searched (`2/2` — 2 genuine matches); → `foo` → `2/5`; Enter/Shift+Enter step `3/5→4/5→3/5`;
+  delete-to-empty → count blank and stays blank; retype `alpha` → `1/1`. Leg 2/3 contracts preserved
+  (sender validation, deletion sync via find-overlay-text, count path B, focus semantics).
+  `npm test` 953/0, typecheck + lint clean. Commit: see the HAT-fix commit on
+  `flight/07-find-overlay-view` (`flight/07: HAT fix — find re-searches on input edits`).
 
 ---
 
