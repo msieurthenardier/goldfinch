@@ -57,9 +57,12 @@ agent-parity (SC8) counterpart to the human find bar (SC4, HAT-verified).
 ## Out of Scope
 
 - The **visual find bar** (`Ctrl+F` open, the floating `[ input ] n/m [↑] [↓] [✕]` overlay, match
-  highlighting, `Esc`/`Enter`/`Shift+Enter`, per-tab restore) — renderer-rendered, verified by the
-  **HAT** + the `npm run a11y` gate, not this apparatus (this spec asserts the find *engine result*, not
-  the bar's pixels).
+  highlighting, `Esc`/`Enter`/`Shift+Enter`, per-tab restore) — since M05 Flight 7 this is a main-owned
+  overlay `WebContentsView` (`find-overlay.html`), not chrome-rendered DOM. Verified by the **HAT**
+  keyboard/focus pass + the DD12 verbatim a11y-attribute carry-over and the `find-overlay-geometry` /
+  `tab-surface-geometry` specs (the `npm run a11y` chrome sweep no longer includes a find state — the
+  overlay webContents is not MCP-addressable). This spec asserts the find *engine result*, not the
+  bar's pixels.
 - **Internal-tab refusal** (`findInPage` on a `goldfinch://` tab under the admin key) — **not reachable
   via the automation surface** (it cannot open or enumerate internal tabs to obtain an internal `wcId`).
   The op-local `isInternalContents` guard is **unit-proven** in `automation-find.test.js`; the live

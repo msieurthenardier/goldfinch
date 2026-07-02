@@ -8,10 +8,11 @@
 //
 // MAIN-PROCESS found-in-page MODEL:
 // Guests are now WebContentsViews whose webContents emit found-in-page to
-// main — proven in production since Flight 3, where the user find bar already
-// runs through it (tab-find IPC main.js:1499 → wc.findInPage() → the
-// permanent found-in-page listener main.js:670 → tab-found-in-page →
-// renderer.js:2787). This module operates on the guest wc directly: it calls
+// main — proven in production since Flight 3, where the user find surface
+// already runs through it (since M05 F7: the overlay's find-overlay:query →
+// wc.findInPage() → the permanent found-in-page listener in wireTabViewEvents
+// → find-overlay:count to the overlay webContents). This module operates on
+// the guest wc directly: it calls
 // wc.findInPage() and listens for found-in-page on the same wc, correlating
 // on the requestId returned by wc.findInPage().
 //

@@ -129,24 +129,6 @@
     <div id="main">
       <div id="webviews"></div>
 
-      <!-- Floating find bar (Ctrl+F). Positioned after #webviews in DOM so natural
-           Tab order flows page → bar. aria-live region is static so the live-region
-           is registered from page load (not created dynamically on open). -->
-      <div id="find-bar" class="hidden" role="search" aria-label="Find in page">
-        <input
-          id="find-input"
-          type="search"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Find…"
-          aria-label="Find in page"
-        />
-        <span id="find-count" role="status" aria-live="polite" aria-atomic="true"></span>
-        <button id="find-prev" class="icon-btn find-nav-btn" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
-        <button id="find-next" class="icon-btn find-nav-btn" type="button" title="Next match (Enter)" aria-label="Next match">↓</button>
-        <button id="find-close" class="icon-btn" type="button" title="Close (Esc)" aria-label="Close find bar">✕</button>
-      </div>
-
       <aside id="media-panel" class="collapsed" aria-label="Media panel">
         <div id="media-panel-header">
           <h2>Media on this page</h2>

@@ -105,7 +105,7 @@ not a failure. `[a11y]`-marked rows are accessibility-relevant.
   **macOS-authoritative**.
 - **The squiggle pixels** — the red wavy underline render is HAT-authoritative (INCONCLUSIVE on WSLg, per
   the top-of-spec block).
-- **The find-bar / other editable affordances** — unrelated; not this spec.
+- **The find overlay / other editable affordances** — unrelated; not this spec.
 - **The page context menu render itself** (sections, cursor, keyboard nav, Inspect) — owned by
   `page-context-menu.md`; this spec cross-references it for the menu render and asserts only the
   **spelling-suggestions** section + the **correction round-trip** on top of it.

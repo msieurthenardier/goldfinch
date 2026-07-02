@@ -37,7 +37,7 @@
 //        GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
 //      It prints ONE line:  AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
 //   2. Export the key the audit needs:
-//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 7-state sweep (admin)
+//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 6-state sweep (admin)
 //        export GOLDFINCH_MCP_KEY=<jarKey>           # --target guest mode (jar)
 //   3. Serve the media fixture (tests/behavior/fixtures/a11y-media/) on :8000:
 //        python3 -m http.server 8000 --directory tests/behavior/fixtures/a11y-media
@@ -45,7 +45,7 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The chrome 7-state sweep needs the ADMIN key (getChromeTarget is admin-only);
+// The chrome 6-state sweep needs the ADMIN key (getChromeTarget is admin-only);
 // `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
 // is the INTERNAL session and the eval tool refuses it even for admin, so it
 // CANNOT be audited via `evaluate` (the old CDP path could) — see the
@@ -134,7 +134,7 @@ const ACCEPTED = [
 ];
 
 // ---------- pick the renderer target (chrome mode, admin) ----------
-// The chrome 7-state sweep drives the app shell, which is reachable only via the
+// The chrome 6-state sweep drives the app shell, which is reachable only via the
 // admin-only getChromeTarget tool — it returns { wcId, kind: 'chrome', url }.
 async function getChromeWcId(client) {
   const { value, isError } = await callTool(client, 'getChromeTarget', {});
@@ -284,32 +284,30 @@ async function main() {
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'lightbox')));
 
-      // 5) Find bar open (focus order, aria-live count, button labels — AC2).
-      // openFind() guards against the lightbox being open, so close it first.
-      // openFind() also requires an active non-internal tab (guarded internally).
-      await evaluate(client, wcId, 'closeLightbox()');
-      await sleep(200);
-      await evaluate(client, wcId, 'openFind()');
-      await sleep(400);
-      allViolations.push(...(await runAxe(client, wcId, axeSource, 'find-bar')));
+      // NOTE (M05 F7 cutover): the former find-bar state was REMOVED. The find UI now
+      // lives in a main-owned overlay WebContentsView (find-overlay.html), which is not
+      // MCP-addressable by construction (never in tabViews; getChromeTarget returns only
+      // the chrome), so axe cannot be injected into it through this apparatus. Overlay
+      // a11y conformance rests on the DD12 verbatim attribute carry-over from the audited
+      // chrome bar (role="search", aria-live/aria-atomic count, button labels) + the HAT
+      // keyboard/focus pass. The chrome sweep stays green and meaningful on the chrome.
 
-      // 6) DevTools button visible (pin it; default is unpinned so the toolbar button is .hidden).
+      // 5) DevTools button visible (pin it; default is unpinned so the toolbar button is .hidden).
       // Audits the button's static a11y — accessible name + valid aria-pressed (NOT aria-expanded).
-      // The find-bar state (state 5) leaves the find bar OPEN; close it so unrelated find nodes
-      // don't pollute this state. closeFind REQUIRES the active-tab arg (renderer.js) — passing
-      // none is a silent no-op, so pass activeTab(). applyToolbarPins is a top-level renderer fn
-      // (window global, like togglePanel/openFind/closeLightbox) and toggles .hidden on
+      // The lightbox state (state 4) leaves the lightbox OPEN; close it so unrelated nodes
+      // don't pollute this state. applyToolbarPins is a top-level renderer fn
+      // (window global, like togglePanel/closeLightbox) and toggles .hidden on
       // els.toggleDevtools per pins.devtools (Leg 2), so pinning un-hides the button for axe.
       // We do NOT open DevTools (no detached window in the gate) — the unpressed static a11y is
-      // the target. This last state mutates live toolbar visibility and does not restore the
+      // the target. This state mutates live toolbar visibility and does not restore the
       // default pin map afterward — harmless, since the client closes immediately below.
-      await evaluate(client, wcId, 'closeFind(activeTab())');
+      await evaluate(client, wcId, 'closeLightbox()');
       await sleep(200);
       await evaluate(client, wcId, "applyToolbarPins({ media: true, shields: true, devtools: true })");
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
 
-      // 7) Page context menu open (Leg 6). The harness cannot fire a guest
+      // 6) Page context menu open (Leg 6). The harness cannot fire a guest
       // `context-menu` event, and the menu's real open path is gated behind
       // unreachable `const pageCtx`/`pageContextEntry`/`menuController`, so we
       // call the additive top-level driver `openPageContextMenuForAudit()`
