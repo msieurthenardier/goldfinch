@@ -48,6 +48,18 @@ for (const stream of [process.stdout, process.stderr]) {
   });
 }
 
+// ── Linux ozone backend note (F8 Leg-6 HAT fix): the WSLg X11/XWayland path
+// swallows the first cross-window click-to-activate; the DEV launch therefore
+// selects the Wayland backend when a compositor socket is reachable. The
+// selection CANNOT live here — Electron resolves the ozone platform before any
+// app code runs (an in-app `app.commandLine.appendSwitch('ozone-platform', …)`
+// changes what child processes REPORT but not the platform actually used —
+// measured via xwininfo). It lives in `scripts/dev-launch.mjs` (the `npm run
+// dev` / `dev:automation` entry), which applies the pure decision helper
+// `src/main/ozone-platform.js` and passes `--ozone-platform=wayland` on the
+// real command line. See those two files + the Leg-6 flight-log entry for the
+// full diagnosis and harness evidence.
+
 const PAGE_PARTITION = 'persist:goldfinch';
 
 // Dedicated, in-memory session for internal `goldfinch://` pages. INTERNAL_PARTITION is
@@ -568,7 +580,14 @@ let devEnableOverride = false;
 // Injected into the engine via deps.grabWindow so observe.js stays Electron-free.
 async function grabWindow() {
   if (!mainWindow) return null;
-  try {
+  // Under the Wayland ozone backend (Leg-6 HAT fix — the dev launcher passes
+  // --ozone-platform=wayland when a compositor socket is reachable), the app's
+  // own surface is NOT in desktopCapturer's window-source list (X-window based;
+  // no PipeWire under WSLg), so the best-size heuristic below would grab an
+  // UNRELATED window. Skip straight to the capturePage composite fallback.
+  const onWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
+  if (!onWayland) {
+    try {
     const bounds = mainWindow.getBounds();
     // FIX 2(a): request thumbnail at the actual window content size so we get a
     // full-resolution capture, not the 150px-wide default thumbnail.
@@ -590,8 +609,9 @@ async function grabWindow() {
     if (best && best.thumbnail) {
       return best.thumbnail.toPNG().toString('base64');
     }
-  } catch {
-    /* desktopCapturer unavailable */
+    } catch {
+      /* desktopCapturer unavailable */
+    }
   }
   // FIX 2(b) — WSLg / Wayland fallback: build a REAL chrome+guest composite in the
   // chrome renderer via executeJavaScript. Steps:
@@ -615,11 +635,6 @@ async function grabWindow() {
     const chromeB64 = chromeImg.toPNG().toString('base64');
     const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
 
-    if (!tabB64) {
-      // No active guest — chrome-only capture.
-      return chromeB64;
-    }
-
     // Get the #webviews slot bounds from the chrome renderer so we know
     // where to draw the guest PNG on the composite canvas.
     const guestBoundsJson = await cc.executeJavaScript(
@@ -627,33 +642,64 @@ async function grabWindow() {
     );
     const guestBounds = guestBoundsJson ? JSON.parse(guestBoundsJson) : null;
 
-    if (!guestBounds) {
-      // Can't locate the slot — return chrome PNG only.
+    // Layer list, bottom-up: guest at the slot offset, then the overlay views in
+    // their z-order (find bar, then the menu-overlay sheet — the sheet is added
+    // after the find re-assert on every show path, so it stacks above). Without
+    // the overlay layers a Wayland-path captureWindow would silently omit an
+    // OPEN MENU / find bar that IS on the real screen (the x11 desktopCapturer
+    // path captured real window pixels, hiding this gap until the Leg-6 ozone
+    // switch). View bounds are window-content DIPs — the same space as the
+    // chrome DOM rect (the chrome view fills the window at 0,0).
+    /** @type {{ b64: string, x: number, y: number, w: number, h: number }[]} */
+    const layers = [];
+    if (tabB64 && guestBounds) {
+      layers.push({ b64: tabB64, x: guestBounds.x, y: guestBounds.y, w: guestBounds.width, h: guestBounds.height });
+    }
+    if (overlayVisible && overlayView && !overlayView.webContents.isDestroyed()) {
+      const img = await overlayView.webContents.capturePage();
+      const b = overlayView.getBounds();
+      if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+    }
+    const sheetView = menuOverlay.isVisible() ? menuOverlay.getView() : null;
+    if (sheetView && !sheetView.webContents.isDestroyed()) {
+      const img = await /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage();
+      const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (sheetView)).getBounds();
+      if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+    }
+
+    if (layers.length === 0) {
+      // No guest and no overlays — chrome-only capture.
       return chromeB64;
     }
 
-    // Composite in the chrome renderer: draw chrome, then guest at the slot offset.
-    const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, tabDataUrl, gx, gy, gw, gh) {
-      return new Promise(function(resolve, reject) {
-        var chromeImg = new Image();
-        chromeImg.onload = function() {
-          var tabImg = new Image();
-          tabImg.onload = function() {
-            var canvas = document.createElement('canvas');
-            canvas.width = chromeImg.naturalWidth;
-            canvas.height = chromeImg.naturalHeight;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(chromeImg, 0, 0);
-            ctx.drawImage(tabImg, Math.round(gx), Math.round(gy), Math.round(gw), Math.round(gh));
-            resolve(canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, ''));
-          };
-          tabImg.onerror = function() { resolve(null); };
-          tabImg.src = tabDataUrl;
-        };
-        chromeImg.onerror = function() { reject(new Error('chrome img load failed')); };
-        chromeImg.src = chromeDataUrl;
+    // Composite in the chrome renderer: draw chrome, then each layer in order.
+    const layerArgs = JSON.stringify(layers.map((l) => ({ u: 'data:image/png;base64,' + l.b64, x: l.x, y: l.y, w: l.w, h: l.h })));
+    const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, layers) {
+      function load(src) {
+        return new Promise(function(resolve, reject) {
+          var img = new Image();
+          img.onload = function() { resolve(img); };
+          img.onerror = function() { reject(new Error('img load failed')); };
+          img.src = src;
+        });
+      }
+      return load(chromeDataUrl).then(function(chromeImg) {
+        return Promise.all(layers.map(function(l) {
+          return load(l.u).then(function(img) { return { img: img, l: l }; }, function() { return null; });
+        })).then(function(loaded) {
+          var canvas = document.createElement('canvas');
+          canvas.width = chromeImg.naturalWidth;
+          canvas.height = chromeImg.naturalHeight;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(chromeImg, 0, 0);
+          loaded.forEach(function(e) {
+            if (!e) return;
+            ctx.drawImage(e.img, Math.round(e.l.x), Math.round(e.l.y), Math.round(e.l.w), Math.round(e.l.h));
+          });
+          return canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, '');
+        });
       });
-    })('data:image/png;base64,${chromeB64}', 'data:image/png;base64,${tabB64}', ${guestBounds.x}, ${guestBounds.y}, ${guestBounds.width}, ${guestBounds.height})`);
+    })('data:image/png;base64,${chromeB64}', ${layerArgs})`);
 
     return compositeB64 || chromeB64;
   } catch {

@@ -1259,3 +1259,245 @@ and flight-log entries covered the observables cited.
   invocation; conditional gates re-run before merge) — all applied. Leg → `ready`.
 - **Flight paused awaiting the operator**: the HAT requires a human at the screen. Signal on
   resume: FD guides steps one at a time per the leg script.
+
+### 2026-07-02 — Leg 6 HAT session (live, operator + FD)
+
+- Setup: flight build launched (`npm run dev`), ticking fixture served on :8123.
+- Step 1 (live-guest float, 3 menus): **PASS** — page ticks under open menus, full-height,
+  flush-top anchoring reads fine.
+- Step 2 (OS-pointer dismissal): **PASS** — guest-region click dismisses AND is swallowed
+  (no navigation) on all three; toolbar click dismisses AND acts. The dismissal-parity
+  contract confirmed on real pixels + real pointer.
+- Step 3 (trigger re-click toggle): **PASS** — clean close at all click speeds, no
+  blink-reopen; cross-trigger open immediately after a close works (suppress is
+  per-menuType).
+- Step 4 (full keyboard contract): **PASS** for the menus themselves (Enter/Space/ArrowDown
+  open + ArrowUp→last, roving/wrap/Home/End, Enter+Space activation, Print dialog fired and
+  cancelled cleanly, Escape/Tab close with trigger refocus; ▾ and 🔒 spot-checked). THREE
+  pre-existing keyboard-reachability observations recorded (none are F8 regressions — F8
+  didn't touch guest focus or chrome traversal):
+  1. Tab never leaves the guest page (no cross-view traversal — guest and chrome are
+     separate webContents; nothing implements F6-style handoff).
+  2. Ctrl+L is dead with guest focus — `focus-address` is not in the guest
+     `before-input-event` capture set (only F12/Ctrl+Shift+I/zoom/P/F/J), so the page
+     swallows it. Ironic post-F8 nuance: the SHEET forwards Ctrl+L (DD13) but the guest
+     never did.
+  3. Chrome-document Tab order does not cycle (stops at the end; return-to-start is a jump,
+     not a wrap).
+  → Follow-up candidate (debrief/maintenance): extend the guest capture set with the
+  chrome-class accelerators (mirror the DD13 union), and consider chrome Tab-wrap +
+  guest→chrome focus handoff. HAT entry-path workaround: mouse-click the address bar, Tab
+  from there.
+- **HAT defect (live, operator) — cross-window click-to-activate swallowed on menu-open blur.**
+  With a sheet menu open, clicking ANOTHER OS window dismissed the menu (correct) but did NOT
+  bring that window to the foreground on the first click — a second click was needed. This is
+  an F8 regression vs the freeze-era menus (pure chrome-DOM hide on blur — no view removal).
+  Hypothesis: `mainWindow.on('blur')` → `closeMenuOverlay('blur')` → `hide()` →
+  `contentView.removeChildView(sheetView)` runs while the sheet's webContents holds focus and
+  the OS is mid-activation of the other window; removing the focused view triggers a focus
+  re-assertion inside our window (Electron re-focuses another view) that swallows the other
+  window's click-to-activate under WSLg.
+- **Inline fix (Developer, this session) — deferred removal on window-blur closes ONLY.**
+  - `menu-overlay-manager.js`: `closeMenuOverlay(reason, token, opts)` grows
+    `opts.deferRemoval` — the close runs the FULL close path unchanged (channel 7, DD5
+    restore, currentMenu null, no refocus) but hides via `view.setVisible(false)` +
+    `pendingRemoval` flag instead of `removeChildView`. `visible` stays true (it tracks
+    child-attachment; the view IS still attached). New `completePendingRemoval()` finishes
+    the removal (flag-gated → idempotent). Completion points: `mainWindow.on('focus')`
+    (main.js wiring), the start of `show()`/`openMenu` (flag cleared; the re-add RAISES the
+    already-attached child — the same idiom tab-set-active relies on — and `setVisible(true)`
+    undoes the deferred close, so normalization needs NO transient detach), and `teardown()`
+    (its visible-branch `removeChildView` covers the attached view; flag cleared).
+  - `main.js`: the BaseWindow blur call site — and ONLY that one — passes
+    `{ deferRemoval: true }`; a new `mainWindow.on('focus')` handler calls
+    `completePendingRemoval()`. The sheet-page-initiated `dismissed{blur}` (channel 5,
+    in-app blur, window still focused) keeps immediate removal. No other close reason,
+    channel semantics, token, suppress, or refocus behavior changed; the manager stays
+    Electron-free.
+  - **F7 invariant note**: "hide = removeChildView, never setVisible(false)-only" remains the
+    steady-state rule; the deferRemoval state is a documented TRANSIENT exception (window
+    backgrounded; removal completes on focus) — recorded at both the manager module header
+    and the blur call site.
+  - Tests (`test/unit/menu-overlay-manager.test.js`, +5): deferRemoval close hides visually
+    with NO removeChildView and unchanged close-path effects; completePendingRemoval removes
+    exactly once (idempotent, safe when nothing pending); open-while-pending normalizes
+    (flag cleared, re-add + setVisible(true), late focus-completion no-ops, later close
+    removes normally); teardown-while-pending removes + clears; non-deferred sheet-initiated
+    blur still removes immediately.
+  - Gates: `npm test` 1047/1047 PASS; `npm run typecheck` clean; `npm run lint` clean.
+    Not committed — awaiting operator live re-test (first-click activation of the other
+    window with a menu open) before the FD commits.
+- **Live re-test: attempt #1 FAILED — defect unchanged.** Operator controls prove it IS an F8
+  regression: (control 1) with NO menu open, a cross-window click raises the other window
+  first-click; (control 2) the freeze-era build with a menu open raises fine. Two flaws
+  identified in attempt #1:
+  1. It still called `setVisible(false)` on the FOCUSED sheet view during OS deactivation —
+     the same focus-churn class as the `removeChildView` it deferred (any view mutation on
+     the focused view mid-activation re-asserts focus inside our window).
+  2. The defer decision lived at the BaseWindow-blur CALL SITE only. The close can arrive
+     via the SHEET-initiated `dismissed{blur}` path instead (sheet webContents blur → page
+     menuController closeAll → channel-5 IPC), which still did an IMMEDIATE
+     `removeChildView` — if WSLg delivers sheet-blur before/instead of BaseWindow blur, the
+     deferral never engages.
+- **Inline fix attempt #2 (Developer, this session) — FULL visual deferral, ordering-immune.**
+  - `menu-overlay-manager.js`: the defer decision moves INSIDE `closeMenuOverlay`, made at
+    close TIME, not at any call site. New injected dep `isWindowFocused()` (main.js:
+    `!!(mainWindow && mainWindow.isFocused())`; default `() => true` — manager stays
+    Electron-free). A `'blur'`-reason close while `isWindowFocused()` is false performs
+    **ZERO view operations** — no `removeChildView` AND no `setVisible(false)`: pure logical
+    close (channel 7, DD5 restore hook, `currentMenu` null, no refocus) + `pendingHide`
+    flag. Ordering immunity: BOTH blur delivery paths — `mainWindow.on('blur')` AND the
+    channel-5 `dismissed{blur}` handler — funnel into the same close-time decision, so
+    whichever WSLg fires first takes the deferral branch and the second is the usual
+    idempotent no-op. `completePendingRemoval` renamed `completePendingHide` (it now
+    performs the WHOLE hide): flag-gated → idempotent; does the real `hide()`
+    (`removeChildView`, the existing shape). Completion points unchanged in spirit:
+    `mainWindow.on('focus')`, `show()`/`openMenu` (flag cleared; re-add raises the
+    still-attached child — same normalization reasoning as attempt #1, pinned test kept),
+    `teardown()` (visible-branch removal covers it; flag cleared). In-app sheet blur
+    (window still focused, e.g. toolbar click) keeps today's immediate hide.
+  - `main.js`: blur call site back to plain `closeMenuOverlay('blur')` (no opts);
+    `mainWindow.on('focus')` → `completePendingHide()`; `isWindowFocused` injected into the
+    manager deps; channel-5 comment notes the sheet-first-blur deferral.
+  - **Accepted trade-off (deliberate F7 hide-invariant exception, window-unfocused only,
+    documented in the manager header + blur call site):** while the app is backgrounded with
+    a menu logically closed, the sheet stays attached and its PIXELS may remain — normally
+    the sheet page hides its menu DOM on its own window-blur (menu-controller's global
+    blur → closeAll → `classList.add('hidden')`), leaving only a transparent attached
+    sheet; if the page-level blur never fires (WSLg uncertainty), the painted menu persists
+    until the window regains focus, where the `'focus'` handler hides it at activation. A
+    re-activating click may land on the still-attached sheet for a frame; verified against
+    the code that every resulting page report is dropped: an `activated` send carries the
+    closed menu's token → dropped by main.js's `!cur || token !== cur.token` check; a
+    `dismissed` send → dropped by `closeMenuOverlay`'s `!currentMenu` idempotency guard (or
+    by the stale-token guard if a new menu opened meanwhile); a click with no open
+    controller entry sends nothing at all (`reportDismissed` requires a live `currentToken`).
+    Residual (accepted): that first re-activating click is consumed by the sheet rather than
+    the guest beneath — one-frame, background-return-only.
+  - Tests (`test/unit/menu-overlay-manager.test.js`, attempt-#1 tests reworked, net +7 over
+    baseline): unfocused blur close performs ZERO view ops (view AND contentView call counts
+    frozen) with the full logical close otherwise; focused (in-app) blur hides immediately;
+    ordering-immunity test drives the sheet-first channel-5-shaped close (token-carrying)
+    through the deferral with the BaseWindow blur as idempotent second; `completePendingHide`
+    hides exactly once (idempotent, safe when nothing pending); open-while-pending
+    normalization (pinned: no detach, re-add raises, late completion no-ops, later close
+    removes normally); teardown-while-pending; non-blur reasons never defer even while
+    unfocused; default (un-injected) dep preserves today's immediate blur hide. Both
+    `isWindowFocused` branches are covered through the manager API via the injected probe.
+  - Gates: `npm test` 1050/1050 PASS; `npm run typecheck` clean; `npm run lint` clean.
+    Not committed — awaiting operator live re-test before the FD commits.
+- **Live re-test: attempt #2 FAILED — defect unchanged.** Zero view operations on the blur
+  close and the behavior is identical — the close handlers are exonerated; the view-operation
+  hypothesis behind attempts #1 and #2 is dead.
+
+### 2026-07-03 — Leg 6 HAT defect, attempt #3 (Developer, autonomous OS-level repro)
+
+- **OS-level repro harness built (the leg's key deliverable).** Lives OUTSIDE the repo at the
+  session scratchpad (`…/scratchpad/blur-diag/`): `win.ps1` (Windows-side driver via
+  `powershell.exe` from WSL — window enumeration/rects, `GetForegroundWindow` truth,
+  REAL input injection via `mouse_event` MOVE/ABSOLUTE + LEFTDOWN/LEFTUP, guarded
+  `clickexpect` that refuses unless `WindowFromPoint` matches the expected window,
+  `clickpoll` = click + 10 ms foreground polling; execution-policy-safe via
+  `-EncodedCommand`, wrapped by `wd.sh`), `client.mjs` (MCP SDK one-shot CLI:
+  `getChromeTarget`/`evaluate`/`captureWindow` against the dev automation server), and
+  `repro.sh` (one verdict-emitting iteration: raise target window → real-click Goldfinch →
+  optionally real-click the kebab open → ONE real click on the other window →
+  RAISED/SWALLOWED from foreground truth). Click-away targets are freshly-spawned
+  disposable windows (uniquely-titled conhost / xmessage / WinForms form) — never operator
+  windows. Coordinate calibration is empirical (guest/chrome `mousedown` recorders via MCP
+  evaluate), because `GetWindowRect` lies for WSLg RAIL windows (a ~32 px x11 /
+  ~11-17 px wayland shadow margin, and EXTERNALLY MOVED RAIL windows desync visible
+  pixels from input mapping entirely — never `SetWindowPos` a RAIL window).
+- **Repro + discriminating power (all on real OS input + foreground truth):** the operator
+  defect reproduces exactly — with a sheet menu open, the first click on another (native)
+  window closes the menu but does NOT raise that window; the second click raises it
+  (measured back-to-back: first SWALLOWED, second RAISED).
+- **Diagnosis — NOT app code, NOT the sheet, NOT menu-specific: WSLg RAIL X11-path
+  click-to-activate swallow.** Evidence chain:
+  1. The trigger is ANY real pointer click into ANY Goldfinch surface (guest page click,
+     chrome address-bar click, or kebab/menu) while foreground; after such a click, the
+     first click on a NATIVE Windows window is swallowed (6/6 + 5/5 across protocols),
+     while `SetForegroundWindow`-only activation (no real click into the app) leaves
+     click-away working (3/3). A 5 s dwell does not clear the armed state.
+  2. Target-type 2×2 (armed): native conhost SWALLOWED / native WinForms SWALLOWED /
+     X-window xmessage RAISED / X-window overlapping-the-app RAISED — X/RAIL→X/RAIL
+     activation always works; only X/RAIL→native is swallowed. Overlap is irrelevant.
+  3. App exoneration: F8 baseline (attempts reverted), the freeze-era build (`0b861c0`,
+     pre-cutover — operator control 2's build), and attempt #2's zero-view-op close all
+     reproduce IDENTICALLY (freeze-era menu-open click-away: SWALLOWED under the harness).
+     Env-gated main-side focus/blur instrumentation showed the app receives ONE clean
+     `wc BLUR` + `window BLUR` at the swallowed click and never re-asserts focus — while
+     Windows-side the foreground never moves. The click is consumed by the WSLg RAIL
+     plumbing (msrdc/Weston), not by Goldfinch. xmessage (plain X app) clicked-into does
+     NOT arm the swallow — the arming is Chromium-under-XWayland-specific.
+  4. **The Wayland ozone backend is clean**: same harness, same protocols — menu-open
+     click-away RAISED 5/5 (+3/3 confirmation on the final build), no-menu control RAISED
+     5/5 (+2/2), menu still closes via the same blur path each time.
+- **Fix — dev launcher selects the Wayland backend when a compositor socket is reachable.**
+  The ozone platform CANNOT be chosen from app code: Electron resolves it before `main.js`
+  runs — an in-app `app.commandLine.appendSwitch('ozone-platform', …)` changes what child
+  processes REPORT but not the platform actually used (proven via `xwininfo`: the window
+  stayed an X11/XWayland window), and `ELECTRON_OZONE_PLATFORM_HINT` was not honored in
+  this setup either. So:
+  - `scripts/dev-launch.mjs` (new; now behind `npm run dev` / `dev:automation` in
+    package.json) — spawns electron with `--ozone-platform=wayland` iff the pure decision
+    helper says a Wayland socket is actually reachable; a caller-provided
+    `--ozone-platform*` flag always wins; otherwise launches exactly as before.
+  - `src/main/ozone-platform.js` (new; Electron-free, injected `exists`) —
+    `decideOzonePlatform`: absolute `WAYLAND_DISPLAY` → trust if socket exists; else
+    `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`; else the **WSLg fallback**
+    `/mnt/wslg/runtime-dir/$WAYLAND_DISPLAY` (some WSLg setups never mirror the socket
+    into `XDG_RUNTIME_DIR`; libwayland honors an absolute `WAYLAND_DISPLAY`, which the
+    launcher exports in that branch). No socket → `{ platform: null }` → x11 unchanged
+    (real X-session desktops untouched). Chromium's own `--ozone-platform-hint=auto` was
+    measured to resolve x11 under WSL (no `XDG_SESSION_TYPE`), hence the explicit probe.
+  - `src/main/main.js` — a pointer comment at the old appendSwitch site explaining why the
+    selection lives in the launcher; plus **`grabWindow` hardened for Wayland**: under
+    `--ozone-platform=wayland` the `desktopCapturer` window-source path is skipped (the
+    app's surface is not in the X-window source list — the best-size heuristic grabbed an
+    UNRELATED window, verified live) and the capturePage composite runs directly; the
+    composite now layers **find overlay + menu-overlay sheet** above chrome+guest (they
+    were silently missing from Wayland-path `captureWindow` — an open menu IS on the real
+    screen; verified by composite-vs-real-desktop screenshot comparison).
+  - `CLAUDE.md` — dev-launch line updated to match.
+- **Verification (final build, `npm run dev:automation`, Wayland confirmed via xwininfo
+  absence of an X11 app window):** harness menu-open click-away **RAISED 5/5** (fresh-build
+  confirmation 3/3), no-menu control **RAISED 5/5** (confirmation 2/2); in-app dismissals
+  unaffected — trigger re-click toggle closes (real clicks), toolbar/address click closes
+  AND acts (address focused), real-keyboard Escape closes AND refocuses the kebab trigger;
+  pixel sanity — kebab menu renders correctly under Wayland (real-desktop screenshot:
+  flush-top, right-anchored, roving focus ring, live guest beneath) and `captureWindow`
+  now shows the same (sheet layer in the composite).
+- **Attempts #1 + #2: REVERTED** (`menu-overlay-manager.js`, the `main.js` blur-close call
+  sites, and their unit tests are back to the pre-attempt state; the combined diff is
+  preserved in the scratchpad as `attempts-1-2-full.patch`). Rationale: their
+  view-operation hypothesis is disproven (the swallow occurs with ZERO view ops, with no
+  menu open at all, and on the freeze-era build), the machinery they added (deferred hide,
+  `isWindowFocused` probe, pixels-persist-while-backgrounded trade-off) is dead weight
+  under the real diagnosis, and attempt #2's accepted trade-off (stale sheet pixels while
+  backgrounded) is a cost with no compensating benefit. The F7 "hide = removeChildView"
+  invariant is restored unqualified.
+- **Residual risk / operator notes:** (1) the fix changes the dev ozone backend — window
+  decorations/DPI/IME under Wayland-RAIL may differ subtly; the HAT sweep items already
+  passed on x11 were spot-rechecked only for menus (open/close/keyboard/pixels) — a quick
+  operator eyeball of general chrome rendering under the new backend is advised at the
+  re-test; (2) packaged Linux builds are unchanged (launcher is dev-only; real desktops
+  don't exhibit the WSLg defect; the packaged operator build is native Windows); (3) the
+  temporary diagnosis instrumentation was removed; the harness stays in the scratchpad
+  (session-scoped) — the flight-log description above is sufficient to rebuild it.
+- Gates: `npm test` **1050/1050 PASS** (attempt tests removed, +8 `ozone-platform` tests),
+  `npm run typecheck` clean, `npm run lint` clean.
+  Not committed — awaiting operator live re-test (first-click activation of another
+  app's window, menu open, on the Wayland dev build) before the FD commits.
+
+- **Blur click-swallow RESOLVED — operator-verified live** (Wayland dev build: menu open →
+  single click on a native Windows window raises it first-click). Final classification: NOT
+  an F8 regression and not a menu bug — a WSLg RAIL/XWayland environment behavior armed by
+  any real click into the app, targeting native-Windows windows only (harness-proven on
+  freeze-era + F8 + attempt-#2 builds alike; the original "freeze-era works" control had
+  compared against the operator's NATIVE Windows build, which never had WSLg in its path).
+  Fix: Wayland-aware dev launcher (`scripts/dev-launch.mjs` + `src/main/ozone-platform.js`,
+  socket-probed, x11 fallback, packaged builds untouched) + `grabWindow` hardened for Wayland
+  (and now compositing open sheet/find overlays — a latent captureWindow gap fixed). Fix
+  attempts #1/#2 reverted (view-op hypothesis disproven; diff archived in the diag
+  scratchpad). Gates 1050/1050 green.

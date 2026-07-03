@@ -7,8 +7,8 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --enable-logging",
-    "dev:automation": "electron . --enable-logging --no-sandbox --automation-dev",
+    "dev": "node scripts/dev-launch.mjs --enable-logging",
+    "dev:automation": "node scripts/dev-launch.mjs --enable-logging --no-sandbox --automation-dev",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "test": "node --test test/unit/*.test.js",
