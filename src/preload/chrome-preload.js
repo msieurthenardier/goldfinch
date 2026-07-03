@@ -81,9 +81,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // jar and signals back 'chrome-new-tab-in-container'. Returns the new container object.
   newContainerCreate: (name) => ipcRenderer.invoke('new-container-create', { name }),
 
-  // --- main → renderer: page context menu (with optional freeze-frame dataURL) ---
-  // Fired by main's guest context-menu listener with the params + an optional freeze-frame
-  // dataURL (captured from the guest before opening). Renderer opens the HTML context menu.
+  // --- main → renderer: page context menu ---
+  // Fired by main's guest context-menu listener with { wcId, params }. Renderer
+  // builds the model and opens it on the menu-overlay sheet.
   onPageContextMenu: (cb) => ipcRenderer.on('page-context-menu', (_e, d) => cb(d)),
 
   // --- clipboard (renderer-side context-menu actions that need main-process clipboard) ---
@@ -112,12 +112,6 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // opens goldfinch://downloads via openDownloads(). Mirrors onOpenFind.
   onOpenDownloads: (cb) => ipcRenderer.on('open-downloads', () => cb()),
 
-  // --- site-info freeze-frame (Flight 3, Leg 2 sub-step 5) ---
-  // Capture the active web guest as a PNG data URL so the renderer can show a
-  // still image while the guest is hidden behind the site-info popup. Returns
-  // null when no active web guest is available (internal tabs need no freeze).
-  captureActiveGuest: () => ipcRenderer.invoke('capture-active-guest'),
-
   // --- web tab lifecycle (Flight 3, Leg 1) ---
   tabCreate: (payload) => ipcRenderer.invoke('tab-create', payload),
   tabClose: (wcId) => ipcRenderer.send('tab-close', wcId),
@@ -127,6 +121,23 @@ contextBridge.exposeInMainWorld('goldfinch', {
   tabSetBounds: (wcId, bounds) => ipcRenderer.send('tab-set-bounds', { wcId, bounds }),
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
   rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
+
+  // --- menu-overlay sheet (M05 Flight 8, DD4) ---
+  // The chrome owns menu state/model-building/actions; the sheet is presentation-only.
+  // Channel 1: open (or model-replace) a menu — {menuType, model, anchor, startIndex, token}.
+  menuOverlayOpen: (payload) => ipcRenderer.send('menu-overlay:open', payload),
+  // Channel 2: programmatic close — reason allowlisted main-side to 'toggle' (trigger
+  // re-click close, no focus move) | 'superseded' (default).
+  menuOverlayClose: (/** @type {{ reason?: 'toggle' | 'superseded' }} */ payload = {}) =>
+    ipcRenderer.send('menu-overlay:close', { reason: payload.reason }),
+  // Channel 6: an item was activated on the sheet — {menuType, id}; chrome executes the action.
+  onMenuOverlayActivated: (cb) => ipcRenderer.on('menu-overlay-activated', (_e, d) => cb(d)),
+  // Channel 7: the menu closed for ANY reason — {menuType, reason, token}; chrome drops
+  // stale tokens, resets aria-expanded, records blur-suppress, refocuses per reason.
+  onMenuOverlayClosed: (cb) => ipcRenderer.on('menu-overlay-closed', (_e, d) => cb(d)),
+  // DD13: chrome-class accelerators forwarded from the sheet's before-input-event —
+  // {action}; handled by the extracted dispatchChromeAction (same bodies as keydown).
+  onChromeShortcutAction: (cb) => ipcRenderer.on('chrome-shortcut-action', (_e, d) => cb(d)),
 
   // --- find overlay (M05 Flight 7) ---
   // The find bar is a main-owned chrome-class WebContentsView floating over the

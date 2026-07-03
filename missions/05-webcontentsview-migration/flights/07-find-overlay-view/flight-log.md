@@ -184,7 +184,11 @@ Leg 1's carried items (maximize/DPR≠1, transparent corners).
 Ctrl+F stimulus always seeds `''`, so close-then-reopen loses prior text (renderer-owned `findText`
 arrives with Leg 3; NOT a bug against this leg); (2) unfreeze focus — after kebab-close re-show, the
 overlay input does NOT regain OS focus (`hasFocus:false`, focus stays in the chrome) — roughly
-inset-bar parity; needs a deliberate HAT judgment.
+inset-bar parity; needs a deliberate HAT judgment. *[Annotation 2026-07-02 (F8 Leg 5b): mechanism
+restructured in F8 — the menu-close restore is now an owned, explicit step (`closeMenuOverlay`'s
+DD5 hook; see F8 flight.md DD5). F7's HAT accepted this behavior as correct (see the HAT session
+note below); the live focus behavior on the restructured mechanism is ratified at the F8 Leg-6
+HAT.]*
 
 **Anomalies:** WSLg find cold-start re-manifested (see Anomalies section — pre-existing, reproduced
 at the raw Electron level, warm behavior fully correct).
@@ -471,7 +475,10 @@ hidden≠destroyed observable caveat.
   it as wrong either way), and commit as a HAT-fix commit. Operator continues with edit-independent
   steps meanwhile (2, 4, 6-11); steps 3 and 5 wait on the fix.
 - **2026-07-02 — HAT steps 2/4/6/7/8/9/11 PASS; 10 skipped (not-run, no scale change available).**
-  Judgments settled: unfreeze non-refocus ACCEPTED as correct; theming ACCEPTED as-is. Step 7
+  Judgments settled: unfreeze non-refocus ACCEPTED as correct *[annotation 2026-07-02 (F8 Leg 5b):
+  mechanism restructured in F8 — restore is now an owned, explicit step (`closeMenuOverlay`'s DD5
+  hook; see F8 flight.md DD5); the accepted-as-correct disposition stands, and the live focus
+  behavior on the new mechanism is ratified at the F8 Leg-6 HAT]*; theming ACCEPTED as-is. Step 7
   observation: switch-to-internal flicker — operator identifies as long-standing; classified into the
   Flight-3 WSLg-class "blip on internal tabs" known-issue family, carried (not an F7 defect).
 - **2026-07-02 — HAT-1 RESOLVED (`e5daeca`): root cause = inverted `findNext` semantics;

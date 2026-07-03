@@ -168,8 +168,11 @@ both: the count now populates from the first character, operator-confirmed.
 - [ ] Flight 5/6 planning: `<webview>`-era option-semantics sweep checklist (Rec 1)
 - [ ] `.flightops/agent-crews/leg-execution.md`: PID-scoped-kill rule (Rec 2) — also propose upstream
   to mission-control defaults
-- [ ] CLAUDE.md: pattern section (Rec 3)
-- [ ] `tests/behavior/find-overlay-geometry.md`: spec errata (Rec 4)
+- [x] CLAUDE.md: pattern section (Rec 3) — *executed 2026-07-02 by F8 Leg 5b: "Overlay-view
+  patterns (M05 Flights 7–8)" section added with all five entries*
+- [x] `tests/behavior/find-overlay-geometry.md`: spec errata (Rec 4) — *executed 2026-07-02 by F8
+  Leg 5b: four errata + absence-authoritativeness rule + optional reopen-check folded in (step 6's
+  freeze wording also updated to the F8 menu-overlay mechanism, assertion unchanged)*
 - [ ] `tests/behavior/find-in-page.md`: cold-start caveat update (Rec 5)
 - [ ] Mission Known Issues: mark the WSLg find cold-start family RESOLVED for the human bar
   (automation-op re-verify pending, Flight 5)

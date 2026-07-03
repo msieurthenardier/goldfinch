@@ -87,9 +87,9 @@ interface GoldfinchBridge {
   /** Create a new container by name; main calls jars.add and signals back chrome-new-tab-in-container. */
   newContainerCreate(name: string): Promise<{ id: string; name: string; color: string; partition: string } | null>;
 
-  // --- HTML page context menu (main → renderer) ---
-  /** Main fires with { wcId, params } — renderer opens the HTML context menu and applies its
-   *  own freeze-frame via freezeGuest()/captureActiveGuest() (Option A; no main-side capture). */
+  // --- page context menu (main → renderer) ---
+  /** Main fires with { wcId, params } — renderer builds the model and opens it on the
+   *  menu-overlay sheet (menuType 'page-context'). */
   onPageContextMenu(cb: (d: { wcId: number; params: any }) => void): void;
   /** Write text to the system clipboard (invoked from the HTML context menu Copy action). */
   clipboardWriteText(text: string): Promise<void>;
@@ -122,12 +122,37 @@ interface GoldfinchBridge {
   /** Fired by the main-side Ctrl+J before-input-event capture (DD2). No payload. */
   onOpenDownloads(cb: () => void): void;
 
+  // --- menu-overlay sheet (M05 Flight 8, DD4 — chrome owns state/model/actions) ---
+  /** Channel 1: open (or model-replace) a menu on the sheet. The model is
+   * template-shaped per menuType (Leg 3): `menu` items {id,label,color?,variant?},
+   * `info-popup` rows {type,text?/label?/value?,id?}, `input-dialog` (empty). */
+  menuOverlayOpen(payload: {
+    menuType: string;
+    model: Array<{
+      id?: string;
+      label?: string;
+      color?: string;
+      variant?: string;
+      type?: 'item' | 'separator' | 'note' | 'row' | 'action';
+      text?: string;
+      value?: string;
+    }>;
+    anchor: { alignRight?: number; alignLeft?: number; x?: number; y: number };
+    startIndex: number;
+    token: number;
+  }): void;
+  /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded'). */
+  menuOverlayClose(payload?: { reason?: 'toggle' | 'superseded' }): void;
+  /** Channel 6: an item was activated on the sheet; chrome executes the action.
+   * `value` (Leg 3) is the input-dialog's text — main-validated (string, ≤24). */
+  onMenuOverlayActivated(cb: (d: { menuType: string; id: string; value?: string }) => void): void;
+  /** Channel 7: the menu closed for ANY reason; chrome resets state per reason/token. */
+  onMenuOverlayClosed(cb: (d: { menuType: string; reason: string; token: number }) => void): void;
+  /** DD13: chrome-class accelerators forwarded from the sheet's before-input-event. */
+  onChromeShortcutAction(cb: (d: { action: string }) => void): void;
+
   // The internal `goldfinch://` partition string (single source of truth).
   internalPartition: string;
-
-  // --- site-info freeze-frame (Flight 3, Leg 2 sub-step 5) ---
-  /** Capture the active web guest as a PNG data URL for freeze-frame behind site-info popup. Returns null if no active web guest. */
-  captureActiveGuest(): Promise<string | null>;
 
   // --- tab lifecycle (Flight 3, Leg 1 — web tab WebContentsView substrate) ---
   /** Create a web tab view in main; returns the guest wcId (invoke). */
@@ -270,6 +295,48 @@ declare const menuController: {
 
 /** Roving-tabindex helper (wrap math + tabIndex/focus). Injected by menu-controller.js. */
 declare function focusItem(items: HTMLElement[], i: number): void;
+
+/**
+ * Injected by src/shared/safe-color.js via the globalThis branch (the
+ * injection-safe color validator extracted from jars.js — M05 F8 Leg 3; the
+ * menu-overlay sheet document loads it via <script> to validate dot colors
+ * against the SAME domain the product accepts).
+ */
+declare function isSafeColor(c: any): boolean;
+
+/**
+ * Injected by src/shared/site-info.js via the globalThis branch (the pure
+ * site-info derivation shared by the chrome popup and the sheet model — M05 F8
+ * Leg 3). Same route as isSafeTabUrl above.
+ */
+declare function deriveSiteInfo(
+  tab: { url?: string; privacy?: any } | null | undefined,
+  internal: boolean
+):
+  | { internal: true; note: string }
+  | { internal: false; host: string; connection: string; trackers: number; permissions: number };
+
+/**
+ * Injected by src/shared/container-menu.js via the globalThis branch (the
+ * container-picker sheet model with the NAMESPACED id space — M05 F8 Leg 3).
+ */
+declare function buildContainerModel(
+  containers: Array<{ id?: any; name?: any; color?: any }>
+): Array<{ id: string; label: string; color?: string; variant?: string }>;
+
+/**
+ * Injected by src/shared/page-context-model.js via the globalThis branch (the
+ * pure page-context params→model builder with the namespaced/INDEX-dispatched id
+ * space — M05 F8 Leg 4). Toolbar mode short-circuits to the single Unpin item.
+ */
+declare function pageContextModel(
+  params: any,
+  toolbarItem?: 'media' | 'shields' | 'devtools' | null
+): Array<
+  | { type: 'item'; id: string; label: string }
+  | { type: 'separator' }
+  | { type: 'note'; text: string }
+>;
 
 /**
  * Injected by src/shared/audit-paging.js via the globalThis branch (the
