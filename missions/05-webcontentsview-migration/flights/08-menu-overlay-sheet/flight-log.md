@@ -1237,3 +1237,25 @@ and flight-log entries covered the observables cited.
 - Single batch commit made on `flight/08-menu-overlay-sheet` (code + artifacts + specs + docs).
   No GitHub PR per the mission's local long-running-branch model; merge to the mission branch
   happens at flight landing after the HAT.
+
+### 2026-07-02 — Flight Director: batch phase complete; HAT leg designed and ready
+
+- Flight-level Reviewer (Sonnet, fresh context, no Developer reasoning): **[HANDOFF:confirmed]**,
+  zero blocking issues across the full six-leg diff. Security sweep clean (sender validation,
+  no tabViews registration, DD8 layering, text-only rendering, value hardening, internal
+  guards); deletion integrity verified independently; 1042/1042 + typecheck + lint green.
+  Two non-blocking items (stale comment phrasing; leg checkbox state) fixed in commit prep.
+- Batch commit `32f4f0e` on `flight/08-menu-overlay-sheet`: 54 files, +7753/−1341. Legs
+  01–05b → `completed`, checked off in flight.md. No push, no PR (mission's local
+  long-running-branch model); merge to `mission/05-webcontentsview-migration` happens at
+  landing, after the HAT.
+- Leg 6 (`06-hat-and-alignment`) designed as the interactive HAT: 15-step guided script
+  compiling every HAT-carried item from Legs 1–5b + the three operator-ratification items
+  (dialog-fix decision, DD12 dialog modality, F7 focus restructuring) + the Witnessed
+  `menu-overlay` run (port-49152 apparatus note) + re-runs/promotions of the re-authored
+  specs. Lightweight design review: approve with changes — three missing sweep items (live
+  Exit as the literal last action; Enter/Space/Tab keyboard completeness incl. the Print
+  dialog; draft-spec promotion on passing re-runs) and two corrections (full Witnessed launch
+  invocation; conditional gates re-run before merge) — all applied. Leg → `ready`.
+- **Flight paused awaiting the operator**: the HAT requires a human at the screen. Signal on
+  resume: FD guides steps one at a time per the leg script.
