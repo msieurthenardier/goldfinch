@@ -1529,3 +1529,24 @@ and flight-log entries covered the observables cited.
   until first pass). Carry-forwards recorded in the run log: find-input focus not restored
   after menu-Escape (documented policy, UX decision candidate); captureWindow-to-file
   apparatus gap; expected-mutable-regions spec pattern.
+
+### 2026-07-06 — Leg 6 HAT wrap: CP5 PASS — flight LANDED
+
+- Steps 12/15 completed post-restart: DD13 accelerator composite ratified ("all feel right");
+  kebab Exit quits cleanly (process exit 0, operator-confirmed — the last code-identity-only
+  item now live-verified). Step 13 optional-skipped (no DPR≠1 display convenient).
+- CP5: HAT 15/15 (13 verified, 1 optional-skipped, all dispositions recorded) + Witnessed
+  `menu-overlay` PASS 6/6. All three ratification items ACCEPTED.
+- Post-HAT gate re-run (required — code fixes landed during the HAT): `npm test` green,
+  typecheck clean, lint clean, **`npm run a11y` green** including the five `sheet:*` states
+  ("No NEW violations — every violation node is in the ACCEPTED baseline").
+- Flight status → `landed`; leg 6 → `completed`; all Contributing-to-Criteria boxes ticked;
+  Flight 8 checked off in mission.md. Merging `flight/08-menu-overlay-sheet` →
+  `mission/05-webcontentsview-migration` (local; `main` untouched).
+- Debrief carry-forwards (for `/flight-debrief`): find-input focus after menu-Escape (UX
+  decision candidate); captureWindow-to-file apparatus gap; three pre-existing keyboard
+  reachability gaps (Tab can't leave guest, Ctrl+L dead from guest focus, no chrome Tab-cycle)
+  → guest-capture-set extension candidate; four re-authored specs' first re-runs pending
+  (internal-tab-menus + page-context-menu still `draft`); semi-permanent dev-key recipe +
+  dual-MCP (prod/dev) config now standing apparatus; prod admin key transited chat once —
+  operator to rotate.

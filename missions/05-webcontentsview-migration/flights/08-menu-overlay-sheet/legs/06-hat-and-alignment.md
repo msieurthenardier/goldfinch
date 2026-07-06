@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Menu Overlay Sheet](../flight.md)
 
 ## Objective
@@ -103,13 +103,13 @@ needs) on a web page with motion (the ticking fixture or a video).
 
 ## Acceptance Criteria
 
-- [ ] Steps 1–13 + 15 pass on screen (failures fixed inline + re-verified, or explicitly
+- [x] Steps 1–13 + 15 pass on screen (failures fixed inline + re-verified, or explicitly
   accepted by the operator with disposition recorded)
-- [ ] Ratification items 1–3 explicitly accepted (or rejected → contained revert planned)
-- [ ] `/behavior-test menu-overlay` passes (or parked with recorded apparatus reason; HAT
+- [x] Ratification items 1–3 explicitly accepted (or rejected → contained revert planned)
+- [x] `/behavior-test menu-overlay` passes (or parked with recorded apparatus reason; HAT
   covers the surface)
-- [ ] Spec re-runs executed or parked-with-record
-- [ ] Flight log updated (HAT results per step, dispositions, run-log references)
+- [x] Spec re-runs executed or parked-with-record
+- [x] Flight log updated (HAT results per step, dispositions, run-log references)
 
 ## Post-Completion (FD-driven at HAT wrap)
 

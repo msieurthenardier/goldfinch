@@ -1,18 +1,18 @@
 # Flight: Menu Overlay Sheet
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] **SC3/SC4-adjacent (menus at parity on a better mechanism)** — all five chrome menu surfaces keep
+- [x] **SC3/SC4-adjacent (menus at parity on a better mechanism)** — all five chrome menu surfaces keep
   their behavior while the freeze-frame mechanism beneath them is replaced; not a mission landing gate
-  (same class as Flight 7).
-- [ ] **Known-issue retirement** — the WSLg internal-tab menu-open blip (F3 carry), the freeze-frame
+  (same class as Flight 7). *(HAT 15/15 + Witnessed `menu-overlay` PASS 6/6, 2026-07-06.)*
+- [x] **Known-issue retirement** — the WSLg internal-tab menu-open blip (F3 carry), the freeze-frame
   capture-latency risk (F3 02b AC1), frozen-page staleness (video/animation halts under any menu), and
   Flight 7's "focus doesn't return to overlay after unfreeze" known item are all structurally retired
-  when the freeze is deleted.
-- [ ] **Flight-9 enabler** — the media/privacy panel flight inherits a menu-free freeze story (no
+  when the freeze is deleted. *(Freeze deleted at Leg 5; restore now an owned explicit step.)*
+- [x] **Flight-9 enabler** — the media/privacy panel flight inherits a menu-free freeze story (no
   DD5-class hide/restore interplay to design against) and a second proven overlay consumer.
 
 ---
@@ -400,7 +400,7 @@ must be preserved bit-for-bit either way, since `page-context-menu.md` asserts i
   DD5 rewiring landed early in Leg 2)*
 - [x] `05b-specs-and-docs` — DD11 spec/unit-test dispositions + CLAUDE.md/docs bundles
   *(second half of the pre-authorized Leg-5 split)*
-- [ ] `06-hat-and-alignment` — guided HAT + `/behavior-test menu-overlay` + spec re-runs
+- [x] `06-hat-and-alignment` — guided HAT + `/behavior-test menu-overlay` + spec re-runs
 
 ---
 
@@ -408,10 +408,10 @@ must be preserved bit-for-bit either way, since `page-context-menu.md` asserts i
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Merged to `mission/05-webcontentsview-migration` (local; `main` untouched)
-- [ ] Tests passing (unit + typecheck + lint + a11y with sheet target)
-- [ ] Documentation updated (CLAUDE.md menu architecture + F7 pattern bundle; docs/mcp-automation.md if
+- [x] All legs completed
+- [x] Merged to `mission/05-webcontentsview-migration` (local; `main` untouched)
+- [x] Tests passing (unit + typecheck + lint + a11y with sheet target)
+- [x] Documentation updated (CLAUDE.md menu architecture + F7 pattern bundle; docs/mcp-automation.md if
   the audit hook changes the automation story)
 
 ### Verification

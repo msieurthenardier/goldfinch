@@ -218,7 +218,11 @@ follow-on work.
   freeze). The same overlay technique could later **retire the freeze-frame hack for menus** — a possible
   follow-on. *(SC4-adjacent UX; not required for mission landing.)*
 
-- [ ] **Flight 8 (new — F7 follow-on, planned 2026-07-02): Menu overlay sheet** — retire the
+- [x] **Flight 8 (new — F7 follow-on, planned 2026-07-02): Menu overlay sheet** — ✅ LANDED
+  (2026-07-06): all five menus + the new-container dialog on the transparent overlay sheet; freeze
+  apparatus deleted; dialog-occlusion defect fixed; HAT 15/15 + Witnessed `menu-overlay` PASS 6/6;
+  bonus: WSLg click-swallow root-caused (XWayland) → Wayland-aware dev launcher. Merged to
+  `mission/05` locally; `main` untouched. — retire the
   freeze-frame menu mechanism using the Flight-7 overlay primitive: a single transparent full-guest
   overlay `WebContentsView` (the "sheet") hosts all five menu surfaces (kebab, container, page context,
   toolbar-unpin, site-info) over the **live** guest; freeze apparatus
