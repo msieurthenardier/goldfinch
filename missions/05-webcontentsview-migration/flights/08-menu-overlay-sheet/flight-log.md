@@ -1514,3 +1514,18 @@ and flight-log entries covered the observables cited.
   invalidate the stored key) on `GOLDFINCH_MCP_PORT=49152`; fixture server:
   `python3 -m http.server 8123 --directory tests/behavior/fixtures/menu-overlay`. Operator's
   installed Goldfinch must stay closed while 49152 is in use.
+
+- **Step 14 — Witnessed run COMPLETE: `/behavior-test menu-overlay` PASS 6/6** (run
+  2026-07-06-22-07-02, live two-agent mode, ~23 min). All four load-bearing properties verified
+  on rendered pixels: live-guest float under an open menu (open-grab tick delta), dismiss-
+  without-forwarding at the recorded link coordinates, DD5 find-bar hide/restore with query
+  intact, return-to-baseline with zero sheet residue. Run log committed at
+  `tests/behavior/menu-overlay/runs/2026-07-06-22-07-02.md`; spec promoted `draft` → `active`
+  with three Validator wording tightenings folded in. The spec's two optional variants were
+  deliberately deferred (both surfaces HAT-verified at steps 9/11). Re-runs of the four
+  re-authored specs: DEFERRED to post-flight (operator's session time; `menu-overlay` was the
+  flight's acceptance gate — the re-authored specs are regression nets whose first runs can
+  ride the next automation session; `internal-tab-menus` + `page-context-menu` remain `draft`
+  until first pass). Carry-forwards recorded in the run log: find-input focus not restored
+  after menu-Escape (documented policy, UX decision candidate); captureWindow-to-file
+  apparatus gap; expected-mutable-regions spec pattern.
