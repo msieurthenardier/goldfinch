@@ -244,5 +244,12 @@ follow-on work.
   (operator decision). *(SC3/SC4-adjacent parity-on-better-mechanism; not required for mission
   landing.)*
 
+- [ ] **Flight 9 (new — panel-slide pulled out of the tentative Flight 6, planned 2026-07-06):
+  Side-panel slide composition (#27 / SC10)** — verify/certify SC7: the media/privacy side panels
+  **compress** the live guest (side-by-side, NOT overlay — operator decision) and the open/close
+  **slide** composites cleanly on the native surface. Verify-first (F1 predicted "#27 doesn't
+  reproduce, SC7 looks free"); fix only if glitchy; SC7 stays droppable. Focused flight; automation
+  parity (F5), macOS, and mission-landing stay separate. *(SC7.)*
+
 > The alignment / vibe-coding session is folded into **Flight 1** (above) rather than a standalone flight —
 > the spike is the natural home for hands-on, judgment-heavy exploration.
