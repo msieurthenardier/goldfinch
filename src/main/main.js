@@ -18,6 +18,10 @@ const { createManager } = require('./downloads-manager');
 const { buildRegisterRecord, buildProgressPayload, buildDonePayload } = require('./downloads-payload');
 const { registerInternalHandler } = require('./internal-ipc');
 const { computeFindOverlayBounds } = require('./find-overlay-geometry');
+const { createMenuOverlayManager } = require('./menu-overlay-manager');
+// F8 Leg 3 / AC5: pure channel-4 `value` validator (string, ≤24) — unit-tested;
+// deliberately NOT part of the manager (the manager never touches channel 4).
+const { sanitizeActivatedValue } = require('./menu-overlay-value');
 const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
@@ -28,6 +32,9 @@ const { makeAutomationToggle } = require('./automation/toggle');
 // path and the MCP ops single-source the SAME internal-detection function (it is ELECTRON-FREE).
 const { toggleDevTools } = require('./devtools');
 const { isInternalContents } = require('./automation/resolve');
+// DD13 (F8 Leg 2): pure dual-export accelerator mapper for the menu-overlay sheet's
+// before-input-event forwarding + the internal-tab guard decision (both unit-tested).
+const { sheetAcceleratorAction, isGuestActionAllowed } = require('../shared/sheet-accelerator');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -40,6 +47,18 @@ for (const stream of [process.stdout, process.stderr]) {
     process.emitWarning(err);
   });
 }
+
+// ── Linux ozone backend note (F8 Leg-6 HAT fix): the WSLg X11/XWayland path
+// swallows the first cross-window click-to-activate; the DEV launch therefore
+// selects the Wayland backend when a compositor socket is reachable. The
+// selection CANNOT live here — Electron resolves the ozone platform before any
+// app code runs (an in-app `app.commandLine.appendSwitch('ozone-platform', …)`
+// changes what child processes REPORT but not the platform actually used —
+// measured via xwininfo). It lives in `scripts/dev-launch.mjs` (the `npm run
+// dev` / `dev:automation` entry), which applies the pure decision helper
+// `src/main/ozone-platform.js` and passes `--ozone-platform=wayland` on the
+// real command line. See those two files + the Leg-6 flight-log entry for the
+// full diagnosis and harness evidence.
 
 const PAGE_PARTITION = 'persist:goldfinch';
 
@@ -340,6 +359,187 @@ function closeFindOverlaySession({ refocusGuest }) {
   pendingOverlayInit = null;
 }
 
+// --- Menu-overlay sheet (M05 Flight 8, DD2/DD4/DD9) -----------------------------------
+// A lazy-singleton transparent WebContentsView covering the active guest's bounds,
+// stacked above the live guest — the surface hosting the chrome menus (kebab as of
+// Leg 2; container/site-info Leg 3; context/unpin Leg 4). Lifecycle + the menu-open
+// state machine live in the extracted, Electron-free manager module
+// (menu-overlay-manager.js); ONLY Electron construction stays here (createSheetView).
+// The sheet's webContents NEVER enters `tabViews` (DD8 — invisible to enumerateTabs by
+// construction; addressable by probed wcId for test driving). NOT gated on
+// entry.trusted anywhere (DD7 — internal tabs are in scope, opposite of the find bar).
+
+// Electron construction for the sheet view (injected into the manager). Chrome-class
+// webPreferences (mirrors the find overlay); transparent background is the
+// CP1-probed DD2 setting.
+function createSheetView() {
+  const view = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  view.setBackgroundColor('#00000000');
+  // DD13 accelerator forwarding: while a menu is open, OS keyboard focus sits in the
+  // sheet's webContents — neither chrome's keydown handlers nor the guest
+  // before-input-event capture see anything. Forward the UNION of the guest-captured
+  // set and the chrome keydownToAction set via the pure mapper; unmodified APG keys
+  // (Arrow/Home/End/Enter/Space/Escape/Tab) return null and stay with the sheet page.
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift });
+    if (!hit) return;
+    // Always swallow a matched accelerator (the sheet page must not see it), and
+    // respect the isAutoRepeat guards exactly as the guest branches do (devtools +
+    // downloads guarded; zoom/print/find deliberately not — parity).
+    event.preventDefault();
+    if (hit.autoRepeatGuard && input.isAutoRepeat) return;
+    if (hit.scope === 'chrome') {
+      // Chrome-class actions ride the main→chrome channel; the renderer's extracted
+      // dispatchChromeAction runs the same switch bodies as its keydown handler.
+      getChromeContents()?.send('chrome-shortcut-action', { action: hit.action });
+      return;
+    }
+    // Guest-class: replicate the guest before-input-event branch bodies against the
+    // ACTIVE guest — guarded by isInternalContents (the original capture sat inside
+    // the !__goldfinchInternal guard, so F12/zoom/print/Ctrl+Shift+I are inert on
+    // internal tabs today and must stay so; Ctrl+J is tab-independent and exempt —
+    // see isGuestActionAllowed). Ctrl+F over an internal active tab is a FULL no-op
+    // (menu stays open, keystroke swallowed — symmetric with the guard).
+    const wc = getActiveTabContents();
+    const activeIsInternal = !wc || isInternalContents(wc);
+    if (!isGuestActionAllowed(hit.action, activeIsInternal)) return;
+    switch (hit.action) {
+      case 'devtools':
+        if (wc) toggleDevTools(wc);
+        break;
+      case 'zoom-in':
+        applyZoom(wc, 'in');
+        break;
+      case 'zoom-out':
+        applyZoom(wc, 'out');
+        break;
+      case 'zoom-reset':
+        applyZoom(wc, 'reset');
+        break;
+      case 'print':
+        // Replicates the guest branch verbatim (incl. its lack of an autoRepeat guard).
+        if (wc) {
+          wc.print({}, (ok, reason) => {
+            if (!ok) console.warn('print failed:', reason);
+          });
+        }
+        break;
+      case 'find':
+        // DD5 conflict resolution: the menu closes BEFORE find opens (the find bar
+        // and an open menu never co-exist), then chrome's openFind drives
+        // find-overlay:open exactly as the guest-captured Ctrl+F does.
+        menuOverlay.closeMenuOverlay('superseded');
+        getChromeContents()?.send('open-find');
+        break;
+      case 'downloads':
+        getChromeContents()?.send('open-downloads');
+        break;
+    }
+  });
+  view.webContents
+    .loadFile(path.join(__dirname, '..', 'renderer', 'menu-overlay.html'))
+    .catch((err) => {
+      console.warn('[menu-overlay] loadFile rejected:', err && (err.code || err.message || err));
+    });
+  return view;
+}
+
+const menuOverlay = createMenuOverlayManager({
+  getContentView: () => (mainWindow ? mainWindow.contentView : null),
+  createSheetView,
+  // Channel-7 emitter (menu-overlay-closed → chrome).
+  sendToChrome: (channel, payload) => {
+    const cc = getChromeContents();
+    if (cc && !cc.isDestroyed()) cc.send(channel, payload);
+  },
+  // DD5 sheet-show hook: find bar hidden while a menu is open (parity).
+  hideFindOverlay,
+  // DD5 close hook with the THREE-reason skip set: 'tab-switch' defers to
+  // tab-set-active's own per-tab find-restore logic; 'tab-hide' just hid the find
+  // overlay one line earlier and restore belongs to tab-set-active's re-add (the
+  // close runs BEFORE activeTabWcId is nulled in that handler, so restoring here
+  // would paint the bar over a hidden guest and then double-handle); 'tab-close'
+  // is skipped explicitly rather than relying on the activeTabWcId null-out
+  // ordering. Every other reason (escape/outside-click/blur/toggle/activated/
+  // superseded/teardown) re-shows iff the find session targets the active tab —
+  // at window teardown findOverlayTabWcId is already nulled (teardownFindOverlayView
+  // runs FIRST in the `closed` handler), so the teardown restore naturally no-ops,
+  // while a sheet-crash teardown (find session still live) restores as desired.
+  restoreFindOverlay: (reason) => {
+    if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
+    if (isFindOverlayActive(activeTabWcId)) showFindOverlay();
+  },
+  // Reason-resolved refocus, main-side half (escape/activated): webContents-level
+  // focus — chrome-side els.kebab.focus() alone cannot move keyboard focus off the
+  // sheet in a multi-view BaseWindow (F7 closeFindOverlaySession precedent).
+  focusChrome: () => getChromeContents()?.focus()
+});
+
+// --- Menu-overlay DD4 IPC (channels 1/2/4/5). Chrome-class trust domain, but every
+// handler validates event.sender by IDENTITY (DD8, F7 pattern): chrome contents for
+// open/close; the sheet's own webContents for activated/dismissed. Payload-declared
+// identity is never trusted. Channels 3/6/7 are .send()s (manager → sheet/chrome). ---
+
+// True iff the sender is the live sheet webContents.
+function isSheetSender(event) {
+  const v = menuOverlay.getView();
+  return !!v && !v.webContents.isDestroyed() && event.sender === v.webContents;
+}
+
+// Channel 1 — chrome → main: open (or model-replace) a menu on the sheet.
+ipcMain.on('menu-overlay:open', (event, payload) => {
+  if (event.sender !== getChromeContents()) return;
+  menuOverlay.openMenu(payload);
+});
+
+// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted to
+// 'toggle' (trigger re-click close — distinct in logs, no focus move) or
+// 'superseded' (mutual exclusion / other programmatic close; the default).
+ipcMain.on('menu-overlay:close', (event, payload) => {
+  if (event.sender !== getChromeContents()) return;
+  const r = payload && payload.reason;
+  menuOverlay.closeMenuOverlay(r === 'toggle' ? 'toggle' : 'superseded');
+});
+
+// Channel 4 — sheet → main: item activated. Stale tokens dropped; channel 7 (from
+// the close) is emitted BEFORE channel 6, so chrome resets trigger state first and
+// the action wins any focus race (round-2 design lock). Leg 3: the payload may
+// carry an optional `value` string (the input-dialog's text) — shape-validated by
+// the pure sanitizeActivatedValue helper (string, ≤24; anything else DROPPED — the
+// payload is still forwarded, just without `value`).
+ipcMain.on('menu-overlay:activated', (event, payload) => {
+  if (!isSheetSender(event)) return;
+  const { id, token, value } = payload || {};
+  if (typeof id !== 'string' || typeof token !== 'number') return;
+  const cur = menuOverlay.getCurrentMenu();
+  if (!cur || token !== cur.token) return; // stale sheet report
+  menuOverlay.closeMenuOverlay('activated', token);
+  /** @type {{ menuType: string, id: string, value?: string }} */
+  const out = { menuType: cur.menuType, id };
+  const v = sanitizeActivatedValue(value);
+  if (v !== undefined) out.value = v;
+  getChromeContents()?.send('menu-overlay-activated', out);
+});
+
+// Channel 5 — sheet → main: dismissed. `reason` allowlisted to the page-attributable
+// flavors; anything else is treated as the page's default flavor ('blur'). Stale
+// tokens are dropped inside closeMenuOverlay.
+const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
+ipcMain.on('menu-overlay:dismissed', (event, payload) => {
+  if (!isSheetSender(event)) return;
+  const { reason, token } = payload || {};
+  if (typeof token !== 'number') return;
+  menuOverlay.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
+});
+
 
 // Returns the guest webContents for a tab view by its wcId (or null if not found/destroyed).
 function getTabContents(wcId) {
@@ -380,7 +580,14 @@ let devEnableOverride = false;
 // Injected into the engine via deps.grabWindow so observe.js stays Electron-free.
 async function grabWindow() {
   if (!mainWindow) return null;
-  try {
+  // Under the Wayland ozone backend (Leg-6 HAT fix — the dev launcher passes
+  // --ozone-platform=wayland when a compositor socket is reachable), the app's
+  // own surface is NOT in desktopCapturer's window-source list (X-window based;
+  // no PipeWire under WSLg), so the best-size heuristic below would grab an
+  // UNRELATED window. Skip straight to the capturePage composite fallback.
+  const onWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
+  if (!onWayland) {
+    try {
     const bounds = mainWindow.getBounds();
     // FIX 2(a): request thumbnail at the actual window content size so we get a
     // full-resolution capture, not the 150px-wide default thumbnail.
@@ -402,8 +609,9 @@ async function grabWindow() {
     if (best && best.thumbnail) {
       return best.thumbnail.toPNG().toString('base64');
     }
-  } catch {
-    /* desktopCapturer unavailable */
+    } catch {
+      /* desktopCapturer unavailable */
+    }
   }
   // FIX 2(b) — WSLg / Wayland fallback: build a REAL chrome+guest composite in the
   // chrome renderer via executeJavaScript. Steps:
@@ -427,11 +635,6 @@ async function grabWindow() {
     const chromeB64 = chromeImg.toPNG().toString('base64');
     const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
 
-    if (!tabB64) {
-      // No active guest — chrome-only capture.
-      return chromeB64;
-    }
-
     // Get the #webviews slot bounds from the chrome renderer so we know
     // where to draw the guest PNG on the composite canvas.
     const guestBoundsJson = await cc.executeJavaScript(
@@ -439,33 +642,64 @@ async function grabWindow() {
     );
     const guestBounds = guestBoundsJson ? JSON.parse(guestBoundsJson) : null;
 
-    if (!guestBounds) {
-      // Can't locate the slot — return chrome PNG only.
+    // Layer list, bottom-up: guest at the slot offset, then the overlay views in
+    // their z-order (find bar, then the menu-overlay sheet — the sheet is added
+    // after the find re-assert on every show path, so it stacks above). Without
+    // the overlay layers a Wayland-path captureWindow would silently omit an
+    // OPEN MENU / find bar that IS on the real screen (the x11 desktopCapturer
+    // path captured real window pixels, hiding this gap until the Leg-6 ozone
+    // switch). View bounds are window-content DIPs — the same space as the
+    // chrome DOM rect (the chrome view fills the window at 0,0).
+    /** @type {{ b64: string, x: number, y: number, w: number, h: number }[]} */
+    const layers = [];
+    if (tabB64 && guestBounds) {
+      layers.push({ b64: tabB64, x: guestBounds.x, y: guestBounds.y, w: guestBounds.width, h: guestBounds.height });
+    }
+    if (overlayVisible && overlayView && !overlayView.webContents.isDestroyed()) {
+      const img = await overlayView.webContents.capturePage();
+      const b = overlayView.getBounds();
+      if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+    }
+    const sheetView = menuOverlay.isVisible() ? menuOverlay.getView() : null;
+    if (sheetView && !sheetView.webContents.isDestroyed()) {
+      const img = await /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage();
+      const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (sheetView)).getBounds();
+      if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
+    }
+
+    if (layers.length === 0) {
+      // No guest and no overlays — chrome-only capture.
       return chromeB64;
     }
 
-    // Composite in the chrome renderer: draw chrome, then guest at the slot offset.
-    const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, tabDataUrl, gx, gy, gw, gh) {
-      return new Promise(function(resolve, reject) {
-        var chromeImg = new Image();
-        chromeImg.onload = function() {
-          var tabImg = new Image();
-          tabImg.onload = function() {
-            var canvas = document.createElement('canvas');
-            canvas.width = chromeImg.naturalWidth;
-            canvas.height = chromeImg.naturalHeight;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(chromeImg, 0, 0);
-            ctx.drawImage(tabImg, Math.round(gx), Math.round(gy), Math.round(gw), Math.round(gh));
-            resolve(canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, ''));
-          };
-          tabImg.onerror = function() { resolve(null); };
-          tabImg.src = tabDataUrl;
-        };
-        chromeImg.onerror = function() { reject(new Error('chrome img load failed')); };
-        chromeImg.src = chromeDataUrl;
+    // Composite in the chrome renderer: draw chrome, then each layer in order.
+    const layerArgs = JSON.stringify(layers.map((l) => ({ u: 'data:image/png;base64,' + l.b64, x: l.x, y: l.y, w: l.w, h: l.h })));
+    const compositeB64 = await cc.executeJavaScript(`(function(chromeDataUrl, layers) {
+      function load(src) {
+        return new Promise(function(resolve, reject) {
+          var img = new Image();
+          img.onload = function() { resolve(img); };
+          img.onerror = function() { reject(new Error('img load failed')); };
+          img.src = src;
+        });
+      }
+      return load(chromeDataUrl).then(function(chromeImg) {
+        return Promise.all(layers.map(function(l) {
+          return load(l.u).then(function(img) { return { img: img, l: l }; }, function() { return null; });
+        })).then(function(loaded) {
+          var canvas = document.createElement('canvas');
+          canvas.width = chromeImg.naturalWidth;
+          canvas.height = chromeImg.naturalHeight;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(chromeImg, 0, 0);
+          loaded.forEach(function(e) {
+            if (!e) return;
+            ctx.drawImage(e.img, Math.round(e.l.x), Math.round(e.l.y), Math.round(e.l.w), Math.round(e.l.h));
+          });
+          return canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, '');
+        });
       });
-    })('data:image/png;base64,${chromeB64}', 'data:image/png;base64,${tabB64}', ${guestBounds.x}, ${guestBounds.y}, ${guestBounds.width}, ${guestBounds.height})`);
+    })('data:image/png;base64,${chromeB64}', ${layerArgs})`);
 
     return compositeB64 || chromeB64;
   } catch {
@@ -484,7 +718,9 @@ async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
-    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll(), grabWindow }),
+    // isTabViewWcId (F8 DD8 defense-in-depth): non-tab, non-chrome wcIds (e.g. the
+    // menu-overlay sheet, the find overlay) resolve only at the admin tier.
+    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -639,8 +875,27 @@ function createWindow() {
     // Find-overlay teardown (DD1): destroys the lazy singleton and clears the find
     // session + ready flag + queued init (AC6f — no refocus concern, everything is
     // tearing down; teardownFindOverlayView never refocuses).
+    // ORDERING PIN (F8 DD5): this runs BEFORE closeMenuOverlay('teardown') — it nulls
+    // findOverlayTabWcId, so the teardown-reason find-restore naturally no-ops
+    // mid-window-teardown (the sheet-crash render-process-gone teardown, where the
+    // find session is still live, restores as desired).
     teardownFindOverlayView();
+    // Menu-overlay close family (F8 DD4): emit the 'teardown' close (channel 7 is a
+    // no-op here — chrome contents already nulled — but the menu state is reset so a
+    // relaunch starts clean), then destroy the lazy singleton (DD9).
+    menuOverlay.closeMenuOverlay('teardown');
+    menuOverlay.teardown();
   });
+
+  // Menu-overlay close family (F8 DD4): BaseWindow blur — app switch closes any open
+  // menu. On an app switch the sheet's own blur ALSO fires (dismissed{blur}, stale by
+  // then): closeMenuOverlay is idempotent + stale-token-guarded, so chrome sees
+  // exactly one channel-7 close and the DD5 restore runs once. No refocus on 'blur'
+  // (never steal focus from the other app on return). Window MINIMIZE is deliberately
+  // NOT in the close family: where the platform fires blur on minimize the menu
+  // closes via this path; where it doesn't (WSLg uncertainty), a menu surviving
+  // minimize-restore is an accepted variation (leg AC3) — HAT observes.
+  mainWindow.on('blur', () => menuOverlay.closeMenuOverlay('blur'));
 
   // DD3: keep the chrome view sized to the window. No-op if the view is already gone
   // (resize can fire during teardown).
@@ -814,14 +1069,11 @@ function wireGuestContents(contents) {
     };
     contents.on('devtools-opened', () => sendDevtoolsState(true));
     contents.on('devtools-closed', () => sendDevtoolsState(false));
-    // HTML page context menu (DD2/DD6, Leg 2b — freeze-frame approach, Option A). The
-    // context-menu event fires on the main-process guest webContents. We forward ONLY the
-    // params; the chrome renderer applies the freeze-frame via its own proven
-    // freezeGuest()/captureActiveGuest() path on menu open (the same path the kebab/container
-    // menus use and the operator confirmed working). An event-time capturePage() here proved
-    // unreliable on WSLg (intermittently threw/returned empty → freeze skipped → live guest
-    // occluded the HTML menu), so we deliberately do NOT capture in this handler. Internal
-    // goldfinch:// guests are excluded by the !__goldfinchInternal guard (DD6).
+    // Custom page context menu (DD2/DD6). The context-menu event fires on the
+    // main-process guest webContents. We forward ONLY the params; the chrome
+    // renderer builds the model (pure pageContextModel) and opens it on the
+    // menu-overlay sheet at the 1:1 guest coords (M05 F8). Internal goldfinch://
+    // guests are excluded by the !__goldfinchInternal guard (DD6).
     contents.on('context-menu', (event, params) => {
       event.preventDefault();
       if (!mainWindow) return;
@@ -1659,16 +1911,31 @@ ipcMain.on('tab-close', (_event, wcId) => {
   if (wcId === findOverlayTabWcId) closeFindOverlaySession({ refocusGuest: false });
   // Belt-and-suspenders (DD1, Leg 1): closing the active tab, or the last web tab
   // (all-internal remaining), removes the overlay from the stack even sessionless.
-  if (wasActive) hideFindOverlay();
+  // Menu-overlay close family (F8 DD4): closing the ACTIVE tab while a menu is open
+  // closes the menu ('tab-close' — restore explicitly skipped in the DD5 hook, not
+  // left to the activeTabWcId null-out accident). Deliberately NO "no web tabs left"
+  // mirror — the sheet serves internal tabs as well (DD7); active-tab lifecycle
+  // covers it.
+  if (wasActive) {
+    hideFindOverlay();
+    menuOverlay.closeMenuOverlay('tab-close');
+  }
   const anyWebTabLeft = [...tabViews.values()].some((e) => e.trusted === false);
   if (!anyWebTabLeft) hideFindOverlay();
 });
 
 ipcMain.on('tab-hide', (_event, wcId) => {
-  // Find-overlay freeze-hide (DD5): hiding the active guest (menu freeze — and the
-  // pending-activation hide) takes the overlay out of the stack too. Restore needs no
-  // code here — unfreeze/late-activation both land in tab-set-active's re-add.
-  if (wcId === activeTabWcId) hideFindOverlay();
+  // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
+  // takes the overlay out of the stack too. Restore needs no code here —
+  // late-activation lands in tab-set-active's re-add.
+  // Menu-overlay close family (F8 DD4): hiding the active guest while a sheet menu
+  // is open CLOSES the menu ('tab-hide'). The DD5 hook skips the find-restore for
+  // this reason (the close runs BEFORE activeTabWcId is nulled below — a restore
+  // here would paint the bar over a hidden guest).
+  if (wcId === activeTabWcId) {
+    hideFindOverlay();
+    menuOverlay.closeMenuOverlay('tab-hide');
+  }
   const entry = tabViews.get(wcId);
   if (!entry) return;
   if (!entry.view.webContents.isDestroyed()) {
@@ -1726,11 +1993,26 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
       // focus from tab-strip keyboard navigation (AC5).
       closeFindOverlaySession({ refocusGuest: false });
     } else if (isFindOverlayActive(wcId)) {
-      // AC6b / DD5 unfreeze restore: re-activating the session's own tab re-shows the
-      // overlay (unfreezeGuest rides tabSetActive) — the session survives freeze.
+      // AC6b / DD5 restore: re-activating the session's own tab re-shows the
+      // overlay — the session survives a hide/re-add cycle.
       // isFindOverlayActive(wcId) implies !entry.trusted (open refuses trusted).
       if (rounded) lastGuestBounds = rounded;
       showFindOverlay();
+    }
+    // Menu-overlay sheet (F8 DD4/DD9/DD7): strictly AFTER the guest re-add AND the
+    // find-overlay re-assert above, so the sheet sits top-of-stack. No entry.trusted
+    // gate — the sheet serves internal tabs too (DD7).
+    if (rounded) menuOverlay.syncBounds(rounded);
+    if (activeTabWcId !== null && activeTabWcId !== wcId) {
+      // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
+      // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
+      // skips the find-restore for 'tab-switch' — this handler's own per-tab
+      // find-restore logic above governs.
+      menuOverlay.closeMenuOverlay('tab-switch');
+    } else if (menuOverlay.isMenuOpen()) {
+      // Same-tab re-activation with a menu open: the re-add keeps the sheet
+      // top-of-stack via re-add-last.
+      menuOverlay.show();
     }
   }
   // Hide old active tab
@@ -1757,6 +2039,10 @@ ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
     if (overlayVisible && overlayView) {
       overlayView.setBounds(computeFindOverlayBounds(rounded));
     }
+    // Menu-overlay geometry-follow (F8 DD12): identity mapping — the sheet's bounds
+    // ARE the active guest's rounded bounds. The manager stores always, applies only
+    // while visible.
+    menuOverlay.syncBounds(rounded);
   }
 });
 
@@ -1805,7 +2091,7 @@ ipcMain.on('find-overlay:close', (event) => {
 // delete-to-empty and switch-back restores a blank bar, not resurrected text), then
 // resolves the session's target guest and runs findInPage. Empty text skips findInPage
 // (the page blanks its own count; NO stopFindInPage — the highlight persists until
-// close). A frozen (hidden-but-live) guest is allowed — counts land when the overlay
+// close). A hidden-but-live guest is allowed — counts land when the overlay
 // re-shows. A stale/destroyed target resolves null → no-op.
 //
 // FLAG MAPPING (HAT-1 fix): the payload's `findNext` keeps the chrome-bar shape
@@ -1832,33 +2118,6 @@ ipcMain.on('find-overlay:query', (event, payload) => {
   const isStep = !!findNext && text === findOverlayLastQueryText;
   findOverlayLastQueryText = text;
   wc.findInPage(text, { findNext: !isStep, forward: forward !== false, matchCase: !!matchCase });
-});
-
-// Site-info / menu freeze-frame: capture the active guest page as a PNG data URL.
-// Called by the renderer before hiding the guest and showing the freeze image.
-// Returns a data URL string, or null if no active guest is available.
-//
-// INTERNAL CAPTURE IS REQUIRED (Leg 3 HAT fix): after Leg 3, internal goldfinch:// tabs are
-// opaque WebContentsViews — they occlude the HTML chrome menus (kebab/container/site-info)
-// exactly like web tabs. So the freeze-frame must be able to capture an internal page too,
-// or those menus render behind the opaque internal view. The earlier "never capture internal"
-// guard rested on the now-invalid "internal never freezes" premise.
-//
-// Why this is safe (NOT a leak, NOT an automation op): the ONLY caller is the trusted chrome
-// renderer's freeze helper — `captureActiveGuest` is exposed solely on chrome-preload, never on
-// any guest preload. It captures, as a still, a page the chrome ALREADY displays in its own
-// #webviews region; nothing crosses a trust boundary that the chrome doesn't already hold.
-// (`isInternalContents` is intentionally NOT applied here; it remains used elsewhere in main.js.)
-ipcMain.handle('capture-active-guest', async () => {
-  const wc = getActiveTabContents();
-  if (!wc || wc.isDestroyed()) return null;
-  try {
-    const img = await wc.capturePage();
-    // toDataURL returns a data: URI (PNG, base64-encoded).
-    return img.toDataURL();
-  } catch {
-    return null;
-  }
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
@@ -2131,7 +2390,9 @@ app.whenReady().then(() => {
   // chrome renderer — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll(), grabWindow });
+    // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
+    // dev seam is not admin-tier, so chrome-class overlay wcIds must refuse here too.
+    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview

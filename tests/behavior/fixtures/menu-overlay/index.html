@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Menu overlay liveness fixture</title>
+    <style>
+      /* Light background so the transparent sheet (and any opaque/black compositing
+         failure) is unmistakable in captureWindow grabs. No external resources. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #f4f1e8;
+        color: #1a1a1a;
+        font-family: sans-serif;
+      }
+      /* Large ticking seconds display, upper-left/centered — the CP1 liveness signal:
+         two grabs ~2s apart must differ here if the guest is live under the sheet. */
+      #clock {
+        position: absolute;
+        top: 18%;
+        left: 8%;
+        font-size: 96px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 2px;
+      }
+      #tick-count {
+        position: absolute;
+        top: 42%;
+        left: 8%;
+        font-size: 40px;
+        color: #444;
+      }
+      /* Plainly visible link anchored bottom-left — the behavior spec's step-3
+         outside-click target (away from the top-right / bottom-right; menus render
+         at the sheet's top edge). */
+      #outside-link {
+        position: absolute;
+        bottom: 24px;
+        left: 24px;
+        font-size: 28px;
+        color: #0645ad;
+      }
+      /* ---- Leg-4 page-context targets (fixed px positions — deterministic
+         right-click coordinates for the AC1 1:1 check; all away from the ticking
+         region on the left and from the y-clamp zone at the bottom edge). The
+         bottom-left #outside-link above stays UNTOUCHED (Leg-6 spec contract). */
+      /* Mid-page link — AC1's positional right-click target. */
+      #midpage-link {
+        position: absolute;
+        top: 320px;
+        left: 520px;
+        font-size: 20px;
+        color: #0645ad;
+      }
+      #fixture-img {
+        position: absolute;
+        top: 120px;
+        left: 520px;
+      }
+      #selectable {
+        position: absolute;
+        top: 380px;
+        left: 520px;
+        width: 360px;
+        font-size: 18px;
+      }
+      #editable {
+        position: absolute;
+        top: 460px;
+        left: 520px;
+        width: 280px;
+        font-size: 18px;
+        padding: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="clock">--:--:--</div>
+    <div id="tick-count">ticks: 0</div>
+    <a id="outside-link" href="?navigated=1">outside-click target link</a>
+    <!-- Leg-4 additions: mid-page link (AC1), same-origin sibling image (real
+         downloads path, no external resources), selection target, editable input. -->
+    <a id="midpage-link" href="?midpage=1">mid-page context link</a>
+    <img id="fixture-img" src="sample-image.png" width="120" height="90" alt="fixture sample" />
+    <p id="selectable">Selectable fixture text for the context menu copy and search checks.</p>
+    <input id="editable" type="text" value="editable fixture text" aria-label="editable fixture field" />
+    <script>
+      let ticks = 0;
+      function tick() {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        document.getElementById('clock').textContent =
+          pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        ticks += 1;
+        document.getElementById('tick-count').textContent = 'ticks: ' + ticks;
+      }
+      tick();
+      setInterval(tick, 1000);
+    </script>
+  </body>
+</html>

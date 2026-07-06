@@ -21,12 +21,18 @@ const find = require('./find');
  *
  * @param {() => (Electron.WebContents | null)} getChromeContents
  *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null }} [opts]
- *   allowInternal — admin's SOLE relaxation (DD6 / Leg 2): when true, deps carry
- *   allowInternal so resolveContents lets the internal goldfinch://settings
- *   session through. The mcp-server builds the admin engine with
- *   `{ allowInternal: true }`; jar engines (and every other caller) leave it
- *   false. Threaded into deps() and forwarded to EVERY resolveContents call site.
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null }} [opts]
+ *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
+ *   when true, deps carry allowInternal so resolveContents (a) lets the internal
+ *   goldfinch://settings session through AND (b) skips the non-tab-contents
+ *   guard (chrome-class overlay views — the menu-overlay sheet, the find
+ *   overlay — resolve only at the admin tier). The mcp-server builds the admin
+ *   engine with `{ allowInternal: true }`; jar engines (and every other caller)
+ *   leave it false. Threaded into deps() and forwarded to EVERY resolveContents
+ *   call site.
+ *   isTabViewWcId — main.js's tabViews-membership predicate (M05 F8 DD8),
+ *   threaded into deps() so resolveContents can refuse non-tab, non-chrome
+ *   wcIds at non-admin tiers. Absent → no behavior change.
  *   getDownloads — accessor for the app-level downloads list (Flight 5). When
  *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
  *   op returns the merged download records. Absent → getDownloadsList throws a clean
@@ -37,7 +43,7 @@ const find = require('./find');
  *   'automation: chrome window unavailable' (same as before injection).
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -53,12 +59,15 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
       if (!chromeContents) throw new Error('automation: chrome window unavailable');
       return chromeContents.executeJavaScript(code);
     };
-    // allowInternal (DD6 / Leg 2): admin's sole relaxation, forwarded to every
-    // resolveContents call site via deps. fromPartition (session.fromPartition)
-    // is carried so the engine and the scope façade share ONE Session→partition
-    // resolver — the membership compare in resolveContentsForJar uses the same
-    // interned Session that resolveContents sees, so they cannot diverge.
-    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow };
+    // allowInternal (DD6 / Leg 2 + F8 DD8): one of admin's TWO relaxations
+    // (internal-session AND non-tab-contents both lift under it), forwarded to
+    // every resolveContents call site via deps. isTabViewWcId (F8 DD8) rides the
+    // same deps so non-admin tiers refuse chrome-class overlay wcIds (menu sheet,
+    // find overlay). fromPartition (session.fromPartition) is carried so the
+    // engine and the scope façade share ONE Session→partition resolver — the
+    // membership compare in resolveContentsForJar uses the same interned Session
+    // that resolveContents sees, so they cannot diverge.
+    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.

@@ -14,7 +14,6 @@ const els = {
   winMin: /** @type {HTMLButtonElement} */ (document.getElementById('win-min')),
   winMax: /** @type {HTMLButtonElement} */ (document.getElementById('win-max')),
   winClose: /** @type {HTMLButtonElement} */ (document.getElementById('win-close')),
-  containerMenu: /** @type {HTMLElement} */ (document.getElementById('container-menu')),
   webviews: /** @type {HTMLElement} */ (document.getElementById('webviews')),
   back: /** @type {HTMLButtonElement} */ (document.getElementById('back')),
   forward: /** @type {HTMLButtonElement} */ (document.getElementById('forward')),
@@ -57,10 +56,7 @@ const els = {
   playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
   playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next')),
   kebab: /** @type {HTMLButtonElement} */ (document.getElementById('kebab')),
-  kebabMenu: /** @type {HTMLElement} */ (document.getElementById('kebab-menu')),
   addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
-  siteInfoPopup: /** @type {HTMLElement} */ (document.getElementById('site-info-popup')),
-  pageContextMenu: /** @type {HTMLElement} */ (document.getElementById('page-context-menu')),
   automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
   automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge')),
   zoomControl: /** @type {HTMLElement} */ (document.getElementById('zoom-control')),
@@ -104,8 +100,6 @@ let tabSeq = 0;
 let activeViewWcId = null;
 // RAF pending flag for debounced geometry sends.
 let rafGeometryPending = false;
-// Whether a freeze-frame is currently active (guest hidden, still image shown in #webviews background).
-let guestFrozen = false;
 
 /* ----------------------------------------------------- jars / containers */
 
@@ -121,146 +115,376 @@ window.goldfinch.jarsList().then((list) => {
 
 /* ------------------------------------------------------- kebab (overflow) menu */
 // APG menu-button: role="menu" popup with four static role="menuitem" items
-// (Settings, Downloads, Print…, Exit) + roving tabindex + arrow-nav. Open/close/dismissal/
-// mutual-exclusion and the APG keyboard contract are owned by the shared menuController.
+// (Settings, Downloads, Print…, Exit) + roving tabindex + arrow-nav.
+//
+// All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
+// chrome keeps the trigger, open stimuli, model building, and action execution;
+// the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
+// freeze-frame apparatus were retired at the Leg-5 cutover.
 
-/** @returns {HTMLElement[]} */
-function kebabItems() {
-  return /** @type {HTMLElement[]} */ ([...els.kebabMenu.querySelectorAll('[role="menuitem"]')]);
-}
-function positionKebabMenu() {
-  const r = els.kebab.getBoundingClientRect();
-  els.kebabMenu.style.top = r.bottom + 4 + 'px';
-  els.kebabMenu.style.right = window.innerWidth - r.right + 'px';
-  els.kebabMenu.style.left = 'auto';
-}
-// Kebab registered with the controller. `onOpen(startIndex)` is the raw show body;
-// `onClose` is the raw hide body. The public `closeKebabMenu` below is DISTINCT.
-const kebabEntry = menuController.register({
-  trigger: els.kebab,
-  menu: els.kebabMenu,
-  items: kebabItems,
-  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
-  onOpen(startIndex = 0) {
-    els.kebabMenu.classList.remove('hidden');
-    positionKebabMenu();
-    els.kebab.setAttribute('aria-expanded', 'true');
-    const items = kebabItems();
-    focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
-    // Freeze-frame: capture the guest and apply the still while the menu is up.
-    // Fire-and-forget (async); the menu is already visible; the freeze arrives when capture resolves.
-    freezeGuest(() => !els.kebabMenu.classList.contains('hidden'));
-  },
-  onClose() {
-    els.kebabMenu.classList.add('hidden');
-    els.kebab.setAttribute('aria-expanded', 'false');
-    unfreezeGuest();
-  }
-});
-// Thin public wrapper — delegates to the controller. DISTINCT from onClose above.
-function closeKebabMenu() {
-  menuController.close(kebabEntry);
-}
-
-// Activation: native click on the focused <button> menuitem fires these.
-els.kebabMenu.querySelector('#kebab-settings')?.addEventListener('click', () => {
-  closeKebabMenu();
+// The four kebab item actions, extracted into NAMED functions consumed by the
+// sheet's channel-6 activation — one source of truth (Exit is verified by this
+// shared body, never activated live).
+function kebabActionSettings() {
   createTab('goldfinch://settings', null, { trusted: true });
-});
-els.kebabMenu.querySelector('#kebab-downloads')?.addEventListener('click', () => {
-  closeKebabMenu();
+}
+function kebabActionDownloads() {
   openDownloads();
-});
-els.kebabMenu.querySelector('#kebab-print')?.addEventListener('click', () => {
-  closeKebabMenu();
+}
+function kebabActionPrint() {
   const t = activeTab();
   if (t && !isInternalTab(t) && t.wcId != null) window.goldfinch.print({ webContentsId: t.wcId });
-});
-els.kebabMenu.querySelector('#kebab-exit')?.addEventListener('click', () => {
-  closeKebabMenu();
+}
+function kebabActionExit() {
   window.goldfinch.appQuit();
+}
+/** @type {{ [id: string]: () => void }} */
+const KEBAB_ACTIONS = {
+  settings: kebabActionSettings,
+  downloads: kebabActionDownloads,
+  print: kebabActionPrint,
+  exit: kebabActionExit
+};
+
+/* ---- kebab (and every menu below) over the menu-overlay sheet (DD4 protocol) ---- */
+
+// Chrome-minted monotonic open-token, carried in channel 1 and echoed in
+// channels 4/5/7 — the stale-close discipline (round-2 design lock). Shared
+// across menu types (all five surfaces mint from the same counter).
+let menuOverlayToken = 0;
+// Per-menuType chrome-side state, driven ONLY by channels 1/7 (its own sends +
+// closes): open flag (toggle + aria), last-minted token (stale channel-7 drop),
+// and the 300 ms blur-close suppress timestamp (trigger re-click race, DD4).
+//
+// GENERALIZED entry shape (Leg 4 design-review decision — Leg 5 inherits it):
+//   ariaTarget: () => HTMLElement|null — aria-expanded is stamped (open) / reset
+//     (channel-7 close) ONLY when non-null. `page-context` returns null: its
+//     "trigger" is transient (address input / body / a foreign menu-button), so
+//     stamping it would leak a false AT signal — including the same-menuType-
+//     replace stale-close orphaning aria on a CHANGED element. The getter is
+//     READ-ONLY (the open path calls it too — it must not clear state on read).
+//   refocus(reason) — per-entry reason→refocus policy, run on every NON-STALE
+//     channel-7 close. Fixed-trigger menus keep the escape+activated→trigger
+//     contract; `page-context` refocuses on 'escape' ONLY → the captured
+//     pageCtx.returnFocus (guarded: isConnected, !== body), else els.address.
+//     returnFocus is cleared after use HERE (never leaks
+//     across opens; a second open overwrites it). Action-moved focus (e.g. the
+//     Unpin body's els.address.focus()) comes from the channel-6 DISPATCH BODY,
+//     not this map — page-context stays escape-only.
+/** @typedef {{ open: boolean, token: number, blurClosedAt: number, ariaTarget: () => (HTMLElement | null), refocus: (reason: string) => void }} OverlayMenuState */
+/** Standard fixed-trigger entry: aria on the trigger; escape/activated → trigger focus.
+ * @param {() => HTMLElement} trigger @returns {OverlayMenuState} */
+const fixedTriggerMenu = (trigger) => ({
+  open: false,
+  token: 0,
+  blurClosedAt: -Infinity,
+  ariaTarget: trigger,
+  refocus(reason) {
+    if (reason === 'escape' || reason === 'activated') trigger().focus();
+  }
+});
+/** @type {{ [menuType: string]: OverlayMenuState }} */
+const overlayMenus = {
+  kebab: fixedTriggerMenu(() => els.kebab),
+  container: fixedTriggerMenu(() => els.newTabMenu),
+  'site-info': fixedTriggerMenu(() => els.addressChip),
+  'new-container': fixedTriggerMenu(() => els.newTabMenu),
+  'page-context': {
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => null, // transient trigger — never stamp aria-expanded
+    refocus(reason) {
+      const ret = pageCtx.returnFocus;
+      pageCtx.returnFocus = null; // cleared after use — never leaks across opens
+      if (reason !== 'escape') return; // escape-only (blur/outside-click/etc: no refocus)
+      if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
+      else els.address.focus();
+    }
+  }
+};
+const BLUR_REOPEN_SUPPRESS_MS = 300;
+
+// Static kebab model — labels rendered via textContent in the sheet (DD8).
+const kebabModel = () => [
+  { id: 'settings', label: 'Settings' },
+  { id: 'downloads', label: 'Downloads' },
+  { id: 'print', label: 'Print…' },
+  { id: 'exit', label: 'Exit' }
+];
+// DD2 anchor nuance: the kebab's anchor is a CHROME client rect — translate
+// chrome→sheet by subtracting the guest-region origin (#webviews). y clamps to 0
+// (DD12): the menu renders right-aligned, flush at the sheet's top edge (the
+// accepted ~4px shift).
+const kebabAnchor = () => {
+  const wv = els.webviews.getBoundingClientRect();
+  const r = els.kebab.getBoundingClientRect();
+  return { alignRight: Math.round(r.right - wv.left), y: 0 };
+};
+// Left-aligned toolbar anchors (Leg 3 — ▾ and 🔒): same chrome→sheet translation,
+// LEFT edge, clamped ≥ 0; y clamps to 0 (DD12 flush-at-top, the accepted shift).
+/** @param {HTMLElement} el */
+const leftAnchorOf = (el) => {
+  const wv = els.webviews.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return { alignLeft: Math.max(0, Math.round(r.left - wv.left)), y: 0 };
+};
+const containerAnchor = () => leftAnchorOf(els.newTabMenu);
+const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
+
+// Generic channel-1 open (Leg 3): mint token, mark open, send, set aria.
+// Mutual exclusion is main's model-replace (channel 7 'superseded' for the
+// outgoing menuType) — no chrome-side menu state exists to close.
+/** @param {string} menuType @param {any[]} model @param {any} anchor
+ *  @param {number} startIndex 0 = first item; -1 = last (trigger ArrowUp) */
+const openOverlayMenu = (menuType, model, anchor, startIndex) => {
+  const st = overlayMenus[menuType];
+  st.token = ++menuOverlayToken;
+  st.open = true; // channel-1 send IS the chrome-side open transition
+  window.goldfinch.menuOverlayOpen({ menuType, model, anchor, startIndex, token: st.token });
+  const ariaEl = st.ariaTarget(); // null for page-context — no false AT signal
+  if (ariaEl) ariaEl.setAttribute('aria-expanded', 'true');
+};
+
+/** @param {number} startIndex */
+const openKebabOverlay = (startIndex) => openOverlayMenu('kebab', kebabModel(), kebabAnchor(), startIndex);
+// Container model rebuilt per-open from the `containers` array (no runtime
+// jar-list refresh exists in the product); namespaced ids via the shared
+// buildContainerModel (src/shared/container-menu.js).
+/** @param {number} startIndex */
+const openContainerOverlay = (startIndex) =>
+  openOverlayMenu('container', buildContainerModel(containers), containerAnchor(), startIndex);
+// Site-info model derived from the active tab via the shared deriveSiteInfo
+// (the one derivation source). startIndex is meaningless for the no-items
+// popup — the sheet focuses the "Site settings →" action.
+const openSiteInfoOverlay = () => openOverlayMenu('site-info', siteInfoModel(activeTab()), siteInfoAnchor(), 0);
+// New-container dialog (AC4): the template ignores the anchor (centered via CSS)
+// but the open path stays uniform (fresh token, aria on the ▾ refocus trigger).
+const openNewContainerOverlay = () => openOverlayMenu('new-container', [], containerAnchor(), 0);
+// Page-context sheet opener (Leg 4). The four invocation sites (guest
+// right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
+// live further down; they capture pageCtx FIRST, then call with a POINT anchor:
+// guest params.x/y ride 1:1 (DD2 payoff — sheet CSS coords ≡ guest-region DIPs,
+// no els.webviews offset translation on that path); the chrome-anchored modes
+// (keyboard / toolbar / audit) pass chrome→sheet-translated points. The model is
+// built from the captured params by the pure shared builder; toolbar mode passes
+// pageCtx.toolbarItem.
+/** @param {{ x: number, y: number }} anchor */
+const openPageContextOverlaySheet = (anchor) =>
+  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem), anchor, 0);
+
+// Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
+// 'toggle' close (the sheet's blur usually resolves the close first — see the
+// suppress window; when the click wins the race this is the explicit close, no
+// focus move: the physical click already OS-focused chrome). Closed → suppress
+// the same-menuType RE-OPEN within 300 ms of a blur-reason close (DD4 trigger
+// re-click race: mousedown blurred the sheet → dismissed{blur} → channel 7 reset
+// open-state BEFORE this click fired); other menus' triggers are unaffected
+// (same-menuType-only — composes with mutual exclusion).
+/** @param {string} menuType @param {() => void} openFn */
+const overlayTriggerClick = (menuType, openFn) => {
+  const st = overlayMenus[menuType];
+  if (st.open) {
+    window.goldfinch.menuOverlayClose({ reason: 'toggle' });
+    return;
+  }
+  if (performance.now() - st.blurClosedAt < BLUR_REOPEN_SUPPRESS_MS) return;
+  openFn();
+};
+
+els.kebab.addEventListener('click', () => overlayTriggerClick('kebab', () => openKebabOverlay(0)));
+
+// Trigger keydown (APG menu-button): Enter/Space/ArrowDown → open to first item,
+// ArrowUp → open to last (startIndex −1). preventDefault suppresses the synthetic
+// click. Deliberately NO suppress window here — a keyboard re-open immediately
+// after a stale close must work (the token discipline covers that race).
+els.kebab.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    openKebabOverlay(0);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    openKebabOverlay(-1);
+  }
 });
 
-els.kebab.addEventListener('click', () => {
-  if (menuController.current === kebabEntry) menuController.close(kebabEntry);
-  else menuController.open(kebabEntry, 0);
+// ▾ container-picker trigger (Leg 3): click toggle + APG menu-button keydown —
+// mirrors the kebab pair exactly.
+els.newTabMenu.addEventListener('click', () => overlayTriggerClick('container', () => openContainerOverlay(0)));
+els.newTabMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    openContainerOverlay(0);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    openContainerOverlay(-1);
+  }
+});
+
+// 🔒 site-info chip (Leg 3): click toggle + trigger keydown — the chip's own
+// keydown handler below registers Enter/Space/ArrowDown/ArrowUp (startIndex is
+// moot for the popup, so all four keys open the same way).
+els.addressChip.addEventListener('click', () => overlayTriggerClick('site-info', openSiteInfoOverlay));
+els.addressChip.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    openSiteInfoOverlay();
+  }
+});
+
+// Channel 6: execute the activated item's action via the named action bodies /
+// shared helpers (one source of truth). Arrives AFTER
+// the channel-7 'activated' close (main emits 7 before 6), so trigger state is
+// already reset and the action wins any focus race. `value` (Leg 3) is the
+// input-dialog's text — shape-validated main-side (string, ≤24), data here.
+window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
+  switch (menuType) {
+    case 'kebab': {
+      const fn = KEBAB_ACTIONS[id];
+      if (fn) fn();
+      break;
+    }
+    case 'container': {
+      // NAMESPACED id dispatch (round-2 design catch): `jar:<jarId>` selects
+      // that jar — even one literally named "New Container" (slug id
+      // `new-container`) or "Burner"; sentinels ride the `action:` prefix, so
+      // a user jar can never shadow them.
+      if (id === 'action:new-container') {
+        // Activated-close-then-fresh-open (design decision): main already
+        // closed the container menu (reason 'activated' — the normal channel-4
+        // path); immediately re-open menuType 'new-container' as a FRESH open
+        // through the same path as any trigger open (new token; uniform
+        // suppress/aria bookkeeping). The one-IPC-round-trip hide/re-show
+        // blink is the accepted variation.
+        openNewContainerOverlay();
+      } else if (id === 'action:burner') {
+        createTab(currentHomePage(), makeBurner());
+      } else if (id.startsWith('jar:')) {
+        const jarId = id.slice('jar:'.length);
+        const c = containers.find((x) => x.id === jarId);
+        if (c) createTab(currentHomePage(), c);
+      }
+      break;
+    }
+    case 'site-info': {
+      if (id === 'site-settings') openSiteSettingsTab();
+      break;
+    }
+    case 'new-container': {
+      // Shared submit body (the old dialog's create path, extracted): trim
+      // guard + newContainerCreate → push + createTab. The sheet page already
+      // guards whitespace-only input (dialog stays open page-side).
+      if (id === 'create') createContainerAndOpenTab(value);
+      break;
+    }
+    case 'page-context': {
+      // Bodies read the pageCtx fields CAPTURED at open (TOCTOU: acted-on
+      // wcId is never re-resolved via activeTab()). VALIDATED-NO-OP discipline
+      // on EVERY id (design review): a synchronous local open can overwrite
+      // pageCtx between channel 7 and channel 6, and params can be gone by
+      // dispatch time (tab closed) — each body re-guards its inputs and never
+      // throws on a stale dispatch (main-side handlers already tolerate dead
+      // wcId targets).
+      const p = pageCtx.params || {};
+      const wcId = pageCtx.wcId;
+      if (id === 'link:open') {
+        if (typeof p.linkURL === 'string' && p.linkURL) createTab(p.linkURL);
+      } else if (id === 'link:copy') {
+        if (typeof p.linkURL === 'string' && p.linkURL) window.goldfinch.clipboardWriteText(p.linkURL);
+      } else if (id === 'image:open' || id === 'image:copy' || id === 'image:save') {
+        // Same srcURL || imageURL preference + mediaType gate as the builder.
+        const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
+        if (typeof imgSrc === 'string' && imgSrc) {
+          if (id === 'image:open') {
+            createTab(imgSrc);
+          } else if (id === 'image:copy') {
+            window.goldfinch.clipboardWriteText(imgSrc);
+          } else {
+            const r = window.goldfinch.downloadMedia({
+              webContentsId: wcId,
+              url: imgSrc,
+              suggestedName: basenameFromUrl(imgSrc)
+            });
+            Promise.resolve(r).then((res) => {
+              if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
+            }).catch(() => toast('Download failed', 'Unknown error'));
+          }
+        }
+      } else if (id === 'sel:copy') {
+        if (typeof p.selectionText === 'string' && p.selectionText) {
+          window.goldfinch.clipboardWriteText(p.selectionText);
+        }
+      } else if (id === 'sel:search') {
+        if (typeof p.selectionText === 'string' && p.selectionText) createTab(toUrl(p.selectionText));
+      } else if (id.startsWith('edit:')) {
+        // Allowlisted edit-action dispatch (main re-validates the allowlist too).
+        const action = id.slice('edit:'.length);
+        if (p.isEditable && ['cut', 'copy', 'paste', 'undo', 'redo'].includes(action)) {
+          window.goldfinch.pageContextAction({ webContentsId: wcId, action });
+        }
+      } else if (id.startsWith('spell:')) {
+        // INDEX dispatch (DD8): the id carries only the index; the word resolves
+        // from the CAPTURED suggestions with bounds/type validation — a guest
+        // string never round-trips as a command. Out-of-range / malformed /
+        // params-gone → validated no-op.
+        const i = Number.parseInt(id.slice('spell:'.length), 10);
+        const sugg = p.dictionarySuggestions;
+        if (
+          Number.isInteger(i) && i >= 0 &&
+          Array.isArray(sugg) && i < Math.min(sugg.length, 8) &&
+          typeof sugg[i] === 'string'
+        ) {
+          window.goldfinch.correctMisspelling({ webContentsId: wcId, word: sugg[i] });
+        }
+      } else if (id === 'action:inspect') {
+        if (wcId != null) window.goldfinch.toggleDevtools({ webContentsId: wcId });
+      } else if (id.startsWith('action:unpin:')) {
+        const item = id.slice('action:unpin:'.length);
+        if (item === 'media' || item === 'shields' || item === 'devtools') {
+          window.goldfinch.unpinToolbarItem(item);
+          // Dispatch-body refocus: the unpin hides the button the menu was
+          // anchored to — land focus on the address bar. NOT the reason map
+          // (page-context stays escape-only).
+          els.address.focus();
+        }
+      }
+      break;
+    }
+  }
+});
+
+// Channel 7: the single close-state sink. Stale tokens (a re-open raced an old
+// instance's close) are dropped WHOLE — a stale close must not clear the newer
+// open's state (and, for page-context, must not consume the newer open's
+// returnFocus). aria-expanded resets on EVERY (non-stale) reason — guarded on
+// ariaTarget() (null for page-context, whose transient trigger is never
+// stamped). Refocus is the per-entry reason policy (chrome-side half — main
+// already moved webContents-level focus for escape/activated): fixed-trigger
+// menus focus the trigger on escape/activated; page-context is escape-only →
+// the captured returnFocus (cleared after use). toggle → no move (the click
+// already focused chrome); blur → NO refocus (never steal focus from another
+// app); tab-switch/superseded/tab-close/tab-hide/teardown → no move (the
+// incoming guest keeps focus).
+window.goldfinch.onMenuOverlayClosed(({ menuType, reason, token }) => {
+  const st = overlayMenus[menuType];
+  if (!st) return;
+  if (token !== st.token) return; // stale close — drop
+  st.open = false;
+  const ariaEl = st.ariaTarget();
+  if (ariaEl) ariaEl.setAttribute('aria-expanded', 'false');
+  if (reason === 'blur') st.blurClosedAt = performance.now();
+  st.refocus(reason);
 });
 
 /* ------------------------------------------------------- container picker */
-// APG menu-button: role="menu" popup built per-open from the `containers` array.
-// Open/close/dismissal/mutual-exclusion and APG keyboard contract: shared menuController.
+// The ▾ picker renders menuType 'container' from the sheet (trigger wiring
+// above, with the kebab); the model is rebuilt per-open from the `containers`
+// array. The new-container dialog is the sheet's input-dialog template
+// (menuType 'new-container') — it replaced the old chrome dialog at cutover.
 
 // Shared open path for downloads (DD2): kebab downloads item + both Ctrl+J paths converge here.
 function openDownloads() {
   createTab('goldfinch://downloads', null, { trusted: true });
-}
-
-/** @returns {HTMLElement[]} */
-function containerItems() {
-  return /** @type {HTMLElement[]} */ ([...els.containerMenu.querySelectorAll('[role="menuitem"]')]);
-}
-// Container picker registered with the controller.
-const containerEntry = menuController.register({
-  trigger: els.newTabMenu,
-  menu: els.containerMenu,
-  items: containerItems,
-  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last item) */
-  onOpen(startIndex = 0) {
-    const m = els.containerMenu;
-    // role="presentation" on the non-item header so role="menu" doesn't trip
-    // axe aria-required-children (only .cm-item buttons are role="menuitem").
-    m.innerHTML = '<div class="cm-title" role="presentation">Open new tab in…</div>';
-    for (const c of containers) {
-      const item = document.createElement('button');
-      item.className = 'cm-item';
-      item.setAttribute('role', 'menuitem');
-      item.innerHTML = `<span class="cm-dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
-      item.addEventListener('click', () => {
-        closeContainerMenu();
-        createTab(currentHomePage(), c);
-      });
-      m.appendChild(item);
-    }
-    const burner = document.createElement('button');
-    burner.className = 'cm-item';
-    burner.setAttribute('role', 'menuitem');
-    burner.innerHTML = '<span class="cm-dot" style="background:#ff8c42"></span>Burner tab <em>(evaporates)</em>';
-    burner.addEventListener('click', () => {
-      closeContainerMenu();
-      createTab(currentHomePage(), makeBurner());
-    });
-    m.appendChild(burner);
-
-    const add = document.createElement('button');
-    add.className = 'cm-item add';
-    add.setAttribute('role', 'menuitem');
-    add.textContent = '+ New container…';
-    add.addEventListener('click', () => {
-      closeContainerMenu();
-      document.getElementById('new-container-dialog').classList.remove('hidden');
-      document.getElementById('new-container-name').focus();
-    });
-    m.appendChild(add);
-    m.classList.remove('hidden');
-    // Anchor the menu under the pill's ▾ trigger.
-    m.style.left = els.newTabMenu.getBoundingClientRect().left + 'px';
-    els.newTabMenu.setAttribute('aria-expanded', 'true');
-    // Apply roving tabindex + focus via the shared helper (items rebuilt every open).
-    const items = containerItems();
-    focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
-    // Freeze-frame: capture the guest and apply the still while the menu is up.
-    // Fire-and-forget (async); the menu is already visible; the freeze arrives when capture resolves.
-    freezeGuest(() => !els.containerMenu.classList.contains('hidden'));
-  },
-  onClose() {
-    els.containerMenu.classList.add('hidden');
-    els.newTabMenu.setAttribute('aria-expanded', 'false');
-    unfreezeGuest();
-  }
-});
-// Thin public wrapper — delegates to the controller. DISTINCT from onClose above.
-function closeContainerMenu() {
-  menuController.close(containerEntry);
 }
 
 function makeBurner() {
@@ -269,140 +493,66 @@ function makeBurner() {
 }
 
 /* ------------------------------------------------------- site-info popup */
-// Registered with menuController WITHOUT an items getter — the controller's roving
-// keydown early-returns on !entry.items, so it no-ops for this popup. The popup
-// supplies its own keydown (Escape + Tab → close + return focus to chip). DD5/DD7.
+// The 🔒 chip renders menuType 'site-info' from the sheet (trigger wiring
+// above); the sheet's info-popup template supplies Escape/Tab dismissal. The
+// model derives from the shared deriveSiteInfo (src/shared/site-info.js) —
+// the one derivation source. DD5/DD7.
 
-function positionSiteInfoPopup() {
-  const r = els.addressChip.getBoundingClientRect();
-  els.siteInfoPopup.style.top = r.bottom + 4 + 'px';
-  els.siteInfoPopup.style.left = r.left + 'px';
-  els.siteInfoPopup.style.right = 'auto';
+/** Caller-resolved internal flag for deriveSiteInfo (isInternalTab/isInternalPageUrl
+ * live with the chrome's tab state, not in the shared module).
+ * @param {Tab|null} tab */
+function siteInfoInternalFlag(tab) {
+  return !!tab && (isInternalTab(tab) || isInternalPageUrl(tab.url));
 }
 
-/** @param {Tab|null} tab */
-function buildSiteInfo(tab) {
-  const popup = els.siteInfoPopup;
-  if (!tab || isInternalTab(tab) || isInternalPageUrl(tab.url)) {
-    // Internal tab — static secure-page note; no site data, no "Site settings" link.
-    popup.innerHTML =
-      '<div class="si-section">' +
-      '<div class="si-row si-secure">You\'re viewing a secure Goldfinch page.</div>' +
-      '</div>';
-    return;
-  }
-
-  // Web tab — build origin/connection/privacy summary.
-  let host;
-  try {
-    host = new URL(tab.url).host;
-  } catch {
-    host = '—';
-  }
-  const connection = /^https:/i.test(tab.url || '') ? 'HTTPS' : 'HTTP';
-  const trackers = tab.privacy?.net?.trackers?.blocked ?? 0;
-  const permissions = tab.privacy?.permissions?.length ?? 0;
-
-  popup.innerHTML =
-    '<div class="si-section">' +
-    '<div class="si-row si-host">' + escapeHtml(host) + '</div>' +
-    '<div class="si-row"><span class="si-label">Connection</span><span class="si-value">' + escapeHtml(connection) + '</span></div>' +
-    '<div class="si-row"><span class="si-label">Trackers blocked</span><span class="si-value">' + escapeHtml(String(trackers)) + '</span></div>' +
-    '<div class="si-row"><span class="si-label">Permissions</span><span class="si-value">' + escapeHtml(String(permissions)) + '</span></div>' +
-    '</div>' +
-    '<div class="si-actions">' +
-    '<button class="text-btn small si-settings-btn">Site settings →</button>' +
-    '</div>';
-
-  const settingsBtn = /** @type {HTMLButtonElement|null} */ (popup.querySelector('.si-settings-btn'));
-  if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
-      closeSiteInfo();
-      const existing = [...tabs.values()].find(isInternalTab);
-      if (existing && existing.wcId != null) {
-        // Internal tab is now a WebContentsView (Leg 3); navigate via tab-navigate IPC.
-        window.goldfinch.tabNavigate({ wcId: existing.wcId, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] });
-        activateTab(existing.id);
-      } else if (existing) {
-        // wcId not yet arrived; just activate the tab (it will load at its original URL).
-        activateTab(existing.id);
-      } else {
-        createTab('goldfinch://settings/#privacy', null, { trusted: true });
-      }
-    });
+/** "Site settings →" destination — the channel-6 'site-settings' activation body
+ * (extracted, Leg 3). */
+function openSiteSettingsTab() {
+  const existing = [...tabs.values()].find(isInternalTab);
+  if (existing && existing.wcId != null) {
+    // Internal tab is now a WebContentsView (Leg 3); navigate via tab-navigate IPC.
+    window.goldfinch.tabNavigate({ wcId: existing.wcId, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] });
+    activateTab(existing.id);
+  } else if (existing) {
+    // wcId not yet arrived; just activate the tab (it will load at its original URL).
+    activateTab(existing.id);
+  } else {
+    createTab('goldfinch://settings/#privacy', null, { trusted: true });
   }
 }
 
-const siteInfoEntry = menuController.register({
-  trigger: els.addressChip,
-  menu: els.siteInfoPopup,
-  onOpen() {
-    buildSiteInfo(activeTab());
-    els.siteInfoPopup.classList.remove('hidden');
-    positionSiteInfoPopup();
-    // Focus the "Site settings →" button if present (web state), else the container (internal).
-    const btn = /** @type {HTMLElement|null} */ (els.siteInfoPopup.querySelector('button, a'));
-    (btn || els.siteInfoPopup).focus();
-    // Freeze-frame: delegate to the shared helper (guestFrozen flag + #webviews background).
-    // Pass a liveness check so a rapid open+close doesn't apply a stale freeze.
-    freezeGuest(() => !els.siteInfoPopup.classList.contains('hidden'));
-    // No sendActiveBounds() — site-info uses freeze-frame; guest is hidden while open.
-  },
-  onClose() {
-    els.siteInfoPopup.classList.add('hidden');
-    unfreezeGuest();
-    // No sendActiveBounds() needed — unfreezeGuest calls tabSetActive directly.
-  }
-});
-
-// Thin public wrapper — delegates to the controller. Distinct from onClose above.
-function closeSiteInfo() {
-  menuController.close(siteInfoEntry);
+/** Sheet info-popup template model: note/row/action items derived from the
+ * active tab's state. All strings are DATA — the sheet renders via textContent
+ * only (DD8).
+ * @param {Tab|null} tab */
+function siteInfoModel(tab) {
+  const info = deriveSiteInfo(tab, siteInfoInternalFlag(tab));
+  // `=== true` (not truthiness): narrows the discriminated union under this
+  // project's strictNullChecks-off typecheck config.
+  if (info.internal === true) return [{ type: 'note', variant: 'secure', text: info.note }];
+  return [
+    { type: 'note', variant: 'host', text: info.host },
+    { type: 'row', label: 'Connection', value: info.connection },
+    { type: 'row', label: 'Trackers blocked', value: String(info.trackers) },
+    { type: 'row', label: 'Permissions', value: String(info.permissions) },
+    { type: 'action', id: 'site-settings', label: 'Site settings →' }
+  ];
 }
-
-// Chip click: toggle the popup (mirrors the kebab click pattern).
-// This is the click handler leg 4 intentionally left off.
-els.addressChip.addEventListener('click', () => {
-  if (menuController.current === siteInfoEntry) menuController.close(siteInfoEntry);
-  else menuController.open(siteInfoEntry);
-});
-
-// Popup keydown: Escape or Tab → close + return focus to chip.
-// IMPORTANT: the controller's menu-keydown early-returns on !entry.items, so it will NOT
-// handle Escape/Tab for this popup — this listener is the ONLY thing that does it.
-els.siteInfoPopup.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' || e.key === 'Tab') {
-    e.preventDefault();
-    closeSiteInfo();
-    els.addressChip.focus();
-  }
-});
 
 /* ------------------------------------------------- page context menu (SC6/DD2/DD3) */
-// The custom web-content context menu, rendered via the menuController. It subscribes to
-// onPageContextMenu IPC ({ wcId, params, dataURL? }) forwarded from the guest's main-side
-// context-menu listener (internal goldfinch:// guests auto-excluded main-side, DD6).
-// Items are built per-invocation from the forwarded params; the menu opens at the cursor
-// position and supplies focus-return via the additive focusReturn? option.
+// The custom web-content context menu, rendered from the sheet (menuType
+// 'page-context', point-anchored). It subscribes to onPageContextMenu IPC
+// ({ wcId, params }) forwarded from the guest's main-side context-menu listener
+// (internal goldfinch:// guests auto-excluded main-side, DD6). The model is built
+// per-invocation from the forwarded params by the pure shared pageContextModel;
+// focus-return rides the per-entry refocus policy (escape-only → returnFocus).
 
-/** @returns {HTMLElement[]} */
-function pageContextItems() {
-  return /** @type {HTMLElement[]} */ ([...els.pageContextMenu.querySelectorAll('[role="menuitem"]')]);
-}
-
-// Module-scoped state: the LAST forwarded { wcId, params }, the cursor coords to open at,
-// and the focus-return target captured at open. Acted-on wcId is the one captured at
-// right-click (TOCTOU — never re-resolved via activeTab() for dispatch). `keyboard` marks a
-// chrome-focused Shift+F10/ContextMenu invocation so focus-return branches correctly.
-/** @type {{ wcId: number|null, params: any, x: number, y: number, returnFocus: HTMLElement|null, keyboard: boolean, toolbarItem: ('media'|'shields'|'devtools'|null) }} */
-const pageCtx = { wcId: null, params: null, x: 0, y: 0, returnFocus: null, keyboard: false,
+// Module-scoped state: the LAST forwarded { wcId, params } and the focus-return
+// target captured at open. Acted-on wcId is the one captured at right-click
+// (TOCTOU — never re-resolved via activeTab() for dispatch).
+/** @type {{ wcId: number|null, params: any, returnFocus: HTMLElement|null, toolbarItem: ('media'|'shields'|'devtools'|null) }} */
+const pageCtx = { wcId: null, params: null, returnFocus: null,
   toolbarItem: null };  // 'media' | 'shields' | 'devtools' | null  (null = page-content mode)
-
-/** Truncate a string for an inline menu label. */
-function truncateLabel(s, n = 40) {
-  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
-  return t.length > n ? t.slice(0, n - 1) + '…' : t;
-}
 
 /** Derive a download filename from a media URL's basename (mirrors media-panel naming). */
 function basenameFromUrl(url) {
@@ -415,219 +565,30 @@ function basenameFromUrl(url) {
   }
 }
 
-/**
- * Build the context-appropriate sections from the captured params into the (empty) menu node.
- * In toolbar-mode (ctx.toolbarItem set) it short-circuits to a single "Unpin {item}" item.
- * @param {{ wcId: number|null, params: any, toolbarItem?: ('media'|'shields'|'devtools'|null) }} ctx
- */
-function buildPageContextSections(ctx) {
-  const m = els.pageContextMenu;
-  m.innerHTML = '';
-  const p = ctx.params || {};
-  let needSep = false;
-
-  /** Append a thin separator before the next section (skipped before the first). */
-  const sep = () => {
-    if (!needSep) return;
-    const s = document.createElement('div');
-    s.className = 'cm-sep';
-    s.setAttribute('role', 'separator');
-    m.appendChild(s);
-  };
-  /**
-   * @param {string} label  visible text (already plain — set via textContent, no HTML injection)
-   * @param {() => void} onClick  action; every handler closes the menu first so focus-return runs
-   */
-  const item = (label, onClick) => {
-    const b = document.createElement('button');
-    b.className = 'cm-item';
-    b.setAttribute('role', 'menuitem');
-    b.textContent = label;
-    b.addEventListener('click', () => {
-      closePageContextMenu();
-      onClick();
-    });
-    m.appendChild(b);
-    needSep = true;
-  };
-
-  // --- toolbar-mode: single "Unpin {item}" item — short-circuit; no page sections. ---
-  if (ctx.toolbarItem) {
-    const itm = ctx.toolbarItem;
-    const label = 'Unpin ' + (itm === 'media' ? 'Media'
-      : itm === 'shields' ? 'Shields' : 'DevTools');
-    item(label, () => {
-      window.goldfinch.unpinToolbarItem(itm);
-      els.address.focus();
-    });
-    return;
-  }
-
-  // --- link ---
-  if (p.linkURL) {
-    sep();
-    item('Open link in new tab', () => createTab(p.linkURL));
-    item('Copy link', () => window.goldfinch.clipboardWriteText(p.linkURL));
-  }
-
-  // --- image (prefer srcURL, fall back to imageURL) ---
-  const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
-  if (imgSrc) {
-    sep();
-    item('Open image in new tab', () => createTab(imgSrc));
-    item('Copy image address', () => window.goldfinch.clipboardWriteText(imgSrc));
-    item('Save image', () => {
-      const r = window.goldfinch.downloadMedia({
-        webContentsId: ctx.wcId,
-        url: imgSrc,
-        suggestedName: basenameFromUrl(imgSrc)
-      });
-      Promise.resolve(r).then((res) => {
-        if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
-      }).catch(() => toast('Download failed', 'Unknown error'));
-    });
-  }
-
-  // --- selection ---
-  if (p.selectionText) {
-    sep();
-    item('Copy', () => window.goldfinch.clipboardWriteText(p.selectionText));
-    item(`Search for "${truncateLabel(p.selectionText, 30)}"`, () => createTab(toUrl(p.selectionText)));
-  }
-
-  // --- editable (edit-actions gated by editFlags; render only if truthy — OMIT otherwise) ---
-  if (p.isEditable) {
-    const f = p.editFlags || {};
-    const acts = [];
-    if (f.canCut) acts.push(['Cut', 'cut']);
-    if (f.canCopy) acts.push(['Copy', 'copy']);
-    if (f.canPaste) acts.push(['Paste', 'paste']);
-    if (f.canUndo) acts.push(['Undo', 'undo']);
-    if (f.canRedo) acts.push(['Redo', 'redo']);
-    if (acts.length) {
-      sep();
-      for (const [label, action] of acts) {
-        item(label, () => window.goldfinch.pageContextAction({ webContentsId: ctx.wcId, action }));
-      }
-    }
-  }
-
-  // --- spelling suggestions ---
-  if (p.misspelledWord) {
-    sep();
-    const sugg = Array.isArray(p.dictionarySuggestions) ? p.dictionarySuggestions.slice(0, 8) : [];
-    if (sugg.length) {
-      for (const word of sugg) {
-        item(word, () => window.goldfinch.correctMisspelling({ webContentsId: ctx.wcId, word }));
-      }
-    } else {
-      // Informational placeholder (the only disabled affordance — not in the roving set).
-      const none = document.createElement('div');
-      none.className = 'cm-item';
-      none.setAttribute('aria-disabled', 'true');
-      none.textContent = 'No suggestions';
-      m.appendChild(none);
-      needSep = true;
-    }
-  }
-
-  // --- always: Inspect (routes through toggle-devtools; web-only by construction, DD6) ---
-  sep();
-  item('Inspect', () => window.goldfinch.toggleDevtools({ webContentsId: ctx.wcId }));
-}
-
-/**
- * Position the menu at the cursor. params.x/y are GUEST-page coords relative to the
- * active WebContentsView's top-left; map to chrome-overlay client coords via the
- * #webviews slot getBoundingClientRect(), then clamp inside the viewport. For a
- * chrome-focused keyboard invocation, x/y are already chrome client coords
- * (keyboard = true skips the guest-view offset).
- */
-function positionPageContextMenu(px, py, keyboard) {
-  // params.x/y are GUEST-VIEW-relative (relative to the content region's top-left). Offset
-  // by the #webviews slot rect to map to chrome client coords. All tabs are now native
-  // WebContentsViews (Leg 3 — no <webview> elements remain), so the #webviews rect is always
-  // the correct origin. Keyboard (chrome-focused Shift+F10) coords are already chrome client
-  // coords → no offset needed.
-  let r;
-  if (keyboard) {
-    r = { left: 0, top: 0 };
-  } else {
-    r = els.webviews.getBoundingClientRect();
-  }
-  const m = els.pageContextMenu;
-  const mw = m.offsetWidth;
-  const mh = m.offsetHeight;
-  let x = r.left + px;
-  let y = r.top + py;
-  x = Math.min(x, window.innerWidth - mw - 4);
-  y = Math.min(y, window.innerHeight - mh - 4);
-  m.style.left = Math.max(4, x) + 'px';
-  m.style.top = Math.max(4, y) + 'px';
-  m.style.right = 'auto';
-}
-
-const pageContextEntry = menuController.register({
-  // No persistent trigger button — the menu node is its own `trigger` purely so the
-  // controller's trigger-keydown wiring has a target. Focus-return goes through focusReturn.
-  trigger: els.pageContextMenu,
-  menu: els.pageContextMenu,
-  items: pageContextItems,
-  /** @param {number} [startIndex] index to focus on open (default 0; -1 = last) */
-  onOpen(startIndex = 0) {
-    // Freeze whenever a web guest could occlude the menu (freezeGuest self-gates to web tabs —
-    // it no-ops for internal/no-guest). Toolbar-Unpin and keyboard (Shift+F10) invocations also
-    // overlap the guest region when no side panel is open (the Unpin dropdown extends DOWN into
-    // the content area), so they must freeze too — excluding them left the menu occluded by the
-    // opaque native guest. Fire-and-forget via the shared helper, the proven kebab/container path;
-    // the liveness check bails if the menu was dismissed before the async capture resolves.
-    // (Positioning is unaffected — positionPageContextMenu still uses pageCtx.keyboard for the
-    // offset; freeze only hides the guest + paints the still. onClose unfreezes unconditionally.)
-    freezeGuest(() => menuController.current === pageContextEntry);
-    buildPageContextSections(pageCtx);
-    els.pageContextMenu.classList.remove('hidden');
-    // Self-focus the chrome menu node (blur-race defensive mitigation).
-    els.pageContextMenu.focus();
-    positionPageContextMenu(pageCtx.x, pageCtx.y, pageCtx.keyboard);
-    const items = pageContextItems();
-    if (items.length) focusItem(items, startIndex === -1 ? items.length - 1 : startIndex);
-  },
-  onClose() {
-    els.pageContextMenu.classList.add('hidden');
-    unfreezeGuest();
-    const ret = pageCtx.returnFocus;
-    pageCtx.returnFocus = null;
-    if (ret && typeof ret.focus === 'function') ret.focus();
-  },
-  focusReturn() {
-    const ret = pageCtx.returnFocus;
-    pageCtx.returnFocus = null;
-    // All tabs are native WebContentsViews (Leg 3); there is no <webview> element to focus.
-    // For mouse right-click on a guest, Electron naturally returns focus to the guest view
-    // on menu close; the chrome address bar is the fallback for the keyboard / toolbar-Unpin cases.
-    if (ret && ret !== document.body && typeof ret.focus === 'function') { ret.focus(); return; }
-    els.address.focus();
-  }
-});
-// Thin public wrapper — delegates to the controller. DISTINCT from onClose above.
-function closePageContextMenu() {
-  menuController.close(pageContextEntry);
+/** Chrome client coords → sheet CSS point (the DD2 nuance for the
+ * chrome-anchored invocation modes: keyboard, toolbar-unpin, audit hook): subtract
+ * the guest-region origin; y clamps ≥ 0 (an anchor above the guest region renders
+ * flush at the sheet's top edge). The guest right-click path does NOT come through
+ * here — its params.x/y are already sheet coords, 1:1 (DD2 payoff).
+ * @param {number} cx @param {number} cy @returns {{ x: number, y: number }} */
+function chromePointToSheet(cx, cy) {
+  const wv = els.webviews.getBoundingClientRect();
+  return { x: Math.round(cx - wv.left), y: Math.max(0, Math.round(cy - wv.top)) };
 }
 
 // Subscription: the guest right-click flows guest -> main -> this IPC ({ wcId, params }).
-// Store state + coords + focus-return, then open. The freeze-frame is applied in
-// pageContextEntry.onOpen via the shared freezeGuest() helper (Option A — the proven
-// kebab/container path), NOT from an event-time main-side capture (unreliable on WSLg).
-// The open is deferred to a microtask so any chrome `window` blur from the right-click has settled.
+// Store state + focus-return, then open menuType 'page-context' on the sheet AT
+// params.x/y DIRECTLY — guest-view-relative DIPs ≡ sheet-page CSS coords (DD2
+// 1:1 identity; NO els.webviews offset translation on this path).
 window.goldfinch.onPageContextMenu(({ wcId, params }) => {
   pageCtx.wcId = wcId;
   pageCtx.params = params;
-  pageCtx.x = (params && typeof params.x === 'number') ? params.x : 0;
-  pageCtx.y = (params && typeof params.y === 'number') ? params.y : 0;
-  pageCtx.keyboard = false;
   pageCtx.toolbarItem = null;
   pageCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
-  queueMicrotask(() => menuController.open(pageContextEntry, 0));
+  openPageContextOverlaySheet({
+    x: (params && typeof params.x === 'number') ? params.x : 0,
+    y: (params && typeof params.y === 'number') ? params.y : 0
+  }); // 1:1 — no translation
 });
 
 // Shift+F10 / ContextMenu key — chrome-focused case. When focus is INSIDE the guest
@@ -647,17 +608,16 @@ document.addEventListener('keydown', (e) => {
   const r = target.getBoundingClientRect();
   pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
   pageCtx.params = null;
-  pageCtx.x = Math.round(r.left);
-  pageCtx.y = Math.round(r.bottom);
-  pageCtx.keyboard = true;
   pageCtx.toolbarItem = null;
   pageCtx.returnFocus = target;
-  menuController.open(pageContextEntry, 0);
+  // Chrome-anchored mode: translate the element-rect point chrome→sheet (the
+  // DD2 nuance — only the guest right-click path rides 1:1).
+  openPageContextOverlaySheet(chromePointToSheet(r.left, r.bottom));
 });
 
 /**
  * Toolbar-mode invocation: right-click a pinned toolbar icon to get a single "Unpin {item}"
- * item, anchored at the clicked button. Reuses pageContextEntry for positioning + keyboard nav.
+ * item, anchored at the clicked button (menuType 'page-context', toolbar short-circuit).
  * @param {'media'|'shields'|'devtools'} item
  * @param {HTMLElement} anchorEl  the toolbar button that was right-clicked
  */
@@ -666,16 +626,15 @@ function openToolbarContextMenu(item, anchorEl) {
   pageCtx.toolbarItem = item;
   pageCtx.params = null;
   pageCtx.wcId = null;
-  pageCtx.x = Math.round(r.left);
-  pageCtx.y = Math.round(r.bottom);
-  pageCtx.keyboard = true;
   pageCtx.returnFocus = anchorEl;
-  menuController.open(pageContextEntry, 0);
+  // Toolbar-mode on the sheet: the model short-circuits to the single Unpin
+  // item (pageCtx.toolbarItem); translated element anchor (chrome→sheet).
+  openPageContextOverlaySheet(chromePointToSheet(r.left, r.bottom));
 }
 
 /**
  * Test/audit hook: open the page context menu with a representative synthetic params payload
- * so the `npm run a11y` harness can audit the open #page-context-menu. Builds a full-section
+ * so the `npm run a11y` harness can audit the open sheet menu. Builds a full-section
  * menu (link + selection + editable + spelling-suggestions + Inspect) at a fixed chrome coord.
  * Reachable via the MCP evaluate tool (top-level function → window global).
  */
@@ -692,12 +651,11 @@ function openPageContextMenuForAudit() {
     x: 80,
     y: 80
   };
-  pageCtx.x = 80;
-  pageCtx.y = 80;
-  pageCtx.keyboard = true;
   pageCtx.toolbarItem = null;
   pageCtx.returnFocus = els.address;
-  menuController.open(pageContextEntry, 0);
+  // The synthetic 80,80 CHROME coords are translated chrome→sheet like the other
+  // keyboard-mode anchors — immaterial to the audit's purpose, pinned for determinism.
+  openPageContextOverlaySheet(chromePointToSheet(80, 80));
 }
 
 /* ------------------------------------------------------------------ tabs */
@@ -971,12 +929,12 @@ function measureWebviewsSlotDIP() {
 // The guest is never inset (DD8, M05 F7): find — formerly the only inset contributor
 // (computeTopInsetDIP/measureWebviewsSlotWithInsetDIP, deleted at the F7 cutover) —
 // now floats as a main-owned overlay WebContentsView above the full-bounds guest.
-// Site-info uses the freeze-frame approach (guest hidden, no inset needed).
+// Menus float the same way on the menu-overlay sheet (M05 F8) — the guest stays
+// live at full bounds under an open menu.
 
 // Debounced geometry send: sends the active web tab's bounds after a rAF,
 // coalescing multiple rapid calls (resize, panel toggle) into one send.
 function sendActiveBounds() {
-  if (guestFrozen) return;
   if (rafGeometryPending) return;
   rafGeometryPending = true;
   requestAnimationFrame(() => {
@@ -986,59 +944,10 @@ function sendActiveBounds() {
     // internal tabs are WebContentsViews now (Leg 3), not <webview> elements. Excluding
     // internal here stranded them at stale bounds until a tabSetActive (tab switch) re-bounded
     // them. Always the full slot: find never insets the guest (DD8 — the overlay floats).
-    // The guestFrozen early-return above still correctly skips a frozen view.
     if (t && t.wcId != null) {
       window.goldfinch.tabSetBounds(t.wcId, measureWebviewsSlotDIP());
     }
   });
-}
-
-/**
- * Freeze the active guest (web or internal): capture a still frame, set it as the #webviews
- * background, hide the live guest view. Returns true if the freeze was applied, false otherwise.
- * After Leg 3, internal goldfinch:// tabs are opaque WebContentsViews too, so they also occlude
- * the HTML chrome menus and must be freezable — the guard keys on the active view's wcId, not on
- * trust. (activeViewWcId is not used here; the freeze hides t.wcId directly so it works for any
- * active view, web or internal.)
- * @param {(() => boolean) | null} [stillOpen]  optional liveness check — if provided and
- *   returns false after the async capture, the freeze is aborted (popup was closed before
- *   the capture resolved).
- * @returns {Promise<boolean>}
- */
-async function freezeGuest(stillOpen) {
-  const t = activeTab();
-  if (!t || t.wcId == null) return false;
-  const dataURL = await window.goldfinch.captureActiveGuest();
-  if (!dataURL) return false;
-  if (stillOpen && !stillOpen()) return false;
-  // Decode the still before hiding the live view so it paints in the same frame —
-  // avoids a one-frame flash of empty #webviews (esp. visible on light internal pages).
-  try { const img = new Image(); img.src = dataURL; await img.decode(); } catch { /* decode unsupported/failed → proceed; worst case the prior brief flash */ }
-  if (stillOpen && !stillOpen()) return false;   // re-check liveness after the decode await
-  els.webviews.style.backgroundImage = `url('${dataURL}')`;
-  els.webviews.style.backgroundSize = '100% 100%';
-  window.goldfinch.tabHide(t.wcId);
-  guestFrozen = true;
-  return true;
-}
-
-/**
- * Unfreeze: clear the still background and re-show the active guest (web or internal).
- * No-ops if no freeze is active. Re-shows whichever view is active and updates the
- * unified activeViewWcId tracker to reflect the now-visible view.
- */
-function unfreezeGuest() {
-  if (!guestFrozen) return;
-  guestFrozen = false;
-  els.webviews.style.backgroundImage = '';
-  els.webviews.style.backgroundSize = '';
-  const t = activeTab();
-  if (t && t.wcId != null) {
-    // Full slot (DD8). Main's tab-set-active re-adds the guest AND re-shows the find
-    // overlay above it when a session is open — the DD5 unfreeze-restore path.
-    window.goldfinch.tabSetActive(t.wcId, measureWebviewsSlotDIP());
-    activeViewWcId = t.wcId;
-  }
 }
 
 // wireWebview removed (Leg 3): all tabs — web and internal — are now WebContentsViews;
@@ -1119,10 +1028,9 @@ els.reload.addEventListener('click', () => {
   }
 });
 els.newTab.addEventListener('click', () => createTab());
-els.newTabMenu.addEventListener('click', () => {
-  if (menuController.current === containerEntry) menuController.close(containerEntry);
-  else menuController.open(containerEntry, 0);
-});
+// The ▾ container-picker toggle is registered with its own gate branch (Leg 3):
+// gate OFF in the container-picker section (chrome-DOM menu), gate ON in the
+// menu-overlay sheet branch (menuType 'container').
 
 // --- custom window controls (win+linux frameless; hidden on macOS) ---
 els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
@@ -2391,14 +2299,94 @@ window.goldfinch.onOpenTab((url) => createTab(url));
 
 /* --------------------------------------------------------------- shortcuts */
 
+/**
+ * The IMPURE chrome-shortcut dispatch, extracted from the global keydown handler
+ * (M05 F8 Leg 2 / DD13 — refactor, not duplicate): the SAME switch bodies now
+ * serve the keydown handler below AND the sheet-forwarded `chrome-shortcut-action`
+ * channel (accelerators pressed while a sheet menu holds keyboard focus).
+ *
+ * Returns whether the action was HANDLED — the keydown handler calls
+ * preventDefault only on `true`, preserving the original conditional-
+ * preventDefault semantics exactly: the internal-tab / null-wcId guarded branches
+ * (devtools/zoom/find) returned WITHOUT preventDefault on a guard hit → false
+ * here; reload and downloads preventDefault-ed BEFORE their tab guards → always
+ * true here; the rest always preventDefault-ed → always true.
+ *
+ * @param {string} action  a keydownToAction / sheet-accelerator chrome-class action
+ * @returns {boolean} whether the action was handled (caller preventDefaults on true)
+ */
+function dispatchChromeAction(action) {
+  switch (action) {
+    // DevTools (F12 and Ctrl+Shift+I) — chrome-focused fallback (the page-focused case is
+    // captured main-side in before-input-event). No-op on internal tabs / a tab with no live wcId.
+    case 'devtools': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return false;
+      window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
+      return true;
+    }
+    // Page-zoom fallback (DD6): route the active web tab's wcId to main.
+    case 'zoom-in':
+    case 'zoom-out':
+    case 'zoom-reset': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return false;
+      const zoom = (action === 'zoom-out') ? 'out' : (action === 'zoom-reset') ? 'reset' : 'in';
+      window.goldfinch.zoomApply({ webContentsId: t.wcId, action: zoom });
+      return true;
+    }
+    // Chrome-focused Ctrl+F fallback (DD2 / AC2): no bar on internal tabs.
+    case 'find': {
+      const t = activeTab();
+      if (!t || isInternalTab(t) || t.wcId == null) return false;
+      openFind(t);
+      return true;
+    }
+    case 'new-tab':
+      createTab();
+      return true;
+    case 'close-tab':
+      if (activeTabId) closeTab(activeTabId);
+      return true;
+    case 'focus-address':
+      els.address.focus();
+      els.address.select();
+      return true;
+    case 'toggle-panel':
+      togglePanel();
+      return true;
+    case 'toggle-privacy':
+      togglePrivacy();
+      return true;
+    case 'reload': {
+      // preventDefault preceded the tab guard in the original handler — handled
+      // (true) even when there is no / an internal active tab.
+      const t = activeTab();
+      // Internal tabs: reload keyboard shortcut is a no-op (internal pages are static).
+      if (t && isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+      return true;
+    }
+    // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
+    // in before-input-event → onOpenDownloads). No-op if the active tab is already internal so a
+    // second internal tab isn't stacked (DD2). preventDefault preceded the guard — always true.
+    case 'downloads': {
+      const t = activeTab();
+      if (!(t && isInternalTab(t))) openDownloads();
+      return true;
+    }
+  }
+  return false;
+}
+
 document.addEventListener('keydown', (e) => {
   // The pure decision — "given (key, mods, lightboxOpen), which action?" — lives in
   // keydownToAction (../shared/keydown-action.js, a bare global; same dual-export
   // route as isSafeTabUrl). It reproduces the live gating exactly: F12 before the
   // modifier gate, mod = ctrl||meta, zoom/find/F12/Ctrl+Shift+I lightbox-deferred,
   // the t/w/l/m/Shift+P/r chain not lightbox-gated, Ctrl+Shift+I vs Shift+P by key
-  // letter. The IMPURE dispatch below (active-tab resolution, internal-tab / null-wcId
-  // guards, preventDefault, IPC / DOM ops) stays here unchanged — behavior-preserving.
+  // letter. The IMPURE dispatch lives in dispatchChromeAction above (extracted,
+  // M05 F8 Leg 2) — preventDefault fires only when it reports handled, preserving
+  // the conditional-preventDefault of the guarded branches bit-for-bit.
   const action = keydownToAction({
     key: e.key,
     ctrl: e.ctrlKey,
@@ -2407,76 +2395,15 @@ document.addEventListener('keydown', (e) => {
     lightboxOpen: !els.lightbox.classList.contains('hidden'),
   });
   if (!action) return;
+  if (dispatchChromeAction(action)) e.preventDefault();
+});
 
-  switch (action) {
-    // DevTools (F12 and Ctrl+Shift+I) — chrome-focused fallback (the page-focused case is
-    // captured main-side in before-input-event). No-op on internal tabs / a tab with no live wcId.
-    case 'devtools': {
-      const t = activeTab();
-      if (!t || isInternalTab(t) || t.wcId == null) return;
-      e.preventDefault();
-      window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
-      return;
-    }
-    // Page-zoom fallback (DD6): route the active web tab's wcId to main.
-    case 'zoom-in':
-    case 'zoom-out':
-    case 'zoom-reset': {
-      const t = activeTab();
-      if (!t || isInternalTab(t) || t.wcId == null) return;
-      const zoom = (action === 'zoom-out') ? 'out' : (action === 'zoom-reset') ? 'reset' : 'in';
-      e.preventDefault();
-      window.goldfinch.zoomApply({ webContentsId: t.wcId, action: zoom });
-      return;
-    }
-    // Chrome-focused Ctrl+F fallback (DD2 / AC2): no bar on internal tabs.
-    case 'find': {
-      const t = activeTab();
-      if (!t || isInternalTab(t) || t.wcId == null) return;
-      e.preventDefault();
-      openFind(t);
-      return;
-    }
-    case 'new-tab':
-      e.preventDefault();
-      createTab();
-      return;
-    case 'close-tab':
-      e.preventDefault();
-      if (activeTabId) closeTab(activeTabId);
-      return;
-    case 'focus-address':
-      e.preventDefault();
-      els.address.focus();
-      els.address.select();
-      return;
-    case 'toggle-panel':
-      e.preventDefault();
-      togglePanel();
-      return;
-    case 'toggle-privacy':
-      e.preventDefault();
-      togglePrivacy();
-      return;
-    case 'reload': {
-      e.preventDefault();
-      const t = activeTab();
-      if (!t) return;
-      // Internal tabs: reload keyboard shortcut is a no-op (internal pages are static).
-      if (isWebTab(t) && t.wcId != null) window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
-      return;
-    }
-    // Downloads (Ctrl+J) — chrome-focused fallback (the page-focused case is captured main-side
-    // in before-input-event → onOpenDownloads). No-op if the active tab is already internal so a
-    // second internal tab isn't stacked (DD2).
-    case 'downloads': {
-      e.preventDefault();
-      const t = activeTab();
-      if (t && isInternalTab(t)) return;
-      openDownloads();
-      return;
-    }
-  }
+// DD13 (M05 F8): chrome-class accelerators forwarded from the menu-overlay sheet's
+// before-input-event (keyboard focus sits in the sheet while a menu is open — the
+// keydown handler above never sees them). Same dispatch, no event to preventDefault
+// (main already swallowed the sheet-side input).
+window.goldfinch.onChromeShortcutAction(({ action }) => {
+  if (typeof action === 'string') dispatchChromeAction(action);
 });
 
 /* --------------------------------------------------------- automation hook */
@@ -2695,7 +2622,6 @@ webviewsSlotObserver.observe(els.webviews);
 // it sends the current layout immediately, trusting that main sent the signal only
 // after applying chromeView.setBounds (so layout is stable).
 window.goldfinch.onTriggerSendBounds(() => {
-  if (guestFrozen) return;
   // Force a fresh measurement, bypassing the rAF coalescing guard.
   // Re-schedule a rAF-based send too for the settled-layout measurement.
   rafGeometryPending = false;  // cancel any pending rAF (it was reading stale bounds)
@@ -2703,41 +2629,20 @@ window.goldfinch.onTriggerSendBounds(() => {
 });
 
 // ---------------------------------------------------------------------------
-// New container dialog: wire OK/Cancel at startup (runs once; elements are always present).
-(function initNewContainerDialog() {
-  const dialog = /** @type {HTMLElement|null} */ (document.getElementById('new-container-dialog'));
-  const input = /** @type {HTMLInputElement|null} */ (document.getElementById('new-container-name'));
-  const okBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('new-container-ok'));
-  const cancelBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('new-container-cancel'));
-  if (!dialog || !input || !okBtn || !cancelBtn) return;
-
-  function closeDialog() {
-    dialog.classList.add('hidden');
-    input.value = '';
+// New container creation — the submit body for the sheet dialog's channel-6
+// 'create' activation (M05 F8 Leg 3; extracted from the retired chrome dialog's
+// submitDialog). Trim guard kept here as defense-in-depth — the primary
+// whitespace guard is PAGE-SIDE in the sheet dialog (it stays open there).
+/** @param {any} rawName */
+async function createContainerAndOpenTab(rawName) {
+  const name = String(rawName == null ? '' : rawName).trim();
+  if (!name) return;
+  // Main creates the jar and returns the container object; renderer opens the tab directly.
+  const c = await window.goldfinch.newContainerCreate(name);
+  if (c) {
+    containers.push(c);
+    createTab(currentHomePage(), c);
   }
-
-  async function submitDialog() {
-    const name = input.value.trim();
-    if (!name) return;
-    closeDialog();
-    // Main creates the jar and returns the container object; renderer opens the tab directly.
-    const c = await window.goldfinch.newContainerCreate(name);
-    if (c) {
-      containers.push(c);
-      createTab(currentHomePage(), c);
-    }
-  }
-
-  okBtn.addEventListener('click', () => submitDialog());
-  cancelBtn.addEventListener('click', () => closeDialog());
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); submitDialog(); }
-    else if (e.key === 'Escape') { e.preventDefault(); closeDialog(); }
-  });
-  // Click outside the inner box to dismiss
-  dialog.addEventListener('click', (e) => {
-    if (e.target === dialog) closeDialog();
-  });
-})();
+}
 
 window.goldfinch.settingsGet('homePage').then((url) => createTab(url || HOMEPAGE)).catch(() => createTab(HOMEPAGE));

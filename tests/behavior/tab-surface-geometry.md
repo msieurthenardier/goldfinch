@@ -1,28 +1,34 @@
-# Behavior Test: Tab-surface geometry — freeze/restore, panel-resizes-guest, find-overlay float
+# Behavior Test: Tab-surface geometry — menu-over-live-guest, panel-resizes-guest, find-overlay float
 
 **Slug**: `tab-surface-geometry`
 **Status**: draft
 **Created**: 2026-06-26
 **Last Run**: never
 
-> **Carried WSLg known issue.** A tiny residual menu-open blip on the freeze paint is an
-> operator-accepted WSLg compositing artifact (Flight 3) — it is NOT a freeze/restore correctness
-> failure. The checkpoints below assert the still-paint, the menu-renders-above, and the live-view
-> restore at correct bounds; a sub-frame blip on a passing restore is recorded, not failed.
+> **Re-authored 2026-07-02 (F8 Leg 5b).** The freeze-frame rows this spec originally carried (still
+> painted into `#webviews backgroundImage`, live guest hidden while a menu is open) were retired at
+> the Flight-8 cutover — menus now render from the **menu-overlay sheet** (a transparent full-guest
+> `WebContentsView`) over the **live** guest. The former freeze rows are now live-guest rows: **menu
+> open ≠ guest hidden**. The geometry rows (panel-resizes-guest, find-overlay float) survive
+> unchanged.
+
+> **Carried WSLg known issue.** A tiny sub-frame compositing blip is an operator-accepted WSLg
+> artifact (Flight 3 family) — it is NOT a correctness failure. A sub-frame blip on an
+> otherwise-correct render is recorded, not failed.
 
 ## Intent
 
 Verify, on the `WebContentsView` guest surface, the **geometry and compositing** behaviors that the
-Flight-3 migration introduced and that no unit test can reach: (1) the **freeze-frame** cycle — opening
-a chrome menu paints a still of the guest into the chrome `#webviews` layer and hides the live guest
-view so HTML chrome renders **above** it, and dismissing restores the live view at correct bounds;
-(2) **panel-resizes-guest** — opening/closing the media (or privacy) side panel reflows the guest view
-to the remaining region with no clip, overlap, or dead band; (3) **find-overlay float (not inset)** —
-since M05 Flight 7 the find bar is a main-owned overlay `WebContentsView` composited above the guest;
-opening it must **not** change the guest's bounds (the guest keeps the full `#webviews` slot — the old
-find inset was removed at the F7 cutover). These are *rendered-surface* properties (the
-mission's "DOM-correct ≠ render-correct" class), so the test asserts `captureWindow` pixels corroborated
-by the chrome's own `#webviews` style — never DOM geometry alone.
+Flight-3 migration introduced and that no unit test can reach: (1) **menu-over-live-guest** — opening
+a chrome menu composites the menu (rendered from the menu-overlay sheet) **above** a guest that stays
+**live and full-bounds** (no still, no hide, no push-down; the sheet's bounds coincide with the guest
+region); (2) **panel-resizes-guest** — opening/closing the media (or privacy) side panel reflows the
+guest view to the remaining region with no clip, overlap, or dead band; (3) **find-overlay float (not
+inset)** — since M05 Flight 7 the find bar is a main-owned overlay `WebContentsView` composited above
+the guest; opening it must **not** change the guest's bounds (the guest keeps the full `#webviews`
+slot — the old find inset was removed at the F7 cutover). These are *rendered-surface* properties
+(the mission's "DOM-correct ≠ render-correct" class), so the test asserts `captureWindow` pixels —
+never DOM geometry alone.
 
 ## Preconditions
 
@@ -31,9 +37,14 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
   (pick a free loopback port; prior sessions used 49707/49710). Capture the `adminKey` from the
   `AUTOMATION_DEV_MINT` stdout line. The admin key is required — a jar key is refused `getChromeTarget`
   (`admin-only`) and cannot drive the chrome renderer.
-- **This test drives the chrome renderer** (toolbar, menus, and panel live in the chrome; the find
-  overlay is a separate main-owned `WebContentsView` — NOT in the chrome DOM/AX tree and not
-  MCP-enumerable) and observes the **composited window**. `getChromeTarget()` returns the chrome `wcId`.
+- **This test drives the chrome renderer** (toolbar, menu triggers, and panel live in the chrome; the
+  find overlay and the menu-overlay sheet are separate main-owned `WebContentsView`s — NOT in the
+  chrome DOM/AX tree and not MCP-enumerable) and observes the **composited window**.
+  `getChromeTarget()` returns the chrome `wcId`.
+- **Liveness fixture.** The menu-over-live-guest rows need time-varying page content: use the
+  `tests/behavior/fixtures/menu-overlay/` fixture (ticking seconds display), served locally (e.g.
+  `python3 -m http.server` from the fixture directory) — a static page is pixel-identical live vs
+  stale and cannot witness liveness.
 - **Coordinate-click rule:** all clicks are coordinate-based — `click(wcId, x, y)` located via a
   `captureWindow()` screenshot. No CSS selectors over the MCP surface.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does NOT qualify (it launches its own
@@ -41,36 +52,33 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
 
 ## Observables Required
 
-- **mcp — the AUTHORITATIVE freeze tell** (`readDom(chromeWcId)` of the `#webviews` element's
-  `backgroundImage` inline style: a `data:` URL while frozen — set by `freezeGuest`/`renderer.js:1076` —
-  and `''`/`none` while live — cleared by `unfreezeGuest`/`renderer.js:1091`). Also `getChromeTarget` →
-  chrome `wcId`; `readAxTree(chromeWcId)` for menu/panel open state (`aria-expanded`); `enumerateTabs`
-  for the active web tab `wcId`.
-- **browser / rendered window — CORROBORATING for freeze, AUTHORITATIVE for geometry** (`captureWindow()`).
-  Use it as the primary observable for **panel-resizes-guest** and **find-overlay float** (the panel case
-  is a real guest-bounds change the window grab shows directly; the find case pairs pixels with a
-  guest-bounds probe proving the bounds did NOT change). For the **freeze / menu-above** checks treat it
-  as *corroborating only*: see the apparatus caveat below.
+- **browser / rendered window — AUTHORITATIVE** (`captureWindow()`, OS-grab path): the menu composited
+  over live, ticking guest content (liveness = pixel delta between successive grabs); guest bounds
+  under panel open/close; the find bar's float. Also `getChromeTarget` → chrome `wcId`;
+  `readAxTree(chromeWcId)` / `readDom(chromeWcId)` for menu/panel trigger state (`aria-expanded`);
+  `enumerateTabs` for the active web tab `wcId`.
+- **mcp — corroborating**: the menu-overlay sheet's rendered menu via `readDom(sheetWcId)` if probed
+  (optional here — `menu-overlay.md` owns the sheet's DOM contract). **Sheet/find-bar DOM can never
+  serve as a "closed" observable** (lazy singletons — hidden ≠ destroyed); pixels are the closed-state
+  authority.
 
-> **Apparatus caveat — `captureWindow` on the WSLg fallback path.** `captureWindow` has two paths: an OS
-> window grab (`desktopCapturer`, primary) and a **WSLg/Wayland fallback** that composites the
-> chrome image with `getActiveTabContents().capturePage()` drawn at the `#webviews` offset
-> (`main.js:213-275`). During freeze the live guest is `setVisible(false)`, and the fallback draws that
-> (possibly stale) guest frame **over** the chrome — i.e. it can paint the guest *on top of* an open
-> menu, defeating a naive "menu pixels are visible" assertion. So on WSLg the menu-above pixel check is
-> **best-effort**; the freeze state is judged authoritatively by the `#webviews` `backgroundImage` tell.
-> Also: because the freeze paints a still of the *same* page, a static page is pixel-identical frozen vs
-> live — restore is judged by `backgroundImage === ''`, optionally pixel-confirmed by scrolling the live
-> guest after restore (a frozen still won't scroll).
+> **Apparatus caveat — `captureWindow` on the WSLg fallback path.** `captureWindow` has two paths: an
+> OS window grab (`desktopCapturer`, primary — composites ALL views incl. the overlays) and a
+> **WSLg/Wayland fallback** that composites the chrome image with only the active guest's
+> `capturePage()` at the `#webviews` offset — the fallback may not composite sibling overlay views
+> (the find bar, the menu-overlay sheet). On the fallback, overlay/menu-presence pixel checks are
+> **best-effort**; the OS-grab path is authoritative. **Absence-authoritativeness rule:** an
+> overlay-absence check is authoritative only after a same-run grab has shown that overlay compositing
+> on the active capture path.
 
 ## Steps
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Connect the admin MCP client; `getChromeTarget()`. Open a web tab in the Default jar to a content-rich page (e.g. `https://example.com`); via `enumerateTabs` record its `wcId`. Take a `captureWindow()` and `readDom(chromeWcId)` of the `#webviews` element. | (setup) Record chrome `wcId`, guest `wcId`, and the baseline `#webviews` style. |
-| 2 | **Baseline (live, not frozen):** inspect the Step-1 `captureWindow()` and the `#webviews` `backgroundImage`. | The guest page content is composited in the `#webviews` region; `#webviews` has **no** `backgroundImage` (empty / `none`) — the live view is showing, nothing is frozen. |
-| 3 | **Freeze on menu open:** locate the kebab (⋮) via `captureWindow()`; `click(wcId, x, y)` to open it. Take `readDom(chromeWcId)` (authoritative) and a `captureWindow()` (corroborating). | **Authoritative:** `#webviews` `backgroundImage` is now a `data:` URL — `freezeGuest` painted the guest still into the chrome layer and hid the live view. **Corroborating (best-effort on WSLg):** the kebab menu appears **above** the page content in the screenshot, not occluded. `readAxTree` shows the kebab `aria-expanded="true"`. [render-correct] |
-| 4 | **Restore on dismiss:** `pressKey(wcId, 'Escape')`. Take `readDom(chromeWcId)` (authoritative) and a `captureWindow()`. Optionally `scroll` the guest to pixel-confirm the live view is back. | **Authoritative:** `#webviews` `backgroundImage` is cleared (`''`/`none`) — `unfreezeGuest` ran and restored the live view at full bounds. The menu is gone (`aria-expanded="false"`). Optional pixel confirm: the guest scrolls (a frozen still would not). A sub-frame WSLg blip during the swap is recorded, not failed. |
+| 1 | Connect the admin MCP client; `getChromeTarget()`. Open a web tab in the Default jar on the ticking liveness fixture (`tests/behavior/fixtures/menu-overlay/`, served locally); via `enumerateTabs` record its `wcId`. Take a `captureWindow()`. | (setup) Record chrome `wcId`, guest `wcId`, and the baseline frame (guest full-height, ticking region located, no menu). |
+| 2 | **Baseline (live):** take a second `captureWindow()` ~2 s after Step 1's and compare the ticking region. | The guest page content is composited in the `#webviews` region and the ticking region **differs between the two grabs** — the guest is live at baseline (establishes the liveness observable for Step 3). |
+| 3 | **Menu over live guest:** locate the kebab (⋮) via `captureWindow()`; `click(chromeWcId, x, y)` to open it. Take two `captureWindow()` grabs ~2 s apart, plus `readAxTree(chromeWcId)`. | The kebab menu is composited **above** the guest content, flush at the top edge of the guest region (the sheet covers the guest region only — F8 DD12); the guest stays **visible, live, and full-height** around it — the ticking region **differs between the two grabs** (a frozen still would be identical), and no push-down or blanking appears. `readAxTree` shows the kebab `aria-expanded="true"`. [render-correct] |
+| 4 | **Dismiss restores nothing because nothing was hidden:** dismiss the menu (Escape — deliver to the sheet's webContents if probed, or `pressKey(chromeWcId, 'Escape')` after a chrome focus anchor). Take a `captureWindow()`. | The menu is gone from the pixels; the guest is still live at full bounds (it never left); kebab `aria-expanded="false"`. A sub-frame WSLg blip during the close is recorded, not failed. |
 | 5 | **Panel-resizes-guest (open):** locate and open the media side panel via `captureWindow()` + `click(wcId, x, y)`. Take a `captureWindow()`. | The guest view **reflows to the region beside the panel** — the panel and the guest tile the content area with **no overlap, no gap/dead band, and no clipping** of the guest; the guest content visibly re-lays-out to the narrower width. [render-correct] |
 | 6 | **Panel-resizes-guest (close):** close the panel via `captureWindow()` + `click(wcId, x, y)`. Take a `captureWindow()`. | The guest view restores to the **full** `#webviews` region; no residual inset, no dead band where the panel was. |
 | 7 | **Find-overlay float (open):** record the active guest's bounds (bounds probe / `enumerateTabs`-adjacent geometry read) and the `#webviews` rect, then open find (`pressKey` Ctrl+F on the guest, or drive the chrome's `openFind()`). Take a `captureWindow()` and re-probe the guest bounds. | **Primary tell:** the find bar is composited **over** a FULL-bounds guest — the guest-bounds probe equals the full `#webviews` rect, **identical to the pre-open probe** (the bar floats; the guest is never inset). The `[ input ] n/m [↑][↓][✕]` bar is visible in the screenshot above the guest, which is not broken/clipped behind it. **AX re-scope:** the find input is NOT in the chrome AX tree (`readAxTree(chromeWcId)`) — the overlay is a separate webContents; do not assert it there (the overlay's own a11y is HAT-covered per DD12). [render-correct] |
@@ -81,18 +89,21 @@ by the chrome's own `#webviews` style — never DOM geometry alone.
 
 ## Out of Scope
 
-- **Menus on internal `goldfinch://` tabs** (kebab/container freeze-above + restore while *on* Settings
-  / Downloads, and internal-view resize) — `internal-tab-menus.md`.
+- **Menus on internal `goldfinch://` tabs** (render-above + internal-view resize while *on* Settings /
+  Downloads) — `internal-tab-menus.md`.
+- **The sheet's own contract** (liveness under every surface, click-swallow dismissal, find-bar
+  interplay, keyboard) — `menu-overlay.md`.
 - **The find *engine result*** (match counts, stepping, jar-scoping) — `find-in-page.md` (this spec
   asserts only the bar's float/rendering and the guest's unchanged bounds, not its results).
 - **Find-overlay geometry tracking** (position-sync across resize/panel/tab-switch, internal-tab
-  removal, freeze-hide/restore) — `find-overlay-geometry.md`.
+  removal, menu hide/restore) — `find-overlay-geometry.md`.
 - **Menu items, keyboard operation, dismissal semantics** — `kebab-menu.md`, `page-context-menu.md`,
   `menu-dismissal.md`.
 - **macOS rendering** — WSLg is the in-loop venue this mission; macOS is the Flight-6 landing gate.
 
 ## Variants (optional)
 
-- Repeat Steps 3–4 with the **page context menu** (right-click the guest, located via `captureWindow()`)
-  instead of the kebab — exercises the main-originated freeze path (the `page-context-menu` IPC) vs. the
-  renderer-originated kebab freeze.
+- Repeat Steps 3–4 with the **page context menu** (right-click the guest at a point away from the
+  ticking region — `click(guestWcId, x, y, { button: 'right' })` fires the real guest `context-menu`
+  path) instead of the kebab — exercises the main-originated (guest → main → chrome → sheet)
+  invocation vs. the chrome-trigger path.

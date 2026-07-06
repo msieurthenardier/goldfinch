@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+    <title>Menu overlay</title>
+    <link rel="stylesheet" href="menu-overlay.css" />
+  </head>
+  <body>
+    <!-- Menu-overlay sheet document (M05 Flight 8, DD2/DD4). Fully transparent page
+         covering the active guest's bounds; menus render as absolutely-positioned
+         DOM inside #menu-root from the serialized menu model (menu-overlay:init).
+         menu-controller.js is the shared dual-export, DOM-pure APG engine (this is
+         the only document that loads it since the F8 cutover retired the chrome-DOM
+         menus): its global pointerdown/blur listeners are the sheet's
+         outside-click/blur dismissal and its menu-keydown contract provides
+         roving/Arrow/Home/End/Escape/Tab. It must load BEFORE menu-overlay.js. -->
+    <div id="menu-root"></div>
+    <script src="../shared/safe-color.js"></script>
+    <script src="menu-controller.js"></script>
+    <script src="menu-overlay.js"></script>
+  </body>
+</html>

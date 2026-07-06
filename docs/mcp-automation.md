@@ -306,14 +306,35 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   - **A key whose jar no longer exists drives nothing.** If the jar is deleted from the registry
     while a key is still valid, every op for that identity errors (`automation: no-such-jar`).
 
-- **The admin identity bypasses jar-scoping.** An `admin`-resolved connection enumerates **every**
-  jar's guest tabs **and** the internal `goldfinch://settings` tab, can drive/observe any of them
-  (the **sole** relaxation of the internal-session exclusion), and may call `captureWindow`,
-  `getChromeTarget`, and `downloadsList`. Admin is the *only* identity allowed to touch the internal
-  session, discover the chrome renderer, or read the app-level downloads model. Jar keys calling
-  `getChromeTarget` or `downloadsList` get `automation: admin-only` (mirroring `captureWindow`). The
-  `wcId` returned by `getChromeTarget` is then passed to the drive/observe tools to act on / read
-  the app shell (tab strip, toolbar, menus).
+- **The admin identity bypasses jar-scoping — admin's TWO relaxations (M05 F8 DD8).** An
+  `admin`-resolved connection enumerates **every** jar's guest tabs **and** the internal
+  `goldfinch://settings` tab, can drive/observe any of them, and may call `captureWindow`,
+  `getChromeTarget`, and `downloadsList`. `allowInternal` is **no longer the sole** admin
+  relaxation — the resolver grants admin exactly two:
+  1. the **internal-session exclusion** is lifted (admin may drive/observe the internal tab;
+     the eval/DevTools ops still refuse it — see their security-invariant blocks);
+  2. **non-tab, non-chrome wcIds resolve at the admin tier only** — a live `WebContentsView`
+     that is not in main's `tabViews` and is not the chrome (the chrome-class overlay views:
+     the **menu-overlay sheet**, the **find overlay**) is refused for jar keys with
+     `automation: non-tab-contents` (defense-in-depth; jar-tier wcId-first ops were already
+     refused on session identity with `out-of-jar`).
+  Admin is the *only* identity allowed to touch the internal session, discover the chrome
+  renderer, resolve the overlay views, or read the app-level downloads model. Jar keys calling
+  `getChromeTarget` or `downloadsList` get `automation: admin-only` (mirroring `captureWindow`).
+  The `wcId` returned by `getChromeTarget` is then passed to the drive/observe tools to act on /
+  read the app shell (tab strip, toolbar, menu triggers).
+
+- **Overlay views are non-enumerable but probe-addressable (design choice, M05 F7/F8).** The find
+  overlay and the menu-overlay sheet are deliberately **not registered in `tabViews`**, so they
+  never appear in `enumerateTabs` — but they remain live webContents, directly addressable by
+  wcId at the **admin tier** (the enumerable-vs-addressable nuance, documented at construction).
+  Apparatus that needs them (the a11y audit's five `sheet:*` menu states, behavior tests)
+  discovers the wcId with an id-space **probe walk around the known ids** — `readDom(id)`
+  succeeding with the overlay's markup identifies it; a failed probe on a non-existent id is a
+  normal refused result. **Skip every `enumerateTabs` wcId and the chrome wcId in the walk**: the
+  eval/read ops are foreground-first, so probing a background *tab* activates it (a real
+  tab-switch that disturbs the state under test — e.g. it closes an open sheet menu); the
+  overlays are never in `enumerateTabs`, so skipping tabs loses nothing.
 
 > **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
 > It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging

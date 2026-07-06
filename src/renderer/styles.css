@@ -261,7 +261,6 @@ html.platform-darwin #window-controls {
 .switch:focus-visible,
 .icon-action:focus-visible,
 #player-controls button:focus-visible,
-.cm-item:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -533,10 +532,9 @@ a:focus-visible {
   flex: 1;
   position: relative;
   /* Dark shell color (matches the chrome WebContentsView background #1e1f25 = --bg) so any
-     residual gap frame during the freeze-frame swap reads dark-on-dark (invisible) rather
-     than a white flash — most visible on light internal goldfinch:// pages. The opaque active
-     view covers #webviews normally; the still covers it during freeze; this is only ever seen
-     in the one-frame gap (now also mitigated by decoding the still before hiding the view). */
+     residual gap frame during a guest hide/show swap (tab switch, pending activation) reads
+     dark-on-dark (invisible) rather than a white flash — most visible on light internal
+     goldfinch:// pages. The opaque active view covers #webviews normally. */
   background: var(--bg);
 }
 #webviews webview {
@@ -1244,218 +1242,13 @@ a:focus-visible {
   font-size: 11px;
   width: 22px;
 }
-#container-menu {
-  position: absolute;
-  top: 36px;
-  /* left is set inline by the container-menu onOpen — the pill moves with the tab count,
-     so the menu is anchored under the ▾ trigger dynamically. This is the fallback. */
-  left: 6px;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 210px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-/* Kebab (overflow) menu — reuses the container-menu chrome, but is anchored
-   dynamically to the kebab button's rect (top/right set inline by
-   positionKebabMenu()); right-aligned so it never overflows the viewport. */
-#kebab-menu {
-  position: absolute;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 160px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-/* Custom page context menu (SC6/DD2/DD3) — reuses the container/kebab chrome and the
-   .cm-item button style. Anchored at the cursor (top/left set inline by
-   positionPageContextMenu, clamped to the viewport); lives at the menu tier (z-index:60),
-   below the z-index:100 lightbox. tabindex="-1" + outline:none keeps the menu node itself
-   from showing a focus ring when onOpen self-focuses it (the blur-race defensive mitigation);
-   the focusable items still carry the .cm-item:focus-visible gold ring. */
-#page-context-menu {
-  position: absolute;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px;
-  min-width: 200px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  outline: none;
-}
-/* Section separator between context-menu groups (link / image / selection / editable /
-   suggestions / Inspect). Same top-border idiom as .cm-item.add. */
-#page-context-menu .cm-sep {
-  border-top: 1px solid var(--border);
-  margin: 4px 0;
-}
-/* Disabled affordance (e.g. "No suggestions") — dim, non-interactive. Edit items are
-   OMITTED rather than disabled (kept out of the roving set), so this is only used for
-   the rare informational placeholder. */
-#page-context-menu .cm-item[aria-disabled='true'] {
-  color: var(--fg-dim);
-  cursor: default;
-}
-#page-context-menu .cm-item[aria-disabled='true']:hover {
-  background: transparent;
-}
-.cm-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--fg-dim);
-  padding: 4px 8px;
-}
-.cm-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--fg);
-  padding: 7px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.cm-item:hover {
-  background: var(--bg);
-}
-.cm-item.add {
-  color: var(--fg-dim);
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-.cm-item em {
-  color: var(--fg-dim);
-  font-style: normal;
-  font-size: 10px;
-}
-.cm-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
+/* The menu/dialog CSS (#kebab-menu, #container-menu, #page-context-menu,
+   .site-info-popup, .new-container-dialog family, .cm-item/.cm-title/.cm-sep)
+   moved to menu-overlay.css with the menus themselves (M05 F8 cutover) — the
+   chrome document no longer renders any popup menu. */
 
-/* ---------- New container inline dialog ----------
-   Shown when "New container…" is selected in the HTML picker.
-   Full-screen dimmed backdrop with a small centered card for the name input. */
-.new-container-dialog {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.new-container-inner {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px 20px 16px;
-  min-width: 260px;
-  max-width: 340px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.new-container-label {
-  font-size: 12px;
-  color: var(--fg-dim);
-  font-weight: 500;
-}
-.new-container-input {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
-  font-size: 13px;
-  padding: 7px 10px;
-  outline: none;
-  width: 100%;
-  box-sizing: border-box;
-}
-.new-container-input:focus {
-  border-color: var(--accent);
-}
-.new-container-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* ---------- Site-info popup ---------- */
-/* Small card anchored left-aligned under the address chip (position set inline).
-   Not a menu — role="dialog", no roving-tabindex; its own Escape/Tab keydown closes it. */
-.site-info-popup {
-  position: absolute;
-  z-index: 60;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px 8px;
-  min-width: 220px;
-  max-width: 320px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  outline: none; /* focus ring via :focus-visible below */
-}
-.site-info-popup:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.si-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.si-host {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--fg);
-  word-break: break-all;
-  margin-bottom: 4px;
-}
-.si-secure {
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.si-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-}
-.si-label {
-  color: var(--fg-dim);
-  flex: 1;
-}
-.si-value {
-  color: var(--fg);
-  font-variant-numeric: tabular-nums;
-}
-.si-actions {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-}
-.si-settings-btn {
-  /* inherits .text-btn .small; no extra overrides needed */
-}
-
+/* Jar color dot — used by the privacy panel's Jar section (pJar in renderer.js);
+   the sheet menus carry their own copy in menu-overlay.css. */
 .cm-dot {
   width: 10px;
   height: 10px;

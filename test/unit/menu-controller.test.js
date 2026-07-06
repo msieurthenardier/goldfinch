@@ -5,9 +5,12 @@ const assert = require('node:assert/strict');
 
 // menu-controller.js attaches global pointerdown/blur listeners at module load
 // (document.addEventListener / window.addEventListener) and reads
-// document.activeElement inside the menu-keydown handler. Node has no DOM, so we
-// install minimal stand-ins BEFORE requiring the module. activeElement is a
-// mutable field the roving-tabindex assertions point at a fake item.
+// document.activeElement inside the menu-keydown handler. Since the M05 F8
+// cutover the module is loaded ONLY by the menu-overlay sheet document
+// (menu-overlay.html) — its global listeners are the sheet's outside-click/blur
+// dismissal. Node has no DOM, so we install minimal stand-ins BEFORE requiring
+// the module. activeElement is a mutable field the roving-tabindex assertions
+// point at a fake item.
 const documentStub = {
   addEventListener() {},
   /** @type {any} */ activeElement: null,
@@ -21,8 +24,9 @@ const { menuController, focusItem } = require('../../src/renderer/menu-controlle
 // Fakes. A trigger/menu is a plain object whose addEventListener records the
 // handler by event type, with contains() + a focus spy. onOpen/onClose/focusReturn
 // are recording spies. By default trigger and menu are distinct nodes (the normal
-// menu-button case); pass { sameNode: true } for the page-context-style consumer
-// where trigger === menu (opener-skip path).
+// menu-button case); pass { sameNode: true } for the sheet-template consumers
+// (menu-overlay.js registers every template entry with trigger === menu — the
+// opener-skip, programmatic-open path).
 // ---------------------------------------------------------------------------
 function makeNode() {
   /** @type {Record<string, (e:any)=>void>} */

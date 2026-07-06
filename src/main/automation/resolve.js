@@ -62,18 +62,26 @@ function classifyContents(wc, chromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — mainWindow.webContents (injected; passed through for
  *                    callers that immediately classify the result)
- *   allowInternal — when true (admin's SOLE relaxation, Leg 2 / DD6), the
+ *   allowInternal — when true (one of admin's TWO relaxations — see below), the
  *                   internal-session throw is SKIPPED. Defaults to false/undefined:
  *                   existing callers that pass no allowInternal behave exactly as
  *                   before. bad-handle / no-such-contents ALWAYS apply.
+ *   isTabViewWcId — (M05 F8 DD8, defense-in-depth) main.js's tabViews-membership
+ *                   predicate. When provided and NOT allowInternal, a live wcId
+ *                   that is neither a tabViews member nor the chrome contents
+ *                   (e.g. the menu-overlay sheet, the find overlay — chrome-class
+ *                   overlay views) throws `non-tab-contents`: such wcIds resolve
+ *                   only at the ADMIN tier. This is admin's SECOND relaxation
+ *                   (alongside allowInternal). Absent predicate = no behavior
+ *                   change (offline tests / legacy callers).
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents: _chromeContents, allowInternal = false }) {
+function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -88,12 +96,23 @@ function resolveContents(wcId, { fromId, chromeContents: _chromeContents, allowI
   // A directly-supplied internal-guest wcId is rejected here, not merely
   // filtered from an enumerate pass — this closes the bypass path.
   //
-  // DD6 (Leg 2): the admin engine builds deps with allowInternal:true — its
-  // SOLE relaxation of this exclusion. Jar keys (and every existing caller)
+  // DD6 (Leg 2) / F8 DD8: the admin engine builds deps with allowInternal:true —
+  // one of admin's TWO relaxations (the other being the non-tab-contents guard
+  // below, which allowInternal also lifts). Jar keys (and every existing caller)
   // leave allowInternal false/undefined, so the internal session stays
   // ABSOLUTELY off-limits to them.
   if (!allowInternal && isInternalContents(wc)) {
     throw new Error('automation: internal-session — wcId ' + wcId + ' belongs to the internal goldfinch://settings session and cannot be driven');
+  }
+
+  // F8 DD8 (defense-in-depth): non-tab, non-chrome wcIds (chrome-class overlay
+  // views — the menu-overlay sheet, the find overlay) resolve only at the admin
+  // tier. NOT a live-vulnerability fix: jar-tier wcId-first ops already refuse
+  // these on session identity in resolveContentsForJar (out-of-jar) — this
+  // resolver-level rule is robust against a future sheet-gets-a-partition change.
+  // Fires only when main.js threads the predicate; admin (allowInternal) is exempt.
+  if (!allowInternal && typeof isTabViewWcId === 'function' && wc !== chromeContents && !isTabViewWcId(wcId)) {
+    throw new Error('automation: non-tab-contents — wcId ' + wcId + ' is not a tab view (chrome-class overlay contents resolve only at the admin tier)');
   }
 
   return wc;

@@ -39,32 +39,10 @@
         <button id="win-close" class="icon-btn win-ctrl win-close" title="Close" aria-label="Close"></button>
       </div>
     </div>
-    <div id="container-menu" class="hidden" role="menu" aria-label="Open new tab in a container"></div>
-    <div id="kebab-menu" class="hidden" role="menu" aria-label="More menu">
-      <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
-      <button id="kebab-downloads" class="cm-item" role="menuitem" tabindex="-1">Downloads</button>
-      <button id="kebab-print" class="cm-item" role="menuitem" tabindex="-1">Print…</button>
-      <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
-    </div>
-    <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
-    <!-- Custom page context menu (SC6/DD2/DD3). Empty at rest — items built per-invocation
-         from the forwarded guest context-menu params, rendered via the menuController.
-         tabindex="-1" lets onOpen self-focus the chrome (blur-race defensive mitigation)
-         without joining the natural tab order. -->
-    <div id="page-context-menu" class="hidden" role="menu" aria-label="Page actions" tabindex="-1"></div>
-
-    <!-- Inline "New container" name input — shown when "New container…" is selected
-         in the HTML container picker. -->
-    <div id="new-container-dialog" class="hidden new-container-dialog" role="dialog" aria-modal="true" aria-label="New container">
-      <div class="new-container-inner">
-        <label for="new-container-name" class="new-container-label">New container name</label>
-        <input id="new-container-name" class="new-container-input" type="text" maxlength="24" placeholder="e.g. Shopping" autocomplete="off" spellcheck="false" />
-        <div class="new-container-actions">
-          <button id="new-container-ok" class="text-btn small" type="button">Create</button>
-          <button id="new-container-cancel" class="text-btn small" type="button">Cancel</button>
-        </div>
-      </div>
-    </div>
+    <!-- All popup menus (kebab / container / site-info / page-context) and the
+         new-container dialog render in the menu-overlay SHEET (menu-overlay.html,
+         a transparent WebContentsView above the guest — M05 F8); the chrome keeps
+         only their trigger buttons. -->
     <!-- Toolbar -->
     <div id="toolbar">
       <img id="brand" src="assets/goldfinch_color.png" alt="Goldfinch" title="Goldfinch" />
@@ -206,7 +184,9 @@
 
     <script src="../shared/url-safety.js"></script>
     <script src="../shared/keydown-action.js"></script>
-    <script src="menu-controller.js"></script>
+    <script src="../shared/site-info.js"></script>
+    <script src="../shared/container-menu.js"></script>
+    <script src="../shared/page-context-model.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>
