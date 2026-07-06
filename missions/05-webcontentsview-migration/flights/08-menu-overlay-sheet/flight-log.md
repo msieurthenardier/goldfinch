@@ -1501,3 +1501,16 @@ and flight-log entries covered the observables cited.
   (and now compositing open sheet/find overlays — a latent captureWindow gap fixed). Fix
   attempts #1/#2 reverted (view-op hypothesis disproven; diff archived in the diag
   scratchpad). Gates 1050/1050 green.
+
+- **HAT state at session restart (2026-07-06)**: steps 1–12 PASS (12 = DD13 composite
+  ratified); 13 optional-skipped; three ratification items ACCEPTED; WSLg click-swallow fixed
+  (Wayland dev launcher, committed `a25fbad`, operator-verified). REMAINING: step 14
+  (Witnessed `/behavior-test menu-overlay` + spec re-runs/promotions) and step 15 (kebab Exit,
+  literal last action), then flight landing per the leg's Post-Completion.
+- **Apparatus (post-restart recipe)**: goldfinch MCP is now a PROJECT-scope server in
+  mission-control `.mcp.json` (gitignored) with a SEMI-PERMANENT admin key — the key hash is
+  persisted in the dev profile; relaunch with plain `npm run dev:automation` (NO
+  `GOLDFINCH_AUTOMATION_DEV_MINT` / `GOLDFINCH_AUTOMATION_ADMIN`, which would re-mint and
+  invalidate the stored key) on `GOLDFINCH_MCP_PORT=49152`; fixture server:
+  `python3 -m http.server 8123 --directory tests/behavior/fixtures/menu-overlay`. Operator's
+  installed Goldfinch must stay closed while 49152 is in use.
