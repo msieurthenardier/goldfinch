@@ -147,7 +147,18 @@ follow-on work.
 
 ## Known Issues
 
-- [ ] {none yet — populate as flights surface migration blockers}
+- [ ] **Multi-`WebContentsView` keyboard/focus bridging is unsolved for guest+chrome** — discovered
+  in Flight 8 HAT, mission-wide architectural consequence (not an F8 regression). Three gaps: Tab
+  can't leave the guest page (no cross-view traversal); Ctrl+L (focus-address) is dead when a guest
+  has focus (not in the guest `before-input-event` capture set); chrome Tab order doesn't cycle.
+  DD13 solved the analogous problem for the sheet. Fix: a dedicated keyboard-nav maintenance flight
+  (operator-approved) — extend the guest capture set to the chrome-class accelerator union + a
+  guest→chrome focus handoff + chrome Tab-wrap.
+- [ ] **`<webview>`-era doc drift persists in source** — discovered in Flight 8 debrief.
+  `src/preload/webview-preload.js:2-5` still references `<webview>` tabs and `ipcRenderer.sendToHost`
+  (both stale since Flight 3; code uses `ipcRenderer.send('guest-media-list', …)`). The README was
+  scrubbed (commit `84833d2`); a repo-wide `<webview>` sweep belongs in the end-of-mission
+  maintenance flight.
 
 ## Flights
 
