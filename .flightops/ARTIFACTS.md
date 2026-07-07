@@ -40,6 +40,15 @@ This project stores Flight Control artifacts as markdown files in the repository
 
 ---
 
+## Git Conventions
+
+How flight work is named in version control. Skills read these — adjust them to match your VCS conventions.
+
+- **Flight branch**: `flight/{number}-{slug}` — created at flight start (`git checkout -b flight/{number}-{slug}`)
+- **Commit subject**: `flight/{number}: {description}`, with a `Mission: {mission-number}` trailer
+
+---
+
 ## Core Artifacts
 
 ### Mission
