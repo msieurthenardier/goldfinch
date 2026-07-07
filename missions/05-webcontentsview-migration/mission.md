@@ -153,7 +153,9 @@ follow-on work.
   has focus (not in the guest `before-input-event` capture set); chrome Tab order doesn't cycle.
   DD13 solved the analogous problem for the sheet. Fix: a dedicated keyboard-nav maintenance flight
   (operator-approved) — extend the guest capture set to the chrome-class accelerator union + a
-  guest→chrome focus handoff + chrome Tab-wrap.
+  guest→chrome focus handoff + chrome Tab-wrap. **→ Being addressed in Flight 5** (planning, 2026-07-07):
+  folded in as a prerequisite because the broken bridge blocks corpus runs; scoped to the named gaps
+  (Ctrl+L + Tab handoff + chrome wrap), verified by the new `chrome-guest-keyboard-nav` Witnessed spec.
 - [ ] **`<webview>`-era doc drift persists in source** — discovered in Flight 8 debrief.
   `src/preload/webview-preload.js:2-5` still references `<webview>` tabs and `ipcRenderer.sendToHost`
   (both stale since Flight 3; code uses `ipcRenderer.send('guest-media-list', …)`). The README was
@@ -217,10 +219,15 @@ follow-on work.
   in the HAT was proven by spike + spun out to **Flight 7**. Merged to `mission/05` locally; `main`
   untouched. *(SC4 via HAT; SC6-partial code-complete, live re-verify deferred.)* — *original tentative
   framing (commentary): re-home the renderer↔`<webview>`-element seams; budgeted as a rewrite.*
-- [ ] **Flight 5: Automation parity sweep** — full MCP end-to-end parity via the `mcp-*` behavior-test
-  corpus on the new surface. **Scope reduced (planning, 2026-06-25):** internal `goldfinch://` page
-  migration moved to **Flight 3** (DD0); this flight is now the automation parity sweep, with the internal
-  trust model already on views from F3. *(SC6; SC1/SC5 internal-page parts land in F3.)*
+- [ ] **Flight 5: Cross-view keyboard bridge & admin-wired parity sweep** — *(planning, 2026-07-07)* reshaped
+  from the tentative "automation parity sweep." Two halves in one apparatus-gated flight: **(A)** land the
+  multi-`WebContentsView` chrome↔guest keyboard/focus bridge (the Known Issue below — it blocks corpus runs
+  crossing the boundary), then **(B)** drain the full admin-wired corpus on the native surface — SC6 automation
+  (`mcp-*` + automation specs), SC4 conveniences (the F4-deferred corpus + `npm run a11y`), and the
+  SC5-apparatus trust specs. **Operator boundary (DD1):** F5 = this cluster; F6 = the browsing/tab/chrome-UI
+  corpus + macOS + merge. Gated by a Leg-1 **apparatus-wiring litmus** (the F4 Leg-4 blocker). *(SC6, SC4-formal,
+  SC5-part; closes the F4 Leg-4 deferral.)* — *original framing (commentary): "full MCP end-to-end parity via the
+  `mcp-*` corpus"; internal-page migration already moved to Flight 3 (DD0).*
 - [ ] **Flight 6: Parity sweep & land** — run the full active behavior-test corpus as the parity
   benchmark; macOS build-readiness check; merge the mission branch to `main`. *(SC3, SC8, mission
   landing.)* — **Panel composition (SC7/#27/SC10) is DONE (Flight 9, certified 2026-07-07)** and its
