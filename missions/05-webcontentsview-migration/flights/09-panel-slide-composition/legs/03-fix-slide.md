@@ -26,14 +26,20 @@ migration. FD + operator diagnosed it live:
    (body clipped — "Shiel"/"Block tracke"). Operator's sharp catch: the panel's **header row reaches
    the window edge while the body below (incl. scrollbar) is clipped ~90px short** — the panel isn't
    composited as one rigid layer during the animation.
-3. **Root cause.** Since the guest re-bounds to its final width in one step (DOM `#webviews` snaps at
-   t=0; the guest view follows via `tabSetBounds`), the CSS width slide only animates the chrome-DOM
-   panel box while the guest stays put — a mismatched half-animation. That sustained chrome repaint
-   over the slide **mis-composites the native views on WSLg** (DOM-correct, render-wrong — the
-   mission's thesis, at the compositor level). Same root cause as the three M04 mechanisms that all
-   "failed identically." It is a real, *captured* render defect (not a live-only flicker); the earlier
-   Leg-1 "capture path shows it stable" reading was a mis-timed-capture artifact (captures landed on
-   settled frames), corrected here by the operator's mid-slide screenshots.
+3. **Root cause (corrected at debrief — WSLg was a red herring).** The guest is a **separate
+   compositing surface** (native `WebContentsView`, or the old `<webview>`) whose bounds change in
+   **one discrete `setBounds` step** — it cannot animate in lockstep. So the CSS width slide only
+   animates the chrome-DOM panel box while the guest slot snaps to final at t=0 (DOM `#webviews`
+   jumps; the guest view follows in one step) — a mismatched half-animation (chrome ramps, guest
+   steps). That sustained mismatched chrome repaint over the live guest **mis-renders the composited
+   frame** (DOM-correct, render-wrong — the mission's thesis, at the compositor). This is
+   **PLATFORM-INDEPENDENT**: initially attributed to WSLg during the live diagnosis, but the operator
+   confirmed at debrief that the **identical glitch occurs on the native Windows build** — and it is
+   the same defect that broke M04's three smooth-slide attempts under `<webview>`. It reproduces
+   across `<webview>`→`WebContentsView` AND across WSLg→native Windows, so the constant is the
+   separate-compositing-surface-steps-discretely invariant, not any one platform's compositor. A
+   real, *captured* render defect (operator mid-slide screenshots); the earlier Leg-1 "capture path
+   shows it stable" reading was a mis-timed-capture artifact (captures landed on settled frames).
 
 ## The fix
 

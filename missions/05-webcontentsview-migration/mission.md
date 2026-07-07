@@ -159,6 +159,21 @@ follow-on work.
   (both stale since Flight 3; code uses `ipcRenderer.send('guest-media-list', …)`). The README was
   scrubbed (commit `84833d2`); a repo-wide `<webview>` sweep belongs in the end-of-mission
   maintenance flight.
+- [x] **[RESOLVED F9] Guest-view geometry cannot be animated — the guest steps discretely.** A
+  `WebContentsView`/`<webview>` guest re-bounds in one discrete `setBounds` step, so animating chrome
+  layout that resizes the guest slot (e.g. a sliding side panel) produces a chrome-ramps-while-guest-
+  steps mismatch that mis-renders the composited frame on **every platform** (operator-confirmed on
+  native Windows — NOT a WSLg quirk, contrary to the initial in-flight attribution). This is the
+  single mechanism behind all four #27 failures (M04's three + F9). Resolved by retiring the panel
+  slide animation (instant open, F9). Invariant now in CLAUDE.md.
+- [ ] **Render-correctness at the compositing layer is invisible to DOM + automated captures** —
+  mission methodology finding (F7 find cold-start, F8 click-swallow, F9 panel glitch all surfaced
+  only under a human eye / operator screenshots). DOM reads, a11y, `evaluate`, AND discrete
+  `captureWindow` grabs (which land on settled frames) are necessary-but-insufficient for guest-region
+  render/compositing changes — the authoritative signal is the rendered surface observed *in motion*
+  by a human. Budget a HAT / operator-screenshot pass for every guest-region geometry change.
+  **Caveat (F9):** do NOT reflexively attribute such defects to WSLg — F9's was cross-platform;
+  require a native-platform control before blaming the rig.
 
 ## Flights
 
@@ -206,9 +221,13 @@ follow-on work.
   corpus on the new surface. **Scope reduced (planning, 2026-06-25):** internal `goldfinch://` page
   migration moved to **Flight 3** (DD0); this flight is now the automation parity sweep, with the internal
   trust model already on views from F3. *(SC6; SC1/SC5 internal-page parts land in F3.)*
-- [ ] **Flight 6: Panel composition, parity sweep & land** — media/privacy panel as a native overlay;
-  claim #27/SC10 if free (SC7); run the full active behavior-test corpus as the parity benchmark; macOS
-  build-readiness check; merge the mission branch to `main`. *(SC3, SC7, SC8, mission landing.)*
+- [ ] **Flight 6: Parity sweep & land** — run the full active behavior-test corpus as the parity
+  benchmark; macOS build-readiness check; merge the mission branch to `main`. *(SC3, SC8, mission
+  landing.)* — **Panel composition (SC7/#27/SC10) is DONE (Flight 9, certified 2026-07-07)** and its
+  original framing here ("media/privacy panel as a native **overlay**") was **refuted**: panels
+  compress the guest side-by-side, they do NOT overlay it (F9 DD1, operator decision), and #27 was
+  the slide *animation*, retired — not an overlay migration. F6's macOS pass need only a one-line HAT
+  confirm that instant panel open/close reads clean on macOS (no slide left to differ by platform).
 
 - [x] **Flight 7 (new — surfaced in the Flight-4 HAT): Floating overlay find bar** — ✅ LANDED
   (2026-07-02). Overlay `WebContentsView` find bar shipped at full parity+ (float-not-inset,

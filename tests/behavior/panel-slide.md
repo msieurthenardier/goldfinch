@@ -5,8 +5,10 @@
 **Created**: 2026-07-06
 **Last Run**: 2026-07-07-00-17-13 (PASS 6/6 — first run, settled compositing). Promoted draft→active
 at F9 Leg-3. **Note:** F9 removed the panel *slide animation* (panels now open/close **instantly** —
-the animated slide was structurally un-composite-able on the native-view surface and mis-composited
-on WSLg; see the flight #27/SC10 resolution). This spec asserts **settled-state** compositing, which
+the animated slide was structurally un-animatable — the guest is a separate compositing surface that
+steps discretely, so chrome-ramps-while-guest-steps mis-renders the frame on **every platform**
+(operator-confirmed on native Windows, not a WSLg quirk); see the flight #27/SC10 resolution). This
+spec asserts **settled-state** compositing, which
 is unchanged by that fix and remains the regression net; there is no longer any inter-frame slide to
 judge.
 
@@ -20,9 +22,11 @@ judge.
 > stays live.
 
 > **No slide to judge (F9 Leg-3).** Panels now open/close **instantly** — the width animation was
-> removed because it was structurally un-composite-able on the native-view surface (the guest snaps
-> to its final width in one step; only the chrome panel box animated, and that mismatch
-> mis-composited on WSLg). So there is no inter-frame smoothness property at all; this spec asserts
+> removed because it was structurally un-animatable: the guest is a separate compositing surface whose
+> bounds step discretely (it snaps to its final width in one step), so only the chrome panel box
+> animated and that chrome-ramps-while-guest-steps mismatch mis-renders the frame on **every**
+> platform (operator-confirmed on native Windows — not a WSLg quirk). So there is no inter-frame
+> smoothness property at all; this spec asserts
 > **settled-state** compositing only (guest flush to the panel, no gap/overlap/residual, guest live) —
 > the durable regression net. (Historical: the original F9 CP1 run judged settled state while the
 > 0.18s slide still existed; removing the slide does not change any settled assertion here.)

@@ -198,3 +198,27 @@ panels must inset, not overlay (DD1). No source changes required unless Leg 1/2 
 - Deviation recorded (anticipated fix was "make the slide smooth"; actual fix retires the slide) —
   per the flight's mid-execution-scope-change discipline. CP2 now PASS (glitch gone). Leg 2 →
   completed, Leg 3 → completed.
+
+### 2026-07-07 — DEBRIEF CORRECTION: WSLg was a red herring (operator observation)
+
+- **The in-flight root-cause attribution to "WSLg mis-composites" was WRONG.** At the debrief the
+  operator confirmed the **identical panel-slide glitch occurs on the native Windows build**, not
+  just WSLg. Combined with "exactly the same as M04" (which ran under `<webview>`), the defect
+  reproduces across **both architectures** (`<webview>` → `WebContentsView`) AND **both platforms**
+  (WSLg → native Windows).
+- **Corrected root cause (platform-independent):** the guest is a **separate compositing surface**
+  whose bounds change in **one discrete step** — it cannot animate in lockstep. Animating chrome
+  layout that resizes the guest slot produces a chrome-ramps-while-guest-steps mismatch that
+  mis-renders the composited frame on **every** platform. WSLg is not the cause; the
+  separate-surface-steps-discretely invariant is. This is *stronger* than the WSLg story: it
+  explains all four #27 failures (M04's three + F9) under one mechanism and confirms the fix
+  (retire the slide) is universally correct — which is why it works everywhere.
+- Artifacts corrected accordingly (`flight.md` SC7 line, `legs/03-fix-slide.md` root cause,
+  `tests/behavior/panel-slide.md`, the `styles.css` rationale comment, CLAUDE.md invariant). The
+  fix and all verification are unaffected — only the *attribution* changed.
+- **Methodology caution recorded:** I (FD) over-pattern-matched to WSLg because the two prior
+  mission render issues (F7 find cold-start, F8 click-swallow) genuinely WERE WSLg — so a third
+  render defect got the same label without a native-platform control. The operator's native-Windows
+  observation was the control the crew (running on the WSLg repo) could not perform. Lesson: do not
+  attribute a render defect to the rig without a cross-platform control; "the last two were WSLg" is
+  not evidence the next one is.

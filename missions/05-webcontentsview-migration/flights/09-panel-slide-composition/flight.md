@@ -8,11 +8,13 @@
 - [x] **SC7 — Side-panel compositing (#27 / SC10) — CERTIFIED (2026-07-07).** The media/privacy
   panels composite correctly over the live guest on the native `WebContentsView` architecture — at
   rest (flush, no gap/overlap; Leg-1 Witnessed `panel-slide` 6/6) AND on open/close (instant, no
-  mid-slide mis-composite). The animated *slide* was found structurally un-composite-able on the
-  native-view surface (guest snaps to final width in one step; only the chrome panel box animated;
-  that mismatch mis-composited on WSLg — DOM-correct, render-wrong) — the same root cause as M04's
-  three failed mechanisms. **Resolved by retiring the un-animatable slide** (panels open instantly,
-  no UX loss, operator-confirmed at the HAT) rather than fighting the compositor. #27/SC10 closed.
+  mid-slide mis-render). The animated *slide* was found structurally un-animatable: the guest is a
+  separate compositing surface whose bounds change in one discrete step, so only the chrome panel
+  box animates while the guest slot snaps — a mismatch that mis-renders the composited frame
+  (DOM-correct, render-wrong). **Platform-independent** (operator-confirmed on the native Windows
+  build, not just WSLg; same defect as M04's three failed `<webview>`-era attempts). **Resolved by
+  retiring the un-animatable slide** (panels open instantly, no UX loss, operator-confirmed at the
+  HAT). #27/SC10 closed.
 
 ## Pre-Flight
 

@@ -556,18 +556,22 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   /* Panels open/close INSTANTLY — no width transition (M05 F9, #27/SC10).
-     Rationale: with the native-`WebContentsView` guest, the guest re-bounds to its final
-     compressed width in one step (the DOM `#webviews` slot snaps at t=0; the guest view
-     follows via `tabSetBounds`), so a CSS width slide only animates the chrome-DOM panel box
-     while the guest stays put — a mismatched half-animation. Worse, that sustained chrome
-     repaint mis-composites the native views on WSLg (DOM layout is provably correct —
-     toolbar stable, no overflow — but the composited frame shifts/clips mid-slide; the
-     mission's "DOM-correct ≠ render-correct" failure, at the compositor). Removing the
-     animation closes #27/SC10: the panel composites correctly over the live guest at rest
-     (flush, verified) AND on open/close (instant, no mid-slide frames to mis-composite),
-     with no UX loss (operator-confirmed at the F9 HAT). The M04 attempts to *make the slide
-     smooth* (three CSS mechanisms, transform-composited) all failed for this same root cause;
-     F9 resolves it by retiring the un-animatable slide rather than fighting the compositor. */
+     Rationale: the guest is a SEPARATE COMPOSITING SURFACE (a native `WebContentsView`, or
+     the old `<webview>`) whose bounds change in ONE discrete `setBounds`/`tabSetBounds` step —
+     it cannot be animated in lockstep. So a CSS width slide animates only the chrome-DOM panel
+     box while the guest slot snaps to its final width at t=0 (the `#webviews` DOM slot jumps;
+     the guest view follows in one step) — a mismatched half-animation (chrome ramps, guest
+     steps). Sustaining that mismatched chrome repaint over the live guest mis-renders the
+     composited frame (it shifts/clips mid-slide) — the DOM layout is provably correct (toolbar
+     stable, no overflow) but the pixels are wrong: the mission's "DOM-correct ≠ render-correct"
+     failure, at the compositor. This is PLATFORM-INDEPENDENT — operator-confirmed on the native
+     Windows build as well as WSLg, and it is the same defect that broke M04's three
+     smooth-slide attempts under `<webview>`. Removing the animation closes #27/SC10: the panel
+     composites correctly over the live guest at rest (flush, verified) AND on open/close
+     (instant, no mid-slide frames), with no UX loss (operator-confirmed at the F9 HAT).
+     INVARIANT: never animate chrome layout that resizes/repositions the guest slot — the guest
+     steps, so the animation always mismatches. Animate things that float OVER the guest (F7
+     find bar, F8 menu sheet) instead. */
 }
 #media-panel.collapsed {
   width: 0;
@@ -988,18 +992,22 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   /* Panels open/close INSTANTLY — no width transition (M05 F9, #27/SC10).
-     Rationale: with the native-`WebContentsView` guest, the guest re-bounds to its final
-     compressed width in one step (the DOM `#webviews` slot snaps at t=0; the guest view
-     follows via `tabSetBounds`), so a CSS width slide only animates the chrome-DOM panel box
-     while the guest stays put — a mismatched half-animation. Worse, that sustained chrome
-     repaint mis-composites the native views on WSLg (DOM layout is provably correct —
-     toolbar stable, no overflow — but the composited frame shifts/clips mid-slide; the
-     mission's "DOM-correct ≠ render-correct" failure, at the compositor). Removing the
-     animation closes #27/SC10: the panel composites correctly over the live guest at rest
-     (flush, verified) AND on open/close (instant, no mid-slide frames to mis-composite),
-     with no UX loss (operator-confirmed at the F9 HAT). The M04 attempts to *make the slide
-     smooth* (three CSS mechanisms, transform-composited) all failed for this same root cause;
-     F9 resolves it by retiring the un-animatable slide rather than fighting the compositor. */
+     Rationale: the guest is a SEPARATE COMPOSITING SURFACE (a native `WebContentsView`, or
+     the old `<webview>`) whose bounds change in ONE discrete `setBounds`/`tabSetBounds` step —
+     it cannot be animated in lockstep. So a CSS width slide animates only the chrome-DOM panel
+     box while the guest slot snaps to its final width at t=0 (the `#webviews` DOM slot jumps;
+     the guest view follows in one step) — a mismatched half-animation (chrome ramps, guest
+     steps). Sustaining that mismatched chrome repaint over the live guest mis-renders the
+     composited frame (it shifts/clips mid-slide) — the DOM layout is provably correct (toolbar
+     stable, no overflow) but the pixels are wrong: the mission's "DOM-correct ≠ render-correct"
+     failure, at the compositor. This is PLATFORM-INDEPENDENT — operator-confirmed on the native
+     Windows build as well as WSLg, and it is the same defect that broke M04's three
+     smooth-slide attempts under `<webview>`. Removing the animation closes #27/SC10: the panel
+     composites correctly over the live guest at rest (flush, verified) AND on open/close
+     (instant, no mid-slide frames), with no UX loss (operator-confirmed at the F9 HAT).
+     INVARIANT: never animate chrome layout that resizes/repositions the guest slot — the guest
+     steps, so the animation always mismatches. Animate things that float OVER the guest (F7
+     find bar, F8 menu sheet) instead. */
 }
 #privacy-panel.collapsed {
   width: 0;
