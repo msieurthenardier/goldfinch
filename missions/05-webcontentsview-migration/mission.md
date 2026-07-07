@@ -72,7 +72,7 @@ follow-on work.
   `webContents` id continues to work end-to-end; auth/origin gating, jar scoping, and the
   observe/act/find/nav/devtools ops all hold. The accumulated MCP behavior-test corpus is the benchmark.
   *(Verified: `mcp-drive-end-to-end` + the `mcp-*` behavior tests.)*
-- [ ] **SC7 — Side-panel compositing (#27 / SC10) — bonus, free-only.** The media/privacy panel
+- [x] **SC7 — Side-panel compositing (#27 / SC10) — CERTIFIED (Flight 9, 2026-07-07).** The media/privacy panel
   composites correctly over the guest surface, closing #27/SC10 — pursued **only if** it falls out of the
   native-view model essentially for free. Not a gate; explicitly droppable without reopening as polish.
 - [ ] **SC8 — Frameless window & controls parity, per platform.** The frameless window, drag regions,
@@ -244,7 +244,7 @@ follow-on work.
   (operator decision). *(SC3/SC4-adjacent parity-on-better-mechanism; not required for mission
   landing.)*
 
-- [ ] **Flight 9 (new — panel-slide pulled out of the tentative Flight 6, planned 2026-07-06):
+- [x] **Flight 9 (new — panel-slide pulled out of the tentative Flight 6, 2026-07-06/07): ✅ LANDED —
   Side-panel slide composition (#27 / SC10)** — verify/certify SC7: the media/privacy side panels
   **compress** the live guest (side-by-side, NOT overlay — operator decision) and the open/close
   **slide** composites cleanly on the native surface. Verify-first (F1 predicted "#27 doesn't
