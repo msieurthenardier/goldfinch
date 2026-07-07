@@ -1,6 +1,6 @@
 # Flight: Side-Panel Slide Composition (#27 / SC10)
 
-**Status**: landed
+**Status**: completed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
