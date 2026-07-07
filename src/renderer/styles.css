@@ -555,9 +555,19 @@ a:focus-visible {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition:
-    width 0.18s ease,
-    margin-right 0.18s ease;
+  /* Panels open/close INSTANTLY — no width transition (M05 F9, #27/SC10).
+     Rationale: with the native-`WebContentsView` guest, the guest re-bounds to its final
+     compressed width in one step (the DOM `#webviews` slot snaps at t=0; the guest view
+     follows via `tabSetBounds`), so a CSS width slide only animates the chrome-DOM panel box
+     while the guest stays put — a mismatched half-animation. Worse, that sustained chrome
+     repaint mis-composites the native views on WSLg (DOM layout is provably correct —
+     toolbar stable, no overflow — but the composited frame shifts/clips mid-slide; the
+     mission's "DOM-correct ≠ render-correct" failure, at the compositor). Removing the
+     animation closes #27/SC10: the panel composites correctly over the live guest at rest
+     (flush, verified) AND on open/close (instant, no mid-slide frames to mis-composite),
+     with no UX loss (operator-confirmed at the F9 HAT). The M04 attempts to *make the slide
+     smooth* (three CSS mechanisms, transform-composited) all failed for this same root cause;
+     F9 resolves it by retiring the un-animatable slide rather than fighting the compositor. */
 }
 #media-panel.collapsed {
   width: 0;
@@ -977,9 +987,19 @@ a:focus-visible {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition:
-    width 0.18s ease,
-    margin-right 0.18s ease;
+  /* Panels open/close INSTANTLY — no width transition (M05 F9, #27/SC10).
+     Rationale: with the native-`WebContentsView` guest, the guest re-bounds to its final
+     compressed width in one step (the DOM `#webviews` slot snaps at t=0; the guest view
+     follows via `tabSetBounds`), so a CSS width slide only animates the chrome-DOM panel box
+     while the guest stays put — a mismatched half-animation. Worse, that sustained chrome
+     repaint mis-composites the native views on WSLg (DOM layout is provably correct —
+     toolbar stable, no overflow — but the composited frame shifts/clips mid-slide; the
+     mission's "DOM-correct ≠ render-correct" failure, at the compositor). Removing the
+     animation closes #27/SC10: the panel composites correctly over the live guest at rest
+     (flush, verified) AND on open/close (instant, no mid-slide frames to mis-composite),
+     with no UX loss (operator-confirmed at the F9 HAT). The M04 attempts to *make the slide
+     smooth* (three CSS mechanisms, transform-composited) all failed for this same root cause;
+     F9 resolves it by retiring the un-animatable slide rather than fighting the compositor. */
 }
 #privacy-panel.collapsed {
   width: 0;

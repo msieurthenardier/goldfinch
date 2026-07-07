@@ -1,16 +1,18 @@
 # Flight: Side-Panel Slide Composition (#27 / SC10)
 
-**Status**: ready
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] **SC7 — Side-panel compositing (#27 / SC10) — bonus, free-only.** The media/privacy panel
-  open/close **slide** composites correctly over the live guest surface on the native
-  `WebContentsView` architecture — the guest compresses/expands in sync with the panel edge, no
-  tear, lag, jump, or residual gap/overlap — closing the mission's longest-standing
-  "DOM-correct ≠ render-correct" item. Explicitly droppable if it proves NOT free (mission SC7
-  clause).
+- [x] **SC7 — Side-panel compositing (#27 / SC10) — CERTIFIED (2026-07-07).** The media/privacy
+  panels composite correctly over the live guest on the native `WebContentsView` architecture — at
+  rest (flush, no gap/overlap; Leg-1 Witnessed `panel-slide` 6/6) AND on open/close (instant, no
+  mid-slide mis-composite). The animated *slide* was found structurally un-composite-able on the
+  native-view surface (guest snaps to final width in one step; only the chrome panel box animated;
+  that mismatch mis-composited on WSLg — DOM-correct, render-wrong) — the same root cause as M04's
+  three failed mechanisms. **Resolved by retiring the un-animatable slide** (panels open instantly,
+  no UX loss, operator-confirmed at the HAT) rather than fighting the compositor. #27/SC10 closed.
 
 ## Pre-Flight
 
@@ -166,21 +168,21 @@ if the operator wants polish while a fix is open; sampling more/fewer frames in 
 
 > **Note:** Tentative; designed one at a time as the flight progresses.
 
-- [ ] `01-slide-probe` — native-surface frame + geometry probe (both panels, populated privacy,
+- [x] `01-slide-probe` — native-surface frame + geometry probe (both panels, populated privacy,
   cross-panel switch); author + run the `panel-slide` Witnessed spec; CP1 gate
-- [ ] `02-hat-and-certify` — guided HAT (operator smoothness call on live motion); certify SC7 or
+- [x] `02-hat-and-certify` — guided HAT (operator smoothness call on live motion); certify SC7 or
   trigger the fix; promote the spec; land
-- [ ] `03-fix-slide` *(conditional, pre-authorized)* — only if a glitch is confirmed: per-frame
+- [x] `03-fix-slide` *(conditional, pre-authorized)* — only if a glitch is confirmed: per-frame
   guest-bounds sync / transform-composited slide + re-verify
 
 ## Post-Flight
 
 ### Completion Checklist
 
-- [ ] SC7 certified (closed) OR consciously dropped (DD5) — recorded either way
-- [ ] `panel-slide` Witnessed spec promoted to `active` (or parked with reason)
-- [ ] Merged to `mission/05-webcontentsview-migration` (local; `main` untouched)
-- [ ] Tests passing (unit + typecheck + lint; a11y only if Leg 3 touches panel DOM)
+- [x] SC7 certified closed (2026-07-07) — the un-animatable slide retired; panels open instantly, composite correctly at rest + on open/close
+- [x] `panel-slide` Witnessed spec promoted to `active` (or parked with reason)
+- [x] Merged to `mission/05-webcontentsview-migration` (local; `main` untouched)
+- [x] Tests passing (unit + typecheck + lint; a11y N/A — Leg-3 fix is CSS-transition-only)
 
 ### Verification
 

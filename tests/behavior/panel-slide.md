@@ -1,8 +1,14 @@
 # Behavior Test: Side-panel slide compositing — guest compresses flush to the panel, stays live
 
 **Slug**: `panel-slide`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-06
+**Last Run**: 2026-07-07-00-17-13 (PASS 6/6 — first run, settled compositing). Promoted draft→active
+at F9 Leg-3. **Note:** F9 removed the panel *slide animation* (panels now open/close **instantly** —
+the animated slide was structurally un-composite-able on the native-view surface and mis-composited
+on WSLg; see the flight #27/SC10 resolution). This spec asserts **settled-state** compositing, which
+is unchanged by that fix and remains the regression net; there is no longer any inter-frame slide to
+judge.
 
 > **Why this spec exists.** Mission-05 SC7/#27/SC10: the media/privacy side panels **compress** the
 > live guest (side-by-side, not overlay) via a width slide. Under `<webview>` the slide tore because
@@ -13,11 +19,13 @@
 > residual strip — for both panels, populated privacy, and the cross-panel switch, while the guest
 > stays live.
 
-> **Apparatus limit — inter-frame smoothness is HAT-only (DD4).** Each `captureWindow` grab is a
-> *settled* frame; the absence of tear/lag/stutter *during* the 0.18s slide cannot be proven from
-> discrete grabs. That property is certified by the **HAT** (operator watching continuous motion),
-> exactly as OS-pointer interception was in the menu-overlay spec. This spec asserts settled-state and
-> resting-geometry compositing only — the durable regression net — not motion smoothness.
+> **No slide to judge (F9 Leg-3).** Panels now open/close **instantly** — the width animation was
+> removed because it was structurally un-composite-able on the native-view surface (the guest snaps
+> to its final width in one step; only the chrome panel box animated, and that mismatch
+> mis-composited on WSLg). So there is no inter-frame smoothness property at all; this spec asserts
+> **settled-state** compositing only (guest flush to the panel, no gap/overlap/residual, guest live) —
+> the durable regression net. (Historical: the original F9 CP1 run judged settled state while the
+> 0.18s slide still existed; removing the slide does not change any settled assertion here.)
 
 > **Apparatus-wiring litmus (required).** Before any step, confirm the MCP client is wired to the
 > **dev** instance at admin tier: `getChromeTarget()` returns a chrome wcId AND `enumerateTabs()`
@@ -61,9 +69,9 @@ with the guest flush. These are settled-state "DOM-correct ≠ render-correct" c
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Litmus: `getChromeTarget()`, `enumerateTabs()`. Open a web tab (Default jar) on the motion fixture. Record chrome + guest wcId and the baseline `#webviews` slot bounds via `evaluate`. Baseline `captureWindow()` (no panel open). | (setup) Litmus passes. Baseline: guest full-width below the toolbar, both panels collapsed (width 0), no residual panel strip. |
-| 2 | **Media open + compress:** `evaluate(chromeWcId, "document.getElementById('toggle-media').click()")`. After ~0.3s settle, `captureWindow()`; `evaluate` the `#webviews` slot bounds + `#media-panel` rendered width. Wait ~2s, `captureWindow()` again. | Media panel occupies the right ~360px; the guest is **compressed flush** against the panel's left edge — no gap (dark strip) and no overlap between guest and panel. The `#webviews` width shrank by ≈ the panel width and the guest re-bounded to it. The guest is **live** — the ticking region **differs between the two grabs** (compression didn't freeze it). [render-correct] |
+| 2 | **Media open + compress (PRIMARY flush-seam assertion):** `evaluate(chromeWcId, "document.getElementById('toggle-media').click()")`. After ~0.3s settle, `captureWindow()`; `evaluate` the `#webviews` slot bounds + `#media-panel` rendered width. Wait ~2s, `captureWindow()` again. | Media panel occupies the right ~360px; the guest is **compressed flush** against the panel's left edge — no gap (dark strip) and no overlap between guest and panel. The `#webviews` width shrank by ≈ the panel width and the guest re-bounded to it. **Re-layout tell (recommended, not overlay):** on the cream fixture, compression genuinely reflows the guest — a horizontal scrollbar appears and a text line clips at the panel seam (both vanish on restore in step 3); this is the strongest evidence `#webviews` re-bounded rather than being overlaid. The guest is **live** — the ticking region **differs between the two grabs** (compression didn't freeze it). [render-correct] |
 | 3 | **Media close + restore:** `evaluate(chromeWcId, "document.getElementById('media-close').click()")`. Settle; `captureWindow()`; `evaluate` slot bounds. | Panel collapsed; the guest expanded back to **full width, flush to the window edge**, with no residual panel strip or gap. Slot bounds back to baseline. [render-correct] |
-| 4 | **Privacy open, settled-composite:** open a tab on a **real page with tracker/third-party activity** (NOT the static local fixture — `renderPrivacy` always appends its ~8 sections, so a child-count check on the fixture passes trivially and proves nothing; a real page yields non-zero stats). `evaluate(chromeWcId, "document.getElementById('toggle-privacy').click()")`. Settle; `captureWindow()`; `evaluate` a real-content signal (a non-zero **Trackers** or **Third-party** big-stat, not merely `#privacy-body` child count > 0) + slot bounds. | Privacy panel open on the right with a **genuinely populated body** (a non-zero stat rendered); guest compressed flush against it, no gap/overlap. **Note (HAT-scoped):** the M04 asymmetry root — privacy stats arriving *async* and reflowing the body *during* the open frame — is an inter-frame property this settled grab cannot see; the operator observes it live in the Leg-2 HAT on a real tracker-heavy page. [render-correct] |
+| 4 | **Privacy open, settled-composite:** open a tab on a **real page with tracker/third-party activity** (NOT the static local fixture — `renderPrivacy` always appends its ~8 sections, so a child-count check on the fixture passes trivially and proves nothing; a real page yields non-zero stats). Default page: `https://www.cnn.com/` (verified tracker-heavy — first run yielded Trackers=3, Third-party domains=16); fallback if it fails/changes: any tracker-heavy news/retail site. **Network-dependent** — if offline or no page yields non-zero stats, this step is INCONCLUSIVE, not fail (the compositing isn't broken; the apparatus can't populate it). Let the page fully load / hit `#privacy-refresh` before reading (stats accrue async). `evaluate(chromeWcId, "document.getElementById('toggle-privacy').click()")`. Settle; `captureWindow()`; `evaluate` a real-content signal (a non-zero **Trackers** or **Third-party domains** `.ps-big` value, not merely `#privacy-body` child count > 0) + slot bounds. | Privacy panel open on the right with a **genuinely populated body** (a non-zero stat rendered); guest compressed flush against it, no gap/overlap. **Seam caveat:** on a dark-themed real page the guest|panel seam is dark-on-dark — judge flush by absence of any *bright gap strip* + no cross-boundary bleed, backed by the slot-width Δ; the crispest flush-seam evidence is **step 2** (cream fixture vs dark panel), which is the primary flush assertion — steps 4–6 primarily assert population / single-inset / return. **Note (HAT-scoped):** the M04 asymmetry root — privacy stats arriving *async* and reflowing the body *during* the open frame — is an inter-frame property this settled grab cannot see; the operator observes it live in the Leg-2 HAT on a real tracker-heavy page. [render-correct] |
 | 5 | **Cross-panel switch:** with privacy open, `evaluate(chromeWcId, "document.getElementById('toggle-media').click()")`. Settle; `captureWindow()`. | Privacy closes and media opens as the single right panel — **exactly one** panel inset, guest still compressed flush against it (no double-inset, no gap where the old panel was, no overlap). [render-correct] |
 | 6 | **Return to baseline:** close the open panel (`media-close`). Settle; final `captureWindow()`; `evaluate` slot bounds. | Frame pixel-equivalent to the step-1 baseline (modulo time-varying content): no panel, guest full-width flush, no residual strip. Slot bounds == baseline. [render-correct] |
 
