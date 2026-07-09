@@ -1,7 +1,7 @@
 # Behavior Test: Cross-view keyboard navigation (chrome ↔ guest)
 
 **Slug**: `chrome-guest-keyboard-nav`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-07
 **Last Run**: never
 
