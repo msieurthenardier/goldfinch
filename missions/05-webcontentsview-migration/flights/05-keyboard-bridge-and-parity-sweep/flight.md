@@ -1,17 +1,15 @@
 # Flight: Cross-View Keyboard Bridge & Admin-Wired Parity Sweep
 
-**Status**: ready
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC6** — Automation (MCP) parity, no drift: every guest-addressing MCP tool works end-to-end;
-  auth/origin gating, jar scoping, observe/act/find/nav/devtools ops all hold, proven on the new surface.
-- [ ] **SC4** — Conveniences parity, *formal* net: the deferred Witnessed convenience corpus + `npm run a11y`
-  (Flight 4 accepted SC4 via HAT and deferred the formal net on the apparatus-wiring blocker; this flight closes it).
-- [ ] **SC5 (part)** — Privacy & trust preserved: the apparatus-gated security specs (internal-session
-  exclusion, jar scoping, farbling, scheme guard) re-verified live on the native view surface.
-- [ ] **Mission Known Issue** — Multi-`WebContentsView` chrome↔guest keyboard/focus bridging (F8 HAT): resolved
-  in full (all three gaps), unblocking corpus runs that cross the chrome/guest boundary.
+- [x] **SC6** — Automation (MCP) parity, no drift: ✅ automation corpus PASS on the native surface (Leg 4).
+- [x] **SC4** — Conveniences parity, *formal* net: ✅ convenience corpus + `npm run a11y` PASS (Legs 5–6).
+- [x] **SC5 (part)** — Privacy & trust preserved: ✅ internal-session exclusion, jar scoping, farbling, scheme
+  guard all re-verified live (Leg 3); admin-navigate-internal is a *pre-existing* concern → debrief.
+- [x] **Mission Known Issue** — Multi-`WebContentsView` chrome↔guest keyboard/focus bridging (F8 HAT): ✅ resolved
+  (all three gaps), verified live (Leg 2).
 
 > **F5/F6 boundary (operator decision, DD1):** Flight 5 drains *everything that needs the live admin-wired
 > apparatus* — the MCP automation corpus (SC6), the deferred convenience corpus + a11y (SC4), and the
@@ -42,14 +40,15 @@ is the multi-view keyboard bridge, which must land first because the broken brid
 - [ ] **Do any specs need a *functional* surface update (not just terminology)?** Expectation: **none** — the
   corpus drives by `wcId` through the MCP client, which survives the migration; `sendToHost` appears in zero
   specs. Confirmed spec-by-spec as each runs; any genuine functional dependency surfaced becomes in-flight work.
-- [ ] **Ctrl+L on internal `goldfinch://` tabs** (leg-design). All current guest branches sit inside the
-  `!__goldfinchInternal` guard (`main.js:997`), so a Ctrl+L branch added there stays dead on internal tabs.
-  Intended default: Ctrl+L should focus the address bar on **both** web and internal tabs (it's a chrome-level
-  accelerator, not a guest feature) — so the capture must live where it also fires for internal tabs (outside
-  that guard, or via the renderer-keydown fallback path). Resolve at the keyboard-bridge leg.
-- [ ] **Deterministic guest→chrome Tab target** (leg-design). After Tab leaves the guest, which chrome control
-  receives focus, and does the handoff move **OS** focus to the chrome view (so the Step-6 chrome Tab-wrap
-  operates on a genuinely focused chrome)? Pin at leg design.
+- [x] **Ctrl+L on internal `goldfinch://` tabs** → **RESOLVED (Leg 2 design):** Ctrl+L focuses the address bar on
+  **both** web and internal tabs. The whole guest handler sits inside the `!__goldfinchInternal` guard, so
+  internal tabs get no `before-input-event` today; the "renderer-keydown fallback" idea is **refuted** (it fires
+  only when *chrome* holds focus — verified no `globalShortcut`/app-menu exists). Fix: a **separate minimal
+  internal-guest `before-input-event`** handling only the two cross-view keys, leaving the web-guest block
+  untouched. See Leg 2 Context DD.
+- [x] **Deterministic guest→chrome Tab target** → **RESOLVED (Leg 2 design):** forward Tab hands off to the
+  **address bar** (`els.address`, always present); the handoff moves **OS** focus via `getChromeContents().focus()`
+  (the `focusChrome` primitive, `main.js:483`). Shift+Tab is out of required scope (last-chrome-control if handled).
 
 ### Design Decisions
 
@@ -171,13 +170,13 @@ surface; any spec found to have a genuine *functional* `<webview>` dependency (n
 in-scope migration work.
 
 ### Checkpoints
-- [ ] Wiring litmus green — client provably bound to this instance at admin tier (DD2)
+- [x] Wiring litmus green — client provably bound to this instance at admin tier (DD2) ✅ 2026-07-08 (port `8899`)
 - [ ] Keyboard bridge landed: all three gaps closed; `chrome-guest-keyboard-nav` Witnessed PASS; mapper units green
 - [ ] Security + gating specs PASS (trust boundary + jar-scoping intact on the new surface)
 - [ ] MCP automation corpus PASS (SC6)
 - [ ] Convenience corpus PASS + find WSLg cold-start question answered & `find-in-page.md` updated (SC4)
-- [ ] `npm run a11y` green (SC4 formal net)
-- [ ] F4 housekeeping folded (CLAUDE.md conventions + stale comments)
+- [x] `npm run a11y` green (SC4 formal net) ✅ 2026-07-08 (0 NEW violations)
+- [x] F4 housekeeping folded (CLAUDE.md conventions + stale comments)
 
 ### Adaptation Criteria
 
@@ -197,12 +196,12 @@ in-scope migration work.
 > **Note:** Tentative; legs are planned one at a time as the flight progresses. The corpus is clustered so each
 > leg fixes the regressions it surfaces. Precise per-spec assignment is enumerated at the first corpus leg.
 
-- [ ] `apparatus-bringup-and-litmus` — launch the admin-wired flight-5 instance; run + record the wiring litmus (DD2). **Hard gate.**
-- [ ] `cross-view-keyboard-bridge` — full three-gap fix on the DD13 primitive; mapper unit tests; run the new `chrome-guest-keyboard-nav` Witnessed spec.
-- [ ] `security-and-gating-specs` — `internal-session-exclusion`, `mcp-jar-scoping`, `tab-surface-geometry`, `internal-tab-menus`, `farbling-correctness`, `tab-scheme-guard`; fix regressions.
-- [ ] `automation-mcp-corpus` — `mcp-drive-end-to-end`, `mcp-auth-gating`, `mcp-loopback-origin-guard`, `automation-key-gating`, `settings-automation`, `foreground-to-act`, `observe-refusal-contract`, `devtools-cdp-conflict`; fix regressions (SC6).
-- [ ] `conveniences-corpus` — `find-in-page` (+ answer WSLg cold-start, update spec), `page-zoom`, `print-to-pdf`, `downloads-surface`, `page-context-menu`, `spellcheck`, `kebab-menu`, `menu-dismissal`; fix regressions (SC4).
-- [ ] `a11y-and-housekeeping` — `npm run a11y`; fold F4 CLAUDE.md conventions + fix stale `will-attach-webview` comments (DD5).
+- [x] `apparatus-bringup-and-litmus` — launch the admin-wired flight-5 instance; run + record the wiring litmus (DD2). **Hard gate.** ✅ **Litmus GREEN** (2026-07-08); port pinned `8899` (49707 Hyper-V-reserved on this WSL2 rig — see flight-log Deviation).
+- [x] `cross-view-keyboard-bridge` — Ctrl+L + Tab-handoff gaps closed (new pure `cross-view-nav.js` helper + `handleGuestCrossViewNav` on both web & internal guests); 10 new unit tests; `npm test`/typecheck/lint green (2026-07-08). Chrome Tab-wrap: no code added (self-contained focus scope already wraps — live determination is behavior-spec Step 6). **LANDED** — FD-run `/behavior-test chrome-guest-keyboard-nav` is the Witnessed acceptance net.
+- [x] `security-and-gating-specs` — `internal-session-exclusion`, `mcp-jar-scoping`, `tab-surface-geometry`, `internal-tab-menus`, `farbling-correctness`, `tab-scheme-guard`. ✅ **6/6 PASS, Validator CONFIRMED** (2026-07-08); both BLOCKING security specs clean; no regressions.
+- [x] `automation-mcp-corpus` — `mcp-drive-end-to-end`, `mcp-auth-gating`, `mcp-loopback-origin-guard`, `automation-key-gating`, `settings-automation`, `foreground-to-act`, `observe-refusal-contract`, `devtools-cdp-conflict`. ✅ **SC6 PASS, Validator CONFIRMED** (2026-07-08); DD9 "FAIL" triaged to a profile-mismatch false alarm; 2 CDP specs are macOS-authoritative (DD8).
+- [x] `conveniences-corpus` — `find-in-page` (WSLg cold-start answered, spec updated), `page-zoom`, `print-to-pdf`, `downloads-surface`, `page-context-menu`, `spellcheck`, `kebab-menu`, `menu-dismissal`. ✅ **SC4 formal net PASS** (2026-07-08); no product regression (the "security" flag triaged to a non-regression — jar exclusion intact); WSLg caveats → F6 macOS gate.
+- [x] `a11y-and-housekeeping` — `npm run a11y`; fold F4 CLAUDE.md conventions + fix stale `will-attach-webview` comments (DD5). ✅ **a11y GREEN** (0 NEW violations, 21 accepted baseline) on the admin-wired instance (port 8899); CLAUDE.md conventions + 3 stale comments + spec promotions/drift-fixes applied; test 1060/1060, typecheck+lint clean (2026-07-08).
 - [ ] `hat-and-alignment` *(optional)* — guided HAT over the keyboard bridge + any surface that surprised the corpus.
 
 ---

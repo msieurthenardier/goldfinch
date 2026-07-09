@@ -61,8 +61,8 @@ const DEFAULTS = {
   // Additive boolean — no schema version bump, no migration. It rides the no-validator
   // typeof-match fallback in load() (typeof false === typeof DEFAULTS.spellcheck), so a
   // settings file written before this leg auto-populates to false. Gated at the SESSION
-  // layer in main.js (setSpellCheckerLanguages), never at will-attach-webview (immutable
-  // after attach), so the toggle can reach already-open tabs.
+  // layer in main.js (setSpellCheckerLanguages), never in the WebContentsView's webPreferences
+  // (immutable after construction), so the toggle can reach already-open tabs.
   spellcheck: false
 };
 

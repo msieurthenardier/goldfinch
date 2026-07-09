@@ -1,7 +1,7 @@
 # Behavior Test: Internal-tab menus — kebab/container/site-info render above live goldfinch:// tabs + resize
 
 **Slug**: `internal-tab-menus`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-26
 **Last Run**: never
 

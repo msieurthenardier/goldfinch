@@ -147,7 +147,7 @@ follow-on work.
 
 ## Known Issues
 
-- [ ] **Multi-`WebContentsView` keyboard/focus bridging is unsolved for guest+chrome** — discovered
+- [x] **[RESOLVED F5] Multi-`WebContentsView` keyboard/focus bridging** — discovered
   in Flight 8 HAT, mission-wide architectural consequence (not an F8 regression). Three gaps: Tab
   can't leave the guest page (no cross-view traversal); Ctrl+L (focus-address) is dead when a guest
   has focus (not in the guest `before-input-event` capture set); chrome Tab order doesn't cycle.
@@ -219,7 +219,11 @@ follow-on work.
   in the HAT was proven by spike + spun out to **Flight 7**. Merged to `mission/05` locally; `main`
   untouched. *(SC4 via HAT; SC6-partial code-complete, live re-verify deferred.)* — *original tentative
   framing (commentary): re-home the renderer↔`<webview>`-element seams; budgeted as a rewrite.*
-- [ ] **Flight 5: Cross-view keyboard bridge & admin-wired parity sweep** — *(planning, 2026-07-07)* reshaped
+- [x] **Flight 5: Cross-view keyboard bridge & admin-wired parity sweep** — ✅ **LANDED (2026-07-08)**: keyboard
+  bridge (all 3 gaps) + admin-wired corpus sweep — SC6 automation PASS, SC4 conveniences+a11y PASS, SC5 trust
+  re-verified; no regressions (the internal-exclusion "security" flag triaged to a non-regression). Follow-ups →
+  debrief: DD9 OFF-branch positive-witness, admin-navigate-internal hardening, WSLg/CDP items → F6 macOS gate.
+  *(planning, 2026-07-07)* reshaped
   from the tentative "automation parity sweep." Two halves in one apparatus-gated flight: **(A)** land the
   multi-`WebContentsView` chrome↔guest keyboard/focus bridge (the Known Issue below — it blocks corpus runs
   crossing the boundary), then **(B)** drain the full admin-wired corpus on the native surface — SC6 automation

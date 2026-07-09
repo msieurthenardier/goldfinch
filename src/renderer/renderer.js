@@ -953,7 +953,8 @@ function sendActiveBounds() {
 // wireWebview removed (Leg 3): all tabs — web and internal — are now WebContentsViews;
 // no <webview> elements are constructed and wireWebview is unreachable. Tab-strip events
 // (navigate, title, favicon, load, find) are forwarded from main via wireTabViewEvents +
-// the module-level onTab* IPC subscriptions. Leg 4 removes will-attach-webview / webviewTag.
+// the module-level onTab* IPC subscriptions. No `will-attach-webview` handler or `webviewTag`
+// option remains — the `<webview>` machinery was removed when tabs moved to WebContentsView (M05 F3).
 
 function updateNavButtons() {
   const tab = activeTab();
