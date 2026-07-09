@@ -1,6 +1,6 @@
 # Flight: Parity Sweep, Mission Landing & v0.6.0 Release
 
-**Status**: landed
+**Status**: completed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
