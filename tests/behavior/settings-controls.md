@@ -38,6 +38,10 @@ writes through an origin-checked IPC bridge to the main process, which persists 
 - A reachable web page (e.g. `https://example.com/`) for the home-effect + security checks.
 - The settings store path is known: `userData/settings.json` (read via Bash/Read on the filesystem); Shields:
   `userData/shields.json`.
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Read `settings.json`/`shields.json` from the `-dev` profile —
+  comparing against the prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **Guest-reachability probe**: after opening Settings, confirm the `goldfinch://settings` guest is
   reachable — it surfaces in admin `enumerateTabs({ allowInternal: true })` as the internal guest `wcId`
   (proven by `settings-shell`'s migration).

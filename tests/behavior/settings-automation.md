@@ -90,6 +90,10 @@ off-by-default opt-in gets its operator-facing control).
   re-rendered `outerHTML` then reflects the committed state) and mark the UI-reflection sub-read
   `partial`. Use `readDom` for **text content, `hidden`/`disabled` attributes, `title`/`aria-label`,
   and element presence** (these are attribute-serialized — correct over `readDom`).
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Read `settings.json` (`automationEnabled`/`automationPort`/key
+  hashes) from the `-dev` profile — comparing against the prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **The build includes** the leg-2–4 Automation section: the enable toggle, address/port/bind-status
   controls, the per-jar + admin key controls, and the activity indicator + audit viewer.
 - **Admin-tier steps** require `GOLDFINCH_AUTOMATION_ADMIN` set in the launch env; without it, the

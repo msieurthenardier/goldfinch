@@ -1,8 +1,8 @@
 'use strict';
 
 // Preload for trusted internal `goldfinch://` pages (the Settings page).
-// Runs under contextIsolation:true + sandbox:true (set in will-attach-webview's
-// INTERNAL_PARTITION branch). In a sandbox:true + contextIsolation:true preload,
+// Runs under contextIsolation:true + sandbox:true (set at the `tab-create` handler's
+// trusted branch when constructing the internal WebContentsView). In a sandbox:true + contextIsolation:true preload,
 // `location` IS available and reflects the URL being loaded at the time the preload
 // is injected — so `location.origin` reads 'goldfinch://settings' for the real settings
 // page and the web origin for any other content.

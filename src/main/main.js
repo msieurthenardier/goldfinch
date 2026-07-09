@@ -35,6 +35,7 @@ const { isInternalContents } = require('./automation/resolve');
 // DD13 (F8 Leg 2): pure dual-export accelerator mapper for the menu-overlay sheet's
 // before-input-event forwarding + the internal-tab guard decision (both unit-tested).
 const { sheetAcceleratorAction, isGuestActionAllowed } = require('../shared/sheet-accelerator');
+const { crossViewNavAction } = require('../shared/cross-view-nav');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -970,6 +971,43 @@ function applyZoom(wc, action) {
 // explicitly for new WebContentsViews in ipcMain.handle('tab-create') (because
 // web-contents-created fires SYNCHRONOUSLY during new WebContentsView(), before the
 // tabViews registry entry can be set — so the global handler cannot identify them).
+//
+// handleGuestCrossViewNav — the guest→chrome keyboard bridge (M05 Flight 5 Leg 2).
+// Two keys must cross the multi-WebContentsView boundary from a focused guest back
+// to the chrome view: Ctrl/Cmd+L (focus the address bar) and an unmodified Tab
+// (hand focus off to the chrome's pinned first control, the address bar). Both are
+// chrome-level — not guest features — so they apply to WEB and INTERNAL guests
+// alike; this helper is invoked from BOTH the web-guest before-input-event and the
+// minimal internal-guest one. The pure decision (which key, if any) lives in the
+// unit-tested crossViewNavAction; here we run the side effects. Returns true iff it
+// handled (swallowed) the key so callers can early-return.
+function handleGuestCrossViewNav(event, input) {
+  if (input.type !== 'keyDown') return false;
+  const nav = crossViewNavAction({
+    key: input.key,
+    control: input.control,
+    meta: input.meta,
+    shift: input.shift,
+    alt: input.alt,
+  });
+  if (!nav) return false;
+  // Swallow the key so the guest never sees it (both keys leave the guest).
+  event.preventDefault();
+  // Held key: swallow but don't re-hand-off — a repeated Tab/Ctrl+L must not thrash
+  // focus back to chrome on every keyDown repeat (mirrors the guest branches' own
+  // isAutoRepeat guards).
+  if (input.isAutoRepeat) return true;
+  // Focus-then-send (F4 rule): OS-focus the chrome VIEW before the focus-address IPC.
+  // dispatchChromeAction('focus-address') only DOM-focuses els.address; for the input
+  // to actually accept typing the chrome view must hold OS keyboard focus (which, on a
+  // focused guest, it does not). Reuse getChromeContents()?.focus() (the focusChrome
+  // primitive). Both cross-view keys resolve to the pinned address bar, so both ride
+  // the existing chrome-shortcut-action:focus-address channel.
+  getChromeContents()?.focus();
+  getChromeContents()?.send('chrome-shortcut-action', { action: 'focus-address' });
+  return true;
+}
+
 function wireGuestContents(contents) {
   // Open target=_blank / window.open as new tabs in our own UI instead of
   // spawning native Electron windows.
@@ -997,6 +1035,12 @@ function wireGuestContents(contents) {
   if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      // Cross-view keyboard bridge (M05 F5 Leg 2) FIRST — Ctrl+L / unmodified Tab hand
+      // focus back to the chrome view. Contained approach: this single call sits above
+      // the existing accelerator branches, which stay UNTOUCHED (no regression surface
+      // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
+      // for every one of those keys, so it never shadows them.
+      if (handleGuestCrossViewNav(event, input)) return;
       // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
       // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
       // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
@@ -1079,6 +1123,19 @@ function wireGuestContents(contents) {
       if (!mainWindow) return;
       if (isInternalContents(contents)) return;
       getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
+    });
+  } else {
+    // Internal goldfinch:// guests get NO before-input-event from the block above
+    // (it sits inside the !__goldfinchInternal guard, so F12/zoom/print/find/downloads/
+    // devtools are all inert on internal tabs — intentional). But the two CROSS-VIEW
+    // keys (Ctrl+L, Tab) are chrome-level, not guest features, and must still work when
+    // an internal tab holds OS focus — the only viable capture is a main-side
+    // before-input-event on the internal guest's webContents (a chrome renderer-keydown
+    // fallback never fires while the internal view holds focus). Register a SEPARATE,
+    // MINIMAL handler that calls ONLY handleGuestCrossViewNav — nothing else — so
+    // internal tabs gain the keyboard bridge and no other accelerators.
+    contents.on('before-input-event', (event, input) => {
+      handleGuestCrossViewNav(event, input);
     });
   }
 }

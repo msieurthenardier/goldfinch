@@ -74,6 +74,10 @@ primary path).
   Media/Shields, which default pinned). If a prior run left `devtools: true` in `settings.json`, reset it
   (delete the file or set `devtools: false`) before running so the default-unpinned assertions hold.
 - `userData/settings.json` is readable on the filesystem; a reachable web page (e.g. `https://example.com/`).
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Read `settings.json` from the `-dev` profile — comparing against the
+  prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **Active-precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings,
   confirm the `goldfinch://settings` guest is enumerable via `enumerateTabs` (the admin engine's

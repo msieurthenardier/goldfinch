@@ -6,15 +6,22 @@
 **Last Run**: 2026-06-19-03-05-57 (partial — stepping/warm finds verified; cold-first-find
 WSLg-blocked; see `find-in-page/runs/2026-06-19-03-05-57.md`)
 
-> **Known environment limitation (WSLg).** The FIRST `findInPage` on a freshly-loaded guest may
-> return `{matches:0, activeMatchOrdinal:0}` in the WSLg dev environment — a Chromium cold-start
-> quirk where the first `found-in-page` event from the main-process `wc.findInPage()` arrives with
-> `finalUpdate:true, matches:0` before the real count populates. The automation op handles this via
-> a main-process `requestId`-correlated retry: on a `finalUpdate:true, matches:0` event it records
-> `last` and re-issues the find (up to 5 times, every 500 ms, within the overall 3 s timeout).
-> Whether this quirk still reproduces under `WebContentsView` (vs. the prior `<webview>` surface)
-> is re-verified by this run on the new surface. Step 2 below may still fail on WSLg if the
-> cold-start still manifests; **when re-running on macOS, expect step 2 to pass.**
+> **Known environment limitation (WSLg) — CONFIRMED still reproduces under `WebContentsView`
+> (2026-07-08 Leg-5 run).** A `findInPage` **new search** (`findNext:false`/omitted) on a
+> freshly-loaded guest returns `{matches:0, activeMatchOrdinal:0}` in the WSLg dev environment — a
+> Chromium cold-start quirk where the `found-in-page` event from the main-process `wc.findInPage()`
+> arrives with `finalUpdate:true, matches:0` before the real count populates. The automation op
+> attempts a main-process `requestId`-correlated retry (up to 5 times, every 500 ms, within the
+> overall 3 s timeout); **on this rig the retry does NOT recover** — the call burns the full ~2.5 s
+> budget and still returns `{0,0}`. The 2026-07-08 run observed this **not only on the first find but
+> on every `new-search` call in the session**, while **`findNext` stepping reports the correct count
+> (`matches:2`) and moves the active ordinal correctly** (fwd `1→2→wrap`, back `2→1`, matches
+> unchanged). So under `WebContentsView` the engine *does* count matches — the failure is confined to
+> the `findNext:false` new-search return path. Step 2 (a new search) therefore **FAILS on WSLg**
+> (dispositioned WSLg-known, not a Leg-5 regression — prior run `2026-06-19-03-05-57` was likewise
+> cold-first-find-blocked); **when re-running on macOS, expect step 2 to pass.** Step 5 (no-match
+> `{0,0}`) is **INCONCLUSIVE on WSLg** — a genuine no-match and the quirk's false-zero are
+> indistinguishable while every new-search returns `{0,0}`.
 
 ## Intent
 

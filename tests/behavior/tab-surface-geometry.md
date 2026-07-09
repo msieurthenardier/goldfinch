@@ -1,7 +1,7 @@
 # Behavior Test: Tab-surface geometry — menu-over-live-guest, panel-resizes-guest, find-overlay float
 
 **Slug**: `tab-surface-geometry`
-**Status**: draft
+**Status**: active
 **Created**: 2026-06-26
 **Last Run**: never
 
