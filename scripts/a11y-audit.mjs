@@ -37,7 +37,7 @@
 //        GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation
 //      It prints ONE line:  AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}
 //   2. Export the key the audit needs:
-//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 7-state sweep (admin)
+//        export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # default chrome 6-state sweep (admin)
 //        export GOLDFINCH_MCP_KEY=<jarKey>           # --target guest mode (jar)
 //   3. Serve the media fixture (tests/behavior/fixtures/a11y-media/) on :8000:
 //        python3 -m http.server 8000 --directory tests/behavior/fixtures/a11y-media
@@ -45,7 +45,9 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The chrome 7-state sweep needs the ADMIN key (getChromeTarget is admin-only);
+// The default sweep (5 chrome states + 5 menu-overlay SHEET states) needs the
+// ADMIN key (getChromeTarget is admin-only, and the sheet's wcId resolves only
+// under the admin relaxation — it is deliberately not in tabViews, DD8);
 // `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
 // is the INTERNAL session and the eval tool refuses it even for admin, so it
 // CANNOT be audited via `evaluate` (the old CDP path could) — see the
@@ -122,7 +124,22 @@ const ACCEPTED = [
   { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
   { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
-  { id: 'region', selector: '#page-context-menu', state: 'page-context-menu', reason: 'transient role="menu" popup overlay (Flight 4 custom page context menu); a floating menu is not document content requiring a landmark — same accepted-chrome-exception class as #tabs/#brand. Its menuitem roles/names/keyboard nav raise no violations.' },
+  // NOTE (M05 F8 cutover): the old chrome `#page-context-menu` region entry was
+  // retired with the chrome-DOM menus — the page-context state now audits the
+  // menu-overlay SHEET document. The three state-scoped `#sheet-menu` entries
+  // below are its successors, confirmed live 2026-07-02 (Leg 5 CP4 run): the
+  // sheet's `menu`-template states fire the same region advisory the chrome
+  // menu did — a transient role="menu" popup overlay is not document content
+  // requiring a landmark (the same accepted-chrome-exception class as
+  // #tabs/#brand). The `info-popup` (site-info) and `input-dialog`
+  // (new-container) templates raise NO findings (role="dialog" content is
+  // outside the region rule's scope) — no entries needed for them.
+  { id: 'region', selector: '#sheet-menu', state: 'sheet:kebab', reason: 'transient role="menu" sheet overlay (kebab); floating menu needs no landmark — chrome #page-context-menu precedent. Menuitem roles/names/keyboard nav raise no violations.' },
+  { id: 'region', selector: '#sheet-menu', state: 'sheet:container', reason: 'transient role="menu" sheet overlay (container picker); floating menu needs no landmark — chrome #page-context-menu precedent.' },
+  { id: 'region', selector: '#sheet-menu', state: 'sheet:page-context', reason: 'transient role="menu" sheet overlay (page context); floating menu needs no landmark — direct successor of the retired chrome #page-context-menu entry.' },
+  // The two `html` entries below are deliberately STATE-UNSCOPED: they match the
+  // chrome document in every chrome state AND the sheet document in the sheet
+  // states (the sheet is a transient popup layer, not a document with main/h1).
   { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
   { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
   // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a
@@ -134,7 +151,7 @@ const ACCEPTED = [
 ];
 
 // ---------- pick the renderer target (chrome mode, admin) ----------
-// The chrome 7-state sweep drives the app shell, which is reachable only via the
+// The chrome+sheet sweep drives the app shell, which is reachable only via the
 // admin-only getChromeTarget tool — it returns { wcId, kind: 'chrome', url }.
 async function getChromeWcId(client) {
   const { value, isError } = await callTool(client, 'getChromeTarget', {});
@@ -177,6 +194,60 @@ async function getGuestWcId(client, substring) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- discover the menu-overlay sheet's wcId (M05 F8, DD6/DD8) ----------
+// The sheet is a lazy-singleton chrome-class WebContentsView created on the
+// FIRST menu open. It is deliberately absent from enumerateTabs (never in
+// tabViews — DD8), so the audit discovers it by probing the wcId space for the
+// menu-overlay.html document (the F7 probed-id-space technique; admin-only —
+// non-tab wcIds resolve only under the admin relaxation). Called ONCE per run,
+// after the first sheet state opens; the wcId is stable across states unless
+// the sheet crashes (self-teardown + recreate would mint a new one).
+//
+// SKIP every wcId enumerateTabs reports (and the chrome's own wcId): `evaluate`
+// is FOREGROUND-FIRST, so probing a background TAB would activate it — a
+// tab-switch that closes the just-opened menu out from under the audit. The
+// sheet is never in enumerateTabs (DD8), so skipping tab ids loses nothing.
+async function findSheetWcId(client, skipWcIds) {
+  const skip = new Set(skipWcIds || []);
+  try {
+    const { value: tabs, isError } = await callTool(client, 'enumerateTabs', {});
+    if (!isError && Array.isArray(tabs)) for (const t of tabs) skip.add(t.wcId);
+  } catch {
+    // enumerateTabs unavailable — fall back to the unfiltered walk
+  }
+  for (let id = 1; id <= 64; id++) {
+    if (skip.has(id)) continue;
+    try {
+      const { value, isError } = await callTool(client, 'evaluate', { wcId: id, expression: 'location.href' });
+      if (!isError && typeof value === 'string' && value.includes('menu-overlay.html')) return id;
+    } catch {
+      // bad handle / dead / excluded target — keep walking
+    }
+  }
+  fail(
+    'menu-overlay sheet wcId not found by the probe walk (1..64) — the sheet is a ' +
+      'lazy singleton, so a menu state must have OPENED before discovery (and the ' +
+      'audit needs the ADMIN key: non-tab wcIds resolve admin-only).'
+  );
+}
+
+// Sheet-side dismissal (design constraint): a chrome-side menuOverlayClose would
+// leave the sheet DOM rendered (the deliberate persist-after-main-close design),
+// breaking the DOM-closed check between states — so dismissal is a synthesized
+// Escape keydown on the OPEN template node, evaluated IN THE SHEET document.
+// That drives the sheet's own dismissal path (capture-phase 'escape' attribution
+// → controller close → dismissed{escape} → main close → chrome refocus).
+const SHEET_DISMISS_EXPR = `(() => {
+  const open = ['sheet-menu', 'sheet-popup', 'sheet-dialog']
+    .map((id) => document.getElementById(id))
+    .find((el) => el && !el.classList.contains('hidden'));
+  if (!open) return 'none-open';
+  open.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  return 'escaped';
+})()`;
+const SHEET_CLOSED_EXPR = `['sheet-menu', 'sheet-popup', 'sheet-dialog']
+  .every((id) => { const el = document.getElementById(id); return !el || el.classList.contains('hidden'); })`;
 
 // Evaluate an expression in the target tab's main world via the eval tool. The
 // MCP `evaluate` tool runs `webContents.executeJavaScript` (no CDP), natively
@@ -284,44 +355,65 @@ async function main() {
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'lightbox')));
 
-      // 5) Find bar open (focus order, aria-live count, button labels — AC2).
-      // openFind() guards against the lightbox being open, so close it first.
-      // openFind() also requires an active non-internal tab (guarded internally).
-      await evaluate(client, wcId, 'closeLightbox()');
-      await sleep(200);
-      await evaluate(client, wcId, 'openFind()');
-      await sleep(400);
-      allViolations.push(...(await runAxe(client, wcId, axeSource, 'find-bar')));
+      // NOTE (M05 F7 cutover): the former find-bar state was REMOVED. The find UI now
+      // lives in a main-owned overlay WebContentsView (find-overlay.html), which is not
+      // MCP-addressable by construction (never in tabViews; getChromeTarget returns only
+      // the chrome), so axe cannot be injected into it through this apparatus. Overlay
+      // a11y conformance rests on the DD12 verbatim attribute carry-over from the audited
+      // chrome bar (role="search", aria-live/aria-atomic count, button labels) + the HAT
+      // keyboard/focus pass. The chrome sweep stays green and meaningful on the chrome.
 
-      // 6) DevTools button visible (pin it; default is unpinned so the toolbar button is .hidden).
+      // 5) DevTools button visible (pin it; default is unpinned so the toolbar button is .hidden).
       // Audits the button's static a11y — accessible name + valid aria-pressed (NOT aria-expanded).
-      // The find-bar state (state 5) leaves the find bar OPEN; close it so unrelated find nodes
-      // don't pollute this state. closeFind REQUIRES the active-tab arg (renderer.js) — passing
-      // none is a silent no-op, so pass activeTab(). applyToolbarPins is a top-level renderer fn
-      // (window global, like togglePanel/openFind/closeLightbox) and toggles .hidden on
+      // The lightbox state (state 4) leaves the lightbox OPEN; close it so unrelated nodes
+      // don't pollute this state. applyToolbarPins is a top-level renderer fn
+      // (window global, like togglePanel/closeLightbox) and toggles .hidden on
       // els.toggleDevtools per pins.devtools (Leg 2), so pinning un-hides the button for axe.
       // We do NOT open DevTools (no detached window in the gate) — the unpressed static a11y is
-      // the target. This last state mutates live toolbar visibility and does not restore the
+      // the target. This state mutates live toolbar visibility and does not restore the
       // default pin map afterward — harmless, since the client closes immediately below.
-      await evaluate(client, wcId, 'closeFind(activeTab())');
+      await evaluate(client, wcId, 'closeLightbox()');
       await sleep(200);
       await evaluate(client, wcId, "applyToolbarPins({ media: true, shields: true, devtools: true })");
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
 
-      // 7) Page context menu open (Leg 6). The harness cannot fire a guest
-      // `context-menu` event, and the menu's real open path is gated behind
-      // unreachable `const pageCtx`/`pageContextEntry`/`menuController`, so we
-      // call the additive top-level driver `openPageContextMenuForAudit()`
-      // (renderer.js → window global) which opens #page-context-menu with a
-      // representative full-section synthetic params payload (link + selection +
-      // editable + spelling-suggestions + Inspect). Audits the open menu's a11y:
-      // role="menu" node, role="menuitem" buttons with accessible names,
-      // role="separator" between sections, roving tabindex. Reuses the
-      // already-a11y-passing #container-menu markup, so expect NO new violations.
-      await evaluate(client, wcId, 'openPageContextMenuForAudit()');
-      await sleep(400);
-      allViolations.push(...(await runAxe(client, wcId, axeSource, 'page-context-menu')));
+      // 6-10) Menu-overlay SHEET states (M05 F8 cutover, DD6). Every popup menu
+      // renders in the transparent sheet WebContentsView, so each state opens
+      // from the CHROME (evaluate on the chrome's own top-level open paths —
+      // the same bodies the trigger click/keydown handlers run) and audits the
+      // SHEET's wcId. The old chrome `page-context-menu` state re-targets the
+      // sheet here; chrome base states above are unchanged. `new-container` has
+      // no chrome-side trigger element — `openNewContainerOverlay()` is the
+      // module-scope open path (the same body the container menu's
+      // 'action:new-container' activation runs; sanctioned at leg design).
+      // Between states, dismissal is SHEET-SIDE (see SHEET_DISMISS_EXPR) and the
+      // DOM-closed check runs before the next open.
+      const SHEET_STATES = [
+        { label: 'sheet:kebab', open: 'openKebabOverlay(0)' },
+        { label: 'sheet:container', open: 'openContainerOverlay(0)' },
+        { label: 'sheet:site-info', open: 'openSiteInfoOverlay()' },
+        { label: 'sheet:new-container', open: 'openNewContainerOverlay()' },
+        // The audit hook builds a representative full-section synthetic params
+        // payload (link + selection + editable + spelling-suggestions + Inspect).
+        { label: 'sheet:page-context', open: 'openPageContextMenuForAudit()' }
+      ];
+      let sheetWcId = null;
+      for (const state of SHEET_STATES) {
+        await evaluate(client, wcId, state.open);
+        await sleep(400);
+        if (sheetWcId == null) sheetWcId = await findSheetWcId(client, [wcId]); // once — stable across states
+        allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
+        const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
+        if (dismissed !== 'escaped') {
+          throw new Error(`sheet state "${state.label}": no open template node to dismiss (got ${dismissed})`);
+        }
+        await sleep(300);
+        const closed = await evaluate(client, sheetWcId, SHEET_CLOSED_EXPR);
+        if (!closed) {
+          throw new Error(`sheet state "${state.label}" did not close after the sheet-side Escape`);
+        }
+      }
     }
   } finally {
     await client.close();

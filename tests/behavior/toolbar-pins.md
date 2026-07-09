@@ -16,7 +16,7 @@ with `F12`/`Ctrl+Shift+I` shortcuts that work **regardless of pin state**. The D
 **toggle button** (`aria-pressed` reflecting the external detached DevTools window's open/closed state, NOT
 `aria-expanded` — it has no in-page panel), and is **inert-not-hidden** on internal `goldfinch://` tabs
 (DD5). This needs a behavior test, not a unit test: the assertions are real-environment, cross-process UI —
-the pin toggle lives in a `<webview>` guest on a privileged scheme, the toolbar lives in the chrome renderer
+the pin toggle lives in a guest WebContentsView on a privileged scheme, the toolbar lives in the chrome renderer
 and reflects the active pin state via an IPC broadcast, persistence is a file the main process writes, and
 the DevTools button's pressed state is driven by a `devtools-state-changed` event the main process forwards
 (Leg-1 spike POSITIVE — the event fires reliably, so the button reflects open/closed **live**, including a
@@ -74,6 +74,10 @@ primary path).
   Media/Shields, which default pinned). If a prior run left `devtools: true` in `settings.json`, reset it
   (delete the file or set `devtools: false`) before running so the default-unpinned assertions hold.
 - `userData/settings.json` is readable on the filesystem; a reachable web page (e.g. `https://example.com/`).
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Read `settings.json` from the `-dev` profile — comparing against the
+  prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **Active-precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an exact count) the tools this spec drives:
   `getChromeTarget`, and `getChromeTarget()` returns a numeric chrome `wcId`. After opening Settings,
   confirm the `goldfinch://settings` guest is enumerable via `enumerateTabs` (the admin engine's

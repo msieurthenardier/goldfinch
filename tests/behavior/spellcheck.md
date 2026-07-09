@@ -54,6 +54,10 @@ cross-process round-trip (guest `context-menu` params → chrome menu → `page-
   NEVER a literal network/no-fetch assertion. Do **not** author a `[mixed-frame]` network row.
 - **Fresh-profile reset (setup-friendly).** Before running, reset `userData/settings.json` (delete it or
   set `spellcheck: false`) so the Default-OFF baseline holds. `settings.json` is filesystem-readable.
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Reset/read `settings.json` in the `-dev` profile — comparing against
+  the prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **Active-precondition probe** (Step 1): `tools/list` includes (presence-checked) `getChromeTarget`,
   `enumerateTabs`, `click`, `typeText`, `pressKey`, `readDom`, `readAxTree`, `captureWindow`, `evaluate`;
   `getChromeTarget()` returns a numeric chrome `wcId`.
@@ -105,7 +109,7 @@ not a failure. `[a11y]`-marked rows are accessibility-relevant.
   **macOS-authoritative**.
 - **The squiggle pixels** — the red wavy underline render is HAT-authoritative (INCONCLUSIVE on WSLg, per
   the top-of-spec block).
-- **The find-bar / other editable affordances** — unrelated; not this spec.
+- **The find overlay / other editable affordances** — unrelated; not this spec.
 - **The page context menu render itself** (sections, cursor, keyboard nav, Inspect) — owned by
   `page-context-menu.md`; this spec cross-references it for the menu render and asserts only the
   **spelling-suggestions** section + the **correction round-trip** on top of it.

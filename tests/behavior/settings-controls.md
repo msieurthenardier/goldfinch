@@ -10,7 +10,7 @@ Verify that the **global Shields toggles** and the **home page** are operable **
 that changes **persist** (to `shields.json` / `settings.json`) and **take effect**, and that they stay
 **consistent with the existing slide-out Shields panel** — plus that the privileged settings-page IPC bridge
 is **origin-locked** (web content cannot call it). This needs a behavior test, not a unit test, because the
-assertions are real-environment + cross-process: a control in a `<webview>` guest on a privileged scheme
+assertions are real-environment + cross-process: a control in a guest WebContentsView on a privileged scheme
 writes through an origin-checked IPC bridge to the main process, which persists to disk and broadcasts to a
 *different* renderer (the chrome) — none of which is observable offline. SC7 (controls operable + persistent
 + consistent) and SC8 (keyboard + a11y) are exactly this shape.
@@ -38,6 +38,10 @@ writes through an origin-checked IPC bridge to the main process, which persists 
 - A reachable web page (e.g. `https://example.com/`) for the home-effect + security checks.
 - The settings store path is known: `userData/settings.json` (read via Bash/Read on the filesystem); Shields:
   `userData/shields.json`.
+- **Dev-profile store location (load-bearing for the filesystem reads).** Under `npm run dev:automation` the
+  app is profile-isolated (`!app.isPackaged` → `app.setPath`), so `userData` is **`~/.config/goldfinch-dev`**,
+  NOT the installed `~/.config/goldfinch`. Read `settings.json`/`shields.json` from the `-dev` profile —
+  comparing against the prod profile mis-fires as a false mismatch (F5 Leg 4).
 - **Guest-reachability probe**: after opening Settings, confirm the `goldfinch://settings` guest is
   reachable — it surfaces in admin `enumerateTabs({ allowInternal: true })` as the internal guest `wcId`
   (proven by `settings-shell`'s migration).

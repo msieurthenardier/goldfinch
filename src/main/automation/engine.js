@@ -19,21 +19,31 @@ const find = require('./find');
  * engine.js itself uses no webContents.debugger (DD8); it wires ./observe, whose readAxTree is
  * the engine's sole debugger user.
  *
- * @param {() => (Electron.BrowserWindow | null)} getMainWindow
- *   Accessor for the current chrome BrowserWindow (may return null if window is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null }} [opts]
- *   allowInternal — admin's SOLE relaxation (DD6 / Leg 2): when true, deps carry
- *   allowInternal so resolveContents lets the internal goldfinch://settings
- *   session through. The mcp-server builds the admin engine with
- *   `{ allowInternal: true }`; jar engines (and every other caller) leave it
- *   false. Threaded into deps() and forwarded to EVERY resolveContents call site.
+ * @param {() => (Electron.WebContents | null)} getChromeContents
+ *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null }} [opts]
+ *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
+ *   when true, deps carry allowInternal so resolveContents (a) lets the internal
+ *   goldfinch://settings session through AND (b) skips the non-tab-contents
+ *   guard (chrome-class overlay views — the menu-overlay sheet, the find
+ *   overlay — resolve only at the admin tier). The mcp-server builds the admin
+ *   engine with `{ allowInternal: true }`; jar engines (and every other caller)
+ *   leave it false. Threaded into deps() and forwarded to EVERY resolveContents
+ *   call site.
+ *   isTabViewWcId — main.js's tabViews-membership predicate (M05 F8 DD8),
+ *   threaded into deps() so resolveContents can refuse non-tab, non-chrome
+ *   wcIds at non-admin tiers. Absent → no behavior change.
  *   getDownloads — accessor for the app-level downloads list (Flight 5). When
  *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
  *   op returns the merged download records. Absent → getDownloadsList throws a clean
  *   `downloads-unavailable`. Field named getDownloads to avoid shadowing the op name.
+ *   grabWindow — async function returning a base64 PNG of the whole window, or null
+ *   on failure. Injected from main.js (Flight 3, Leg 1); kept out of observe.js so
+ *   that module stays Electron-free and unit-testable. Absent → captureWindow throws
+ *   'automation: chrome window unavailable' (same as before injection).
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getMainWindow, { allowInternal = false, getDownloads = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -44,18 +54,20 @@ function createEngine(getMainWindow, { allowInternal = false, getDownloads = nul
    * `activate` of its own — avoids any accidental recursion.
    */
   const deps = () => {
-    const mw = getMainWindow();
-    const chromeContents = mw ? mw.webContents : null;
+    const chromeContents = getChromeContents();
     const executeInRenderer = (/** @type {string} */ code) => {
-      if (!mw) throw new Error('automation: chrome window unavailable');
-      return mw.webContents.executeJavaScript(code);
+      if (!chromeContents) throw new Error('automation: chrome window unavailable');
+      return chromeContents.executeJavaScript(code);
     };
-    // allowInternal (DD6 / Leg 2): admin's sole relaxation, forwarded to every
-    // resolveContents call site via deps. fromPartition (session.fromPartition)
-    // is carried so the engine and the scope façade share ONE Session→partition
-    // resolver — the membership compare in resolveContentsForJar uses the same
-    // interned Session that resolveContents sees, so they cannot diverge.
-    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition };
+    // allowInternal (DD6 / Leg 2 + F8 DD8): one of admin's TWO relaxations
+    // (internal-session AND non-tab-contents both lift under it), forwarded to
+    // every resolveContents call site via deps. isTabViewWcId (F8 DD8) rides the
+    // same deps so non-admin tiers refuse chrome-class overlay wcIds (menu sheet,
+    // find overlay). fromPartition (session.fromPartition) is carried so the
+    // engine and the scope façade share ONE Session→partition resolver — the
+    // membership compare in resolveContentsForJar uses the same interned Session
+    // that resolveContents sees, so they cannot diverge.
+    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.
@@ -93,9 +105,8 @@ function createEngine(getMainWindow, { allowInternal = false, getDownloads = nul
     findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) => find.findInPage(wcId, text, deps(), opts),
     stopFindInPage: (/** @type {number} */ wcId) => find.stopFindInPage(wcId, deps()),
     getChromeTarget: () => {
-      const mw = getMainWindow();
-      const cc = mw ? mw.webContents : null;
-      if (!cc) throw new Error('automation: chrome-window-unavailable — mainWindow is null (closed or starting up)');
+      const cc = getChromeContents();
+      if (!cc) throw new Error('automation: chrome-window-unavailable — chrome contents is null (closed or starting up)');
       return { wcId: cc.id, kind: 'chrome', url: cc.getURL() };
     },
     // App-level downloads view (Flight 5, DD6): no wcId, admin-only via the scope façade.

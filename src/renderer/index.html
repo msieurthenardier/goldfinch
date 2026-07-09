@@ -39,20 +39,10 @@
         <button id="win-close" class="icon-btn win-ctrl win-close" title="Close" aria-label="Close"></button>
       </div>
     </div>
-    <div id="container-menu" class="hidden" role="menu" aria-label="Open new tab in a container"></div>
-    <div id="kebab-menu" class="hidden" role="menu" aria-label="More menu">
-      <button id="kebab-settings" class="cm-item" role="menuitem" tabindex="0">Settings</button>
-      <button id="kebab-downloads" class="cm-item" role="menuitem" tabindex="-1">Downloads</button>
-      <button id="kebab-print" class="cm-item" role="menuitem" tabindex="-1">Print…</button>
-      <button id="kebab-exit" class="cm-item" role="menuitem" tabindex="-1">Exit</button>
-    </div>
-    <div id="site-info-popup" class="site-info-popup hidden" role="dialog" aria-label="Site information" tabindex="-1"></div>
-    <!-- Custom page context menu (SC6/DD2/DD3). Empty at rest — items built per-invocation
-         from the forwarded guest context-menu params (Leg 1 onPageContextMenu), rendered via the
-         menuController 4th consumer. tabindex="-1" lets onOpen self-focus the chrome (blur-race
-         defensive mitigation) without joining the natural tab order. -->
-    <div id="page-context-menu" class="hidden" role="menu" aria-label="Page actions" tabindex="-1"></div>
-
+    <!-- All popup menus (kebab / container / site-info / page-context) and the
+         new-container dialog render in the menu-overlay SHEET (menu-overlay.html,
+         a transparent WebContentsView above the guest — M05 F8); the chrome keeps
+         only their trigger buttons. -->
     <!-- Toolbar -->
     <div id="toolbar">
       <img id="brand" src="assets/goldfinch_color.png" alt="Goldfinch" title="Goldfinch" />
@@ -116,24 +106,6 @@
     <!-- Main area: web content + media panel -->
     <div id="main">
       <div id="webviews"></div>
-
-      <!-- Floating find bar (Ctrl+F). Positioned after #webviews in DOM so natural
-           Tab order flows page → bar. aria-live region is static so the live-region
-           is registered from page load (not created dynamically on open). -->
-      <div id="find-bar" class="hidden" role="search" aria-label="Find in page">
-        <input
-          id="find-input"
-          type="search"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Find…"
-          aria-label="Find in page"
-        />
-        <span id="find-count" role="status" aria-live="polite" aria-atomic="true"></span>
-        <button id="find-prev" class="icon-btn find-nav-btn" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
-        <button id="find-next" class="icon-btn find-nav-btn" type="button" title="Next match (Enter)" aria-label="Next match">↓</button>
-        <button id="find-close" class="icon-btn" type="button" title="Close (Esc)" aria-label="Close find bar">✕</button>
-      </div>
 
       <aside id="media-panel" class="collapsed" aria-label="Media panel">
         <div id="media-panel-header">
@@ -212,7 +184,9 @@
 
     <script src="../shared/url-safety.js"></script>
     <script src="../shared/keydown-action.js"></script>
-    <script src="menu-controller.js"></script>
+    <script src="../shared/site-info.js"></script>
+    <script src="../shared/container-menu.js"></script>
+    <script src="../shared/page-context-model.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

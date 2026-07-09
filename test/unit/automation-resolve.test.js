@@ -358,6 +358,88 @@ test('resolveContentsForJar: undefined deps.chromeContents → guard is a no-op'
   assert.equal(resolveContentsForJar(11, jar, deps), wc);
 });
 
+// ---------------------------------------------------------------------------
+// resolveContents — isTabViewWcId non-tab-contents guard (M05 F8 DD8,
+// defense-in-depth). Admin's SECOND relaxation: chrome-class overlay wcIds
+// (the menu-overlay sheet, the find overlay) resolve only at the admin tier.
+// ---------------------------------------------------------------------------
+
+test('DD8 baseline: jar tier refuses a chrome-class non-tab wcId with OUT-OF-JAR (session identity) — not a widening being closed', () => {
+  // The sheet is chrome-class (defaultSession-like session that matches no jar
+  // partition), so resolveContentsForJar throws out-of-jar exactly as burner tabs
+  // are refused — the resolver-level rule below is defense-in-depth on top.
+  const world = makeSessionWorld();
+  const jar = { id: 'personal', partition: 'persist:container:personal' };
+  const sheetWc = makeWcInPartition(70, 'chrome-default', world); // matches no jar
+  const deps = { fromId: (id) => id === 70 ? sheetWc : null, chromeContents: null, fromPartition: world.fromPartition };
+  assert.throws(
+    () => resolveContentsForJar(70, jar, deps),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+});
+
+test('DD8: with the predicate, a live non-tab non-chrome wcId throws non-tab-contents at the non-admin tier', () => {
+  const chromeContents = makeGuestWc(1);
+  const sheetWc = makeGuestWc(70); // chrome-class overlay: live, NOT internal, NOT chrome, NOT a tab view
+  const deps = {
+    fromId: (id) => (id === 70 ? sheetWc : id === 1 ? chromeContents : null),
+    chromeContents,
+    isTabViewWcId: (id) => id === 42 // 70 is not a tab view
+  };
+  assert.throws(
+    () => resolveContents(70, deps),
+    (err) => err instanceof Error && err.message.includes('automation: non-tab-contents')
+  );
+});
+
+test('DD8: the predicate does NOT refuse tab views or the chrome contents', () => {
+  const chromeContents = makeGuestWc(1);
+  const tabWc = makeGuestWc(42);
+  const deps = {
+    fromId: (id) => (id === 42 ? tabWc : id === 1 ? chromeContents : null),
+    chromeContents,
+    isTabViewWcId: (id) => id === 42
+  };
+  assert.equal(resolveContents(42, deps), tabWc, 'tabViews member resolves');
+  assert.equal(resolveContents(1, deps), chromeContents, 'the chrome contents resolves (wc === chromeContents exemption)');
+});
+
+test('DD8: admin (allowInternal:true) is UNAFFECTED — overlay wcIds resolve with the predicate present', () => {
+  const chromeContents = makeGuestWc(1);
+  const sheetWc = makeGuestWc(70);
+  const deps = {
+    fromId: (id) => (id === 70 ? sheetWc : null),
+    chromeContents,
+    allowInternal: true,
+    isTabViewWcId: () => false
+  };
+  assert.equal(resolveContents(70, deps), sheetWc, 'admin tier drives the sheet by probed wcId (F7 precedent)');
+});
+
+test('DD8: ABSENT predicate = no behavior change (legacy callers / offline tests)', () => {
+  const chromeContents = makeGuestWc(1);
+  const sheetWc = makeGuestWc(70);
+  const deps = {
+    fromId: (id) => (id === 70 ? sheetWc : null),
+    chromeContents
+    // no isTabViewWcId
+  };
+  assert.equal(resolveContents(70, deps), sheetWc);
+});
+
+test('DD8: internal-session still throws FIRST (guard order — internal check precedes non-tab-contents)', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = {
+    fromId: (id) => (id === 99 ? internalWc : null),
+    chromeContents: null,
+    isTabViewWcId: () => false
+  };
+  assert.throws(
+    () => resolveContents(99, deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
+  );
+});
+
 test('resolveContents: error messages are distinguishable per guard', () => {
   // Pins AC4: three distinct prefixes so callers can identify which guard fired.
   const internalWc = makeInternalWc(1);

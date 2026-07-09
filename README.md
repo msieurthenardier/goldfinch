@@ -161,9 +161,15 @@ npm start
 
 ### Development
 
-`npm run dev:automation` launches the app with a **dev-gated, loopback-only MCP automation
-server** (`127.0.0.1:49707`) that lets an MCP client drive and observe tabs. It is exposed in no
-released build — see [`docs/mcp-automation.md`](docs/mcp-automation.md) for the consumer reference.
+`npm run dev` / `npm run dev:automation` go through `scripts/dev-launch.mjs`, which selects the
+Electron **Wayland** ozone backend when a compositor socket is present (falling back to X11
+otherwise); packaged builds are unaffected. On WSLg this avoids an XWayland window-activation quirk
+where the first click onto another OS window is swallowed.
+
+`npm run dev:automation` additionally launches a **dev-gated, loopback-only MCP automation
+server** (default `127.0.0.1:49707`; override with `GOLDFINCH_MCP_PORT`) that lets an MCP client
+drive and observe tabs. It is exposed in no released build — see
+[`docs/mcp-automation.md`](docs/mcp-automation.md) for the consumer reference.
 
 ## Keyboard shortcuts
 
@@ -213,11 +219,15 @@ shortcuts work whether or not the button is pinned.
 | `src/main/settings-store.js` | Durable, atomic, schema-versioned app preferences store (`userData/settings.json`); validated writes; pluggable serialization seam. |
 | `src/main/internal-ipc.js` | Origin-checked IPC bridge helpers (`registerInternalHandler`) — main-side sender verification for trusted `goldfinch://` internal pages. |
 | `src/renderer/pages/settings.html` | The internal Settings page — Privacy & Shields global toggles and editable Home page (wired and persisted). |
-| `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox. |
+| `src/renderer/*` | The browser UI: tabs, toolbar, media panel, privacy panel, lightbox, and the overlay surfaces (floating find bar, menu overlay sheet). |
 
-Each tab is a `<webview>` running real Chromium. The media scanner preload is
-force-injected into every page and streams its catalog to the UI via
-`ipcRenderer.sendToHost`.
+Each tab is a native `WebContentsView` running real Chromium, hosted on a
+main-process `BaseWindow` and positioned by the main process (Mission 05 migrated
+the tab/guest surface off renderer-embedded `<webview>` tags). The chrome UI is
+itself a `WebContentsView` stacked over the guests; find-in-page and the menu
+surfaces are additional overlay views composited above the active guest. The media
+scanner preload is force-injected into every page and streams its catalog to the
+main process via `ipcRenderer.send('guest-media-list', …)`, which forwards it to the UI.
 
 ### Internal pages (`goldfinch://`)
 

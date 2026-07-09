@@ -40,7 +40,7 @@ synthetic events faithfully model "a user can actually open these tabs and see w
   ```
   The Bearer rides every request the transport sends. This spec requires the **admin** key — a jar
   key is refused `getChromeTarget` (`admin-only`) and cannot drive the chrome renderer.
-- **This test drives the renderer (the Goldfinch chrome UI), NOT a `<webview>` guest** — the pill
+- **This test drives the renderer (the Goldfinch chrome UI), NOT a guest WebContentsView** — the pill
   and tab strip live in the chrome renderer. `getChromeTarget()` returns the chrome `wcId` directly
   (no target-selection trap). All drive and observe calls pass this `wcId`.
 - Input must be delivered as **trusted events** via the MCP tools (`click(wcId, x, y)`,

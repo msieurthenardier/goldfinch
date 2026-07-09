@@ -6,69 +6,74 @@
 // Provides findInPage/stopFindInPage over a resolved webContents, keyed by
 // wcId.
 //
-// DEVIATION D1 (renderer-routed find):
-// The main-process `found-in-page` event is NEVER delivered to any
-// main-process webContents (not the guest wc, not chromeContents) for
-// <webview> guests. Electron only fires it on the renderer-side <webview>
-// DOM element. Therefore, this module routes all find operations through
-// the chrome renderer: deps.chromeContents.executeJavaScript injects a
-// script that (1) finds the <webview> by getWebContentsId(), (2) attaches
-// a DOM `found-in-page` listener on the element (where the event DOES fire),
-// (3) calls wv.findInPage() with cold-start retry, and (4) resolves ONLY
-// when result.finalUpdate is true AND result.matches > 0 (non-zero resolve),
-// with a timeout fallback. The result (activeMatchOrdinal + matches) is
-// returned to the main process via the executeJavaScript return value.
+// MAIN-PROCESS found-in-page MODEL:
+// Guests are now WebContentsViews whose webContents emit found-in-page to
+// main — proven in production since Flight 3, where the user find surface
+// already runs through it (since M05 F7: the overlay's find-overlay:query →
+// wc.findInPage() → the permanent found-in-page listener in wireTabViewEvents
+// → find-overlay:count to the overlay webContents). This module operates on
+// the guest wc directly: it calls
+// wc.findInPage() and listens for found-in-page on the same wc, correlating
+// on the requestId returned by wc.findInPage().
+//
+// REQUEST-ID CORRELATION:
+// wc.findInPage(text, opts) returns a numeric requestId. The found-in-page
+// event's result object carries the same requestId. This op listens on wc for
+// found-in-page and ignores events whose result.requestId is not one it
+// issued — so concurrent finds (e.g. the user bar firing at the same time,
+// which the permanent main.js:670 listener also services) are never
+// misattributed. Each retry issue() gets a fresh requestId; all are tracked in
+// a Set so a late event from an earlier retry attempt still correlates.
 //
 // COLD-START RETRY (resolve-on-nonzero):
-// On freshly-loaded webviews in the WSLg automation environment, Chromium
-// emits a spurious `found-in-page` event with finalUpdate:true, matches:0
-// BEFORE the real count populates. Resolving on any finalUpdate returns {0,0}
-// on a cold start; a re-issued find then reports the real count. The injected
-// script therefore resolves IMMEDIATELY only when finalUpdate===true AND
-// matches>0; on finalUpdate===true with matches===0 it records `last` and
-// lets the retry interval re-issue the find. The setInterval retries every
-// RETRY=500ms, up to MAX=5 attempts within the overall TIMEOUT. After MAX
-// attempts or TIMEOUT, resolve with `last` (which is {…,matches:0} for a
-// genuine no-match — correct). On a working webview a real match resolves on
-// attempt 1 (~3ms); on a cold webview it retries until a non-zero finalUpdate
-// arrives. A genuine no-match resolves after retries (slightly slower, still
-// correct). Re-issues use the caller's original OPTS — no findNext:true on
-// retry, which would corrupt the active-match ordinal.
+// On freshly-loaded guests in the WSLg automation environment, Chromium may
+// emit a spurious found-in-page event with finalUpdate:true, matches:0 BEFORE
+// the real count populates. Resolving on any finalUpdate returns {0,0} on a
+// cold start; a re-issued find then reports the real count. The op therefore
+// resolves IMMEDIATELY only when finalUpdate===true AND matches>0; on
+// finalUpdate===true with matches===0 it records `last` and the retry interval
+// re-issues the find (every RETRY=500ms, up to MAX=5 attempts within the
+// overall findTimeoutMs). After MAX attempts or timeout, resolve with `last`
+// ({0,0} for a genuine no-match — correct). Re-issues use the caller's
+// original opts — no findNext:true on retry (that would corrupt the
+// active-match ordinal). Whether the cold-start quirk still reproduces under
+// WebContentsView is re-verified live in Leg 4's find-in-page Witnessed run;
+// porting the retry keeps correctness regardless.
 //
 // SECURITY (DD5): Both ops carry an op-local isInternalContents guard AFTER
 // resolveContents. The admin engine builds deps with { allowInternal: true },
 // so resolveContents alone would let admin find in goldfinch://settings. The
 // op-local guard closes that path — internal pages are refused even under
-// the admin key, matching the zoom.js/print.js discipline.
+// the admin key, matching the zoom.js/print.js discipline. The guard fires
+// BEFORE the foreground-first activate.
+//
+// FOREGROUND-FIRST (AC5): For backgrounded guests, findInPage activates then
+// re-resolves before issuing the search (mirrors print.js discipline). The
+// post-activate re-resolve result is ASSIGNED back to wc so the find is
+// issued on the live, re-resolved handle.
+// stopFindInPage has no foreground requirement — it clears any active find
+// session regardless of foreground state.
 //
 // ELECTRON-FREE: no require('electron') at the top. Electron handles are
 // injected via deps so the module is unit-testable under plain node --test
-// with fake deps (including a fake chromeContents.executeJavaScript).
-//
-// FOREGROUND-FIRST (AC5): For backgrounded guests, findInPage activates then
-// re-resolves before issuing the search (mirrors print.js discipline).
-// stopFindInPage has no foreground requirement — it clears any active find
-// session regardless of foreground state.
+// with fake deps (a fake wc EventEmitter + findInPage/stopFindInPage methods).
 
 const { resolveContents, classifyContents, isInternalContents } = require('./resolve');
 
 /**
- * Search for text in a webContents (identified by wcId) by routing the find
- * through the chrome renderer's <webview> DOM element.
+ * Search for text in a webContents (identified by wcId) by calling
+ * wc.findInPage() on the guest webContents and listening for the
+ * found-in-page event on the same wc, correlated by requestId.
  *
- * DEVIATION D1: main-process `found-in-page` events are never delivered for
- * <webview> guests. Instead, this op injects a script into the chrome renderer
- * that attaches a DOM `found-in-page` listener on the <webview> element (where
- * the event DOES fire), calls wv.findInPage() with cold-start retry, and
- * resolves ONLY when finalUpdate===true AND matches>0 (non-zero resolve). On a
- * cold webview Chromium emits finalUpdate:true,matches:0 before the count
- * populates; the handler records `last` and lets the retry interval re-issue
- * the find (up to MAX=5 every 500ms within the overall TIMEOUT=3000ms). A
- * genuine no-match resolves after retries with {0,0}. Re-issues use the
- * caller's original OPTS — no findNext:true on retry (ordinal corruption).
+ * Resolves only when finalUpdate===true AND matches>0 (non-zero resolve)
+ * to guard against the WSLg cold-start spurious finalUpdate:true,matches:0
+ * event. On cold-start spurious events the op records `last` and the retry
+ * interval re-issues the find (up to MAX=5 every 500ms within the overall
+ * findTimeoutMs). A genuine no-match resolves after retries with {0,0}.
  *
  * SECURITY: op-local internal-session guard AFTER resolveContents — internal
- * pages are refused even when deps carries allowInternal:true.
+ * pages are refused even when deps carries allowInternal:true. Guard fires
+ * BEFORE activate.
  *
  * @param {number} wcId
  * @param {string} text  text to search for
@@ -83,66 +88,78 @@ const { resolveContents, classifyContents, isInternalContents } = require('./res
  * @returns {Promise<{ activeMatchOrdinal: number, matches: number }>}
  */
 async function findInPage(wcId, text, deps, { forward = true, findNext = false, matchCase = false } = {}) {
-  const wc = resolveContents(wcId, deps);
+  let wc = resolveContents(wcId, deps);
   if (isInternalContents(wc)) {
     throw new Error('automation: findInPage — internal-session excluded');
   }
 
   // Foreground-first for guest tabs (mirrors print.js discipline).
+  // Post-activate re-resolve is ASSIGNED to wc so the find is issued on the
+  // live, re-resolved handle (the pre-activate handle may be stale after the
+  // async hop).
   if (classifyContents(wc, deps.chromeContents) === 'guest' && typeof deps.activate === 'function') {
     await deps.activate(wcId);
-    resolveContents(wcId, deps); // post-activate stale-handle re-resolve (bad-handle / dead check)
-  }
-
-  if (!deps.chromeContents) {
-    throw new Error('automation: findInPage — chromeContents unavailable (chrome window closed?)');
+    wc = resolveContents(wcId, deps); // post-activate stale-handle re-resolve (bad-handle / dead check)
   }
 
   const timeoutMs = (deps && deps.findTimeoutMs) || 3000;
+  const findOpts = { forward, findNext, matchCase };
 
-  // Route the find through the chrome renderer: inject a script that attaches
-  // a DOM `found-in-page` listener on the <webview> element and calls
-  // wv.findInPage() with cold-start retry. The renderer-side DOM event fires
-  // correctly for <webview> guests; the main-process event does not (D1).
+  // requestId-correlated promise with cold-start retry.
   //
-  // Cold-start resolve-on-nonzero: resolve ONLY when finalUpdate===true AND
-  // matches>0. On a cold webview Chromium emits a spurious finalUpdate:true,
-  // matches:0 before the real count; recording `last` and re-issuing via
-  // setInterval (every RETRY=500ms, up to MAX=5) captures the real result.
-  // A genuine no-match resolves from `last` after MAX or TIMEOUT.
-  // Re-issues use the caller's original OPTS — no findNext:true (D1).
+  // Each issue() call obtains a fresh requestId from Electron and adds it to
+  // `issued`. The found-in-page listener ignores events whose requestId is not
+  // in `issued`, so concurrent finds (e.g. the user bar) are never
+  // misattributed. All retry requestIds are tracked so a late event from an
+  // earlier retry still correlates.
   //
-  // Text and opts are JSON-encoded into the script — never string-concatenated.
-  const opts = { forward, findNext, matchCase };
-  const code = `(function(){return new Promise(function(resolve){
-  var WCID = ${JSON.stringify(wcId)}, TEXT = ${JSON.stringify(text)}, OPTS = ${JSON.stringify(opts)};
-  var TIMEOUT = ${JSON.stringify(timeoutMs)}, RETRY = 500, MAX = 5;
-  var wv = Array.prototype.find.call(document.querySelectorAll('webview'), function(w){
-    try { return w.getWebContentsId() === WCID; } catch(e){ return false; }
+  // MAX-retry exhaustion resolves `last` immediately (finish(last) in the
+  // interval) so the interval does not busy-spin until the timeout fires.
+  const res = await new Promise((resolve) => {
+    const RETRY = 500, MAX = 5;
+    const issued = new Set();
+    let last = { activeMatchOrdinal: 0, matches: 0 };
+    let attempts = 0, done = false, iv = null, to = null;
+
+    const cleanup = () => {
+      if (iv) clearInterval(iv);
+      if (to) clearTimeout(to);
+      wc.removeListener('found-in-page', onFound);
+    };
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(v);
+    };
+
+    function onFound(_e, result) {
+      if (!result || !issued.has(result.requestId)) return; // requestId correlation
+      last = { activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches };
+      if (result.finalUpdate === true && result.matches > 0) finish(last); // cold-start: resolve only on nonzero
+    }
+
+    const issue = () => {
+      attempts++;
+      issued.add(wc.findInPage(text, findOpts)); // same opts on retry — no findNext flip
+    };
+
+    wc.on('found-in-page', onFound);
+    issue();
+    iv = setInterval(() => {
+      if (done) return;
+      if (attempts >= MAX) { finish(last); return; }
+      issue();
+    }, RETRY);
+    to = setTimeout(() => finish(last), timeoutMs);
   });
-  if (!wv) { resolve({ activeMatchOrdinal: 0, matches: 0 }); return; }
-  var done = false, last = { activeMatchOrdinal: 0, matches: 0 }, attempts = 0, iv = null, to = null;
-  function cleanup(){ if(iv) clearInterval(iv); if(to) clearTimeout(to); wv.removeEventListener('found-in-page', h); }
-  function finish(v){ if (done) return; done = true; cleanup(); resolve(v); }
-  function h(e){ var r = e.result || {}; last = { activeMatchOrdinal: r.activeMatchOrdinal, matches: r.matches }; if (r.finalUpdate === true && r.matches > 0) finish(last); }
-  wv.addEventListener('found-in-page', h);
-  function issue(){ attempts++; wv.findInPage(TEXT, OPTS); }
-  issue();
-  iv = setInterval(function(){ if (done) return; if (attempts >= MAX) return; issue(); }, RETRY);
-  to = setTimeout(function(){ finish(last); }, TIMEOUT);
-});
-})()`;
 
-  const res = await deps.chromeContents.executeJavaScript(code, true);
   return { activeMatchOrdinal: res.activeMatchOrdinal || 0, matches: res.matches || 0 };
 }
 
 /**
- * Clear the active find session on a webContents (clearSelection), routed
- * through the chrome renderer's <webview> DOM element.
- *
- * DEVIATION D1: stopFindInPage is similarly routed through the chrome renderer
- * for consistency with findInPage.
+ * Clear the active find session on a webContents (clearSelection) by calling
+ * wc.stopFindInPage('clearSelection') on the guest webContents directly.
  *
  * Op-local internal-session guard: runs AFTER resolveContents so it fires
  * even when deps carries allowInternal:true (admin).
@@ -161,20 +178,7 @@ async function stopFindInPage(wcId, deps) {
     throw new Error('automation: stopFindInPage — internal-session excluded');
   }
 
-  if (!deps.chromeContents) {
-    throw new Error('automation: stopFindInPage — chromeContents unavailable (chrome window closed?)');
-  }
-
-  const code = `(function(){
-  var wcId = ${JSON.stringify(wcId)};
-  var wv = Array.prototype.find.call(document.querySelectorAll('webview'), function(w){
-    try { return w.getWebContentsId() === wcId; } catch(e){ return false; }
-  });
-  if (wv) wv.stopFindInPage('clearSelection');
-  return { ok: true };
-})()`;
-
-  await deps.chromeContents.executeJavaScript(code, true);
+  wc.stopFindInPage('clearSelection');
   return { ok: true };
 }
 

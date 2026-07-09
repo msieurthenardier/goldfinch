@@ -5,7 +5,9 @@ export default [
   { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs'] }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
-    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'test/**', '*.config.{js,mjs}'],
+    // find-overlay-preload.js and menu-overlay-preload.js are chrome-class (M05 F7 DD1 /
+    // F8 DD8) — they stay in this node-globals block alongside chrome-preload.js.
+    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
@@ -40,7 +42,7 @@ export default [
     ignores: ['src/renderer/menu-controller.js'], // it DEFINES the menu globals (own block above)
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly' }
+      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly', isSafeColor: 'readonly', deriveSiteInfo: 'readonly', buildContainerModel: 'readonly', pageContextModel: 'readonly' }
     }
   },
   eslintConfigPrettier // last — Prettier owns formatting

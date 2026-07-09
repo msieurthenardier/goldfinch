@@ -8,15 +8,10 @@ const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-// Injection-safe color validator.
-// HEX: 3/4/6/8 hex digits — 4 and 8 are CSS4 RGBA shorthand (e.g. #abc8, #11223344).
-// KEYWORD: letters-only (≤20 chars) — covers all CSS color keywords (red, rebeccapurple, etc.)
-// and cannot contain injection characters (parens, semicolons, quotes, angle brackets, spaces).
-const HEX = /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
-const KEYWORD = /^[a-zA-Z]{1,20}$/;
-function isSafeColor(c) {
-  return typeof c === 'string' && (HEX.test(c) || KEYWORD.test(c));
-}
+// Injection-safe color validator — extracted to src/shared/safe-color.js (M05
+// Flight 8, Leg 3) so the menu-overlay sheet validates dot colors against the SAME
+// domain. Re-exported below (not moved) — consumers keep requiring it from here.
+const { isSafeColor } = require('../shared/safe-color');
 
 const DEFAULTS = [
   { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' },

@@ -3,7 +3,7 @@
 **Slug**: `responsive-tab-strip`
 **Status**: active
 **Created**: 2026-06-06
-**Last Run**: 2026-06-07-00-44-37
+**Last Run**: 2026-06-24-23-02-18
 
 ## Intent
 
@@ -39,7 +39,7 @@ covered by `npm run a11y`.)
   ```
   The Bearer rides every request the transport sends. This spec requires the **admin** key — a jar
   key is refused `getChromeTarget` (`admin-only`) and cannot drive the chrome renderer.
-- **Drive the renderer (chrome UI), NOT a `<webview>` guest.** `getChromeTarget()` returns the
+- **Drive the renderer (chrome UI), NOT a guest WebContentsView.** `getChromeTarget()` returns the
   chrome `wcId` directly (no target-selection trap). All drive and observe calls pass this `wcId`.
 - Input delivered as **trusted events** via the MCP tools (`click(wcId, x, y)`,
   `pressKey(wcId, name)`) — only trusted events fire the renderer's real handlers + native focus
