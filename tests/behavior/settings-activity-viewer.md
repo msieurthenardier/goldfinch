@@ -11,7 +11,7 @@ log inside the privileged internal guest and **paginates** it with the conventio
 (`‹ 1 2 3 … ›`), honoring the F7 freshness contract: **page 1 is live** (re-renders as new entries
 arrive) while **page 2+ is frozen** at the moment it was opened (older entries do not slide mid-read),
 with **back-to-live** resuming page 1. This needs a behavior test, not a unit test, for two reasons the
-F7 debrief made concrete: (1) the viewer renders inside a `<webview>` guest on the `goldfinch://`
+F7 debrief made concrete: (1) the viewer renders inside a guest WebContentsView on the `goldfinch://`
 scheme, and its subresource (`audit-paging.js`) must be **served** via `INTERNAL_PAGES` — a renderer-in-guest
 **serve seam** that unit tests structurally cannot reach (it 404'd at the F7 HAT and rendered nothing);
 and (2) the freeze/live state machine is wired to **live broadcasts** that only fire against a running

@@ -11,7 +11,7 @@ Verify that page zoom applies to the active tab's **web content** — driven by 
 `-`/`0`) and by the automation `setZoom` tool — is observable through `getZoom` and the page's own
 scale, is **per-origin-per-jar** (zooming one jar's tab does not change another jar's tab), and
 **no-ops on `goldfinch://` internal pages**. This needs real-environment observation: zoom is a
-Chromium-engine effect on a live `<webview>` that unit tests cannot exercise, and the per-jar
+Chromium-engine effect on a live guest WebContentsView that unit tests cannot exercise, and the per-jar
 isolation + internal-exclusion properties are only true against the running app's session model.
 
 ## Preconditions

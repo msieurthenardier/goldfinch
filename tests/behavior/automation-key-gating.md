@@ -12,7 +12,7 @@ button and the env-gated admin `Generate/Rotate admin key` button are `disabled`
 stays available (governed only by whether a key exists), because we do **not** auto-revoke on
 toggle-off. Flipping the toggle ON enables the mint buttons **live** (no reload); flipping OFF disables
 them again. This needs a behavior test, not a unit test: the gating is a **rendered, cross-IIFE,
-live-broadcast-wired** behavior in a `<webview>` guest on the `goldfinch://` scheme (the key-management
+live-broadcast-wired** behavior in a guest WebContentsView on the `goldfinch://` scheme (the key-management
 IIFE must observe the persisted `automationEnabled` and react to `onSettingsChanged`), and the
 toggle→buttons coupling only manifests in the real rendered DOM. It backs the **SC8** opt-in model and
 the F8 human-only-enable thesis: the surface must be a deliberate human ON before credentials can be

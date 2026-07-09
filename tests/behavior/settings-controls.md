@@ -10,7 +10,7 @@ Verify that the **global Shields toggles** and the **home page** are operable **
 that changes **persist** (to `shields.json` / `settings.json`) and **take effect**, and that they stay
 **consistent with the existing slide-out Shields panel** — plus that the privileged settings-page IPC bridge
 is **origin-locked** (web content cannot call it). This needs a behavior test, not a unit test, because the
-assertions are real-environment + cross-process: a control in a `<webview>` guest on a privileged scheme
+assertions are real-environment + cross-process: a control in a guest WebContentsView on a privileged scheme
 writes through an origin-checked IPC bridge to the main process, which persists to disk and broadcasts to a
 *different* renderer (the chrome) — none of which is observable offline. SC7 (controls operable + persistent
 + consistent) and SC8 (keyboard + a11y) are exactly this shape.

@@ -1,8 +1,11 @@
 'use strict';
 
-// Injected into every page rendered in a <webview> tab. Walks the DOM,
-// collects every piece of media (images, video, audio, embeds), and streams
-// the catalog up to the browser UI via ipcRenderer.sendToHost.
+// Injected into every web page rendered in a guest WebContentsView tab (wired
+// as the web-branch tab's webPreferences.preload, running in the page main
+// world). Walks the DOM, collects every piece of media (images, video, audio,
+// embeds), and streams the catalog up to the browser UI via ipcRenderer.send
+// ('guest-media-list'). (Filename retained for history; the tab is a
+// WebContentsView, not a <webview> element.)
 
 const { ipcRenderer } = require('electron');
 

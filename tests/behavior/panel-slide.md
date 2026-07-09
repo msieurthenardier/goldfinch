@@ -13,7 +13,7 @@ is unchanged by that fix and remains the regression net; there is no longer any 
 judge.
 
 > **Why this spec exists.** Mission-05 SC7/#27/SC10: the media/privacy side panels **compress** the
-> live guest (side-by-side, not overlay) via a width slide. Under `<webview>` the slide tore because
+> live guest (side-by-side, not overlay) via a width slide. Under the legacy `<webview>` implementation the slide tore because
 > the out-of-process guest couldn't track the animating layout; on the native `WebContentsView`
 > surface the guest is re-bounded by main-process geometry and should track cleanly. This spec is the
 > re-runnable regression net for the **settled compositing**: after a panel opens/closes the guest
