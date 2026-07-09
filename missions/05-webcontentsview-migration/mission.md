@@ -156,6 +156,11 @@ follow-on work.
   guest→chrome focus handoff + chrome Tab-wrap. **→ Being addressed in Flight 5** (planning, 2026-07-07):
   folded in as a prerequisite because the broken bridge blocks corpus runs; scoped to the named gaps
   (Ctrl+L + Tab handoff + chrome wrap), verified by the new `chrome-guest-keyboard-nav` Witnessed spec.
+- [ ] **`nav.js` internal-guard asymmetry (pre-existing, surfaced in Flight 5)** — an `admin`-tier key can
+  `navigate`/`reload` the internal `goldfinch://settings` partition (loading web content into it), because
+  `nav.js` lacks the op-local `isInternalContents` guard that `zoom`/`find`/`print`/`observe` all carry even for
+  admin. NOT migration-caused (`nav.js` unchanged this mission); admin-only, script-injection stays blocked.
+  Small, self-contained hardening — close in F6 or end-of-mission maintenance. See F5 debrief.
 - [ ] **`<webview>`-era doc drift persists in source** — discovered in Flight 8 debrief.
   `src/preload/webview-preload.js:2-5` still references `<webview>` tabs and `ipcRenderer.sendToHost`
   (both stale since Flight 3; code uses `ipcRenderer.send('guest-media-list', …)`). The README was
