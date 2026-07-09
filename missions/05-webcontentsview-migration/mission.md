@@ -1,6 +1,6 @@
 # Mission: WebContentsView Migration
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -55,7 +55,7 @@ follow-on work.
   back/forward/reload, address bar, persistent sessions, favicons, popups-as-tabs, tab-strip keyboard
   operability — confirmed by the existing active browsing/tab behavior tests passing on the new
   surface. *(Verified: behavior-test corpus.)*
-- [ ] **SC4 — Conveniences parity (with event-seam re-architecture).** Zoom, print/Save-as-PDF,
+- [x] **SC4 — Conveniences parity (with event-seam re-architecture).** Zoom, print/Save-as-PDF,
   find-in-page, DevTools, page context menu, spellcheck, and the downloads surface all keep working on the
   native guest surface. Note this is **parity by re-architecture, not by survival** for any feature that
   rode a renderer↔`<webview>`-element seam: `find.js`'s renderer-routed `found-in-page` workaround
@@ -63,12 +63,12 @@ follow-on work.
   `<webview>` DOM element that ceases to exist, and must be re-homed to the main-process `webContents`
   (the upside: the ~130-line find workaround can likely be *deleted*). *(Verified: per-feature behavior
   tests; find-in-page event delivery re-verified on the new surface.)*
-- [ ] **SC5 — Privacy & trust model preserved.** Fingerprint farbling (the main-world,
+- [x] **SC5 — Privacy & trust model preserved.** Fingerprint farbling (the main-world,
   non-context-isolated preload path) still runs per tab; Shields apply per jar; container/burner/default
   partitions stay isolated; and the internal-page trust model (the four gates, the internal session, the
   origin-checked bridge) holds — none of these weaken in the move off `will-attach-webview`. *(Verified:
   privacy/security behavior tests + internal-session exclusion checks.)*
-- [ ] **SC6 — Automation (MCP) parity, no drift.** Every MCP tool that addresses guest pages by
+- [x] **SC6 — Automation (MCP) parity, no drift.** Every MCP tool that addresses guest pages by
   `webContents` id continues to work end-to-end; auth/origin gating, jar scoping, and the
   observe/act/find/nav/devtools ops all hold. The accumulated MCP behavior-test corpus is the benchmark.
   *(Verified: `mcp-drive-end-to-end` + the `mcp-*` behavior tests.)*
