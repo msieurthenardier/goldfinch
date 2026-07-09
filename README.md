@@ -86,9 +86,12 @@ or download **v0.6.0** directly:
     only network egress spellcheck introduces, it happens only after explicit
     opt-in, and it is documented here per Goldfinch's no-silent-egress posture.
 - **Containers / cookie jars** (click the `▾` next-to-new-tab button):
-  - Four built-in isolated containers — **Default**, **Personal**, **Work**, and
-    **Banking** — each backed by its own Electron session partition (separate
-    cookies, storage, cache, and farble seed).
+  - Isolated containers, each backed by its own Electron session partition
+    (separate cookies, storage, cache, and farble seed). New installs start
+    with **Personal** (the default jar) and **Work**; profiles from earlier
+    versions keep their existing container set unchanged. Fuller jar
+    management (rename, delete, pick the default) arrives later in this
+    mission.
   - **Ephemeral burner tabs** — non-persistent partition that evaporates when the
     tab is closed; leaves no cookies or storage behind.
   - **User-created jars** — add custom containers with a name and color; each
@@ -210,7 +213,7 @@ shortcuts work whether or not the button is pinned.
 |------|------|
 | `src/main/main.js` | Electron main process: window, downloads, popup-to-tab, privacy monitor, IPC. |
 | `src/main/shields.js` | Persisted Shields config (block/strip/isolate/farble/pausedSites) + URL/cookie policy helpers. |
-| `src/main/jars.js` | Container/jar definitions and isolated session partitions; CRUD for user-created jars. |
+| `src/main/jars.js` | Container/jar lifecycle model: versioned registry with seed/migration on load, default-jar pointer, create/rename/remove — each jar an isolated session partition. |
 | `src/main/trackers.js` | Registrable-domain (eTLD+1) extraction and tracker classification by category. |
 | `src/preload/chrome-preload.js` | Safe `window.goldfinch` API bridge for the UI. |
 | `src/preload/webview-preload.js` | Injected into every page; scans the DOM for media. |

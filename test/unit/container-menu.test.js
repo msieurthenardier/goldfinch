@@ -5,9 +5,10 @@ const assert = require('node:assert/strict');
 
 const { buildContainerModel } = require('../../src/shared/container-menu');
 
-require('../helpers/electron-stub');
 // slug() is not exported; jars.add exercises it — used below to pin the collision
 // premise (slug('New Container') === 'new-container') against the real product code.
+// No electron-stub needed: jars.js is Electron-free (M06 Flight 1, Leg 1), and add()
+// before load() deliberately never persists (storePath stays null).
 const jars = require('../../src/main/jars');
 
 const DEFAULT = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
@@ -60,10 +61,29 @@ test("jar named 'New Container' collides with the sentinel id — namespacing ke
   assert.equal(jarItem.label, 'New Container');
 });
 
-test("jar named 'Burner' likewise stays distinct from action:burner", () => {
+// Flipped for the DD4 reserved namespace (M06 Flight 1, Leg 1): minting a jar named
+// "Burner" no longer yields id `burner` — slug() remaps out of the reserved
+// `burner`/`burner-*` namespace at mint time (prefix `jar-`).
+test("minting a jar named 'Burner' remaps to id jar-burner (reserved namespace)", () => {
   const created = jars.add('Burner');
-  assert.equal(created.id, 'burner');
+  assert.equal(created.id, 'jar-burner'); // the DD4 mint remap, pinned on real slug()
+  assert.equal(created.name, 'Burner', 'display name untouched by the remap');
   const model = buildContainerModel([created]);
-  assert.ok(model.some((m) => m.id === 'jar:burner'));
+  assert.ok(model.some((m) => m.id === 'jar:jar-burner'));
   assert.ok(model.some((m) => m.id === 'action:burner'));
+});
+
+// The original picker-tolerance premise, re-pinned with a HAND-BUILT jar object:
+// the namespaced model ids were designed to tolerate a literal `burner`-id jar
+// (e.g. from a legacy profile) rendering distinctly from the burner sentinel —
+// that tolerance must survive even though add() can no longer mint the id.
+test("a literal burner-id jar (hand-built) still renders distinct from action:burner", () => {
+  const model = buildContainerModel([
+    { id: 'burner', name: 'Burner', color: '#ff8c42', partition: 'persist:container:burner' }
+  ]);
+  const jarItem = model.find((m) => m.id === 'jar:burner');
+  const sentinel = model.find((m) => m.id === 'action:burner');
+  assert.ok(jarItem, 'jar item present under the jar: prefix');
+  assert.ok(sentinel, 'sentinel still present under the action: prefix');
+  assert.notEqual(jarItem.id, sentinel.id);
 });

@@ -7,6 +7,7 @@ const { pathToFileURL } = require('url');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
+const { registerJarIpc } = require('./jar-ipc');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { initProfileAndStores } = require('./init-profile');
@@ -1878,6 +1879,10 @@ ipcMain.handle('chrome-clipboard-write', (_e, text) => {
 ipcMain.handle('new-container-create', async (_event, { name }) => {
   if (!name || typeof name !== 'string') return null;
   const c = jars.add(name);
+  // Both add entry points emit jars-changed (DD6). broadcastJarsChanged's const
+  // destructuring sits at the jar section further down — legal (the handler runs
+  // long after module evaluation).
+  broadcastJarsChanged();
   return c;
 });
 
@@ -2314,8 +2319,20 @@ ipcMain.on('unpin-toolbar-item', (_e, item) => {
 });
 
 // --- cookie jars / container identities ---
-ipcMain.handle('jars-list', () => jars.list());
-ipcMain.handle('jars-add', (_e, { name, color }) => jars.add(name, color));
+// The six jar-registry channels (list/add/rename/remove/set-default/get-default) live in
+// jar-ipc.js (M06 F1 Leg 3) — unit-testable via injected deps, and they don't feed this file.
+// The mutating channels are deliberately chrome-trusted (bare ipcMain.handle, same domain as
+// new-container-create); Flight 3 adds internal-origin-gated variants for the management page (DD7).
+// broadcastJarsChanged is reused by new-container-create above (the picker's add entry point).
+const { broadcastJarsChanged } = registerJarIpc({
+  ipcMain,
+  jars,
+  session,
+  rerollSeed,
+  revokeJarKey,
+  settings,
+  broadcast: broadcastToChromeAndInternal
+});
 
 // New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
 // so the site can no longer link you to who you just were.
@@ -2498,9 +2515,13 @@ app.whenReady().then(() => {
     //     `--automation-dev`, so this can never run in production.
     //   - A plain `npm run dev:automation` (no GOLDFINCH_AUTOMATION_DEV_MINT) does
     //     NOT enable the surface and prints NOTHING — off-by-default stays observable.
-    //   - Mints for the canonical persistent 'default' jar (always present in
-    //     jars.list(); the mint guard rejects unknown/burner ids). Admin key minted
-    //     only when GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
+    //   - Mints for the literal jar id 'default' — present on profiles migrated from
+    //     a pre-v2 install, but NOT on fresh installs (the M06 F1 fresh seed is
+    //     Personal+Work). On a fresh profile the mint throws the known-jar guard
+    //     error, caught below and logged as '[mcp] dev auto-mint failed: …' — the
+    //     surface still binds (the mint has no enable side-effect). INTERIM GAP:
+    //     M06 Flight 2 retires this hardcoded jar id. Admin key minted only when
+    //     GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
     //   - Prints the result ONCE to stdout as a single parseable line so the FD can
     //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
     if (shouldAutoMint(process.argv, process.env)) {

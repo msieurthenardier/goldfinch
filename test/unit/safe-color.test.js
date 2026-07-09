@@ -7,7 +7,7 @@ const { isSafeColor } = require('../../src/shared/safe-color');
 
 // The extraction is a re-export seam: jars.js must keep exposing the SAME function
 // (test/unit/jars.test.js requires it from src/main/jars — pinned here by identity).
-require('../helpers/electron-stub');
+// jars.js is Electron-free since M06 F1 Leg 1, so no electron-stub is needed.
 const jars = require('../../src/main/jars');
 
 test('jars.js re-exports the shared isSafeColor (same function, not a copy)', () => {
