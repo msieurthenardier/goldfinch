@@ -962,12 +962,12 @@ function applyZoom(wc, action) {
 }
 
 // ---------------------------------------------------------------------------
-// Each <webview> gets the media-scanner preload injected. The webview's
-// `webpreferences` attribute in the renderer references this path indirectly,
-// but we also enforce it here so pages can never opt out.
+// Each web guest WebContentsView gets the media-scanner preload (webview-preload.js)
+// injected via its webPreferences.preload, set at construction time in tab-create
+// so pages can never opt out.
 // ---------------------------------------------------------------------------
-// wireGuestContents — wires event listeners onto a guest webContents. Called for
-// <webview> elements from the global app.on('web-contents-created') handler AND
+// wireGuestContents — wires event listeners onto a guest webContents. Called from
+// the global app.on('web-contents-created') handler AND
 // explicitly for new WebContentsViews in ipcMain.handle('tab-create') (because
 // web-contents-created fires SYNCHRONOUSLY during new WebContentsView(), before the
 // tabViews registry entry can be set — so the global handler cannot identify them).

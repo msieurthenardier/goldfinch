@@ -592,7 +592,7 @@ window.goldfinch.onPageContextMenu(({ wcId, params }) => {
 });
 
 // Shift+F10 / ContextMenu key — chrome-focused case. When focus is INSIDE the guest
-// <webview>, Chromium synthesizes a real context-menu event on the guest webContents,
+// WebContentsView, Chromium synthesizes a real context-menu event on the guest webContents,
 // which flows through main's listener and the onPageContextMenu subscription above.
 // This handler only covers the CHROME-focused case (toolbar/chrome element focus).
 document.addEventListener('keydown', (e) => {

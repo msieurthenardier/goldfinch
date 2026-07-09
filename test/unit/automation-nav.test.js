@@ -41,6 +41,7 @@ function makeGuestWc(id) {
 
 /**
  * Build a fake internal-session webContents (goldfinch://settings guest).
+ * Records every nav method so admin-path tests can assert NO side effect fired.
  */
 function makeInternalWc(id) {
   return {
@@ -51,7 +52,13 @@ function makeInternalWc(id) {
     loadURL(url) {
       this.loadURLCalls.push(url);
       return Promise.resolve();
-    }
+    },
+    goBackCalled: false,
+    goBack() { this.goBackCalled = true; },
+    goForwardCalled: false,
+    goForward() { this.goForwardCalled = true; },
+    reloadCalled: false,
+    reload() { this.reloadCalled = true; }
   };
 }
 
@@ -347,4 +354,66 @@ test('goBack/goForward/reload each call the correct wc method and not the others
   assert.equal(wc3.reloadCalled, true, 'reload must call wc.reload');
   assert.equal(wc3.goBackCalled, false, 'reload must NOT call wc.goBack');
   assert.equal(wc3.goForwardCalled, false, 'reload must NOT call wc.goForward');
+});
+
+// ---------------------------------------------------------------------------
+// ADMIN PATH — op-local internal-session guard (DD6, Leg 2)
+//
+// These tests construct deps WITH allowInternal:true. Under that flag,
+// resolveContents SKIPS its internal-session throw (admin's sole relaxation),
+// so the ONLY thing refusing the internal wcId is nav.js's OWN op-local
+// isInternalContents guard. The pre-existing internal-refusal cases above pass
+// deps WITHOUT allowInternal, so they exercise resolveContents's throw and would
+// stay green even if the op-local guard were removed — hence these dedicated
+// admin-path assertions per op. Each also asserts NO navigation side effect fired.
+// ---------------------------------------------------------------------------
+
+test('navigate: internal wcId under allowInternal:true → op-local guard refuses, loadURL NOT called', async () => {
+  const internalWc = makeInternalWc(99);
+  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  await assert.rejects(
+    () => navigate(99, 'https://example.com', deps),
+    (err) => err instanceof Error && err.message.includes('automation: navigate — internal-session excluded')
+  );
+  assert.equal(internalWc.loadURLCalls.length, 0, 'admin must NOT drive loadURL on the internal session');
+});
+
+test('goBack: internal wcId under allowInternal:true → op-local guard refuses, goBack NOT called', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  assert.throws(
+    () => goBack(99, deps),
+    (err) => err instanceof Error && err.message.includes('automation: goBack — internal-session excluded')
+  );
+  assert.equal(internalWc.goBackCalled, false, 'admin must NOT drive goBack on the internal session');
+});
+
+test('goForward: internal wcId under allowInternal:true → op-local guard refuses, goForward NOT called', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  assert.throws(
+    () => goForward(99, deps),
+    (err) => err instanceof Error && err.message.includes('automation: goForward — internal-session excluded')
+  );
+  assert.equal(internalWc.goForwardCalled, false, 'admin must NOT drive goForward on the internal session');
+});
+
+test('reload: internal wcId under allowInternal:true → op-local guard refuses, reload NOT called', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = { fromId: (id) => id === 99 ? internalWc : null, chromeContents: null, allowInternal: true };
+  assert.throws(
+    () => reload(99, deps),
+    (err) => err instanceof Error && err.message.includes('automation: reload — internal-session excluded')
+  );
+  assert.equal(internalWc.reloadCalled, false, 'admin must NOT drive reload on the internal session');
+});
+
+// Guest tabs remain drivable under allowInternal:true (the guard is internal-only,
+// not an admin-wide block).
+test('navigate: guest wcId under allowInternal:true → loadURL still called (guard is internal-only)', async () => {
+  const wc = makeGuestWc(10);
+  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null, allowInternal: true };
+  await navigate(10, 'https://example.com', deps);
+  assert.equal(wc.loadURLCalls.length, 1);
+  assert.equal(wc.loadURLCalls[0], 'https://example.com');
 });

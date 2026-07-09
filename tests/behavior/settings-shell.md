@@ -9,10 +9,11 @@
 Verify that `goldfinch://settings` presents a **recognizable, accessible settings shell** (persistent
 left section-nav + titled sections + placeholder content) and that the **address-bar chips** behave
 correctly — an internal-page identity chip on `goldfinch://`, a web-page site-info chip + popup on
-`http(s)` (summarizing existing per-tab data), and the **internal-tab navigation lock** (a web URL typed
-in a `goldfinch://` tab opens a new normal tab rather than navigating the internal tab). This needs a
+`http(s)` (summarizing existing per-tab data), and the **internal-tab navigation lock**, now enforced by a
+**read-only address bar** on internal tabs (`readOnly=true`; editable on web tabs) so direct user URL entry
+into a `goldfinch://` tab is blocked at the input. This needs a
 behavior test rather than a unit test because the assertions are real-environment, cross-process UI
-observations: the shell renders inside a `<webview>` guest on a privileged scheme, the chip lives in the
+observations: the shell renders inside a guest WebContentsView on a privileged scheme, the chip lives in the
 chrome renderer and reflects the active tab, and the lock is a navigation-routing behavior visible only
 in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exactly this shape.
 
@@ -43,7 +44,7 @@ in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exact
     chip, toolbar, tab strip. Read via `readDom(wcId)` / `readAxTree(wcId)`; drive via
     `click(wcId, x, y)` / `pressKey(wcId, name)`.
   - **Internal guest target** (from `enumerateTabs` → the entry with `url: 'goldfinch://settings'`
-    → its `wcId` as `guestWcId`): the `goldfinch://settings` `<webview>` guest. Read via
+    → its `wcId` as `guestWcId`): the `goldfinch://settings` guest WebContentsView. Read via
     `readDom(guestWcId)` / `readAxTree(guestWcId)`; drive via `click(guestWcId, x, y)` /
     `pressKey(guestWcId, name)`. Keep them straight — do NOT pass the chrome `wcId` to guest read
     calls or vice versa.
@@ -88,8 +89,8 @@ in the running app. SC6 (recognizable shell) and SC8 (keyboard + a11y) are exact
 | 7 | Confirm the **internal-page identity chip**: with the Settings tab active, call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the chip element in the chrome `#address-wrap`. | An internal-page identity chip is shown (a "Goldfinch"/secure-internal indicator), distinct from the web-page chip; it is NOT a web origin/lock. |
 | 8 | Open a normal web tab to `https://example.com/` and activate it; call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the chip in `#address-wrap`. | A **web-page site-info chip** is shown (a connection/lock indicator + the origin `example.com`), distinct from the internal chip. |
 | 9 | Take a `captureWindow()` screenshot to locate the web chip; call `click(wcId, x, y)` on the chip coordinates; call `readDom(wcId)` / `readAxTree(wcId)` on the **chrome target** to read the popup element + its text. | A site-info **popup** opens showing the origin + connection (https) + a compact summary derived from the tab's existing privacy data (trackers blocked / permissions count) + a **"Site settings →"** action. *(A freshly-opened site legitimately summarizes to `0 trackers` / empty; `tab.privacy.net` is null until the ~350ms `privacy-net` IPC arrives — `0`/"—"/empty is a valid pass, the popup must not be blank/crashed.)* |
-| 10 | Take a `captureWindow()` screenshot to locate the popup's "Site settings →" action; call `click(wcId, x, y)` on its coordinates; observe the chrome via `readAxTree(wcId)`. | The existing **Shields/privacy panel** opens for the site (the popup is a thin entry point, not a duplicate). The popup closes. |
-| 11 | **Internal-tab lock**: re-activate the `goldfinch://settings` tab (locate it via `captureWindow()` and `click(wcId, x, y)`, or `enumerateTabs`); take a `captureWindow()` screenshot to locate the address bar; call `click(wcId, x, y)` on the address bar coordinates (≈ (400, 63) at 1400×900) to focus it, then call `typeText(wcId, 'https://example.com/')` and `pressKey(wcId, 'Enter')` (or note which trusted path is used). | A **new normal tab** opens to `https://example.com/` (partition `persist:goldfinch`); the **internal Settings tab stays on `goldfinch://settings`** (its webview did NOT navigate to the web URL — confirmed via `enumerateTabs` and `readDom(wcId)` on the chrome). The tab count increased by one. |
+| 10 | Take a `captureWindow()` screenshot to locate the popup's "Site settings →" action; call `click(wcId, x, y)` on its coordinates; observe via `enumerateTabs` + `readDom(wcId)` on the chrome. | Activating **"Site settings →"** navigates to the internal **`goldfinch://settings/#privacy`** page (the Flight-7 rewire): an existing internal Settings tab is reused and moved to `#privacy`, else a new trusted internal tab opens there. It does **NOT** open a slide-out Shields/privacy panel (that panel is still reachable via the toolbar Shields icon / `Ctrl+Shift+P`, but is no longer this action's destination). The popup closes. |
+| 11 | **Internal-tab read-only address lock**: re-activate the `goldfinch://settings` tab (locate it via `captureWindow()` and `click(wcId, x, y)`, or `enumerateTabs`); read the chrome address `<input>` via `readDom(wcId)` / `readAxTree(wcId)` and inspect its editability (`readOnly` / `aria-readonly` / not-editable). Then activate a normal web tab (e.g. `https://example.com/`) and read the same address `<input>` again for contrast. | On the internal Settings tab the address `<input>` is **read-only** (`readOnly=true` — the chip is `data-state="internal"`), so direct user URL entry is blocked at the input: the old "type a web URL → new tab opens" affordance no longer applies. This is **intended trust hardening**. On the web tab the same `<input>` is **editable** (`readOnly=false`, `data-state="web"`). The internal Settings tab remains on `goldfinch://settings`. |
 | 12 | Dismiss the site-info popup by calling `click(wcId, x, y)` outside it (locate via `captureWindow()`) or `pressKey(wcId, 'Escape')` (if still open) and confirm the shared menu-dismiss behavior via `readAxTree(wcId)`. | The popup closes on outside-click / Escape (it routes through the shared `menuController`); focus returns appropriately. `[a11y]` |
 
 **Row conventions**: `[a11y]`-marked rows are accessibility-relevant. Step 11's lock is the UX half of the

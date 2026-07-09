@@ -16,7 +16,7 @@ with `F12`/`Ctrl+Shift+I` shortcuts that work **regardless of pin state**. The D
 **toggle button** (`aria-pressed` reflecting the external detached DevTools window's open/closed state, NOT
 `aria-expanded` — it has no in-page panel), and is **inert-not-hidden** on internal `goldfinch://` tabs
 (DD5). This needs a behavior test, not a unit test: the assertions are real-environment, cross-process UI —
-the pin toggle lives in a `<webview>` guest on a privileged scheme, the toolbar lives in the chrome renderer
+the pin toggle lives in a guest WebContentsView on a privileged scheme, the toolbar lives in the chrome renderer
 and reflects the active pin state via an IPC broadcast, persistence is a file the main process writes, and
 the DevTools button's pressed state is driven by a `devtools-state-changed` event the main process forwards
 (Leg-1 spike POSITIVE — the event fires reliably, so the button reflects open/closed **live**, including a

@@ -71,8 +71,8 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // The explicit webContentsId is captured at call time; main acts on THAT id, never activeTab() (TOCTOU).
   toggleDevtools: ({ webContentsId }) => ipcRenderer.invoke('toggle-devtools', { webContentsId }),
   isDevtoolsOpen: ({ webContentsId }) => ipcRenderer.invoke('is-devtools-open', { webContentsId }),
-  // Fired by main's guest devtools-opened/devtools-closed listener (leg-1 spike POSITIVE — both the
-  // guest contents and the <webview> tag fire; we wire the guest side). Mirrors onZoomChanged; Leg 2
+  // Fired by main's guest devtools-opened/devtools-closed listener (leg-1 spike POSITIVE — the events
+  // fire on the guest webContents, which is the side we wire). Mirrors onZoomChanged; Leg 2
   // subscribes for live button updates. Payload { wcId, open }.
   onDevtoolsStateChanged: (cb) => ipcRenderer.on('devtools-state-changed', (_e, d) => cb(d)),
 

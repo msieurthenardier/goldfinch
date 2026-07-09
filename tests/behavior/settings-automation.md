@@ -12,7 +12,7 @@ configure the listen port (with a "find free port" helper), generate / rotate / 
 (show-once plaintext + copy) and — when env-gated — the admin key, and watch automation activity (a
 visible chrome indicator + an in-settings audit viewer). This needs a behavior test, not a unit test,
 because the assertions are real-environment, cross-process UI observations: the settings shell renders
-inside a `<webview>` guest on the privileged `goldfinch://` scheme (read/driven via the admin MCP
+inside a guest WebContentsView on the privileged `goldfinch://` scheme (read/driven via the admin MCP
 surface's `allowInternal` enumeration), the activity indicator lives in the chrome renderer (read via
 `getChromeTarget`), and the indicator/viewer only populate against a **live MCP session** over the
 loopback transport. It backs **SC9** (keys managed from Settings — generate / rotate / revoke, effective
@@ -64,7 +64,7 @@ off-by-default opt-in gets its operator-facing control).
     via `readDom(wcId)` / `readAxTree(wcId)` / `captureWindow()`. The indicator lives in the chrome
     renderer, **NOT** in the settings guest.
   - **Internal guest target** (from `enumerateTabs` → the entry with `url: 'goldfinch://settings'`
-    → its `wcId` as `guestWcId`): the `goldfinch://settings` `<webview>` guest — the entire
+    → its `wcId` as `guestWcId`): the `goldfinch://settings` guest WebContentsView — the entire
     `<section id="automation">` (enable toggle, address/port fields, Keys subsection,
     `#automation-active-sessions`, `#automation-activity-log`). Read via `readDom(guestWcId)` /
     `readAxTree(guestWcId)`; drive via `click(guestWcId, x, y)` / `typeText(guestWcId, …)` /
