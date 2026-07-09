@@ -159,6 +159,32 @@ pre-publish, satisfying DD7's "catch a broken build before publishing" intent.
 
 _(further runtime decisions recorded here)_
 
+### Release sequence (operator-gated) — progress
+**Operator chose (2026-07-09): merge+push+dry-run, STOP before the tag.**
+- Legs 1–4 committed on `flight/06` (`d34ebac`); final Reviewer `[HANDOFF:confirmed]` (nav.js hardening genuine;
+  secret scan clean; one doc finding fixed — CLAUDE.md page-context Escape reverted to code-accurate).
+- Merged `flight/06` → `mission/05` (`cdc84a2`) → **`main`** (`761aec0`, "Land Mission 05 … v0.6.0"). Tests
+  1065/1065 on merged `main`. **Pushed `main`** (`18470bc..761aec0`).
+- **Build-only CI dry-run dispatched** (`workflow_dispatch` on `main`, run `29022790272`) — 3 platform builds
+  (linux/mac/win); the tag-only "Create draft release" job correctly SKIPPED (publishes nothing).
+- **Build-only dry-run GREEN** (run `29022790272`): Build(linux) ✅ 1m54s, Build(mac) ✅ 50s, Build(win) ✅ 3m5s;
+  create-draft/publish/update-readme all SKIPPED (no tag → nothing published). All 5 installers build cleanly.
+  Benign annotation: `macos-latest` → macOS 26 migration (June 2026, informational). DD7 satisfied.
+- **STOPPED before the `v0.6.0` tag/publish (Leg 6)** — awaited the operator's final go.
+- **Clarified with operator:** the repo is **PRIVATE**, so the GitHub Release is collaborator-only (not
+  world-visible); release visibility follows repo visibility. Operator gave the go.
+- **Leg 5 (merge-to-main) COMPLETE:** `flight/06`→`mission/05`(`cdc84a2`)→`main`(`761aec0`); pushed. THE MISSION LANDING.
+- **Leg 6 (cut-release) COMPLETE — v0.6.0 PUBLISHED:** tagged `v0.6.0` on `761aec0`, pushed → release run
+  `29027676740` **all 6 jobs success** (create-release, build linux/mac/win, publish, update-readme). Release is
+  stable (not draft/prerelease) with all installers: **mac** `Goldfinch-0.6.0-arm64.dmg` + `-arm64-mac.zip`
+  (Apple Silicon), **win** `Goldfinch-Setup-0.6.0.exe`, **linux** `Goldfinch-0.6.0.AppImage` +
+  `goldfinch_0.6.0_amd64.deb`, + auto-update `latest*.yml`. Release body set from `v0.6.0-release-notes.md`
+  (unsigned-mac disclosure). `update-readme` auto-committed download links to `main` (`609c3e4`); local `main`
+  fast-forwarded. **Note:** mac is **arm64-only** (macos-latest default) — no Intel/x64 mac build; a config
+  follow-up if x64 mac is wanted (→ debrief). URL: https://github.com/msieurthenardier/goldfinch/releases/tag/v0.6.0
+- **Leg 7 (release-smoke-and-hat):** optional + non-gating; the local Leg-3 linux build + the CI dry-run + the
+  real release build all validated packaging. Skipped by default (available on request).
+
 ## Deviations
 
 _(none yet)_

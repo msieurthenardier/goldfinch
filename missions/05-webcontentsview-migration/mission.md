@@ -39,7 +39,7 @@ follow-on work.
 
 ## Success Criteria
 
-- [ ] **SC1 — Native guest surface.** Web tabs and internal `goldfinch://` pages render via
+- [x] **SC1 — Native guest surface.** ✅ MET (F3 built it; F6 verified source-absence). Web tabs and internal `goldfinch://` pages render via
   `WebContentsView` on a `BaseWindow`; no `<webview>` tag remains in the tab/guest path. *(Verified:
   source absence + app launches and browses.)*
 - [x] **SC2 — Spike-gated commitment, verified on pixels.** ✅ MET (Flight 1, 2026-06-23/24): all six
@@ -51,7 +51,7 @@ follow-on work.
   geometry-only check is necessary-but-insufficient and a false-confidence trap. A clean spike authorizes
   the cutover; a non-clean spike pauses for an operator options-review (not auto-abort). *(Verified: spike
   artifact with pixel evidence + recorded go/review decision.)*
-- [ ] **SC3 — Browser-behavior parity.** The chrome behaves as it does today — multi-tab browsing,
+- [x] **SC3 — Browser-behavior parity.** ✅ MET (F6 corpus PASS 8/8 on the native surface). The chrome behaves as it does today — multi-tab browsing,
   back/forward/reload, address bar, persistent sessions, favicons, popups-as-tabs, tab-strip keyboard
   operability — confirmed by the existing active browsing/tab behavior tests passing on the new
   surface. *(Verified: behavior-test corpus.)*
@@ -75,7 +75,7 @@ follow-on work.
 - [x] **SC7 — Side-panel compositing (#27 / SC10) — CERTIFIED (Flight 9, 2026-07-07).** The media/privacy panel
   composites correctly over the guest surface, closing #27/SC10 — pursued **only if** it falls out of the
   native-view model essentially for free. Not a gate; explicitly droppable without reopening as polish.
-- [ ] **SC8 — Frameless window & controls parity, per platform.** The frameless window, drag regions,
+- [x] **SC8 — Frameless window & controls parity, per platform.** ✅ MET (Linux/WSLg in-loop; macOS by build-readiness — installer builds green in CI, runtime deferred, DD2). The frameless window, drag regions,
   and window controls (custom minimize/maximize/close on Windows/Linux; native traffic lights on macOS)
   work as they do today on the `BaseWindow` shell. *(Verified: in-loop on Linux/WSLg; macOS by
   build-readiness + recorded decision, per Constraints.)*
@@ -237,7 +237,10 @@ follow-on work.
   corpus + macOS + merge. Gated by a Leg-1 **apparatus-wiring litmus** (the F4 Leg-4 blocker). *(SC6, SC4-formal,
   SC5-part; closes the F4 Leg-4 deferral.)* — *original framing (commentary): "full MCP end-to-end parity via the
   `mcp-*` corpus"; internal-page migration already moved to Flight 3 (DD0).*
-- [ ] **Flight 6: Parity sweep & land** — run the full active behavior-test corpus as the parity
+- [x] **Flight 6: Parity sweep & land** — ✅ **LANDED + SHIPPED (2026-07-09)**: SC3 corpus PASS 8/8, SC1
+  source-absence verified, `nav.js` hardened, `<webview>` sweep done; merged `mission/05` → `main`; **v0.6.0
+  released** with all installers (mac arm64 / win / linux); macOS runtime deferred (build-readiness, DD2).
+  *(original tentative framing below)* — run the full active behavior-test corpus as the parity
   benchmark; macOS build-readiness check; merge the mission branch to `main`. *(SC3, SC8, mission
   landing.)* — **Panel composition (SC7/#27/SC10) is DONE (Flight 9, certified 2026-07-07)** and its
   original framing here ("media/privacy panel as a native **overlay**") was **refuted**: panels

@@ -1,18 +1,14 @@
 # Flight: Parity Sweep, Mission Landing & v0.6.0 Release
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [WebContentsView Migration](../../mission.md)
 
 ## Contributing to Criteria
-- [ ] **SC1** — Native guest surface: source-absence of the **functional** forms verified + the app launches
-  and browses. (Precise pattern — DD10: absence of a constructed `<webview>` element, a `webviewTag:`
-  webPreferences key, and a `will-attach-webview` registration in the tab/guest path. **Whitelisted legitimate
-  residuals** that must NOT fail the check: the `src/preload/webview-preload.js` filename (load-bearing preload),
-  the `#webviews` guest-region DOM slot id, and historical comments that state the machinery was removed.)
-- [ ] **SC3** — Browser-behavior parity: the browsing / tab-strip / chrome-UI corpus passes on the native surface.
-- [ ] **SC8** — Frameless window & controls parity, per platform: Linux/WSLg in-loop; **macOS by build-readiness
-  + recorded decision** (no in-loop mac venue — DD2), per the mission's macOS constraint.
-- [ ] **Mission landing** — `mission/05` merges to `main`; the migration ships as **v0.6.0** with all installers.
+- [x] **SC1** — Native guest surface: ✅ source-absence of the functional forms verified (Leg 2, DD10 + whitelist).
+- [x] **SC3** — Browser-behavior parity: ✅ browsing/tab/chrome-UI corpus PASS 8/8 on the native surface (Leg 1).
+- [x] **SC8** — Frameless window & controls parity: ✅ Linux/WSLg in-loop; **macOS by build-readiness** (mac
+  installer builds green in CI; runtime deferred — DD2), per the mission's macOS constraint.
+- [x] **Mission landing** — ✅ `mission/05` merged to `main`; shipped as **v0.6.0** with all installers.
 
 > **This is the mission-landing + release flight** (operator: "inclusive… cut a release and a minor version with
 > all the installers"). It closes the remaining parity criteria, lands the mission to `main`, and cuts a real
@@ -172,9 +168,9 @@ Prove parity, clean the surface, dry-run the build, land, then release — in th
 - [x] `carry-forwards-and-webview-sweep` — `nav.js` op-local internal guard on **all four** ops (navigate/goBack/goForward/reload) **+ unit tests that assert refusal with `allowInternal:true`** (the existing tests don't — DD6); doc reconciliations (page-context Escape target; `mcp-drive` Preconditions); the repo-wide `<webview>`→WebContentsView sweep (specs + `webview-preload.js` header + source comments); **SC1 source-absence** per the DD10 functional-form pattern + whitelist. test/typecheck/lint green. ✅ **landed** (2026-07-08): 5 new admin-path nav tests, 1065/1065; SC1 residuals = whitelist only.
 - [x] `release-readiness` — config audit + local linux installer smoke. ✅ **landed** (2026-07-08): AppImage+deb build clean; asar:false deliberate; build.yml sound. The 3-platform CI dry-run runs post-merge-pre-tag (DD7 refinement).
 - [x] `version-and-notes` — bumped `package.json` → 0.6.0 (== tag `v0.6.0`); authored `v0.6.0-release-notes.md` (migration highlights + unsigned-mac disclosure + follow-ups). ✅ **landed** (2026-07-08).
-- [ ] `merge-to-main` — merge `mission/05` → `main` (parity proven; clean — planning-verified FF-able); confirm `main` builds/tests green. **Landing.**
-- [ ] `cut-release` — tag `v0.6.0` on `main`, push (**operator-gated**); verify Actions builds + publishes all installers to the GitHub Release (`gh release view v0.6.0`). **Note (DD11): the `update-readme` job auto-commits back to `main` after a stable publish — expected, not drift.** **Outward-facing.**
-- [ ] `release-smoke-and-hat` *(optional, **non-gating** — a green publish is NOT held hostage to a WSLg smoke)* — launch the published linux installer, browse (SC1 browse), confirm the release reads clean; guided HAT.
+- [x] `merge-to-main` — `flight/06`→`mission/05`(`cdc84a2`)→`main`(`761aec0`); pushed; 1065/1065 on main. ✅ **THE MISSION LANDING** (2026-07-09).
+- [x] `cut-release` — tagged `v0.6.0`, release run all-green; **v0.6.0 PUBLISHED** with all installers (mac arm64 dmg+zip, win nsis, linux AppImage+deb); notes set; `update-readme` auto-committed (`609c3e4`). ✅ (2026-07-09).
+- [x] `release-smoke-and-hat` *(optional, non-gating)* — **skipped**; packaging validated by the Leg-3 local build + CI dry-run + the real release build. Available on request.
 
 ---
 
