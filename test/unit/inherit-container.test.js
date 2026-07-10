@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { inheritContainerDecision } = require('../../src/shared/inherit-container');
+const { inheritContainerDecision, inheritFromPartition } = require('../../src/shared/inherit-container');
 
 // ---------------------------------------------------------------------------
 // Truth table (M06 F2 HAT Leg 4 / D3 — link/image/selection-search open
@@ -54,5 +54,59 @@ test('never throws on malformed input', () => {
   });
   assert.doesNotThrow(() => {
     assert.deepEqual(inheritContainerDecision(/** @type {any} */ (undefined), /** @type {any} */ (undefined)), {});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inheritFromPartition truth table (DD7, M06 F3 Leg 4 — popup inheritance:
+// resolves the opener's forwarded partition STRING, not a Tab/container object)
+// ---------------------------------------------------------------------------
+
+const CONTAINERS = [
+  { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' },
+  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work' }
+];
+
+test('persistent partition matching a container -> { container: <that reference> }', () => {
+  const result = inheritFromPartition('persist:container:work', CONTAINERS);
+  assert.deepEqual(result, { container: CONTAINERS[1] });
+  assert.equal(result.container, CONTAINERS[1]); // same reference, not a copy
+});
+
+test('burner partition (COLON separator, not the hyphen used in burner ids) -> freshBurner sentinel', () => {
+  assert.deepEqual(inheritFromPartition('burner:123456789', CONTAINERS), { freshBurner: true });
+});
+
+test('popup from a burner tab never inherits the opener\'s own burner container (burner containers are never in `containers` anyway, pinned regardless)', () => {
+  const withBurnerLookalike = [...CONTAINERS, { id: 'burner-123456789', partition: 'burner:123456789', burner: true }];
+  const result = inheritFromPartition('burner:123456789', withBurnerLookalike);
+  assert.deepEqual(result, { freshBurner: true });
+  assert.equal(result.container, undefined);
+});
+
+test('internal partition (bare `goldfinch-internal`, no persist:/burner: prefix) -> {} default routing', () => {
+  assert.deepEqual(inheritFromPartition('goldfinch-internal', CONTAINERS), {});
+});
+
+test('null/undefined partition -> {} default routing (opener closed before the popup IPC lands)', () => {
+  assert.deepEqual(inheritFromPartition(null, CONTAINERS), {});
+  assert.deepEqual(inheritFromPartition(undefined, CONTAINERS), {});
+});
+
+test('persistent-looking partition with NO matching container -> {} default (privacy-conservative, never guesses)', () => {
+  assert.deepEqual(inheritFromPartition('persist:container:deleted-jar', CONTAINERS), {});
+});
+
+test('unrecognized partition format -> {} default, never throws', () => {
+  assert.doesNotThrow(() => {
+    assert.deepEqual(inheritFromPartition('something-else', CONTAINERS), {});
+  });
+});
+
+test('missing/empty containers array -> still resolves burner/default correctly, never throws', () => {
+  assert.doesNotThrow(() => {
+    assert.deepEqual(inheritFromPartition('burner:1', /** @type {any} */ (undefined)), { freshBurner: true });
+    assert.deepEqual(inheritFromPartition('persist:container:work', []), {});
+    assert.deepEqual(inheritFromPartition('persist:container:work', /** @type {any} */ (null)), {});
   });
 });

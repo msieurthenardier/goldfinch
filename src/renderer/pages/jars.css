@@ -1,0 +1,330 @@
+/* Cookie-jar management page — Chrome-style shell (Flight 3, Leg 1). Self-contained:
+   no @import. Mirrors downloads.css's brand tokens, dark/gold chrome, and focus-ring
+   conventions. */
+
+/* ── Brand tokens (authoritative chrome values from src/renderer/styles.css) ── */
+:root {
+  --accent: #f5c518;
+  --accent-fg: #1e1f25;
+  --bg: #1e1f25;
+  --bg-2: #282a32;
+  --bg-3: #32343d;
+  --fg: #e6e7ea;
+  --fg-dim: #9a9ca6;
+  --border: #3a3c46;
+  --ok: #6dff8f;
+  --err: #ff8c7a;
+}
+
+/* ── Reset ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Main content column ── */
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 48px 64px;
+}
+
+/* ── Header ── */
+.jars-header {
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Heading + "+ New jar" button row (HAT follow-up F5) — split out of
+   .jars-header so the header block can also hold .jars-description above
+   the divider, with the row itself keeping the original flex layout. */
+.jars-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jars-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+/* ── Intro copy (HAT step-1 finding F2) — muted paragraph style consistent with
+   the .jars-footnote / settings.js plain-<p> convention used elsewhere on the
+   internal pages. Grouped inside .jars-header (HAT follow-up F5), so it sits
+   above the divider with the heading/button row instead of below it. ── */
+.jars-description {
+  margin: 8px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── List ── */
+.jars-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.jar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Burner row wraps to a second line for its explanatory hint (F4) — every other
+   row stays single-line. */
+.jar-row[data-burner='true'] {
+  flex-wrap: wrap;
+}
+
+.jar-burner-hint {
+  flex: 1 0 100%;
+  margin: 4px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.jar-dot {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #9aa0ac; /* fallback dot color; jars.js overrides via isSafeColor */
+  border: 1px solid var(--border);
+}
+
+.jar-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jar-name {
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.jar-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.jar-footnote-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+/* ── Row actions (Leg 2) ── */
+.jar-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Buttons (Leg 2; realigned to downloads.css's .downloads-btn/.download-btn
+   conventions per HAT step-1 finding F3 — operator ruling: outline-on-hover,
+   not a brightness fill) — bg-2 fill by default, accent-bordered outline on
+   hover, accent fill for primary, transparent/err outline for danger. ── */
+.jar-btn {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.1s, filter 0.1s;
+}
+
+.jar-btn:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.jar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jar-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.jar-btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* Primary is already accent-filled, so the outline-on-hover cue would be
+   invisible — mirrors .download-btn.primary:hover's brightness fill instead. */
+.jar-btn-primary:not(:disabled):hover {
+  filter: brightness(1.1);
+  border-color: var(--accent);
+}
+
+.jar-btn-danger {
+  background: transparent;
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.jar-btn-danger:not(:disabled):hover {
+  background: rgba(255, 140, 122, 0.12);
+  border-color: var(--err);
+}
+
+/* Compact text button — currently only "Make default" (HAT step-5 finding F6,
+   operator ruling: no obvious icon for it, so it stays text, but shrunk so it
+   sits well beside the icon-only Edit/Delete buttons below). */
+.jar-btn-compact {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Icon-only row actions — Edit (pencil) / Delete (trash), HAT step-5 finding
+   F6: replaces the old text Edit/Delete buttons. Square, centered glyph;
+   inherits .jar-btn's bg/border/hover/focus-visible treatment (outline-on-hover
+   accent border, per F3) — .jar-btn-danger's transparent/err-outline/rgba-hover
+   treatment layers on top unchanged for Delete, and the svg's
+   stroke="currentColor" (jars.js) picks up that err color for free. */
+.jar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.jar-icon-btn .jar-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* ── Create/edit forms (Leg 2) ── */
+#jars-create-panel:not(:empty) {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 16px;
+  margin-bottom: 16px;
+}
+
+/* Edit/confirm rows swap the base row's flex layout for a block layout so the
+   form/confirm content can stack vertically. */
+.jar-row-edit,
+.jar-row-confirm {
+  display: block;
+}
+
+.jar-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.jar-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.jar-name-input {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.jar-name-input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch-btn.selected {
+  border-color: var(--fg);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.swatch-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.jar-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.jar-error-line {
+  min-height: 16px;
+  color: var(--err);
+  font-size: 12px;
+  margin: 0;
+}
+
+.jar-confirm-text {
+  color: var(--fg-dim);
+  font-size: 13px;
+  margin: 4px 0 0;
+}

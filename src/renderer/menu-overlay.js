@@ -193,7 +193,6 @@
       if (typeof item.id !== 'string') continue;
       const btn = document.createElement('button');
       btn.className = 'cm-item';
-      if (item.variant === 'add') btn.classList.add('add');
       btn.setAttribute('role', 'menuitem');
       btn.tabIndex = -1;
       if (item.color !== undefined) {

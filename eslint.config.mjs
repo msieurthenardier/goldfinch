@@ -42,7 +42,7 @@ export default [
     ignores: ['src/renderer/menu-controller.js'], // it DEFINES the menu globals (own block above)
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly', isSafeColor: 'readonly', deriveSiteInfo: 'readonly', buildContainerModel: 'readonly', pageContextModel: 'readonly', BURNER: 'readonly', resolveNewTabContainer: 'readonly', inheritContainerDecision: 'readonly' }
+      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly', isSafeColor: 'readonly', deriveSiteInfo: 'readonly', buildContainerModel: 'readonly', pageContextModel: 'readonly', BURNER: 'readonly', resolveNewTabContainer: 'readonly', inheritContainerDecision: 'readonly', inheritFromPartition: 'readonly', buildJarPageModel: 'readonly', PALETTE: 'readonly', buildAutomationIndicatorModel: 'readonly' }
     }
   },
   eslintConfigPrettier // last — Prettier owns formatting

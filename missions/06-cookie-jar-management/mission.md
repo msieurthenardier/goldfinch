@@ -150,21 +150,33 @@ identity, not id string, and already degrades gracefully when a jar disappears.
       (renderer.js:713). Cosmetic-only — discovered during Flight 1 design review;
       fold into Flight 2's retirement sweep. *(Retired in Flight 2, DD6; operator
       kept always-dotted at HAT.)*
-- [ ] `window.open`/`target=_blank` popups do NOT inherit the opener tab's jar —
+- [x] `window.open`/`target=_blank` popups do NOT inherit the opener tab's jar —
       main's window-open handler forwards only the URL, so popups route to the
       default jar. Context-menu link-opens were fixed to inherit at Flight 2's HAT
       (operator ruling); the popup path needs opener plumbing (three-file change).
       Discovered in Flight 2 HAT, affects jar-confinement expectations — candidate
-      for Flight 3 or 5.
-- [ ] Guest-focus accelerator forwarding is incomplete beyond the fixed Ctrl+T:
+      for Flight 3 or 5. *(Fixed Flight 3 DD7: main tracks the opener's partition at
+      creation time and forwards it on `open-tab`; the renderer resolves inheritance
+      renderer-side via `inheritFromPartition`. Behavior-tested —
+      `popup-jar-inheritance` 5/5 PASS.)*
+- [x] Guest-focus accelerator forwarding is incomplete beyond the fixed Ctrl+T:
       Ctrl+W and sibling chrome-class accelerators are still swallowed when a web
       page holds keyboard focus (same pre-existing `before-input-event` gap class).
       Discovered in Flight 2 HAT (D2 diagnosis), affects keyboard UX — candidate
-      for a chrome-integration flight.
-- [ ] Tabs whose jar is deleted stay open on the wiped partition and keep reporting
+      for a chrome-integration flight. *(Fixed Flight 3 DD8: per-key one-offs
+      replaced with one classifier-driven forwarder and explicit per-guest-kind
+      allowlists (web = full chrome-class set, internal = cross-view + new-tab +
+      close-tab). Ctrl+Shift+T intentionally dropped — chrome-focus parity, the
+      chord is reserved for a future reopen-closed-tab feature. HAT-verified at
+      Flight 3 CP5.)*
+- [x] Tabs whose jar is deleted stay open on the wiped partition and keep reporting
       the deleted jarId (documented Flight 2 DD2 trade-off; operator-observed at
       HAT). Flight 3's management-page delete must close open tabs in the jar
-      (mission criterion 4).
+      (mission criterion 4). *(Fixed Flight 3 DD6: the renderer's `jars-changed`
+      orphan branch performs an ordered sweep — pre-activate a survivor if the
+      active tab is orphaned, close non-active orphans first, close the active
+      orphan last, letting `closeTab`'s own last-tab fallback fire exactly once.
+      Behavior-tested — `jar-delete-closes-tabs` 5/5 PASS.)*
 
 ## Flights
 
@@ -180,7 +192,7 @@ identity, not id string, and already degrades gracefully when a jar disappears.
       all four reserved-base-partition assumptions (store floor, main-process base
       partition constant + privacy-handler fallbacks, dev auto-mint hardcode, renderer
       first-tab constant/race); Burner-as-default fallback behavior
-- [ ] Flight 3: Jar management page — new special page with jar list, create, rename,
+- [x] Flight 3: Jar management page — new special page with jar list, create, rename,
       recolor, delete, and set-default interactions
 - [ ] Flight 4: Per-jar data controls — clear cookies / site storage / cache, full
       identity wipe integration, extensible clearable-data-class list

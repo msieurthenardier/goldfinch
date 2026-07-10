@@ -15,12 +15,13 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// The internal-origin allowlist (Flight 5). The trust boundary is "internal page vs
-// web," NOT "settings vs downloads" — every inhabitant is an equally-trusted internal
-// origin, so the SAME bridge (settings + shields + automation + downloads methods) is
-// exposed to each. The downloads methods are inert on the settings page (it never calls
-// them) and the main-side registerInternalHandler origin check gates them regardless.
-const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads']);
+// The internal-origin allowlist (Flight 5, extended Flight 3 F3). The trust boundary is
+// "internal page vs web," NOT "settings vs downloads vs jars" — every inhabitant is an
+// equally-trusted internal origin, so the SAME bridge (settings + shields + automation +
+// downloads + jars methods) is exposed to each. The downloads/jars methods are inert on
+// the settings page (it never calls them) and the main-side registerInternalHandler
+// origin check gates them regardless.
+const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars']);
 
 // Only expose the bridge when this preload is running in a genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
@@ -264,7 +265,77 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     offDownloadsChanged: (handles) => {
       if (Array.isArray(handles)) for (const h of handles) off(h);
-    }
+    },
+
+    // Cookie-jar registry surface (Flight 3, Leg 1). The goldfinch://jars page is the
+    // only caller; wrappers are thin ipcRenderer.invoke calls onto the internal-origin-
+    // gated internal-jars-* channels (registerJarIpc / jar-ipc.js), which share their
+    // exact handler bodies with the chrome-trusted jars-* channels the picker uses.
+
+    /**
+     * List every persistent jar (Burner is never a store entry — compose it
+     * separately via jarsGetDefault()/the BURNER constant).
+     * @returns {Promise<Array<{id:string,name:string,color:string,partition:string}>>}
+     */
+    jarsList: () => ipcRenderer.invoke('internal-jars-list'),
+
+    /**
+     * Create a new jar. Resolves with the created container, or null for an
+     * invalid payload (missing/non-string name).
+     * @param {{name:string,color?:string}} payload
+     * @returns {Promise<object|null>}
+     */
+    jarsAdd: (payload) => ipcRenderer.invoke('internal-jars-add', payload),
+
+    /**
+     * Rename/recolor an existing jar — id/partition are immutable, so this is the
+     * ONLY mutation entry for both name and color. Resolves with the updated
+     * container, or null for an unknown id.
+     * @param {{id:string,name?:string,color?:string}} payload
+     * @returns {Promise<object|null>}
+     */
+    jarsRename: (payload) => ipcRenderer.invoke('internal-jars-rename', payload),
+
+    /**
+     * Delete a jar: wipes its storage/cache, rerolls its fingerprint seed, and
+     * revokes its automation key. Resolves with the removal result; the
+     * renderer's jars-changed subscriber closes the jar's open tabs.
+     * @param {{id:string}} payload
+     * @returns {Promise<{ok:boolean, removed?:object, wiped?:boolean}>}
+     */
+    jarsRemove: (payload) => ipcRenderer.invoke('internal-jars-remove', payload),
+
+    /**
+     * Move the default flag to an existing jar. Resolves true on success, false
+     * for an unknown id (or an explicit { id: null } while jars still exist).
+     * @param {{id:string|null}} payload
+     * @returns {Promise<boolean>}
+     */
+    jarsSetDefault: (payload) => ipcRenderer.invoke('internal-jars-set-default', payload),
+
+    /**
+     * Read the current default jar object, or the BURNER identity clone when no
+     * persistent jar holds the flag. Compare by id, never by reference — this
+     * crosses IPC as a structured-clone of the frozen BURNER constant.
+     * @returns {Promise<{id:string,name:string,color:string}>}
+     */
+    jarsGetDefault: () => ipcRenderer.invoke('internal-jars-get-default'),
+
+    /**
+     * Subscribe to jars-changed broadcasts. cb receives { containers, defaultId }
+     * (defaultId null ⇔ Burner holds the flag). Returns a numeric handle for use
+     * with offJarsChanged.
+     * @param {(payload:{containers:Array<object>, defaultId:(string|null)}) => void} cb
+     * @returns {number}
+     */
+    onJarsChanged: (cb) => on('jars-changed', cb),
+
+    /**
+     * Unsubscribe the jars-changed listener registered under handle h. Call from
+     * a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offJarsChanged: (h) => off(h)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

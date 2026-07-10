@@ -1164,24 +1164,60 @@ a:focus-visible {
   color: var(--accent-fg);
 }
 
-/* Automation indicator (SC10/DD6). Visible only when ≥1 session is connected.
-   The connected (jar-only) state uses the brand accent (gold). The .admin state
-   uses a DELIBERATELY non-alarm color (violet) — admin is "more privileged", not
-   "broken"; a danger-red here would misread as an error. Final color is a HAT/leg-7
-   polish point. The badge background tracks the same state colors. */
+/* Automation ("robot") indicator (F7, Flight 3 Leg 6 HAT — operator ruling).
+   Visible whenever >=1 automation key is ENABLED (jar or admin) — independent of
+   whether any connection is currently live; renderAutomationIndicator (renderer.js)
+   drives the mode class from buildAutomationIndicatorModel:
+     .automation-idle   — enabled, no active connection: grayed out (dim, desaturated).
+     .automation-jar    — exactly one active jar: the glyph takes that jar's color,
+                           applied as an INLINE style (arbitrary operator-chosen jar
+                           color — a CSS class can't parameterize it), isSafeColor-
+                           guarded both in the model and again at DOM-application time.
+     .automation-multi  — more than one simultaneously active jar (or a single active
+                           jar whose color couldn't be safely resolved): the same
+                           brand-accent (gold) the pre-F7 "connected" state used —
+                           neutral, deliberately NOT rainbow (reserved for admin).
+     .automation-admin  — the admin key is enabled AND currently active: an animated
+                           rainbow sweep (hue-rotate), trumping any concurrent jar
+                           activity. Non-alarm by design — admin is "more privileged",
+                           not "broken"; a danger-red here would misread as an error.
+   The count badge always shows the ENABLED jar-key count (not live connections),
+   hidden at 0 — same badge treatment across every visible mode. */
 #automation-indicator {
-  color: var(--accent);
+  color: var(--fg-dim);
 }
 #automation-indicator .tb-badge {
   background: var(--accent);
   color: var(--accent-fg);
 }
-#automation-indicator.admin {
-  color: #a371f7;
+#automation-indicator.automation-idle {
+  color: var(--fg-dim);
+  opacity: 0.6;
 }
-#automation-indicator.admin .tb-badge {
-  background: #a371f7;
-  color: #1e1f25;
+/* .automation-jar carries no color rule here — renderer.js sets style.color
+   directly to the isSafeColor-checked jar color (see comment block above). */
+#automation-indicator.automation-multi {
+  color: var(--accent);
+}
+#automation-indicator.automation-admin {
+  color: var(--accent);
+  animation: automation-rainbow 3s linear infinite;
+}
+@keyframes automation-rainbow {
+  from {
+    filter: hue-rotate(0deg) saturate(1.6);
+  }
+  to {
+    filter: hue-rotate(360deg) saturate(1.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #automation-indicator.automation-admin {
+    /* Static mid-sweep tint instead of the sweep itself — still visually distinct
+       from .automation-multi's plain accent, no motion for a reduced-motion user. */
+    animation: none;
+    filter: hue-rotate(120deg) saturate(1.6);
+  }
 }
 
 /* privacy status tones */

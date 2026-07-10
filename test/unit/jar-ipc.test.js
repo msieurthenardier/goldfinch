@@ -102,20 +102,119 @@ function makeHarness(t, { containers = [personal, work], defaultId = 'personal',
   const { broadcastJarsChanged } = registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast });
 
   const invoke = (channel, payload) => handlers.get(channel)({}, payload);
+  // Internal-origin-gated twins (F3 DD1) are registered through registerInternalHandler,
+  // whose wrapper reads event.senderFrame.origin + event.sender.session.__goldfinchInternal
+  // BEFORE forwarding to the shared handler body — a trusted fake event mirroring
+  // internal-ipc.test.js's trustedEvent() shape is required (the bare `{}` the chrome
+  // `invoke` helper passes has no senderFrame, so it would always reject).
+  const trustedJarsEvent = () => ({
+    senderFrame: { origin: 'goldfinch://jars', url: 'goldfinch://jars/' },
+    sender: { session: { __goldfinchInternal: true } }
+  });
+  const invokeInternal = (channel, payload) => handlers.get(channel)(trustedJarsEvent(), payload);
   const broadcasts = () => events.filter((e) => e.fn === 'broadcast');
 
-  return { jars, handlers, events, sessions, settings, broadcastJarsChanged, invoke, broadcasts };
+  return { jars, handlers, events, sessions, settings, broadcastJarsChanged, invoke, invokeInternal, broadcasts };
 }
 
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the six jar-registry channels, no others', (t) => {
+test('registers exactly the six chrome + six internal jar-registry channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
-    ['jars-add', 'jars-get-default', 'jars-list', 'jars-remove', 'jars-rename', 'jars-set-default']
+    [
+      'internal-jars-add',
+      'internal-jars-get-default',
+      'internal-jars-list',
+      'internal-jars-remove',
+      'internal-jars-rename',
+      'internal-jars-set-default',
+      'jars-add',
+      'jars-get-default',
+      'jars-list',
+      'jars-remove',
+      'jars-rename',
+      'jars-set-default'
+    ]
   );
+});
+
+// ---------------------------------------------------------------------------
+// Internal-origin-gated twins (F3 DD1) — share the exact handler body with their
+// chrome twin, so a mutation via internal-jars-add is observable via jars-list, and
+// an untrusted event is rejected the same way internal-ipc.test.js pins.
+// ---------------------------------------------------------------------------
+test('internal-jars-add creates a jar observable via the chrome jars-list channel', (t) => {
+  const h = makeHarness(t);
+  const c = h.invokeInternal('internal-jars-add', { name: 'Banking', color: '#f5c518' });
+  assert.equal(c.name, 'Banking');
+  assert.deepEqual(h.invoke('jars-list').map((x) => x.id), ['personal', 'work', 'banking']);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jars-changed');
+});
+
+test('internal-jars-list returns the same live array as jars-list', (t) => {
+  const h = makeHarness(t);
+  assert.equal(h.invokeInternal('internal-jars-list'), h.invoke('jars-list'));
+});
+
+test('internal-jars-rename shares behavior with jars-rename (color-only patch keeps the name)', (t) => {
+  const h = makeHarness(t);
+  const c = h.invokeInternal('internal-jars-rename', { id: 'personal', color: '#ff0000' });
+  assert.equal(c.name, 'Personal');
+  assert.equal(c.color, '#ff0000');
+});
+
+test('internal-jars-set-default shares behavior with jars-set-default', (t) => {
+  const h = makeHarness(t);
+  assert.equal(h.invokeInternal('internal-jars-set-default', { id: 'work' }), true);
+  assert.equal(h.invoke('jars-get-default').id, 'work');
+});
+
+test('internal-jars-get-default returns BURNER (reference-equal) when the store is empty', (t) => {
+  const h = makeHarness(t, { containers: [], defaultId: null });
+  assert.equal(h.invokeInternal('internal-jars-get-default'), BURNER);
+});
+
+test('internal-jars-remove composes the same delete pipeline as jars-remove', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invokeInternal('internal-jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.wiped, true);
+  assert.deepEqual(h.events.map((e) => e.fn), [
+    'clearStorageData',
+    'clearCache',
+    'rerollSeed',
+    'revokeJarKey',
+    'broadcast',
+    'broadcast'
+  ]);
+});
+
+test('an untrusted event (wrong origin) is rejected on every internal-jars-* channel', (t) => {
+  const h = makeHarness(t);
+  const untrusted = {
+    senderFrame: { origin: 'https://evil.test', url: 'https://evil.test/' },
+    sender: { session: { __goldfinchInternal: true } }
+  };
+  for (const channel of [
+    'internal-jars-list',
+    'internal-jars-add',
+    'internal-jars-rename',
+    'internal-jars-set-default',
+    'internal-jars-get-default',
+    'internal-jars-remove'
+  ]) {
+    assert.throws(
+      () => h.handlers.get(channel)(untrusted, { id: 'personal' }),
+      (err) => err instanceof Error && err.message.includes('forbidden'),
+      `${channel} should reject an untrusted sender`
+    );
+  }
+  assert.equal(h.broadcasts().length, 0);
 });
 
 // ---------------------------------------------------------------------------

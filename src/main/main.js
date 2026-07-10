@@ -42,6 +42,12 @@ const { isInternalContents } = require('./automation/resolve');
 // before-input-event forwarding + the internal-tab guard decision (both unit-tested).
 const { sheetAcceleratorAction, isGuestActionAllowed } = require('../shared/sheet-accelerator');
 const { crossViewNavAction } = require('../shared/cross-view-nav');
+// DD8 (M06 F3 Leg 4): the generalized guest-focus chrome-shortcut forwarder reuses
+// the SAME pure classifier the chrome DOM keydown handler uses (renderer.js),
+// consulted against a per-guest-kind allowlist (web vs internal) — see
+// handleGuestChromeShortcut below.
+const { keydownToAction } = require('../shared/keydown-action');
+const { isChromeActionForwardable } = require('../shared/guest-forward-allowlist');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -104,6 +110,18 @@ const INTERNAL_PAGES = {
     '/': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.html'),
     '/downloads.css': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.css'),
     '/downloads.js': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.js')
+  },
+  // Third internal page (Flight 3, Leg 1): the jar-management surface. Same
+  // allowlist-driven serving as settings/downloads. Its script list pulls three
+  // shared modules straight from src/shared/ (burner.js, safe-color.js,
+  // jar-page-model.js) — precedent: settings serves audit-paging.js from shared.
+  jars: {
+    '/': path.join(__dirname, '..', 'renderer', 'pages', 'jars.html'),
+    '/jars.css': path.join(__dirname, '..', 'renderer', 'pages', 'jars.css'),
+    '/jars.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars.js'),
+    '/jar-page-model.js': path.join(__dirname, '..', 'shared', 'jar-page-model.js'),
+    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js'),
+    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js')
   }
 };
 
@@ -1012,35 +1030,75 @@ function handleGuestCrossViewNav(event, input) {
   return true;
 }
 
-// New-tab keyboard bridge (M06 F2 HAT D2 fix). Ctrl/Cmd+T is chrome-class (keydown-
-// action.js keydownToAction: key 't' → 'new-tab'), but chrome's own DOM keydown
-// handler (renderer.js) only fires while the chrome view itself holds OS keyboard
-// focus (freshly booted / address bar) — the overwhelmingly common state, a
-// focused web (or internal) guest, silently swallowed the key with no forward
-// anywhere: sheetAcceleratorAction already enumerated 'new-tab' as chrome-class
-// for the SHEET-open forwarding path (menu-overlay.js DD13), but the plain,
-// no-sheet guest capture in wireGuestContents below never implemented the same
-// forward. Applies to BOTH web and internal guests (called from both
-// wireGuestContents branches, mirroring handleGuestCrossViewNav's dual
-// registration) because dispatchChromeAction('new-tab') has no isInternalTab gate
-// (unlike devtools/zoom/find) — a new tab must open regardless of which guest
-// currently holds focus. Returns true iff it handled (swallowed) the key.
-function handleGuestNewTab(event, input) {
+// Generalized chrome-class accelerator forwarder (DD8, M06 F3 Leg 4). Replaces
+// the accumulating handleGuest* one-offs — flagged at Flight 2's debrief
+// ("before more handleGuest* functions accumulate") — with ONE classifier-driven
+// forwarder: classify the keystroke with the SAME pure `keydownToAction` the
+// chrome DOM keydown handler uses (renderer.js), and forward it as a single
+// `chrome-shortcut-action` send iff the per-guest-kind allowlist
+// (`isChromeActionForwardable`, src/shared/guest-forward-allowlist.js) admits
+// it. Parity goal (FD ruling): an accelerator that works under chrome focus
+// works identically under guest focus.
+//
+// ABSORBS the former handleGuestNewTab (M06 F2 HAT D2 fix — Ctrl/Cmd+T silently
+// swallowed under guest focus with no forward anywhere): new-tab is now just
+// one member of the WEB/INTERNAL allowlists, going through the same classify+
+// allowlist path as every other forwarded action. Ctrl+T still forwards on both
+// guest branches (no regression) — Ctrl+Shift+T does NOT (keydownToAction only
+// matches lowercase 't'): an intentional drop, not a bug — parity with chrome
+// focus, and Ctrl+Shift+T is reserved unassigned for a future "reopen closed
+// tab" feature (FD ruling, pinned by a classifier-level unit test).
+//
+// Main-side-handled keys (zoom/print/find/downloads/devtools) are NOT in either
+// allowlist, so this forwarder no-ops for them (returns false, no
+// preventDefault) and callers fall through unchanged to their existing branches
+// below — this function adds no regression surface over those.
+//
+// MUST be called AFTER handleGuestCrossViewNav in both guest branches
+// (design-review catch): crossViewNavAction and keydownToAction both map
+// Ctrl+L → focus-address; handleGuestCrossViewNav's early return is what makes
+// that safe. Calling this first would double-dispatch focus-address.
+//
+// @param {Electron.Event} event
+// @param {Electron.Input} input
+// @param {'web' | 'internal'} guestKind
+// @returns {boolean} whether it handled (swallowed) the key
+function handleGuestChromeShortcut(event, input, guestKind) {
   if (input.type !== 'keyDown') return false;
-  if (!(input.control || input.meta)) return false;
-  if (input.key !== 't' && input.key !== 'T') return false;
+  const action = keydownToAction({
+    key: input.key,
+    ctrl: input.control,
+    meta: input.meta,
+    shift: input.shift,
+    // Guests hold no lightbox state (lightbox is chrome-only UI); none of the
+    // actions either allowlist admits are lightbox-gated in keydownToAction
+    // (devtools/zoom/find are excluded by the allowlist itself), so this is safe.
+    lightboxOpen: false,
+  });
+  if (!isChromeActionForwardable(action, guestKind)) return false;
   event.preventDefault();
-  // Swallow but don't stack tabs on a held key (mirrors the Ctrl+J downloads guard
-  // in the guest branch below).
-  if (!input.isAutoRepeat) getChromeContents()?.send('chrome-shortcut-action', { action: 'new-tab' });
+  // Swallow but don't stack/repeat-fire on a held key (mirrors the former
+  // handleGuestNewTab / Ctrl+J downloads guard below).
+  if (!input.isAutoRepeat) getChromeContents()?.send('chrome-shortcut-action', { action });
   return true;
 }
 
 function wireGuestContents(contents) {
   // Open target=_blank / window.open as new tabs in our own UI instead of
   // spawning native Electron windows.
+  //
+  // Popup inheritance (DD7, M06 F3 Leg 4): forward the OPENER's session partition
+  // alongside the URL, read from the existing per-view tabViews registry (set at
+  // tab-create time, cleaned up on tab-close — no staleness risk; `contents` here
+  // IS the opener guest's webContents, keyed by its own wcId). The renderer
+  // resolves `openerPartition` into a container decision via the pure
+  // `inheritFromPartition` (src/shared/inherit-container.js) and consumes it
+  // through the SAME path as context-menu opens. A missing registry entry (e.g.
+  // the opener closed before this IPC lands) yields `openerPartition: undefined`,
+  // which inheritFromPartition resolves to default routing — never a throw.
   contents.setWindowOpenHandler(({ url }) => {
-    getChromeContents()?.send('open-tab', url);
+    const openerPartition = tabViews.get(contents.id)?.partition;
+    getChromeContents()?.send('open-tab', { url, openerPartition });
     return { action: 'deny' };
   });
   // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
@@ -1069,10 +1127,15 @@ function wireGuestContents(contents) {
       // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
       // for every one of those keys, so it never shadows them.
       if (handleGuestCrossViewNav(event, input)) return;
-      // New-tab keyboard bridge (M06 F2 HAT D2 fix) — same contained-call pattern as
-      // the cross-view bridge just above; 't'/'T' is not used by any branch below, so
-      // this never shadows an existing accelerator.
-      if (handleGuestNewTab(event, input)) return;
+      // Generalized chrome-class accelerator forwarder (DD8, M06 F3 Leg 4) — same
+      // contained-call pattern as the cross-view bridge just above, and MUST stay
+      // second (after cross-view nav, before everything below — see the ordering
+      // comment on handleGuestChromeShortcut). The WEB allowlist
+      // (new-tab/close-tab/focus-address/toggle-panel/toggle-privacy/reload) never
+      // overlaps the keys handled by the branches below (devtools/zoom/print/find/
+      // downloads are excluded from the allowlist itself), so this never shadows an
+      // existing accelerator.
+      if (handleGuestChromeShortcut(event, input, 'web')) return;
       // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
       // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
       // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
@@ -1164,13 +1227,17 @@ function wireGuestContents(contents) {
     // an internal tab holds OS focus — the only viable capture is a main-side
     // before-input-event on the internal guest's webContents (a chrome renderer-keydown
     // fallback never fires while the internal view holds focus). Register a SEPARATE,
-    // MINIMAL handler that calls ONLY handleGuestCrossViewNav and handleGuestNewTab —
-    // nothing else — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT
-    // D2 fix — dispatchChromeAction('new-tab') has no isInternalTab gate, so it must
-    // work here too) but no other accelerator.
+    // MINIMAL handler that calls ONLY handleGuestCrossViewNav and the generalized
+    // forwarder with the INTERNAL allowlist (new-tab + close-tab only — DD8 FD
+    // ruling, deliberately thin; extend one action at a time at future leg
+    // design) — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT
+    // D2 fix, absorbed — dispatchChromeAction('new-tab') has no isInternalTab
+    // gate, so it must work here too) plus Ctrl+W, but no other accelerator.
+    // Cross-view nav MUST run first (early return) — see the ordering comment on
+    // handleGuestChromeShortcut (Ctrl+L double-dispatch otherwise).
     contents.on('before-input-event', (event, input) => {
-      handleGuestCrossViewNav(event, input);
-      handleGuestNewTab(event, input);
+      if (handleGuestCrossViewNav(event, input)) return;
+      handleGuestChromeShortcut(event, input, 'internal');
     });
   }
 }
@@ -1839,9 +1906,31 @@ registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
   broadcastToChromeAndInternal('settings-changed', settings.getAll());
   return { key };
 });
-registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => { revokeJarKey(jarId, settings); return { ok: true }; });
-registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => ({ key: mintAdminKey(settings) }));
-registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => { revokeAdminKey(settings); return { ok: true }; });
+// F7 (Flight 3, Leg 6 HAT): revoke/admin-mint/admin-revoke ALSO mutate
+// `automationKeyHashes` / `automationAdminKeyHash` (both settings values) but
+// were missing the broadcast mint already carries — a pre-existing gap against
+// the documented convention ("any IPC handler that mutates settings directly
+// or transitively MUST broadcast settings-changed itself"). Without it, a
+// revoke/rotate only updated the acting settings-page tab (which refresh()es
+// itself locally); the chrome toolbar's automation indicator (and any OTHER
+// open internal tab) would silently lag until the next unrelated broadcast.
+// Fixed here to match jar-key-mint's existing broadcast, needed for the F7
+// indicator to react live to a revoke.
+registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => {
+  revokeJarKey(jarId, settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { ok: true };
+});
+registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => {
+  const key = mintAdminKey(settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { key };
+});
+registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => {
+  revokeAdminKey(settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { ok: true };
+});
 
 // Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6).
 // INTENTIONALLY a bare ipcMain.handle — NOT registerInternalHandler — for the SAME

@@ -18,16 +18,48 @@ const { BURNER } = require('../../src/shared/burner');
 const DEFAULT = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
 
 // ---------------------------------------------------------------------------
-// Shape: jar items (namespaced) + Burner + "+ New container…" sentinels, in order
+// Shape: jar items (namespaced) + Burner + divider + "New Jar" + "Manage jars…"
+// sentinels, in order (HAT step-1 finding F1, operator ruling: a divider
+// separates the jar rows — incl. Burner — from the action rows; the quick-create
+// sentinel is renamed from "+ New container…" to "New Jar" with no leading "+";
+// it carries no variant/accent styling anymore — plain, like "Manage jars…")
 // ---------------------------------------------------------------------------
-test('model = namespaced jar items + burner + new-container sentinels', () => {
+test('model = namespaced jar items + burner + divider + new-container + manage-jars sentinels', () => {
   const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }]);
   assert.deepEqual(model, [
     { id: 'jar:default', label: 'Default', color: '#9aa0ac' },
     { id: 'jar:work', label: 'Work', color: '#2196f3' },
     { id: 'action:burner', label: `${BURNER.name} tab (evaporates)`, color: BURNER.color },
-    { id: 'action:new-container', label: '+ New container…', variant: 'add' }
+    { type: 'separator' },
+    { id: 'action:new-container', label: 'New Jar' },
+    { id: 'action:manage-jars', label: 'Manage jars…' }
   ]);
+});
+
+// F1a: the divider sits immediately after the burner row and before the action
+// rows — never before a jar row, never after "Manage jars…".
+test('divider sits between the burner sentinel and the action rows', () => {
+  const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }]);
+  const burnerIdx = model.findIndex((m) => 'id' in m && m.id === 'action:burner');
+  const sepIdx = model.findIndex((m) => m.type === 'separator');
+  const newContainerIdx = model.findIndex((m) => 'id' in m && m.id === 'action:new-container');
+  assert.equal(sepIdx, burnerIdx + 1, 'divider immediately follows the burner sentinel');
+  assert.equal(newContainerIdx, sepIdx + 1, 'new-container immediately follows the divider');
+});
+
+// M06 Flight 3 Leg 3 (chrome entry integration): the picker gains a
+// "Manage jars…" sentinel AFTER the quick-create row (quick-create stays — operator
+// ruling). Pin its position, label, and variant explicitly.
+test('manage-jars sentinel follows new-container, with a pinned label and no variant', () => {
+  const model = buildContainerModel([DEFAULT]);
+  const newContainerIdx = model.findIndex((m) => 'id' in m && m.id === 'action:new-container');
+  const manageJarsIdx = model.findIndex((m) => 'id' in m && m.id === 'action:manage-jars');
+  assert.ok(newContainerIdx >= 0 && manageJarsIdx === newContainerIdx + 1, 'manage-jars immediately follows new-container');
+  assert.equal(model[newContainerIdx].label, 'New Jar');
+  assert.equal(model[newContainerIdx].variant, undefined);
+  assert.equal(model[manageJarsIdx].label, 'Manage jars…');
+  assert.equal(model[manageJarsIdx].variant, undefined);
+  assert.equal(model[manageJarsIdx].color, undefined);
 });
 
 test('burner sentinel color/label are pinned to the shared BURNER constant', () => {
@@ -37,11 +69,13 @@ test('burner sentinel color/label are pinned to the shared BURNER constant', () 
   assert.equal(sentinel.label, `${BURNER.name} tab (evaporates)`);
 });
 
-test('empty container list still yields the two sentinels', () => {
+test('empty container list still yields the burner sentinel, the divider, and the two action sentinels', () => {
   const model = buildContainerModel([]);
-  assert.equal(model.length, 2);
+  assert.equal(model.length, 4);
   assert.equal(model[0].id, 'action:burner');
-  assert.equal(model[1].id, 'action:new-container');
+  assert.equal(model[1].type, 'separator');
+  assert.equal(model[2].id, 'action:new-container');
+  assert.equal(model[3].id, 'action:manage-jars');
 });
 
 test('malformed entries are skipped; missing color/name degrade to data-safe values', () => {
@@ -50,7 +84,7 @@ test('malformed entries are skipped; missing color/name degrade to data-safe val
   );
   assert.deepEqual(model[0], { id: 'jar:x', label: 'x' }); // no name → id as label; no color key
   assert.deepEqual(model[1], { id: 'jar:y', label: 'Y' }); // non-string color dropped (sheet renders default dot)
-  assert.equal(model.length, 4); // 2 kept + 2 sentinels
+  assert.equal(model.length, 6); // 2 kept + burner + divider + new-container + manage-jars
 });
 
 // ---------------------------------------------------------------------------

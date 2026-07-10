@@ -111,7 +111,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // --- main -> renderer events ---
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
   onDownloadDone: (cb) => ipcRenderer.on('download-done', (_e, data) => cb(data)),
-  onOpenTab: (cb) => ipcRenderer.on('open-tab', (_e, url) => cb(url)),
+  // DD7 (M06 F3 Leg 4): payload is now `{ url, openerPartition }` — main resolves
+  // the opener's partition from tabViews at popup time; the renderer resolves it
+  // into a container decision via inheritFromPartition. Forward the object as-is.
+  onOpenTab: (cb) => ipcRenderer.on('open-tab', (_e, payload) => cb(payload)),
   // Fired by main's before-input-event Ctrl+F capture (DD2/SC4). No payload —
   // the renderer resolves the active tab via activeTab(). Mirrors onOpenTab.
   onOpenFind: (cb) => ipcRenderer.on('open-find', () => cb()),
