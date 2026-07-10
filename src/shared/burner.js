@@ -14,9 +14,9 @@
 // "Burner" can never collide with the ephemeral burner-tab ids the renderer mints
 // (`makeBurner()` → `burner-<n>`).
 //
-// NOTE: container-menu.js (the burner sentinel) and renderer.js:makeBurner still
-// duplicate the '#ff8c42' color literal — consuming this constant there is
-// Flight 2/3 scope, NOT Flight 1 Leg 1.
+// container-menu.js (the burner sentinel) and renderer.js:makeBurner both derive
+// name/color from this constant (M06 Flight 2 Leg 1, DD8) — the prior triplication
+// of the color literal below is retired.
 
 const BURNER = Object.freeze({ id: 'burner', name: 'Burner', color: '#ff8c42' });
 

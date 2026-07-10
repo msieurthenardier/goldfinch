@@ -101,9 +101,13 @@ interface GoldfinchBridge {
   // --- cookie jars / identities ---
   jarsList(): Promise<any>;
   jarsAdd(payload: any): Promise<any>;
+  /** Structured-cloned container object, or the frozen BURNER sentinel — detect by id (DD3). */
+  jarsGetDefault(): Promise<any>;
   identityNew(payload: any): Promise<any>;
 
   // --- main -> renderer events ---
+  /** Fired after every jar mutation with { containers, defaultId } (defaultId null ⇔ Burner). */
+  onJarsChanged(cb: (data: { containers: any[]; defaultId: string | null }) => void): void;
   onDownloadProgress(cb: (data: any) => void): void;
   onDownloadDone(cb: (data: any) => void): void;
   onOpenTab(cb: (url: string) => void): void;
@@ -323,6 +327,21 @@ declare function deriveSiteInfo(
 declare function buildContainerModel(
   containers: Array<{ id?: any; name?: any; color?: any }>
 ): Array<{ id: string; label: string; color?: string; variant?: string }>;
+
+/**
+ * Injected by src/shared/burner.js via the globalThis branch (the frozen Burner
+ * identity constant — M06 Flight 1 DD4 / Flight 2 DD8).
+ */
+declare const BURNER: { id: string; name: string; color: string };
+
+/**
+ * Injected by src/shared/default-routing.js via the globalThis branch (the pure
+ * new-tab container resolution helper — M06 Flight 2 Leg 1 DD1).
+ */
+declare function resolveNewTabContainer(
+  containers: Array<{ id?: any }>,
+  defaultId: string | null | undefined
+): any;
 
 /**
  * Injected by src/shared/page-context-model.js via the globalThis branch (the

@@ -103,15 +103,52 @@ let rafGeometryPending = false;
 
 /* ----------------------------------------------------- jars / containers */
 
-const DEFAULT_CONTAINER = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
-let containers = [DEFAULT_CONTAINER];
-window.goldfinch.jarsList().then((list) => {
-  if (list && list.length) containers = list;
-  // The activity snapshot may have arrived before the jars list resolved, in which
+// Declared cache of the jar store (DD2) — source of truth is jars.js in main.
+// Rebuilt wholesale from the boot snapshot below, then invalidated wholesale by
+// every `jars-changed` broadcast (all four mutating jar-ipc channels plus the
+// picker's new-container-create already broadcast — verified at flight design).
+let containers = [];
+// undefined = boot snapshot not yet arrived; null = Burner holds the flag.
+/** @type {string | null | undefined} */
+let defaultId;
+function applyJarsState(list, dId) {
+  containers = Array.isArray(list) ? list : [];
+  defaultId = dId;
+  refreshOpenTabJars();
+  // The activity snapshot may have arrived before the jars state resolved, in which
   // case a jar session's indicator title showed the raw jarId. Re-run with the cached
   // snapshot now that `containers` is populated, so the friendly jar name is used.
   updateAutomationIndicator(lastSnap);
+}
+// Read once at boot; the pair is reconciled together (DD3).
+const jarsBoot = Promise.all([
+  window.goldfinch.jarsList(),
+  window.goldfinch.jarsGetDefault()
+]).then(([list, d]) => {
+  // Reconciliation contract (DD3): jars-get-default structured-clones the frozen
+  // BURNER sentinel across the IPC boundary, so reference identity is meaningless
+  // here — detect it by id, NEVER by reference.
+  applyJarsState(list, d && d.id !== BURNER.id ? d.id : null);
+}).catch(() => { /* defaultId stays undefined → burner routing; Leg 3 real boots prove the happy path */ });
+window.goldfinch.onJarsChanged((p) => {
+  if (p && Array.isArray(p.containers)) applyJarsState(p.containers, p.defaultId);
 });
+
+// Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
+// jars-state replace (DD2). Removed-jar tabs keep their last-known container — a
+// live session on a wiped partition; closing those tabs is Flight 3/5 scope.
+function refreshOpenTabJars() {
+  for (const tab of tabs.values()) {
+    if (tab.trusted || (tab.container && tab.container.burner)) continue;
+    const fresh = containers.find((c) => c && tab.container && c.id === tab.container.id);
+    if (!fresh) continue;
+    tab.container = fresh;
+    const dot = /** @type {HTMLElement | null} */ (tab.btn && tab.btn.querySelector('.tab-jar'));
+    if (!dot) continue; // absent only for pre-hot-reload tabs; skip silently
+    dot.style.background = fresh.color;
+    dot.title = fresh.name;
+  }
+}
 
 /* ------------------------------------------------------- kebab (overflow) menu */
 // APG menu-button: role="menu" popup with four static role="menuitem" items
@@ -489,7 +526,9 @@ function openDownloads() {
 
 function makeBurner() {
   const n = Math.floor(Math.random() * 1e9);
-  return { id: `burner-${n}`, name: 'Burner', color: '#ff8c42', partition: `burner:${n}`, burner: true };
+  // The burner-<n> id/partition scheme is identity-bearing — unchanged. Only the
+  // display name and color derive from the shared BURNER constant (DD8).
+  return { id: `burner-${n}`, name: BURNER.name, color: BURNER.color, partition: `burner:${n}`, burner: true };
 }
 
 /* ------------------------------------------------------- site-info popup */
@@ -669,12 +708,12 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   const id = `tab-${++tabSeq}`;
   // ⚠️ DATA-LOSS TRAP: the synthetic internal jar is set as the `jar` ITSELF — one object
   // that the webview `partition` attribute, `tab.container`, AND the dot logic all derive
-  // from. If the partition were set to the internal string while tab.container stayed
-  // DEFAULT_CONTAINER, a New Identity click on the Settings tab would wipe the user's real
+  // from. If the partition were set to the internal string while tab.container stayed the
+  // resolved default, a New Identity click on the Settings tab would wipe the user's real
   // `persist:goldfinch` jar (identity-new reads tab.container.partition).
   const jar = trusted
     ? { id: 'internal', name: 'Settings', color: '#9aa0ac', partition: window.goldfinch.internalPartition }
-    : container || DEFAULT_CONTAINER;
+    : container || resolveNewTabContainer(containers, defaultId) || makeBurner();
 
   // Both trusted (internal) and untrusted (web) tabs now use WebContentsView via IPC (Leg 3).
   // tab.webview is null for all tabs; internal tabs use tab.wcId exactly like web tabs.
@@ -707,10 +746,10 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   btn.setAttribute('aria-controls', 'webviews');
   btn.setAttribute('aria-keyshortcuts', 'Delete');
   btn.setAttribute('aria-label', 'New tab');
-  // Colored dot for non-default jars. The internal (Settings) jar is treated like
-  // default — no dot (it's chrome, not a user container).
+  // Colored dot for every jar; the internal (Settings) pseudo-jar is chrome, not a
+  // user container — no dot.
   const dot =
-    jar.id === 'default' || jar.id === 'internal'
+    jar.id === 'internal'
       ? ''
       : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
   btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;
@@ -1758,7 +1797,7 @@ async function clearCookies(scope) {
 async function clearStorage() {
   const tab = activeTab();
   if (!tab) return;
-  const res = await window.goldfinch.privacyClearStorage({ url: tab.url });
+  const res = await window.goldfinch.privacyClearStorage({ url: tab.url, webContentsId: tab.wcId });
   toast(res.ok ? 'Site storage cleared' : 'Clear failed', res.ok ? res.origin : res.error || '');
 }
 
@@ -2076,9 +2115,17 @@ function toggle(on, onChange, label) {
 
 function pJar() {
   const tab = activeTab();
-  const c = (tab && tab.container) || DEFAULT_CONTAINER;
+  const c = tab && tab.container;
   const s = document.createElement('div');
   s.className = 'privacy-section';
+  // Every tab now always carries a real container (createTab always resolves one),
+  // so the no-tab/no-container branch is defensive-only — never fabricate a jar,
+  // just render a neutral placeholder. pJar()'s only call site appends its return
+  // value directly, so this must always return an HTMLElement.
+  if (!c) {
+    s.innerHTML = `<div class="ps-title">Jar</div><div class="ps-main">—</div>`;
+    return s;
+  }
   s.innerHTML =
     `<div class="ps-title">Jar</div>` +
     `<div class="ps-main"><span class="cm-dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
@@ -2435,10 +2482,10 @@ window.__goldfinchAutomation = {
     let container = null;
     if (jarId != null) {
       container = containers.find((c) => c.id === jarId) || null;
-      // Unknown jarId → REFUSE (DD3): do NOT silently fall back to DEFAULT_CONTAINER.
+      // Unknown jarId → REFUSE (DD3): do NOT silently fall back to the resolved default.
       if (!container) throw new Error('automation: unknown-jar — no container ' + jarId);
     }
-    const tab = createTab(url, container);   // null container → createTab uses DEFAULT_CONTAINER (today's behavior)
+    const tab = createTab(url, container);   // null container → createTab resolves the current default jar (or a fresh burner when Burner holds the flag)
     if (!tab) return null;               // URL rejected
     if (tab.wcId != null) return tab.wcId;
     // All tabs (web + internal) are WebContentsViews (Leg 3): wait for wcId to be set
@@ -2638,12 +2685,24 @@ window.goldfinch.onTriggerSendBounds(() => {
 async function createContainerAndOpenTab(rawName) {
   const name = String(rawName == null ? '' : rawName).trim();
   if (!name) return;
-  // Main creates the jar and returns the container object; renderer opens the tab directly.
+  // Main creates the jar and returns the container object; renderer opens the tab
+  // directly. Main's invoke reply broadcasts jars-changed BEFORE it resolves
+  // (jar-ipc.js), so by the time this await returns, the onJarsChanged listener has
+  // already replaced `containers` with an array that includes the new jar — pushing
+  // `c` here would append a duplicate, differently-referenced entry. Use the
+  // returned `c` only for the immediate createTab; the next broadcast/
+  // refreshOpenTabJars reconciles tab.container by id (design review, cycle 1).
   const c = await window.goldfinch.newContainerCreate(name);
   if (c) {
-    containers.push(c);
     createTab(currentHomePage(), c);
   }
 }
 
-window.goldfinch.settingsGet('homePage').then((url) => createTab(url || HOMEPAGE)).catch(() => createTab(HOMEPAGE));
+// Gated on BOTH the home-page setting read and the jars boot snapshot (DD3) — with
+// no hardcoded fallback container left in the renderer, the boot tab must not race
+// the jars snapshot. jarsBoot already swallows its own failure (defaultId stays
+// undefined → burner routing), so this can never be blocked by a jars IPC error.
+Promise.all([
+  window.goldfinch.settingsGet('homePage').catch(() => null),
+  jarsBoot
+]).then(([url]) => createTab(url || HOMEPAGE));

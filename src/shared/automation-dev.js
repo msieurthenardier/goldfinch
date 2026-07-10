@@ -7,6 +7,8 @@
 // Pure; never throws. The legacy browser-process CDP debugging dev gate was removed in F9 along with
 // the ungated CDP debugging path; `--automation-dev` is the sole dev-automation switch.
 
+const { BURNER } = require('./burner');
+
 /**
  * Returns true iff argv carries the EXACT `--automation-dev` token — the MCP-transport dev gate
  * (DD4). It is the SOLE dev-automation switch (the legacy CDP debugging gate was removed in F9), and
@@ -62,4 +64,22 @@ function shouldBindAutomation({ automationEnabled, devForceBind } = {}) {
   return automationEnabled === true || devForceBind === true;
 }
 
-module.exports = { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation };
+/**
+ * Resolves the dev auto-mint target (M06 F2 DD7): the id of the jar that currently
+ * holds the default flag, or `null` when the resolved default is the Burner sentinel
+ * (an empty jar registry — the mint guard refuses burner ids, so there is nothing to
+ * mint). Id-compared against BURNER.id, never reference-compared — jars.getDefault()
+ * may cross process/IPC boundaries where reference identity does not survive
+ * (same discipline as DD3's reconciliation contract).
+ *
+ * Pure; never throws for a conforming `jars` argument.
+ *
+ * @param {{ getDefault: () => { id: string } }} jars
+ * @returns {string | null}
+ */
+function resolveAutoMintTarget(jars) {
+  const d = jars.getDefault();
+  return d && d.id !== BURNER.id ? d.id : null;
+}
+
+module.exports = { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation, resolveAutoMintTarget };
