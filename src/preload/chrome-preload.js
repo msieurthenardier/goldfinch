@@ -52,6 +52,13 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // --- cookie jars / identities ---
   jarsList: () => ipcRenderer.invoke('jars-list'),
   jarsAdd: (payload) => ipcRenderer.invoke('jars-add', payload),
+  jarsRename: (payload) => ipcRenderer.invoke('jars-rename', payload),
+  jarsRemove: (payload) => ipcRenderer.invoke('jars-remove', payload),
+  jarsSetDefault: (payload) => ipcRenderer.invoke('jars-set-default', payload),
+  jarsGetDefault: () => ipcRenderer.invoke('jars-get-default'),
+  // Fired by main after every jar mutation with { containers, defaultId }
+  // (defaultId null ⇔ Burner). Nothing subscribes until Flight 2.
+  onJarsChanged: (cb) => ipcRenderer.on('jars-changed', (_e, d) => cb(d)),
   identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
 
   // --- page zoom ---

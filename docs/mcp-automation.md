@@ -57,8 +57,10 @@ e.g. the host-gateway IP on Linux Docker, or host network mode.
    *Settings controls*). **The Keys mint button is disabled while the toggle is off** — you must
    flip the toggle before minting a key.
 
-2. **Choose your target jar.** Each key authorises one jar's tabs. The `default` jar is the usual
-   starting point. In the **Keys** section of the Automation settings, select the jar you want to
+2. **Choose your target jar.** Each key authorises one jar's tabs. On a profile migrated from a
+   pre-v2 install the `default` jar is the usual starting point; a fresh install seeds
+   **Personal** (the default) + **Work** instead, so pick e.g. `personal` there. In the **Keys**
+   section of the Automation settings, select the jar you want to
    automate and mint a key. The plaintext is shown once — copy it immediately (see *Authentication*).
 
 3. **Add a `.mcp.json` entry in your MCP client's config.** Add the following entry to **your own**
@@ -121,7 +123,11 @@ mint a key on startup and print **one** parseable line to stdout:
 AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey|null>"}
 ```
 
-- `key` — a freshly minted **`default`-jar** key (always present under the double gate).
+- `key` — a freshly minted key for the literal **`default`** jar. **Fresh-install gap
+  (interim, M06 F1):** `default` exists on profiles migrated from a pre-v2 install, but a
+  fresh install seeds Personal + Work — there the mint fails gracefully (`[mcp] dev
+  auto-mint failed: …` on stderr, no `AUTOMATION_DEV_MINT` line) while the surface still
+  binds. M06 Flight 2 retires the hardcoded jar id.
 - `adminKey` — the **admin** key, minted **only** when `GOLDFINCH_AUTOMATION_ADMIN=1` is
   also set; otherwise `null`.
 

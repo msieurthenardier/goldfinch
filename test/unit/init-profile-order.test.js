@@ -7,11 +7,14 @@
 // app.setPath('userData', …) (dev-profile isolation, unpackaged only) BEFORE any
 // getPath('userData') consumer — else a dev launch reads the WRONG profile.
 //
-// The seam: shields.load()/jars.load() read getPath('userData') INTERNALLY, but
-// settings.load(path) takes the path as an ARG, so the ordering signal for settings is
-// the getPath('userData') call initProfileAndStores makes to build that arg. The fake
-// app's getPath records every call, and the fake stores' load() record theirs, into ONE
-// shared call-order array. We assert the setPath index precedes every consumer index.
+// The seam: shields.load() reads getPath('userData') INTERNALLY, but settings.load(path),
+// jars.load(path), and downloads.load(path) take the path as an ARG, so the ordering
+// signal for those is the getPath('userData') call initProfileAndStores makes to build
+// each arg. The fake app's getPath records every call, and the fake stores' load()
+// record theirs (arg-taking stores record the path they received — a forgotten arg
+// would silently degrade jars to its never-persisting seed, so the tests assert it),
+// into ONE shared call-order array. We assert the setPath index precedes every
+// consumer index.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -39,7 +42,7 @@ function makeWorld({ isPackaged }) {
   const stores = {
     shields: { load: () => order.push('shields.load') },
     settings: { load: (p) => { order.push('settings.load'); order.push(`settings.load:${p}`); } },
-    jars: { load: () => order.push('jars.load') },
+    jars: { load: (p) => { order.push('jars.load'); order.push(`jars.load:${p}`); } },
     downloads: { load: (p) => { order.push('downloads.load'); order.push(`downloads.load:${p}`); } },
   };
   return { app, stores, order, getUserData: () => userData };
@@ -57,22 +60,28 @@ test('unpackaged — setPath runs before every getPath(userData) consumer', () =
   initProfileAndStores(w.app, w.stores);
 
   const setPathIdx = idx(w.order, 'setPath');
-  // settings/downloads ordering signal: the getPath calls made to build their load args.
-  // When unpackaged the FIRST getPath feeds setPath's redirect arg (correctly BEFORE
-  // setPath); the remaining getPath calls feed settings.load then downloads.load (both
-  // must be AFTER setPath). indexOf of the first POST-setPath getPath isolates them.
+  // settings/jars/downloads ordering signal: the getPath calls made to build their load
+  // args. When unpackaged the FIRST getPath feeds setPath's redirect arg (correctly
+  // BEFORE setPath); the remaining getPath calls feed settings.load, jars.load, then
+  // downloads.load (all must be AFTER setPath). indexOf of the first POST-setPath
+  // getPath isolates them.
   const firstConsumerGetPathIdx = w.order.indexOf('getPath', setPathIdx);
-  assert.notEqual(firstConsumerGetPathIdx, -1, 'expected a getPath feeding settings/downloads.load');
+  assert.notEqual(firstConsumerGetPathIdx, -1, 'expected a getPath feeding settings/jars/downloads.load');
   assert.ok(setPathIdx < firstConsumerGetPathIdx, 'setPath before the getPath that feeds settings.load');
   assert.ok(setPathIdx < idx(w.order, 'shields.load'), 'setPath before shields.load');
   assert.ok(setPathIdx < idx(w.order, 'settings.load'), 'setPath before settings.load');
   assert.ok(setPathIdx < idx(w.order, 'jars.load'), 'setPath before jars.load');
   assert.ok(setPathIdx < idx(w.order, 'downloads.load'), 'setPath before downloads.load');
 
-  // And the redirect actually took effect: settings.load AND downloads.load got the -dev path.
+  // And the redirect actually took effect: settings.load, jars.load AND downloads.load
+  // got the -dev path.
   assert.ok(
     w.order.includes(`settings.load:/home/x/.config/goldfinch-dev`),
     'settings.load got the dev-redirected userData path'
+  );
+  assert.ok(
+    w.order.includes(`jars.load:/home/x/.config/goldfinch-dev`),
+    'jars.load got the dev-redirected userData path'
   );
   assert.ok(
     w.order.includes(`downloads.load:/home/x/.config/goldfinch-dev`),
@@ -93,6 +102,10 @@ test('packaged — setPath is NOT called; consumers still run (invariant vacuous
   assert.ok(
     w.order.includes(`settings.load:/home/x/.config/goldfinch`),
     'settings.load got the un-redirected userData path when packaged'
+  );
+  assert.ok(
+    w.order.includes(`jars.load:/home/x/.config/goldfinch`),
+    'jars.load got the un-redirected userData path when packaged'
   );
   assert.ok(
     w.order.includes(`downloads.load:/home/x/.config/goldfinch`),
