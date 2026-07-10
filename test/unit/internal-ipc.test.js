@@ -23,6 +23,15 @@ test('isTrustedInternalSender: downloads origin + internal session (true) → tr
   assert.equal(isTrustedInternalSender('goldfinch://downloads', true), true);
 });
 
+test('isTrustedInternalSender: jars origin + internal session (true) → true', () => {
+  // Flight 3 (F3): the allowlist now admits the third internal page.
+  assert.equal(isTrustedInternalSender('goldfinch://jars', true), true);
+});
+
+test('isTrustedInternalSender: jars origin + non-internal session (false) → false', () => {
+  assert.equal(isTrustedInternalSender('goldfinch://jars', false), false);
+});
+
 test('isTrustedInternalSender: web origin (https://evil.test) + internal session → false', () => {
   assert.equal(isTrustedInternalSender('https://evil.test', true), false);
 });

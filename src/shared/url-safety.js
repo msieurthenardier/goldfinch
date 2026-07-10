@@ -78,11 +78,12 @@ function isSafePosterUrl(url) {
 
 /**
  * The allowlist of trusted internal page hosts. This is an internal-host SET so the
- * trust boundary is "internal page vs web," NOT "settings vs downloads" — every
- * inhabitant is an equally-trusted internal origin (Flight 5). Add a host here when
- * adding an internal page; never relax a web gate to reach the scheme.
+ * trust boundary is "internal page vs web," NOT "settings vs downloads vs jars" —
+ * every inhabitant is an equally-trusted internal origin (Flight 5, extended Flight
+ * 3 F3). Add a host here when adding an internal page; never relax a web gate to
+ * reach the scheme.
  */
-const INTERNAL_HOSTS = new Set(['settings', 'downloads']);
+const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars']);
 
 /**
  * isInternalPageUrl(url)
@@ -90,6 +91,7 @@ const INTERNAL_HOSTS = new Set(['settings', 'downloads']);
  * Returns true iff the URL is the canonical root of a trusted internal page:
  *   - goldfinch://settings   (with or without a trailing slash)
  *   - goldfinch://downloads  (with or without a trailing slash)
+ *   - goldfinch://jars       (with or without a trailing slash)
  *
  * Used ONLY by the trusted branch of createTab (provenance is the call site —
  * the flag is never inferred from the URL). Mirrors leg-2's main-process root-path

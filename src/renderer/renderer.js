@@ -135,19 +135,59 @@ window.goldfinch.onJarsChanged((p) => {
 });
 
 // Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
-// jars-state replace (DD2). Removed-jar tabs keep their last-known container — a
-// live session on a wiped partition; closing those tabs is Flight 3/5 scope.
+// jars-state replace (DD2), and close any tab whose jar no longer exists (DD6 —
+// tabs-close-on-delete; broadcast-driven so closure is uniform across every
+// mutation source: page, picker, automation, future surfaces). Burner and internal
+// tabs are exempt — they never appear in `containers` by design, guarded by the
+// same early-continue the surviving-tab refresh already used.
+//
+// ORDERED-SWEEP ruling (DD6, flight-log Decision; leg design review cycle 2 —
+// sound, zero corrections). `closeTab` (below) is READ here but NOT modified: its
+// signature has no suppression hook, and none is needed. The naive unordered close
+// (just `closeTab` every orphan in Map-iteration order) is already CORRECT — it
+// converges to exactly one closeTab-triggered `createTab()` — but it IPC-thrashes:
+// every intermediate activation sends `tabSetActive`, which swaps native
+// WebContentsView visibility. Ordering makes the sweep flicker-free instead of
+// fixing a correctness bug:
+//   1. Collect orphans from a SNAPSHOT (`[...tabs.values()]`) — `closeTab` mutates
+//      the same `tabs` Map (and its last-tab fallback inserts a fresh tab), which a
+//      live iterator would revisit.
+//   2. If the active tab is among the orphans and a live non-orphan tab exists,
+//      activate that survivor FIRST — one deliberate activation, so the fallback
+//      never transiently lands on a doomed orphan.
+//   3. Close every orphan that is not the (possibly just-reassigned) active tab —
+//      these closes never touch `activeTabId`, so no activation fires at all.
+//   4. Close the remaining active orphan LAST, if one still exists (only when no
+//      survivor was found in step 2 — the true all-orphan case). That close is then
+//      the final close: `closeTab`'s own last-tab branch (`else createTab()`,
+//      below) fires EXACTLY ONCE, creating and activating the fresh
+//      default-resolved tab. No behavior change for surviving tabs' dot/title
+//      refresh.
 function refreshOpenTabJars() {
-  for (const tab of tabs.values()) {
+  const snapshot = [...tabs.values()];
+  /** @type {Tab[]} */
+  const orphans = [];
+  for (const tab of snapshot) {
     if (tab.trusted || (tab.container && tab.container.burner)) continue;
     const fresh = containers.find((c) => c && tab.container && c.id === tab.container.id);
-    if (!fresh) continue;
+    if (!fresh) { orphans.push(tab); continue; }
     tab.container = fresh;
     const dot = /** @type {HTMLElement | null} */ (tab.btn && tab.btn.querySelector('.tab-jar'));
     if (!dot) continue; // absent only for pre-hot-reload tabs; skip silently
     dot.style.background = fresh.color;
     dot.title = fresh.name;
   }
+  if (orphans.length === 0) return;
+
+  if (orphans.some((t) => t.id === activeTabId)) {
+    const survivor = snapshot.find((t) => !orphans.includes(t));
+    if (survivor) activateTab(survivor.id);
+  }
+  const activeOrphan = orphans.find((t) => t.id === activeTabId);
+  for (const t of orphans) {
+    if (t !== activeOrphan) closeTab(t.id);
+  }
+  if (activeOrphan) closeTab(activeOrphan.id);
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
@@ -159,7 +199,7 @@ function refreshOpenTabJars() {
 // the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
 // freeze-frame apparatus were retired at the Leg-5 cutover.
 
-// The four kebab item actions, extracted into NAMED functions consumed by the
+// The five kebab item actions, extracted into NAMED functions consumed by the
 // sheet's channel-6 activation — one source of truth (Exit is verified by this
 // shared body, never activated live).
 function kebabActionSettings() {
@@ -167,6 +207,9 @@ function kebabActionSettings() {
 }
 function kebabActionDownloads() {
   openDownloads();
+}
+function kebabActionJars() {
+  openJarsPage();
 }
 function kebabActionPrint() {
   const t = activeTab();
@@ -179,6 +222,7 @@ function kebabActionExit() {
 const KEBAB_ACTIONS = {
   settings: kebabActionSettings,
   downloads: kebabActionDownloads,
+  jars: kebabActionJars,
   print: kebabActionPrint,
   exit: kebabActionExit
 };
@@ -246,6 +290,7 @@ const BLUR_REOPEN_SUPPRESS_MS = 300;
 const kebabModel = () => [
   { id: 'settings', label: 'Settings' },
   { id: 'downloads', label: 'Downloads' },
+  { id: 'jars', label: 'Cookie jars' },
   { id: 'print', label: 'Print…' },
   { id: 'exit', label: 'Exit' }
 ];
@@ -396,6 +441,8 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
         openNewContainerOverlay();
       } else if (id === 'action:burner') {
         createTab(currentHomePage(), makeBurner());
+      } else if (id === 'action:manage-jars') {
+        openJarsPage();
       } else if (id.startsWith('jar:')) {
         const jarId = id.slice('jar:'.length);
         const c = containers.find((x) => x.id === jarId);
@@ -530,6 +577,16 @@ function openDownloads() {
   createTab('goldfinch://downloads', null, { trusted: true });
 }
 
+// Shared open path for the jars page (Leg 3): kebab "Cookie jars" item + the
+// picker's "Manage jars…" sentinel both converge here. Mirrors openDownloads'
+// SHAPE and its dedupe semantics — openDownloads has no dedupe/reuse guard (it
+// unconditionally creates; repeated opens already stack Downloads tabs today), so
+// this opener does the same, unconditionally. Parity, not an enhancement — do not
+// add dedupe logic here.
+function openJarsPage() {
+  createTab('goldfinch://jars', null, { trusted: true });
+}
+
 function makeBurner() {
   const n = Math.floor(Math.random() * 1e9);
   // The burner-<n> id/partition scheme is identity-bearing — unchanged. Only the
@@ -548,6 +605,22 @@ function makeBurner() {
 // @returns {{ id: string, name: string, color: string, partition: string, burner?: boolean } | null}
 function inheritContainerFrom(tab) {
   const d = inheritContainerDecision(tab && tab.container, isInternalTab(tab));
+  if (d.freshBurner) return makeBurner();
+  return d.container || null;
+}
+
+// Popup inheritance (DD7, M06 F3 Leg 4): window.open/target=_blank popups are
+// captured main-side (no Tab object there, only the opener's session partition
+// string, forwarded via the `open-tab` payload). Resolves that partition into
+// the same createTab() container argument shape as inheritContainerFrom above
+// via the pure inheritFromPartition (../shared/inherit-container.js) — freshBurner
+// is minted HERE (burner minting is per-tab stateful, same split as
+// inheritContainerFrom/resolveNewTabContainer), never inheriting the opener's own
+// burner partition (never-share-state invariant, F2 D3 lineage).
+// @param {string | null | undefined} openerPartition
+// @returns {{ id: string, name: string, color: string, partition: string, burner?: boolean } | null}
+function inheritContainerFromPartition(openerPartition) {
+  const d = inheritFromPartition(openerPartition, containers);
   if (d.freshBurner) return makeBurner();
   return d.container || null;
 }
@@ -720,6 +793,23 @@ function openPageContextMenuForAudit() {
 
 /* ------------------------------------------------------------------ tabs */
 
+// Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
+// design review — folded into DD3): every trusted internal tab used to hardcode
+// `name: 'Settings'`, which was fine for one internal page but wrong for the other
+// two (`goldfinch://downloads`, `goldfinch://jars`). Derive the label from the URL
+// host instead. This is ONLY the container tooltip/fallback (the dot title, the
+// automation-indicator fallback) — tab TITLES still come from the page `<title>`.
+// `id: 'internal'` and the internal-partition pairing (below) are UNCHANGED — that
+// pairing is the documented data-loss guard.
+const INTERNAL_JAR_NAMES = { settings: 'Settings', downloads: 'Downloads', jars: 'Cookie Jars' };
+function internalJarName(url) {
+  try {
+    return INTERNAL_JAR_NAMES[new URL(url).host] || 'Settings';
+  } catch {
+    return 'Settings';
+  }
+}
+
 function createTab(url = currentHomePage(), container = null, { trusted = false } = {}) {
   // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
   // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
@@ -733,7 +823,7 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   // resolved default, a New Identity click on the Settings tab would wipe the user's real
   // `persist:goldfinch` jar (identity-new reads tab.container.partition).
   const jar = trusted
-    ? { id: 'internal', name: 'Settings', color: '#9aa0ac', partition: window.goldfinch.internalPartition }
+    ? { id: 'internal', name: internalJarName(url), color: '#9aa0ac', partition: window.goldfinch.internalPartition }
     : container || resolveNewTabContainer(containers, defaultId) || makeBurner();
 
   // Both trusted (internal) and untrusted (web) tabs now use WebContentsView via IPC (Leg 3).
@@ -2364,7 +2454,13 @@ window.goldfinch.onDownloadDone((d) => {
   }
 });
 
-window.goldfinch.onOpenTab((url) => createTab(url));
+// DD7 (M06 F3 Leg 4): payload is `{ url, openerPartition }` — resolve the
+// opener's jar via inheritContainerFromPartition and consume it through the
+// SAME createTab(url, container) path context-menu opens use (fresh burner for
+// a burner opener; default routing for internal/unknown/missing partitions).
+window.goldfinch.onOpenTab(({ url, openerPartition }) => {
+  createTab(url, inheritContainerFromPartition(openerPartition));
+});
 
 /* --------------------------------------------------------------- shortcuts */
 

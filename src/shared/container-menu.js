@@ -10,8 +10,9 @@
 // `burner`), and the Leg-3 sheet dialog makes those names reachable — a FLAT id
 // space would let a real jar shadow the sentinels (activating it would re-open the
 // dialog / open a burner instead of the user's jar). Jar items are `jar:<jarId>`;
-// the sentinels are `action:burner` / `action:new-container`. The chrome's
-// channel-6 `container` case dispatches on the prefix.
+// the sentinels are `action:burner` / `action:new-container` / `action:manage-jars`
+// (M06 Flight 3 Leg 3, opens the goldfinch://jars page). The chrome's channel-6
+// `container` case dispatches on the prefix.
 //
 // Labels are DATA — the sheet renders them via textContent only (DD8); `color` is
 // data too, applied sheet-side via style.background AFTER the shared isSafeColor
@@ -55,6 +56,11 @@ function buildContainerModel(containers) {
   model.push({ id: 'action:burner', label: `${RESOLVED_BURNER.name} tab (evaporates)`, color: RESOLVED_BURNER.color });
   // variant:'add' is a presentation hint (the old .cm-item.add separator styling).
   model.push({ id: 'action:new-container', label: '+ New container…', variant: 'add' });
+  // Manage-jars sentinel (Leg 3, chrome entry point): opens the goldfinch://jars
+  // page. Placed AFTER quick-create — quick-create stays as the in-flow path
+  // (operator ruling), the page is the full-featured surface. Plain navigation
+  // row, not a creation affordance, so it carries no `variant`.
+  model.push({ id: 'action:manage-jars', label: 'Manage jars…' });
   return model;
 }
 

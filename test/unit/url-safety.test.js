@@ -251,6 +251,18 @@ test('internal: rejects goldfinch://downloads/x (sub-path)', () => {
   assert.equal(isInternalPageUrl('goldfinch://downloads/x'), false);
 });
 
+test('internal: allows goldfinch://jars (Flight 3 third internal page)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://jars'), true);
+});
+
+test('internal: allows goldfinch://jars/ (trailing slash)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://jars/'), true);
+});
+
+test('internal: rejects goldfinch://jars/x (sub-path)', () => {
+  assert.equal(isInternalPageUrl('goldfinch://jars/x'), false);
+});
+
 test('internal: rejects goldfinch://settings/x (sub-path)', () => {
   assert.equal(isInternalPageUrl('goldfinch://settings/x'), false);
 });

@@ -18,16 +18,31 @@ const { BURNER } = require('../../src/shared/burner');
 const DEFAULT = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
 
 // ---------------------------------------------------------------------------
-// Shape: jar items (namespaced) + Burner + "+ New container…" sentinels, in order
+// Shape: jar items (namespaced) + Burner + "+ New container…" + "Manage jars…"
+// sentinels, in order
 // ---------------------------------------------------------------------------
-test('model = namespaced jar items + burner + new-container sentinels', () => {
+test('model = namespaced jar items + burner + new-container + manage-jars sentinels', () => {
   const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }]);
   assert.deepEqual(model, [
     { id: 'jar:default', label: 'Default', color: '#9aa0ac' },
     { id: 'jar:work', label: 'Work', color: '#2196f3' },
     { id: 'action:burner', label: `${BURNER.name} tab (evaporates)`, color: BURNER.color },
-    { id: 'action:new-container', label: '+ New container…', variant: 'add' }
+    { id: 'action:new-container', label: '+ New container…', variant: 'add' },
+    { id: 'action:manage-jars', label: 'Manage jars…' }
   ]);
+});
+
+// M06 Flight 3 Leg 3 (chrome entry integration): the picker gains a
+// "Manage jars…" sentinel AFTER the quick-create row (quick-create stays — operator
+// ruling). Pin its position, label, and variant explicitly.
+test('manage-jars sentinel follows new-container, with a pinned label and no variant', () => {
+  const model = buildContainerModel([DEFAULT]);
+  const newContainerIdx = model.findIndex((m) => m.id === 'action:new-container');
+  const manageJarsIdx = model.findIndex((m) => m.id === 'action:manage-jars');
+  assert.ok(newContainerIdx >= 0 && manageJarsIdx === newContainerIdx + 1, 'manage-jars immediately follows new-container');
+  assert.equal(model[manageJarsIdx].label, 'Manage jars…');
+  assert.equal(model[manageJarsIdx].variant, undefined);
+  assert.equal(model[manageJarsIdx].color, undefined);
 });
 
 test('burner sentinel color/label are pinned to the shared BURNER constant', () => {
@@ -37,11 +52,12 @@ test('burner sentinel color/label are pinned to the shared BURNER constant', () 
   assert.equal(sentinel.label, `${BURNER.name} tab (evaporates)`);
 });
 
-test('empty container list still yields the two sentinels', () => {
+test('empty container list still yields the three sentinels', () => {
   const model = buildContainerModel([]);
-  assert.equal(model.length, 2);
+  assert.equal(model.length, 3);
   assert.equal(model[0].id, 'action:burner');
   assert.equal(model[1].id, 'action:new-container');
+  assert.equal(model[2].id, 'action:manage-jars');
 });
 
 test('malformed entries are skipped; missing color/name degrade to data-safe values', () => {
@@ -50,7 +66,7 @@ test('malformed entries are skipped; missing color/name degrade to data-safe val
   );
   assert.deepEqual(model[0], { id: 'jar:x', label: 'x' }); // no name → id as label; no color key
   assert.deepEqual(model[1], { id: 'jar:y', label: 'Y' }); // non-string color dropped (sheet renders default dot)
-  assert.equal(model.length, 4); // 2 kept + 2 sentinels
+  assert.equal(model.length, 5); // 2 kept + 3 sentinels
 });
 
 // ---------------------------------------------------------------------------

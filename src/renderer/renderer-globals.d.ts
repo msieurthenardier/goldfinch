@@ -110,7 +110,11 @@ interface GoldfinchBridge {
   onJarsChanged(cb: (data: { containers: any[]; defaultId: string | null }) => void): void;
   onDownloadProgress(cb: (data: any) => void): void;
   onDownloadDone(cb: (data: any) => void): void;
-  onOpenTab(cb: (url: string) => void): void;
+  /** DD7 (M06 F3 Leg 4): payload carries the opener's session partition (from
+   * main's tabViews registry) so the renderer can inherit the opener's jar via
+   * inheritFromPartition; `openerPartition` is undefined when the opener's
+   * registry entry is already gone (closed before the popup IPC lands). */
+  onOpenTab(cb: (payload: { url: string; openerPartition?: string }) => void): void;
   /** Fired by the main-side Ctrl+F before-input-event capture (SC4/DD2). No payload. */
   onOpenFind(cb: () => void): void;
 
@@ -194,7 +198,7 @@ interface GoldfinchBridge {
 
 /**
  * Internal bridge surface exposed by src/preload/internal-preload.js to goldfinch:// pages.
- * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads).
+ * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads, goldfinch://jars).
  */
 interface GoldfinchInternalBridge {
   version: number;
@@ -224,6 +228,15 @@ interface GoldfinchInternalBridge {
   downloadsClear(): Promise<{ ok: boolean }>;
   onDownloadsChanged(cb: (payload: any) => void): number[];
   offDownloadsChanged(handles: number[]): void;
+  // --- cookie-jar registry surface (Flight 3, Leg 1) ---
+  jarsList(): Promise<Array<{ id: string; name: string; color: string; partition: string }>>;
+  jarsAdd(payload: { name: string; color?: string }): Promise<object | null>;
+  jarsRename(payload: { id: string; name?: string; color?: string }): Promise<object | null>;
+  jarsRemove(payload: { id: string }): Promise<{ ok: boolean; removed?: object; wiped?: boolean }>;
+  jarsSetDefault(payload: { id: string | null }): Promise<boolean>;
+  jarsGetDefault(): Promise<{ id: string; name: string; color: string }>;
+  onJarsChanged(cb: (payload: { containers: Array<object>; defaultId: string | null }) => void): number;
+  offJarsChanged(h: number): void;
 }
 
 interface Window {
@@ -344,6 +357,24 @@ declare function resolveNewTabContainer(
 ): any;
 
 /**
+ * Injected by src/shared/jar-page-model.js via the globalThis branch (the pure
+ * goldfinch://jars row-model — M06 Flight 3 Leg 1 / DD3). Persistent jars in
+ * `containers` order, followed by the static Burner row.
+ */
+declare function buildJarPageModel(
+  containers: Array<{ id?: any; name?: any; color?: any }>,
+  defaultId: string | null | undefined
+): Array<{ id: string; name: string; color: string; isDefault: boolean; isBurner: boolean }>;
+
+/**
+ * Injected by src/shared/jar-page-model.js via the globalThis branch (the curated,
+ * frozen swatch palette for the create/recolor swatch grid — M06 Flight 3 Leg 2 /
+ * DD4). Every entry passes isSafeColor; PALETTE[0] is the preselected color for a
+ * new jar.
+ */
+declare const PALETTE: readonly string[];
+
+/**
  * Injected by src/shared/inherit-container.js via the globalThis branch (the
  * pure link/image/selection-search container-inheritance decision — M06 Flight
  * 2 HAT Leg 4 / D3). At most one of `container`/`freshBurner` is ever set;
@@ -354,6 +385,18 @@ declare function inheritContainerDecision(
   sourceContainer: { id?: any; burner?: boolean } | null | undefined,
   sourceIsInternal: boolean
 ): { container?: { id?: any; burner?: boolean }; freshBurner?: boolean };
+
+/**
+ * Injected by src/shared/inherit-container.js via the globalThis branch (DD7,
+ * M06 F3 Leg 4 — popup-inheritance decision: resolves the opener's forwarded
+ * session-partition string into the SAME decision shape inheritContainerDecision
+ * above produces). At most one of `container`/`freshBurner` is ever set; neither
+ * set means "no inheritance — the caller's default-jar resolution applies".
+ */
+declare function inheritFromPartition(
+  openerPartition: string | null | undefined,
+  containers: Array<{ id?: any; partition?: string; burner?: boolean }> | null | undefined
+): { container?: { id?: any; partition?: string; burner?: boolean }; freshBurner?: boolean };
 
 /**
  * Injected by src/shared/page-context-model.js via the globalThis branch (the
