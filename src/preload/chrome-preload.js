@@ -60,6 +60,16 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // (defaultId null ⇔ Burner). Renderer subscribes as of Flight 2 (DD2).
   onJarsChanged: (cb) => ipcRenderer.on('jars-changed', (_e, d) => cb(d)),
   identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
+  // Per-jar data controls (Flight 4, Leg 1): granular class clears + full
+  // identity wipe. Parity with the internal-preload.js jars wrappers, and the
+  // behavior-test act path (DD9) drives these via chrome-target evaluate.
+  jarsClearData: (payload) => ipcRenderer.invoke('jars-clear-data', payload),
+  jarsWipe: (payload) => ipcRenderer.invoke('jars-wipe', payload),
+  // Fired by main after jars-wipe succeeds, with { id } (Flight 4, Leg 3) — the
+  // chrome renderer's cue to reload the jar's open web tabs (DD4). Same
+  // one-liner shape as onJarsChanged; no off* — chrome preload has no
+  // handle-based subscription cleanup.
+  onJarWiped: (cb) => ipcRenderer.on('jar-wiped', (_e, d) => cb(d)),
 
   // --- page zoom ---
   zoomApply: ({ webContentsId, action }) => ipcRenderer.send('zoom-apply', { webContentsId, action }),

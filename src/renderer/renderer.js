@@ -133,6 +133,20 @@ const jarsBoot = Promise.all([
 window.goldfinch.onJarsChanged((p) => {
   if (p && Array.isArray(p.containers)) applyJarsState(p.containers, p.defaultId);
 });
+// DD4 reload sweep (Flight 4, Leg 3): a full wipe broadcasts jar-wiped { id } —
+// reload every open tab whose container matches, using the same isWebTab guard
+// + tabNavigate reload idiom as newIdentity (renderer.js:~2346). Internal tabs
+// are excluded by the guard; burner tabs never match (jars-wipe rejects
+// burner, so no tab.container ever equals it). Granular clears broadcast
+// nothing — nothing else calls this.
+window.goldfinch.onJarWiped((p) => {
+  if (!p || typeof p.id !== 'string') return;
+  for (const t of tabs.values()) {
+    if (t.container && t.container.id === p.id && isWebTab(t) && t.wcId != null) {
+      window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
+    }
+  }
+});
 
 // Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
 // jars-state replace (DD2), and close any tab whose jar no longer exists (DD6 —

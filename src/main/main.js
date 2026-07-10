@@ -121,7 +121,10 @@ const INTERNAL_PAGES = {
     '/jars.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars.js'),
     '/jar-page-model.js': path.join(__dirname, '..', 'shared', 'jar-page-model.js'),
     '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js'),
-    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js')
+    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
+    // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
+    // list, loaded before jars.js (see jars.html's script-order comment).
+    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js')
   }
 };
 
@@ -1862,8 +1865,14 @@ registerInternalHandler(ipcMain, 'automation:get-status', () => currentAutomatio
 // "Invalid port". rebindMcpServer rebinds if the surface is active (resolvePort
 // picks up the new setting), or is a no-op otherwise. Returns the fresh status so
 // the renderer renders the now-active port without a separate get-status round-trip.
+// M06 Flight 4 Leg 1 (DD8 broadcast-invariant net finding): this handler mutates
+// `automationPort` via settings.set but never broadcast settings-changed — a
+// genuine pre-existing gap the F7 fix (see jar-key-revoke/admin-mint/admin-revoke
+// below) did not cover. Fixed to match those siblings, so any other open
+// internal tab / the chrome sees the new port without a separate reload.
 registerInternalHandler(ipcMain, 'automation:set-port', async (_e, port) => {
   settings.set('automationPort', port);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
   await rebindMcpServer();
   return currentAutomationStatus();
 });
