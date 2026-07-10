@@ -316,8 +316,9 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
     while a key is still valid, every op for that identity errors (`automation: no-such-jar`).
 
 - **The admin identity bypasses jar-scoping — admin's TWO relaxations (M05 F8 DD8).** An
-  `admin`-resolved connection enumerates **every** jar's guest tabs **and** the internal
-  `goldfinch://settings` tab, can drive/observe any of them, and may call `captureWindow`,
+  `admin`-resolved connection enumerates **every** jar's guest tabs **and** every open tab in
+  the internal session (`goldfinch://settings`, `goldfinch://downloads`, `goldfinch://jars`),
+  can drive/observe any of them, and may call `captureWindow`,
   `getChromeTarget`, and `downloadsList`. `allowInternal` is **no longer the sole** admin
   relaxation — the resolver grants admin exactly two:
   1. the **internal-session exclusion** is lifted (admin may drive/observe the internal tab;

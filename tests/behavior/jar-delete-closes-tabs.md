@@ -1,9 +1,9 @@
 # Behavior Test: Jar Delete Closes Its Tabs
 
 **Slug**: `jar-delete-closes-tabs`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-10
-**Last Run**: never
+**Last Run**: 2026-07-10-16-39-03
 
 ## Intent
 

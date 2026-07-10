@@ -3,7 +3,7 @@
 **Slug**: `new-tab-default-routing`
 **Status**: active
 **Created**: 2026-07-09
-**Last Run**: 2026-07-10-04-43-55
+**Last Run**: 2026-07-10-17-15-42
 
 ## Intent
 
@@ -37,13 +37,14 @@ half of mission criterion 5 and the fallback half of criterion 6 (M06).
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Enumerate tabs. | Exactly one boot tab exists and its `jarId` is `personal` (the fresh-seed default), not `default` and not a `burner-*` id. |
+| 1 | Enumerate tabs. Via the chrome apparatus, call `jarsGetDefault()` and `jarsList()`. | Exactly one boot tab exists and its `jarId` is `personal` (the fresh-seed default), not `default` and not a `burner-*` id. `jarsGetDefault()` resolves the personal container; `jarsList()` resolves personal + work (the fresh seed) — the live flag agrees with tab assignment. |
 | 2 | Open a tab via the automation `openTab` tool with the `jarId` field **omitted**. | The new tab's `jarId` is `personal`. |
 | 3 | Via the chrome apparatus, call `window.goldfinch.jarsSetDefault({ id: 'work' })`. | Resolves `true`. |
 | 4 | Open a tab via `openTab` with `jarId` omitted. | The new tab's `jarId` is `work` — the moved flag governs routing with no restart. |
-| 5 | Via the chrome apparatus, call `jarsRemove({ id: 'work' })` then `jarsRemove({ id: 'personal' })`. | Both resolve `{ ok: true, ... }`; the registry is empty (chrome apparatus: `jarsList()` resolves `[]`, `jarsGetDefault()` resolves the Burner identity, id `burner`). |
+| 5 | Via the chrome apparatus, call `jarsRemove({ id: 'work' })` then `jarsRemove({ id: 'personal' })`. Then call `jarsList()` and `jarsGetDefault()`. | Both removes resolve `{ ok: true, ... }`; `jarsList()` resolves `[]`; `jarsGetDefault()` resolves the Burner identity, id `burner` — the registry is empty and the live flag has fallen through to Burner. |
 | 6 | Open a tab via `openTab` with `jarId` omitted. | The new tab's `jarId` matches `burner-<n>` — Burner-as-default yields a fresh evaporating burner tab (NOT id `burner` itself, and not any persistent jar). |
-| 7 | Via the chrome apparatus, call `jarsAdd({ name: 'Fresh' })`. Then open a tab via `openTab` with `jarId` omitted. | `jarsAdd` resolves a container with id `fresh`; the newly opened tab's `jarId` is `fresh` — the first persistent jar added into an empty registry auto-claimed the default flag. |
+| 7 | Via the chrome apparatus, call `jarsAdd({ name: 'Fresh' })`. Then open a tab via `openTab` with `jarId` omitted. Then call `jarsGetDefault()`. | `jarsAdd` resolves a container with id `fresh`; the newly opened tab's `jarId` is `fresh`; `jarsGetDefault()` resolves the `fresh` container — the first persistent jar added into an empty registry auto-claimed the default flag. |
+| 8 | Via the chrome apparatus, call `jarsAdd({ name: 'Second' })` into the now-non-empty registry (from step 7). Then call `jarsGetDefault()`. | `jarsAdd` resolves a container with id `second`; `jarsGetDefault()` still resolves the `fresh` container, NOT `second` — adding a jar into an already-non-empty registry does not move the default flag, distinguishing genuine auto-claim-on-empty-registry (step 7) from an always-default-new-jars bug. |
 
 ## Out of Scope
 

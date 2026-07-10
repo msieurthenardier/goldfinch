@@ -157,6 +157,34 @@ deliberate activation maximum per sweep.
   over the full uncommitted diff, with explicit security focus: internal-channel
   gating, page injection safety, popup-inheritance influence limits, forwarder
   synthesis resistance.
+- 2026-07-10 — Flight-level commit `7461346` (33 files, +3845/−88) after
+  grooming. **FD process decision**: the review/commit landed after Leg 4
+  rather than after Leg 5 — deliberate split so the verify leg's real-boot
+  matrix and behavior tests run against a committed baseline; Leg 5's outputs
+  (docs, spec extension, run logs) get a scoped review + second commit,
+  mirroring F2's two-commit shape. Leg 5 `verify-integration` designed
+  (Developer: spec extension + boot smoke + docs; FD: the three
+  `/behavior-test` runs — the run skill orchestrates its own crew). Design
+  review spawned with post-commit premise re-verification: the delete-fallback-
+  is-a-burner trace, popup route via the NEW handler, the chrome-eval burner
+  staging route post-Leg-3/4, second-jar-no-claim store semantics, and
+  enumerateTabs title observability for internal tabs.
+- 2026-07-10 — Leg 5 design review cycle 1: **approve with changes**. Every
+  behavior-spec premise re-verified against the committed code (delete-fallback
+  burner trace confirmed end-to-end; popups open as tabs via the new handler;
+  chrome-eval burner route live; second-jar-no-claim confirmed at jars.js:259;
+  internal titles DO reach admin enumerateTabs). Incorporated: 2 high — (a)
+  shared-instance staging was unworkable (`jar-delete-closes-tabs` runs first
+  and destroys the Personal+Work seed every spec's preconditions require) →
+  **per-run fresh staging by the FD**, Developer smoke instance self-contained
+  and torn down; (b) the admin key is a one-time stdout mint, not an env var,
+  and agents share no shell → the ruling REMOVES the cross-agent handoff
+  entirely (each agent mints its own; values never committed). 2 low adopted
+  (mcp-automation.md internal-session generalization; the two draft specs added
+  to Files Affected) + distinct smoke-probe jar name. **FD ruling: cycle 2
+  skipped** — direct adoptions. Leg 5 → `ready`; implementation Developer
+  spawned (spec extension + boot smoke + docs; FD holds the three
+  `/behavior-test` runs).
 - 2026-07-10 — Flight-level review: [HANDOFF:confirmed], zero blocking issues
   (security trace: popup inheritance bounded to the opener's own partition;
   forwarder unsynthesizable from page JS). Two doc-hygiene observations
@@ -393,6 +421,99 @@ All classifications carried into flight.md (DDs + Prerequisites). One retirement
   `before-input-event` — DD9 split). Leg → `landed` (review + commit deferred
   to flight level — this was the last autonomous leg; flight-level review and
   commit follow).
+- 2026-07-10 — Leg 5 `verify-integration` Developer-scope work completed
+  (spec extension + boot smoke + docs; the three `/behavior-test` runs are
+  FD-owned and not part of this entry — leg stays `in-flight` until they pass).
+
+  **1. Spec extension** — `tests/behavior/new-tab-default-routing.md` extended
+  per the F2 run's three Validator notes exactly: (a) step 1 and step 5 now
+  carry explicit `jarsGetDefault()`/`jarsList()` Actions alongside their
+  existing tab-state Actions, with Expected Results updated to assert on both;
+  (b) step 7 gained an explicit post-add `jarsGetDefault()` Expected Result,
+  PLUS a new step 8 that adds a second jar into the now-non-empty registry and
+  asserts the default does NOT move (distinguishing genuine auto-claim-on-empty
+  from an always-default-new-jars bug). Table renumbered 1-8 coherently; no
+  other step-count prose references existed to update. Status unchanged
+  (`active`); `Last Run` untouched (FD updates it after the next run).
+
+  **2. Boot smoke** — own fresh scratch instance, self-contained, self-torn-down;
+  no instance/port/key crossed to the FD. Exact commands (key values never
+  recorded, per DD-ruled boundary):
+  - Launch: `XDG_CONFIG_HOME=<own scratch dir> GOLDFINCH_AUTOMATION_DEV_MINT=1
+    GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation`. A jar key and an
+    admin key were minted from the one-time `AUTOMATION_DEV_MINT` stdout line;
+    both discarded at teardown, never written to any file.
+  - Port discovery: `ss -ltnp` against `127.0.0.1:497xx` — bound on **49709**
+    (the configured 49707 was free at launch time but the app still
+    free-fell to 49709; matches "49709/49710 seen on this rig" from the leg's
+    Apparatus recipe note — not investigated further, consistent with prior
+    flights' observation that this is rig-normal, not a defect).
+  - MCP handshake: `curl -X POST http://127.0.0.1:49709/mcp` with
+    `initialize` (heredoc `--data-binary` body per the leg's shell-quoting
+    guidance) → captured the `mcp-session-id` response header → sent
+    `notifications/initialized` (got `202`) → `tools/call` for every probe.
+  - **Probe (a) clean boot**: `enumerateTabs` showed exactly one boot tab
+    (`jarId: "personal"`), matching the fresh-seed default. Full stdout/stderr
+    log reviewed for errors: only standard boot noise (Wayland/DRM render-node
+    warnings, sandbox-multithread notice, `webContents.canGoBack/canGoForward`
+    deprecation notices, the dev-mode CSP security warning, one benign
+    `Frame latency is negative` compositor-timing line) — nothing
+    F3-attributable (no jars-page/jar-IPC errors, no uncaught exceptions,
+    no `TypeError`/`ReferenceError`).
+  - **Probe (b) jars-page open**: `getChromeTarget` → chrome `wcId: 1`;
+    `evaluate` on `wcId: 1` with `window.openJarsPage()` (a plain top-level
+    function in `renderer.js`, a non-module `<script>`, so it lands on
+    `window` automatically — reachable exactly as the leg specified);
+    `enumerateTabs` then showed exactly one new internal tab: `wcId: 3`,
+    `url: "goldfinch://jars/"`, `title: "Cookie Jars — Goldfinch"`,
+    `jarId: "internal"` — the internal-tab title reaching admin
+    `enumerateTabs` (DD9-bounded: page DOM stayed untouched by the apparatus).
+  - **Probe (c) jarsAdd/jarsRemove round-trip**: `evaluate` on `wcId: 1` with
+    `window.goldfinch.jarsAdd({ name: 'SmokeProbe' })` → resolved
+    `{ id: "smokeprobe", name: "SmokeProbe", color: "#b06ef5",
+    partition: "persist:container:smokeprobe" }`; `jarsList()` confirmed
+    personal + work + smokeprobe; `jarsRemove({ id: 'smokeprobe' })` →
+    `{ ok: true, removed: {...}, wiped: true }`; `jarsList()` confirmed the
+    registry back to personal + work only — registry and broadcast
+    observables consistent through the round-trip.
+  - **Teardown**: a first `SIGTERM` to the `npm run dev:automation` wrapper
+    pid alone did not cascade to the Electron process tree (npm does not
+    forward signals to its child by default) — killing the `node
+    scripts/dev-launch.mjs` pid and the Electron main pid directly (both
+    identified via `pstree -p`) brought the whole tree down. Verified clean
+    via `ps aux | grep electron` (no matches) and `ss -ltnp` (port 49709 no
+    longer listening) before deleting the scratch profile directory and the
+    log file (which had carried the one-time plaintext keys).
+
+  **3. Docs** — `CLAUDE.md`: added `goldfinch://jars` to every place the file
+  enumerates internal origins/pages (the "TWO trusted internal origins"
+  paragraph → THREE, its literal `INTERNAL_ORIGINS` code-quote, the
+  `internal-*` channel list, the preload bridge method list, and the kebab
+  item list, which gains a "Cookie jars" entry between Downloads and Print…,
+  matching the actual `kebabModel()` ordering from Leg 3); added the overdue
+  architecture pattern note (F1 rec 4, F2 rec 3) as a new `##Patterns`
+  subsection — the Electron-free injected-deps module pattern and the
+  `src/shared/` dual-export pure-decision-module pattern (both with file
+  exemplars), the two real-boot defect classes (`mkdirSync`-before-
+  synchronous-persist at `jars.js:218`; the classic-`<script>` shared-scope
+  collision with its `vm`-replay-test-net counter-measure, exemplified by
+  `chrome-shared-scripts.test.js` and `jars-page-shared-scripts.test.js`), and
+  the grep-AC verification convention — kept to patterns/conventions only, no
+  project-specific incident narrative. `docs/mcp-automation.md`: applied the
+  one specified light-touch generalization (~:319-320) — "the internal
+  `goldfinch://settings` tab" (singular) became "every open tab in the
+  internal session (`goldfinch://settings`, `goldfinch://downloads`,
+  `goldfinch://jars`)" (plural — multiple internal tabs can coexist, since
+  none of the three openers dedupe). Nothing else in that file was now-false;
+  no other edit made. README not touched (does not enumerate user-facing
+  surfaces in a way requiring a jars-page addition).
+
+  **Gates**: `npm test` 1223/1223 passing (0 fail/skip — doc/spec-only leg,
+  no test-affecting source changes), `npm run typecheck` clean (exit 0),
+  `npm run lint` clean (exit 0). Zero deviations from the leg spec. Leg
+  status stays `in-flight` — lands only after the FD's three `/behavior-test`
+  runs (`jar-delete-closes-tabs`, `popup-jar-inheritance`, the extended
+  `new-tab-default-routing`) all pass.
 
 ---
 
@@ -471,3 +592,32 @@ fixes. Escalation path unused — zero high-severity findings.
   in-scope. Two behavior-test specs drafted at design time
   (`jar-delete-closes-tabs`, `popup-jar-inheritance`). Recon rule from F2 debrief
   applied (first-pass grep covered tests/behavior/ + test/ + docs/).
+
+- 2026-07-10 — Leg 5 FD half complete: three behavior-test runs, each on its own
+  fresh scratch stage (per-run staging ruling), live two-agent Witnessed mode:
+  1. `jar-delete-closes-tabs` @ 2026-07-10-16-39-03 — **5/5 PASS** (first run;
+     spec → active). DD6 proven live: work-jar delete closed exactly its two
+     tabs (identity-checked by wcId), personal tabs untouched; last-jar delete
+     closed all orphans and the fallback opened exactly one fresh burner tab
+     (new wcId, stable across delayed recapture).
+  2. `popup-jar-inheritance` @ 2026-07-10-16-52-13 — **5/5 PASS** (first run;
+     spec → active). DD7 proven live: work-opener popup landed in work;
+     burner-opener popup minted a FRESH burner (exact-string distinct ids);
+     popups are tabs, openers get no WindowProxy (null return — bonus isolation
+     signal); zero jarId reassignment side-effects.
+  3. `new-tab-default-routing` (extended, 8 steps) @ 2026-07-10-17-15-42 —
+     **8/8 PASS**. The new step-8 control held (flag stayed on `fresh` after
+     `second`'s add); step 5 incidentally cross-confirmed tabs-close-on-delete
+     on an independent stage. Duplicate-color observation resolved as by-design
+     (color-less jarsAdd clamps to the store FALLBACK_COLOR; the page always
+     passes a palette color) — noted in the run log, no defect.
+  18/18 checkpoints across the three runs; zero inconclusive, zero retries, no
+  operator interventions. Teardown note (recurring): npm/dev-launch never
+  cascade signals — the Electron main pid needs a direct kill every time; all
+  three instances verified dead (port probe) before the next stage. Validator
+  carry-forwards for future planning: settle-then-recapture worth codifying in
+  delete-fallback specs; burner-id distinctness assertable in step 6; a
+  cookie-cross-check variant would pin burner storage isolation (Flight 4/5);
+  codify step-0 baseline + before/after enumerations in popup spec wording.
+  Leg 5 → `landed`; CP4 checked. Scoped Reviewer spawned over the leg-5 diff
+  before the second flight commit.

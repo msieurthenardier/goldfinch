@@ -1,9 +1,9 @@
 # Behavior Test: Popup Jar Inheritance
 
 **Slug**: `popup-jar-inheritance`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-10
-**Last Run**: never
+**Last Run**: 2026-07-10-16-52-13
 
 ## Intent
 

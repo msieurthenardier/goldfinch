@@ -326,7 +326,7 @@ separate document and follow the same no-top-level-const-collision discipline.
 - [x] CP3 — Chrome integration: both entry points open the page; deleting a jar
       closes its open tabs (incl. zero-tab fallback); popups inherit the opener's
       jar; generalized forwarder passes the accelerator parity check. Suite green.
-- [ ] CP4 — Verification: `jar-delete-closes-tabs` and `popup-jar-inheritance` pass;
+- [x] CP4 — Verification: `jar-delete-closes-tabs` and `popup-jar-inheritance` pass;
       `new-tab-default-routing` extended and re-passing; real-boot matrix clean;
       docs + CLAUDE.md pattern note landed.
 - [ ] CP5 — HAT sign-off; flight `landed`.
