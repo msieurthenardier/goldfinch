@@ -1,9 +1,9 @@
 # Behavior Test: Per-Jar Data Controls
 
 **Slug**: `jar-data-controls`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-10
-**Last Run**: never
+**Last Run**: 2026-07-10-22-10-41
 
 ## Intent
 

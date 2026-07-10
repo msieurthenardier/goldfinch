@@ -270,14 +270,15 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
 
 ### Checkpoints
 
-- [ ] CP1: `jar-data-classes` + both handler pairs + preload wrappers unit-green;
+- [x] CP1: `jar-data-classes` + both handler pairs + preload wrappers unit-green;
       broadcast-invariant net enrolled and green (leg 1)
-- [ ] CP2: relayout renders — nav tree tracks `jars-changed`, sections always
+- [x] CP2: relayout renders — nav tree tracks `jars-changed`, sections always
       expanded, instant-apply rename/recolor round-trips, no edit mode remains (leg 2)
-- [ ] CP3: data controls end-to-end — every action confirm-gated, wipe reloads the
-      jar's tabs via the broadcast sweep (leg 3)
-- [ ] CP4: `jar-data-controls` behavior spec passes on a fresh stage;
-      `jar-delete-closes-tabs` re-passes; suite + typecheck + lint green (leg 4)
+- [x] CP3: data controls end-to-end — every action confirm-gated, wipe reloads the
+      jar's tabs via the broadcast sweep (leg 3; live-proven at leg 4's
+      jar-data-controls run)
+- [x] CP4: `jar-data-controls` behavior spec passes on a fresh stage (7/7);
+      `jar-delete-closes-tabs` re-passes (5/5); suite + typecheck + lint green (leg 4)
 - [ ] CP5: HAT signed off — including the reconcileUi cross-surface race and
       create/confirm Escape paths deliberately exercised (leg 5)
 
@@ -310,7 +311,7 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
       reconcile, DD7 burner section, edit mode removed (CP2)
 - [x] `data-controls-ui` — DD5 confirm-everything data actions, wipe feedback, chrome
       `onJarWiped` preload listener + reload sweep (CP3)
-- [ ] `verify-integration` — behavior tests on fresh stages + suite/typecheck/lint
+- [x] `verify-integration` — behavior tests on fresh stages + suite/typecheck/lint
       against committed baseline (CP4)
 - [ ] `hat-jar-data-controls` — guided HAT incl. the F3 carry-forward paths (CP5)
 

@@ -161,6 +161,25 @@ No items classified `already-satisfied` / `partially-satisfied` — nothing to r
   shape); leg 4 verifies against this committed baseline. No PR opened —
   consistent with the F2/F3 operator workflow (sign-off → local --no-ff merge).
 
+### Leg 4 design review (cycle 1 — approve, zero issues)
+- First clean approve of the flight. The reviewer verified all seven staked
+  premises against the committed baseline `13c6329`: chrome wrapper names +
+  return shapes exact; the full jar-wiped → onJarWiped → sweep → wc.reload()
+  chain (same wcId, in-place reload; enumeration's tabs Map untouched by
+  navigation); exactly ONE jar-wiped emission site (handleWipe success);
+  document.cookie is un-intercepted platform behavior (live store round-trip);
+  createTab/makeBurner remain window properties (strict mode does not affect
+  top-level function installation — and the popup-run precedent proved the
+  route live); all four rejection combinations return {ok:false} pre-session;
+  apparatus facts (dev:automation script, port 49707 default, Bearer +
+  mcp-session-id) drift-free; crew file well-formed; no runs/ dir yet for the
+  new spec.
+- Adopted suggestion: the settle-then-recapture allowance extended to step 3's
+  post-clear cookie read (same platform-timing assumption class as step 5's
+  reload probe). Also noted for future legs: cite precedent runs that postdate
+  the code they vouch for. Cycle 2 unnecessary. Leg → `ready`.
+  [HANDOFF:review-needed]
+
 ---
 
 ## Leg Progress
@@ -401,6 +420,38 @@ Wired the data controls end-to-end and landed the DD4 chrome reload sweep (CP3):
   ozone/Wayland + Electron deprecation/CSP-dev-mode noise) but did not
   navigate to the jars page. End-to-end confirm/reload behavior is leg 4's
   `jar-data-controls` spec and the leg-5 HAT, per plan.
+
+### Leg 4 — verify-integration (2026-07-10, completed)
+
+Gates on the committed baseline `13c6329`: suite 1269/1269, typecheck clean,
+lint clean. Two behavior-test runs, both live two-agent continuation, each on
+its own fresh stage (per-run staging ruling; both instances torn down after;
+fallback port 49709 — fifth and sixth consecutive observations):
+
+- **`jar-data-controls` 2026-07-10-22-10-41 — 7/7 PASS (first run; spec
+  `draft` → `active`)**. Live-proven: class-granular clears act on exactly the
+  requested class (cookie clear left localStorage; storage clear then removed
+  it), stay jar-contained (personal cookie survived work clears), and do NOT
+  reload; the full wipe reloads the jar's tabs in place (in-memory expando
+  sentinel gone, wcId unchanged) via the jar-wiped sweep; all four
+  burner/unknown rejection combinations return {ok:false} on both channels;
+  two burner tabs do not share cookie storage. CLOSES both declared
+  carry-forwards (Burner identity shape; burner storage isolation).
+- **`jar-delete-closes-tabs` 2026-07-10-22-24-45 — 5/5 PASS (re-run)**. The F4
+  relayout did not disturb the closure/registry/fallback contract; zero
+  payload-shape drift vs run 1. Validator scope caveat (correct, by design):
+  state-level pass only — the rendered-layout half of the relayout risk is
+  HAT-owned per DD9.
+- Validator carry-forwards for future spec revisions (debrief items): cookie-only
+  cross-jar containment could probe all three classes; bare `{ok:false}`
+  rejections are observationally identical across causes (a `reason` field would
+  make path regressions detectable); burner isolation is one-directional;
+  step-5's prose settle could be a poll-until condition; no spec teardown
+  convention.
+- Notable operational: the Executor's attempt to stash the admin key in a helper
+  file was denied by the permission layer and correctly rerouted to
+  header-only use — key discipline held; no key material in any committed
+  artifact (leak-grep clean, operator-identity grep clean).
 
 ---
 
