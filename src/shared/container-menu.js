@@ -38,14 +38,14 @@ const RESOLVED_BURNER = typeof module !== 'undefined' && module.exports
 
 /**
  * @param {Array<{ id?: any, name?: any, color?: any }>} containers
- * @returns {Array<{ id: string, label: string, color?: string, variant?: string }>}
+ * @returns {Array<{ id: string, label: string, color?: string } | { type: 'separator' }>}
  */
 function buildContainerModel(containers) {
-  /** @type {Array<{ id: string, label: string, color?: string, variant?: string }>} */
+  /** @type {Array<{ id: string, label: string, color?: string } | { type: 'separator' }>} */
   const model = [];
   for (const c of containers || []) {
     if (!c || typeof c.id !== 'string') continue;
-    /** @type {{ id: string, label: string, color?: string, variant?: string }} */
+    /** @type {{ id: string, label: string, color?: string }} */
     const item = { id: 'jar:' + c.id, label: String(c.name != null ? c.name : c.id) };
     if (typeof c.color === 'string') item.color = c.color;
     model.push(item);
@@ -54,12 +54,21 @@ function buildContainerModel(containers) {
   // is textContent-only, so the label carries the flattened text. Name/color derive
   // from the shared BURNER constant (DD8) instead of duplicating the literal.
   model.push({ id: 'action:burner', label: `${RESOLVED_BURNER.name} tab (evaporates)`, color: RESOLVED_BURNER.color });
-  // variant:'add' is a presentation hint (the old .cm-item.add separator styling).
-  model.push({ id: 'action:new-container', label: '+ New container…', variant: 'add' });
+  // Divider separating the jar rows (including Burner) from the action rows below
+  // (HAT step-1 finding F1a, operator ruling): the sheet's generic `.cm-sep`
+  // renderer (menu-overlay.js, ported from the page-context menu) already handles
+  // `{ type: 'separator' }` — non-focusable, role="separator", excluded from the
+  // roving-tabindex item set for free (no id, so it never dispatches on activation).
+  model.push({ type: 'separator' });
+  // Sentinel renamed from "+ New container…" → "New Jar" (F1b) and stripped of the
+  // old `variant: 'add'` accent styling (F1c — it now renders as a plain item,
+  // consistent with "Manage jars…" below; the divider above is the sole separator
+  // cue now). Action id unchanged — the chrome's channel-6 dispatch depends on it.
+  model.push({ id: 'action:new-container', label: 'New Jar' });
   // Manage-jars sentinel (Leg 3, chrome entry point): opens the goldfinch://jars
   // page. Placed AFTER quick-create — quick-create stays as the in-flow path
   // (operator ruling), the page is the full-featured surface. Plain navigation
-  // row, not a creation affordance, so it carries no `variant`.
+  // row, same "white"/undecorated styling as the quick-create row above.
   model.push({ id: 'action:manage-jars', label: 'Manage jars…' });
   return model;
 }

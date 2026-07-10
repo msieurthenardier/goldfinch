@@ -1906,9 +1906,31 @@ registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
   broadcastToChromeAndInternal('settings-changed', settings.getAll());
   return { key };
 });
-registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => { revokeJarKey(jarId, settings); return { ok: true }; });
-registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => ({ key: mintAdminKey(settings) }));
-registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => { revokeAdminKey(settings); return { ok: true }; });
+// F7 (Flight 3, Leg 6 HAT): revoke/admin-mint/admin-revoke ALSO mutate
+// `automationKeyHashes` / `automationAdminKeyHash` (both settings values) but
+// were missing the broadcast mint already carries — a pre-existing gap against
+// the documented convention ("any IPC handler that mutates settings directly
+// or transitively MUST broadcast settings-changed itself"). Without it, a
+// revoke/rotate only updated the acting settings-page tab (which refresh()es
+// itself locally); the chrome toolbar's automation indicator (and any OTHER
+// open internal tab) would silently lag until the next unrelated broadcast.
+// Fixed here to match jar-key-mint's existing broadcast, needed for the F7
+// indicator to react live to a revoke.
+registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => {
+  revokeJarKey(jarId, settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { ok: true };
+});
+registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => {
+  const key = mintAdminKey(settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { key };
+});
+registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => {
+  revokeAdminKey(settings);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
+  return { ok: true };
+});
 
 // Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6).
 // INTENTIONALLY a bare ipcMain.handle — NOT registerInternalHandler — for the SAME

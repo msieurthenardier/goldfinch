@@ -1,6 +1,6 @@
 # Leg: verify-integration
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Jar Management Page](../flight.md)
 
 ## Objective

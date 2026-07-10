@@ -46,6 +46,56 @@
   if (!listEl || !newBtn || !createPanelEl || !pageErrorEl) return;
 
   const FALLBACK_COLOR = '#9aa0ac';
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Build a decorative inline icon (Lucide-style: 24x24 viewBox, 16x16 render
+   * size, stroke=currentColor so it inherits the button's text color — same
+   * convention already used for the static toolbar/pin-toggle icons in
+   * index.html and settings.html). Built entirely via createElementNS —
+   * NEVER innerHTML/a template string — matching this page's textContent-only
+   * CSP convention (module doc comment); jars.js renders one row per jar
+   * dynamically, so the icon can't be static markup the way the pin-toggle
+   * icons are.
+   * @param {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} shapes
+   * @returns {SVGSVGElement}
+   */
+  function buildIcon(shapes) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.classList.add('jar-icon');
+    for (const shape of shapes) {
+      const el = document.createElementNS(SVG_NS, shape.tag);
+      for (const key of Object.keys(shape.attrs)) el.setAttribute(key, shape.attrs[key]);
+      svg.appendChild(el);
+    }
+    return svg;
+  }
+
+  // Lucide "pencil" and "trash-2" path data (ISC license) — same icon set/style
+  // already vendored as static SVG for the toolbar and pin-toggle buttons.
+  /** @type {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} */
+  const ICON_EDIT = [
+    { tag: 'path', attrs: { d: 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z' } },
+    { tag: 'path', attrs: { d: 'm15 5 4 4' } }
+  ];
+  /** @type {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} */
+  const ICON_DELETE = [
+    { tag: 'path', attrs: { d: 'M3 6h18' } },
+    { tag: 'path', attrs: { d: 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6' } },
+    { tag: 'path', attrs: { d: 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2' } },
+    { tag: 'line', attrs: { x1: '10', x2: '10', y1: '11', y2: '17' } },
+    { tag: 'line', attrs: { x1: '14', x2: '14', y1: '11', y2: '17' } }
+  ];
 
   /** @typedef {{ containers: Array<any>, defaultId: (string|null) }} JarsState */
   /** @typedef {{ mode: ('create'|'edit'|'confirm-delete'|null), rowId: (string|null), draft: ({name: string, color: string, originalColor?: string}|null) }} UiState */
@@ -184,34 +234,56 @@
 
     li.appendChild(main);
 
+    // Burner explanatory hint (HAT step-1 finding F4, operator ruling): rendered
+    // INSIDE the Burner row's own <li>, below the dot+name line but still above
+    // the row's own bottom border (the "divider line" the operator flagged as
+    // visually detaching it when it lived in a separate footnote paragraph below
+    // the whole list) — so it reads as belonging to the Burner row.
+    if (row.isBurner) {
+      const hint = document.createElement('p');
+      hint.className = 'jar-burner-hint';
+      hint.textContent = 'Burner is always available and keeps no history — its tabs evaporate on close.';
+      li.appendChild(hint);
+    }
+
     const editable = !row.isBurner;
     if (editable) {
       const actions = document.createElement('div');
       actions.className = 'jar-row-actions';
 
       if (!row.isDefault) {
+        // Text button (operator ruling, HAT step-5 F6: no obvious icon for
+        // "make default") — kept compact via .jar-btn-compact so it sits well
+        // beside the new icon-only Edit/Delete buttons.
         const defaultBtn = document.createElement('button');
         defaultBtn.type = 'button';
-        defaultBtn.className = 'jar-btn jar-btn-icon';
+        defaultBtn.className = 'jar-btn jar-btn-compact';
         defaultBtn.textContent = 'Make default';
         defaultBtn.setAttribute('aria-label', `Make ${row.name} the default jar`);
         defaultBtn.addEventListener('click', () => handleSetDefault(row.id));
         actions.appendChild(defaultBtn);
       }
 
+      // Icon buttons (HAT step-5 F6): pencil/trash replace the old Edit/Delete
+      // text buttons. aria-label carries the per-row name (list of several
+      // icon-only buttons would otherwise all read identically to a screen
+      // reader — the downloads.js per-item aria-label convention); title
+      // mirrors it for the visible hover tooltip.
       const editBtn = document.createElement('button');
       editBtn.type = 'button';
-      editBtn.className = 'jar-btn jar-btn-icon';
-      editBtn.textContent = 'Edit';
+      editBtn.className = 'jar-btn jar-icon-btn';
+      editBtn.appendChild(buildIcon(ICON_EDIT));
       editBtn.setAttribute('aria-label', `Edit ${row.name}`);
+      editBtn.title = `Edit ${row.name}`;
       editBtn.addEventListener('click', () => openEdit(row));
       actions.appendChild(editBtn);
 
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
-      deleteBtn.className = 'jar-btn jar-btn-icon jar-btn-danger';
-      deleteBtn.textContent = 'Delete';
+      deleteBtn.className = 'jar-btn jar-icon-btn jar-btn-danger';
+      deleteBtn.appendChild(buildIcon(ICON_DELETE));
       deleteBtn.setAttribute('aria-label', `Delete ${row.name}`);
+      deleteBtn.title = `Delete ${row.name}`;
       deleteBtn.addEventListener('click', () => openConfirmDelete(row));
       actions.appendChild(deleteBtn);
 

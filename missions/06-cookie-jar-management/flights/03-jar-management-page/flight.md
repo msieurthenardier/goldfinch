@@ -1,22 +1,22 @@
 # Flight: Jar Management Page
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A dedicated jar-management page is reachable from the browser chrome alongside the
+- [x] A dedicated jar-management page is reachable from the browser chrome alongside the
       existing special pages, listing every jar with its name, color indicator, and
       default marker.
-- [ ] From that page, the user can create a jar with a chosen name and color, and the new
+- [x] From that page, the user can create a jar with a chosen name and color, and the new
       jar is immediately usable for browsing from the container picker — no restart.
-- [ ] The user can rename and recolor an existing jar; the change propagates to open tabs
+- [x] The user can rename and recolor an existing jar; the change propagates to open tabs
       and the container picker without restart, and the jar's stored data is preserved.
-- [ ] The user can delete a jar after an explicit confirmation; its stored data is wiped,
+- [x] The user can delete a jar after an explicit confirmation; its stored data is wiped,
       any open tabs in that jar close, and the jar disappears from all UI surfaces.
-- [ ] The user can move the default flag to any persistent jar from the management page
+- [x] The user can move the default flag to any persistent jar from the management page
       (completes criterion 5 — routing half landed in Flight 2).
-- [ ] Burner appears as a single always-present list entry exposing no
+- [x] Burner appears as a single always-present list entry exposing no
       rename/recolor/delete controls (list-identity half of criterion 6 — the
       behavioral fallback halves landed in Flight 2).
 
@@ -329,7 +329,7 @@ separate document and follow the same no-top-level-const-collision discipline.
 - [x] CP4 — Verification: `jar-delete-closes-tabs` and `popup-jar-inheritance` pass;
       `new-tab-default-routing` extended and re-passing; real-boot matrix clean;
       docs + CLAUDE.md pattern note landed.
-- [ ] CP5 — HAT sign-off; flight `landed`.
+- [x] CP5 — HAT sign-off; flight `landed`.
 
 ### Adaptation Criteria
 
@@ -367,7 +367,7 @@ separate document and follow the same no-top-level-const-collision discipline.
 - [ ] `verify-integration` - Real-boot matrix; run `jar-delete-closes-tabs` +
       `popup-jar-inheritance`; extend + re-run `new-tab-default-routing`; docs +
       CLAUDE.md pattern note (CP4)
-- [ ] `hat-jar-management` - Guided HAT: page look-and-feel + full CRUD on the real
+- [x] `hat-jar-management` - Guided HAT: page look-and-feel + full CRUD on the real
       profile (reversible), destructive delete demo on scratch, accelerator parity,
       popup inheritance from a real click, `.v1.bak` housekeeping (CP5)
 
@@ -377,10 +377,10 @@ separate document and follow the same no-top-level-const-collision discipline.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

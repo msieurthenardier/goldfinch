@@ -62,9 +62,9 @@ body {
 #sheet-menu[data-menu-type='page-context'] {
   min-width: 200px;
 }
-/* Section separator between context-menu groups (link / image / selection /
-   editable / suggestions / Inspect) — chrome #page-context-menu .cm-sep parity
-   (same top-border idiom as .cm-item.add; literals, no styles.css here). */
+/* Section separator — chrome #page-context-menu .cm-sep parity (literals, no
+   styles.css here). Reused by the container menu (F1a, HAT step-1 finding) to
+   divide the jar rows (incl. Burner) from the action rows below. */
 .cm-sep {
   border-top: 1px solid var(--border);
   margin: 4px 0;
@@ -106,13 +106,6 @@ body {
   border-radius: 50%;
   flex: none;
 }
-/* "+ New container…" separator styling (model variant:'add') — chrome parity. */
-.cm-item.add {
-  color: var(--fg-dim);
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-
 /* Item chrome — mirrors the chrome .cm-item block (styles.css). */
 .cm-item {
   display: flex;

@@ -515,6 +515,198 @@ All classifications carried into flight.md (DDs + Prerequisites). One retirement
   runs (`jar-delete-closes-tabs`, `popup-jar-inheritance`, the extended
   `new-tab-default-routing`) all pass.
 
+- 2026-07-10 — Leg 6 `hat-jar-management`, HAT step-1 inline fixes. The
+  operator raised four findings at Verification Step 1 (real-profile
+  look-and-feel pass); all four applied inline, re-verified, not yet
+  committed (commit deferred to operator re-verification per the leg's
+  guided-fix protocol):
+  - **F1 — container picker chrome (`src/shared/container-menu.js`,
+    `src/renderer/menu-overlay.js`, `src/renderer/menu-overlay.css`,
+    `test/unit/container-menu.test.js`)**: (a) inserted a `{ type: 'separator'
+    }` model item between the Burner sentinel and the action rows —
+    `buildContainerModel`'s output is now `[...jars, burner, separator,
+    new-container, manage-jars]`; the sheet's existing generic `.cm-sep`
+    renderer (built for the page-context menu, F8 Leg 4) needed no changes —
+    it already excludes `type: 'separator'` items from the roving-tabindex
+    item set (no `role="menuitem"`, no click handler) for free; (b) renamed
+    the quick-create sentinel label from `'+ New container…'` to `'New Jar'`;
+    (c) dropped its `variant: 'add'` field — deleted the now-dead
+    `if (item.variant === 'add') btn.classList.add('add')` branch in
+    menu-overlay.js and the `.cm-item.add` CSS rule (accent/top-border
+    styling) in menu-overlay.css, so the row renders plain, matching "Manage
+    jars…". Action ids (`action:new-container` / `action:manage-jars`)
+    untouched — the chrome's channel-6 dispatch depends on them. Six existing
+    unit tests updated for the new model shape/length/order; one new test
+    added pinning the divider's exact position (immediately after the burner
+    sentinel, immediately before new-container).
+  - **F2 — jars page intro copy (`src/renderer/pages/jars.html`,
+    `src/renderer/pages/jars.css`)**: added a static two-sentence
+    `<p class="jars-description">` under the header row ("Each cookie jar
+    keeps its own cookies, sign-ins, and site data — sites in one jar can't
+    see another. New tabs open in the default jar; Burner tabs evaporate when
+    closed."), styled as a new muted paragraph class (13px, `--fg-dim`) —
+    static markup only, CSP-compliant (no dynamic content, nothing to
+    textContent-guard).
+  - **F3 — button style parity with the downloads page
+    (`src/renderer/pages/jars.css`)**: read `downloads.css`'s `.downloads-btn`/
+    `.download-btn` conventions (bg-2 fill, border-color→accent outline on
+    hover, no brightness-filter hover) and realigned `.jar-btn` to match:
+    background `--bg-3` → `--bg-2`, hover swapped from `filter:
+    brightness(1.15)` to `border-color: var(--accent)` (the "outline on
+    hover" the operator asked for). `.jar-btn-primary` keeps the accent fill
+    (an outline would be invisible against it) and now gets an explicit
+    `filter: brightness(1.1)` hover, mirroring `.download-btn.primary:hover`
+    — downloads has no primary at the page-header tier, only per-item, so
+    that was the closest analog. `.jar-btn-danger` (Delete/Confirm) has no
+    downloads-page analog (downloads has no destructive action); kept its
+    existing transparent/err-outline/rgba-hover treatment, only adding
+    `border-color: var(--err)` on hover for consistency with the new
+    outline-on-hover idiom.
+  - **F4 — Burner hint placement (`src/renderer/pages/jars.js`,
+    `src/renderer/pages/jars.css`, `src/renderer/pages/jars.html`)**: the
+    "Burner is always available…" hint previously lived in a standalone
+    `<p class="jars-footnote">` below the entire `<ul>` — visually detached
+    below the Burner row's own bottom border (the "divider line"). Moved it
+    into the Burner `<li>` itself: `buildRow()` now appends a
+    `.jar-burner-hint` paragraph inside the Burner row (after the dot+name
+    line, still inside the row's own border), and the row gets
+    `flex-wrap: wrap` (via the existing `data-burner="true"` marker) so the
+    hint drops to its own line beneath the dot+name rather than squeezing
+    onto one line. The old standalone footnote `<p>` and its
+    `.jars-footnote` CSS rule were removed (the text now lives in exactly one
+    place, grouped with the row it describes).
+  - **F5 — description grouped with header, operator follow-up (`src/renderer/pages/jars.html`, `src/renderer/pages/jars.css`)**: moved `.jars-description` from below the header's `border-bottom` divider to inside `.jars-header`, nesting the heading/button row in a new `.jars-header-row` flex wrapper so the paragraph sits above the divider, grouped with the "Cookie Jars" heading and "+ New jar" button rather than with the list.
+  - **F6 — row-action icon buttons, Verification Step 5 (`src/renderer/pages/jars.js`, `src/renderer/pages/jars.css`)**: the per-row "Edit" and "Delete" text buttons looked clunky — replaced both with icon-only buttons (Lucide "pencil" / "trash-2" glyphs). No existing icon-button precedent builds icons dynamically per-row (index.html's toolbar icons and settings.html's pin-toggle icons are static `<svg>` markup baked into the HTML); jars.js renders one row per jar in JS, so the icons are built via `document.createElementNS` (new `buildIcon()` helper + `ICON_EDIT`/`ICON_DELETE` path data) — never innerHTML, matching the page's textContent-only CSP convention. Each icon button keeps `aria-label` (`Edit ${row.name}` / `Delete ${row.name}` — the downloads.js per-item-name convention, more accessible than a shared generic label across several icon-only buttons in one list) plus a matching `title` tooltip; hover/focus-visible come for free from the existing `.jar-btn`/`.jar-btn-danger` rules (outline-on-hover accent border per F3; Delete's err-tinted hover background) since the svg's `stroke="currentColor"` inherits the button's text color. "Make default" (operator ruling: no obvious icon) stays a text button, renamed from the misleadingly-named `.jar-btn-icon` to `.jar-btn-compact` and shrunk to 4px/10px padding so it sits well beside the new 28×28 icon buttons. The confirm-delete row (`buildConfirmRow`) is untouched.
+
+  **Gates**: `npm test` 1224/1224 passing (0 fail/skip — F6 added no new
+  tests, none of the existing unit tests assert on row-button DOM/classes),
+  `npm run typecheck` clean (exit 0), `npm run lint` clean (exit 0). The
+  `chrome-shared-scripts` and `jars-page-shared-scripts` vm nets both re-run
+  individually — green (no top-level const collisions introduced). No
+  `src/main/` or `src/preload/` files touched. Not committed — per the leg's
+  guided-fix protocol, the HAT-fixes commit follows operator re-verification
+  of these five fixes.
+
+- 2026-07-10 — Leg 6 `hat-jar-management`, HAT inline finding F7 — operator-
+  specced feature (not a look-and-feel fix like F1-F6; the operator ruled on
+  the toolbar automation ("robot") indicator's behavior directly). Verbatim
+  spec: "The robot icon shows up when a connection is active. Instead the
+  robot should show whenever at least 1 automation is enabled with a count of
+  the enabled jars. The icon should be in the grayed out state when not
+  active, but reflect the color of the jar when it is active. If the admin
+  key is enabled and active it should be 'rainbow' (if possible)."
+  - **Design**: extracted the indicator's decision logic into a new pure
+    dual-export module, `src/shared/automation-indicator-model.js`
+    (`buildAutomationIndicatorModel`), house pattern (jar-page-model.js /
+    inherit-container.js precedent). Inputs: `enabledJarKeyCount`,
+    `adminKeyEnabled`, `activeJarIds[]`, `adminActive`, `containers[]`.
+    Output: `{ visible, count, mode: 'idle'|'jar'|'multi'|'admin', color }`.
+    VISIBILITY is driven by ENABLED keys (>=1 jar key minted/not-revoked, or
+    the admin key) — independent of live connections (a real behavior
+    change: the icon no longer disappears when idle, only when zero keys are
+    enabled). COUNT is always the enabled-JAR-key count (never admin, per
+    the verbatim spec). MODE resolves from the live activity snapshot: no
+    active connection → `idle` (grayed); exactly one distinct active
+    (non-admin) jar with a color that resolves against the live `containers`
+    list AND passes `isSafeColor` → `jar` (icon tinted with that color);
+    admin key enabled AND currently active → `admin` (rainbow — CSS
+    `hue-rotate` animation, `prefers-reduced-motion` respected), trumping any
+    concurrent jar activity. **Operator-review flag (the one interpretive
+    call the spec left open)**: multiple simultaneously active connections on
+    DIFFERENT non-admin jars, and a single active jar whose id/color can't be
+    safely resolved (stale/deleted jar, or a color failing `isSafeColor`),
+    both collapse into `multi` — the same neutral/brand-accent (gold)
+    treatment the pre-F7 "connected" state used. Rainbow is reserved for
+    admin only, never `multi`. 18 new truth-table unit tests
+    (`test/unit/automation-indicator-model.test.js`) pin every branch
+    including the never-throw defensive paths.
+  - **Wiring**: chrome-side, `renderer.js` now tracks TWO independent cached
+    inputs — `lastSnap` (live activity, unchanged plumbing:
+    `automation:get-activity` + `automation-activity-changed`) and a new
+    `lastKeyState` (enabled-key state). No new IPC channel for key state: the
+    existing `settings-changed` broadcast already carries the full
+    `settings.getAll()` object to chrome (established since jar-key-mint), so
+    `automationKeyHashes`/`automationAdminKeyHash` (non-secret hash digests,
+    never plaintext) were already on the wire — `onSettingsChanged` now also
+    derives `lastKeyState` on every broadcast; the boot read is
+    `window.goldfinch.settingsGet()` (no key → `settings.getAll()`, required
+    widening `settingsGet(key?: string)` in `renderer-globals.d.ts`, was
+    mandatory-`key`). Found and fixed a **pre-existing broadcast gap** while
+    wiring this (`src/main/main.js`): `automation:jar-key-mint` already
+    called `broadcastToChromeAndInternal('settings-changed', ...)` after
+    mutating `automationKeyHashes`, but `automation:jar-key-revoke`,
+    `automation:admin-key-mint`, and `automation:admin-key-revoke` did NOT —
+    a violation of this project's own documented convention ("any IPC
+    handler that mutates settings directly or transitively MUST broadcast
+    settings-changed itself"). Without the fix, revoking a key would leave
+    the indicator showing a stale enabled-count until an unrelated broadcast
+    happened to fire. All three now broadcast, matching mint.
+  - **Styling** (`src/renderer/styles.css`): retired the old `.admin` violet
+    class entirely (replaced by the mode classes below — this is a real UX
+    change, not a rename: pre-F7 "any admin session present" is not the same
+    predicate as "admin key enabled AND active"). `.automation-idle` — dim
+    (`--fg-dim`) + reduced opacity. `.automation-jar` — no CSS color rule;
+    `renderer.js` sets `style.color` directly to the jar's color, gated on
+    `isSafeColor` a SECOND time at DOM-application (defense in depth — the
+    model already gates it once). `.automation-multi` — the pre-F7 brand
+    accent (gold), reused as the neutral treatment. `.automation-admin` — a
+    3s linear `hue-rotate` keyframe sweep, static hue-rotated tint under
+    `prefers-reduced-motion: reduce`. The count badge is unchanged visually
+    (`--accent`/`--accent-fg`) across every mode — only the icon carries the
+    state signal, to avoid a rainbow-icon + differently-tinted-badge clash.
+  - **Load-bearing plumbing note**: `src/renderer/index.html` did not
+    previously load `../shared/safe-color.js` at all (chrome never used
+    `isSafeColor` pre-F7, though it was already an eslint global / d.ts
+    declaration reserved for future use) — added it, immediately before the
+    new `automation-indicator-model.js` script tag (dependency order). The
+    self-deriving `chrome-shared-scripts` vm net picked up both new scripts
+    automatically with no test edits (by design — CLAUDE.md "Grep-AC
+    convention" / the vm net's own self-derivation contract) and stays green.
+    `eslint.config.mjs`'s `src/renderer/**/*.js` globals block and
+    `renderer-globals.d.ts` both gained `buildAutomationIndicatorModel`
+    (Leg 2 precedent — required or both gates fail).
+
+  **Gates**: `npm test` 1242/1242 passing (1224 baseline + 18 new truth-table
+  tests, 0 fail/skip), `npm run typecheck` clean (exit 0), `npm run lint`
+  clean (exit 0). `chrome-shared-scripts` and `jars-page-shared-scripts` vm
+  nets re-run individually — green. Not committed — per the leg's guided-fix
+  protocol, pending operator re-verification alongside F1-F6.
+
+- 2026-07-10 — Leg 6 `hat-jar-management` HAT complete: all 8 verification
+  steps operator-passed, F1-F7 inline fixes re-verified live alongside their
+  originating steps. Closing record for the steps not yet narrated above:
+  - **Step 6 (accelerator parity + popup inheritance)**: with a web page
+    focused — Ctrl+T (new tab, F2 regression check), Ctrl+W (closes that tab,
+    newly forwarded), Ctrl+L (address bar), Ctrl+R (reload) — all passed. With
+    the jars page focused, Ctrl+W closed it (internal allowlist), reopened via
+    kebab. A real `target="_blank"` click from a tab in a non-default jar
+    landed the new tab's dot on the SOURCE jar, not the default — DD7 proven
+    from a real click. All operator-passed.
+  - **Step 7 (scratch destructive demo + housekeeping)**: FD-staged scratch
+    instance, operator watching. Seed-jar tabs opened, both seed jars deleted
+    via chrome-eval — rows and their tabs closed live, page showed Burner as
+    default (Burner pill), re-add auto-claimed the default back onto the new
+    jar. One narration correction made live: no separate burner-fallback TAB
+    appeared during the sweep, because the still-open jars-page internal tab
+    is exempt from the orphan sweep (the internal/burner early-continue guard,
+    DD6) and survives as the sole open tab — there was nothing left needing a
+    fallback tab. Operator accepted this as correct DD6 behavior, not a
+    regression, once narrated. All four F7 automation-indicator states were
+    also witnessed in this window: rainbow stopped the instant the admin
+    connection disconnected; gray+count shown with keys enabled but nothing
+    active; solid jar-color shown on a jar-key connect; the `multi` neutral
+    treatment for concurrent non-admin activity was accepted implicitly (not
+    independently forced, but no objection raised over the course of the
+    demo's connect/disconnect sequence). Housekeeping:
+    `~/.config/goldfinch-dev/containers.json.v1.bak` deleted from the real
+    profile, operator-witnessed (F1 rec 5, expired at F1's merge).
+  - **Step 8 (sign-off)**: operator signed off verbatim: "sign off, run the
+    /flight-debrief then merge to main."
+  Real profile verified restored to its pre-HAT state at step 5 (checkpoint
+  held through steps 6-7, which touched only the scratch instance and,
+  reversibly, web-focus tab state). Leg → `completed`; CP5 checked; flight →
+  `landed`. HAT-fixes commit follows this entry.
+
 ---
 
 ## Decisions
@@ -621,3 +813,15 @@ fixes. Escalation path unused — zero high-severity findings.
   codify step-0 baseline + before/after enumerations in popup spec wording.
   Leg 5 → `landed`; CP4 checked. Scoped Reviewer spawned over the leg-5 diff
   before the second flight commit.
+- 2026-07-10 — Second flight commit `3fb3d9c` (leg 5: run logs + docs + spec
+  extension; scoped review [HANDOFF:confirmed] modulo one checkbox-hygiene fix,
+  applied at commit). Leg 6 `hat-jar-management` designed as guided operator
+  steps; fidelity review (Developer, Sonnet): **approve with changes** — every
+  UI label/text verified against shipped code; incorporated: "+ New jar" label
+  fix (low), step-7 open-tabs-before-delete procedural gap (medium — without it
+  the operator would see no closures and misread a DD6 failure), and a
+  whitespace-name validation one-liner (medium — that guard has NO machine
+  witness anywhere; HAT is its only coverage). Crib notes added (Ctrl+R inert on
+  internal — preempt a false finding; verbatim confirm text; "Make default"
+  label; Default pill). FD ruling: cycle 2 skipped — direct adoptions. Leg 6 →
+  `ready`; handing to the operator.

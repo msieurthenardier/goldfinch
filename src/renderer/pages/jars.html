@@ -19,8 +19,20 @@
   <body>
     <main>
       <div class="jars-header">
-        <h1>Cookie Jars</h1>
-        <button id="jars-new" class="jar-btn jar-btn-primary" type="button">+ New jar</button>
+        <div class="jars-header-row">
+          <h1>Cookie Jars</h1>
+          <button id="jars-new" class="jar-btn jar-btn-primary" type="button">+ New jar</button>
+        </div>
+
+        <!-- Static intro copy (HAT step-1 finding F2) — textContent-equivalent
+             static markup, no dynamic data. Grouped inside the header block
+             (HAT follow-up F5) so it sits above the divider with the heading
+             and "+ New jar" row, not below it with the list. -->
+        <p class="jars-description">
+          Each cookie jar keeps its own cookies, sign-ins, and site data — sites in
+          one jar can't see another. New tabs open in the default jar; Burner tabs
+          evaporate when closed.
+        </p>
       </div>
 
       <!-- Reserved page-level error line (Leg 2) — used for actions that aren't
@@ -35,10 +47,6 @@
            broadcast (page mutations, the picker's quick-create, automation). -->
       <ul id="jars-list" class="jars-list" aria-live="polite" aria-label="Cookie jars">
       </ul>
-
-      <p class="jars-footnote">
-        Burner is always available and keeps no history — its tabs evaporate on close.
-      </p>
     </main>
   </body>
 </html>

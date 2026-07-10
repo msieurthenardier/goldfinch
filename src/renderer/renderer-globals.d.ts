@@ -57,7 +57,10 @@ interface GoldfinchBridge {
   privacyClearStorage(payload: any): Promise<any>;
 
   // --- settings (chrome-trusted; read + subscribe only) ---
-  settingsGet(key: string): Promise<any>;
+  // key omitted (F7, Flight 3 Leg 6 HAT) -> settings-get's main-side handler
+  // (`key ? settings.get(key) : settings.getAll()`) returns the FULL settings
+  // object — used to read the initial automation key-enabled state at boot.
+  settingsGet(key?: string): Promise<any>;
   onSettingsChanged(cb: (all: any) => void): void;
 
   // --- shields ---
@@ -397,6 +400,26 @@ declare function inheritFromPartition(
   openerPartition: string | null | undefined,
   containers: Array<{ id?: any; partition?: string; burner?: boolean }> | null | undefined
 ): { container?: { id?: any; partition?: string; burner?: boolean }; freshBurner?: boolean };
+
+/**
+ * Injected by src/shared/automation-indicator-model.js via the globalThis
+ * branch (the pure toolbar automation-indicator decision model — Flight 3, Leg
+ * 6 / HAT inline finding F7). Visibility is driven by ENABLED keys (jar or
+ * admin); mode/color are driven by which connection, if any, is currently
+ * ACTIVE. `color` is only ever a value that already passed isSafeColor.
+ */
+declare function buildAutomationIndicatorModel(input: {
+  enabledJarKeyCount?: number;
+  adminKeyEnabled?: boolean;
+  activeJarIds?: Array<string | null | undefined>;
+  adminActive?: boolean;
+  containers?: Array<{ id?: any; color?: any }>;
+}): {
+  visible: boolean;
+  count: number;
+  mode: 'idle' | 'jar' | 'multi' | 'admin';
+  color: string | null;
+};
 
 /**
  * Injected by src/shared/page-context-model.js via the globalThis branch (the

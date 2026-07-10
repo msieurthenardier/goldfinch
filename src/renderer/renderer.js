@@ -1938,9 +1938,18 @@ window.goldfinch.onShieldsChanged((c) => {
 
 /* ---- Automation activity indicator (SC10 / DD6) ---- */
 
-// The last snapshot received, cached so the jarsList() resolve can re-run the render
-// with friendly jar names once `containers` is populated (the snapshot can arrive first).
+// The last activity snapshot received, cached so the jarsList() resolve can re-run
+// the render with friendly jar names / jar colors once `containers` is populated
+// (the snapshot can arrive first).
 let lastSnap = /** @type {{ sessions?: any[] }} */ ({ sessions: [] });
+
+// The last automation KEY state (F7, Flight 3 Leg 6 HAT — distinct from the activity
+// snapshot above: this is which keys are ENABLED, not which connections are live).
+// Populated from settings.getAll() (settings-get at boot, settings-changed live) —
+// automationKeyHashes/automationAdminKeyHash are non-secret hash digests already
+// broadcast to chrome on every settings-changed (jar-key-mint et al broadcast the
+// full settings object today), so no new IPC channel is needed.
+let lastKeyState = { enabledJarKeyCount: 0, adminKeyEnabled: false };
 
 /**
  * Map a jarId to its display name via the loaded `containers`, falling back to the raw
@@ -1955,43 +1964,113 @@ function jarDisplayName(jarId) {
 }
 
 /**
- * Render the toolbar automation indicator from an activity snapshot. Hidden + badge
- * cleared when there are no sessions; otherwise shows a count badge and a descriptive
- * title/aria-label naming each attached identity ("admin" or the jar's display name).
- * The `.admin` class applies a non-alarm distinct color when any session is an admin
- * session. Wording is "connected" (transport lifecycle), never "authorized" (DD6).
+ * Derive { enabledJarKeyCount, adminKeyEnabled } from a settings.getAll() payload.
+ * Defensive against a missing/malformed automationKeyHashes (never throws).
+ * @param {{ automationKeyHashes?: any, automationAdminKeyHash?: any }} all
+ * @returns {{ enabledJarKeyCount: number, adminKeyEnabled: boolean }}
+ */
+function computeAutomationKeyState(all) {
+  const hashes = (all && all.automationKeyHashes && typeof all.automationKeyHashes === 'object')
+    ? all.automationKeyHashes
+    : {};
+  return {
+    enabledJarKeyCount: Object.keys(hashes).length,
+    adminKeyEnabled: !!(all && all.automationAdminKeyHash),
+  };
+}
+
+/**
+ * Render the toolbar automation ("robot") indicator (F7, Flight 3 Leg 6 HAT —
+ * operator ruling). Pulls the enabled-key state (lastKeyState) and the live-activity
+ * snapshot (lastSnap) through the pure buildAutomationIndicatorModel and applies the
+ * result to the DOM: hidden when no key is enabled; otherwise grayed out (idle),
+ * tinted with the single active jar's color (jar), a neutral accent for
+ * multiple-simultaneous-active-jars (multi), or an animated rainbow when the admin
+ * key is enabled AND currently active (admin — trumps any concurrent jar activity).
+ * The count badge always shows the ENABLED JAR key count (never the admin key, never
+ * the live-connection count) — hidden at 0, matching the pre-F7 hidden-at-zero UX.
+ */
+function renderAutomationIndicator() {
+  const sessions = (lastSnap && lastSnap.sessions) || [];
+  const activeJarIds = sessions.filter((s) => s && s.kind === 'jar').map((s) => s.jarId);
+  const adminActive = sessions.some((s) => s && s.kind === 'admin');
+  const model = buildAutomationIndicatorModel({
+    enabledJarKeyCount: lastKeyState.enabledJarKeyCount,
+    adminKeyEnabled: lastKeyState.adminKeyEnabled,
+    activeJarIds,
+    adminActive,
+    containers,
+  });
+
+  els.automationIndicator.classList.toggle('hidden', !model.visible);
+  els.automationIndicator.classList.remove('automation-idle', 'automation-jar', 'automation-multi', 'automation-admin');
+
+  if (!model.visible) {
+    els.automationIndicatorBadge.textContent = '';
+    els.automationIndicatorBadge.classList.add('hidden');
+    els.automationIndicator.style.color = '';
+    els.automationIndicator.title = '';
+    els.automationIndicator.setAttribute('aria-label', 'Automation sessions');
+    return;
+  }
+
+  els.automationIndicator.classList.add('automation-' + model.mode);
+  // Defense in depth (F7 spec): re-validate before ever writing to an inline style,
+  // even though buildAutomationIndicatorModel already gated `color` on isSafeColor.
+  els.automationIndicator.style.color = (model.mode === 'jar' && model.color && isSafeColor(model.color))
+    ? model.color
+    : '';
+
+  if (model.count > 0) {
+    els.automationIndicatorBadge.textContent = String(model.count);
+    els.automationIndicatorBadge.classList.remove('hidden');
+  } else {
+    els.automationIndicatorBadge.textContent = '';
+    els.automationIndicatorBadge.classList.add('hidden');
+  }
+
+  const jarWord = model.count === 1 ? 'jar' : 'jars';
+  const enabledPart = model.count > 0 ? model.count + ' ' + jarWord + ' automation-enabled' : 'automation enabled';
+  const connectedNames = sessions.map((s) => (s.kind === 'admin' ? 'admin' : jarDisplayName(s.jarId)));
+  // "connected" names the live transport(s) (DD6 wording — never "authorized");
+  // "enabled" (above) names the persisted key state — kept as two distinct concepts.
+  const label = enabledPart + (connectedNames.length ? ' — connected: ' + connectedNames.join(', ') : '');
+  els.automationIndicator.title = label;
+  els.automationIndicator.setAttribute('aria-label', label);
+}
+
+/**
+ * Update the cached activity snapshot (live connections) and re-render.
  * @param {{ sessions?: any[] }} snap
  */
 function updateAutomationIndicator(snap) {
   lastSnap = snap || { sessions: [] };
-  const sessions = (lastSnap && lastSnap.sessions) || [];
-  const n = sessions.length;
-  els.automationIndicator.classList.toggle('hidden', n === 0);
-  if (!n) {
-    els.automationIndicatorBadge.textContent = '';
-    els.automationIndicatorBadge.classList.add('hidden');
-    els.automationIndicator.classList.remove('admin');
-    return;
-  }
-  const hasAdmin = sessions.some((s) => s.kind === 'admin');
-  const names = sessions.map((s) => (s.kind === 'admin' ? 'admin' : jarDisplayName(s.jarId)));
-  els.automationIndicatorBadge.textContent = String(n);
-  els.automationIndicatorBadge.classList.remove('hidden');
-  els.automationIndicator.classList.toggle('admin', hasAdmin);
-  const label = n + ' automation session' + (n > 1 ? 's' : '') + ' connected: ' + names.join(', ');
-  els.automationIndicator.title = label;
-  els.automationIndicator.setAttribute('aria-label', label);
+  renderAutomationIndicator();
+}
+
+/**
+ * Update the cached automation KEY state (enabled jar-key count / admin-key
+ * enabled) from a settings.getAll()-shaped payload and re-render.
+ * @param {{ automationKeyHashes?: any, automationAdminKeyHash?: any }} all
+ */
+function updateAutomationKeyState(all) {
+  lastKeyState = computeAutomationKeyState(all);
+  renderAutomationIndicator();
 }
 
 // Initial snapshot (catches sessions attached before the chrome loaded) + live updates.
 window.goldfinch.automationGetActivity().then(updateAutomationIndicator).catch(() => {});
 window.goldfinch.onAutomationActivity(updateAutomationIndicator);
+// Initial key state — settingsGet() with no key returns the full settings object
+// (settings-get: (_e, key) => key ? settings.get(key) : settings.getAll()).
+window.goldfinch.settingsGet().then(updateAutomationKeyState).catch(() => {});
 
 /**
  * Show or hide the Media/Shields toolbar icons per the current pin state.
  * Unpinned → button hidden (`.hidden`); keyboard shortcuts remain active.
  * NOTE: the automation indicator is deliberately NOT touched here — it self-manages
- * its `.hidden` state from the live session count (SC10/DD6), and is not pinnable.
+ * its `.hidden` state from the enabled-key count (F7, Flight 3 Leg 6 HAT — was the
+ * live session count pre-F7, SC10/DD6), and is not pinnable.
  * @param {{ media: boolean, shields: boolean, devtools: boolean }} pins
  */
 function applyToolbarPins(pins) {
@@ -2007,6 +2086,11 @@ window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {
 window.goldfinch.onSettingsChanged((all) => {
   if (all && all.homePage !== undefined) homePageCache = all.homePage || HOMEPAGE;
   if (all && all.toolbarPins) applyToolbarPins(all.toolbarPins);
+  // F7 (Flight 3, Leg 6 HAT): settings-changed always carries the FULL settings
+  // object (settings.getAll()), so automationKeyHashes/automationAdminKeyHash are
+  // always present here — re-derive the enabled-key state on every broadcast
+  // (mint/revoke/admin-mint/admin-revoke all fire this channel).
+  if (all) updateAutomationKeyState(all);
 });
 
 /* ------------------------------------------------------------------ page zoom */
