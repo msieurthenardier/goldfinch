@@ -154,7 +154,7 @@
    * the model carries guest-controlled / user-supplied strings; no markup path).
    * `color` is DATA: applied via style.background on a dedicated dot span AFTER
    * the shared isSafeColor check (the product's own color domain — jars.js);
-   * invalid → the DEFAULT_CONTAINER grey. Property assignment cannot inject
+   * invalid → the default grey dot. Property assignment cannot inject
    * sibling declarations regardless — the validation is defense-in-depth.
    * @param {string} menuType @param {any[]} model @param {any} anchor */
   function renderMenu(menuType, model, anchor) {

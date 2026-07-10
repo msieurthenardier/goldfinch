@@ -12,7 +12,9 @@ const {
   isMcpAutomationEnabled,
   shouldAutoMint,
   shouldBindAutomation,
+  resolveAutoMintTarget,
 } = require('../../src/shared/automation-dev');
+const { BURNER } = require('../../src/shared/burner');
 
 describe('isMcpAutomationEnabled (the MCP dev gate, DD4)', () => {
   // --- true ONLY for the exact --automation-dev token ---
@@ -158,5 +160,23 @@ describe('shouldBindAutomation (toggle-binds decision predicate, Flight 8 / DD2)
     assert.equal(shouldBindAutomation({}), false);
     assert.equal(shouldBindAutomation(), false);
     assert.doesNotThrow(() => shouldBindAutomation());
+  });
+});
+
+describe('resolveAutoMintTarget (dev auto-mint target resolution, M06 F2 DD7)', () => {
+  it('returns the default jar id when the default is a real jar', () => {
+    assert.equal(resolveAutoMintTarget({ getDefault: () => ({ id: 'personal' }) }), 'personal');
+  });
+
+  it('returns null for the frozen BURNER sentinel (empty registry)', () => {
+    assert.equal(resolveAutoMintTarget({ getDefault: () => BURNER }), null);
+  });
+
+  it('returns null for a burner-id-shaped object even without reference identity (id-compare, not reference-compare)', () => {
+    assert.equal(resolveAutoMintTarget({ getDefault: () => ({ id: 'burner', name: 'Burner', color: '#ff8c42' }) }), null);
+  });
+
+  it('returns the legacy default jar id (migrated profile)', () => {
+    assert.equal(resolveAutoMintTarget({ getDefault: () => ({ id: 'default' }) }), 'default');
   });
 });

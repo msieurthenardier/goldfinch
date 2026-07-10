@@ -23,7 +23,12 @@ const { createMenuOverlayManager } = require('./menu-overlay-manager');
 // F8 Leg 3 / AC5: pure channel-4 `value` validator (string, ≤24) — unit-tested;
 // deliberately NOT part of the manager (the manager never touches channel 4).
 const { sanitizeActivatedValue } = require('./menu-overlay-value');
-const { isMcpAutomationEnabled, shouldAutoMint, shouldBindAutomation } = require('../shared/automation-dev');
+const {
+  isMcpAutomationEnabled,
+  shouldAutoMint,
+  shouldBindAutomation,
+  resolveAutoMintTarget,
+} = require('../shared/automation-dev');
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
 const { makeAutomationToggle } = require('./automation/toggle');
@@ -61,8 +66,6 @@ for (const stream of [process.stdout, process.stderr]) {
 // `src/main/ozone-platform.js` and passes `--ozone-platform=wayland` on the
 // real command line. See those two files + the Leg-6 flight-log entry for the
 // full diagnosis and harness evidence.
-
-const PAGE_PARTITION = 'persist:goldfinch';
 
 // Dedicated, in-memory session for internal `goldfinch://` pages. INTERNAL_PARTITION is
 // imported from the shared module above (single source of truth) — it must match
@@ -1009,6 +1012,30 @@ function handleGuestCrossViewNav(event, input) {
   return true;
 }
 
+// New-tab keyboard bridge (M06 F2 HAT D2 fix). Ctrl/Cmd+T is chrome-class (keydown-
+// action.js keydownToAction: key 't' → 'new-tab'), but chrome's own DOM keydown
+// handler (renderer.js) only fires while the chrome view itself holds OS keyboard
+// focus (freshly booted / address bar) — the overwhelmingly common state, a
+// focused web (or internal) guest, silently swallowed the key with no forward
+// anywhere: sheetAcceleratorAction already enumerated 'new-tab' as chrome-class
+// for the SHEET-open forwarding path (menu-overlay.js DD13), but the plain,
+// no-sheet guest capture in wireGuestContents below never implemented the same
+// forward. Applies to BOTH web and internal guests (called from both
+// wireGuestContents branches, mirroring handleGuestCrossViewNav's dual
+// registration) because dispatchChromeAction('new-tab') has no isInternalTab gate
+// (unlike devtools/zoom/find) — a new tab must open regardless of which guest
+// currently holds focus. Returns true iff it handled (swallowed) the key.
+function handleGuestNewTab(event, input) {
+  if (input.type !== 'keyDown') return false;
+  if (!(input.control || input.meta)) return false;
+  if (input.key !== 't' && input.key !== 'T') return false;
+  event.preventDefault();
+  // Swallow but don't stack tabs on a held key (mirrors the Ctrl+J downloads guard
+  // in the guest branch below).
+  if (!input.isAutoRepeat) getChromeContents()?.send('chrome-shortcut-action', { action: 'new-tab' });
+  return true;
+}
+
 function wireGuestContents(contents) {
   // Open target=_blank / window.open as new tabs in our own UI instead of
   // spawning native Electron windows.
@@ -1042,6 +1069,10 @@ function wireGuestContents(contents) {
       // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
       // for every one of those keys, so it never shadows them.
       if (handleGuestCrossViewNav(event, input)) return;
+      // New-tab keyboard bridge (M06 F2 HAT D2 fix) — same contained-call pattern as
+      // the cross-view bridge just above; 't'/'T' is not used by any branch below, so
+      // this never shadows an existing accelerator.
+      if (handleGuestNewTab(event, input)) return;
       // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
       // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
       // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
@@ -1133,10 +1164,13 @@ function wireGuestContents(contents) {
     // an internal tab holds OS focus — the only viable capture is a main-side
     // before-input-event on the internal guest's webContents (a chrome renderer-keydown
     // fallback never fires while the internal view holds focus). Register a SEPARATE,
-    // MINIMAL handler that calls ONLY handleGuestCrossViewNav — nothing else — so
-    // internal tabs gain the keyboard bridge and no other accelerators.
+    // MINIMAL handler that calls ONLY handleGuestCrossViewNav and handleGuestNewTab —
+    // nothing else — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT
+    // D2 fix — dispatchChromeAction('new-tab') has no isInternalTab gate, so it must
+    // work here too) but no other accelerator.
     contents.on('before-input-event', (event, input) => {
       handleGuestCrossViewNav(event, input);
+      handleGuestNewTab(event, input);
     });
   }
 }
@@ -1632,9 +1666,8 @@ registerInternalHandler(ipcMain, 'internal-settings-set', async (_e, key, value)
   // help + behavior spec carry the conservative new-tabs-only wording pending macOS/HAT.
   if (key === 'spellcheck') {
     const enabled = value === true;
-    // Base web sessions (always present).
+    // Base web session (always present).
     applySpellcheck(session.defaultSession, enabled);
-    applySpellcheck(session.fromPartition(PAGE_PARTITION), enabled);
     // Every live web jar/container/burner session (already-open tabs).
     const seen = new Set();
     for (const wc of webContents.getAllWebContents()) {
@@ -2351,7 +2384,13 @@ ipcMain.handle('identity-new', async (_e, { partition }) => {
 
 ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-  const ses = wc ? wc.session : session.fromPartition(PAGE_PARTITION);
+  // DD4: strictly per-tab — a missing/destroyed webContents (or the internal Settings
+  // session, reachable if the privacy panel stays open across a tab switch) returns the
+  // channel's empty shape instead of silently falling back to a cross-jar session.
+  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
+    return { firstParty: null, first: 0, third: 0, total: 0, list: [] };
+  }
+  const ses = wc.session;
   const fp = registrableDomain(hostnameOf(url || (wc && wc.getURL()) || ''));
   const all = await ses.cookies.get({});
   let first = 0,
@@ -2369,7 +2408,12 @@ ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
 
 ipcMain.handle('privacy-clear-cookies', async (_e, { webContentsId, scope, url }) => {
   const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-  const ses = wc ? wc.session : session.fromPartition(PAGE_PARTITION);
+  // DD4: strictly per-tab — see privacy-cookies above for the internal-session guard
+  // rationale (the privacy panel can stay open across a switch to Settings).
+  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
+    return { removed: 0 };
+  }
+  const ses = wc.session;
   const fp = registrableDomain(hostnameOf(url || (wc && wc.getURL()) || ''));
   const all = await ses.cookies.get({});
   let removed = 0;
@@ -2389,10 +2433,18 @@ ipcMain.handle('privacy-clear-cookies', async (_e, { webContentsId, scope, url }
   return { removed };
 });
 
-ipcMain.handle('privacy-clear-storage', async (_e, { url }) => {
+ipcMain.handle('privacy-clear-storage', async (_e, { url, webContentsId }) => {
+  const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
+  // DD4: strictly per-tab (this handler previously always acted on the legacy
+  // partition — a real cross-jar bug for any non-legacy tab). Same internal-session
+  // guard as its two siblings: newly reachable here since this handler never touched
+  // `wc` before this leg.
+  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
+    return { ok: false, error: 'no-tab' };
+  }
   try {
     const origin = new URL(url).origin;
-    await session.fromPartition(PAGE_PARTITION).clearStorageData({ origin });
+    await wc.session.clearStorageData({ origin });
     return { ok: true, origin };
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) };
@@ -2417,7 +2469,7 @@ app.on('session-created', (ses) => {
   // Apply the current spellcheck setting to this fresh web jar (DD1 session-layer gating).
   // Read defensively: a session-created can fire before initProfileAndStores loads the store
   // (settings.get would then throw on null dir) — treat an unreadable store as OFF. whenReady
-  // re-applies the correct state to defaultSession/pageSession after stores load anyway.
+  // re-applies the correct state to defaultSession after stores load anyway.
   let spellcheckOn;
   try { spellcheckOn = settings.get('spellcheck') === true; } catch { spellcheckOn = false; }
   applySpellcheck(ses, spellcheckOn);
@@ -2429,14 +2481,14 @@ app.whenReady().then(() => {
   // injecting the loaded downloads-store. Module-scoped so the synchronous
   // session-created hook's wireDownloadHandler closure can reference it. (DD3)
   downloadsManager = createManager(downloads);
-  // Cover the sessions that may already exist before the hook was attached.
+  // Cover the session that may already exist before the hook was attached.
+  // No other pre-warm: jar sessions (including the migrated legacy `default` jar) get
+  // Shields/downloads/spellcheck lazily at their first `session-created` firing above —
+  // routing goes through the live default flag now, so there is no reserved partition
+  // to warm ahead of use (M06 F2 DD5).
   wireDownloadHandler(session.defaultSession);
   applyShields(session.defaultSession);
   applySpellcheck(session.defaultSession, settings.get('spellcheck'));
-  const pageSession = session.fromPartition(PAGE_PARTITION);
-  wireDownloadHandler(pageSession);
-  applyShields(pageSession);
-  applySpellcheck(pageSession, settings.get('spellcheck'));
 
   // Dedicated internal session for `goldfinch://` pages. Set the flag BEFORE fromPartition
   // so the synchronous `session-created` hook skips applyShields + wireDownloadHandler for
@@ -2515,18 +2567,21 @@ app.whenReady().then(() => {
     //     `--automation-dev`, so this can never run in production.
     //   - A plain `npm run dev:automation` (no GOLDFINCH_AUTOMATION_DEV_MINT) does
     //     NOT enable the surface and prints NOTHING — off-by-default stays observable.
-    //   - Mints for the literal jar id 'default' — present on profiles migrated from
-    //     a pre-v2 install, but NOT on fresh installs (the M06 F1 fresh seed is
-    //     Personal+Work). On a fresh profile the mint throws the known-jar guard
-    //     error, caught below and logged as '[mcp] dev auto-mint failed: …' — the
-    //     surface still binds (the mint has no enable side-effect). INTERIM GAP:
-    //     M06 Flight 2 retires this hardcoded jar id. Admin key minted only when
+    //   - Mints for the RESOLVED default jar (M06 F2 DD7): resolveAutoMintTarget(jars)
+    //     reads jars.getDefault() and returns its id, or null when the resolved
+    //     default is the Burner sentinel (empty registry — the mint guard refuses
+    //     burner ids, so minting is skipped with one parseable stderr notice instead
+    //     of a thrown/caught guard error). Admin key minted only when
     //     GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
     //   - Prints the result ONCE to stdout as a single parseable line so the FD can
     //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
     if (shouldAutoMint(process.argv, process.env)) {
       try {
-        const key = mintJarKey('default', settings, jars);
+        const target = resolveAutoMintTarget(jars);
+        if (target === null) {
+          console.error('[mcp] dev auto-mint skipped: default is Burner (no persistent jars)');
+        }
+        const key = target === null ? null : mintJarKey(target, settings, jars);
         const adminKey = process.env.GOLDFINCH_AUTOMATION_ADMIN ? mintAdminKey(settings) : null;
         // mintJarKey mints the key hash only (no enable side-effect); the surface is
         // enabled by the dev-enable override. Single parseable line.

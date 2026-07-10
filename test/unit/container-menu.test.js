@@ -11,6 +11,10 @@ const { buildContainerModel } = require('../../src/shared/container-menu');
 // before load() deliberately never persists (storePath stays null).
 const jars = require('../../src/main/jars');
 
+// Source-of-truth pin (M06 Flight 2 Leg 1, DD8): the sentinel's color/name derive
+// from the shared BURNER constant, not a duplicated literal.
+const { BURNER } = require('../../src/shared/burner');
+
 const DEFAULT = { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' };
 
 // ---------------------------------------------------------------------------
@@ -21,9 +25,16 @@ test('model = namespaced jar items + burner + new-container sentinels', () => {
   assert.deepEqual(model, [
     { id: 'jar:default', label: 'Default', color: '#9aa0ac' },
     { id: 'jar:work', label: 'Work', color: '#2196f3' },
-    { id: 'action:burner', label: 'Burner tab (evaporates)', color: '#ff8c42' },
+    { id: 'action:burner', label: `${BURNER.name} tab (evaporates)`, color: BURNER.color },
     { id: 'action:new-container', label: '+ New container…', variant: 'add' }
   ]);
+});
+
+test('burner sentinel color/label are pinned to the shared BURNER constant', () => {
+  const model = buildContainerModel([]);
+  const sentinel = model.find((m) => m.id === 'action:burner');
+  assert.equal(sentinel.color, BURNER.color);
+  assert.equal(sentinel.label, `${BURNER.name} tab (evaporates)`);
 });
 
 test('empty container list still yields the two sentinels', () => {

@@ -22,7 +22,8 @@ Appearance; once enabled, misspelled words in editable fields are spell-checked,
 `#page-context-menu` surfaces dictionary **suggestions** that, when chosen, **correct** the word through
 the `correctMisspelling` round-trip. This needs a behavior test, not a unit test: the spellchecker is
 gated at the **session layer** (`setSpellCheckerLanguages(['en-US'])` on / `[]` off, across
-`defaultSession` + `PAGE_PARTITION` + every live web jar, never the internal session), the dictionary is
+`defaultSession` + every live web jar session, never the internal session — jar sessions get the
+setting at creation via the session-created hook), the dictionary is
 fetched live from the Chromium CDN on first opt-in (Linux/Windows), and the suggestion→correction is a
 cross-process round-trip (guest `context-menu` params → chrome menu → `page-context-correct` →
 `replaceMisspelling` on the guest) — none of which a unit test reproduces.

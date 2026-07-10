@@ -17,6 +17,24 @@
 // data too, applied sheet-side via style.background AFTER the shared isSafeColor
 // check (invalid → the default grey dot).
 
+// BURNER resolved hybrid-style (M06 Flight 2 DD8): CommonJS require() under the test
+// runner, global under the script-tag chrome (nodeIntegration:false, no require()).
+// index.html loads burner.js before this file.
+//
+// NOTE (Leg 3 D1 fix): do NOT destructure into a top-level `const BURNER` here.
+// Classic (non-module) <script> tags in one document share a single global lexical
+// environment for top-level let/const/class — index.html loads burner.js (which
+// itself declares a top-level `const BURNER`) immediately before this file, so a
+// second top-level `const BURNER`/`const { BURNER }` collides and throws
+// `SyntaxError: Identifier 'BURNER' has already been declared` at PARSE time,
+// silently killing this entire script (buildContainerModel never gets defined) —
+// invisible to the Node-runner unit suite (require() has its own module scope, no
+// collision there), only observable on a real chrome-document boot. The local
+// binding is named RESOLVED_BURNER instead so it never re-declares the global.
+const RESOLVED_BURNER = typeof module !== 'undefined' && module.exports
+  ? require('./burner').BURNER
+  : /** @type {{ id: string, name: string, color: string }} */ (/** @type {any} */ (globalThis).BURNER);
+
 /**
  * @param {Array<{ id?: any, name?: any, color?: any }>} containers
  * @returns {Array<{ id: string, label: string, color?: string, variant?: string }>}
@@ -32,8 +50,9 @@ function buildContainerModel(containers) {
     model.push(item);
   }
   // Burner sentinel — old markup was `Burner tab <em>(evaporates)</em>`; the sheet
-  // is textContent-only, so the label carries the flattened text.
-  model.push({ id: 'action:burner', label: 'Burner tab (evaporates)', color: '#ff8c42' });
+  // is textContent-only, so the label carries the flattened text. Name/color derive
+  // from the shared BURNER constant (DD8) instead of duplicating the literal.
+  model.push({ id: 'action:burner', label: `${RESOLVED_BURNER.name} tab (evaporates)`, color: RESOLVED_BURNER.color });
   // variant:'add' is a presentation hint (the old .cm-item.add separator styling).
   model.push({ id: 'action:new-container', label: '+ New container…', variant: 'add' });
   return model;

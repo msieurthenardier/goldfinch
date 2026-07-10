@@ -57,11 +57,12 @@ e.g. the host-gateway IP on Linux Docker, or host network mode.
    *Settings controls*). **The Keys mint button is disabled while the toggle is off** — you must
    flip the toggle before minting a key.
 
-2. **Choose your target jar.** Each key authorises one jar's tabs. On a profile migrated from a
-   pre-v2 install the `default` jar is the usual starting point; a fresh install seeds
-   **Personal** (the default) + **Work** instead, so pick e.g. `personal` there. In the **Keys**
-   section of the Automation settings, select the jar you want to
-   automate and mint a key. The plaintext is shown once — copy it immediately (see *Authentication*).
+2. **Choose your target jar.** Each key authorises one jar's tabs. The dev auto-mint (below)
+   follows the live default flag — the legacy `default` jar on a profile migrated from a
+   pre-v2 install until the operator moves it, `Personal` on a fresh install (a fresh install
+   seeds **Personal** + **Work**). To mint by hand instead, in the **Keys** section of the
+   Automation settings, select the jar you want to automate and mint a key. The plaintext is
+   shown once — copy it immediately (see *Authentication*).
 
 3. **Add a `.mcp.json` entry in your MCP client's config.** Add the following entry to **your own**
    MCP client config (Claude Code's `.mcp.json`, Cursor's MCP config, etc.) — **not** to Goldfinch's
@@ -123,11 +124,13 @@ mint a key on startup and print **one** parseable line to stdout:
 AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey|null>"}
 ```
 
-- `key` — a freshly minted key for the literal **`default`** jar. **Fresh-install gap
-  (interim, M06 F1):** `default` exists on profiles migrated from a pre-v2 install, but a
-  fresh install seeds Personal + Work — there the mint fails gracefully (`[mcp] dev
-  auto-mint failed: …` on stderr, no `AUTOMATION_DEV_MINT` line) while the surface still
-  binds. M06 Flight 2 retires the hardcoded jar id.
+- `key` — a freshly minted key for the **resolved default jar** (whichever jar currently
+  holds the default flag — the legacy `default` jar on a profile migrated from a pre-v2
+  install, `Personal` on a fresh install, or wherever the operator has since moved the
+  flag). When the resolved default is **Burner** (an emptied jar registry — no persistent
+  jars left), the jar mint is skipped with one parseable stderr notice
+  (`[mcp] dev auto-mint skipped: default is Burner (no persistent jars)`) and `key` is
+  `null` in the printed line; the surface still binds.
 - `adminKey` — the **admin** key, minted **only** when `GOLDFINCH_AUTOMATION_ADMIN=1` is
   also set; otherwise `null`.
 
@@ -360,7 +363,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (non-internal, dom-ready) tabs |
-| `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the default container (or the jar key's own jar). |
+| `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `navigate` | `{ wcId: integer, url: string }` *(required)* | JSON text `{"ok":true}` (void op; http(s) only — unsafe URLs are refused) |

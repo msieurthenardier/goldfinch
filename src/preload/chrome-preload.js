@@ -57,7 +57,7 @@ contextBridge.exposeInMainWorld('goldfinch', {
   jarsSetDefault: (payload) => ipcRenderer.invoke('jars-set-default', payload),
   jarsGetDefault: () => ipcRenderer.invoke('jars-get-default'),
   // Fired by main after every jar mutation with { containers, defaultId }
-  // (defaultId null ⇔ Burner). Nothing subscribes until Flight 2.
+  // (defaultId null ⇔ Burner). Renderer subscribes as of Flight 2 (DD2).
   onJarsChanged: (cb) => ipcRenderer.on('jars-changed', (_e, d) => cb(d)),
   identityNew: (payload) => ipcRenderer.invoke('identity-new', payload),
 
