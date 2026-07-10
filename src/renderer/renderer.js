@@ -424,8 +424,14 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       // wcId targets).
       const p = pageCtx.params || {};
       const wcId = pageCtx.wcId;
+      // D3 (M06 F2 HAT): link/image/selection-search opens inherit the SOURCE
+      // tab's jar (inheritContainerFrom, defined near makeBurner) instead of
+      // createTab's default-jar resolution — computed once here (all three
+      // call sites below are mutually exclusive per dispatch; the source tab
+      // never changes mid-dispatch, so one lookup covers all three bodies).
+      const srcContainer = inheritContainerFrom(findTabByWcId(wcId));
       if (id === 'link:open') {
-        if (typeof p.linkURL === 'string' && p.linkURL) createTab(p.linkURL);
+        if (typeof p.linkURL === 'string' && p.linkURL) createTab(p.linkURL, srcContainer);
       } else if (id === 'link:copy') {
         if (typeof p.linkURL === 'string' && p.linkURL) window.goldfinch.clipboardWriteText(p.linkURL);
       } else if (id === 'image:open' || id === 'image:copy' || id === 'image:save') {
@@ -433,7 +439,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
         const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
         if (typeof imgSrc === 'string' && imgSrc) {
           if (id === 'image:open') {
-            createTab(imgSrc);
+            createTab(imgSrc, srcContainer);
           } else if (id === 'image:copy') {
             window.goldfinch.clipboardWriteText(imgSrc);
           } else {
@@ -452,7 +458,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
           window.goldfinch.clipboardWriteText(p.selectionText);
         }
       } else if (id === 'sel:search') {
-        if (typeof p.selectionText === 'string' && p.selectionText) createTab(toUrl(p.selectionText));
+        if (typeof p.selectionText === 'string' && p.selectionText) createTab(toUrl(p.selectionText), srcContainer);
       } else if (id.startsWith('edit:')) {
         // Allowlisted edit-action dispatch (main re-validates the allowlist too).
         const action = id.slice('edit:'.length);
@@ -529,6 +535,21 @@ function makeBurner() {
   // The burner-<n> id/partition scheme is identity-bearing — unchanged. Only the
   // display name and color derive from the shared BURNER constant (DD8).
   return { id: `burner-${n}`, name: BURNER.name, color: BURNER.color, partition: `burner:${n}`, burner: true };
+}
+
+// D3 (M06 F2 HAT inline fix): a link/image/selection-search opened FROM a page
+// inherits the SOURCE tab's jar — operator ruling at HAT — instead of the DD1
+// default-jar resolution every other partition-less createTab call site uses.
+// The pure decision (truth table, unit-tested) lives in the shared
+// inheritContainerDecision (../shared/inherit-container.js); makeBurner() stays
+// here because burner minting is per-tab stateful (the `burner-<n>` counter),
+// same split as resolveNewTabContainer/DD1.
+// @param {Tab|null} tab
+// @returns {{ id: string, name: string, color: string, partition: string, burner?: boolean } | null}
+function inheritContainerFrom(tab) {
+  const d = inheritContainerDecision(tab && tab.container, isInternalTab(tab));
+  if (d.freshBurner) return makeBurner();
+  return d.container || null;
 }
 
 /* ------------------------------------------------------- site-info popup */

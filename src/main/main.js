@@ -1012,6 +1012,30 @@ function handleGuestCrossViewNav(event, input) {
   return true;
 }
 
+// New-tab keyboard bridge (M06 F2 HAT D2 fix). Ctrl/Cmd+T is chrome-class (keydown-
+// action.js keydownToAction: key 't' → 'new-tab'), but chrome's own DOM keydown
+// handler (renderer.js) only fires while the chrome view itself holds OS keyboard
+// focus (freshly booted / address bar) — the overwhelmingly common state, a
+// focused web (or internal) guest, silently swallowed the key with no forward
+// anywhere: sheetAcceleratorAction already enumerated 'new-tab' as chrome-class
+// for the SHEET-open forwarding path (menu-overlay.js DD13), but the plain,
+// no-sheet guest capture in wireGuestContents below never implemented the same
+// forward. Applies to BOTH web and internal guests (called from both
+// wireGuestContents branches, mirroring handleGuestCrossViewNav's dual
+// registration) because dispatchChromeAction('new-tab') has no isInternalTab gate
+// (unlike devtools/zoom/find) — a new tab must open regardless of which guest
+// currently holds focus. Returns true iff it handled (swallowed) the key.
+function handleGuestNewTab(event, input) {
+  if (input.type !== 'keyDown') return false;
+  if (!(input.control || input.meta)) return false;
+  if (input.key !== 't' && input.key !== 'T') return false;
+  event.preventDefault();
+  // Swallow but don't stack tabs on a held key (mirrors the Ctrl+J downloads guard
+  // in the guest branch below).
+  if (!input.isAutoRepeat) getChromeContents()?.send('chrome-shortcut-action', { action: 'new-tab' });
+  return true;
+}
+
 function wireGuestContents(contents) {
   // Open target=_blank / window.open as new tabs in our own UI instead of
   // spawning native Electron windows.
@@ -1045,6 +1069,10 @@ function wireGuestContents(contents) {
       // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
       // for every one of those keys, so it never shadows them.
       if (handleGuestCrossViewNav(event, input)) return;
+      // New-tab keyboard bridge (M06 F2 HAT D2 fix) — same contained-call pattern as
+      // the cross-view bridge just above; 't'/'T' is not used by any branch below, so
+      // this never shadows an existing accelerator.
+      if (handleGuestNewTab(event, input)) return;
       // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
       // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
       // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
@@ -1136,10 +1164,13 @@ function wireGuestContents(contents) {
     // an internal tab holds OS focus — the only viable capture is a main-side
     // before-input-event on the internal guest's webContents (a chrome renderer-keydown
     // fallback never fires while the internal view holds focus). Register a SEPARATE,
-    // MINIMAL handler that calls ONLY handleGuestCrossViewNav — nothing else — so
-    // internal tabs gain the keyboard bridge and no other accelerators.
+    // MINIMAL handler that calls ONLY handleGuestCrossViewNav and handleGuestNewTab —
+    // nothing else — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT
+    // D2 fix — dispatchChromeAction('new-tab') has no isInternalTab gate, so it must
+    // work here too) but no other accelerator.
     contents.on('before-input-event', (event, input) => {
       handleGuestCrossViewNav(event, input);
+      handleGuestNewTab(event, input);
     });
   }
 }

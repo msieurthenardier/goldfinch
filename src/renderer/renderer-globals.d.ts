@@ -344,6 +344,18 @@ declare function resolveNewTabContainer(
 ): any;
 
 /**
+ * Injected by src/shared/inherit-container.js via the globalThis branch (the
+ * pure link/image/selection-search container-inheritance decision — M06 Flight
+ * 2 HAT Leg 4 / D3). At most one of `container`/`freshBurner` is ever set;
+ * neither set means "no inheritance — the caller's default-jar resolution
+ * applies".
+ */
+declare function inheritContainerDecision(
+  sourceContainer: { id?: any; burner?: boolean } | null | undefined,
+  sourceIsInternal: boolean
+): { container?: { id?: any; burner?: boolean }; freshBurner?: boolean };
+
+/**
  * Injected by src/shared/page-context-model.js via the globalThis branch (the
  * pure page-context params→model builder with the namespaced/INDEX-dispatched id
  * space — M05 F8 Leg 4). Toolbar mode short-circuits to the single Unpin item.

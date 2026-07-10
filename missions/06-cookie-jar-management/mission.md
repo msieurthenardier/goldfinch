@@ -145,10 +145,26 @@ identity, not id string, and already degrades gracefully when a jar disappears.
 
 ## Known Issues
 
-- [ ] A **fifth** reserved-default assumption exists beyond the Architect's original
+- [x] A **fifth** reserved-default assumption exists beyond the Architect's original
       four: the renderer suppresses the jar color dot for `jar.id === 'default'`
       (renderer.js:713). Cosmetic-only — discovered during Flight 1 design review;
-      fold into Flight 2's retirement sweep.
+      fold into Flight 2's retirement sweep. *(Retired in Flight 2, DD6; operator
+      kept always-dotted at HAT.)*
+- [ ] `window.open`/`target=_blank` popups do NOT inherit the opener tab's jar —
+      main's window-open handler forwards only the URL, so popups route to the
+      default jar. Context-menu link-opens were fixed to inherit at Flight 2's HAT
+      (operator ruling); the popup path needs opener plumbing (three-file change).
+      Discovered in Flight 2 HAT, affects jar-confinement expectations — candidate
+      for Flight 3 or 5.
+- [ ] Guest-focus accelerator forwarding is incomplete beyond the fixed Ctrl+T:
+      Ctrl+W and sibling chrome-class accelerators are still swallowed when a web
+      page holds keyboard focus (same pre-existing `before-input-event` gap class).
+      Discovered in Flight 2 HAT (D2 diagnosis), affects keyboard UX — candidate
+      for a chrome-integration flight.
+- [ ] Tabs whose jar is deleted stay open on the wiped partition and keep reporting
+      the deleted jarId (documented Flight 2 DD2 trade-off; operator-observed at
+      HAT). Flight 3's management-page delete must close open tabs in the jar
+      (mission criterion 4).
 
 ## Flights
 
@@ -160,7 +176,7 @@ identity, not id string, and already degrades gracefully when a jar disappears.
       store and IPC surface, rewrite of the validation floor to the "exactly one
       default, Burner fallback" invariant, Burner's static list identity, legacy-Default
       migration (no UI yet)
-- [ ] Flight 2: Default-jar semantics — route new tabs through the default flag; retire
+- [x] Flight 2: Default-jar semantics — route new tabs through the default flag; retire
       all four reserved-base-partition assumptions (store floor, main-process base
       partition constant + privacy-handler fallbacks, dev auto-mint hardcode, renderer
       first-tab constant/race); Burner-as-default fallback behavior

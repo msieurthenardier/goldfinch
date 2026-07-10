@@ -4,7 +4,15 @@
 
 ## Summary
 
-Not yet in flight.
+**Landed 2026-07-10.** All four legs completed: renderer default routing +
+`jars-changed` listener + dot policy + BURNER consumption (Leg 1); main-process
+`PAGE_PARTITION` retirement, per-tab privacy handlers with internal guard,
+resolved-default auto-mint (Leg 2); real-boot matrix + first M06 behavior test
+`new-tab-default-routing` 7/7 PASS (Leg 3, one real defect D1 found+fixed); operator
+HAT sign-off with two inline fixes — guest-focus Ctrl+T forwarding (pre-existing
+gap) and link-open jar inheritance (operator semantics ruling) (Leg 4). Suite
+1132 → 1154; typecheck/lint clean throughout. Two commits: `3998888` (legs 1-3),
+HAT-fixes commit (leg 4 + landing artifacts).
 
 ---
 
@@ -247,6 +255,143 @@ under the operator's standing autonomous-execution directive for this flight pai
 
 ---
 
+- 2026-07-10 — **HAT leg (04-hat-default-semantics) designed** (lightweight per the
+  HAT protocol). FD ruling: agent design-review skipped for this leg — it contains
+  no implementation tasks; its steps restate already-twice-reviewed flight DDs and
+  the Leg-3-proven apparatus, and its safety posture (real profile =
+  reversible-only; destructive demo isolated to scratch) is the only novel content,
+  reviewed here explicitly. Leg → `ready`; session begins with the operator.
+- 2026-07-10 — **HAT inline fixes implemented — D2 (Ctrl+T) + D3 (link-open jar
+  inheritance)**. Diagnosed and fixed live against scratch profiles
+  (`XDG_CONFIG_HOME`-isolated, `GOLDFINCH_AUTOMATION_DEV_MINT`/`_ADMIN`, MCP
+  `pressKey`/`enumerateTabs`/`evaluate` apparatus — Leg 3/HAT's proven rig); the
+  operator's real profile was never attached to: a real instance
+  (`~/.config/goldfinch-dev`, port 49709) was already running independently
+  before this session's first process check; every scratch launch used its own
+  `XDG_CONFIG_HOME` and every MCP/curl call targeted the scratch instance's own
+  discovered port, never 49709. **Caveat**: no pre-session hash of
+  `~/.config/goldfinch-dev/containers.json` was captured before starting, so
+  this is a spot-check, not a byte-for-byte before/after diff — post-session:
+  `eb5d93683de12728cd266da365cbc23a`, mtime `1783627559` (unix), consistent with
+  a file untouched since well before this session began.
+
+  **D2 fix**: `src/main/main.js` gains `handleGuestNewTab` (beside
+  `handleGuestCrossViewNav`) — forwards Ctrl/Cmd+T to the chrome renderer via the
+  existing `chrome-shortcut-action:new-tab` channel, autoRepeat-guarded. Wired
+  into both `wireGuestContents` branches (web-guest capture, called first
+  alongside `handleGuestCrossViewNav`; and the internal-guest minimal handler),
+  since `dispatchChromeAction('new-tab')` has no internal-tab gate. Root cause and
+  regression-vs-pre-existing classification recorded in the D2 deviation entry
+  above (updated per the HAT protocol's one authorized edit). Live-verified
+  post-fix: guest-focused `pressKey` Ctrl+T → tab count +1 (was: no-op,
+  reproduced identically pre-fix on both this branch and a `d1e6be0` worktree);
+  internal-Settings-focused Ctrl+T → tab count +1. No regression unit test — the
+  defect is a real-boot focus/IPC interaction unreachable through the
+  `require()`-based runner (D1/Leg-3 precedent).
+
+  **D3 implementation**: new `src/shared/inherit-container.js` — pure
+  `inheritContainerDecision(sourceContainer, sourceIsInternal)`, dual-exported
+  like `default-routing.js`, returning at most one of `{ container }`
+  (persistent-jar source — inherit the same reference) / `{ freshBurner: true }`
+  (burner source — caller mints a NEW burner, never the source's own partition,
+  per the mission's burner-tabs-never-share-state invariant) / `{}` (internal or
+  unresolvable source — no inheritance, falls through to DD1's default-jar
+  resolution). `src/renderer/renderer.js` gains `inheritContainerFrom(tab)`
+  (beside `makeBurner`) — the impure wrapper that calls `makeBurner()` on the
+  `freshBurner` decision (burner minting stays renderer-side, same DD1 split).
+  The three context-menu open call sites (`link:open`, `image:open`,
+  `sel:search`, inside the `page-context` `onMenuOverlayActivated` case) now
+  resolve `srcContainer = inheritContainerFrom(findTabByWcId(wcId))` once
+  (`wcId` is `pageCtx.wcId`, already the captured SOURCE tab per the existing
+  TOCTOU-safe body discipline; `findTabByWcId` was already defined,
+  Flight-3-era) and pass it as `createTab`'s second argument. `index.html` gained
+  `<script src="../shared/inherit-container.js">` (after `default-routing.js`,
+  before `renderer.js`). `renderer-globals.d.ts` and `eslint.config.mjs`'s
+  renderer-globals list gained `inheritContainerDecision` (same pattern as
+  Leg 1's `BURNER`/`resolveNewTabContainer` additions). New
+  `test/unit/inherit-container.test.js` (6 tests: the full truth table —
+  persistent→inherit-same-reference, burner→freshBurner-sentinel,
+  internal→`{}` regardless of container shape, missing/null source→`{}`,
+  mutual-exclusion of the two fields, malformed-input never-throws). Test count:
+  1148 → 1154 (+6). Live-verified via chrome-eval composing the exact production
+  expression (`inheritContainerFrom(findTabByWcId(wcId))` then
+  `createTab(url, container)`): persistent-jar source (`personal`) → new tab
+  `personal` (same id); burner source (`burner-167921881`) → new tab
+  `burner-434801479` (fresh id, both `burner:true`, `sameContainerRef:false` —
+  confirms no partition sharing); internal (Settings) source →
+  `inheritContainerFrom` returns `null` (falls through to default resolution, as
+  designed).
+
+  **window.open/target=_blank audit (report only, per the leg's ask — not
+  fixed)**: popups do NOT inherit the opener's jar, and do NOT route through
+  `inheritContainerFrom` — same gap D3 fixed for context-menu opens, still open
+  here. `wireGuestContents`'s `contents.setWindowOpenHandler` (src/main/main.js,
+  line 1042, inside the per-guest wiring closure that already has the
+  opener's `contents` in scope) denies the native Electron window and forwards
+  ONLY the target `url` — `getChromeContents()?.send('open-tab', url)` — never
+  the opener's `contents.id`. The preload wrapper
+  (src/preload/chrome-preload.js:114, `onOpenTab: (cb) => ipcRenderer.on('open-tab',
+  (_e, url) => cb(url))`) and the renderer subscriber
+  (src/renderer/renderer.js:2367, `window.goldfinch.onOpenTab((url) =>
+  createTab(url))`) both carry only the URL. `createTab(url)` with no second
+  argument falls straight through to DD1's default-jar resolution — so a
+  `window.open()` call from a tab in a persistent non-default jar (or a burner
+  tab) opens its popup in the DEFAULT jar, not the opener's, mirroring D3's
+  pre-fix context-menu behavior exactly. Not fixed here: closing this gap needs
+  the opener's `contents.id` threaded through all three sites (the
+  `setWindowOpenHandler` send, the preload `onOpenTab` signature, and the
+  renderer subscriber resolving `inheritContainerFrom(findTabByWcId(openerWcId))`
+  before calling `createTab`) — a real three-file plumbing change, not a
+  trivial one-liner, so left for a future flight/leg per the leg's audit-only
+  instruction.
+
+  **Verification**: `timeout 120 npm test` → 1154/1154 (baseline 1148, +6, all in
+  `inherit-container.test.js`); `npm run typecheck` green; `npm run lint` green
+  (both re-run clean after the eslint.config.mjs globals addition).
+  `test/unit/chrome-shared-scripts.test.js` (Leg 3's D1 regression replay) still
+  passes with the new `inherit-container.js` script tag in the load order — no
+  top-level identifier collision. All scratch app instances (SIGTERM, confirmed
+  by PID) and the `d1e6be0` diagnostic worktree torn down;
+  `/tmp/goldfinch-hat-fix` removed; the operator's real `~/.config/goldfinch-dev`
+  confirmed never attached to during this session (spot-check hash/mtime above).
+  Leg 4 verification steps 1/3/4/5 (visual/propagation/burner-
+  fallback/sign-off) remain for the live HAT session with the operator — this
+  entry covers only the D2/D3 inline-fix diagnosis and implementation.
+
+---
+
+- 2026-07-10 — **Leg 4 (`hat-default-semantics`) completed — operator sign-off,
+  flight landed.** Guided session outcomes:
+  **Step 1** (real profile, migrated look-and-feel): PASS — boot tab in legacy
+  `Default` with its new grey dot; picker lists all migrated jars + Burner. **DD6
+  decision: always-dotted KEPT** (operator: "Keep the dot on all tabs").
+  **Step 2** (new-tab routing): initially surfaced two findings → D2 (Ctrl+T dead
+  under guest focus — diagnosed as a PRE-EXISTING before-input-event forwarding gap,
+  not an F2 regression; fixed via `handleGuestNewTab` in main.js; sibling
+  accelerators logged as Anomaly) and D3 (operator ruling: link-opens inherit the
+  source tab's jar — implemented via new `src/shared/inherit-container.js` + three
+  context-menu call sites; burner sources mint a FRESH burner preserving the
+  never-share-state invariant and fixing the burner→persistent-jar leak;
+  window.open/target=_blank audit: popups still default-route, deferred). After
+  fixes: operator re-verified both paths — PASS ("pass").
+  **Step 3** (live propagation, reversible, FD-driven via admin apparatus on port
+  49709): rename+recolor Work → "Work (HAT)"/pink propagated live to the open tab's
+  dot and the picker — PASS; `jarsSetDefault(personal)` → operator Ctrl+T landed in
+  Personal — PASS; full restore verified by post-restore reads (default flag back on
+  `default`, Work name/color restored, FD demo tab closed).
+  **Step 4** (scratch profile, destructive isolated): delete both seed jars →
+  operator's Ctrl+T produced an evaporating burner tab (orange dot), picker showed
+  no persistent jars — PASS; `jarsAdd('Fresh')` auto-claimed the flag, next Ctrl+T
+  landed in Fresh — PASS. Operator also observed the deleted-jar tab staying open
+  (green dot) — confirmed as the documented DD2 trade-off; recorded as
+  operator-confirmed input for Flight 3's tabs-close-on-delete (mission criterion 4).
+  **Step 5**: operator sign-off — "pass, sign off. land the flight."
+  Environment: FD launched/tore down both instances; real instance left running for
+  the operator; scratch profile removed. Suite post-fixes 1154/1154, typecheck +
+  lint clean. Leg → `completed`; CP4 checked; flight → `landed`.
+
+---
+
 ## Decisions
 
 *(none yet)*
@@ -254,6 +399,70 @@ under the operator's standing autonomous-execution directive for this flight pai
 ---
 
 ## Deviations
+
+### D2 (HAT step 2): Ctrl+T reported non-functional on the operator's real profile
+**Planned**: HAT step 2 expected Ctrl+T to open a tab in the default jar.
+**Actual**: Operator reports Ctrl+T does nothing; context-menu open-in-new-tab works
+(lands in default). Wiring exists (keydown-action.js:61 `'t'` → `new-tab` →
+renderer dispatch `createTab()`), so the failure is in the live key path —
+regression-vs-pre-existing to be determined by bisect against main.
+**Reason**: pre-existing gap (not a Flight 2 regression) — root-caused live. On the
+native multi-`WebContentsView` surface, OS keyboard focus sits in whichever guest
+webContents is foreground; the chrome-shell `document.addEventListener('keydown')`
+handler that dispatches `keydownToAction`'s `'t'` → `'new-tab'` mapping
+(renderer.js) only fires while the chrome DOM itself holds OS focus (freshly
+booted / address bar focused). `wireGuestContents`'s `before-input-event` capture
+on a focused guest (main.js) forwards a curated accelerator subset (F12, zoom,
+print, find, Ctrl+J downloads, Ctrl+Shift+I devtools) plus the dedicated
+cross-view bridge for Ctrl+L — but never forwarded `'t'`/new-tab, so a normally
+focused web page (the overwhelmingly common state during real browsing) silently
+swallowed Ctrl+T with no console error. `sheetAcceleratorAction`
+(sheet-accelerator.js) already enumerated `new-tab` as chrome-class for the
+menu-sheet-open forwarding path (M05 F8 DD13) — the plain no-sheet guest capture
+simply never implemented the equivalent forward, so the union that path's own doc
+comment describes was only ever half-wired. Confirmed pre-existing, not a Flight 2
+regression: `git diff d1e6be0 3998888 -- src/main/main.js` touches none of
+`wireGuestContents`/`before-input-event`, and a live d1e6be0 worktree boot
+reproduced the identical swallow (chrome-target Ctrl+T opened a tab, 1→2;
+guest-target Ctrl+T did not, count unchanged) on a scratch profile seeded to the
+legacy-migrated shape (fresh-seed profiles can't auto-mint on main — the very
+`'default'`-literal gap this flight retires — so the legacy shape was needed to
+get a key). Fixed: `handleGuestNewTab` (src/main/main.js, new function beside
+`handleGuestCrossViewNav`) forwards Ctrl/Cmd+T via the existing
+`chrome-shortcut-action:new-tab` channel (same channel the sheet path and the
+cross-view bridge already use), autoRepeat-guarded (mirrors the Ctrl+J downloads
+guard — a held chord must not stack tabs). Wired into BOTH `wireGuestContents`
+branches (the normal web-guest capture AND the internal-guest minimal handler),
+since `dispatchChromeAction('new-tab')` has no `isInternalTab` gate (unlike
+devtools/zoom/find) — Ctrl+T must work regardless of which guest currently holds
+focus, web or internal. Live-verified post-fix on a fresh scratch boot (MCP
+`pressKey` Ctrl+T against a guest wcId → tab count +1; against a chrome-eval-opened
+internal Settings tab's wcId → tab count +1). No regression unit test added: the
+defect is a real-boot-only focus/IPC interaction (identical class to Leg 3's D1),
+not reachable through the `require()`-based unit runner — same reasoning as D1's
+own regression coverage being a real-boot replay, not a unit assertion.
+Sibling chrome-class keys the same guest capture never forwards either — Ctrl+W
+(close-tab), Ctrl+M (toggle-panel), Ctrl+Shift+P (toggle-privacy), Ctrl+R
+(reload), all enumerated in `sheetAcceleratorAction`'s chrome-class branch but,
+like `'t'` before this fix, never wired into the plain no-sheet guest capture —
+left untouched (out of the reported D2 scope; the operator did not report them
+non-functional) and logged as an Anomaly below for a future flight/leg.
+
+### D3 (HAT step 2): scope addition — link-opens inherit the source tab's jar
+**Planned**: all partition-less tab creation routes to the default jar (DD1).
+**Actual/Decision**: Operator ruling at HAT — opening a link in a new tab from a
+non-default tab must stay in THAT tab's jar. FD design ruling for the two
+non-persistent sources: burner source → a FRESH burner (inheriting the same burner
+partition would violate the mission's burner-tabs-never-share-state invariant; note
+this also fixes the pre-existing leak where burner link-opens landed in a persistent
+jar), internal source → default resolution (status quo). Applies to the
+context-menu open paths (link / image / selection-search); window.open/target=_blank
+flow to be audited by the fixing Developer and reported.
+**Reason**: user-visible semantics judged at HAT — exactly what the leg exists for.
+
+---
+
+## Deviations (pre-HAT)
 
 - **D1 (Leg 3, product defect — real-boot-only, F1's D1 precedent repeated)**:
   `src/shared/container-menu.js`'s DD8 hybrid `BURNER` resolution declared a
@@ -277,7 +486,21 @@ under the operator's standing autonomous-execution directive for this flight pai
 
 ## Anomalies
 
-*(none yet)*
+- **Sibling guest-focus keyboard gap (found while root-causing D2, not fixed —
+  out of D2's reported scope)**: `wireGuestContents`'s plain (no-sheet) guest
+  `before-input-event` capture (src/main/main.js) never forwards Ctrl+W
+  (close-tab), Ctrl+M (toggle-panel), Ctrl+Shift+P (toggle-privacy), or Ctrl+R
+  (reload) to the chrome shell — the identical defect class D2 fixed for Ctrl+T
+  (new-tab). All four are already enumerated as chrome-class in
+  `sheetAcceleratorAction` (src/shared/sheet-accelerator.js:63-67, the
+  menu-sheet-open forwarding path), confirming they were always intended to
+  reach the chrome dispatcher; the plain guest capture just never implemented
+  that forward for them (same half-wired-union shape as `'t'` before this leg's
+  fix). Pre-existing (predates this flight), not reported by the operator, not
+  reproduced/confirmed live — flagging for a future flight/leg to root-cause and
+  fix with the same `handleGuestNewTab` pattern (or a single generalized
+  chrome-class forwarder reusing `keydownToAction`/`sheetAcceleratorAction`
+  instead of one hand-rolled function per key).
 
 ---
 

@@ -1,6 +1,6 @@
 # Flight: Default-Jar Semantics
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -292,7 +292,8 @@ its changes are deletions covered by integration + behavior test).
 - [x] **CP2**: Zero reserved-default assumptions outside migration data
       (Leg 2; grep ACs above)
 - [x] **CP3**: Real-boot matrix + `new-tab-default-routing` behavior test pass (Leg 3)
-- [ ] **CP4**: Operator HAT sign-off (Leg 4)
+- [x] **CP4**: Operator HAT sign-off (Leg 4) — signed off 2026-07-10; DD6
+      always-dotted kept; two inline fixes (D2/D3) verified live
 
 ### Adaptation Criteria
 
@@ -323,7 +324,7 @@ its changes are deletions covered by integration + behavior test).
       rewrite
 - [x] `verify-integration` - real-boot matrix (fresh / migrated / emptied registry),
       run `/behavior-test new-tab-default-routing`, grep ACs, full suite
-- [ ] `hat-default-semantics` *(interactive — HAT)* - operator-witnessed verification
+- [x] `hat-default-semantics` *(interactive — HAT)* - operator-witnessed verification
       and DD6 feel check; fixes applied inline until operator is satisfied
 
 ---
@@ -332,10 +333,10 @@ its changes are deletions covered by integration + behavior test).
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated (docs/mcp-automation.md auto-mint + default-container
+- [x] Tests passing (1154/1154 post-HAT-fixes; typecheck + lint clean)
+- [x] Documentation updated (docs/mcp-automation.md auto-mint + default-container
       wording; README/CLAUDE.md only if their jar sections state retired behavior)
 
 ### Verification
