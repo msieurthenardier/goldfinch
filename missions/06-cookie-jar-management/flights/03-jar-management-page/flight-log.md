@@ -825,3 +825,11 @@ fixes. Escalation path unused — zero high-severity findings.
   internal — preempt a false finding; verbatim confirm text; "Make default"
   label; Default pill). FD ruling: cycle 2 skipped — direct adoptions. Leg 6 →
   `ready`; handing to the operator.
+- 2026-07-10 — Flight debrief completed (Developer + Architect interviews;
+  operator interview skipped — the operator was present for the entire HAT and
+  every ruling is logged verbatim). Headline improvement: the F7 mid-HAT feature
+  process gap (mini-leg promotion gate adopted as a standing recommendation).
+  Notable finding: the suite's flat ~5.05s wall-clock across three flights is
+  one pre-existing file's real-timer budget (automation-find.test.js ~5.02s in
+  isolation), not general headroom. Flight `landed` → `completed` under the
+  operator's directive ("sign off, run the /flight-debrief then merge to main").
