@@ -389,6 +389,15 @@ under the operator's standing autonomous-execution directive for this flight pai
   Environment: FD launched/tore down both instances; real instance left running for
   the operator; scratch profile removed. Suite post-fixes 1154/1154, typecheck +
   lint clean. Leg → `completed`; CP4 checked; flight → `landed`.
+- 2026-07-10 — **Debrief complete** (Developer + Architect interviews; human
+  interview skipped — operator was live in the HAT loop, rulings on record).
+  Debrief persisted (flight-debrief.md); flight `landed` → `completed` under the
+  operator's directive ("run the /flight-debrief then get everything merged to
+  main"). Headline findings: recon grep scope (4-pass fixture discovery), DD1's
+  partition-less≠context-less lesson (Architect's honest self-assessment: the
+  mission's own open question was never carried into flight OQs), second
+  script-scope real-boot defect → ES-module question filed for maintenance.
+  Merging to main per the same directive.
 
 ---
 
