@@ -324,7 +324,7 @@ fs seam) or parallel tests will cross-pollute through the real filesystem.
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged
+- [x] Code merged
 - [x] Tests passing
 - [x] Documentation updated (jars.js header comment documents the v2 schema +
       invariant; CLAUDE.md only if it describes the jar set — check at Leg 4)
