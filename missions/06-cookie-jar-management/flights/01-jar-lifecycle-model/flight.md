@@ -1,6 +1,6 @@
 # Flight: Jar Lifecycle Model
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
