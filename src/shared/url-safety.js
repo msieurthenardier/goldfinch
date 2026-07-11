@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * isSafeTabUrl(url)
  *
@@ -12,7 +10,7 @@
  * chrome:, protocol-relative URLs, non-strings, empties, and malformed input.
  * Never throws.
  */
-function isSafeTabUrl(url) {
+export function isSafeTabUrl(url) {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (trimmed === '') return false;
@@ -54,7 +52,7 @@ function isSafeTabUrl(url) {
  * data:image/png,x");… value would pass a scheme-only gate and break out
  * of the url("…") CSS context.
  */
-function isSafePosterUrl(url) {
+export function isSafePosterUrl(url) {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (trimmed === '') return false;
@@ -103,7 +101,7 @@ const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars']);
  * every web/file/data/javascript scheme, non-strings, empties, malformed input.
  * Never throws.
  */
-function isInternalPageUrl(url) {
+export function isInternalPageUrl(url) {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (trimmed === '') return false;
@@ -120,14 +118,4 @@ function isInternalPageUrl(url) {
     INTERNAL_HOSTS.has(parsed.host) &&
     (parsed.pathname === '/' || parsed.pathname === '')
   );
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer,
-// which runs with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl };
-} else {
-  /** @type {any} */ (globalThis).isSafeTabUrl = isSafeTabUrl;
-  /** @type {any} */ (globalThis).isSafePosterUrl = isSafePosterUrl;
-  /** @type {any} */ (globalThis).isInternalPageUrl = isInternalPageUrl;
 }

@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 /**
  * keydownToAction({ key, ctrl, meta, shift, lightboxOpen })
@@ -37,7 +36,7 @@
  *   | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
  *   | 'toggle-privacy' | 'reload' | 'downloads' | null}
  */
-function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
+export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
   // F12 (no modifier) — must be decided BEFORE the modifier gate, else it never
   // fires. Defers while a lightbox is open.
   if (key === 'F12') return lightboxOpen ? null : 'devtools';
@@ -71,12 +70,4 @@ function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
   if (key === 'r') return 'reload';
 
   return null;
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer,
-// which runs with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { keydownToAction };
-} else {
-  /** @type {any} */ (globalThis).keydownToAction = keydownToAction;
 }

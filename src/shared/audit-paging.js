@@ -1,15 +1,15 @@
-'use strict';
-
 /**
  * Pure, DOM-free pagination + freshness state machine for the Settings activity
  * viewer (Flight 7, Leg 6, DD4). Windows the renderer-side audit ring snapshot
  * at 20 entries/page, newest-first, with freeze-on-page-2+ so the operator can
  * read older entries coherently while a bulk run floods the live ring.
  *
- * Mirrors the `src/shared/url-safety.js` dual-export idiom: a UMD tail that is
- * lint-clean here (the `src/shared/**` eslint block grants node globals, so
- * `module` is defined). The renderer loads it via `<script src=".../audit-paging.js">`
- * (sets browser globals); the test runner / main use `require()`.
+ * Real ES module (M07 Flight 2 sweep): pure `export` bindings only — the six
+ * functions are exported under their canonical names (the test runner requires
+ * them via require(esm); settings.html loads the file via a `type="module"`
+ * tag and pages/settings.js imports what it uses). Canonical name: `activeLog`
+ * (the old page-global alias `activeLogOf` was retired with the M07-F2
+ * transitional-bridge removal).
  *
  * @typedef {Object} AuditEntry
  * @property {number} ts          epoch-ms timestamp
@@ -49,7 +49,7 @@
  * @param {number} pageSize        entries per page (20 in the viewer)
  * @returns {PageWindow}
  */
-function windowPage(activeLog, page, pageSize) {
+export function windowPage(activeLog, page, pageSize) {
   const log = Array.isArray(activeLog) ? activeLog : [];
   const total = log.length;
   const start = (page - 1) * pageSize;
@@ -78,7 +78,7 @@ function windowPage(activeLog, page, pageSize) {
  * @param {AuditEntry[]|null} frozenLog the frozen snapshot
  * @returns {number} count of liveLog entries with ts > max(frozenLog.ts)
  */
-function countNewer(liveLog, frozenLog) {
+export function countNewer(liveLog, frozenLog) {
   const live = Array.isArray(liveLog) ? liveLog : [];
   const frozen = Array.isArray(frozenLog) ? frozenLog : [];
   if (!frozen.length) return live.length;
@@ -101,7 +101,7 @@ function countNewer(liveLog, frozenLog) {
  * @param {PagerState} state
  * @returns {AuditEntry[]}
  */
-function activeLog(state) {
+export function activeLog(state) {
   return state.frozenLog ?? state.liveLog;
 }
 
@@ -113,7 +113,7 @@ function activeLog(state) {
  * @param {number} pageSize
  * @returns {number}
  */
-function pageCount(total, pageSize) {
+export function pageCount(total, pageSize) {
   return Math.max(1, Math.ceil(total / pageSize));
 }
 
@@ -131,7 +131,7 @@ function pageCount(total, pageSize) {
  * @param {{edge?: number, around?: number}} [opts]
  * @returns {Array<number|'…'>} e.g. [1, '…', 4, 5, 6, '…', 12]
  */
-function pageList(total, pageSize, currentPage, opts) {
+export function pageList(total, pageSize, currentPage, opts) {
   const edge = opts && typeof opts.edge === 'number' ? opts.edge : 1;
   const around = opts && typeof opts.around === 'number' ? opts.around : 1;
   const count = pageCount(total, pageSize);
@@ -183,7 +183,7 @@ function pageList(total, pageSize, currentPage, opts) {
  * @param {{type:string, log?: AuditEntry[], page?: number}} event
  * @returns {PagerState}
  */
-function reduceAudit(state, event) {
+export function reduceAudit(state, event) {
   const PAGE_SIZE = 20;
   switch (event.type) {
     case 'broadcast': {
@@ -228,17 +228,4 @@ function reduceAudit(state, event) {
     default:
       return state;
   }
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer,
-// which runs with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { windowPage, countNewer, activeLog, reduceAudit, pageList, pageCount };
-} else {
-  /** @type {any} */ (globalThis).windowPage = windowPage;
-  /** @type {any} */ (globalThis).countNewer = countNewer;
-  /** @type {any} */ (globalThis).activeLogOf = activeLog;
-  /** @type {any} */ (globalThis).reduceAudit = reduceAudit;
-  /** @type {any} */ (globalThis).pageList = pageList;
-  /** @type {any} */ (globalThis).pageCount = pageCount;
 }

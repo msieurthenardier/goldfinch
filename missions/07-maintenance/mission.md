@@ -69,7 +69,10 @@ is the remaining empirical gate.
 - [x] Flight 1: Suite & contract hygiene — timer mocks + `{ok:false, error}`
       standardization (2 legs, no dependencies) — landed 2026-07-11; suite
       5.0s → 958ms, both data channels error-bearing on every failure branch
-- [ ] Flight 2: ESM conversion of `src/shared/` — pilot leg gating the full
-      sweep + machinery retirement (~4-5 legs)
+- [x] Flight 2: ESM conversion of `src/shared/` — pilot leg gating the full
+      sweep + machinery retirement (~4-5 legs) — landed 2026-07-11 as 6
+      legs (preload-require(esm) divert + split sweep); `src/shared/` on
+      real ESM, collision machinery retired, code delta −194
 - [ ] Flight 3: Doc promotions — the three CLAUDE.md pattern notes, written
-      post-ESM (1 leg)
+      post-ESM (1 leg) — now includes the MockTimers recipe as a fourth
+      edit (Flight 1 debrief action item)

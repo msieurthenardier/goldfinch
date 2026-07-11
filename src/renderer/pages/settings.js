@@ -1,4 +1,14 @@
-'use strict';
+// Imports use the page's SERVING paths, not disk paths: this file is served at
+// goldfinch://settings/settings.js and its shared dependencies as flat sibling
+// subresources (INTERNAL_PAGES is an exact-match flat map — a disk-true
+// ../../shared/*.js specifier would 404 at boot). tsc cannot resolve the flat
+// specifiers against the disk layout (TS2307), so each carries @ts-ignore;
+// the bindings type as `any`, matching the ambient-global typing they replace
+// (M07 Flight 2 leg 5 FD ruling; backlog-noted for a future typing cycle).
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { activeLog, windowPage, reduceAudit, pageList, pageCount } from './audit-paging.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { isSafeColor } from './safe-color.js';
 
 /**
  * settings.js — scroll-spy progressive enhancement.
@@ -897,9 +907,10 @@ function automationKeysOnce() {
   // Entries per page. 20/page newest-first. The freshness contract (page 1 live,
   // higher pages frozen) survives underneath but is invisible to the operator —
   // standard numbered pagination on top. The windowing + freshness state machine
-  // is the pure module audit-paging.js, loaded as a <script> before this one
-  // (globals: windowPage / countNewer / activeLogOf / reduceAudit / pageList /
-  // pageCount — the url-safety.js dual-export precedent).
+  // is the pure ES module audit-paging.js, imported at the top of this file
+  // (activeLog / windowPage / reduceAudit / pageList / pageCount — canonical
+  // export names; the old activeLogOf page-global alias died with the
+  // transitional bridges, M07 Flight 2 leg 5).
   const PAGE_SIZE = 20;
 
   // Single nav container; the numbered pager (‹ 1 2 3 … › buttons) is rebuilt
@@ -1025,7 +1036,7 @@ function automationKeysOnce() {
   function renderActivity() {
     renderSessions(lastSessions);
 
-    const active = activeLogOf(state);
+    const active = activeLog(state);
     const win = windowPage(active, state.page, PAGE_SIZE);
 
     // --- recent action log (newest-first) ---

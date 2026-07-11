@@ -16,8 +16,19 @@
          outside-click/blur dismissal and its menu-keydown contract provides
          roving/Arrow/Home/End/Escape/Tab. It must load BEFORE menu-overlay.js. -->
     <div id="menu-root"></div>
-    <script src="../shared/safe-color.js"></script>
-    <script src="menu-controller.js"></script>
-    <script src="menu-overlay.js"></script>
+    <!-- Mixed module/defer-classic queue (M07 Flight 2, DD3 transitional defer
+         rule): safe-color.js and menu-overlay.js (the page controller, which
+         imports isSafeColor) are real ES modules (type="module").
+         menu-controller.js is the product's ONE remaining classic script
+         (DD6 carve-out — it publishes the menuController/focusItem globals
+         menu-overlay.js reads) and carries `defer`, so every script joins the
+         same after-parse in-order execution queue — a non-defer classic would
+         execute during parse, BEFORE any module, inverting document order.
+         menu-controller.js must stay ahead of menu-overlay.js in the queue
+         (document order preserved — its globals must exist when the
+         controller module executes). -->
+    <script src="../shared/safe-color.js" type="module"></script>
+    <script src="menu-controller.js" defer></script>
+    <script src="menu-overlay.js" type="module"></script>
   </body>
 </html>

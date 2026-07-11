@@ -1,6 +1,21 @@
-'use strict';
-
 /* Goldfinch browser UI controller: tabs, navigation, and the media panel. */
+
+// ES module (M07 Flight 2 leg 5): shared dependencies are explicit imports.
+// index.html is a file:// document, so the specifiers are disk-true relative
+// paths — no serving-path mismatch, no @ts-ignore needed (unlike the two
+// internal pages' flat-served imports). The evaluate-reachable seam at the
+// BOTTOM of this file republishes the automation/dogfooding entry points that
+// module scoping would otherwise hide.
+import { BURNER } from '../shared/burner.js';
+import { buildContainerModel } from '../shared/container-menu.js';
+import { buildAutomationIndicatorModel } from '../shared/automation-indicator-model.js';
+import { isSafeColor } from '../shared/safe-color.js';
+import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
+import { keydownToAction } from '../shared/keydown-action.js';
+import { deriveSiteInfo } from '../shared/site-info.js';
+import { pageContextModel } from '../shared/page-context-model.js';
+import { resolveNewTabContainer } from '../shared/default-routing.js';
+import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -783,9 +798,9 @@ function openToolbarContextMenu(item, anchorEl) {
  * Test/audit hook: open the page context menu with a representative synthetic params payload
  * so the `npm run a11y` harness can audit the open sheet menu. Builds a full-section
  * menu (link + selection + editable + spelling-suggestions + Inspect) at a fixed chrome coord.
- * Reachable via the MCP evaluate tool (top-level function → window global).
+ * Reachable via the MCP evaluate tool (published by the evaluate-reachable seam
+ * at the bottom of this file — module scope hides top-level functions).
  */
-// eslint-disable-next-line no-unused-vars
 function openPageContextMenuForAudit() {
   pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
   pageCtx.params = {
@@ -2643,8 +2658,8 @@ function dispatchChromeAction(action) {
 
 document.addEventListener('keydown', (e) => {
   // The pure decision — "given (key, mods, lightboxOpen), which action?" — lives in
-  // keydownToAction (../shared/keydown-action.js, a bare global; same dual-export
-  // route as isSafeTabUrl). It reproduces the live gating exactly: F12 before the
+  // keydownToAction (../shared/keydown-action.js, imported at the top of this
+  // file, same route as isSafeTabUrl). It reproduces the live gating exactly: F12 before the
   // modifier gate, mod = ctrl||meta, zoom/find/F12/Ctrl+Shift+I lightbox-deferred,
   // the t/w/l/m/Shift+P/r chain not lightbox-gated, Ctrl+Shift+I vs Shift+P by key
   // letter. The IMPURE dispatch lives in dispatchChromeAction above (extracted,
@@ -2921,3 +2936,39 @@ Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
   jarsBoot
 ]).then(([url]) => createTab(url || HOMEPAGE));
+
+// ---------------------------------------------------------------------------
+// Evaluate-reachable automation/dogfooding seam (M07 Flight 2 leg 5, FD-approved).
+// This file is an ES module: its top-level functions are module-scoped, NOT
+// page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
+// dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
+// and scripts/a11y-audit.mjs) call these entry points by global name via
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 18-entry
+// set on globalThis, each tagged with its consumer class. It is NOT the
+// classic-script shared-scope collision class (deliberate assignments from
+// module scope, not top-level declares in a shared lexical scope). CLOSED SET:
+// do not grow it without an FD ruling — an evaluate caller outside these 18 is
+// a design change, not a seam addition.
+Object.assign(/** @type {any} */ (globalThis), {
+  // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
+  openJarsPage,
+  kebabActionSettings,
+  openContainerOverlay,
+  // behavior-spec (tests/behavior/*.md drive these by name)
+  createTab, // popup-jar-inheritance, jar-data-controls
+  makeBurner, // popup-jar-inheritance, jar-data-controls
+  newIdentity, // farbling-correctness
+  measureWebviewsSlotDIP, // panel-slide
+  openFind, // tab-surface-geometry
+  // a11y-audit (scripts/a11y-audit.mjs chrome state-drivers)
+  navigate,
+  togglePanel,
+  togglePrivacy,
+  openLightbox,
+  closeLightbox,
+  applyToolbarPins,
+  openKebabOverlay,
+  openSiteInfoOverlay,
+  openNewContainerOverlay,
+  openPageContextMenuForAudit
+});

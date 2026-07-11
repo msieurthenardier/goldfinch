@@ -285,3 +285,81 @@ accept a DevTools-open blind spot vs. decide the value isn't worth the CDP depen
 - **Keep-current is the real prerequisite:** the inherited PQ benefit only exists if Electron/Chromium stays
   current enough to ship `X25519MLKEM768` and Goldfinch doesn't override/downgrade the TLS config. Worth a
   standing note wherever Electron bumps are decided.
+
+---
+
+## Renderer crash / sleep-resume resilience (chrome + guest views) + crash observability
+
+**Status:** defect-driven flight seed — likely a maintenance-mission flight, not its own mission.
+**Captured:** 2026-07-11, from a live incident on the operator's installed (packaged) Windows build.
+
+### The incident (the evidence)
+
+After a sleep/resume, the installed build came back unusable: **tab strip empty, content area flat
+dark gray, buttons dead — but CSS hover still working**. Live diagnosis established:
+
+- **Main was healthy** — window drag/resize (main-process message loop) worked; the process tree
+  showed the browser process, GPU, utilities, and 9 renderers all alive. Not a main-process hang.
+- The fingerprint decodes as **renderer-side death during suspend**: a guest `WebContentsView`
+  whose renderer is killed paints as a **solid gray surface** (the view object stays alive —
+  `isDestroyed()` stays false — so main keeps it attached); the **chrome** renderer was killed and
+  came back as a fresh/broken document — the tab strip is built purely in `renderer.js` memory, so
+  a reset chrome document starts blank, and if its boot gate (`renderer.js` bottom:
+  `Promise.all([settingsGet('homePage'), jarsBoot]).then(createTab)`) never completes, you get
+  exactly "empty strip + dead buttons + live hover" (hover is CSS, needs no JS).
+- Chromium killing backgrounded renderers across suspend (memory pressure / GPU reset on resume)
+  is a **known, recurring environment hazard**, and this machine has a kernel-level history of
+  flaky sleep (an April 2026 `0xA0 INTERNAL_POWER_ERROR` bugcheck in the Event Log).
+- **Forensics hit a wall — that's a finding in itself.** A killed *child* renderer writes nothing
+  to the Windows Application log, and Goldfinch never starts `crashReporter`, so there is **no
+  ground truth anywhere** about which process died or why. Silence in the logs ≠ nothing died.
+
+### The gap
+
+Crash recovery exists **only for the two overlay views** — the find overlay (`main.js` ~291) and
+the menu-overlay sheet (`menu-overlay-manager.js` ~154) both have the **AC7 teardown-and-rebuild
+`render-process-gone` pattern** (M05 F7/F8). The **chrome view and guest tabs have none**; there
+are no `unresponsive` handlers and no `powerMonitor` hooks. A crashed guest silently renders gray
+forever; a crashed chrome renderer bricks the whole UI until the user kills the process tree.
+
+### Fix shape (three legs, roughly)
+
+1. **Chrome view `render-process-gone` → reload + reconcile.** Reload the chrome document and
+   reconcile main's tab state with the fresh renderer (main still holds the live guest views; the
+   fresh chrome knows nothing about them — decide re-announce vs. teardown). **Ordering hazards —
+   this is why it wants a spec'd leg, not a drive-by patch:** the pending-init queues, the
+   find-overlay session state (`findOverlayTabWcId`), and the sheet's chrome-wcId assumptions all
+   assume a stable chrome renderer.
+2. **Guest tab `render-process-gone` → visible recovery.** Auto-`reload()` the tab, or notify the
+   chrome to render a "tab crashed — reload" affordance, instead of the silent gray surface.
+   (Extends the AC7 pattern from overlays to tabs.)
+3. **Observability.** `crashReporter.start({ uploadToServer: false })` for local dumps under
+   `userData`, plus log `render-process-gone` `details.reason` (`oom` / `killed` / `crashed`) per
+   process — so the next incident self-identifies instead of needing live forensics. Optionally
+   `powerMonitor.on('resume')` as a cheap post-resume health-check trigger and `unresponsive`
+   handlers for symmetry.
+
+### Scope notes
+
+- Recovery must respect the **internal-page trust model**: reloading a crashed internal
+  (`goldfinch://`) tab goes through the trusted-nav rules (`isInternalPageUrl`), never a relaxed gate.
+- Verification is awkward by nature (killing renderers on purpose): `wc.forcefullyCrashRenderer()`
+  is the test lever for both the chrome and guest paths; drive it over the automation surface.
+- Cheap first leg candidate: observability (leg 3) alone is small, zero-risk, and converts the
+  next field incident into data — worth doing even if 1–2 wait.
+
+---
+
+## Internal pages: flat-served import specifiers are untypeable (TS2307)
+
+**Status:** typing debt — future typing cycle, not urgent.
+**Captured:** M07 Flight 2 leg 5 (ESM conversion, FD ruling).
+
+The two internal page controllers (`src/renderer/pages/settings.js`, `pages/jars.js`) import
+their shared dependencies via the pages' SERVING paths (`./safe-color.js` etc.) because
+`INTERNAL_PAGES` (main.js) is an exact-match flat map — a disk-true `../../shared/*.js`
+specifier would 404 at boot. tsc resolves against the disk layout and cannot see the protocol
+map, so the six flat imports each carry `// @ts-ignore` and their bindings type as `any`
+(matching the ambient-global typing they replaced — no regression). Options for a future cycle:
+`paths` mapping in jsconfig for the internal-page directory, or `.d.ts` shims per flat specifier.
+Do NOT restructure the protocol map for this — it is trust-sensitive (traversal-proof by design).

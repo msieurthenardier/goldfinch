@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Clearable per-jar data classes (M06 Flight 4, Leg 1 / DD2). A frozen, ordered
 // list of descriptors mapping onto Electron's `ses.clearStorageData({ storages })`
@@ -12,21 +11,19 @@
 // `ses.clearCache()` + `ses.clearStorageData({ storages: ['shadercache'] })`.
 //
 // No imports — this module depends on nothing (mirrors jar-page-model.js's shape).
-// Dual-export tail below (CJS + globalThis) follows jar-page-model.js:80-85
-// exactly. Loaded via classic <script> on jars.html, sharing the page's ONE
-// top-level lexical scope with burner.js / safe-color.js / jar-page-model.js /
-// jars.js (jars-page-shared-scripts.test.js enforces no top-level collision) —
-// the names JAR_DATA_CLASSES / jarDataClassById were checked against those files'
-// own top-level declarations (BURNER, RESOLVED_BURNER, PALETTE,
-// buildJarPageModel, HEX, KEYWORD, isSafeColor; jars.js is IIFE-wrapped, so it
-// declares nothing at top level) before being finalized.
+// Real ES module (M07 Flight 2 sweep): pure `export` bindings for all consumers
+// (require(esm) in jar-ipc.js and the test runner; pages/jars.js imports what it
+// uses). jars.html is now an all-module page, so the old classic-script
+// shared-lexical-scope collision class no longer applies —
+// jars-page-shared-scripts.test.js now guards the page's script-tag contracts
+// instead.
 
 /**
  * @typedef {{ id: string, label: string, storages: readonly string[] | null }} JarDataClass
  */
 
 /** @type {ReadonlyArray<JarDataClass>} */
-const JAR_DATA_CLASSES = Object.freeze([
+export const JAR_DATA_CLASSES = Object.freeze([
   Object.freeze({ id: 'cookies', label: 'Cookies', storages: Object.freeze(['cookies']) }),
   Object.freeze({
     id: 'storage',
@@ -43,18 +40,9 @@ const JAR_DATA_CLASSES = Object.freeze([
  * @param {string} id
  * @returns {JarDataClass | null}
  */
-function jarDataClassById(id) {
+export function jarDataClassById(id) {
   for (const c of JAR_DATA_CLASSES) {
     if (c.id === id) return c;
   }
   return null;
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { JAR_DATA_CLASSES, jarDataClassById };
-} else {
-  /** @type {any} */ (globalThis).JAR_DATA_CLASSES = JAR_DATA_CLASSES;
-  /** @type {any} */ (globalThis).jarDataClassById = jarDataClassById;
 }

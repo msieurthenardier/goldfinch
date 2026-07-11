@@ -188,18 +188,29 @@
       <div id="lightbox-stage"></div>
     </div>
 
-    <script src="../shared/url-safety.js"></script>
-    <script src="../shared/keydown-action.js"></script>
-    <script src="../shared/site-info.js"></script>
-    <script src="../shared/burner.js"></script>
-    <script src="../shared/container-menu.js"></script>
-    <script src="../shared/page-context-model.js"></script>
-    <script src="../shared/default-routing.js"></script>
-    <script src="../shared/inherit-container.js"></script>
-    <!-- safe-color.js MUST load before automation-indicator-model.js (F7): the
-         model's jar-color resolution defense-in-depth-checks isSafeColor. -->
-    <script src="../shared/safe-color.js"></script>
-    <script src="../shared/automation-indicator-model.js"></script>
-    <script src="renderer.js"></script>
+    <!-- Fully-module page (M07 Flight 2 leg 5): all ten ../shared/ scripts AND
+         renderer.js (the page controller, which imports its shared
+         dependencies) are real ES modules (type="module") — no classic script
+         remains on this page, so the DD3 transitional defer rule is vacuous
+         here. The module loader guarantees the dependencies; the explicit tag
+         order is kept for load-order legibility (the module map dedupes
+         evaluation). renderer.js's boot gate runs at module evaluation — the
+         same after-parse queue position as the old defer tag. -->
+    <script src="../shared/url-safety.js" type="module"></script>
+    <script src="../shared/keydown-action.js" type="module"></script>
+    <script src="../shared/site-info.js" type="module"></script>
+    <script src="../shared/burner.js" type="module"></script>
+    <script src="../shared/container-menu.js" type="module"></script>
+    <script src="../shared/page-context-model.js" type="module"></script>
+    <script src="../shared/default-routing.js" type="module"></script>
+    <script src="../shared/inherit-container.js" type="module"></script>
+    <!-- safe-color.js loads before automation-indicator-model.js (F7): the
+         model's jar-color resolution defense-in-depth-checks isSafeColor. Both
+         are real ES modules now — the model imports safe-color directly, so the
+         module loader guarantees the dependency; the explicit tag order is kept
+         for load-order legibility (the module map dedupes evaluation). -->
+    <script src="../shared/safe-color.js" type="module"></script>
+    <script src="../shared/automation-indicator-model.js" type="module"></script>
+    <script src="renderer.js" type="module"></script>
   </body>
 </html>

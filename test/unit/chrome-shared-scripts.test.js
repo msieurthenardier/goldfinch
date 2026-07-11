@@ -1,70 +1,125 @@
 'use strict';
 
-// Regression net for M06 Flight 2 Leg 3 D1: `src/renderer/index.html` loads its
-// `src/shared/*.js` modules as separate classic (non-module) <script> tags, which
-// all share ONE global lexical environment in the chrome document. A top-level
-// `const`/`let`/`class` declared in two of those scripts collides — the second
-// script's parse step throws `SyntaxError: Identifier 'X' has already been
-// declared`, which silently kills that ENTIRE script (nothing in it — not even
-// its function declarations — ever runs), while every script tag before and
-// after it keeps loading normally. This is invisible to the Node-runner unit
-// suite: `require()` gives each shared module its own module scope, so a
-// collision that is fatal in the browser's shared-script-tag realm never
-// reproduces under `require()`. D1 (Leg 3) hit exactly this: burner.js's
-// top-level `const BURNER` and container-menu.js's top-level
-// `const { BURNER } = ...` both landed in index.html's shared global scope,
-// breaking buildContainerModel() on every real boot while every unit test
-// (which only ever requires container-menu.js in isolation) stayed green.
+// Script-tag contract tests for the renderer and internal-page documents.
+// Everything here is self-derived from the real HTML files on disk — one
+// glob over src/renderer/**/*.html, never a hand-maintained list — so the
+// pins track the documents' actual script sets without drifting.
 //
-// This test reproduces the browser's shared-global-scope semantics with Node's
-// `vm` module (a fresh vm context's top-level lexical environment behaves
-// identically to a document's — verified: a second `vm.runInContext('const X=2')`
-// after `const X=1` throws the same SyntaxError a browser would) and replays
-// EVERY `../shared/*.js` <script> tag from index.html, in the exact order the
-// browser loads them, in one shared context. Any future top-level identifier
-// collision among those scripts fails this test instead of only surfacing on a
-// live boot.
+// Contracts pinned (M07 Flight 2, ESM conversion end-state):
+//
+//   1. Tag-count guard: index.html still loads its src/shared/ scripts. A
+//      markup or regex drift that silently parsed ZERO tags would make every
+//      other pin vacuously green — this guard fails first instead.
+//   2. DD3, now the PERMANENT rule (all documents): on any page that loads at
+//      least one module script, every classic <script> tag must carry
+//      `defer`. Module scripts always execute after parse; a non-defer
+//      classic executes DURING parse — before every module, inverting
+//      document order. menu-overlay.html's classic menu-controller.js (the
+//      DD6 carve-out, the product's one remaining classic script) is the live
+//      binding case.
+//   3. Module pin (all documents): every <script> tag that resolves to a
+//      src/shared/*.js file is type="module". src/shared/ is real ESM as of
+//      this flight — a classic tag on an ESM file is a parse-time
+//      SyntaxError that only a live boot would otherwise catch.
+//
+// History: until M07 Flight 2 this file was a shared-scope vm-replay net.
+// Classic (non-module) <script> tags all share ONE top-level lexical
+// environment per document, so two classic scripts independently declaring
+// the same top-level const/let/class collided at parse time — fatal on a real
+// boot, invisible to the require()-based unit suite (M06 F2 Leg 3 D1 hit
+// exactly this). The net replayed every classic shared tag in one Node `vm`
+// context to catch collisions statically. The ESM conversion made that class
+// structurally impossible (module scripts get their own scope), so the replay
+// machinery retired with the conversion's retire-machinery leg — see
+// missions/07-maintenance/flights/02-esm-conversion/.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
-const INDEX_HTML = path.join(__dirname, '../../src/renderer/index.html');
-const SHARED_DIR = path.join(__dirname, '../../src/shared');
+const REPO_ROOT = path.join(__dirname, '../..');
+const RENDERER_DIR = path.join(REPO_ROOT, 'src/renderer');
+const SHARED_DIR = path.join(REPO_ROOT, 'src/shared');
+const INDEX_HTML = path.join(RENDERER_DIR, 'index.html');
 
-// Parse the ordered list of `../shared/*.js` <script src="..."> tags straight out
-// of index.html — sourced from the real file, not a hand-maintained list, so this
-// test tracks index.html's actual load order and script set without drifting.
-function sharedScriptFiles() {
-  const html = fs.readFileSync(INDEX_HTML, 'utf8');
-  const files = [];
-  const re = /<script src="\.\.\/shared\/([^"]+\.js)"><\/script>/g;
+// Parse EVERY <script ... src="..."> tag straight out of an HTML document, in
+// document order. Attribute parsing is order-insensitive (src / type="module"
+// / defer may appear in any order inside the tag).
+function scriptTags(htmlPath) {
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const tags = [];
+  const re = /<script\b([^>]*)>/g;
   let m;
-  while ((m = re.exec(html))) files.push(m[1]);
-  return files;
+  while ((m = re.exec(html))) {
+    const attrs = m[1];
+    const srcMatch = /\bsrc="([^"]+\.js)"/.exec(attrs);
+    if (!srcMatch) continue;
+    tags.push({
+      src: srcMatch[1],
+      isModule: /\btype="module"/.test(attrs),
+      hasDefer: /\bdefer\b/.test(attrs)
+    });
+  }
+  return tags;
+}
+
+// Every renderer/internal-page document, self-derived from the tree.
+function rendererDocuments() {
+  return fs
+    .readdirSync(RENDERER_DIR, { recursive: true })
+    .filter((f) => f.endsWith('.html'))
+    .sort()
+    .map((f) => path.join(RENDERER_DIR, f));
+}
+
+// A tag references a src/shared/ file when its src points there explicitly
+// (index.html / menu-overlay.html use ../shared/ relative paths) or when its
+// flat name exists in src/shared/ (internal pages serve shared files via flat
+// srcs resolved through the INTERNAL_PAGES protocol map in main.js).
+// Resolution is by existence, not a hardcoded list. No page-local script name
+// collides with a src/shared/ name today; if one ever did, this pin would
+// flag the tag and the collision would get resolved by renaming — safer than
+// silently skipping a real shared file.
+function isSharedSrc(src) {
+  if (src.includes('../shared/')) return true;
+  if (src.includes('/')) return false;
+  return fs.existsSync(path.join(SHARED_DIR, src));
+}
+
+function repoRel(file) {
+  return path.relative(REPO_ROOT, file);
 }
 
 test('index.html shared-script load order is non-empty (guards against a silent parse regression)', () => {
-  assert.ok(sharedScriptFiles().length >= 5, 'expected several ../shared/*.js <script> tags in index.html');
+  const shared = scriptTags(INDEX_HTML).filter((t) => isSharedSrc(t.src));
+  assert.ok(shared.length >= 5, 'expected several ../shared/*.js <script> tags in index.html');
 });
 
-test('every ../shared/*.js script index.html loads executes with no top-level identifier collision', () => {
-  const files = sharedScriptFiles();
-  // A fresh vm context mirrors the chrome document's realm: no `module`/`require`
-  // (nodeIntegration:false, matching the real chrome-preload contextBridge setup),
-  // so every dual-export module takes its `globalThis`-assignment branch — same as
-  // in the browser — and each script's top-level const/let lands in ONE shared
-  // lexical environment, exactly like separate <script> tags in one document.
-  const context = vm.createContext({});
-  for (const file of files) {
-    const source = fs.readFileSync(path.join(SHARED_DIR, file), 'utf8');
-    assert.doesNotThrow(
-      () => vm.runInContext(source, context, { filename: file }),
-      (err) => {
-        throw new Error(`src/shared/${file} failed to load into the shared chrome script scope: ${err && err.message}`);
-      }
-    );
+test('DD3 pin, all documents: a classic script tag on a page with module scripts carries defer', () => {
+  for (const doc of rendererDocuments()) {
+    const tags = scriptTags(doc);
+    if (!tags.some((t) => t.isModule)) continue; // the rule binds only on pages that load module scripts
+    for (const t of tags) {
+      if (t.isModule) continue;
+      assert.ok(
+        t.hasDefer,
+        `${repoRel(doc)} loads "${t.src}" as a non-defer classic script on a page with module scripts — ` +
+          'it would execute during parse, BEFORE any module, inverting document order (DD3)'
+      );
+    }
+  }
+});
+
+test('module pin, all documents: every src/shared/*.js script tag is type="module"', () => {
+  for (const doc of rendererDocuments()) {
+    for (const t of scriptTags(doc)) {
+      if (!isSharedSrc(t.src)) continue;
+      assert.ok(
+        t.isModule,
+        `${repoRel(doc)} loads the shared file "${t.src}" as a classic script — src/shared/ is ESM, ` +
+          'and a classic tag on an ESM file is a parse-time SyntaxError only a live boot would catch'
+      );
+    }
   }
 });

@@ -5,12 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Settings — Goldfinch</title>
     <link rel="stylesheet" href="settings.css" />
-    <script src="audit-paging.js" defer></script>
-    <!-- Injection-safe color validator (M06 F4 Leg 5 HAT F7): loaded before
-         settings.js so its isSafeColor guard is available for the automation-key
-         list's robot glyph / unkeyed dot tint (see settings.js jar-row rendering). -->
-    <script src="safe-color.js" defer></script>
-    <script src="settings.js" defer></script>
+    <!-- Fully-module page (M07 Flight 2 leg 5): audit-paging.js (pure
+         pagination/freshness state machine), safe-color.js (injection-safe
+         color validator — M06 F4 Leg 5 HAT F7), and settings.js (the page
+         controller, which imports both via flat serving-path specifiers)
+         are all real ES modules (type="module"). The module loader
+         guarantees the dependencies; the explicit tag order is kept for
+         load-order legibility (the module map dedupes evaluation). -->
+    <script src="audit-paging.js" type="module"></script>
+    <script src="safe-color.js" type="module"></script>
+    <script src="settings.js" type="module"></script>
   </head>
   <body>
     <nav aria-label="Settings sections">

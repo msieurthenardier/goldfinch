@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Pure link/image/selection-search open-in-new-tab container inheritance (M06
 // Flight 2, HAT Leg 4 / D3). Extracted so the truth table is unit-testable
@@ -33,7 +32,7 @@
  * @param {boolean} sourceIsInternal
  * @returns {{ container?: { id?: any, burner?: boolean }, freshBurner?: boolean }}
  */
-function inheritContainerDecision(sourceContainer, sourceIsInternal) {
+export function inheritContainerDecision(sourceContainer, sourceIsInternal) {
   if (sourceIsInternal || !sourceContainer) return {};
   if (sourceContainer.burner) return { freshBurner: true };
   return { container: sourceContainer };
@@ -76,7 +75,7 @@ function inheritContainerDecision(sourceContainer, sourceIsInternal) {
  * @param {Array<{ id?: any, partition?: string, burner?: boolean }> | null | undefined} containers
  * @returns {{ container?: { id?: any, partition?: string, burner?: boolean }, freshBurner?: boolean }}
  */
-function inheritFromPartition(openerPartition, containers) {
+export function inheritFromPartition(openerPartition, containers) {
   if (typeof openerPartition !== 'string' || !openerPartition) return {};
   if (openerPartition.startsWith('burner:')) return { freshBurner: true };
   if (openerPartition.startsWith('persist:')) {
@@ -84,13 +83,4 @@ function inheritFromPartition(openerPartition, containers) {
     return match ? { container: match } : {};
   }
   return {}; // internal (`goldfinch-internal`) / unrecognized format → default
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer,
-// which runs with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { inheritContainerDecision, inheritFromPartition };
-} else {
-  /** @type {any} */ (globalThis).inheritContainerDecision = inheritContainerDecision;
-  /** @type {any} */ (globalThis).inheritFromPartition = inheritFromPartition;
 }

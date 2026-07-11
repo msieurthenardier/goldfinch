@@ -1,5 +1,9 @@
 // @ts-check
-'use strict';
+
+// Real ES module (M07 Flight 2 sweep). Consumers are the main process
+// (main.js, via require(esm)) and the test runner ONLY — no renderer document
+// ever loaded this file via <script>, so the old globalThis branch was dead
+// code and was deleted with the dual-export tail (no transitional bridge).
 
 /**
  * crossViewNavAction({ key, control, meta, shift, alt })
@@ -27,20 +31,11 @@
  * @param {{ key: string, control: boolean, meta: boolean, shift: boolean, alt: boolean }} input
  * @returns {'focus-address' | 'tab-handoff' | null}
  */
-function crossViewNavAction({ key, control, meta, shift, alt }) {
+export function crossViewNavAction({ key, control, meta, shift, alt }) {
   // Ctrl/Cmd+L — matches both `l` and `L` (the shifted form) with control||meta,
   // per the leg spec; no other guest accelerator uses the L key, so this is safe.
   if ((control || meta) && (key === 'l' || key === 'L')) return 'focus-address';
   // Unmodified forward Tab only — Shift/Ctrl/Alt/Meta+Tab fall through to null.
   if (key === 'Tab' && !shift && !control && !meta && !alt) return 'tab-handoff';
   return null;
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()) — mirrors
-// sheet-accelerator.js / keydown-action.js.
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { crossViewNavAction };
-} else {
-  /** @type {any} */ (globalThis).crossViewNavAction = crossViewNavAction;
 }
