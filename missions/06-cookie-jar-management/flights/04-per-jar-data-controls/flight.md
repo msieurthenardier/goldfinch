@@ -1,6 +1,6 @@
 # Flight: Per-Jar Data Controls
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -322,9 +322,9 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged
+- [x] Code merged
 - [x] Tests passing
-- [ ] Documentation updated
+- [x] Documentation updated
 
 ### Verification
 
