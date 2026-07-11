@@ -74,5 +74,7 @@ is the remaining empirical gate.
       legs (preload-require(esm) divert + split sweep); `src/shared/` on
       real ESM, collision machinery retired, code delta −194
 - [ ] Flight 3: Doc promotions — the three CLAUDE.md pattern notes, written
-      post-ESM (1 leg) — now includes the MockTimers recipe as a fourth
-      edit (Flight 1 debrief action item)
+      post-ESM — now includes the MockTimers recipe as a fourth edit
+      (Flight 1 debrief action item), the widened shared-module rewrite
+      (Flight 2 debrief Rec 1), and two ride-along invariant tests
+      (Flight 2 debrief Recs 2–3, operator-ruled 2026-07-11) — 2 legs
