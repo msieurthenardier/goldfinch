@@ -224,3 +224,64 @@ Target is Chrome's behavior: tabs **shrink much smaller** (toward favicon-only) 
 - **Sequencing caveat:** do it cleanly **before or after** Flight 3, never *inside* it —
   `responsive-tab-strip` is a Flight 3 HAT acceptance gate, so changing tab-strip behavior mid-flight
   would move the regression baseline under the migration.
+
+---
+
+## Connection-security transparency: surface post-quantum key exchange (+ trust anchor) in site-info
+
+**Status:** idea / future-mission seed — small, on-brand, mostly leverages inherited Chromium capability.
+**Captured:** 2026-07-11, during a threat-model thought-experiment session (OS-level identification →
+what a browser *can* honestly defend → encryption longevity).
+
+### The thesis
+Add a **connection-security readout** to the 🔒 site-info popup that tells the user, legibly, what
+protection is actually in force on the current connection. The headline row is **post-quantum status**:
+whether this page's TLS key exchange is **post-quantum-hybrid** (`X25519MLKEM768`) or **classical-only**
+(`X25519`). Chromium already negotiates hybrid ML-KEM by default where the server supports it — Goldfinch
+implements **no crypto and changes no connection**; the feature just makes the invisible visible. This is
+pure transparency over inherited capability, in the same spirit as media-visibility and tracker-visibility.
+
+### Why (the reasoning)
+The threat-model walk that produced this landed on a sharp scope boundary: a browser **cannot** defend
+the base OS or the transport envelope, and it **cannot** detect a dishonest/colluding endpoint. What it
+**can** do well is (a) enforce genuine end-to-end encryption, (b) make interception *detectable*, and
+(c) **tell the user honestly what is and isn't protected** on this connection. Most browsers negotiate PQ
+key exchange silently and never surface it; drawing the line sharply — "this connection is safe against
+harvest-now-decrypt-later, that one isn't" — is itself the feature. The relevant threat PQ addresses is
+**harvest-now-decrypt-later** (record ciphertext today, decrypt once a CRQC exists), which is why it
+matters even though no quantum computer exists yet.
+
+### What it is / is NOT
+- **IS:** a readout. Three states per tab: **post-quantum** (positive), **classical-only** (neutral/muted,
+  an honest "not HNDL-protected" signal), **not applicable** (`http://` / internal `goldfinch://`).
+- **NOT** a control — Goldfinch can't force PQ; the server decides. **NOT** new crypto. **NOT**
+  anonymity/metadata/OS protection — orthogonal to the whole identification thread; it speaks only to
+  *content-confidentiality longevity* on honest connections.
+
+### The gating spike (do this first — it decides whether the rest is worth building)
+**Data acquisition is the real risk, not the UI.** Electron exposes no clean public API for the negotiated
+key-exchange group. The source is **CDP** — `Network.responseReceived → response.securityDetails.keyExchangeGroup`,
+or `Security.getVisibleSecurityState`. That collides with two documented constraints:
+- The **`cdp.js` single-client lock** — a standing Network/Security-domain attach conflicts with a user
+  opening DevTools (the existing `debugger-unavailable` case).
+- The project's **prefer-`executeJavaScript`-over-CDP** discipline — and there is **no** main-world JS path
+  to the TLS group, so this feature genuinely needs CDP or it doesn't ship.
+Spike question (per the "gate any new mechanism on a cheap on-platform spike" rule): can we read
+`keyExchangeGroup` cheaply per-navigation (momentary attach on `did-navigate`, read once, detach, cache by
+`wcId`) **without** holding an attach that breaks DevTools? Options the spike settles: momentary-attach vs.
+accept a DevTools-open blind spot vs. decide the value isn't worth the CDP dependency.
+
+### Scope notes for when this becomes a mission (or small flight)
+- The pure/testable core is the **classification** (`keyExchangeGroup` string → {post-quantum | classical |
+  none} + label). Home it in `deriveSiteInfo` (`src/shared/site-info.js`, the single derivation source) as a
+  new `keyExchange` field; `siteInfoModel(activeTab())` carries it; the sheet's `info-popup` template renders
+  the row via `textContent`. Add a dual-export-style unit test for the classifier.
+- Data path mirrors existing site-info: main captures the group per-tab keyed by `wcId`, exposes it to the
+  renderer.
+- **Natural extension** (only if worth more than one row): a small **connection-transparency block** — TLS
+  version, cipher, PQ-ness, and the **trust anchor** (which root/CA validated this, surfaced so an
+  OS-injected MITM CA becomes *visible rather than silent*). The trust-anchor row is the one that pays off
+  the "make interception detectable" half of the thesis; PQ-status is the headline.
+- **Keep-current is the real prerequisite:** the inherited PQ benefit only exists if Electron/Chromium stays
+  current enough to ship `X25519MLKEM768` and Goldfinch doesn't override/downgrade the TLS config. Worth a
+  standing note wherever Electron bumps are decided.
