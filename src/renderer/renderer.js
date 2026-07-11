@@ -2953,7 +2953,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
   kebabActionSettings,
-  openContainerOverlay,
+  openContainerOverlay, // also driven by scripts/a11y-audit.mjs (SHEET_STATES 'sheet:container')
   // behavior-spec (tests/behavior/*.md drive these by name)
   createTab, // popup-jar-inheritance, jar-data-controls
   makeBurner, // popup-jar-inheritance, jar-data-controls

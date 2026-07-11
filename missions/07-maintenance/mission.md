@@ -73,8 +73,10 @@ is the remaining empirical gate.
       sweep + machinery retirement (~4-5 legs) — landed 2026-07-11 as 6
       legs (preload-require(esm) divert + split sweep); `src/shared/` on
       real ESM, collision machinery retired, code delta −194
-- [ ] Flight 3: Doc promotions — the three CLAUDE.md pattern notes, written
+- [x] Flight 3: Doc promotions — the three CLAUDE.md pattern notes, written
       post-ESM — now includes the MockTimers recipe as a fourth edit
       (Flight 1 debrief action item), the widened shared-module rewrite
       (Flight 2 debrief Rec 1), and two ride-along invariant tests
-      (Flight 2 debrief Recs 2–3, operator-ruled 2026-07-11) — 2 legs
+      (Flight 2 debrief Recs 2–3, operator-ruled 2026-07-11) — 2 legs —
+      landed 2026-07-11; CLAUDE.md rewritten for the post-ESM world, suite
+      1293/1293 with the two new invariant pins

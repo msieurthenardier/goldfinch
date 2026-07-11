@@ -1,12 +1,12 @@
 # Flight: Doc Promotions
 
-**Status**: ready
+**Status**: landed
 **Mission**: [Codebase Health — 2026-07-11 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] CLAUDE.md carries the three promoted patterns, post-ESM (criterion 4)
-- [ ] Gates stay green (criterion 5) — the two ride-along invariant tests
+- [x] CLAUDE.md carries the three promoted patterns, post-ESM (criterion 4)
+- [x] Gates stay green (criterion 5) — the two ride-along invariant tests
       (F2 debrief Recs 2–3, operator-ruled onto this flight 2026-07-11) are
       additive suite pins, not a mission criterion of their own
 
@@ -142,13 +142,13 @@ changes.
 
 ### Checkpoints
 
-- [ ] CP1: four edits + rewrite landed; CLAUDE.md internally consistent
+- [x] CP1: four edits + rewrite landed; CLAUDE.md internally consistent
       with the post-Flight-2 tree — full-file consistency sweep: grep
       CLAUDE.md for `dual-export`, `typeof module`, vm-replay/replay-net
       phrasing, eslint shared-globals block, `renderer-globals.d.ts`
       shared-global mentions; every hit judged exempt-or-real (grep-AC
       convention)
-- [ ] CP2: both invariant tests in the suite and green; each test
+- [x] CP2: both invariant tests in the suite and green; each test
       demonstrated to FAIL on a synthetic violation during leg
       verification (mutate a copy, not the tree), proving it pins what it
       claims
@@ -166,9 +166,9 @@ MockTimers note; test file names; whether the two tests share a file.
 
 ### Legs
 
-- [ ] `claude-md-promotions` — the four edits + shared-module rewrite +
+- [x] `claude-md-promotions` — the four edits + shared-module rewrite +
       consistency sweep (CP1)
-- [ ] `invariant-pins` — require-cache preload-graph test + static
+- [x] `invariant-pins` — require-cache preload-graph test + static
       seam-contract test (CP2)
 
 ---
@@ -177,9 +177,9 @@ MockTimers note; test file names; whether the two tests share a file.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Tests passing (suite + the two new pins)
-- [ ] Documentation updated (this IS the documentation)
+- [x] All legs completed
+- [x] Tests passing (suite + the two new pins) — 1293/1293, ~970ms
+- [x] Documentation updated (this IS the documentation)
 
 ### Verification
 
