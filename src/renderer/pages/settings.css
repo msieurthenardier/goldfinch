@@ -478,14 +478,38 @@ main section p {
   font-weight: 500;
 }
 
-/* Small color chip identifying the jar (matches the jar's color token). */
-.jar-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  display: inline-block;
+/* Per-jar key-state slot (F7 HAT, M06 F4 Leg 5): fixed 14x14 footprint so a
+   keyed row (robot glyph) and an unkeyed row (color dot) never jump against
+   each other. (Operator sizing follow-up: was 12x12, the old .jar-swatch
+   square's slot — bumped one notch together with the glyph/dot below.) */
+.jar-key-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  border: 1px solid var(--border);
+}
+
+/* Robot glyph for a jar WITH a minted automation key — same construction as the
+   toolbar automation indicator (src/renderer/index.html #automation-indicator):
+   stroke="currentColor", tinted via the jar's color (isSafeColor-guarded in
+   settings.js) on the element's inline `color`. Renders at 14px (settings.js
+   sets the SVG width/height attributes; sizing lives there, this rule only
+   normalizes display). */
+.jar-key-glyph {
+  display: block;
+}
+
+/* Color dot for a jar WITHOUT a key — mirrors the tab strip's per-tab jar dot
+   (.tab-jar in src/renderer/styles.css: a plain borderless circle), one notch
+   larger (10px vs the tab's 8px — operator sizing follow-up) so it balances
+   the 14px robot glyph in the shared slot. */
+.jar-key-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: block;
 }
 
 /* Show-once reveal block: set apart from the jars list so the just-minted key

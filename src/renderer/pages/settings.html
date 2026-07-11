@@ -6,6 +6,10 @@
     <title>Settings — Goldfinch</title>
     <link rel="stylesheet" href="settings.css" />
     <script src="audit-paging.js" defer></script>
+    <!-- Injection-safe color validator (M06 F4 Leg 5 HAT F7): loaded before
+         settings.js so its isSafeColor guard is available for the automation-key
+         list's robot glyph / unkeyed dot tint (see settings.js jar-row rendering). -->
+    <script src="safe-color.js" defer></script>
     <script src="settings.js" defer></script>
   </head>
   <body>

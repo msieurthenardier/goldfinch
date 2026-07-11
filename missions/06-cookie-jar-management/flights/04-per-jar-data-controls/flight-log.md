@@ -453,6 +453,150 @@ fallback port 49709 — fifth and sixth consecutive observations):
   header-only use — key discipline held; no key material in any committed
   artifact (leak-grep clean, operator-identity grep clean).
 
+### Leg 5 (HAT) design review (cycle 1 — approve with changes) + pre-HAT fix
+- The HAT-script review earned its keep before the operator spent a minute:
+  **it found a real bug in the leg-2 code by tracing the script's own step 6** —
+  `commitOrRevertName` had no dirty tracking, so blurring a focused-but-untyped
+  name input after a cross-page rename would commit the STALE name back,
+  silently reverting the other surface's rename (the exact opposite of the
+  code's documented sync-on-blur contract).
+- **FD call, made out loud per the mini-leg gate: FIX, not feature** (contradicts
+  documented intent; scoped one-file change). Developer spawned pre-HAT:
+  `nameDirty` flag set only by the input listener; non-dirty blur now syncs the
+  display instead of committing; Escape and all commit paths clear the flag;
+  comments updated to keep the contract truthful. Gates re-run green
+  (1269/1269, typecheck, lint). The HAT's step 6 is promoted to a REQUIRED
+  check as the fix's live witness (page DOM is HAT-owned per DD9 — no unit seam).
+- Script corrections adopted from the review: step 3 ends with the jar renamed
+  back to "HatOne" (later steps reference the label); step 4 names the picker
+  row precisely ("New Jar"), notes its open-a-tab side effect, and names the
+  second quick-create jar ("HatRace2") for cleanup accounting; step 7 lists the
+  full cleanup set and carries two crib notes (HatTwo's tabs close on delete —
+  expected F3 behavior; the delete control is currently a full-size "Delete
+  jar…" text danger button, presentation operator-adjustable).
+- Leg → `ready`. HAT is operator-interactive from here.
+
+### Leg 5 — hat-jar-data-controls (2026-07-10, completed — all 7 steps PASS)
+
+**Backfilled 2026-07-10 from the session transcript after a WSL crash killed the
+FD session mid-leg.** The crash lost the log writes, not the work: all fixes
+below are on the working tree and were re-verified post-crash (suite 1277/1277,
+typecheck, lint — all green).
+
+- **Step 1 (layout + entry points): PASS** ("functions well") with three
+  look-and-feel findings, all FIX under the inline protocol, implemented in one
+  Developer spawn and re-verified by the operator:
+  - **F1** — "Make default" moved into the section header, occupying the same
+    spot as the Default pill (the two swap in place as the flag moves).
+  - **F2** — wipe button relabeled "New identity" → **"Clear identity"**
+    (`jars.js:794`); success note aligned ("Identity cleared — …"). The privacy
+    panel's separate per-tab "New identity" button was deliberately left
+    untouched — different surface; rename it only if the operator asks.
+  - **F3** — delete button gains a leading trashcan icon (Flight 3's CSP-safe
+    `buildIcon` helper restored from `4e1d980`).
+  - Side Q&A recorded: "Clear identity" = full data wipe **plus fingerprint
+    persona reroll** (fresh farbling seed), vs the three data buttons which
+    clear stored data only and leave the persona linkable.
+- **Step 2 (create from sidebar): PASS** after two findings, fixed and
+  re-verified:
+  - **F4** — create panel repositioned: now a single stable node anchored
+    inside `#jars-sections` immediately before the Burner section, so the form
+    opens where the new jar's section will land (was: form at top, result at
+    bottom). One conditional `insertBefore` per render; contents still rebuilt
+    only on mode transitions, focus/caret preserved.
+  - **F5** — `pickNewJarColor` added to `jar-page-model.js` (beside PALETTE):
+    new-jar preselected swatch is uniformly random among palette colors not
+    already in use, whole-palette fallback when all are used. +8 unit tests
+    (rng determinism, used-color exclusion, all-used fallback, garbage-input
+    safety) — suite 1269 → **1277**.
+- **Step 3 (instant-apply editing): PASS** — operator reported "all pass"
+  covering the F4/F5 re-verification and the step-3 checklist (Enter commit,
+  blur commit, whitespace revert, Escape revert-and-blur, swatch recolor,
+  rename back to "HatOne").
+- **F6 (open at crash)** — operator finding outside the script: with the
+  settings tab open, renaming/recoloring a jar on the jars page does not update
+  the settings tab's jar display (automation key list renders jar name + color
+  but refreshes only on `settings-changed`; `jars-changed` is never
+  subscribed). FD ruled it a genuine cross-surface staleness bug **predating
+  this flight**; call: FIX, inline protocol. The Developer spawn for it was
+  interrupted ~90s in by the WSL crash — **no F6 code landed** (`settings.js`
+  untouched). Resumption re-spawns it.
+- **F6 fixed on resume** (Developer re-spawned with the original brief):
+  diagnosis confirmed — settings.js's automation key list refreshed only on
+  `settings-changed`; `jars-changed` (the rename/recolor broadcast) was never
+  subscribed. Fix subscribes both settings-page IIFEs via the internal
+  preload's existing `onJarsChanged`/`offJarsChanged` (the jars.js:1359
+  convention: subscribe + pagehide cleanup), reusing the existing `refresh()`
+  path — no parallel render path. **The Developer found a second instance of
+  the same bug class during diagnosis**: the automation activity viewer's
+  `jarNames` map (session labels) was seeded once from `automationKeysOnce()`
+  and never refreshed — also fixed, rebuilt from the broadcast payload.
+  One file (`settings.js`, +27), gates green (1277/1277, typecheck, lint).
+  Operator re-verification pending.
+- **F6 re-verified by operator: PASS** (key-list name + swatch update live on
+  rename/recolor from the jars page; post-crash relaunch).
+- **Step 4 (focus preservation): PASS** — caret survived a picker quick-create
+  broadcast mid-edit ("HatRace"); create panel + typed text survived a second
+  quick-create ("HatRace2"). DD6's hard requirement holds live.
+- **F7 (operator UX change, settings page)** — FD call, out loud: look-and-feel
+  FIX class, inline protocol (presentation swap on existing elements, no new
+  behavior/state; operator explicitly waved it through). Spec: in the
+  automation key list, (1) jars WITH a minted key show the robot icon in place
+  of the color square; (2) jars without a key show a color dot matching the
+  tab-strip presentation.
+- **F7 implemented**: keyed jars show the robot glyph (hand-reproduced from the
+  tab strip's `#automation-indicator` SVG via `createElementNS` — the original
+  is static markup, so no shared builder existed; `currentColor` + inline
+  jar-color tint, the indicator's own convention), unkeyed jars show an 8px
+  dot mirroring the tab strip's `.tab-jar` (deliberately NOT the jars page's
+  larger bordered dots — spec said "match the tab"). Same 12×12 slot footprint
+  either way; choice re-derives on every `renderJars()` so mint/revoke/
+  rename/recolor update live. **Net-new hardening flagged by the Developer**:
+  the old swatch set `jar.color` UNGUARDED and settings.html didn't even load
+  `safe-color.js` — the fix wires it in (`INTERNAL_PAGES.settings` in main.js +
+  script tag, per the jars-page precedent) and applies the
+  `isSafeColor`/`FALLBACK_COLOR` idiom. Files: settings.{js,css,html} +
+  main.js (page-serving wiring only). Gates green (1277/1277, typecheck,
+  lint). Operator re-verification pending.
+- **F7 re-verified by operator: PASS** ("perfect") with one sizing follow-up,
+  implemented by the same Developer (context continued): settings key-list
+  slot 12→14px, robot glyph 12→14, unkeyed dot 8→10 (tab strip's own 8px
+  `.tab-jar` untouched). Toolbar `#automation-indicator`: no literal CSS
+  padding found — the "excess padding" impression is the robot artwork's
+  viewBox whitespace (ink fills ~67% of the 24-unit box vs ~83% for Shields),
+  so the glyph renders 16→18px via an id-scoped override; the 36×32 button box
+  is unchanged (no toolbar height jump), viewBox left uncropped per the shared
+  Lucide convention. Next notch if still light: 20px. Gates green (1277/1277,
+  typecheck, lint). Sizing re-verification pending.
+- **F7 sizing re-verified by operator: PASS** ("perfect") — 18px toolbar robot
+  / 14px settings glyph / 10px dot stand.
+- **Step 5 (data controls, confirm-everything): PASS** — confirm-below-row with
+  focus landing, Cancel, Confirm + non-red success note, confirm SWAP on
+  cross-action click, Escape dismiss all verified live. **CP5 presentation
+  rulings**: operator passed the step with no change requests — (a) swapped-away
+  success note painting the shared status line: KEEP as-is; (b) silent failure
+  after swap-away: ACCEPTED as spec'd. Both closed.
+- **Step 6 (wipe reload + cross-surface race): PASS, all three parts** —
+  (1) HatTwo wipe visibly reloaded both its tabs, others untouched;
+  (2) HatRace deleted from page B collapsed page A's open delete confirm
+  silently, no stale editor; (3) **REQUIRED witness PASS**: focused-untyped
+  name field in page A synced to page B's rename on blur instead of
+  committing the stale name — the pre-HAT `commitOrRevertName` dirty-flag fix
+  is live-verified. Both F3 carry-forward zero-witness paths now have live
+  witnesses.
+- **Step 7 (cleanup): PASS** — HAT jars deleted (HatOne, HatTwo, HatRace2;
+  HatRace already removed by step 6's race), HatTwo's tabs closed on delete as
+  expected (F3 behavior), all surfaces back to real jars only. Operator noted
+  it's a dev instance and residual state is not a concern.
+- **HAT COMPLETE — all 7 steps PASS.** Findings ledger: F1-F5 (steps 1-2,
+  look-and-feel), F6 (cross-surface staleness, predates flight, + second
+  instance in activity viewer), F7 (settings key-list robot/dot iconography +
+  sizing pass incl. toolbar indicator 16→18px). All fixed inline, all
+  operator-re-verified. CP5 checked; both F3 carry-forward zero-witness paths
+  now live-witnessed. Leg 5 → `completed`, flight → `landed` per operator
+  instruction ("land the flight including the debrief; merge to main; bump
+  minor for a new installer").
+
 ---
 
 ## Decisions
@@ -516,3 +660,13 @@ fallback port 49709 — fifth and sixth consecutive observations):
   extended to all four burner/unknown-id rejection combinations across both
   channels; leg 1's description itemizes the cache-sentinel unit case. FD call:
   changes are mechanical/cosmetic — cycle 2 skipped per the skill's minor-fix rule.
+- 2026-07-10: HAT session (legs 1-4 committed at `8fcd43c` beforehand). Steps 1-3
+  passed with findings F1-F5 fixed inline and re-verified (detail in the Leg 5
+  backfill entry under Leg Progress). Operator then reported F6 (settings-tab jar
+  display staleness); the Developer spawn for it was cut off by a WSL crash that
+  ended the session. Log entries for the HAT were lost with the session.
+- 2026-07-10: Post-crash resume (new FD session). Tree verified intact; gates
+  re-run green (1277/1277, typecheck, lint); HAT ledger reconstructed from the
+  crashed session's transcript and backfilled above. Leg 5 `ready` → `in-flight`
+  (it was already being executed; the status write was lost with the crash).
+  Resuming at: F6 re-spawn, then HAT step 4.

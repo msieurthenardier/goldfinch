@@ -377,10 +377,19 @@ declare function buildJarPageModel(
 /**
  * Injected by src/shared/jar-page-model.js via the globalThis branch (the curated,
  * frozen swatch palette for the create/recolor swatch grid — M06 Flight 3 Leg 2 /
- * DD4). Every entry passes isSafeColor; PALETTE[0] is the preselected color for a
- * new jar.
+ * DD4). Every entry passes isSafeColor; pickNewJarColor (below) is what actually
+ * selects a new jar's color.
  */
 declare const PALETTE: readonly string[];
+
+/**
+ * Injected by src/shared/jar-page-model.js via the globalThis branch (the new-jar
+ * color-selection helper — M06 Flight 4 Leg 5 HAT F5). Uniformly random among
+ * `palette` entries not already in `usedColors`; falls back to uniformly random
+ * over the whole palette once every entry is used. `random` is an injectable RNG
+ * test seam, defaulting to Math.random.
+ */
+declare function pickNewJarColor(palette: readonly string[], usedColors: any[] | null | undefined, random?: () => number): string;
 
 /**
  * Injected by src/shared/jar-data-classes.js via the globalThis branch (the pure,

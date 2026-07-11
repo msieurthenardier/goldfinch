@@ -46,18 +46,26 @@
            thrown to console-only. -->
       <p id="jars-page-error" class="jar-error-line" aria-live="polite"></p>
 
-      <!-- Create-jar form panel, shown/hidden by jars.js (ui.mode === 'create').
-           Rebuilt ONLY on an actual open/close transition (Leg 2) — a
-           state-only render pass leaves an open panel's DOM untouched so an
-           in-progress name/color pick survives an unrelated broadcast. -->
-      <div id="jars-create-panel"></div>
-
       <!-- One always-expanded <section id="jar-{id}"> per jar (incl. Burner,
            read-only) — reconciled per-section, keyed by jar id (Leg 2 / DD6).
            NO aria-live here (FD ruling): it reconciles on every jars-changed
            broadcast from ANY surface, which would be announcement spam. The
            live regions are exactly #jars-page-error and each section's own
-           error line. -->
+           error line.
+
+           The create-jar form panel (#jars-create-panel, ui.mode === 'create')
+           is NOT static markup here (HAT step-2 finding F4: the form must
+           render where its result lands — immediately before the Burner
+           section, after the last persistent jar's section — a position that
+           varies with the persistent-jar count, so it can't be a fixed spot
+           in static HTML). jars.js builds it as a single stable DOM node and
+           anchors it dynamically into this container (anchorCreatePanel).
+           Its CONTENTS are still rebuilt only on an actual ui.mode open/close
+           transition (Leg 2, unchanged) — a state-only render pass leaves an
+           open panel's DOM untouched so an in-progress name/color pick
+           survives an unrelated broadcast; its POSITION moves only via a
+           single conditional insertBefore call, which never disturbs
+           focus/caret inside it. -->
       <div id="jars-sections"></div>
     </main>
   </body>

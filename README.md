@@ -89,9 +89,11 @@ or download **v0.6.0** directly:
   - Isolated containers, each backed by its own Electron session partition
     (separate cookies, storage, cache, and farble seed). New installs start
     with **Personal** (the default jar) and **Work**; profiles from earlier
-    versions keep their existing container set unchanged. Fuller jar
-    management (rename, delete, pick the default) arrives later in this
-    mission.
+    versions keep their existing container set unchanged.
+  - **Jar management page** (`goldfinch://jars`, opened from the kebab menu's
+    "Cookie jars" entry or the container picker's "Manage jars…" row) — a
+    settings-style page listing every jar, with instant-apply rename, recolor,
+    make-default, create, and delete.
   - **Ephemeral burner tabs** — non-persistent partition that evaporates when the
     tab is closed; leaves no cookies or storage behind.
   - **User-created jars** — add custom containers with a name and color; each
@@ -99,6 +101,12 @@ or download **v0.6.0** directly:
   - **New Identity** (in the Shield panel → Jar section) — wipes the current
     jar's cookies and storage, rerolls its fingerprint seed, and reloads the
     page so the site cannot link the new session to the old one.
+  - **Per-jar data controls** (on the jar management page, each jar's own
+    section) — confirm-gated "Clear cookies" / "Clear site storage" / "Clear
+    cache" buttons plus **"Clear identity"**, a full data wipe with a
+    fingerprint-seed reroll that auto-reloads the jar's open tabs. Same
+    operation as the Shield panel's per-tab New Identity above, just scoped to
+    the whole jar from the management page — the two coexist.
 - **Pinnable toolbar icons** — the **Media**, **Shields**, and **DevTools** toolbar
   buttons are icon buttons (Media/Shields carry a count badge) that can be pinned
   or unpinned:

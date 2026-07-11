@@ -1186,6 +1186,17 @@ a:focus-visible {
 #automation-indicator {
   color: var(--fg-dim);
 }
+/* The robot artwork's ink only spans ~16 of the 24 viewBox units vertically
+   (y=4–20; the Shields glyph spans ~20), so at the shared 16px .tb-glyph render
+   size it reads visibly smaller than its toolbar neighbors. Render it one notch
+   larger (18px) to even out the visual weight — id-scoped so the other toolbar
+   glyphs keep their 16px convention; the 36×32 .icon-btn box is untouched (flex
+   centering absorbs the difference — no toolbar height change). CSS wins over
+   the SVG's width/height="16" attributes. */
+#automation-indicator .tb-glyph {
+  width: 18px;
+  height: 18px;
+}
 #automation-indicator .tb-badge {
   background: var(--accent);
   color: var(--accent-fg);

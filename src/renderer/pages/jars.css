@@ -278,11 +278,12 @@ main {
   border-color: var(--err);
 }
 
-/* "Make default" (F6 ruling: stays text, no icon) */
+/* "Make default" (F6 ruling: stays text, no icon). F1 (HAT step-1): lives in
+   the section header now, in the same slot the Default pill occupies — no
+   bottom margin needed there (the header is a single centered flex row). */
 .jar-btn-compact {
   padding: 4px 10px;
   font-size: 12px;
-  margin-bottom: 12px;
 }
 
 /* ── Name input + swatch grid (DD6 instant-apply) ── */
@@ -397,13 +398,36 @@ main {
   margin-top: 4px;
 }
 
-/* ── Create panel ── */
+/* Delete button's leading trash icon (HAT step-1 finding F3): icon + visible
+   text, the icon is decorative (aria-hidden, set in jars.js's buildIcon). */
+.jar-btn-icon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jar-btn-icon-label .jar-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: block;
+}
+
+/* ── Create panel ──
+   Lives inside #jars-sections now (HAT step-2 finding F4), anchored by
+   jars.js immediately before the Burner section so the form renders exactly
+   where its result — the new jar's section — will land. Spacing mirrors
+   .jar-section's own rhythm (40px bottom margin, scroll-margin-top for
+   scrollIntoView clearance) since it now sits between two sections in the
+   flow instead of above them; empty (ui.mode !== 'create') collapses to
+   nothing via :not(:empty), so a closed panel contributes no gap. */
 #jars-create-panel:not(:empty) {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 16px;
-  margin-bottom: 24px;
+  margin-bottom: 40px;
+  scroll-margin-top: 24px;
 }
 
 .jar-form {

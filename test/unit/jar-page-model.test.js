@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { BURNER } = require('../../src/shared/burner');
 const { isSafeColor } = require('../../src/shared/safe-color');
-const { buildJarPageModel, PALETTE } = require('../../src/shared/jar-page-model');
+const { buildJarPageModel, PALETTE, pickNewJarColor } = require('../../src/shared/jar-page-model');
 
 const personal = { id: 'personal', name: 'Personal', color: '#4caf50' };
 const work = { id: 'work', name: 'Work', color: '#2196f3' };
@@ -126,4 +126,71 @@ test('PALETTE is frozen', () => {
 test('PALETTE[0] is a sensible default-new-jar color (defined, isSafeColor-clean)', () => {
   assert.equal(typeof PALETTE[0], 'string');
   assert.ok(isSafeColor(PALETTE[0]));
+});
+
+// ---------------------------------------------------------------------------
+// pickNewJarColor (HAT M06 Flight 4 Leg 5 F5: new-jar color selection — uniformly
+// random among unused palette entries, falling back to uniformly random over the
+// whole palette once every entry is used; defensive on malformed input)
+// ---------------------------------------------------------------------------
+
+test('injected rng=0 picks the first unused palette entry', () => {
+  const color = pickNewJarColor(PALETTE, [], () => 0);
+  assert.equal(color, PALETTE[0]);
+});
+
+test('injected rng just under 1 picks the last unused palette entry', () => {
+  const color = pickNewJarColor(PALETTE, [], () => 0.999999999);
+  assert.equal(color, PALETTE[PALETTE.length - 1]);
+});
+
+test('a single remaining unused color is always chosen, regardless of rng', () => {
+  const usedColors = PALETTE.slice(1); // every entry but PALETTE[0] is used
+  for (const rng of [0, 0.25, 0.5, 0.75, 0.999999999]) {
+    assert.equal(pickNewJarColor(PALETTE, usedColors, () => rng), PALETTE[0]);
+  }
+});
+
+test('used colors are excluded from the pick across many rng draws', () => {
+  const usedColors = [PALETTE[0], PALETTE[1]];
+  for (let i = 0; i < 50; i++) {
+    const color = pickNewJarColor(PALETTE, usedColors, () => i / 50);
+    assert.ok(!usedColors.includes(color), `${color} should not be a used color`);
+  }
+});
+
+test('when every palette entry is used, falls back to a uniformly random pick over the whole palette', () => {
+  const usedColors = PALETTE.slice(); // copy — every entry used
+  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0), PALETTE[0]);
+  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0.999999999), PALETTE[PALETTE.length - 1]);
+  // still random over the full palette, not pinned to a single fallback entry
+  const midIndex = Math.floor(PALETTE.length / 2);
+  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0.5), PALETTE[midIndex]);
+});
+
+test('a non-array usedColors is treated as no used colors, never throws', () => {
+  assert.doesNotThrow(() => {
+    const color = pickNewJarColor(PALETTE, /** @type {any} */ ('not-an-array'), () => 0);
+    assert.equal(color, PALETTE[0]);
+  });
+});
+
+test('an empty or invalid palette returns a safe fallback (PALETTE[0]), never throws', () => {
+  assert.doesNotThrow(() => {
+    assert.equal(pickNewJarColor(/** @type {any} */ ([]), [], () => 0), PALETTE[0]);
+  });
+  assert.doesNotThrow(() => {
+    assert.equal(pickNewJarColor(/** @type {any} */ (null), [], () => 0), PALETTE[0]);
+  });
+  assert.doesNotThrow(() => {
+    assert.equal(pickNewJarColor(/** @type {any} */ (undefined), /** @type {any} */ ('garbage'), () => 0), PALETTE[0]);
+  });
+});
+
+test('the result is always a member of the palette for valid palettes, across many rng values', () => {
+  for (let i = 0; i < 100; i++) {
+    const rng = i / 100;
+    const color = pickNewJarColor(PALETTE, [], () => rng);
+    assert.ok(PALETTE.includes(color), `${color} (rng=${rng}) should be a PALETTE member`);
+  }
 });

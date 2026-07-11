@@ -33,6 +33,15 @@
  * transition (open/close), never on a state-only render pass, so typing in it
  * survives an unrelated broadcast.
  *
+ * The create panel's DOM POSITION is likewise a single stable node, never
+ * torn down and recreated (HAT step-2 finding F4): it is not part of the row
+ * model, so it lives outside sectionMap and is anchored explicitly into
+ * #jars-sections immediately before the Burner section (anchorCreatePanel),
+ * one conditional insertBefore call per render — the form renders exactly
+ * where its result (the new jar's section) will land, and a section inserted
+ * while the panel is open lands before it, never disturbing focus/caret
+ * inside an open panel.
+ *
  * CSP: served as a same-origin subresource under default-src 'self' (no
  * 'unsafe-inline'). NO inline event handlers; NO dynamic <script>/<style>
  * injection. All DOM is built with createElement + textContent (names are
@@ -56,11 +65,71 @@
   const sectionsEl = /** @type {HTMLElement|null} */ (document.getElementById('jars-sections'));
   const navEl = /** @type {HTMLElement|null} */ (document.getElementById('jars-nav'));
   const newBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('jars-new'));
-  const createPanelEl = /** @type {HTMLElement|null} */ (document.getElementById('jars-create-panel'));
   const pageErrorEl = /** @type {HTMLElement|null} */ (document.getElementById('jars-page-error'));
-  if (!sectionsEl || !navEl || !newBtn || !createPanelEl || !pageErrorEl) return;
+  if (!sectionsEl || !navEl || !newBtn || !pageErrorEl) return;
+
+  // The create panel is built here (not as static markup in jars.html) and
+  // anchored dynamically into #jars-sections, immediately before the Burner
+  // section — HAT step-2 finding F4: the form must render where its result
+  // (the new jar's section) lands, and that position depends on the
+  // persistent-jar count, so it can't be a fixed spot in static HTML. It is
+  // ONE stable node for the page's lifetime: never recreated, and never
+  // detached-then-reattached — only repositioned via a single conditional
+  // insertBefore move (see anchorCreatePanel), which — like every other
+  // insertBefore reposition on this page (renderSections' own note below) —
+  // never disturbs focus/caret inside it. Its CONTENTS are still rebuilt
+  // only on an actual ui.mode open/close transition (renderCreatePanel /
+  // maybeRenderCreatePanel, unchanged from Leg 2).
+  const createPanelEl = document.createElement('div');
+  createPanelEl.id = 'jars-create-panel';
 
   const FALLBACK_COLOR = '#9aa0ac';
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Build a decorative inline icon (Lucide-style: 24x24 viewBox, 16x16 render
+   * size, stroke=currentColor so it inherits the button's text color — same
+   * convention already used for the static toolbar/pin-toggle icons in
+   * index.html and settings.html). Built entirely via createElementNS — NEVER
+   * innerHTML/a template string — matching this page's textContent-only CSP
+   * convention (module doc comment). Restored from Flight 3's implementation
+   * (removed as dead code in Leg 2; reinstated at HAT step-1 finding F3 for
+   * the delete button's trash icon — git show 4e1d980:src/renderer/pages/jars.js).
+   * @param {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} shapes
+   * @returns {SVGSVGElement}
+   */
+  function buildIcon(shapes) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.classList.add('jar-icon');
+    for (const shape of shapes) {
+      const el = document.createElementNS(SVG_NS, shape.tag);
+      for (const key of Object.keys(shape.attrs)) el.setAttribute(key, shape.attrs[key]);
+      svg.appendChild(el);
+    }
+    return svg;
+  }
+
+  // Lucide "trash-2" path data (ISC license) — same icon set/style already
+  // vendored as static SVG for the toolbar and pin-toggle buttons, and as
+  // Flight 3's icon-only delete button (git show 4e1d980).
+  /** @type {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} */
+  const ICON_DELETE = [
+    { tag: 'path', attrs: { d: 'M3 6h18' } },
+    { tag: 'path', attrs: { d: 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6' } },
+    { tag: 'path', attrs: { d: 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2' } },
+    { tag: 'line', attrs: { x1: '10', x2: '10', y1: '11', y2: '17' } },
+    { tag: 'line', attrs: { x1: '14', x2: '14', y1: '11', y2: '17' } }
+  ];
 
   /** @typedef {{ containers: Array<any>, defaultId: (string|null) }} JarsState */
   /** @typedef {{ mode: ('create'|'confirm'|null), rowId: (string|null), action: (string|null), draft: ({name: string, color: string}|null) }} UiState */
@@ -375,7 +444,8 @@
    *   makeDefaultBtn?: HTMLButtonElement, deleteArea?: HTMLElement,
    *   deleteConfirmOpen?: boolean, pendingColor?: (string|null),
    *   dataButtons?: Map<string, HTMLButtonElement>, dataConfirmArea?: HTMLElement,
-   *   dataConfirmOpenKey?: (string|null), statusClearHandle?: (number|null)
+   *   dataConfirmOpenKey?: (string|null), statusClearHandle?: (number|null),
+   *   nameDirty?: boolean
    * }} SectionRefs
    */
 
@@ -383,10 +453,15 @@
   const sectionMap = new Map();
 
   /**
-   * Build the always-expanded section for a persistent (non-Burner) jar: header
-   * (dot + name + Default pill), inline name input + swatch grid (instant
-   * apply, DD6), "Make default" text button (F6: stays text), the data-controls
-   * block (button row + shared confirm area, DD5/leg 3), and Delete.
+   * Build the always-expanded section for a persistent (non-Burner) jar:
+   * header (dot + name + a header-slot occupied by EITHER the Default pill OR
+   * the "Make default" text button — HAT step-1 finding F1: the button moved
+   * into the same slot the pill occupies, so only one of the two is ever
+   * visible, toggled via `.hidden` in updateJarSection; both stay attached to
+   * the header permanently, which is what keeps the swap in place instead of
+   * a rebuild), inline name input + swatch grid (instant apply, DD6), the
+   * data-controls block (button row + shared confirm area, DD5/leg 3), and
+   * Delete. "Make default" stays a text button (F3 HAT ruling).
    * @param {JarRow} row
    * @returns {SectionRefs}
    */
@@ -406,6 +481,13 @@
     pill.className = 'jar-badge';
     pill.textContent = 'Default';
     header.appendChild(pill);
+
+    const makeDefaultBtn = document.createElement('button');
+    makeDefaultBtn.type = 'button';
+    makeDefaultBtn.className = 'jar-btn jar-btn-compact';
+    makeDefaultBtn.textContent = 'Make default';
+    header.appendChild(makeDefaultBtn);
+
     section.appendChild(header);
 
     const nameLabel = document.createElement('label');
@@ -427,12 +509,6 @@
     errorLine.className = 'jar-error-line';
     errorLine.setAttribute('aria-live', 'polite');
     section.appendChild(errorLine);
-
-    const makeDefaultBtn = document.createElement('button');
-    makeDefaultBtn.type = 'button';
-    makeDefaultBtn.className = 'jar-btn jar-btn-compact';
-    makeDefaultBtn.textContent = 'Make default';
-    section.appendChild(makeDefaultBtn);
 
     const dataControls = buildDataControlsBlock(row.id);
     section.appendChild(dataControls.root);
@@ -460,10 +536,21 @@
       dataButtons: dataControls.buttons,
       dataConfirmArea: dataControls.confirmArea,
       dataConfirmOpenKey: undefined,
-      statusClearHandle: null
+      statusClearHandle: null,
+      nameDirty: false
     };
 
     makeDefaultBtn.addEventListener('click', () => handleSetDefault(row.id));
+
+    // Dirty tracking (HAT review fix): ONLY this listener sets nameDirty, so it
+    // fires exclusively on operator keystrokes, never on a programmatic
+    // `.value =` assignment (the sync paths below assign directly and do not
+    // dispatch `input`). commitOrRevertName below uses this flag — not a
+    // stale-vs-store diff — to tell an operator edit apart from a focused
+    // input's display having gone stale under it via broadcast.
+    nameInput.addEventListener('input', () => {
+      refs.nameDirty = true;
+    });
 
     nameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -471,6 +558,7 @@
         // revert + blur, and stop the event from reaching it (leg spec AC).
         e.stopPropagation();
         nameInput.value = refs.row ? refs.row.name : '';
+        refs.nameDirty = false;
         nameInput.blur();
         return;
       }
@@ -498,7 +586,10 @@
     refs.makeDefaultBtn.setAttribute('aria-label', `Make ${row.name} the default jar`);
 
     // Uniform focus rule: a focused name input's value is never overwritten by
-    // a render pass — it syncs on blur (via commitOrRevertName) instead.
+    // a render pass — it syncs on blur (via commitOrRevertName) instead. That
+    // deferred sync only actually runs the display-catchup branch (not a
+    // commit) when the input is clean (nameDirty is false) — see
+    // commitOrRevertName.
     if (document.activeElement !== refs.nameInput) {
       refs.nameInput.value = row.name;
     }
@@ -568,23 +659,44 @@
 
   /**
    * Commit-or-revert a section's name input (Enter and blur share this path).
-   * Only invokes jarsRename when the trimmed value is non-empty and differs
-   * from the store name (page-side trim is the SOLE whitespace enforcement —
-   * F3 ruling carried forward); a whitespace-only or no-op edit reverts to the
-   * store name in place.
+   *
+   * The input's own `input` listener is the ONLY thing that sets
+   * `refs.nameDirty` — so it is true iff the operator typed since the last
+   * commit/revert/sync. A focused input never gets its `.value` overwritten by
+   * a render pass (uniform focus rule); instead the store can move out from
+   * under it (another page's rename arrives via broadcast) while the display
+   * stays stale. If the input is NOT dirty, that staleness — not an edit — is
+   * the only thing that could be pending, so this is the deferred sync
+   * completing: catch the display up to the current store name and return
+   * WITHOUT calling jarsRename (doing otherwise would re-commit the stale
+   * display and silently clobber whatever the other page just wrote).
+   *
+   * When the input IS dirty, only invoke jarsRename if the trimmed value is
+   * non-empty and differs from the store name (page-side trim is the SOLE
+   * whitespace enforcement — F3 ruling carried forward); a whitespace-only or
+   * no-op edit reverts to the store name in place. Every exit path below
+   * clears nameDirty — a commit/revert always leaves the input clean.
    * @param {string} id
    * @param {SectionRefs} refs
    */
   function commitOrRevertName(id, refs) {
     const inputEl = refs.nameInput;
     const storeName = refs.row ? refs.row.name : '';
+    if (!refs.nameDirty) {
+      // Deferred focused-sync completing: no operator edit is pending, so
+      // catch the display up to the (possibly just-broadcast) store name.
+      inputEl.value = storeName;
+      return;
+    }
     const trimmed = inputEl.value.trim();
     if (trimmed === '' || trimmed === storeName) {
       inputEl.value = storeName;
+      refs.nameDirty = false;
       return;
     }
     bridge.jarsRename({ id, name: trimmed })
       .then((result) => {
+        refs.nameDirty = false;
         if (!result) {
           setSectionStatus(refs, "Couldn't update jar", false);
           if (document.activeElement !== inputEl) inputEl.value = refs.row ? refs.row.name : storeName;
@@ -593,6 +705,7 @@
         setSectionStatus(refs, '', false);
       })
       .catch(() => {
+        refs.nameDirty = false;
         setSectionStatus(refs, "Couldn't update jar", false);
         if (document.activeElement !== inputEl) inputEl.value = refs.row ? refs.row.name : storeName;
       });
@@ -621,7 +734,7 @@
   };
   const WIPE_COPY =
     "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will reload.";
-  const WIPE_OK_NOTE = 'New identity — data wiped, fingerprint rerolled.';
+  const WIPE_OK_NOTE = 'Identity cleared — data wiped, fingerprint rerolled.';
 
   /**
    * Data-controls action table (leg spec guidance #2): one entry per confirm
@@ -678,7 +791,7 @@
     const wipeBtn = document.createElement('button');
     wipeBtn.type = 'button';
     wipeBtn.className = 'jar-btn jar-btn-danger';
-    wipeBtn.textContent = 'New identity';
+    wipeBtn.textContent = 'Clear identity';
     wipeBtn.addEventListener('click', () => openDataConfirm(id, 'wipe'));
     buttons.set('wipe', wipeBtn);
     buttonRow.appendChild(wipeBtn);
@@ -816,14 +929,19 @@
   }
 
   /**
+   * Full-size text danger button with a leading trash icon (HAT step-1
+   * finding F3). The icon is aria-hidden decoration (buildIcon sets it) — the
+   * visible "Delete jar…" text (plus the per-jar aria-label, unchanged) is
+   * what carries the accessible name, so adding the icon doesn't touch it.
    * @param {JarRow} row
    * @returns {HTMLButtonElement}
    */
   function buildDeleteButton(row) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'jar-btn jar-btn-danger';
-    btn.textContent = 'Delete jar…';
+    btn.className = 'jar-btn jar-btn-danger jar-btn-icon-label';
+    btn.appendChild(buildIcon(ICON_DELETE));
+    btn.appendChild(document.createTextNode('Delete jar…'));
     btn.setAttribute('aria-label', `Delete ${row.name}`);
     btn.addEventListener('click', () => openConfirmDelete(row));
     return btn;
@@ -957,6 +1075,20 @@
    * buildJarPageModel's own ordering, so no special-casing needed here).
    * insertBefore never disturbs an already-attached node's focus, so this
    * reordering pass is safe even mid-edit.
+   *
+   * Burner gets its own positioning branch (F4 fix): the create panel is NOT
+   * part of `rows`, but it lives in #jars-sections too (anchored just before
+   * Burner — see anchorCreatePanel). If Burner were positioned via the same
+   * `prevEl.nextSibling` check as every other row, an open panel sitting
+   * between the last persistent section and Burner would make that check see
+   * the panel instead of Burner and wrongly conclude Burner is out of place
+   * on EVERY render — shuffling it before the panel, which anchorCreatePanel
+   * would then have to shuffle back, on every single render pass while the
+   * panel is open. Positioning Burner as sectionsEl's literal last child
+   * sidesteps that: Burner is always the final row (buildJarPageModel's
+   * ordering contract), so "is it already the last child" is the correct,
+   * churn-free check regardless of whether the panel is currently attached
+   * between it and the previous section.
    * @param {JarRow[]} rows
    */
   function renderSections(rows) {
@@ -983,12 +1115,47 @@
         updateJarSection(refs, row);
       }
 
-      if (prevEl == null) {
+      if (row.isBurner) {
+        if (sectionsEl.lastChild !== refs.root) sectionsEl.appendChild(refs.root);
+      } else if (prevEl == null) {
         if (sectionsEl.firstChild !== refs.root) sectionsEl.insertBefore(refs.root, sectionsEl.firstChild);
       } else if (prevEl.nextSibling !== refs.root) {
         sectionsEl.insertBefore(refs.root, prevEl.nextSibling);
       }
       prevEl = refs.root;
+    }
+  }
+
+  /**
+   * Anchor the create panel immediately before the Burner section (F4 fix).
+   * The panel isn't part of `rows`, so renderSections above never positions
+   * it — this corrective step runs after every render (state-only or
+   * ui.mode transition alike) and repositions it via ONE conditional
+   * insertBefore call: a no-op in the steady-state case where it's already
+   * in the right spot, and otherwise a single atomic DOM move — which, like
+   * every other insertBefore reposition on this page, never disturbs a
+   * currently-focused descendant, so this is safe to run even while the
+   * panel holds focus (typed name / picked color mid-edit).
+   *
+   * Because this runs on every render, a NEW jar section inserted while the
+   * panel is open lands before it automatically: renderSections' own
+   * insertBefore call for that new row targets `prevEl.nextSibling`, which —
+   * in the steady state this function maintains — IS the panel, so the new
+   * section is slotted in right before it, and this function then finds the
+   * panel already correctly placed before Burner and no-ops.
+   * @param {JarRow[]} rows
+   */
+  function anchorCreatePanel(rows) {
+    const burnerRow = rows.find((r) => r.isBurner);
+    const burnerRefs = burnerRow ? sectionMap.get(burnerRow.id) : null;
+    if (burnerRefs) {
+      if (createPanelEl.parentNode !== sectionsEl || createPanelEl.nextSibling !== burnerRefs.root) {
+        sectionsEl.insertBefore(createPanelEl, burnerRefs.root);
+      }
+    } else if (createPanelEl.parentNode !== sectionsEl || sectionsEl.lastChild !== createPanelEl) {
+      // Defensive fallback — buildJarPageModel always appends a Burner row,
+      // so this branch is not reachable in practice.
+      sectionsEl.appendChild(createPanelEl);
     }
   }
 
@@ -1125,7 +1292,7 @@
     if (ui.mode === 'create') {
       closeTransient();
     } else {
-      ui = { mode: 'create', rowId: null, action: null, draft: { name: '', color: PALETTE[0] } };
+      ui = { mode: 'create', rowId: null, action: null, draft: { name: '', color: pickNewJarColor(PALETTE, state.containers.map((c) => c.color)) } };
       render();
     }
   });
@@ -1161,6 +1328,7 @@
 
     renderNav(rows);
     renderSections(rows);
+    anchorCreatePanel(rows);
     observeSectionsIfChanged(rows);
     maybeRenderCreatePanel();
   }

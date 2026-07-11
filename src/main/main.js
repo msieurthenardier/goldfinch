@@ -101,7 +101,12 @@ const INTERNAL_PAGES = {
     // <script> before settings.js. Kept in src/shared/ for the lint-clean UMD tail
     // + node-test require(); served here so the goldfinch://settings guest can load
     // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
-    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js')
+    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js'),
+    // Injection-safe color validator (M06 F4 Leg 5 HAT F7): the automation-key
+    // list guards the jar color it tints the robot glyph / unkeyed dot with, the
+    // same isSafeColor/FALLBACK_COLOR idiom jars.js uses — precedent: jars serves
+    // this same shared module (see the jars host entry below).
+    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js')
   },
   // Second internal page (Flight 5, Leg 2): the app-level downloads surface. Same
   // allowlist-driven serving as settings — handleInternal/createResolver/INTERNAL_CSP

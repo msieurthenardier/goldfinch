@@ -1,6 +1,6 @@
 # Flight: Per-Jar Data Controls
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -238,7 +238,7 @@ anyway.
       serviceworkers/cachestorage).
 - [x] No new network services — no environment conflicts beyond the known port
       fallback.
-- [ ] GUI-capable session for the HAT leg (operator present — verified at execution).
+- [x] GUI-capable session for the HAT leg (operator present — verified at execution).
 
 ### Pre-Flight Checklist
 
@@ -279,7 +279,7 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
       jar-data-controls run)
 - [x] CP4: `jar-data-controls` behavior spec passes on a fresh stage (7/7);
       `jar-delete-closes-tabs` re-passes (5/5); suite + typecheck + lint green (leg 4)
-- [ ] CP5: HAT signed off — including the reconcileUi cross-surface race and
+- [x] CP5: HAT signed off — including the reconcileUi cross-surface race and
       create/confirm Escape paths deliberately exercised (leg 5)
 
 ### Adaptation Criteria
@@ -313,7 +313,7 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
       `onJarWiped` preload listener + reload sweep (CP3)
 - [x] `verify-integration` — behavior tests on fresh stages + suite/typecheck/lint
       against committed baseline (CP4)
-- [ ] `hat-jar-data-controls` — guided HAT incl. the F3 carry-forward paths (CP5)
+- [x] `hat-jar-data-controls` — guided HAT incl. the F3 carry-forward paths (CP5)
 
 ---
 
@@ -321,9 +321,9 @@ the relayout must not break it — cheap regression insurance). The HAT closes.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
+- [x] Tests passing
 - [ ] Documentation updated
 
 ### Verification

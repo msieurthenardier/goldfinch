@@ -194,7 +194,7 @@ identity, not id string, and already degrades gracefully when a jar disappears.
       first-tab constant/race); Burner-as-default fallback behavior
 - [x] Flight 3: Jar management page — new special page with jar list, create, rename,
       recolor, delete, and set-default interactions
-- [ ] Flight 4: Per-jar data controls — clear cookies / site storage / cache, full
+- [x] Flight 4: Per-jar data controls — clear cookies / site storage / cache, full
       identity wipe integration, extensible clearable-data-class list
 - [ ] Flight 5: Chrome integration — entry points, container-picker parity with the new
       lifecycle, fresh-install defaults verification, delete-with-open-tabs vs.
