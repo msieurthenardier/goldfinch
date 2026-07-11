@@ -243,8 +243,8 @@ interface GoldfinchInternalBridge {
   onJarsChanged(cb: (payload: { containers: Array<object>; defaultId: string | null }) => void): number;
   offJarsChanged(h: number): void;
   // --- per-jar data controls (Flight 4, Leg 1/3) ---
-  jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[] }>;
-  jarsWipe(payload: { id: string }): Promise<{ ok: boolean }>;
+  jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
+  jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
 }
 
 interface Window {

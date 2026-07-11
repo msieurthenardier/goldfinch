@@ -1,6 +1,6 @@
 # Mission: Codebase Health — 2026-07-11 Maintenance
 
-**Status**: planning
+**Status**: active
 
 ## Outcome
 
@@ -66,8 +66,9 @@ is the remaining empirical gate.
 
 ## Flights
 
-- [ ] Flight 1: Suite & contract hygiene — timer mocks + `{ok:false, error}`
-      standardization (2 legs, no dependencies)
+- [x] Flight 1: Suite & contract hygiene — timer mocks + `{ok:false, error}`
+      standardization (2 legs, no dependencies) — landed 2026-07-11; suite
+      5.0s → 958ms, both data channels error-bearing on every failure branch
 - [ ] Flight 2: ESM conversion of `src/shared/` — pilot leg gating the full
       sweep + machinery retirement (~4-5 legs)
 - [ ] Flight 3: Doc promotions — the three CLAUDE.md pattern notes, written

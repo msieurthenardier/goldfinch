@@ -118,14 +118,18 @@ test('findInPage: resolves activeMatchOrdinal and matches from a matching-reques
   assert.equal(wc._finds[0].text, 'hello');
 });
 
-test('findInPage: zero-matches result returned cleanly (not an error)', async () => {
+test('findInPage: zero-matches result returned cleanly (not an error)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(2);
   const deps = {
     fromId: makeFakeFromId({ 2: wc }),
     findTimeoutMs: 100, // short timeout — no matching event, resolves last={0,0}
   };
 
-  const result = await findInPage(2, 'missing', deps);
+  const p = findInPage(2, 'missing', deps);
+  await new Promise(r => setImmediate(r));
+  t.mock.timers.tick(100);
+  const result = await p;
   assert.deepEqual(result, { activeMatchOrdinal: 0, matches: 0 });
 });
 
@@ -174,7 +178,8 @@ test('findInPage: exactly one found-in-page listener during a find (listener hyg
 //   re-issue happens; a later matches>0 event resolves the real count
 // ---------------------------------------------------------------------------
 
-test('findInPage: cold-start — finalUpdate:true,matches:0 does not resolve; re-issue happens; matches>0 resolves', async () => {
+test('findInPage: cold-start — finalUpdate:true,matches:0 does not resolve; re-issue happens; matches>0 resolves', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(5);
   const deps = {
     fromId: makeFakeFromId({ 5: wc }),
@@ -182,20 +187,18 @@ test('findInPage: cold-start — finalUpdate:true,matches:0 does not resolve; re
   };
 
   // Step 1: emit spurious cold-start event for requestId=1 (finalUpdate:true, matches:0)
-  // Step 2: after a tick (the retry interval fires), emit a real event for requestId=2
-  setImmediate(() => {
-    // Spurious cold-start event — must NOT resolve
-    emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-  });
-
-  // Wait for the retry to fire and issue a second find (requestId=2), then resolve it
-  // We use a small delay to ensure the retry interval (500ms) has fired
+  // Step 2: tick the mocked clock past the retry interval (RETRY=500ms) and emit
+  // a real event for requestId=2
   const p = findInPage(5, 'word', deps);
-  await new Promise(r => setImmediate(r)); // let the spurious event fire
+  await new Promise(r => setImmediate(r)); // let the initial issue land
+
+  // Spurious cold-start event — must NOT resolve
+  emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
+  await new Promise(r => setImmediate(r));
 
   // At this point wc._finds.length should still be 1 (not yet retried)
-  // We poll briefly for the retry to fire
-  await new Promise(r => setTimeout(r, 520)); // just over RETRY=500ms
+  t.mock.timers.tick(500); // fires the retry interval (replaces the real 520ms sleep)
+  await new Promise(r => setImmediate(r));
   assert.ok(wc._finds.length >= 2, 'a re-issue must happen after the cold-start spurious event');
 
   // Emit the real result for the re-issue (requestId=2)
@@ -210,7 +213,8 @@ test('findInPage: cold-start — finalUpdate:true,matches:0 does not resolve; re
 // findInPage — timeout fallback resolves `last`
 // ---------------------------------------------------------------------------
 
-test('findInPage: timeout fallback — resolves last when no qualifying event arrives', async () => {
+test('findInPage: timeout fallback — resolves last when no qualifying event arrives', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(6);
   const deps = {
     fromId: makeFakeFromId({ 6: wc }),
@@ -218,12 +222,16 @@ test('findInPage: timeout fallback — resolves last when no qualifying event ar
   };
 
   // No event emitted — timeout fires, resolves last={0,0}
-  const result = await findInPage(6, 'ghost', deps);
+  const p = findInPage(6, 'ghost', deps);
+  await new Promise(r => setImmediate(r));
+  t.mock.timers.tick(100);
+  const result = await p;
   assert.deepEqual(result, { activeMatchOrdinal: 0, matches: 0 },
     'timeout fallback must resolve {0,0} for a genuine no-match');
 });
 
-test('findInPage: timeout fallback resolves last nonzero count if a non-final event arrived first', async () => {
+test('findInPage: timeout fallback resolves last nonzero count if a non-final event arrived first', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(7);
   const deps = {
     fromId: makeFakeFromId({ 7: wc }),
@@ -235,7 +243,10 @@ test('findInPage: timeout fallback resolves last nonzero count if a non-final ev
     emitFound(wc, { requestId: 1, activeMatchOrdinal: 1, matches: 2, finalUpdate: false });
   });
 
-  const result = await findInPage(7, 'partial', deps);
+  const p = findInPage(7, 'partial', deps);
+  await new Promise(r => setImmediate(r)); // let the non-final event land
+  t.mock.timers.tick(100);
+  const result = await p;
   // last was updated to {1,2} but not resolved (finalUpdate:false), timeout resolves last
   assert.deepEqual(result, { activeMatchOrdinal: 1, matches: 2 });
 });
@@ -260,14 +271,18 @@ test('findInPage: listener cleanup after resolve — listenerCount is 0', async 
     'found-in-page listener must be removed after resolve');
 });
 
-test('findInPage: listener cleanup after timeout — listenerCount is 0', async () => {
+test('findInPage: listener cleanup after timeout — listenerCount is 0', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(9);
   const deps = {
     fromId: makeFakeFromId({ 9: wc }),
     findTimeoutMs: 80,
   };
 
-  await findInPage(9, 'timed-out', deps);
+  const p = findInPage(9, 'timed-out', deps);
+  await new Promise(r => setImmediate(r));
+  t.mock.timers.tick(80);
+  await p;
   assert.equal(wc.listenerCount('found-in-page'), 0,
     'found-in-page listener must be removed after timeout');
 });
@@ -340,7 +355,8 @@ test('findInPage: matchCase:true threaded to wc.findInPage', async () => {
 // findInPage — MAX-retry exhaustion resolves last without waiting for timeout
 // ---------------------------------------------------------------------------
 
-test('findInPage: MAX-retry exhaustion resolves last immediately without waiting for timeout', async () => {
+test('findInPage: MAX-retry exhaustion resolves last immediately without waiting for timeout', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(50);
   // Long timeout so we know resolution came from MAX exhaustion, not timeout
   const deps = {
@@ -352,18 +368,22 @@ test('findInPage: MAX-retry exhaustion resolves last immediately without waiting
   // re-issuing. After MAX=5 retries, the interval's `attempts >= MAX` branch
   // fires finish(last) before the timeout.
   const p = findInPage(50, 'retry-exhaust', deps);
+  await new Promise(r => setImmediate(r)); // let the initial issue land
 
-  // Poll: emit spurious cold-start events for each issued requestId so the
-  // listener records them (updates last) but doesn't resolve (matches===0).
-  // The interval fires at 500ms cadence; we emit one spurious event per requestId.
-  const pollInterval = setInterval(() => {
+  // Emit spurious cold-start events for each issued requestId so the listener
+  // records them (updates last) but doesn't resolve (matches===0), then tick
+  // the retry interval one step at a time (single 500ms steps, drained between,
+  // per the interleaving hazard) until the 5th fire trips MAX exhaustion.
+  for (let round = 0; round < 5; round++) {
     for (let i = 1; i <= wc._reqId; i++) {
       emitFound(wc, { requestId: i, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
     }
-  }, 100);
+    await new Promise(r => setImmediate(r));
+    t.mock.timers.tick(500);
+    await new Promise(r => setImmediate(r));
+  }
 
   const result = await p;
-  clearInterval(pollInterval);
 
   assert.deepEqual(result, { activeMatchOrdinal: 0, matches: 0 });
   assert.ok(wc._finds.length >= 5, `expected ≥5 issues (MAX retries), got ${wc._finds.length}`);
@@ -373,28 +393,32 @@ test('findInPage: MAX-retry exhaustion resolves last immediately without waiting
 // findInPage — retry uses same opts (no findNext:true on retry)
 // ---------------------------------------------------------------------------
 
-test('findInPage: retry issues use same caller opts — no findNext:true corruption', async () => {
+test('findInPage: retry issues use same caller opts — no findNext:true corruption', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(51);
   const deps = {
     fromId: makeFakeFromId({ 51: wc }),
     findTimeoutMs: 3000,
   };
 
-  // Emit two cold-start spurious events (req 1 and 2) then a real one (req 3)
-  let tick = 0;
-  const iv = setInterval(() => {
-    tick++;
-    if (tick === 1) {
-      emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-    } else if (tick === 2) {
-      emitFound(wc, { requestId: 2, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-    } else if (tick >= 3 && wc._finds.length >= 3) {
-      emitFound(wc, { requestId: 3, activeMatchOrdinal: 1, matches: 2, finalUpdate: true });
-      clearInterval(iv);
-    }
-  }, 520);
+  // Emit two cold-start spurious events (req 1 and 2) then a real one (req 3),
+  // ticking the retry interval one 500ms step at a time with drains between.
+  const p = findInPage(51, 'retry-opts', deps, { forward: false, findNext: false, matchCase: true });
+  await new Promise(r => setImmediate(r)); // let the initial issue (req 1) land
 
-  const result = await findInPage(51, 'retry-opts', deps, { forward: false, findNext: false, matchCase: true });
+  emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
+  await new Promise(r => setImmediate(r));
+  t.mock.timers.tick(500); // re-issue → req 2
+  await new Promise(r => setImmediate(r));
+
+  emitFound(wc, { requestId: 2, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
+  await new Promise(r => setImmediate(r));
+  t.mock.timers.tick(500); // re-issue → req 3
+  await new Promise(r => setImmediate(r));
+
+  emitFound(wc, { requestId: 3, activeMatchOrdinal: 1, matches: 2, finalUpdate: true });
+
+  const result = await p;
 
   // All issues must use the original opts (not findNext:true)
   for (const call of wc._finds) {
