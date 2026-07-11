@@ -4,7 +4,9 @@
 // Pure row-model for the goldfinch://jars management page (M06 Flight 3, Leg 1 /
 // DD3). Extracted so the page's list logic is unit-testable without DOM, following
 // the mission's proven pure-module split (container-menu.js / default-routing.js /
-// inherit-container.js precedent).
+// inherit-container.js precedent). Also hosts PALETTE (DD4) and pickNewJarColor
+// (M06 Flight 4 Leg 5 HAT F5) — the new-jar color-selection helper, kept beside
+// the palette it draws from.
 //
 // Contract: returns an ORDERED array of rows — every persistent jar (in the order
 // jars.list() returns them) followed by the static Burner row. `isDefault` is true
@@ -75,11 +77,42 @@ function buildJarPageModel(containers, defaultId) {
   return rows;
 }
 
+/**
+ * Pick a color for a newly-created jar (M06 Flight 4 Leg 5 HAT F5): uniformly
+ * random among `palette` entries NOT already in `usedColors`, so new jars don't
+ * visually collide with existing ones. When every palette entry is already used
+ * (or `usedColors` otherwise covers the whole palette), falls back to uniformly
+ * random over the WHOLE palette — collision is unavoidable at that point, so we
+ * stop trying to avoid it rather than picking a fixed entry.
+ *
+ * Defensive on malformed input: a non-array/empty `palette` returns PALETTE[0]
+ * (a safe, known-isSafeColor-clean value) rather than throwing or returning
+ * undefined — production never passes anything but PALETTE here, and the store's
+ * cleanColor (jars.js) backstops any color that slips through regardless.
+ *
+ * @param {readonly string[]} palette
+ * @param {Array<any> | null | undefined} usedColors
+ * @param {() => number} [random] injectable RNG, defaults to Math.random (test seam)
+ * @returns {string}
+ */
+function pickNewJarColor(palette, usedColors, random = Math.random) {
+  if (!Array.isArray(palette) || palette.length === 0) return PALETTE[0];
+  const used = new Set(Array.isArray(usedColors) ? usedColors : []);
+  const unused = palette.filter((color) => !used.has(color));
+  const pool = unused.length > 0 ? unused : palette;
+  const index = Math.floor(random() * pool.length);
+  // Clamp defensively: a random() implementation that returns exactly 1 (out of
+  // spec for Math.random, but this is an injectable test seam) must not index
+  // past the end of pool.
+  return pool[Math.min(index, pool.length - 1)];
+}
+
 // Dual export: CommonJS (main process + test runner) and global (renderer-class
 // documents, which run with nodeIntegration:false and cannot require()).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildJarPageModel, PALETTE };
+  module.exports = { buildJarPageModel, PALETTE, pickNewJarColor };
 } else {
   /** @type {any} */ (globalThis).buildJarPageModel = buildJarPageModel;
   /** @type {any} */ (globalThis).PALETTE = PALETTE;
+  /** @type {any} */ (globalThis).pickNewJarColor = pickNewJarColor;
 }

@@ -101,7 +101,12 @@ const INTERNAL_PAGES = {
     // <script> before settings.js. Kept in src/shared/ for the lint-clean UMD tail
     // + node-test require(); served here so the goldfinch://settings guest can load
     // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
-    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js')
+    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js'),
+    // Injection-safe color validator (M06 F4 Leg 5 HAT F7): the automation-key
+    // list guards the jar color it tints the robot glyph / unkeyed dot with, the
+    // same isSafeColor/FALLBACK_COLOR idiom jars.js uses — precedent: jars serves
+    // this same shared module (see the jars host entry below).
+    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js')
   },
   // Second internal page (Flight 5, Leg 2): the app-level downloads surface. Same
   // allowlist-driven serving as settings — handleInternal/createResolver/INTERNAL_CSP
@@ -121,7 +126,10 @@ const INTERNAL_PAGES = {
     '/jars.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars.js'),
     '/jar-page-model.js': path.join(__dirname, '..', 'shared', 'jar-page-model.js'),
     '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js'),
-    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js')
+    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
+    // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
+    // list, loaded before jars.js (see jars.html's script-order comment).
+    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js')
   }
 };
 
@@ -1862,8 +1870,14 @@ registerInternalHandler(ipcMain, 'automation:get-status', () => currentAutomatio
 // "Invalid port". rebindMcpServer rebinds if the surface is active (resolvePort
 // picks up the new setting), or is a no-op otherwise. Returns the fresh status so
 // the renderer renders the now-active port without a separate get-status round-trip.
+// M06 Flight 4 Leg 1 (DD8 broadcast-invariant net finding): this handler mutates
+// `automationPort` via settings.set but never broadcast settings-changed — a
+// genuine pre-existing gap the F7 fix (see jar-key-revoke/admin-mint/admin-revoke
+// below) did not cover. Fixed to match those siblings, so any other open
+// internal tab / the chrome sees the new port without a separate reload.
 registerInternalHandler(ipcMain, 'automation:set-port', async (_e, port) => {
   settings.set('automationPort', port);
+  broadcastToChromeAndInternal('settings-changed', settings.getAll());
   await rebindMcpServer();
   return currentAutomationStatus();
 });

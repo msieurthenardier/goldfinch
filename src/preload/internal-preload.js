@@ -321,6 +321,31 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     jarsGetDefault: () => ipcRenderer.invoke('internal-jars-get-default'),
 
+    // Per-jar data controls (Flight 4, Leg 1). Same internal-origin-gated
+    // internal-jars-* trust domain as the registry wrappers above.
+
+    /**
+     * Clear one or more data classes (cookies/storage/cache — see
+     * src/shared/jar-data-classes.js) from a jar's partition. Strict
+     * fail-closed: an unknown jar id (Burner is never a store entry, so it
+     * always rejects), an empty/non-array `classes`, or ANY unknown class id
+     * rejects with { ok: false } and no session call at all.
+     * @param {{id:string, classes:string[]}} payload
+     * @returns {Promise<{ok:boolean, cleared?:string[]}>}
+     */
+    jarsClearData: (payload) => ipcRenderer.invoke('internal-jars-clear-data', payload),
+
+    /**
+     * Full identity wipe for a jar: clears every storage class + cache and
+     * rerolls its fingerprint seed (the jar itself and its automation key are
+     * untouched — only delete removes those). Broadcasts `jar-wiped { id }`
+     * BEFORE resolving on success. Rejects the same way as jarsClearData for
+     * burner/unknown ids.
+     * @param {{id:string}} payload
+     * @returns {Promise<{ok:boolean, error?:string}>}
+     */
+    jarsWipe: (payload) => ipcRenderer.invoke('internal-jars-wipe', payload),
+
     /**
      * Subscribe to jars-changed broadcasts. cb receives { containers, defaultId }
      * (defaultId null ⇔ Burner holds the flag). Returns a numeric handle for use

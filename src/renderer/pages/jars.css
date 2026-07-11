@@ -1,6 +1,8 @@
-/* Cookie-jar management page — Chrome-style shell (Flight 3, Leg 1). Self-contained:
-   no @import. Mirrors downloads.css's brand tokens, dark/gold chrome, and focus-ring
-   conventions. */
+/* Cookie-jar management page — Chrome-style shell, settings-style master-detail
+   layout (Flight 4, Leg 2 / DD1). Self-contained: no @import. Layout/scroll/nav
+   dialect is adapted from settings.css (see the scroll-container comment below);
+   button/form/swatch/error-line conventions carry over from the F3 row layout
+   this leg replaces. */
 
 /* ── Brand tokens (authoritative chrome values from src/renderer/styles.css) ── */
 :root {
@@ -14,6 +16,8 @@
   --border: #3a3c46;
   --ok: #6dff8f;
   --err: #ff8c7a;
+  --nav-w: 220px;
+  --nav-top: 0px;
 }
 
 /* ── Reset ── */
@@ -23,6 +27,12 @@
   box-sizing: border-box;
 }
 
+/* ── Scroll container: <body> owns the scroll (NOT <main>) ──────────────────────
+   Mirrors settings.css's own rule verbatim (leg spec's load-bearing citation):
+   putting overflow:auto on <main> would create a scrollable region that axe
+   flags as scrollable-region-focusable unless it has tabindex="0". Letting
+   <body> scroll is the correct pattern for a full-page layout — the nav below
+   is the one element that gets its own overflow (sticky + self-scrolling). */
 html {
   height: 100%;
 }
@@ -35,13 +45,108 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+/* ── Smooth scroll: gated behind reduced-motion preference ── */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ── Left nav (sticky sidebar) ── */
+nav[aria-label="Jars"] {
+  flex: 0 0 var(--nav-w);
+  position: sticky;
+  top: var(--nav-top);
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+}
+
+nav[aria-label="Jars"] ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+nav[aria-label="Jars"] li {
+  margin: 0;
+}
+
+nav[aria-label="Jars"] a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+  transition: background 0.1s, color 0.1s;
+}
+
+nav[aria-label="Jars"] a:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
+nav[aria-label="Jars"] a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Active section highlight (set by the scroll-spy in jars.js; also :target fallback) */
+nav[aria-label="Jars"] a[aria-current="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--bg-3);
+}
+
+.jar-nav-dot {
+  width: 10px;
+  height: 10px;
+}
+
+.jar-nav-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact default marker on the nav entry (Burner carries it when defaultId is null). */
+.jar-nav-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+#jars-new {
+  margin: 8px 20px 0;
 }
 
 /* ── Main content column ── */
 main {
-  max-width: 760px;
-  margin: 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 32px 48px 64px;
+  max-width: 760px;
 }
 
 /* ── Header ── */
@@ -49,15 +154,6 @@ main {
   margin-bottom: 24px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
-}
-
-/* Heading + "+ New jar" button row (HAT follow-up F5) — split out of
-   .jars-header so the header block can also hold .jars-description above
-   the divider, with the row itself keeping the original flex layout. */
-.jars-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .jars-header h1 {
@@ -68,10 +164,6 @@ main {
   letter-spacing: -0.01em;
 }
 
-/* ── Intro copy (HAT step-1 finding F2) — muted paragraph style consistent with
-   the .jars-footnote / settings.js plain-<p> convention used elsewhere on the
-   internal pages. Grouped inside .jars-header (HAT follow-up F5), so it sits
-   above the divider with the heading/button row instead of below it. ── */
 .jars-description {
   margin: 8px 0 0;
   color: var(--fg-dim);
@@ -79,32 +171,32 @@ main {
   line-height: 1.5;
 }
 
-/* ── List ── */
-.jars-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ── Jar sections (always expanded, DD1) ── */
+.jar-section {
+  margin-bottom: 40px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 24px; /* clears the sticky nav on anchor jumps */
 }
 
-.jar-row {
+.jar-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.jar-section-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-/* Burner row wraps to a second line for its explanatory hint (F4) — every other
-   row stays single-line. */
-.jar-row[data-burner='true'] {
-  flex-wrap: wrap;
-}
-
-.jar-burner-hint {
-  flex: 1 0 100%;
-  margin: 4px 0 0;
-  color: var(--fg-dim);
-  font-size: 12px;
+.jar-section-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg);
+  word-break: break-word;
 }
 
 .jar-dot {
@@ -114,20 +206,6 @@ main {
   border-radius: 50%;
   background: #9aa0ac; /* fallback dot color; jars.js overrides via isSafeColor */
   border: 1px solid var(--border);
-}
-
-.jar-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.jar-name {
-  font-weight: 600;
-  color: var(--fg);
-  word-break: break-word;
 }
 
 .jar-badge {
@@ -142,23 +220,16 @@ main {
   padding: 2px 6px;
 }
 
-.jar-footnote-badge {
-  flex: 0 0 auto;
-  font-size: 11px;
+/* Burner section (DD7): read-only — header line + hint copy only. */
+.jar-burner-hint {
+  margin: 0;
   color: var(--fg-dim);
+  font-size: 13px;
 }
 
-/* ── Row actions (Leg 2) ── */
-.jar-row-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-}
-
-/* ── Buttons (Leg 2; realigned to downloads.css's .downloads-btn/.download-btn
-   conventions per HAT step-1 finding F3 — operator ruling: outline-on-hover,
-   not a brightness fill) — bg-2 fill by default, accent-bordered outline on
-   hover, accent fill for primary, transparent/err outline for danger. ── */
+/* ── Buttons (carried over from the pre-relayout row layout — outline-on-hover
+   accent border for default, accent fill for primary, transparent/err outline
+   for danger) ── */
 .jar-btn {
   background: var(--bg-2);
   color: var(--fg);
@@ -191,8 +262,6 @@ main {
   border-color: var(--accent);
 }
 
-/* Primary is already accent-filled, so the outline-on-hover cue would be
-   invisible — mirrors .download-btn.primary:hover's brightness fill instead. */
 .jar-btn-primary:not(:disabled):hover {
   filter: brightness(1.1);
   border-color: var(--accent);
@@ -209,64 +278,23 @@ main {
   border-color: var(--err);
 }
 
-/* Compact text button — currently only "Make default" (HAT step-5 finding F6,
-   operator ruling: no obvious icon for it, so it stays text, but shrunk so it
-   sits well beside the icon-only Edit/Delete buttons below). */
+/* "Make default" (F6 ruling: stays text, no icon). F1 (HAT step-1): lives in
+   the section header now, in the same slot the Default pill occupies — no
+   bottom margin needed there (the header is a single centered flex row). */
 .jar-btn-compact {
   padding: 4px 10px;
   font-size: 12px;
 }
 
-/* Icon-only row actions — Edit (pencil) / Delete (trash), HAT step-5 finding
-   F6: replaces the old text Edit/Delete buttons. Square, centered glyph;
-   inherits .jar-btn's bg/border/hover/focus-visible treatment (outline-on-hover
-   accent border, per F3) — .jar-btn-danger's transparent/err-outline/rgba-hover
-   treatment layers on top unchanged for Delete, and the svg's
-   stroke="currentColor" (jars.js) picks up that err color for free. */
-.jar-icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-}
-
-.jar-icon-btn .jar-icon {
-  width: 16px;
-  height: 16px;
-  display: block;
-}
-
-/* ── Create/edit forms (Leg 2) ── */
-#jars-create-panel:not(:empty) {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 16px;
-  margin-bottom: 16px;
-}
-
-/* Edit/confirm rows swap the base row's flex layout for a block layout so the
-   form/confirm content can stack vertically. */
-.jar-row-edit,
-.jar-row-confirm {
-  display: block;
-}
-
-.jar-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 0;
-}
-
+/* ── Name input + swatch grid (DD6 instant-apply) ── */
 .jar-form-label {
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
   color: var(--fg-dim);
+  margin-bottom: 10px;
+  max-width: 320px;
 }
 
 .jar-name-input {
@@ -284,6 +312,10 @@ main {
   border-color: var(--accent);
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+.swatch-grid-container {
+  margin-bottom: 10px;
 }
 
 .swatch-grid {
@@ -311,20 +343,96 @@ main {
   outline-offset: 2px;
 }
 
-.jar-form-actions {
-  display: flex;
-  gap: 8px;
-}
-
+/* ── Error / confirm text (shared by section, create-panel, and delete-confirm) ── */
 .jar-error-line {
   min-height: 16px;
   color: var(--err);
   font-size: 12px;
-  margin: 0;
+  margin: 0 0 8px;
+}
+
+/* Success variant (data-action feedback on the section's shared status line —
+   review finding: success notes must NOT render in the error color). */
+.jar-error-line.is-ok {
+  color: var(--ok);
 }
 
 .jar-confirm-text {
   color: var(--fg-dim);
   font-size: 13px;
-  margin: 4px 0 0;
+  margin: 0 0 8px;
+}
+
+.jar-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* In-section two-step delete confirm (DD5/F3 copy). */
+.jar-confirm {
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Data controls (Leg 3, DD5): always-visible button row + one shared
+   confirm area below it, diffed on the open (action, rowId) pair. ── */
+.jar-data-controls {
+  margin: 4px 0 16px;
+}
+
+.jar-data-controls-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jar-data-confirm-area:not(:empty) {
+  margin-top: 8px;
+}
+
+/* ── Delete control ── */
+.jar-delete-area {
+  margin-top: 4px;
+}
+
+/* Delete button's leading trash icon (HAT step-1 finding F3): icon + visible
+   text, the icon is decorative (aria-hidden, set in jars.js's buildIcon). */
+.jar-btn-icon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jar-btn-icon-label .jar-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: block;
+}
+
+/* ── Create panel ──
+   Lives inside #jars-sections now (HAT step-2 finding F4), anchored by
+   jars.js immediately before the Burner section so the form renders exactly
+   where its result — the new jar's section — will land. Spacing mirrors
+   .jar-section's own rhythm (40px bottom margin, scroll-margin-top for
+   scrollIntoView clearance) since it now sits between two sections in the
+   flow instead of above them; empty (ui.mode !== 'create') collapses to
+   nothing via :not(:empty), so a closed panel contributes no gap. */
+#jars-create-panel:not(:empty) {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 16px;
+  margin-bottom: 40px;
+  scroll-margin-top: 24px;
+}
+
+.jar-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
 }

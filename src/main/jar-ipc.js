@@ -1,6 +1,7 @@
 'use strict';
 
-// IPC surface for the v2 jar lifecycle (M06 Flight 1 Leg 3 / DD6, DD7, CP3).
+// IPC surface for the v2 jar lifecycle (M06 Flight 1 Leg 3 / DD6, DD7, CP3) plus
+// the per-jar data controls (M06 Flight 4, Leg 1 / DD2, DD3, DD4).
 //
 // The store (jars.js) stays PURE — it only mutates and persists the registry.
 // Session side-effects live here, in the handler layer (DD6): delete composes
@@ -11,6 +12,13 @@
 // internal-session webContents (the injected `broadcast` is main.js's
 // broadcastToChromeAndInternal — the same mechanism as shields-changed /
 // settings-changed). Nothing subscribes until Flight 2; fire-and-forget by design.
+//
+// Flight 4 adds `jars-clear-data` (granular class clears, DD2/DD3) and
+// `jars-wipe` (the full identity wipe — data + fingerprint reroll, DD3/DD4);
+// wipe broadcasts `jar-wiped { id }` so the chrome renderer can reload the jar's
+// open tabs (leg 3 owns the listener/sweep). Neither channel mutates the jar
+// registry or broadcasts settings-changed/jars-changed — they act only on the
+// jar's session partition.
 //
 // Trust domain (DD7 / F3 DD1): the chrome channels (bare `ipcMain.handle`, same
 // domain as the picker's `new-container-create`) and the internal-origin-gated
@@ -27,13 +35,15 @@
 // `rerollSeed`, `revokeJarKey`, `settings`, `broadcast`) is injected at
 // registerJarIpc(deps), so the whole surface is unit-testable without Electron
 // (the init-profile / downloads-manager / menu-overlay-manager extraction
-// precedent — and it keeps the twelve handlers out of the main.js god file).
+// precedent — and it keeps the fourteen handlers out of the main.js god file).
 
 const { BURNER } = require('../shared/burner');
+const { jarDataClassById } = require('../shared/jar-data-classes');
 const { registerInternalHandler } = require('./internal-ipc');
 
 /**
- * Register the six jar-registry IPC channels and return the jars-changed
+ * Register the six jar-registry IPC channels plus the two per-jar data-control
+ * channels (Flight 4, Leg 1 — clear-data/wipe) and return the jars-changed
  * broadcaster (main.js reuses it in the picker's `new-container-create` — the
  * second add entry point, whose renderer-tangled flow stays in main.js).
  *
@@ -141,6 +151,72 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     return { ok: true, removed, wiped };
   }
 
+  // Per-jar data controls (M06 Flight 4, Leg 1 / DD2, DD3). Partition lookup is
+  // inline `jars.list().find(...)` (the store deliberately exposes no `get(id)`
+  // helper — do not add one for these two call sites). Burner is never a store
+  // entry (no `partition` field on the identity object — src/shared/burner.js),
+  // so `find` misses and both handlers reject it the same way as an unknown id;
+  // this also covers `burner-<n>` ephemeral tab ids, which are never store
+  // entries either.
+
+  // handleClearData: strict fail-closed (DD2) — every requested class id must be
+  // known BEFORE any session call runs (no partial application on a malformed
+  // payload). Classes apply in payload order; duplicates are valid and simply
+  // re-apply (harmless — not deduped, kept dumb per the leg spec).
+  async function handleClearData(_e, p) {
+    if (p === null || typeof p !== 'object') return { ok: false };
+    const entry = jars.list().find((j) => j.id === p.id);
+    if (!entry) return { ok: false };
+    if (!Array.isArray(p.classes) || p.classes.length === 0) return { ok: false };
+    const descriptors = [];
+    for (const classId of p.classes) {
+      const d = jarDataClassById(classId);
+      if (!d) return { ok: false };
+      descriptors.push(d);
+    }
+    const ses = session.fromPartition(entry.partition);
+    try {
+      for (const d of descriptors) {
+        if (d.storages) {
+          await ses.clearStorageData({ storages: d.storages });
+        } else {
+          // cache sentinel (DD2): clearCache() has no storages-set form, so it
+          // pairs with a shadercache-only clearStorageData call.
+          await ses.clearCache();
+          await ses.clearStorageData({ storages: ['shadercache'] });
+        }
+      }
+    } catch {
+      // Fail-soft (matching the delete path's session-call containment stance):
+      // a thrown session call returns { ok: false } with no partial-success shape.
+      return { ok: false };
+    }
+    return { ok: true, cleared: descriptors.map((d) => d.id) };
+  }
+
+  // handleWipe: the full identity wipe — same composition as identity-new
+  // (main.js:2461, `clearStorageData()` + `clearCache()` + `rerollSeed`) plus the
+  // `jar-wiped` broadcast (DD4), minus registry removal and automation-key
+  // revoke (the jar persists; its automation key stays valid — DD3). The
+  // broadcast fires BEFORE resolving (house broadcast-before-resolve rule) and
+  // ONLY on the success path — a thrown session call returns { ok: false, error }
+  // with no broadcast and no reroll (nothing was wiped; no reload should fire).
+  async function handleWipe(_e, p) {
+    if (p === null || typeof p !== 'object') return { ok: false };
+    const entry = jars.list().find((j) => j.id === p.id);
+    if (!entry) return { ok: false };
+    const ses = session.fromPartition(entry.partition);
+    try {
+      await ses.clearStorageData();
+      await ses.clearCache();
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+    rerollSeed(ses);
+    broadcast('jar-wiped', { id: entry.id });
+    return { ok: true };
+  }
+
   // Chrome-trusted channels (unchanged trust domain — DD7).
   ipcMain.handle('jars-list', handleList);
   ipcMain.handle('jars-add', handleAdd);
@@ -148,6 +224,8 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   ipcMain.handle('jars-set-default', handleSetDefault);
   ipcMain.handle('jars-get-default', handleGetDefault);
   ipcMain.handle('jars-remove', handleRemove);
+  ipcMain.handle('jars-clear-data', handleClearData);
+  ipcMain.handle('jars-wipe', handleWipe);
 
   // Internal-origin-gated twins (F3 DD1) — same handler bodies, reached only by
   // an allowlisted goldfinch:// internal page (the jars management page).
@@ -157,6 +235,8 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   registerInternalHandler(ipcMain, 'internal-jars-set-default', handleSetDefault);
   registerInternalHandler(ipcMain, 'internal-jars-get-default', handleGetDefault);
   registerInternalHandler(ipcMain, 'internal-jars-remove', handleRemove);
+  registerInternalHandler(ipcMain, 'internal-jars-clear-data', handleClearData);
+  registerInternalHandler(ipcMain, 'internal-jars-wipe', handleWipe);
 
   return { broadcastJarsChanged };
 }

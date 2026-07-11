@@ -533,6 +533,106 @@ function automationKeysOnce() {
 
   const bridge = window.goldfinchInternal;
 
+  // Fallback for an invalid/unsafe jar color (defense in depth — jars.js already
+  // validates on write). Mirrors jars.js's FALLBACK_COLOR constant byte-for-byte
+  // (kept local rather than shared/exported: it's a presentation-layer fallback,
+  // not product logic).
+  const FALLBACK_COLOR = '#9aa0ac';
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Build the "robot" automation glyph for a jar WITH a minted key. Same path
+   * data as the toolbar automation indicator's inline SVG (src/renderer/index.html
+   * #automation-indicator) — hand-built via createElementNS/setAttribute (never
+   * innerHTML: this list re-renders on every jars-changed/refresh, and the CSP-safe
+   * convention this file already follows for jar names applies equally here even
+   * though the glyph itself carries no user string). stroke="currentColor" mirrors
+   * the toolbar indicator's convention, tinted via the wrapping <svg>'s inline
+   * `color` — the element it replaces (.jar-swatch) carried the jar's color, so
+   * tinting the glyph the same way is the natural reading (F7 operator ruling).
+   * @param {string} color
+   * @returns {SVGSVGElement}
+   */
+  function buildAutomationGlyph(color) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'jar-key-glyph');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    // 14px render (operator sizing follow-up: was 12) — fills the 14x14
+    // .jar-key-icon slot; the unkeyed 10px .jar-key-dot balances against it.
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.style.color = isSafeColor(color) ? color : FALLBACK_COLOR;
+
+    const path1 = document.createElementNS(SVG_NS, 'path');
+    path1.setAttribute('d', 'M12 8V4H8');
+    svg.appendChild(path1);
+
+    const body = document.createElementNS(SVG_NS, 'rect');
+    body.setAttribute('width', '16');
+    body.setAttribute('height', '12');
+    body.setAttribute('x', '4');
+    body.setAttribute('y', '8');
+    body.setAttribute('rx', '2');
+    svg.appendChild(body);
+
+    const legL = document.createElementNS(SVG_NS, 'path');
+    legL.setAttribute('d', 'M2 14h2');
+    svg.appendChild(legL);
+
+    const legR = document.createElementNS(SVG_NS, 'path');
+    legR.setAttribute('d', 'M20 14h2');
+    svg.appendChild(legR);
+
+    const armR = document.createElementNS(SVG_NS, 'path');
+    armR.setAttribute('d', 'M15 13v2');
+    svg.appendChild(armR);
+
+    const armL = document.createElementNS(SVG_NS, 'path');
+    armL.setAttribute('d', 'M9 13v2');
+    svg.appendChild(armL);
+
+    return svg;
+  }
+
+  /**
+   * Build the color dot for a jar WITHOUT a key — mirrors the tab strip's
+   * per-tab jar dot (`.tab-jar` in src/renderer/styles.css: 8px circle, no
+   * border) so the settings list reads consistently with the tabs. Guarded by
+   * the same isSafeColor/FALLBACK_COLOR idiom as the glyph above.
+   * @param {string} color
+   * @returns {HTMLSpanElement}
+   */
+  function buildJarDot(color) {
+    const dot = document.createElement('span');
+    dot.className = 'jar-key-dot';
+    dot.style.backgroundColor = isSafeColor(color) ? color : FALLBACK_COLOR;
+    return dot;
+  }
+
+  /**
+   * Build the per-row key-state slot: the robot glyph for a keyed jar, or the
+   * color dot for an unkeyed one — both inside a fixed-footprint wrapper so
+   * keyed/unkeyed rows never jump in alignment. Re-derived on every renderJars()
+   * call (mint/revoke/recolor all route through refresh() → renderJars()), so
+   * the glyph-vs-dot choice always reflects the current hasKey/color.
+   * @param {{ color: string, hasKey: boolean }} jar
+   * @returns {HTMLSpanElement}
+   */
+  function buildJarKeySlot(jar) {
+    const slot = document.createElement('span');
+    slot.className = 'jar-key-icon';
+    slot.appendChild(jar.hasKey ? buildAutomationGlyph(jar.color) : buildJarDot(jar.color));
+    return slot;
+  }
+
   // DD9 (Flight 8): the PERSISTED `automationEnabled` gates KEY GENERATION (mint),
   // never revocation. Tracked here and kept live by the onSettingsChanged subscription
   // below. Gate strictly on the persisted value (what the toggle reflects) — NEVER on
@@ -573,7 +673,11 @@ function automationKeysOnce() {
 
   /**
    * Rebuild the jars list. Built with createElement + textContent (NOT innerHTML)
-   * because jar names are user-controlled. NEVER touches the reveal (AC8).
+   * because jar names are user-controlled. NEVER touches the reveal (AC8). Each
+   * row's key-state slot (buildJarKeySlot) re-derives the glyph-vs-dot choice
+   * from the fresh `jar.hasKey`/`jar.color` on every call, so it stays live
+   * across mint/revoke (this function) and jars-changed-triggered refreshes
+   * (rename/recolor — see the hJars listener below).
    * @param {Array<{ id: string, name: string, color: string, hasKey: boolean }>} jars
    */
   function renderJars(jars) {
@@ -582,10 +686,7 @@ function automationKeysOnce() {
       const row = document.createElement('div');
       row.className = 'settings-row jar-row';
 
-      const swatch = document.createElement('span');
-      swatch.className = 'jar-swatch';
-      swatch.style.backgroundColor = jar.color;
-      row.appendChild(swatch);
+      row.appendChild(buildJarKeySlot(jar));
 
       const name = document.createElement('span');
       name.className = 'jar-name';
@@ -705,6 +806,20 @@ function automationKeysOnce() {
     }
   });
   window.addEventListener('pagehide', () => bridge.offSettingsChanged(hKeys), { once: true });
+
+  // HAT F6 (M06 F4 Leg 5): jars-changed fires on every registry mutation (add /
+  // rename / remove / setDefault — jar-ipc.js), including a rename/recolor from
+  // the jars page. This list's rows (name + color swatch) are seeded from
+  // automation:list-keys and otherwise only rebuilt by the settingsChanged
+  // listener above, which never fires on a jar rename/recolor — so the row went
+  // stale until the next mint/revoke. Reuse the existing refresh() path (no
+  // parallel render) rather than consuming the broadcast payload directly, since
+  // refresh() re-derives hasKey alongside name/color from a fresh
+  // automationListKeys() call.
+  const hJars = bridge.onJarsChanged(() => {
+    refresh().catch(() => {});
+  });
+  window.addEventListener('pagehide', () => bridge.offJarsChanged(hJars), { once: true });
 })();
 
 /* ---- automation activity viewer (Leg 4 / SC10 / DD6) ---- */
@@ -734,6 +849,19 @@ function automationKeysOnce() {
       if (haveSnapshot) renderActivity();
     })
     .catch(() => {});
+
+  // HAT F6 (M06 F4 Leg 5): keep jarNames live across a jar rename/recolor (the
+  // same staleness the key-list IIFE above had). jars-changed already carries
+  // id/name for every persistent jar (jar-ipc.js), so this rebuilds the map
+  // straight from the broadcast payload — no extra round-trip through
+  // automationListKeys() is needed just for names.
+  const hActivityJars = bridge.onJarsChanged((payload) => {
+    if (!payload || !Array.isArray(payload.containers)) return;
+    jarNames.clear();
+    for (const j of /** @type {Array<{id: string, name: string}>} */ (payload.containers)) jarNames.set(j.id, j.name);
+    if (haveSnapshot) renderActivity();
+  });
+  window.addEventListener('pagehide', () => bridge.offJarsChanged(hActivityJars), { once: true });
 
   /**
    * @param {string|null} jarId

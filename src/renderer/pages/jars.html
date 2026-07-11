@@ -6,28 +6,34 @@
     <title>Cookie Jars — Goldfinch</title>
     <link rel="stylesheet" href="jars.css" />
     <!-- Script order (leg spec): burner.js declares the frozen BURNER identity;
-         safe-color.js is the injection-safe color validator; jar-page-model.js is
-         the pure row-model consuming both; jars.js is the page controller. All four
-         share ONE top-level lexical scope (classic non-module <script> tags) — see
-         the F2 D1 shared-scope-collision lesson pinned in
+         jar-data-classes.js is the pure clearable-data-class list (no deps, so it
+         loads right after burner.js); safe-color.js is the injection-safe color
+         validator; jar-page-model.js is the pure row-model consuming both;
+         jars.js is the page controller. All five share ONE top-level lexical
+         scope (classic non-module <script> tags) — see the F2 D1
+         shared-scope-collision lesson pinned in
          test/unit/jars-page-shared-scripts.test.js. -->
     <script src="burner.js"></script>
+    <script src="jar-data-classes.js"></script>
     <script src="safe-color.js"></script>
     <script src="jar-page-model.js"></script>
     <script src="jars.js" defer></script>
   </head>
   <body>
+    <!-- Master-detail layout (Leg 2 / DD1): settings.html's nav+main structure,
+         adapted for DYNAMIC content (jars.js rebuilds #jars-nav and
+         #jars-sections from every jars-changed broadcast — settings' own nav
+         is static HTML). "+ New jar" moved here from the old header row. -->
+    <nav aria-label="Jars">
+      <ul id="jars-nav" role="list"></ul>
+      <button id="jars-new" class="jar-btn jar-btn-primary" type="button" aria-expanded="false">+ New jar</button>
+    </nav>
     <main>
       <div class="jars-header">
-        <div class="jars-header-row">
-          <h1>Cookie Jars</h1>
-          <button id="jars-new" class="jar-btn jar-btn-primary" type="button">+ New jar</button>
-        </div>
+        <h1>Cookie Jars</h1>
 
         <!-- Static intro copy (HAT step-1 finding F2) — textContent-equivalent
-             static markup, no dynamic data. Grouped inside the header block
-             (HAT follow-up F5) so it sits above the divider with the heading
-             and "+ New jar" row, not below it with the list. -->
+             static markup, no dynamic data. -->
         <p class="jars-description">
           Each cookie jar keeps its own cookies, sign-ins, and site data — sites in
           one jar can't see another. New tabs open in the default jar; Burner tabs
@@ -36,17 +42,31 @@
       </div>
 
       <!-- Reserved page-level error line (Leg 2) — used for actions that aren't
-           scoped to a form (e.g. set-default). textContent-set only; never thrown
-           to console-only. -->
+           scoped to a section (e.g. set-default). textContent-set only; never
+           thrown to console-only. -->
       <p id="jars-page-error" class="jar-error-line" aria-live="polite"></p>
 
-      <!-- Create-jar form panel, shown/hidden by jars.js (ui.mode === 'create'). -->
-      <div id="jars-create-panel"></div>
+      <!-- One always-expanded <section id="jar-{id}"> per jar (incl. Burner,
+           read-only) — reconciled per-section, keyed by jar id (Leg 2 / DD6).
+           NO aria-live here (FD ruling): it reconciles on every jars-changed
+           broadcast from ANY surface, which would be announcement spam. The
+           live regions are exactly #jars-page-error and each section's own
+           error line.
 
-      <!-- aria-live region: the list wholesale-re-renders on every jars-changed
-           broadcast (page mutations, the picker's quick-create, automation). -->
-      <ul id="jars-list" class="jars-list" aria-live="polite" aria-label="Cookie jars">
-      </ul>
+           The create-jar form panel (#jars-create-panel, ui.mode === 'create')
+           is NOT static markup here (HAT step-2 finding F4: the form must
+           render where its result lands — immediately before the Burner
+           section, after the last persistent jar's section — a position that
+           varies with the persistent-jar count, so it can't be a fixed spot
+           in static HTML). jars.js builds it as a single stable DOM node and
+           anchors it dynamically into this container (anchorCreatePanel).
+           Its CONTENTS are still rebuilt only on an actual ui.mode open/close
+           transition (Leg 2, unchanged) — a state-only render pass leaves an
+           open panel's DOM untouched so an in-progress name/color pick
+           survives an unrelated broadcast; its POSITION moves only via a
+           single conditional insertBefore call, which never disturbs
+           focus/caret inside it. -->
+      <div id="jars-sections"></div>
     </main>
   </body>
 </html>

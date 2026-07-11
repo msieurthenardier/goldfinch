@@ -111,6 +111,8 @@ interface GoldfinchBridge {
   // --- main -> renderer events ---
   /** Fired after every jar mutation with { containers, defaultId } (defaultId null ⇔ Burner). */
   onJarsChanged(cb: (data: { containers: any[]; defaultId: string | null }) => void): void;
+  /** Fired after a jars-wipe succeeds, with { id } (Flight 4 Leg 3, DD4) — the cue to reload the jar's open web tabs. */
+  onJarWiped(cb: (data: { id: string }) => void): void;
   onDownloadProgress(cb: (data: any) => void): void;
   onDownloadDone(cb: (data: any) => void): void;
   /** DD7 (M06 F3 Leg 4): payload carries the opener's session partition (from
@@ -240,6 +242,9 @@ interface GoldfinchInternalBridge {
   jarsGetDefault(): Promise<{ id: string; name: string; color: string }>;
   onJarsChanged(cb: (payload: { containers: Array<object>; defaultId: string | null }) => void): number;
   offJarsChanged(h: number): void;
+  // --- per-jar data controls (Flight 4, Leg 1/3) ---
+  jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[] }>;
+  jarsWipe(payload: { id: string }): Promise<{ ok: boolean }>;
 }
 
 interface Window {
@@ -372,10 +377,35 @@ declare function buildJarPageModel(
 /**
  * Injected by src/shared/jar-page-model.js via the globalThis branch (the curated,
  * frozen swatch palette for the create/recolor swatch grid — M06 Flight 3 Leg 2 /
- * DD4). Every entry passes isSafeColor; PALETTE[0] is the preselected color for a
- * new jar.
+ * DD4). Every entry passes isSafeColor; pickNewJarColor (below) is what actually
+ * selects a new jar's color.
  */
 declare const PALETTE: readonly string[];
+
+/**
+ * Injected by src/shared/jar-page-model.js via the globalThis branch (the new-jar
+ * color-selection helper — M06 Flight 4 Leg 5 HAT F5). Uniformly random among
+ * `palette` entries not already in `usedColors`; falls back to uniformly random
+ * over the whole palette once every entry is used. `random` is an injectable RNG
+ * test seam, defaulting to Math.random.
+ */
+declare function pickNewJarColor(palette: readonly string[], usedColors: any[] | null | undefined, random?: () => number): string;
+
+/**
+ * Injected by src/shared/jar-data-classes.js via the globalThis branch (the pure,
+ * frozen clearable-data-class list for the goldfinch://jars per-jar data controls
+ * — M06 Flight 4 Leg 1 / DD2). `storages` is Electron's ClearStorageDataOptions
+ * taxonomy subset, or the `null` sentinel for the `cache` class (handled via
+ * clearCache() + a shadercache clearStorageData call — see jar-ipc.js).
+ */
+interface JarDataClass {
+  id: string;
+  label: string;
+  storages: readonly string[] | null;
+}
+declare const JAR_DATA_CLASSES: readonly JarDataClass[];
+/** Look up a data class descriptor by id; null when unknown. */
+declare function jarDataClassById(id: string): JarDataClass | null;
 
 /**
  * Injected by src/shared/inherit-container.js via the globalThis branch (the

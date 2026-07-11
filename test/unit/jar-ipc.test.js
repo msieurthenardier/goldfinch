@@ -65,16 +65,24 @@ function makeHarness(t, { containers = [personal, work], defaultId = 'personal',
     }
   };
 
+  // clearStorageData/clearCache capture their call OPTIONS in an `args` field
+  // (Flight 4, Leg 1) alongside the original { fn, partition } shape every
+  // existing assertion (`events.map(e => e.fn)`, `events[0].partition`, ...)
+  // already reads — additive only, so those 23 pre-existing tests are
+  // unaffected. Each call pushes its OWN event, so a handler that calls
+  // clearStorageData/clearCache multiple times in sequence (the cache-sentinel
+  // mapping, or a multi-class clear-data payload) gets one distinct, ordered
+  // record per call, each with its own args.
   const session = {
     fromPartition(partition) {
       const ses = {
         partition,
-        async clearStorageData() {
+        async clearStorageData(options) {
           if (storageThrows) throw new Error('wipe failed');
-          events.push({ fn: 'clearStorageData', partition });
+          events.push({ fn: 'clearStorageData', partition, args: options });
         },
-        async clearCache() {
-          events.push({ fn: 'clearCache', partition });
+        async clearCache(options) {
+          events.push({ fn: 'clearCache', partition, args: options });
         }
       };
       sessions.push(ses);
@@ -120,23 +128,27 @@ function makeHarness(t, { containers = [personal, work], defaultId = 'personal',
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the six chrome + six internal jar-registry channels, no others', (t) => {
+test('registers exactly the eight chrome + eight internal jar channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
     [
       'internal-jars-add',
+      'internal-jars-clear-data',
       'internal-jars-get-default',
       'internal-jars-list',
       'internal-jars-remove',
       'internal-jars-rename',
       'internal-jars-set-default',
+      'internal-jars-wipe',
       'jars-add',
+      'jars-clear-data',
       'jars-get-default',
       'jars-list',
       'jars-remove',
       'jars-rename',
-      'jars-set-default'
+      'jars-set-default',
+      'jars-wipe'
     ]
   );
 });
@@ -206,7 +218,9 @@ test('an untrusted event (wrong origin) is rejected on every internal-jars-* cha
     'internal-jars-rename',
     'internal-jars-set-default',
     'internal-jars-get-default',
-    'internal-jars-remove'
+    'internal-jars-remove',
+    'internal-jars-clear-data',
+    'internal-jars-wipe'
   ]) {
     assert.throws(
       () => h.handlers.get(channel)(untrusted, { id: 'personal' }),
@@ -410,6 +424,126 @@ test('jars-remove with a throwing wipe is fail-soft: { ok: true, wiped: false },
   assert.equal(h.events[2].channel, 'settings-changed');
   assert.equal(h.events[3].channel, 'jars-changed');
   assert.deepEqual(h.jars.list().map((c) => c.id), ['work']);
+});
+
+// ---------------------------------------------------------------------------
+// jars-clear-data (Flight 4, Leg 1 / DD2, DD3) — granular per-class clears.
+// Partition lookup is jars.list().find(...); Burner is never a store entry, so
+// it rejects the same way as an unknown id (covers burner-<n> ids too).
+// ---------------------------------------------------------------------------
+test('jars-clear-data applies each requested class in order, passing the exact storages array per class', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'storage'] });
+  assert.deepEqual(result, { ok: true, cleared: ['cookies', 'storage'] });
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearStorageData']);
+  assert.deepEqual(h.events[0].args, { storages: ['cookies'] });
+  assert.deepEqual(h.events[1].args, {
+    storages: ['filesystem', 'indexdb', 'localstorage', 'websql', 'serviceworkers', 'cachestorage']
+  });
+  assert.equal(h.events[0].partition, 'persist:container:personal');
+  assert.equal(h.broadcasts().length, 0); // clear-data never broadcasts (DD3 scope note: no settings/jars mutation)
+});
+
+test('jars-clear-data with the cache class calls clearCache AND clearStorageData({ storages: [shadercache] })', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.deepEqual(h.events[1].args, { storages: ['shadercache'] });
+});
+
+test('jars-clear-data with duplicate class ids applies twice, harmlessly (not deduped)', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'cookies'] });
+  assert.deepEqual(result.cleared, ['cookies', 'cookies']);
+  assert.equal(h.events.filter((e) => e.fn === 'clearStorageData').length, 2);
+});
+
+test('jars-clear-data rejection matrix returns { ok: false } and touches no session', async (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope'],
+    ['unknown id', { id: 'nope', classes: ['cookies'] }],
+    ['burner', { id: 'burner', classes: ['cookies'] }],
+    ['missing classes', { id: 'personal' }],
+    ['empty classes', { id: 'personal', classes: [] }],
+    ['unknown class id', { id: 'personal', classes: ['history'] }],
+    ['non-array classes', { id: 'personal', classes: 'cookies' }]
+  ];
+  for (const [label, payload] of cases) {
+    assert.deepEqual(await h.invoke('jars-clear-data', payload), { ok: false }, label);
+  }
+  assert.equal(h.events.length, 0);
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-clear-data with a partially-unknown classes array applies NONE of them (strict fail-closed)', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'history'] });
+  assert.deepEqual(result, { ok: false });
+  assert.equal(h.events.length, 0); // "cookies" never applied either — no partial application
+});
+
+test('jars-clear-data with a throwing session call returns { ok: false }', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies'] });
+  assert.deepEqual(result, { ok: false });
+});
+
+test('internal-jars-clear-data shares behavior with jars-clear-data', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invokeInternal('internal-jars-clear-data', { id: 'personal', classes: ['cookies'] });
+  assert.deepEqual(result, { ok: true, cleared: ['cookies'] });
+});
+
+// ---------------------------------------------------------------------------
+// jars-wipe (Flight 4, Leg 1 / DD3, DD4) — the full identity wipe. Same
+// composition as identity-new plus the jar-wiped broadcast, minus registry
+// removal/key revoke (the jar persists).
+// ---------------------------------------------------------------------------
+test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> resolve', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearCache', 'rerollSeed', 'broadcast']);
+  assert.equal(h.events[0].partition, 'persist:container:personal');
+  assert.equal(h.events[0].args, undefined); // no filter — full wipe, matching identity-new
+  assert.equal(h.events[1].partition, 'persist:container:personal');
+  assert.equal(h.sessions.length, 1);
+  assert.equal(h.events[2].ses, h.sessions[0]); // reroll got the SAME session object
+  assert.equal(h.events[3].channel, 'jar-wiped');
+  assert.deepEqual(h.events[3].payload, { id: 'personal' });
+});
+
+test('jars-wipe rejects burner and unknown/malformed ids with { ok: false }, no session call', async (t) => {
+  const h = makeHarness(t);
+  assert.deepEqual(await h.invoke('jars-wipe', { id: 'burner' }), { ok: false });
+  assert.deepEqual(await h.invoke('jars-wipe', { id: 'nope' }), { ok: false });
+  assert.deepEqual(await h.invoke('jars-wipe', 'nope'), { ok: false });
+  assert.deepEqual(await h.invoke('jars-wipe', undefined), { ok: false });
+  assert.equal(h.events.length, 0);
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-wipe with a throwing session call returns { ok: false, error } with NO broadcast and NO reroll', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, false);
+  assert.equal(typeof result.error, 'string');
+  // clearStorageData threw before logging anything; rerollSeed/broadcast never ran
+  // (nothing was wiped, so no reload should fire).
+  assert.equal(h.events.length, 0);
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('internal-jars-wipe shares behavior with jars-wipe', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invokeInternal('internal-jars-wipe', { id: 'work' });
+  assert.deepEqual(result, { ok: true });
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jar-wiped');
+  assert.deepEqual(b[0].payload, { id: 'work' });
 });
 
 // ---------------------------------------------------------------------------
