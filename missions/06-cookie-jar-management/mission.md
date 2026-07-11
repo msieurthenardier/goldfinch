@@ -1,6 +1,6 @@
 # Mission: Cookie Jar Management
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
