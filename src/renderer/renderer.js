@@ -349,7 +349,7 @@ const openKebabOverlay = (startIndex) => openOverlayMenu('kebab', kebabModel(), 
 // buildContainerModel (src/shared/container-menu.js).
 /** @param {number} startIndex */
 const openContainerOverlay = (startIndex) =>
-  openOverlayMenu('container', buildContainerModel(containers), containerAnchor(), startIndex);
+  openOverlayMenu('container', buildContainerModel(containers, defaultId), containerAnchor(), startIndex);
 // Site-info model derived from the active tab via the shared deriveSiteInfo
 // (the one derivation source). startIndex is meaningless for the no-items
 // popup — the sheet focuses the "Site settings →" action.

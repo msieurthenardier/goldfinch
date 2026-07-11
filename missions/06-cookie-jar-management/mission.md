@@ -142,6 +142,8 @@ identity, not id string, and already degrades gracefully when a jar disappears.
 - Should "delete a jar while an automation key is scoped to it" be an explicit behavior
   test, given the automation layer documents graceful degradation but has never been
   tested end-to-end against real deletion? *(Architect suggestion — Flight 5 candidate)*
+  *(RESOLVED, Flight 5: yes — `jar-key-revocation-on-delete` authored and passed 5/5
+  first run; the delete→revocation→401 chain is live-witnessed and re-runnable.)*
 
 ## Known Issues
 
@@ -196,7 +198,11 @@ identity, not id string, and already degrades gracefully when a jar disappears.
       recolor, delete, and set-default interactions
 - [x] Flight 4: Per-jar data controls — clear cookies / site storage / cache, full
       identity wipe integration, extensible clearable-data-class list
-- [ ] Flight 5: Chrome integration — entry points, container-picker parity with the new
+- [x] Flight 5: Chrome integration — entry points, container-picker parity with the new
       lifecycle, fresh-install defaults verification, delete-with-open-tabs vs.
       zero-tabs-window invariant, cross-surface and automation-degradation behavior
-      tests
+      tests *(flown at reduced scope as "Mission-Close Gaps" after the post-Flight-4
+      audit found most of this list already covered by Flights 1–4 with evidence; the
+      two surviving gaps — the picker default marker and the automation-degradation
+      behavior test — were closed. Original framing preserved above per the
+      scope-change convention.)*

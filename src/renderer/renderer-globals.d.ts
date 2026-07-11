@@ -344,10 +344,13 @@ declare function deriveSiteInfo(
 /**
  * Injected by src/shared/container-menu.js via the globalThis branch (the
  * container-picker sheet model with the NAMESPACED id space — M05 F8 Leg 3).
+ * `defaultId` (Flight 5 Leg 1) marks the default-holder row with `isDefault: true`
+ * — the holder container, or the Burner sentinel when defaultId is null/dangling.
  */
 declare function buildContainerModel(
-  containers: Array<{ id?: any; name?: any; color?: any }>
-): Array<{ id: string; label: string; color?: string; variant?: string }>;
+  containers: Array<{ id?: any; name?: any; color?: any }>,
+  defaultId?: any
+): Array<{ id: string; label: string; color?: string; variant?: string; isDefault?: boolean }>;
 
 /**
  * Injected by src/shared/burner.js via the globalThis branch (the frozen Burner

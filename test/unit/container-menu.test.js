@@ -24,12 +24,15 @@ const DEFAULT = { id: 'default', name: 'Default', color: '#9aa0ac', partition: '
 // sentinel is renamed from "+ New container…" to "New Jar" with no leading "+";
 // it carries no variant/accent styling anymore — plain, like "Manage jars…")
 // ---------------------------------------------------------------------------
+// Single-arg call ≡ defaultId undefined ≡ null-default semantics ⇒ Burner marked
+// (design-review H2: this literal MUST carry isDefault: true — the only permitted
+// existing-test edit).
 test('model = namespaced jar items + burner + divider + new-container + manage-jars sentinels', () => {
   const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }]);
   assert.deepEqual(model, [
     { id: 'jar:default', label: 'Default', color: '#9aa0ac' },
     { id: 'jar:work', label: 'Work', color: '#2196f3' },
-    { id: 'action:burner', label: `${BURNER.name} tab (evaporates)`, color: BURNER.color },
+    { id: 'action:burner', label: `${BURNER.name} tab (evaporates)`, color: BURNER.color, isDefault: true },
     { type: 'separator' },
     { id: 'action:new-container', label: 'New Jar' },
     { id: 'action:manage-jars', label: 'Manage jars…' }
@@ -131,4 +134,59 @@ test("a literal burner-id jar (hand-built) still renders distinct from action:bu
   assert.ok(jarItem, 'jar item present under the jar: prefix');
   assert.ok(sentinel, 'sentinel still present under the action: prefix');
   assert.notEqual(jarItem.id, sentinel.id);
+});
+
+// ---------------------------------------------------------------------------
+// Default-holder marker truth table (Flight 5 Leg 1, DD1). The row whose id
+// === defaultId carries isDefault: true; Burner carries it when defaultId is
+// null/undefined or dangling (matches no container) — never both, never
+// neither, and never an action/separator row.
+// ---------------------------------------------------------------------------
+test('holder row carries isDefault: true when defaultId matches a container', () => {
+  const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }], 'work');
+  const work = model.find((m) => m.id === 'jar:work');
+  const dflt = model.find((m) => m.id === 'jar:default');
+  const burner = model.find((m) => m.id === 'action:burner');
+  assert.equal(work.isDefault, true, 'the matching jar row carries the marker');
+  assert.equal(dflt.isDefault, undefined, 'the non-matching jar row is unmarked');
+  assert.equal(burner.isDefault, undefined, 'burner is unmarked when a jar holds the default');
+});
+
+test('burner carries isDefault: true when defaultId is null', () => {
+  const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }], null);
+  const burner = model.find((m) => m.id === 'action:burner');
+  assert.equal(burner.isDefault, true);
+  assert.equal(model.find((m) => m.id === 'jar:default').isDefault, undefined);
+  assert.equal(model.find((m) => m.id === 'jar:work').isDefault, undefined);
+});
+
+test('burner carries isDefault: true when defaultId is undefined', () => {
+  const model = buildContainerModel([DEFAULT], undefined);
+  const burner = model.find((m) => m.id === 'action:burner');
+  assert.equal(burner.isDefault, true);
+});
+
+test('burner carries isDefault: true when defaultId is dangling (matches no container)', () => {
+  const model = buildContainerModel([DEFAULT, { id: 'work', name: 'Work', color: '#2196f3' }], 'deleted-jar');
+  const burner = model.find((m) => m.id === 'action:burner');
+  assert.equal(burner.isDefault, true, 'dangling id falls back to burner — never lies about routing');
+  assert.equal(model.find((m) => m.id === 'jar:default').isDefault, undefined);
+  assert.equal(model.find((m) => m.id === 'jar:work').isDefault, undefined);
+});
+
+test('single-argument call (backward compatible) marks burner, matching the null-default shape', () => {
+  const model = buildContainerModel([DEFAULT]);
+  const burner = model.find((m) => m.id === 'action:burner');
+  assert.equal(burner.isDefault, true);
+  assert.equal(model.find((m) => m.id === 'jar:default').isDefault, undefined);
+});
+
+test('action rows and the separator never carry isDefault, regardless of defaultId', () => {
+  const model = buildContainerModel([DEFAULT], 'default');
+  const newContainer = model.find((m) => m.id === 'action:new-container');
+  const manageJars = model.find((m) => m.id === 'action:manage-jars');
+  const sep = model.find((m) => m.type === 'separator');
+  assert.equal(newContainer.isDefault, undefined);
+  assert.equal(manageJars.isDefault, undefined);
+  assert.equal(sep.isDefault, undefined);
 });
