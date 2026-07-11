@@ -1,5 +1,9 @@
 // @ts-check
-'use strict';
+
+// Real ES module (M07 Flight 2 sweep). Consumers are the main process
+// (main.js, via require(esm)) and the test runner ONLY — no renderer document
+// ever loaded this file via <script>, so the old globalThis branch was dead
+// code and was deleted with the dual-export tail (no transitional bridge).
 
 /**
  * sheetAcceleratorAction({ key, control, meta, shift })
@@ -40,7 +44,7 @@
  *     | 'reload' | 'toggle-privacy',
  *   autoRepeatGuard?: boolean } | null}
  */
-function sheetAcceleratorAction({ key, control, meta, shift }) {
+export function sheetAcceleratorAction({ key, control, meta, shift }) {
   // F12 — the sole modifier-less accelerator (guest devtools branch).
   if (key === 'F12') return { scope: 'guest', action: 'devtools', autoRepeatGuard: true };
 
@@ -85,16 +89,7 @@ function sheetAcceleratorAction({ key, control, meta, shift }) {
  *   true when there is no active guest at all (nothing to act on)
  * @returns {boolean}
  */
-function isGuestActionAllowed(action, activeTabIsInternal) {
+export function isGuestActionAllowed(action, activeTabIsInternal) {
   if (action === 'downloads') return true; // tab-independent, exempt
   return !activeTabIsInternal;
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { sheetAcceleratorAction, isGuestActionAllowed };
-} else {
-  /** @type {any} */ (globalThis).sheetAcceleratorAction = sheetAcceleratorAction;
-  /** @type {any} */ (globalThis).isGuestActionAllowed = isGuestActionAllowed;
 }

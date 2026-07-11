@@ -23,7 +23,7 @@ Verify that Goldfinch's anti-fingerprinting **farbling** actually fires on the l
 ## Observables Required
 
 - browser (guest main-world JS values — `navigator.hardwareConcurrency` / `navigator.deviceMemory`, `canvas.toDataURL()` / `getImageData` samples — measured via the **Goldfinch MCP `evaluate` tool** on the guest WebContentsView wcId; the eval tool runs `webContents.executeJavaScript` in the **guest main world** where the farbling hooks live, ZERO CDP, return value is JSON-serializable). **The apparatus must target the GUEST WebContentsView wcId — acquired via `enumerateTabs` and filtered to the jar's tab — NOT the top-level Goldfinch chrome target.** The farbling hooks are installed only in the guest's page context; evaluating in the chrome shell would read the unmodified real values.
-- browser (New-Identity Variant only — the chrome "New Identity" control for the active jar, used to reroll the seed — measured via the Goldfinch MCP **admin** surface: `readAxTree` / `click`, or `evaluate(chromeWcId, 'newIdentity()')` on the chrome renderer global).
+- browser (New-Identity Variant only — the chrome "New Identity" control for the active jar, used to reroll the seed — measured via the Goldfinch MCP **admin** surface: `readAxTree` / `click`, or `evaluate(chromeWcId, 'newIdentity()')` — `newIdentity` is published on the chrome's global scope by the evaluate-reachable seam at the bottom of renderer.js).
 - shell (precondition probes: MCP surface answers an authenticated `initialize`/`tools/list`, fixture HTTP 200 — measured via the MCP client / Bash / curl).
 
 ## Steps

@@ -1,5 +1,3 @@
-'use strict';
-
 // Menu-overlay sheet page script (M05 Flight 8, Legs 2-3 / DD4). Presentation-only:
 // receives the serialized menu model over `menu-overlay:init` (channel 3), renders
 // it under #menu-root via a TEMPLATE REGISTRY keyed by menuType (Leg 3):
@@ -35,8 +33,12 @@
 // template's node → 'outside-click'.
 
 // menuController / focusItem are globals set by the sibling menu-controller.js
-// <script>; isSafeColor by ../shared/safe-color.js (the SAME color domain the
-// product accepts — jars.js re-exports it). Both load before this file.
+// classic <script> — the product's ONE remaining classic script (M07 Flight 2
+// DD6 carve-out); its `defer` tag precedes this module in the shared
+// after-parse queue, so the globals exist when this file executes.
+// isSafeColor is imported (the SAME color domain the product accepts —
+// jars.js re-exports it).
+import { isSafeColor } from '../shared/safe-color.js';
 
 (() => {
   const root = document.getElementById('menu-root');

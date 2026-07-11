@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Pure site-info derivation (M05 Flight 8, Leg 3 / AC3). ONE derivation source
 // shared by TWO renderers during the parallel-run: the chrome's innerHTML popup
@@ -16,7 +15,7 @@
  * @returns {{ internal: true, note: string } |
  *   { internal: false, host: string, connection: string, trackers: number, permissions: number }}
  */
-function deriveSiteInfo(tab, internal) {
+export function deriveSiteInfo(tab, internal) {
   if (!tab || internal) {
     // Internal tab — static secure-page note; no site data, no "Site settings" link.
     return { internal: true, note: "You're viewing a secure Goldfinch page." };
@@ -32,13 +31,4 @@ function deriveSiteInfo(tab, internal) {
   const trackers = tab.privacy?.net?.trackers?.blocked ?? 0;
   const permissions = tab.privacy?.permissions?.length ?? 0;
   return { internal: false, host, connection, trackers, permissions };
-}
-
-// Dual export: CommonJS (test runner) and global (the chrome renderer, which runs
-// with nodeIntegration:false and cannot require()). index.html loads this via
-// <script> before renderer.js.
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { deriveSiteInfo };
-} else {
-  /** @type {any} */ (globalThis).deriveSiteInfo = deriveSiteInfo;
 }

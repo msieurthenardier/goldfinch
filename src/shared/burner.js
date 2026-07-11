@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Burner identity constant (M06 Flight 1 / DD4). The Burner is a shared frozen
 // identity, NEVER a jars.js store entry — three subsystems depend on burner ∉
@@ -17,13 +16,11 @@
 // container-menu.js (the burner sentinel) and renderer.js:makeBurner both derive
 // name/color from this constant (M06 Flight 2 Leg 1, DD8) — the prior triplication
 // of the color literal below is retired.
+//
+// Real ES module (M07 Flight 2 pilot): `export const` for module consumers
+// (import in container-menu.js / jar-page-model.js and the page controllers
+// renderer.js / pages/jars.js; require(esm) in main-process code and the test
+// runner). The transitional globalThis bridge was removed in leg 5 when the
+// page controllers converted.
 
-const BURNER = Object.freeze({ id: 'burner', name: 'Burner', color: '#ff8c42' });
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BURNER };
-} else {
-  /** @type {any} */ (globalThis).BURNER = BURNER;
-}
+export const BURNER = Object.freeze({ id: 'burner', name: 'Burner', color: '#ff8c42' });

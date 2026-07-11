@@ -2,18 +2,11 @@
 
 // Unit tests for src/shared/jar-data-classes.js (M06 Flight 4, Leg 1 / DD2).
 //
-// Pure, dependency-free dual-export module — the CJS branch is exercised via
-// require() below; the globalThis branch is exercised with the same `vm`
-// technique test/unit/jars-page-shared-scripts.test.js uses to prove the
-// classic-<script> load path actually populates the expected globals (no
-// `module`/`require` in the sandbox, so the module's dual-export tail takes its
-// globalThis branch, exactly as it does in the real goldfinch://jars document).
+// Pure, dependency-free ES module (M07 Flight 2 sweep) — exercised via
+// require(esm) below (destructuring the module namespace, same as jar-ipc.js).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 
 const { JAR_DATA_CLASSES, jarDataClassById } = require('../../src/shared/jar-data-classes');
 
@@ -93,28 +86,4 @@ test('jarDataClassById returns null for an unknown id', () => {
   assert.equal(jarDataClassById('history'), null);
   assert.equal(jarDataClassById(''), null);
   assert.equal(jarDataClassById('COOKIES'), null); // case-sensitive
-});
-
-// ---------------------------------------------------------------------------
-// Browser global branch (classic <script>, no module/require) — the vm
-// technique jars-page-shared-scripts.test.js uses for the shared-scope net,
-// applied here directly to prove THIS module's globalThis branch is correct,
-// not just collision-free.
-// ---------------------------------------------------------------------------
-test('the globalThis branch (classic <script> load) populates JAR_DATA_CLASSES and jarDataClassById', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/shared/jar-data-classes.js'), 'utf8');
-  const sandbox = {};
-  const context = vm.createContext(sandbox);
-  vm.runInContext(source, context, { filename: 'jar-data-classes.js' });
-  // Array.from(...) here runs against the OUTER realm's Array constructor, so the
-  // result is a plain outer-realm array — comparing the vm-realm array directly
-  // against an outer-realm literal trips Node assert's cross-realm identity check
-  // ("same structure but not reference-equal") even though the contents match.
-  assert.deepEqual(
-    Array.from(sandbox.JAR_DATA_CLASSES, (c) => c.id),
-    ['cookies', 'storage', 'cache']
-  );
-  assert.equal(typeof sandbox.jarDataClassById, 'function');
-  assert.equal(sandbox.jarDataClassById('cache').storages, null);
-  assert.equal(sandbox.jarDataClassById('nope'), null);
 });

@@ -27,8 +27,8 @@ const {
   isMcpAutomationEnabled,
   shouldAutoMint,
   shouldBindAutomation,
-  resolveAutoMintTarget,
 } = require('../shared/automation-dev');
+const { resolveAutoMintTarget } = require('./auto-mint');
 const { createEngine } = require('./automation/engine');
 const { createMcpServer, mintJarKey, mintAdminKey, revokeJarKey, revokeAdminKey, resolvePort, freePortInRange } = require('./automation/mcp-server');
 const { makeAutomationToggle } = require('./automation/toggle');

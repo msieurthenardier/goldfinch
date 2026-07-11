@@ -1,3 +1,6 @@
+// PRELOAD-REACHABLE (flight-02 divert constraint): required by chrome-preload.js via the RENDERER
+// process's Node require (no require(esm) support) — must stay CJS and must never require a
+// converted ESM module.
 'use strict';
 
 // Single source of truth for the internal `goldfinch://` partition string. Required

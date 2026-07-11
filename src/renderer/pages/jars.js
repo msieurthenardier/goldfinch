@@ -1,4 +1,18 @@
-'use strict';
+// Imports use the page's SERVING paths, not disk paths: this file is served at
+// goldfinch://jars/jars.js and its shared dependencies as flat sibling
+// subresources (INTERNAL_PAGES is an exact-match flat map — a disk-true
+// ../../shared/*.js specifier would 404 at boot). tsc cannot resolve the flat
+// specifiers against the disk layout (TS2307), so each carries @ts-ignore;
+// the bindings type as `any`, matching the ambient-global typing they replace
+// (M07 Flight 2 leg 5 FD ruling; backlog-noted for a future typing cycle).
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { BURNER } from './burner.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { buildJarPageModel, PALETTE, pickNewJarColor } from './jar-page-model.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { JAR_DATA_CLASSES } from './jar-data-classes.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { isSafeColor } from './safe-color.js';
 
 /**
  * jars.js — the goldfinch://jars internal page controller.

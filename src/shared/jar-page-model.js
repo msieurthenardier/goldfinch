@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Pure row-model for the goldfinch://jars management page (M06 Flight 3, Leg 1 /
 // DD3). Extracted so the page's list logic is unit-testable without DOM, following
@@ -15,21 +14,22 @@
 // DD2). No DOM, no Electron; the caller applies isSafeColor before touching
 // style.background (defense in depth, menu-overlay.js:202 precedent).
 //
-// BURNER resolved hybrid-style (M06 Flight 2 DD8 precedent, RESOLVED_BURNER in
-// container-menu.js): CommonJS require() under the test runner, global under the
-// script-tag internal page (nodeIntegration:false, no require()). jars.html loads
-// burner.js before this file — see the F2 D1 shared-scope-collision lesson: this
-// module must NOT redeclare a top-level `const BURNER`.
-const RESOLVED_BURNER = typeof module !== 'undefined' && module.exports
-  ? require('./burner').BURNER
-  : /** @type {{ id: string, name: string, color: string }} */ (/** @type {any} */ (globalThis).BURNER);
+// Real ES module (M07 Flight 2 pilot). BURNER arrives via a real import — the
+// old hybrid require-or-global resolution (RESOLVED_BURNER, M06 Flight 2 DD8
+// precedent) is retired. Historical note (F2 D1): as a classic script this file
+// had to avoid re-declaring a top-level `const BURNER` (classic <script> tags
+// share ONE top-level lexical scope with burner.js). Module scope now isolates
+// top-level declarations, so the import binding below is structurally
+// collision-free.
+
+import { BURNER } from './burner.js';
 
 // Curated palette (M06 Flight 3, Leg 2 / DD4): a fixed, frozen set of swatches for
 // the create/recolor swatch grid. Each entry is a plain 6-digit hex so it always
 // passes isSafeColor (unit-pinned below) — the page palette is UX, the store's
 // cleanColor (jars.js:80) remains the enforcement backstop. First entry is the
 // preselected color for a new jar. Distinct, no near-duplicates.
-const PALETTE = Object.freeze([
+export const PALETTE = Object.freeze([
   '#4caf50', // green (matches the fresh-seed "Personal" default — sensible first pick)
   '#2196f3', // blue
   '#f5c518', // gold (brand accent)
@@ -51,7 +51,7 @@ const PALETTE = Object.freeze([
  * @param {string | null | undefined} defaultId
  * @returns {Array<{ id: string, name: string, color: string, isDefault: boolean, isBurner: boolean }>}
  */
-function buildJarPageModel(containers, defaultId) {
+export function buildJarPageModel(containers, defaultId) {
   /** @type {Array<{ id: string, name: string, color: string, isDefault: boolean, isBurner: boolean }>} */
   const rows = [];
   for (const c of containers || []) {
@@ -68,9 +68,9 @@ function buildJarPageModel(containers, defaultId) {
   // exactly when defaultId is null/undefined (the store's "Burner holds the
   // flag" convention — jar-ipc.js broadcastJarsChanged / DD2).
   rows.push({
-    id: RESOLVED_BURNER.id,
-    name: RESOLVED_BURNER.name,
-    color: RESOLVED_BURNER.color,
+    id: BURNER.id,
+    name: BURNER.name,
+    color: BURNER.color,
     isDefault: defaultId == null,
     isBurner: true
   });
@@ -95,7 +95,7 @@ function buildJarPageModel(containers, defaultId) {
  * @param {() => number} [random] injectable RNG, defaults to Math.random (test seam)
  * @returns {string}
  */
-function pickNewJarColor(palette, usedColors, random = Math.random) {
+export function pickNewJarColor(palette, usedColors, random = Math.random) {
   if (!Array.isArray(palette) || palette.length === 0) return PALETTE[0];
   const used = new Set(Array.isArray(usedColors) ? usedColors : []);
   const unused = palette.filter((color) => !used.has(color));
@@ -105,14 +105,4 @@ function pickNewJarColor(palette, usedColors, random = Math.random) {
   // spec for Math.random, but this is an injectable test seam) must not index
   // past the end of pool.
   return pool[Math.min(index, pool.length - 1)];
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildJarPageModel, PALETTE, pickNewJarColor };
-} else {
-  /** @type {any} */ (globalThis).buildJarPageModel = buildJarPageModel;
-  /** @type {any} */ (globalThis).PALETTE = PALETTE;
-  /** @type {any} */ (globalThis).pickNewJarColor = pickNewJarColor;
 }

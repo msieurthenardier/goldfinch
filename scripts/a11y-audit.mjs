@@ -333,9 +333,11 @@ async function main() {
       // The media & privacy panels are mutually exclusive (togglePrivacy(true)
       // closes the media panel) and renderPrivacy() early-returns while collapsed,
       // so each state must be opened and audited separately — NOT by toggling the
-      // .collapsed class directly. Drive the renderer's own functions (top-level
-      // fns in src/renderer/renderer.js → window globals, reachable in the main
-      // world by executeJavaScript).
+      // .collapsed class directly. Drive the renderer's own functions through the
+      // explicit evaluate-reachable seam (the `Object.assign(globalThis, {...})`
+      // block at the bottom of src/renderer/renderer.js — a module's top-level
+      // fns are NOT page globals; the seam publishes the closed set this script
+      // calls, reachable in the main world by executeJavaScript).
 
       // 1) Base chrome.
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'base-chrome')));

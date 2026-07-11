@@ -5,19 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cookie Jars — Goldfinch</title>
     <link rel="stylesheet" href="jars.css" />
-    <!-- Script order (leg spec): burner.js declares the frozen BURNER identity;
-         jar-data-classes.js is the pure clearable-data-class list (no deps, so it
-         loads right after burner.js); safe-color.js is the injection-safe color
-         validator; jar-page-model.js is the pure row-model consuming both;
-         jars.js is the page controller. All five share ONE top-level lexical
-         scope (classic non-module <script> tags) — see the F2 D1
-         shared-scope-collision lesson pinned in
-         test/unit/jars-page-shared-scripts.test.js. -->
-    <script src="burner.js"></script>
-    <script src="jar-data-classes.js"></script>
-    <script src="safe-color.js"></script>
-    <script src="jar-page-model.js"></script>
-    <script src="jars.js" defer></script>
+    <!-- Fully-module page (M07 Flight 2 leg 5): burner.js (frozen BURNER
+         identity), jar-data-classes.js (pure clearable-data-class list),
+         safe-color.js (injection-safe color validator), jar-page-model.js
+         (the pure row-model importing burner), and jars.js (the page
+         controller, which imports all four via flat serving-path specifiers)
+         are all real ES modules (type="module"). The module loader guarantees
+         the dependencies; the explicit tag order is kept for load-order
+         legibility (the module map dedupes evaluation). The script-tag
+         contract test (test/unit/jars-page-shared-scripts.test.js) pins this
+         all-module tag set and would flag any future classic script (the F2 D1
+         shared-scope-collision lesson). -->
+    <script src="burner.js" type="module"></script>
+    <script src="jar-data-classes.js" type="module"></script>
+    <script src="safe-color.js" type="module"></script>
+    <script src="jar-page-model.js" type="module"></script>
+    <script src="jars.js" type="module"></script>
   </head>
   <body>
     <!-- Master-detail layout (Leg 2 / DD1): settings.html's nav+main structure,

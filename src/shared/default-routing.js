@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Pure new-tab container resolution (M06 Flight 2, Leg 1 / DD1). Extracted so the
 // routing truth-table is unit-testable without DOM.
@@ -19,15 +18,7 @@
  * @param {string | null | undefined} defaultId
  * @returns {any}
  */
-function resolveNewTabContainer(containers, defaultId) {
+export function resolveNewTabContainer(containers, defaultId) {
   if (defaultId == null) return null; // null = Burner holds the flag; undefined = snapshot pending — both mint a burner
   return (containers || []).find((c) => c && c.id === defaultId) || null;
-}
-
-// Dual export: CommonJS (main process + test runner) and global (renderer-class
-// documents, which run with nodeIntegration:false and cannot require()).
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resolveNewTabContainer };
-} else {
-  /** @type {any} */ (globalThis).resolveNewTabContainer = resolveNewTabContainer;
 }

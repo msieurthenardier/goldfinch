@@ -1,5 +1,4 @@
 // @ts-check
-'use strict';
 
 // Page-context menu model for the menu-overlay sheet (M05 Flight 8, Leg 4 / AC2).
 // Pure params→model builder: ports the section logic of the chrome renderer's
@@ -41,7 +40,7 @@ const UNPIN_LABELS = { media: 'Unpin Media', shields: 'Unpin Shields', devtools:
  * @param {('media'|'shields'|'devtools'|null)} [toolbarItem]  toolbar-unpin mode
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>}
  */
-function pageContextModel(params, toolbarItem) {
+export function pageContextModel(params, toolbarItem) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>} */
   const model = [];
 
@@ -119,13 +118,4 @@ function pageContextModel(params, toolbarItem) {
   sep();
   item('action:inspect', 'Inspect');
   return model;
-}
-
-// Dual export: CommonJS (test runner) and global (the chrome renderer, which runs
-// with nodeIntegration:false and cannot require()). index.html loads this via
-// <script> before renderer.js.
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { pageContextModel };
-} else {
-  /** @type {any} */ (globalThis).pageContextModel = pageContextModel;
 }

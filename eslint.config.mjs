@@ -7,8 +7,32 @@ export default [
   {
     // find-overlay-preload.js and menu-overlay-preload.js are chrome-class (M05 F7 DD1 /
     // F8 DD8) — they stay in this node-globals block alongside chrome-preload.js.
-    files: ['src/main/**', 'src/shared/**', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
+    // The four named src/shared/ files are the CJS-by-design carve-outs from the
+    // M07 Flight 2 ESM conversion (automation-dev.js + internal-page.js are
+    // preload-reachable — preload require graphs must stay ESM-free; dev-profile.js
+    // + guest-forward-allowlist.js by zero-benefit ruling). They bind commonjs HERE;
+    // the src/shared/** module block below ignores them so this binding survives
+    // later-wins — that keeps the lint parse guard (an `export` in a preload-reachable
+    // file must FAIL lint, the leg-1 blocker class).
+    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
+    rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
+  },
+  {
+    // M07 Flight 2 end-state: src/shared/ is real ESM. This block no longer
+    // inherits from the commonjs block above (src/shared/** left its files),
+    // so it carries the node globals and the house no-unused-vars rule itself.
+    // The `ignores` entry is LOAD-BEARING: without it, later-wins would silently
+    // re-bind the four CJS-by-design files to module and lose the parse guard
+    // on exactly the preload-constrained files.
+    files: ['src/shared/**'],
+    ignores: [
+      'src/shared/automation-dev.js',
+      'src/shared/internal-page.js',
+      'src/shared/dev-profile.js',
+      'src/shared/guest-forward-allowlist.js'
+    ],
+    languageOptions: { sourceType: 'module', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
   {
@@ -42,8 +66,27 @@ export default [
     ignores: ['src/renderer/menu-controller.js'], // it DEFINES the menu globals (own block above)
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, isSafeTabUrl: 'readonly', isSafePosterUrl: 'readonly', isInternalPageUrl: 'readonly', keydownToAction: 'readonly', menuController: 'readonly', focusItem: 'readonly', windowPage: 'readonly', countNewer: 'readonly', activeLogOf: 'readonly', reduceAudit: 'readonly', pageList: 'readonly', pageCount: 'readonly', isSafeColor: 'readonly', deriveSiteInfo: 'readonly', buildContainerModel: 'readonly', pageContextModel: 'readonly', BURNER: 'readonly', resolveNewTabContainer: 'readonly', inheritContainerDecision: 'readonly', inheritFromPartition: 'readonly', buildJarPageModel: 'readonly', PALETTE: 'readonly', pickNewJarColor: 'readonly', buildAutomationIndicatorModel: 'readonly', JAR_DATA_CLASSES: 'readonly', jarDataClassById: 'readonly' }
+      // Only the menu-controller globals remain injected (DD6 carve-out — the
+      // provider stays a classic script). The shared-module globals were retired
+      // with the M07 Flight 2 ESM conversion: pages import what they use.
+      globals: { ...globals.browser, menuController: 'readonly', focusItem: 'readonly' }
     }
+  },
+  {
+    // M07 Flight 2 leg 5: the four page controllers are ES modules now
+    // (import their shared dependencies; renderer.js additionally publishes
+    // the explicit evaluate-reachable seam). Later-wins over the renderer
+    // script block above — sourceType flips to module; globals/rules merge,
+    // so the browser globals (and the injected menu-controller globals)
+    // persist. menu-controller.js is untouched — the product's one remaining
+    // classic script (DD6 carve-out).
+    files: [
+      'src/renderer/renderer.js',
+      'src/renderer/pages/jars.js',
+      'src/renderer/pages/settings.js',
+      'src/renderer/menu-overlay.js'
+    ],
+    languageOptions: { sourceType: 'module' }
   },
   eslintConfigPrettier // last — Prettier owns formatting
 ];

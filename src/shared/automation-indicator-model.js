@@ -1,10 +1,11 @@
 // @ts-check
-'use strict';
 
 // Pure decision model for the chrome toolbar's automation ("robot") indicator
 // (Flight 3, Leg 6 / HAT inline finding F7 — operator ruling). Extracted so the
-// visibility/count/color/rainbow truth table is unit-testable without DOM, the
-// SAME dual-export shape as jar-page-model.js / inherit-container.js.
+// visibility/count/color/rainbow truth table is unit-testable without DOM. Real
+// ES module (M07 Flight 2 sweep), the same shape as jar-page-model.js: a real
+// `import` of its dependency; consumed via `import` by the chrome controller
+// (renderer.js) since leg 5 removed the transitional globalThis bridge.
 //
 // Operator spec (verbatim): "The robot icon shows up when a connection is
 // active. Instead the robot should show whenever at least 1 automation is
@@ -40,13 +41,7 @@
 // (neutral), matching the "never throw" contract every other shared decision
 // module in this codebase holds to.
 
-// isSafeColor resolution mirrors container-menu.js's RESOLVED_BURNER hybrid:
-// CommonJS require() under the test runner / main process, global under the
-// script-tag chrome (nodeIntegration:false, no require()). index.html loads
-// safe-color.js before this file.
-const RESOLVED_IS_SAFE_COLOR = typeof module !== 'undefined' && module.exports
-  ? require('./safe-color').isSafeColor
-  : /** @type {(c: any) => boolean} */ (/** @type {any} */ (globalThis).isSafeColor);
+import { isSafeColor } from './safe-color.js';
 
 /**
  * Resolve the display color for a single active jarId against the live
@@ -59,7 +54,7 @@ const RESOLVED_IS_SAFE_COLOR = typeof module !== 'undefined' && module.exports
 function resolveJarColor(jarId, containers) {
   const jar = (containers || []).find((c) => c && c.id === jarId);
   if (!jar || typeof jar.color !== 'string') return null;
-  return RESOLVED_IS_SAFE_COLOR(jar.color) ? jar.color : null;
+  return isSafeColor(jar.color) ? jar.color : null;
 }
 
 /**
@@ -82,7 +77,7 @@ function resolveJarColor(jarId, containers) {
  *   color: string | null,
  * }}
  */
-function buildAutomationIndicatorModel(input) {
+export function buildAutomationIndicatorModel(input) {
   const opts = input || {};
   const jarKeyCount = Number.isInteger(opts.enabledJarKeyCount) && opts.enabledJarKeyCount > 0
     ? opts.enabledJarKeyCount
@@ -118,14 +113,4 @@ function buildAutomationIndicatorModel(input) {
   }
 
   return { visible: true, count: jarKeyCount, mode: 'idle', color: null };
-}
-
-// Dual export: CommonJS (main process — unused today, but kept parallel to the
-// pattern — + test runner) and global (the chrome renderer, which runs with
-// nodeIntegration:false and cannot require()). index.html loads this via
-// <script> after safe-color.js and before renderer.js.
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildAutomationIndicatorModel };
-} else {
-  /** @type {any} */ (globalThis).buildAutomationIndicatorModel = buildAutomationIndicatorModel;
 }

@@ -1,11 +1,11 @@
 # Flight: ESM Conversion of src/shared/
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Codebase Health — 2026-07-11 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] `src/shared/` on real `import`/`export`; collision class structurally
+- [x] `src/shared/` on real `import`/`export`; collision class structurally
       gone; compensating machinery retired (criterion 1)
 
 ---
@@ -168,14 +168,22 @@ CLAUDE.md ONLY as a pointer (full doc rewrite is Flight 3).
 
 ### Checkpoints
 
-- [ ] CP1: pilot green — both load paths live-booted, main-process
+- [x] CP1: pilot green — both load paths live-booted, main-process
       require(esm) proven in a real app boot, suite/typecheck/lint green
       with the pilot's vm-net + eslint adaptations in place
-- [ ] CP2: all of `src/shared/` ESM; all consuming pages live-boot; suite
-      green
-- [ ] CP3: machinery retired (d.ts slimmed per DD6, eslint globals gone,
-      vm nets retired/repurposed); net line delta strongly negative; gates
-      green
+      (met via legs 1+2 — the preload-edge-split divert; evidence in
+      flight-log "Leg 2 — preload-edge-split (2026-07-11)")
+- [x] CP2: all of `src/shared/` ESM; all consuming pages live-boot; suite
+      green — met at leg 4 landing (flight-log "Leg 4 — esm-sweep-chrome
+      (2026-07-11)"): 15/15 dual-export conversions done, zero
+      `typeof module` sites left in `src/shared/`, chrome surface
+      live-booted (legs 2/3 proved the other three surfaces; their
+      documents are untouched by leg 4) — except the 4 CJS-by-design —
+      2 preload-constrained, 2 left by ruling
+- [x] CP3: machinery retired (d.ts slimmed per DD6, eslint globals gone,
+      vm nets retired/repurposed); net line delta strongly negative
+      (496+/690− = −194, missions/ + BACKLOG.md excluded); gates green
+      incl. `npm run a11y` — landed 2026-07-11 (flight-log Leg 6 entry)
 
 ### Adaptation Criteria
 
@@ -189,10 +197,25 @@ leaving the 4 plain-CJS no-page modules.
 
 ### Legs
 
-- [ ] `esm-pilot` — DD2 slice, hard gate (CP1)
-- [ ] `esm-sweep-*` — remaining modules + page retags (CP2; count fixed at
-      leg design)
-- [ ] `retire-machinery` — d.ts / eslint / vm nets final state (CP3)
+- [x] `esm-pilot` — DD2 slice, hard gate (CP1)
+- [x] `preload-edge-split` — divert re-plan (flight-log Decisions,
+      2026-07-11): break the preload→burner require edge, complete CP1's
+      live boot
+- [x] `esm-sweep-internal` — internal-surface providers + cross-surface
+      safe-color + DD5 partner automation-indicator-model; 4-document
+      retag (sweep partition fixed post-pilot, FD) — landed 2026-07-11,
+      four-surface live boot green (flight-log Leg 3 entry)
+- [x] `esm-sweep-chrome` — remaining chrome-surface providers + the two
+      dead-global modules (CP2 on landing) — landed 2026-07-11,
+      chrome-surface live boot green, all nine bridged globals verified
+      (flight-log Leg 4 entry)
+- [x] `esm-sweep-controllers` — page controllers convert to modules;
+      all 13 transitional bridges removed; 18-entry evaluate seam
+      published — landed 2026-07-11, four-surface live boot green through
+      the seam, zero ReferenceError (flight-log Leg 5 entry)
+- [x] `retire-machinery` — d.ts / eslint / vm nets final state (CP3) —
+      landed 2026-07-11, all static gates + `npm run a11y` green
+      (flight-log Leg 6 entry)
 
 ---
 
@@ -200,9 +223,9 @@ leaving the 4 plain-CJS no-page modules.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Tests passing
-- [ ] Documentation updated (pointer-level; Flight 3 owns the rewrite)
+- [x] All legs completed
+- [x] Tests passing
+- [x] Documentation updated (pointer-level; Flight 3 owns the rewrite)
 
 ### Verification
 
