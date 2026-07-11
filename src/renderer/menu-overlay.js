@@ -202,6 +202,16 @@
         btn.appendChild(dot);
       }
       btn.appendChild(document.createTextNode(String(item.label != null ? item.label : item.id)));
+      if (item.isDefault) {
+        // Default-jar marker (Flight 5 Leg 1) — trails the label (dot leads, marker
+        // trails). Visible descendant text inside the role="menuitem" button
+        // contributes to the accessible name automatically, so this satisfies the
+        // a11y requirement without a separate aria-label; textContent only, no markup.
+        const badge = document.createElement('span');
+        badge.className = 'cm-default';
+        badge.textContent = 'Default';
+        btn.appendChild(badge);
+      }
       btn.addEventListener('click', () => {
         // Exactly one report per token: activation wins over the dismissal the
         // controller's onClose would otherwise send.

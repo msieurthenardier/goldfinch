@@ -38,22 +38,35 @@ const RESOLVED_BURNER = typeof module !== 'undefined' && module.exports
 
 /**
  * @param {Array<{ id?: any, name?: any, color?: any }>} containers
- * @returns {Array<{ id: string, label: string, color?: string } | { type: 'separator' }>}
+ * @param {any} [defaultId]
+ * @returns {Array<{ id: string, label: string, color?: string, isDefault?: boolean } | { type: 'separator' }>}
  */
-function buildContainerModel(containers) {
-  /** @type {Array<{ id: string, label: string, color?: string } | { type: 'separator' }>} */
+function buildContainerModel(containers, defaultId) {
+  /** @type {Array<{ id: string, label: string, color?: string, isDefault?: boolean } | { type: 'separator' }>} */
   const model = [];
-  for (const c of containers || []) {
+  const list = containers || [];
+  // Default-holder resolution (Flight 5 Leg 1, DD1): the row whose id === defaultId
+  // carries the marker; when defaultId is null/undefined OR matches no container in
+  // the list (dangling — jar deleted, stale value), Burner carries it instead. This
+  // mirrors resolveNewTabContainer's fallback (default-routing.js), which routes to
+  // burner for BOTH cases — the marker must never lie about where a new tab opens.
+  const holderIsBurner =
+    defaultId == null || !list.some((c) => c && typeof c.id === 'string' && c.id === defaultId);
+  for (const c of list) {
     if (!c || typeof c.id !== 'string') continue;
-    /** @type {{ id: string, label: string, color?: string }} */
+    /** @type {{ id: string, label: string, color?: string, isDefault?: boolean }} */
     const item = { id: 'jar:' + c.id, label: String(c.name != null ? c.name : c.id) };
     if (typeof c.color === 'string') item.color = c.color;
+    if (!holderIsBurner && c.id === defaultId) item.isDefault = true;
     model.push(item);
   }
   // Burner sentinel — old markup was `Burner tab <em>(evaporates)</em>`; the sheet
   // is textContent-only, so the label carries the flattened text. Name/color derive
   // from the shared BURNER constant (DD8) instead of duplicating the literal.
-  model.push({ id: 'action:burner', label: `${RESOLVED_BURNER.name} tab (evaporates)`, color: RESOLVED_BURNER.color });
+  /** @type {{ id: string, label: string, color?: string, isDefault?: boolean }} */
+  const burnerItem = { id: 'action:burner', label: `${RESOLVED_BURNER.name} tab (evaporates)`, color: RESOLVED_BURNER.color };
+  if (holderIsBurner) burnerItem.isDefault = true;
+  model.push(burnerItem);
   // Divider separating the jar rows (including Burner) from the action rows below
   // (HAT step-1 finding F1a, operator ruling): the sheet's generic `.cm-sep`
   // renderer (menu-overlay.js, ported from the page-context menu) already handles

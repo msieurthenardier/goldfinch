@@ -106,6 +106,21 @@ body {
   border-radius: 50%;
   flex: none;
 }
+/* Default-jar marker (Flight 5 Leg 1) — jars.css .jar-nav-badge precedent, scaled
+   to the menu row's smaller font-size (12px vs the nav list's 13px). Trails the
+   label text (dot leads, marker trails); textContent-only, never innerHTML. */
+.cm-default {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
 /* Item chrome — mirrors the chrome .cm-item block (styles.css). */
 .cm-item {
   display: flex;
