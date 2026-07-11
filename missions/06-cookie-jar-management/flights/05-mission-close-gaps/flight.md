@@ -1,6 +1,6 @@
 # Flight: Mission-Close Gaps
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Cookie Jar Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -105,7 +105,7 @@ sheet-side flag) per design review; behavior-spec step composition.
 ### Completion Checklist
 
 - [x] All legs completed
-- [ ] Code merged
+- [x] Code merged
 - [x] Tests passing
 - [x] Documentation updated
 
