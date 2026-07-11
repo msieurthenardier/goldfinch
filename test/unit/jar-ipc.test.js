@@ -459,19 +459,19 @@ test('jars-clear-data with duplicate class ids applies twice, harmlessly (not de
   assert.equal(h.events.filter((e) => e.fn === 'clearStorageData').length, 2);
 });
 
-test('jars-clear-data rejection matrix returns { ok: false } and touches no session', async (t) => {
+test('jars-clear-data rejection matrix returns { ok: false, error } and touches no session', async (t) => {
   const h = makeHarness(t);
   const cases = [
-    ['non-object payload', 'nope'],
-    ['unknown id', { id: 'nope', classes: ['cookies'] }],
-    ['burner', { id: 'burner', classes: ['cookies'] }],
-    ['missing classes', { id: 'personal' }],
-    ['empty classes', { id: 'personal', classes: [] }],
-    ['unknown class id', { id: 'personal', classes: ['history'] }],
-    ['non-array classes', { id: 'personal', classes: 'cookies' }]
+    ['non-object payload', 'nope', 'jars: clear-data — malformed-payload'],
+    ['unknown id', { id: 'nope', classes: ['cookies'] }, 'jars: clear-data — unknown-jar'],
+    ['burner', { id: 'burner', classes: ['cookies'] }, 'jars: clear-data — unknown-jar'],
+    ['missing classes', { id: 'personal' }, 'jars: clear-data — invalid-classes'],
+    ['empty classes', { id: 'personal', classes: [] }, 'jars: clear-data — invalid-classes'],
+    ['unknown class id', { id: 'personal', classes: ['history'] }, 'jars: clear-data — unknown-class: history'],
+    ['non-array classes', { id: 'personal', classes: 'cookies' }, 'jars: clear-data — invalid-classes']
   ];
-  for (const [label, payload] of cases) {
-    assert.deepEqual(await h.invoke('jars-clear-data', payload), { ok: false }, label);
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(await h.invoke('jars-clear-data', payload), { ok: false, error }, label);
   }
   assert.equal(h.events.length, 0);
   assert.equal(h.sessions.length, 0);
@@ -480,14 +480,14 @@ test('jars-clear-data rejection matrix returns { ok: false } and touches no sess
 test('jars-clear-data with a partially-unknown classes array applies NONE of them (strict fail-closed)', async (t) => {
   const h = makeHarness(t);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'history'] });
-  assert.deepEqual(result, { ok: false });
+  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — unknown-class: history' });
   assert.equal(h.events.length, 0); // "cookies" never applied either — no partial application
 });
 
-test('jars-clear-data with a throwing session call returns { ok: false }', async (t) => {
+test('jars-clear-data with a throwing session call returns { ok: false, error }', async (t) => {
   const h = makeHarness(t, { storageThrows: true });
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies'] });
-  assert.deepEqual(result, { ok: false });
+  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — session-failure: wipe failed' });
 });
 
 test('internal-jars-clear-data shares behavior with jars-clear-data', async (t) => {
@@ -515,12 +515,12 @@ test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> r
   assert.deepEqual(h.events[3].payload, { id: 'personal' });
 });
 
-test('jars-wipe rejects burner and unknown/malformed ids with { ok: false }, no session call', async (t) => {
+test('jars-wipe rejects burner and unknown/malformed ids with { ok: false, error }, no session call', async (t) => {
   const h = makeHarness(t);
-  assert.deepEqual(await h.invoke('jars-wipe', { id: 'burner' }), { ok: false });
-  assert.deepEqual(await h.invoke('jars-wipe', { id: 'nope' }), { ok: false });
-  assert.deepEqual(await h.invoke('jars-wipe', 'nope'), { ok: false });
-  assert.deepEqual(await h.invoke('jars-wipe', undefined), { ok: false });
+  assert.deepEqual(await h.invoke('jars-wipe', { id: 'burner' }), { ok: false, error: 'jars: wipe — unknown-jar' });
+  assert.deepEqual(await h.invoke('jars-wipe', { id: 'nope' }), { ok: false, error: 'jars: wipe — unknown-jar' });
+  assert.deepEqual(await h.invoke('jars-wipe', 'nope'), { ok: false, error: 'jars: wipe — malformed-payload' });
+  assert.deepEqual(await h.invoke('jars-wipe', undefined), { ok: false, error: 'jars: wipe — malformed-payload' });
   assert.equal(h.events.length, 0);
   assert.equal(h.sessions.length, 0);
 });
@@ -529,7 +529,7 @@ test('jars-wipe with a throwing session call returns { ok: false, error } with N
   const h = makeHarness(t, { storageThrows: true });
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.equal(result.ok, false);
-  assert.equal(typeof result.error, 'string');
+  assert.equal(result.error, 'jars: wipe — session-failure: wipe failed');
   // clearStorageData threw before logging anything; rerollSeed/broadcast never ran
   // (nothing was wiped, so no reload should fire).
   assert.equal(h.events.length, 0);

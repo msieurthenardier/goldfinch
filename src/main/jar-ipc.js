@@ -164,14 +164,16 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   // payload). Classes apply in payload order; duplicates are valid and simply
   // re-apply (harmless — not deduped, kept dumb per the leg spec).
   async function handleClearData(_e, p) {
-    if (p === null || typeof p !== 'object') return { ok: false };
+    if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: clear-data — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);
-    if (!entry) return { ok: false };
-    if (!Array.isArray(p.classes) || p.classes.length === 0) return { ok: false };
+    if (!entry) return { ok: false, error: 'jars: clear-data — unknown-jar' };
+    if (!Array.isArray(p.classes) || p.classes.length === 0) {
+      return { ok: false, error: 'jars: clear-data — invalid-classes' };
+    }
     const descriptors = [];
     for (const classId of p.classes) {
       const d = jarDataClassById(classId);
-      if (!d) return { ok: false };
+      if (!d) return { ok: false, error: `jars: clear-data — unknown-class: ${classId}` };
       descriptors.push(d);
     }
     const ses = session.fromPartition(entry.partition);
@@ -186,10 +188,10 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
           await ses.clearStorageData({ storages: ['shadercache'] });
         }
       }
-    } catch {
+    } catch (e) {
       // Fail-soft (matching the delete path's session-call containment stance):
-      // a thrown session call returns { ok: false } with no partial-success shape.
-      return { ok: false };
+      // a thrown session call returns { ok: false, error } with no partial-success shape.
+      return { ok: false, error: `jars: clear-data — session-failure: ${String(e && e.message ? e.message : e)}` };
     }
     return { ok: true, cleared: descriptors.map((d) => d.id) };
   }
@@ -202,15 +204,15 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   // ONLY on the success path — a thrown session call returns { ok: false, error }
   // with no broadcast and no reroll (nothing was wiped; no reload should fire).
   async function handleWipe(_e, p) {
-    if (p === null || typeof p !== 'object') return { ok: false };
+    if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: wipe — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);
-    if (!entry) return { ok: false };
+    if (!entry) return { ok: false, error: 'jars: wipe — unknown-jar' };
     const ses = session.fromPartition(entry.partition);
     try {
       await ses.clearStorageData();
       await ses.clearCache();
     } catch (e) {
-      return { ok: false, error: String(e && e.message ? e.message : e) };
+      return { ok: false, error: `jars: wipe — session-failure: ${String(e && e.message ? e.message : e)}` };
     }
     rerollSeed(ses);
     broadcast('jar-wiped', { id: entry.id });

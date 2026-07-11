@@ -331,7 +331,7 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * always rejects), an empty/non-array `classes`, or ANY unknown class id
      * rejects with { ok: false } and no session call at all.
      * @param {{id:string, classes:string[]}} payload
-     * @returns {Promise<{ok:boolean, cleared?:string[]}>}
+     * @returns {Promise<{ok:boolean, cleared?:string[], error?:string}>}
      */
     jarsClearData: (payload) => ipcRenderer.invoke('internal-jars-clear-data', payload),
 

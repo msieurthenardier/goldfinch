@@ -1,12 +1,12 @@
 # Flight: Suite & Contract Hygiene
 
-**Status**: ready
+**Status**: completed
 **Mission**: [Codebase Health — 2026-07-11 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Suite wall-clock under ~1.5s via timer mocks (criterion 2)
-- [ ] `{ok:false, error}` uniform on both jar data channels (criterion 3)
+- [x] Suite wall-clock under ~1.5s via timer mocks (criterion 2) — 958ms
+- [x] `{ok:false, error}` uniform on both jar data channels (criterion 3)
 
 ---
 
@@ -68,9 +68,9 @@ out of scope). Broadcast-order and fail-closed semantics unchanged.
 
 ### Checkpoints
 
-- [ ] CP1: suite internal duration < 1.5s, all retry semantics still pinned,
-      1283+ tests green
-- [ ] CP2: every failure branch of both handlers unit-pinned with an `error`
+- [x] CP1: suite internal duration < 1.5s, all retry semantics still pinned,
+      1283+ tests green — measured 958ms, 1283/1283
+- [x] CP2: every failure branch of both handlers unit-pinned with an `error`
       string; typecheck/lint green
 
 ### Adaptation Criteria
@@ -83,8 +83,8 @@ clock seam).
 
 ### Legs
 
-- [ ] `timer-mocks` — finding 2 (CP1)
-- [ ] `result-contract` — finding 4 (CP2)
+- [x] `timer-mocks` — finding 2 (CP1)
+- [x] `result-contract` — finding 4 (CP2)
 
 ---
 
@@ -92,9 +92,12 @@ clock seam).
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Tests passing
-- [ ] Documentation updated (N/A expected — no user-facing change)
+- [x] All legs completed
+- [x] Tests passing (1283/1283, internal duration 958ms; typecheck + lint
+      green; verified independently by the flight Reviewer)
+- [x] Documentation updated (N/A confirmed — CLAUDE.md describes the
+      channels' fail-closed semantics, not the failure return shape; no doc
+      references suite timing)
 
 ### Verification
 
