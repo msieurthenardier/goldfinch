@@ -1,6 +1,6 @@
 # Flight: ESM Conversion of src/shared/
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-07-11 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
