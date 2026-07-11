@@ -1,6 +1,6 @@
 {
   "name": "goldfinch",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A Chromium-based browser with an expandable media panel for viewing, playing, and downloading site media.",
   "main": "src/main/main.js",
   "author": "msieurthenardier <msieurthenardier@gmail.com>",
