@@ -132,7 +132,10 @@ const INTERNAL_PAGES = {
     '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
     // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
     // list, loaded before jars.js (see jars.html's script-order comment).
-    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js')
+    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
+    // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
+    // for the page's collapsible History/Cookies/Other-site-data panels.
+    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js')
   }
 };
 

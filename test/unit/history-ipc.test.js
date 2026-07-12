@@ -67,6 +67,10 @@ function makeFakeStore({ throws = {} } = {}) {
       const n = arr.length;
       data.set(jarId, []);
       return n;
+    },
+    countByJar(jarId) {
+      if (throws.countByJar) throw new Error('store blew up');
+      return rows(jarId).length;
     }
   };
 }
@@ -105,16 +109,18 @@ function makeHarness({ storeThrows = {} } = {}) {
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the four chrome + four internal history channels, no others', () => {
+test('registers exactly the five chrome + five internal history channels, no others', () => {
   const h = makeHarness();
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
     [
       'history-clear',
+      'history-count',
       'history-delete',
       'history-list',
       'history-search',
       'internal-history-clear',
+      'internal-history-count',
       'internal-history-delete',
       'internal-history-list',
       'internal-history-search'
@@ -135,7 +141,8 @@ test('an untrusted event (wrong origin) is rejected on every internal-history-* 
     'internal-history-list',
     'internal-history-search',
     'internal-history-delete',
-    'internal-history-clear'
+    'internal-history-clear',
+    'internal-history-count'
   ]) {
     assert.throws(
       () => h.handlers.get(channel)(untrusted, { jarId: 'personal' }),
@@ -426,4 +433,58 @@ test('history-clear: a throwing store returns the static store-failure string, n
   const result = h.invoke('history-clear', { jarId: 'personal' });
   assert.deepEqual(result, { ok: false, error: 'history: clear — store-failure' });
   assert.equal(h.events.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// history-count (M08 Flight 2, Leg 1 / flight DD6)
+// ---------------------------------------------------------------------------
+test('history-count: malformed payload returns the static error, no store call', () => {
+  const h = makeHarness();
+  for (const bad of [undefined, null, 'nope', 42]) {
+    assert.deepEqual(h.invoke('history-count', bad), { ok: false, error: 'history: count — malformed-payload' });
+  }
+});
+
+test('history-count: unknown jarId returns the static error', () => {
+  const h = makeHarness();
+  assert.deepEqual(h.invoke('history-count', { jarId: 'nope' }), {
+    ok: false,
+    error: 'history: count — unknown-jar'
+  });
+  assert.deepEqual(h.invoke('history-count', { jarId: 'burner' }), {
+    ok: false,
+    error: 'history: count — unknown-jar'
+  });
+});
+
+test('history-count: success shape returns { ok: true, count } against a real store, no broadcast', () => {
+  const h = makeHarness();
+  h.store.seed('personal', { url: 'https://example.com/a' });
+  h.store.seed('personal', { url: 'https://example.com/b' });
+  h.store.seed('work', { url: 'https://other.example.com' });
+  const result = h.invoke('history-count', { jarId: 'personal' });
+  assert.deepEqual(result, { ok: true, count: 2 });
+  assert.equal(h.events.length, 0);
+});
+
+test('history-count: an empty jar returns { ok: true, count: 0 }', () => {
+  const h = makeHarness();
+  const result = h.invoke('history-count', { jarId: 'personal' });
+  assert.deepEqual(result, { ok: true, count: 0 });
+});
+
+test('history-count: a throwing store returns the static store-failure string, never rejects', () => {
+  const h = makeHarness({ storeThrows: { countByJar: true } });
+  const result = h.invoke('history-count', { jarId: 'personal' });
+  assert.deepEqual(result, { ok: false, error: 'history: count — store-failure' });
+  assert.equal(h.events.length, 0);
+});
+
+test('a count via internal-history-count sees rows recorded via the chrome twin (extract-don\'t-fork parity)', () => {
+  const h = makeHarness();
+  h.store.seed('personal', { url: 'https://example.com/a' });
+  const chromeResult = h.invoke('history-count', { jarId: 'personal' });
+  const internalResult = h.invokeInternal('internal-history-count', { jarId: 'personal' });
+  assert.deepEqual(chromeResult, internalResult);
+  assert.deepEqual(chromeResult, { ok: true, count: 1 });
 });

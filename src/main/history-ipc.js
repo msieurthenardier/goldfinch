@@ -25,7 +25,7 @@
 const { registerInternalHandler } = require('./internal-ipc');
 
 /**
- * Register the four history IPC channels (chrome-trusted + internal-origin-
+ * Register the five history IPC channels (chrome-trusted + internal-origin-
  * gated twins). Returns nothing — mutation broadcasts fire inside the
  * handlers via the injected `broadcast`; main.js needs no returned broadcaster
  * (unlike registerJarIpc, whose broadcastJarsChanged is reused by a second,
@@ -128,11 +128,25 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
     }
   }
 
+  // M08 Flight 2 Leg 1 / DD6: the jars page's History panel count line. Read-only
+  // — no broadcast (querying never changes state).
+  function handleCount(_e, p) {
+    if (isMalformed(p)) return { ok: false, error: 'history: count — malformed-payload' };
+    if (!isKnownJar(p.jarId)) return { ok: false, error: 'history: count — unknown-jar' };
+    try {
+      return { ok: true, count: historyStore.countByJar(p.jarId) };
+    } catch (err) {
+      console.error('[history]', err);
+      return { ok: false, error: 'history: count — store-failure' };
+    }
+  }
+
   // Chrome-trusted channels.
   ipcMain.handle('history-list', handleList);
   ipcMain.handle('history-search', handleSearch);
   ipcMain.handle('history-delete', handleDelete);
   ipcMain.handle('history-clear', handleClear);
+  ipcMain.handle('history-count', handleCount);
 
   // Internal-origin-gated twins — same handler bodies, reached only by an
   // allowlisted goldfinch:// internal page (the jars/history management page).
@@ -140,6 +154,7 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
   registerInternalHandler(ipcMain, 'internal-history-search', handleSearch);
   registerInternalHandler(ipcMain, 'internal-history-delete', handleDelete);
   registerInternalHandler(ipcMain, 'internal-history-clear', handleClear);
+  registerInternalHandler(ipcMain, 'internal-history-count', handleCount);
 }
 
 module.exports = { registerHistoryIpc };

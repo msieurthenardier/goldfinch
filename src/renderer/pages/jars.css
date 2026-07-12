@@ -393,9 +393,87 @@ main {
   margin-top: 8px;
 }
 
-/* ── Delete control ── */
-.jar-delete-area {
-  margin-top: 4px;
+/* ── Panels (Flight 2, Leg 2 / DD3): WAI-ARIA disclosure pattern —
+   h3 > button[aria-expanded] + role="region" aria-labelledby, NOT <details>
+   (full control of the reconcile + CSS). Default collapsed (DD4); toggle is
+   INSTANT — no height animation (leg spec #8). ── */
+.jar-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  scroll-margin-top: 24px; /* clears the sticky nav on hash-deep-link scrolls */
+}
+
+.jar-panel-heading {
+  margin: 0;
+}
+
+.jar-panel-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: none;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jar-panel-toggle:hover {
+  background: var(--bg-3);
+}
+
+.jar-panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Chevron via aria-expanded attribute selector — content swap, not an
+   animated rotation (no transition property — instant toggle per leg spec). */
+.jar-panel-toggle::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-right: 10px;
+  border-right: 2px solid var(--fg-dim);
+  border-bottom: 2px solid var(--fg-dim);
+  transform: rotate(-45deg);
+}
+
+.jar-panel-toggle[aria-expanded="true"]::before {
+  transform: rotate(45deg);
+}
+
+.jar-panel-count {
+  font-weight: 400;
+  color: var(--fg-dim);
+  margin-left: 4px;
+}
+
+.jar-panel-region {
+  padding: 14px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 24px;
+}
+
+.jar-panel-hint {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+/* ── Section footer (DD1): Wipe + Delete are jar-LEVEL identity actions,
+   rendered outside all panels — reuses .jar-data-controls/-buttons/
+   -confirm-area (design review verified safe: no per-region singleton
+   selectors). ── */
+.jar-section-footer {
+  margin-top: 16px;
 }
 
 /* Delete button's leading trash icon (HAT step-1 finding F3): icon + visible

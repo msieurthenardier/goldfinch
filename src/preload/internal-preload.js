@@ -401,6 +401,15 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     historyClear: (payload) => ipcRenderer.invoke('internal-history-clear', payload),
 
     /**
+     * Read the live visit count for a jar (M08 Flight 2, Leg 1 / flight DD6).
+     * Rejects the same way as historyList/historySearch on a malformed
+     * payload or unknown jar id.
+     * @param {{jarId:string}} payload
+     * @returns {Promise<any>}
+     */
+    historyCount: (payload) => ipcRenderer.invoke('internal-history-count', payload),
+
+    /**
      * Subscribe to history-changed broadcasts. cb receives { jarId }.
      * Returns a numeric handle for use with offHistoryChanged.
      * @param {(p: any) => void} cb

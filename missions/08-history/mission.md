@@ -213,7 +213,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
       only; burner/internal structurally excluded via positive partition
       allowlist), persist across restarts, retention pruning,
       invalidation-signal broadcasts, `registerXIpc`-style wiring.
-- [ ] Flight 2: Manage-jars page reorganization — collapsible per-data-class
+- [x] Flight 2: Manage-jars page reorganization — collapsible per-data-class
       panels (history, cookies, other site data) with left-nav anchors;
       panel/anchor architecture serves all data classes.
 - [ ] Flight 3: History panel content — browse, search, per-entry delete,
