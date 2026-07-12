@@ -363,3 +363,25 @@ map, so the six flat imports each carry `// @ts-ignore` and their bindings type 
 (matching the ambient-global typing they replaced — no regression). Options for a future cycle:
 `paths` mapping in jsconfig for the internal-page directory, or `.d.ts` shims per flat specifier.
 Do NOT restructure the protocol map for this — it is trust-sensitive (traversal-proof by design).
+
+---
+
+## Electron major bump: 42 → 43 (post-history maintenance sweep item)
+
+**Status:** small deferred upgrade — routed to the post-mission-08 full-category maintenance
+sweep (operator ruling at mission-08 sign-off, 2026-07-12). **Not a mission.**
+**Captured:** 2026-07-12, during mission-08 (per-jar browsing history) planning.
+
+At mission-08 sign-off Goldfinch took the in-line **patch bump 42.4.0 → 42.6.1** (Node 24.18,
+Chrome 148.0.7778.280; full unit suite + typecheck green). The **major bump to 43.x**
+(Chrome 150, same Node 24.18 line) was deliberately deferred: Electron 42 is still in support
+(latest three majors), majors can shift renderer/main behavior right after the M05
+WebContentsView migration settled, and the next full-category maintenance sweep is already
+queued for right after the history mission — the natural home for it.
+
+Notes for that sweep:
+- 43.1.0 bundles the same Node line (24.18), so `node:sqlite` posture (mission-08 substrate)
+  is unchanged — still experimental; re-check the `ExperimentalWarning` and API surface on
+  the new runtime as part of the bump.
+- Re-run the behavior-test net after the bump — chrome/guest event timing is the risk class
+  a major moves.
