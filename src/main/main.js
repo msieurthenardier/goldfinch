@@ -8,6 +8,9 @@ const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
 const { registerJarIpc } = require('./jar-ipc');
+const historyStore = require('./history-store');
+const { createHistoryRecorder } = require('./history-recorder');
+const { registerHistoryIpc } = require('./history-ipc');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { initProfileAndStores } = require('./init-profile');
@@ -604,6 +607,13 @@ let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, e
 // NOTHING to the settings store — the persisted `automationEnabled` stays the sole
 // human-written value. Never active in a packaged build.
 let devEnableOverride = false;
+// The history recorder (M08 Flight 1, Leg 2). Module-scoped so wireTabViewEvents'
+// closure (built per tab-create, long before or after boot) can reach it — assigned
+// once in app.whenReady, right after the history store opens. Stays null until then;
+// every call site uses the `?.` guard, so navigations before boot (impossible in
+// practice — tabs are created via IPC after the chrome loads) are harmless no-ops.
+/** @type {ReturnType<typeof createHistoryRecorder> | null} */
+let historyRecorder = null;
 
 // Grab a screenshot of the main window as a base64 PNG (Flight 3, Leg 1).
 // Tries desktopCapturer first (with correct thumbnailSize); falls back to a
@@ -1253,7 +1263,11 @@ function wireGuestContents(contents) {
 // Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
 // Forwards did-navigate / title / favicon / loading to the chrome renderer; the
 // found-in-page count fans out to the find-overlay webContents (path B, DD3).
-function wireTabViewEvents(view, wcId) {
+// `partition` (M08 Flight 1, Leg 2 / DD5) is the SAME raw value passed to
+// tabViews.set at the call site (trusted ? INTERNAL_PARTITION : partition) — the
+// history recorder's positive-allowlist gate rejects the internal partition on
+// its own, so there is no divergence to keep in sync.
+function wireTabViewEvents(view, wcId, partition) {
   const wc = view.webContents;
   const sendToChrome = (channel, payload) => {
     const cc = getChromeContents();
@@ -1266,13 +1280,16 @@ function wireTabViewEvents(view, wcId) {
   wc.on('did-navigate', guard(() => {
     sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
     sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
   }));
   wc.on('did-navigate-in-page', guard(() => {
     sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
     sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
   }));
   wc.on('page-title-updated', guard((_e, title) => {
     sendToChrome('tab-title', { wcId, title });
+    historyRecorder?.handleTitleUpdated(wcId, title);
   }));
   wc.on('page-favicon-updated', guard((_e, favicons) => {
     sendToChrome('tab-favicon', { wcId, favicons });
@@ -2082,7 +2099,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   wireGuestContents(view.webContents);
 
   // Tab-strip event forwarding
-  wireTabViewEvents(view, wcId);
+  wireTabViewEvents(view, wcId, trusted ? INTERNAL_PARTITION : partition);
 
   view.webContents.loadURL(url).catch((err) => {
     console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
@@ -2100,6 +2117,7 @@ ipcMain.on('tab-close', (_event, wcId) => {
     entry.view.webContents.destroy();
   }
   tabViews.delete(wcId);
+  historyRecorder?.forgetTab(wcId);
   if (activeTabWcId === wcId) activeTabWcId = null;
   // Find-overlay session teardown (AC6d): the session target is being destroyed —
   // close the session with NO refocus (nothing sensible to focus; the stopFind inside
@@ -2470,6 +2488,19 @@ const { broadcastJarsChanged } = registerJarIpc({
   broadcast: broadcastToChromeAndInternal
 });
 
+// --- per-jar history IPC (M08 Flight 1 Leg 3 / DD9) ---
+// The four history read/mutate channels live in history-ipc.js, twin-registered
+// exactly like the jar-registry channels above. Registered at module scope
+// (not inside whenReady, next to the leg-2 boot block) — handlers only touch
+// historyStore at invoke time, always after boot, the same lazy-closure
+// property that lets registerJarIpc run before jars.load().
+registerHistoryIpc({
+  ipcMain,
+  historyStore,
+  jars,
+  broadcast: broadcastToChromeAndInternal
+});
+
 // New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
 // so the site can no longer link you to who you just were.
 ipcMain.handle('identity-new', async (_e, { partition }) => {
@@ -2578,8 +2609,42 @@ app.on('session-created', (ses) => {
   applySpellcheck(ses, spellcheckOn);
 });
 
+// Builds the retentionByJarId map from the live registry and runs one prune pass
+// (M08 Flight 1 / DD6). Wrapped in try/catch — a prune failure must never crash the
+// hourly interval or the boot-time first pass. Broadcasts history-changed per jar
+// with a nonzero deletion count (pruneExpired already returns nonzero-only).
+function pruneAllJars() {
+  try {
+    const retentionByJarId = Object.fromEntries(jars.list().map((j) => [j.id, j.retentionDays]));
+    const deleted = historyStore.pruneExpired(retentionByJarId, Date.now());
+    for (const jarId of Object.keys(deleted)) {
+      broadcastToChromeAndInternal('history-changed', { jarId });
+    }
+  } catch (err) {
+    console.error('[history] prune failed:', err);
+  }
+}
+
 app.whenReady().then(() => {
   initProfileAndStores(app, { shields, settings, jars, downloads });
+  // History store: opened as a SIBLING call right after initProfileAndStores
+  // returns — deliberately NOT by widening that function's unit-pinned 4-store
+  // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
+  // dev-profile setPath redirect has already run by the time initProfileAndStores
+  // returns, so userData is correct here for free (Architect-pinned, flight DD8 /
+  // Technical Approach). historyRecorder is module-scoped so wireTabViewEvents'
+  // closure (built per tab-create) can see it.
+  historyStore.open(app.getPath('userData'));
+  historyRecorder = createHistoryRecorder({
+    store: historyStore,
+    listJars: () => jars.list(),
+    broadcast: broadcastToChromeAndInternal
+  });
+  // Prune once at open, then hourly — unref'd so the interval never holds the
+  // process open on its own (mirrors no other long-lived interval in main.js
+  // needing this, but the house pattern for background timers).
+  pruneAllJars();
+  setInterval(pruneAllJars, 60 * 60 * 1000).unref();
   // Instantiate the app-level downloads manager ONCE, right after the stores load,
   // injecting the loaded downloads-store. Module-scoped so the synchronous
   // session-created hook's wireDownloadHandler closure can reference it. (DD3)
@@ -2720,5 +2785,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     mcpServer?.stop();
     app.quit();
+  }
+});
+
+// History store close (M08 Flight 1 / DD2) — a NEW, deliberately LATER lifecycle
+// seam than before-quit's teardown: will-quit fires after windows are torn down,
+// guaranteeing no in-flight navigation can still be writing when the store closes
+// (Architect review). close() checkpoints the WAL file.
+app.on('will-quit', () => {
+  try {
+    historyStore.close();
+  } catch {
+    // best-effort — quit must not hang or crash on a close failure
   }
 });

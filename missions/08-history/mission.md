@@ -208,7 +208,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
 > planned and created one at a time as work progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] Flight 1: Per-jar history store on built-in `node:sqlite` (decision
+- [x] Flight 1: Per-jar history store on built-in `node:sqlite` (decision
       record written, incl. write-path pin) — record visits (jar-backed tabs
       only; burner/internal structurally excluded via positive partition
       allowlist), persist across restarts, retention pruning,

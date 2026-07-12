@@ -234,7 +234,7 @@ interface GoldfinchInternalBridge {
   onDownloadsChanged(cb: (payload: any) => void): number[];
   offDownloadsChanged(handles: number[]): void;
   // --- cookie-jar registry surface (Flight 3, Leg 1) ---
-  jarsList(): Promise<Array<{ id: string; name: string; color: string; partition: string }>>;
+  jarsList(): Promise<Array<{ id: string; name: string; color: string; partition: string; retentionDays: number }>>;
   jarsAdd(payload: { name: string; color?: string }): Promise<object | null>;
   jarsRename(payload: { id: string; name?: string; color?: string }): Promise<object | null>;
   jarsRemove(payload: { id: string }): Promise<{ ok: boolean; removed?: object; wiped?: boolean }>;
@@ -245,6 +245,13 @@ interface GoldfinchInternalBridge {
   // --- per-jar data controls (Flight 4, Leg 1/3) ---
   jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
   jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
+  // --- per-jar history surface (M08 Flight 1, Leg 3) ---
+  historyList(payload: any): Promise<any>;
+  historySearch(payload: any): Promise<any>;
+  historyDelete(payload: any): Promise<any>;
+  historyClear(payload: any): Promise<any>;
+  onHistoryChanged(cb: (p: any) => void): number;
+  offHistoryChanged(h: number): void;
 }
 
 interface Window {

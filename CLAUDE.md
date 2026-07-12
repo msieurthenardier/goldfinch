@@ -174,6 +174,87 @@ The Unpin dispatch body also calls `els.address.focus()` **after** the send (a d
 
 **Settings read channel for the chrome (`settings-get`).** `ipcMain.handle('settings-get', ...)` in `main.js` is intentionally **not** behind `registerInternalHandler` — its trust domain is the `file://` chrome (the `window.goldfinch` surface in `chrome-preload.js`), the same as `shields-get`. Web webviews have no `ipcRenderer.invoke`, so only the chrome and the internal guest can reach IPC at all.
 
+### History store (`src/main/history-store.js`)
+
+Durable, per-jar browsing-history persistence (M08 Flight 1). Unlike the
+JSON-file codec pattern (`settings-store.js` / `downloads-store.js`), the
+history store needs indexed range queries (recent paging) and full-text
+search at scale, so it is the **first house store built on a live SQLite
+handle** rather than a whole-file rewrite.
+
+- **Substrate ruling (DD1).** The store runs on Node's built-in `node:sqlite`
+  (`DatabaseSync`) — an operator ruling at mission design, not a vendored
+  native module — preserving Goldfinch's zero-runtime-dependency identity
+  (the M03 MCP-SDK precedent set the bar for what earns a dependency; a
+  storage engine the runtime already ships does not). Full decision record:
+  `missions/08-history/flights/01-history-store/flight.md` DD1.
+- **The accepted ongoing cost.** `node:sqlite` is an **experimental** Node
+  API: it emits `ExperimentalWarning` at require time (in the app console and
+  in `npm test` output — cosmetic, accepted) and its surface may shift across
+  Electron/Node upgrades. **Every future Electron major bump must re-run the
+  store's unit suite and treat a `node:sqlite` API break as a first-class
+  migration cost** — this is a standing tax, not a one-time risk.
+- **Recording pipeline.** `src/main/history-recorder.js` (`createHistoryRecorder`
+  — Electron-free, injected-deps factory, not a module singleton; one instance
+  built in `main.js` at boot) is the recording GATE, called from the existing
+  `did-navigate` / `did-navigate-in-page` / `page-title-updated` guards in
+  `wireTabViewEvents` (`main.js`), which threads the tab's **partition** into
+  the recorder alongside the events it already forwards. Decision gates, in
+  order: (1) **positive registered-jar allowlist** — records only when the
+  tab's partition exactly matches a live jar's `partition`
+  (`jars.list().find(j => j.partition === partition)`); this is a positive
+  resolution against the registry, never an "is not a burner" negative check,
+  so burner (`burner:<n>`) and internal (`goldfinch-internal`) partitions
+  structurally match nothing and record nothing — no dedicated exclusion code
+  exists or is needed for them; (2) an `http:`/`https:` scheme allowlist,
+  independently excluding `goldfinch://` and `about:blank`; (3) a per-jar
+  in-memory consecutive-duplicate suppression window (default 30 s) that
+  bounds reload/redirect spam without a DB read on the hot path. A per-`wcId`
+  map backfills titles arriving later via `page-title-updated`; `forgetTab(wcId)`
+  clears it on tab teardown (a crashed tab leaks its entry — accepted, bounded,
+  wcIds are never reused).
+- **`retentionDays` + prune cadence.** Each jar record (`jars.js`) carries a
+  `retentionDays` field (integer, 1–3650, default `30`, validated by
+  `cleanRetention`) — retention is operator-facing jar configuration, so it
+  lives on the jar record, not in the history store itself. `pruneAllJars()`
+  (`main.js`) builds a `{ jarId: retentionDays }` map from the live registry
+  and calls `historyStore.pruneExpired(...)` once at store open and again on
+  an hourly `setInterval(...).unref()`; it also garbage-collects orphan rows
+  whose `jar_id` no longer resolves to a registered jar (defense-in-depth for
+  jar deletions). Up to ~1 h of over-retention between ticks is accepted as
+  invisible at a 30-day granularity.
+- **`history-changed { jarId }` invalidation contract.** Every mutation (a
+  recorded visit, a title backfill, a per-entry delete, a jar clear, a prune
+  deletion) broadcasts `history-changed` with **only** `{ jarId }` via
+  `broadcastToChromeAndInternal` — never row data or counts. Subscribers
+  re-query through their own read path (the same invalidation-not-snapshot
+  lesson as `jars-changed`/`shields-changed`).
+- **IPC twins + static error strings.** `src/main/history-ipc.js`
+  (`registerHistoryIpc`) defines each handler body once and registers it
+  twice, mirroring `jar-ipc.js`'s extract-don't-fork pattern: a bare
+  `ipcMain.handle('history-*', ...)` on the chrome-trusted channel, and
+  `registerInternalHandler(ipcMain, 'internal-history-*', ...)` on the
+  internal-origin-gated twin (reached today only by `goldfinch://jars` — history
+  has no page of its own). The four ops (`list`/`search`/`delete`/`clear`)
+  validate fail-closed, in order (malformed payload → unknown jar → bad args),
+  and every failure returns a **static, non-interpolated** `history: <op> —
+  <code>` string — deliberately not repeating `jar-ipc.js`'s
+  `clear-data`/`wipe` dynamic-interpolation branches.
+- **`history.db` WAL file family.** The store opens `userData/history.db` in
+  `journal_mode=WAL` + `synchronous=NORMAL`, so the live database is actually
+  a **three-file family on disk**: `history.db`, `history.db-wal`, and
+  `history.db-shm`. `app.on('will-quit', ...)` closes the store (checkpointing
+  the WAL) — a deliberately later lifecycle seam than `before-quit`'s
+  teardown, chosen so no in-flight navigation can still be writing once
+  windows are torn down. A corrupt `history.db` (and its `-wal`/`-shm`
+  siblings) is quarantined to a `.corrupt-<ms-epoch>` sibling and recreated
+  fresh on next `open()` — the app must boot.
+- **Two live-probed sqlite gotchas** (design review, verified live): never mix
+  a bare `?` placeholder with numbered `?1`/`?2`/… placeholders in the same
+  statement (SQLite collapses them onto one bound slot), and keep the FTS5
+  index on the **default `unicode61` tokenizer** — a `tokenchars` override
+  turns a whole URL into one token and silently breaks prefix search.
+
 ### Internal-bridge security model (`src/main/internal-ipc.js`)
 
 The trusted internal pages (`goldfinch://settings`, `goldfinch://downloads`, `goldfinch://jars`) have **privileged IPC channels** (`internal-settings-get/set`, `internal-shields-get/set`, `internal-downloads-*`, `internal-jars-*`) that must not be reachable by web content. Two guard layers defend this, with the main-side check as the authoritative boundary:

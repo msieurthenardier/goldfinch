@@ -360,7 +360,60 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * a pagehide handler to prevent accumulation across reloads.
      * @param {number} h
      */
-    offJarsChanged: (h) => off(h)
+    offJarsChanged: (h) => off(h),
+
+    // Per-jar history surface (M08 Flight 1 Leg 3 / DD9). The history UI has no
+    // page of its own — it renders inside goldfinch://jars — so these wrappers
+    // are thin ipcRenderer.invoke calls onto the internal-origin-gated
+    // internal-history-* channels (registerHistoryIpc / history-ipc.js), which
+    // share their exact handler bodies with the chrome-trusted history-*
+    // channels (no chrome-preload consumer this flight — see history-ipc.js).
+
+    /**
+     * List recent visits for a jar, most-recent-first. Rejects on an unknown
+     * jar id or malformed args ({ ok: false, error }).
+     * @param {{jarId:string, limit?:number, before?:number|null}} payload
+     * @returns {Promise<any>}
+     */
+    historyList: (payload) => ipcRenderer.invoke('internal-history-list', payload),
+
+    /**
+     * Full-text search a jar's history. Rejects the same way as historyList.
+     * @param {{jarId:string, query:string, limit?:number}} payload
+     * @returns {Promise<any>}
+     */
+    historySearch: (payload) => ipcRenderer.invoke('internal-history-search', payload),
+
+    /**
+     * Delete a single visit by id, scoped to the jar. Resolves { ok: false,
+     * error: 'history: delete — not-found' } when the visit doesn't exist.
+     * @param {{jarId:string, visitId:number}} payload
+     * @returns {Promise<any>}
+     */
+    historyDelete: (payload) => ipcRenderer.invoke('internal-history-delete', payload),
+
+    /**
+     * Clear all visits for a jar. Idempotent — clearing an empty jar resolves
+     * { ok: true, cleared: 0 } with no broadcast.
+     * @param {{jarId:string}} payload
+     * @returns {Promise<any>}
+     */
+    historyClear: (payload) => ipcRenderer.invoke('internal-history-clear', payload),
+
+    /**
+     * Subscribe to history-changed broadcasts. cb receives { jarId }.
+     * Returns a numeric handle for use with offHistoryChanged.
+     * @param {(p: any) => void} cb
+     * @returns {number}
+     */
+    onHistoryChanged: (cb) => on('history-changed', cb),
+
+    /**
+     * Unsubscribe the history-changed listener registered under handle h. Call
+     * from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offHistoryChanged: (h) => off(h)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for
