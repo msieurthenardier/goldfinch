@@ -48,7 +48,8 @@ test('exposes exactly the repo interface', () => {
     'deleteVisit',
     'clearJar',
     'countByJar',
-    'pruneExpired'
+    'pruneExpired',
+    'pruneOneJar'
   ]) {
     assert.equal(typeof store[m], 'function', `${m} should be a function`);
   }
@@ -67,6 +68,7 @@ test('every method throws "history store not open" before open(), except close()
   assert.throws(() => store.clearJar('a'), /history store not open/);
   assert.throws(() => store.countByJar('a'), /history store not open/);
   assert.throws(() => store.pruneExpired({}, 1), /history store not open/);
+  assert.throws(() => store.pruneOneJar('a', 30, 1), /history store not open/);
   assert.doesNotThrow(() => store.close(), 'close() before open() must be a no-op, not throw');
 });
 
@@ -414,6 +416,86 @@ test('pruneExpired return value maps only nonzero deletion counts', () => {
     // Jar 'b' is registered with a retention but has no rows at all.
     const result = store.pruneExpired({ a: 9999, b: 30 }, 2000);
     assert.deepEqual(result, {}, 'no deletions occurred (a within retention, b has no rows)');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// pruneOneJar (history flight M08 F3 / DD4) — single-jar cutoff delete, NO
+// orphan sweep. Safe by construction for a single-jar caller (the retention
+// EDIT path): a naive pruneExpired({[id]:days}, now) call would delete every
+// OTHER jar's history (absent from the map = orphaned).
+// ---------------------------------------------------------------------------
+test('pruneOneJar deletes only rows older than the cutoff for the given jar and returns the deleted count', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    const dayMs = 86_400_000;
+    const now = 1000 * dayMs;
+
+    const oldId = store.recordVisit({ jarId: 'a', url: 'https://old/', visitedAt: now - 31 * dayMs });
+    const freshId = store.recordVisit({ jarId: 'a', url: 'https://fresh/', visitedAt: now - 1 * dayMs });
+
+    const deleted = store.pruneOneJar('a', 30, now);
+    assert.equal(deleted, 1);
+    assert.deepEqual(store.listRecent('a').map((r) => r.id), [freshId]);
+    void oldId;
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('pruneOneJar: no-collateral pin — other jars are untouched, including an "orphan" id absent from any call', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    const dayMs = 86_400_000;
+    const now = 1000 * dayMs;
+
+    store.recordVisit({ jarId: 'a', url: 'https://old-a/', visitedAt: now - 31 * dayMs });
+    store.recordVisit({ jarId: 'b', url: 'https://old-b/', visitedAt: now - 31 * dayMs });
+    store.recordVisit({ jarId: 'orphan', url: 'https://old-orphan/', visitedAt: now - 31 * dayMs });
+
+    const deleted = store.pruneOneJar('a', 30, now);
+    assert.equal(deleted, 1);
+    assert.equal(store.countByJar('a'), 0);
+    // Unlike pruneExpired, jars NOT named in this call are never touched — no
+    // orphan sweep.
+    assert.equal(store.countByJar('b'), 1, 'jar b must survive untouched');
+    assert.equal(store.countByJar('orphan'), 1, 'an unregistered jar id must survive untouched (no orphan GC here)');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('pruneOneJar returns 0 when nothing is old enough to prune', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://fresh/', visitedAt: 1000 });
+    assert.equal(store.pruneOneJar('a', 9999, 2000), 0);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('pruneOneJar validates jarId/days/now and throws TypeError', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.throws(() => store.pruneOneJar('', 30, 1000), TypeError);
+    assert.throws(() => store.pruneOneJar(/** @type {any} */ (42), 30, 1000), TypeError);
+    assert.throws(() => store.pruneOneJar('a', /** @type {any} */ ('30'), 1000), TypeError);
+    assert.throws(() => store.pruneOneJar('a', NaN, 1000), TypeError);
+    assert.throws(() => store.pruneOneJar('a', 30, /** @type {any} */ (null)), TypeError);
+    assert.throws(() => store.pruneOneJar('a', 30, NaN), TypeError);
   } finally {
     removeTempDir(dir);
   }

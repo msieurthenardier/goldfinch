@@ -15,6 +15,8 @@ import { JAR_DATA_CLASSES } from './jar-data-classes.js';
 import { isSafeColor } from './safe-color.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createHistoryPanel } from './jars-history-panel.js';
 
 /**
  * jars.js — the goldfinch://jars internal page controller.
@@ -204,6 +206,18 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
 
   function clearPageError() {
     pageErrorEl.textContent = '';
+  }
+
+  /**
+   * Read a jar's RAW store record by id — carries `retentionDays`, unlike
+   * the page-model `JarRow` built by `buildJarPageModel` (leg spec #2: the
+   * History panel's `getRetentionDays` callback needs the raw record, never
+   * the page-model row).
+   * @param {string} id
+   * @returns {any}
+   */
+  function currentRowFor(id) {
+    return state.containers.find((c) => c.id === id) || null;
   }
 
   // A data-action success note stays on screen for a few seconds before
@@ -503,7 +517,8 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
    *   confirmOpenKeys?: Map<string, (string|null)>,
    *   panelOpen?: Map<string, boolean>,
    *   panelRefs?: Map<string, { button: HTMLButtonElement, region: HTMLElement, countSpan?: HTMLElement }>,
-   *   statusClearHandle?: (number|null), nameDirty?: boolean
+   *   statusClearHandle?: (number|null), nameDirty?: boolean,
+   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null)
    * }} SectionRefs
    */
 
@@ -512,7 +527,8 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
 
   /**
    * One region's always-visible button row + its own confirm area below it
-   * (leg spec #4/#8) — reused verbatim for the Cookies panel, the
+   * (leg spec #4/#8) — reused verbatim for the History panel (Flight 3, Leg
+   * 2 — zero-arg call, same as every other caller), the Cookies panel, the
    * Other-site-data panel, and the section footer; no per-region singleton
    * selectors (design review verified reuse is safe).
    * @returns {{ root: HTMLElement, buttonRow: HTMLElement, confirmArea: HTMLElement }}
@@ -635,6 +651,16 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
     /** @type {Map<string, HTMLElement>} */
     const panelButtonRows = new Map();
 
+    // Forward-declared: the History panel's `onError` (below, built inside
+    // the JAR_PANELS loop) and its module instance both close over `refs`,
+    // which is only assigned once the section is otherwise fully built (see
+    // the SectionRefs literal below). Safe — neither closure is ever invoked
+    // until after buildJarSection returns, by which point `refs` is set.
+    /** @type {SectionRefs} */
+    let refs;
+    /** @type {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null} */
+    let historyPanel = null;
+
     for (const panel of JAR_PANELS) {
       const headingId = 'jar-' + row.id + '--' + panel.id + '-heading';
       const regionId = 'jar-' + row.id + '--' + panel.id;
@@ -674,19 +700,29 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
       region.className = 'jar-panel-region';
       region.hidden = true;
 
+      // Every panel — including History (Flight 3, Leg 2) — gets the
+      // standard jars.js-owned data controls (Clear-<class> button + this
+      // region's confirm area). History additionally gets a SECOND child:
+      // the module-owned mount (DD7 DOM contract — the region has exactly
+      // two children; jars.js never writes inside the mount).
+      const controls = buildRegionControls();
+      panelButtonRows.set(panel.id, controls.buttonRow);
+      confirmAreas.set(panel.id, controls.confirmArea);
+      confirmOpenKeys.set(panel.id, null);
+      region.appendChild(controls.root);
+
       if (panel.id === 'history') {
-        // Flight 3 territory (browse/search/delete); this flight renders
-        // only the count (button label, above) + a short hint (DD1/DD5).
-        const hint = document.createElement('p');
-        hint.className = 'jar-panel-hint';
-        hint.textContent = 'Detailed browsing history for this jar is coming in a later flight.';
-        region.appendChild(hint);
-      } else {
-        const controls = buildRegionControls();
-        panelButtonRows.set(panel.id, controls.buttonRow);
-        confirmAreas.set(panel.id, controls.confirmArea);
-        confirmOpenKeys.set(panel.id, null);
-        region.appendChild(controls.root);
+        const historyMount = document.createElement('div');
+        historyMount.className = 'jar-history-mount';
+        region.appendChild(historyMount);
+
+        historyPanel = createHistoryPanel({
+          bridge,
+          jarId: row.id,
+          mountEl: historyMount,
+          onError: (message) => setSectionStatus(refs, message, false),
+          getRetentionDays: () => currentRowFor(row.id)?.retentionDays ?? 30
+        });
       }
 
       panelEl.appendChild(region);
@@ -716,6 +752,9 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
         panelOpen.set(panel.id, willOpen);
         region.hidden = !willOpen;
         toggleBtn.setAttribute('aria-expanded', String(willOpen));
+        // History panel content is lazy-fetched on first expand (DD6) —
+        // onExpanded() no-ops on every later expand once a view has painted.
+        if (willOpen && panel.id === 'history') refs.historyPanel?.onExpanded();
       });
     }
 
@@ -764,8 +803,7 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
     footer.appendChild(footerControls.root);
     section.appendChild(footer);
 
-    /** @type {SectionRefs} */
-    const refs = {
+    refs = {
       root: section,
       isBurner: false,
       row: null,
@@ -784,7 +822,8 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
       panelOpen,
       panelRefs,
       statusClearHandle: null,
-      nameDirty: false
+      nameDirty: false,
+      historyPanel
     };
 
     makeDefaultBtn.addEventListener('click', () => handleSetDefault(row.id));
@@ -855,7 +894,10 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
     updateConfirmAreas(refs, row);
     // Panel open/closed state and panel DOM (incl. the History count span)
     // are NEVER touched here (module doc INVARIANT) — static labels/content
-    // give this function nothing else to reconcile in the panels block.
+    // give this function nothing else to reconcile in the panels block. The
+    // History module's own content is reconciled by itself — no arg, per
+    // its module contract; it re-reads retentionDays via its own callback.
+    refs.historyPanel?.onJarsRow();
   }
 
   /**
@@ -981,15 +1023,21 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
   // the transition key MUST widen to include the row's current name too — a
   // name-only change while that confirm is open would otherwise not trigger a
   // rebuild, leaving stale copy on screen.
+  // Keyed by the data-CLASS id (`cls.id`), NOT the action id (design review,
+  // HIGH — DATA_ACTIONS sources copy via CLEAR_COPY[cls.id]; a 'clear-history'
+  // key here would render undefined confirm copy). This mistake nearly
+  // shipped — double-check any future entry is keyed by class id.
   const CLEAR_COPY = {
     cookies: "Clears this jar's cookies. Sites in this jar will sign you out.",
     storage: "Clears this jar's site storage — data sites saved locally in this jar.",
-    cache: "Clears this jar's cached files. Sites reload them on next visit."
+    cache: "Clears this jar's cached files. Sites reload them on next visit.",
+    history: "Clears this jar's browsing history."
   };
   const CLEAR_OK_NOTE = {
     cookies: 'Cookies cleared.',
     storage: 'Site storage cleared.',
-    cache: 'Cache cleared.'
+    cache: 'Cache cleared.',
+    history: 'History cleared.'
   };
   const WIPE_COPY =
     "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will reload.";
@@ -1038,7 +1086,9 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
   };
 
   // Confirm-area region ids, in the order updateConfirmAreas diffs them.
-  const CONFIRM_REGIONS = ['cookies', 'site-data', 'footer'];
+  // 'history' is FIRST, matching JAR_PANELS order (cosmetic — the diff loop
+  // is order-independent).
+  const CONFIRM_REGIONS = ['history', 'cookies', 'site-data', 'footer'];
 
   /**
    * Map a DATA_ACTIONS key to the region id that hosts its confirm area (leg
@@ -1325,6 +1375,7 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
         const removed = sectionMap.get(id);
         // No timers firing into removed DOM (leg spec AC — feedback timing).
         if (removed.statusClearHandle != null) clearTimeout(removed.statusClearHandle);
+        removed.historyPanel?.destroy();
         removed.root.remove();
         sectionMap.delete(id);
       }
@@ -1649,7 +1700,12 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
   const historyChangedHandle = bridge.onHistoryChanged((payload) => {
     if (!payload || typeof payload.jarId !== 'string') return;
     const refs = sectionMap.get(payload.jarId);
-    if (!refs || refs.isBurner || !refs.panelRefs) return;
+    if (!refs || refs.isBurner) return;
+    // In addition to the count refresh below (Flight 2's existing wiring),
+    // the History module re-runs its own current view's top page — a no-op
+    // if the panel was never expanded (leg spec #5).
+    refs.historyPanel?.onHistoryChanged();
+    if (!refs.panelRefs) return;
     const historyPanelRef = refs.panelRefs.get('history');
     if (!historyPanelRef || !historyPanelRef.countSpan) return;
     fetchHistoryCount(payload.jarId, historyPanelRef.countSpan);

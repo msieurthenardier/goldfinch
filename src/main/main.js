@@ -135,7 +135,11 @@ const INTERNAL_PAGES = {
     '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
     // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
     // for the page's collapsible History/Cookies/Other-site-data panels.
-    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js')
+    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js'),
+    // History panel content module (M08 Flight 3, Leg 2 / flight DD7) — a
+    // page-local module (src/renderer/pages/, not src/shared/), unlike the
+    // entries above.
+    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js')
   }
 };
 
@@ -2488,7 +2492,8 @@ const { broadcastJarsChanged } = registerJarIpc({
   rerollSeed,
   revokeJarKey,
   settings,
-  broadcast: broadcastToChromeAndInternal
+  broadcast: broadcastToChromeAndInternal,
+  historyStore
 });
 
 // --- per-jar history IPC (M08 Flight 1 Leg 3 / DD9) ---

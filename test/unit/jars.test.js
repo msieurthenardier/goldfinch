@@ -832,7 +832,7 @@ test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to v2 w
   }
 });
 
-test('persisted round-trip: a custom retentionDays value on disk survives load unchanged (no public setter this leg — file edited directly)', () => {
+test('persisted round-trip: a custom retentionDays value on disk survives load unchanged (file edited directly)', () => {
   const dir = makeTempDir();
   try {
     const custom = { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: 90 };
@@ -1165,6 +1165,90 @@ test('setDefault is idempotent: current holder → true; null-while-empty → tr
     store.remove('personal');
     assert.equal(store.setDefault(null), true, 'setDefault(null) while already empty is a no-op success');
     assert.equal(store.getDefault(), BURNER);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ===========================================================================
+// setRetention (history flight M08 F3 / DD4) — REJECTS invalid input (unlike
+// cleanRetention's load-time coercion-to-default).
+// ===========================================================================
+
+test('setRetention: happy path mutates, persists, and returns the updated container', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const updated = store.setRetention('personal', 90);
+    assert.equal(updated.retentionDays, 90);
+    assert.equal(store.list()[0].retentionDays, 90);
+    assert.equal(readStore(dir).containers[0].retentionDays, 90, 'persisted');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: unknown id returns null, no throw, nothing persisted', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    assert.equal(store.setRetention('ghost', 90), null);
+    assert.equal(store.list()[0].retentionDays, 30, 'unchanged');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: rejection table — invalid days values return null and do not mutate', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const cases = [
+      [0, 'zero is out of range'],
+      [1.5, 'non-integer'],
+      ['30', 'numeric string must not coerce'],
+      [3651, 'one past the max'],
+      [null, 'null']
+    ];
+    for (const [input, label] of cases) {
+      assert.equal(store.setRetention('personal', /** @type {any} */ (input)), null, label);
+      assert.equal(store.list()[0].retentionDays, 30, `${label}: value must stay unchanged`);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: boundary values 1 and 3650 are accepted', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    assert.equal(store.setRetention('personal', 1).retentionDays, 1);
+    assert.equal(store.setRetention('personal', 3650).retentionDays, 3650);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: current-value write is still ok, still persists (idempotent, no special-casing)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const updated = store.setRetention('personal', 30);
+    assert.equal(updated.retentionDays, 30);
+    assert.equal(readStore(dir).containers[0].retentionDays, 30);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('rename() still ignores retention — a rename patch never touches retentionDays', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    store.setRetention('personal', 90);
+    store.rename('personal', { name: 'Renamed', color: '#abcdef' });
+    assert.equal(store.list()[0].retentionDays, 90, 'rename must not reset or touch retentionDays');
   } finally {
     removeTempDir(dir);
   }

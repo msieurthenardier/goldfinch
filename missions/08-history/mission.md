@@ -87,15 +87,15 @@ Prior debriefs left concrete planning inputs this mission adopts:
 - [ ] Jar isolation holds for history on every surface: no web page, no
       address-bar session, and no jar-keyed automation client can observe
       history from a jar other than its own. *(behavior-test-backed)*
-- [ ] The manage-jars page presents each jar's data in collapsible panels
+- [x] The manage-jars page presents each jar's data in collapsible panels
       (history, cookies, other site data) with left-nav anchors; panels
       expand/collapse independently and anchors jump to the right jar/section.
-- [ ] The history panel supports browsing recent visits, text search, deleting
+- [x] The history panel supports browsing recent visits, text search, deleting
       an individual entry, and clearing all history for that jar.
-- [ ] History participates in the jar data controls: clearing history via the
+- [x] History participates in the jar data controls: clearing history via the
       data-class control and wiping a jar both remove that jar's history
       alongside its other data classes.
-- [ ] Each jar has its own retention policy (initial value 30 days), editable
+- [x] Each jar has its own retention policy (initial value 30 days), editable
       on the manage-jars page; entries older than the jar's retention are
       removed automatically without operator action.
 - [ ] Typing in the address bar surfaces matching suggestions drawn
@@ -200,7 +200,13 @@ Prior debriefs left concrete planning inputs this mission adopts:
 
 ## Known Issues
 
-*(none yet — populated during execution as flights surface problems)*
+- **`rerollSeed` is skipped when a session call throws during jar delete**
+  (`wipeJarData` extraction, Flight 3): if the same slug is re-minted in the
+  SAME app process, a stale fingerprint seed could persist onto the
+  re-created jar's partition. Bounded (restart closes it; the precondition
+  already left storage uncleaned pre-Flight-3). Discovered in Flight 3,
+  adjudicated acceptable at flight review; candidate for a future hardening
+  touch.
 
 ## Flights
 
@@ -216,7 +222,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
 - [x] Flight 2: Manage-jars page reorganization — collapsible per-data-class
       panels (history, cookies, other site data) with left-nav anchors;
       panel/anchor architecture serves all data classes.
-- [ ] Flight 3: History panel content — browse, search, per-entry delete,
+- [x] Flight 3: History panel content — browse, search, per-entry delete,
       clear-all; per-jar retention control; history data-class wired into
       clear-data and jar wipe (`JAR_DATA_CLASSES` extension).
 - [ ] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,

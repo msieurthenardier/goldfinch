@@ -43,12 +43,61 @@ const personal = { id: 'personal', name: 'Personal', color: '#4caf50', partition
 const work = { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work' };
 
 /**
+ * A tiny jar-keyed in-memory visit store — the ONLY two methods jar-ipc.js
+ * calls on historyStore (clearJar, pruneOneJar), real enough that the n>0
+ * broadcast gate and cross-jar isolation fall out of actual behavior rather
+ * than hardcoded stubs. Per-method `throws` flags simulate a store hiccup for
+ * the fail-soft/fail-closed branches — built from scratch (this harness had
+ * no fake historyStore before this leg), mirroring history-ipc.test.js's
+ * makeFakeStore convention (per-method throws.<method> toggles).
+ */
+function makeFakeHistoryStore({ throws = {} } = {}) {
+  /** @type {Map<string, Array<{ visitedAt: number }>>} */
+  const data = new Map();
+
+  function rows(jarId) {
+    if (!data.has(jarId)) data.set(jarId, []);
+    return data.get(jarId);
+  }
+
+  return {
+    // Test-only helpers — not part of the real history-store API.
+    seed(jarId, visitedAt = 1) {
+      rows(jarId).push({ visitedAt });
+    },
+    count(jarId) {
+      return rows(jarId).length;
+    },
+    clearJar(jarId) {
+      if (throws.clearJar) throw new Error('history store blew up');
+      const n = rows(jarId).length;
+      data.set(jarId, []);
+      return n;
+    },
+    pruneOneJar(jarId, days, now) {
+      if (throws.pruneOneJar) throw new Error('history store blew up');
+      const cutoff = now - days * 86_400_000;
+      const before = rows(jarId);
+      const kept = before.filter((v) => v.visitedAt >= cutoff);
+      const deleted = before.length - kept.length;
+      data.set(jarId, kept);
+      return deleted;
+    }
+  };
+}
+
+/**
  * Build the fake-deps harness around a real jars store loaded from a v2
  * envelope written to a temp dir. Every observable side-effect (wipe calls,
  * reroll, revoke, broadcasts) is recorded IN ORDER in `events`, so the
- * delete-composition ordering is assertable from one array.
+ * delete-composition ordering is assertable from one array. `historyThrows`
+ * toggles per-method throw behavior on the ONE shared fake historyStore (see
+ * makeFakeHistoryStore header note).
  */
-function makeHarness(t, { containers = [personal, work], defaultId = 'personal', storageThrows = false } = {}) {
+function makeHarness(
+  t,
+  { containers = [personal, work], defaultId = 'personal', storageThrows = false, historyThrows = {} } = {}
+) {
   const dir = makeTempDir();
   t.after(() => removeTempDir(dir));
   fs.writeFileSync(path.join(dir, 'containers.json'), JSON.stringify({ version: 2, defaultId, containers }));
@@ -107,7 +156,18 @@ function makeHarness(t, { containers = [personal, work], defaultId = 'personal',
   const broadcast = (channel, payload) =>
     events.push({ fn: 'broadcast', channel, payload: structuredClone(payload), raw: payload });
 
-  const { broadcastJarsChanged } = registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast });
+  const historyStore = makeFakeHistoryStore({ throws: historyThrows });
+
+  const { broadcastJarsChanged } = registerJarIpc({
+    ipcMain,
+    jars,
+    session,
+    rerollSeed,
+    revokeJarKey,
+    settings,
+    broadcast,
+    historyStore
+  });
 
   const invoke = (channel, payload) => handlers.get(channel)({}, payload);
   // Internal-origin-gated twins (F3 DD1) are registered through registerInternalHandler,
@@ -122,13 +182,24 @@ function makeHarness(t, { containers = [personal, work], defaultId = 'personal',
   const invokeInternal = (channel, payload) => handlers.get(channel)(trustedJarsEvent(), payload);
   const broadcasts = () => events.filter((e) => e.fn === 'broadcast');
 
-  return { jars, handlers, events, sessions, settings, broadcastJarsChanged, invoke, invokeInternal, broadcasts };
+  return {
+    jars,
+    handlers,
+    events,
+    sessions,
+    settings,
+    historyStore,
+    broadcastJarsChanged,
+    invoke,
+    invokeInternal,
+    broadcasts
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the eight chrome + eight internal jar channels, no others', (t) => {
+test('registers exactly the nine chrome + nine internal jar channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
@@ -140,6 +211,7 @@ test('registers exactly the eight chrome + eight internal jar channels, no other
       'internal-jars-remove',
       'internal-jars-rename',
       'internal-jars-set-default',
+      'internal-jars-set-retention',
       'internal-jars-wipe',
       'jars-add',
       'jars-clear-data',
@@ -148,6 +220,7 @@ test('registers exactly the eight chrome + eight internal jar channels, no other
       'jars-remove',
       'jars-rename',
       'jars-set-default',
+      'jars-set-retention',
       'jars-wipe'
     ]
   );
@@ -220,7 +293,8 @@ test('an untrusted event (wrong origin) is rejected on every internal-jars-* cha
     'internal-jars-get-default',
     'internal-jars-remove',
     'internal-jars-clear-data',
-    'internal-jars-wipe'
+    'internal-jars-wipe',
+    'internal-jars-set-retention'
   ]) {
     assert.throws(
       () => h.handlers.get(channel)(untrusted, { id: 'personal' }),
@@ -417,13 +491,36 @@ test('jars-remove with a throwing wipe is fail-soft: { ok: true, wiped: false },
   const result = await h.invoke('jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(result.wiped, false);
-  // Registry removal already happened; reroll/revoke/broadcasts still ran
-  // (clearStorageData threw before logging, clearCache never ran).
-  assert.deepEqual(h.events.map((e) => e.fn), ['rerollSeed', 'revokeJarKey', 'broadcast', 'broadcast']);
-  assert.equal(h.events[0].ses, h.sessions[0]);
-  assert.equal(h.events[2].channel, 'settings-changed');
-  assert.equal(h.events[3].channel, 'jars-changed');
+  // Registry removal already happened; revoke/broadcasts still ran. rerollSeed
+  // does NOT run here (M08 F3 leg 1: wipeJarData's session calls are UN-CAUGHT
+  // — clearStorageData threw before reaching rerollSeed, which now lives
+  // INSIDE wipeJarData, after the session calls — a session throw skips it,
+  // same as it always skipped the (new) history purge).
+  assert.deepEqual(h.events.map((e) => e.fn), ['revokeJarKey', 'broadcast', 'broadcast']);
+  assert.equal(h.events[0].jarId, 'personal');
+  assert.equal(h.events[1].channel, 'settings-changed');
+  assert.equal(h.events[2].channel, 'jars-changed');
   assert.deepEqual(h.jars.list().map((c) => c.id), ['work']);
+});
+
+// M08 Flight 3, Leg 1 / DD2 — history purges on delete too (via wipeJarData).
+test('jars-remove purges the jar\'s history silently — no broadcast, handleRemove emits none', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  h.historyStore.seed('personal', 2000);
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(h.historyStore.count('personal'), 0, 'history purged');
+  assert.ok(h.broadcasts().every((b) => b.channel !== 'history-changed'), 'handleRemove never broadcasts history-changed');
+});
+
+test('jars-remove session-throw-with-history-rows pin: fail-soft continues, but the purge is SKIPPED (it runs after the throwing session calls, inside wipeJarData)', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.wiped, false);
+  assert.equal(h.historyStore.count('personal'), 1, 'purge never ran — the row survives');
 });
 
 // ---------------------------------------------------------------------------
@@ -467,7 +564,7 @@ test('jars-clear-data rejection matrix returns { ok: false, error } and touches 
     ['burner', { id: 'burner', classes: ['cookies'] }, 'jars: clear-data — unknown-jar'],
     ['missing classes', { id: 'personal' }, 'jars: clear-data — invalid-classes'],
     ['empty classes', { id: 'personal', classes: [] }, 'jars: clear-data — invalid-classes'],
-    ['unknown class id', { id: 'personal', classes: ['history'] }, 'jars: clear-data — unknown-class: history'],
+    ['unknown class id', { id: 'personal', classes: ['nonexistent'] }, 'jars: clear-data — unknown-class: nonexistent'],
     ['non-array classes', { id: 'personal', classes: 'cookies' }, 'jars: clear-data — invalid-classes']
   ];
   for (const [label, payload, error] of cases) {
@@ -479,8 +576,8 @@ test('jars-clear-data rejection matrix returns { ok: false, error } and touches 
 
 test('jars-clear-data with a partially-unknown classes array applies NONE of them (strict fail-closed)', async (t) => {
   const h = makeHarness(t);
-  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'history'] });
-  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — unknown-class: history' });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'nonexistent'] });
+  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — unknown-class: nonexistent' });
   assert.equal(h.events.length, 0); // "cookies" never applied either — no partial application
 });
 
@@ -494,6 +591,77 @@ test('internal-jars-clear-data shares behavior with jars-clear-data', async (t) 
   const h = makeHarness(t);
   const result = await h.invokeInternal('internal-jars-clear-data', { id: 'personal', classes: ['cookies'] });
   assert.deepEqual(result, { ok: true, cleared: ['cookies'] });
+});
+
+// ---------------------------------------------------------------------------
+// jars-clear-data — the `history` class (M08 Flight 3, Leg 1 / DD1):
+// discriminator-first dispatch (ahead of the storages-null cache fallthrough),
+// its own static error fragment, n>0 broadcast gate.
+// ---------------------------------------------------------------------------
+test('jars-clear-data with classes:["history"] clears via historyStore.clearJar and broadcasts history-changed (n>0)', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  h.historyStore.seed('personal', 2000);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['history'] });
+  assert.deepEqual(result, { ok: true, cleared: ['history'] });
+  assert.equal(h.historyStore.count('personal'), 0);
+  // No session call at all for a pure-history clear.
+  assert.equal(h.events.filter((e) => e.fn === 'clearStorageData' || e.fn === 'clearCache').length, 0);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'history-changed');
+  assert.deepEqual(b[0].payload, { jarId: 'personal' });
+});
+
+test('jars-clear-data with classes:["history"] on an empty jar is ok:true with NO broadcast (n>0 gate)', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['history'] });
+  assert.deepEqual(result, { ok: true, cleared: ['history'] });
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('jars-clear-data with the cache class still routes to clearCache, NOT historyStore (regression pin for the fallthrough hazard)', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.equal(h.historyStore.count('personal'), 1, 'a cache clear must NOT touch history');
+  assert.equal(h.broadcasts().length, 0, 'no history-changed for a cache-only clear');
+});
+
+test('jars-clear-data with mixed ["history","cookies"] clears BOTH, in request order', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['history', 'cookies'] });
+  assert.deepEqual(result, { ok: true, cleared: ['history', 'cookies'] });
+  assert.equal(h.historyStore.count('personal'), 0);
+  const sessionCalls = h.events.filter((e) => e.fn !== 'broadcast');
+  assert.deepEqual(sessionCalls.map((e) => e.fn), ['clearStorageData']);
+  assert.deepEqual(sessionCalls[0].args, { storages: ['cookies'] });
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'history-changed');
+});
+
+test('jars-clear-data with classes:["cookies","history"] on a history-store throw returns the static history-failure string; the already-applied session class is unaffected', async (t) => {
+  const h = makeHarness(t, { historyThrows: { clearJar: true } });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'history'] });
+  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — history-failure' });
+  // 'cookies' ran BEFORE 'history' in request order — its session call already
+  // fired and is not rolled back (matching the mixed-class error-attribution
+  // shape, not the strict fail-closed PRE-validation, which only guards
+  // against unknown class ids).
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData']);
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('internal-jars-clear-data with classes:["history"] shares behavior with jars-clear-data', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invokeInternal('internal-jars-clear-data', { id: 'personal', classes: ['history'] });
+  assert.deepEqual(result, { ok: true, cleared: ['history'] });
+  assert.equal(h.historyStore.count('personal'), 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -536,6 +704,49 @@ test('jars-wipe with a throwing session call returns { ok: false, error } with N
   assert.equal(h.broadcasts().length, 0);
 });
 
+// M08 Flight 3, Leg 1 / DD2 — wipe also purges history via wipeJarData.
+test('jars-wipe purges history and broadcasts history-changed AFTER jar-wiped (order pinned)', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', 1000);
+  h.historyStore.seed('personal', 2000);
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(h.historyStore.count('personal'), 0);
+  const b = h.broadcasts();
+  assert.equal(b.length, 2);
+  assert.equal(b[0].channel, 'jar-wiped', 'jar-wiped keeps its shipped ordering — it drives tab reloads');
+  assert.equal(b[1].channel, 'history-changed');
+  assert.deepEqual(b[1].payload, { jarId: 'personal' });
+});
+
+test('jars-wipe on a jar with no history broadcasts ONLY jar-wiped (n>0 gate, no history-changed)', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.deepEqual(result, { ok: true });
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jar-wiped');
+});
+
+test('jars-wipe stays ok:true when the history purge throws — logged, no history-changed, jar-wiped still fires', async (t) => {
+  const h = makeHarness(t, { historyThrows: { clearJar: true } });
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.deepEqual(result, { ok: true });
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jar-wiped');
+});
+
+test('jars-wipe session-throw-with-history-rows pin: fail-hard returns, the purge is SKIPPED (it runs after the throwing session calls, inside wipeJarData)', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, false);
+  assert.equal(h.historyStore.count('personal'), 1, 'purge never ran — the row survives');
+  assert.equal(h.broadcasts().length, 0);
+});
+
 test('internal-jars-wipe shares behavior with jars-wipe', async (t) => {
   const h = makeHarness(t);
   const result = await h.invokeInternal('internal-jars-wipe', { id: 'work' });
@@ -544,6 +755,94 @@ test('internal-jars-wipe shares behavior with jars-wipe', async (t) => {
   assert.equal(b.length, 1);
   assert.equal(b[0].channel, 'jar-wiped');
   assert.deepEqual(b[0].payload, { id: 'work' });
+});
+
+// ---------------------------------------------------------------------------
+// jars-set-retention (M08 Flight 3, Leg 1 / DD4) — the first `{ ok, container }`
+// wrapper shape in this module (design review Q2: deliberate). Unknown-jar vs
+// invalid-days are disambiguated by checking jars.list() membership FIRST
+// (both surface as `null` from jars.setRetention). Success always broadcasts
+// jars-changed; historyStore.pruneOneJar then runs in its own try/catch,
+// broadcasting history-changed only when rows were deleted (n>0 gate).
+// ---------------------------------------------------------------------------
+test('jars-set-retention happy path: mutates, persists via jars.js, broadcasts jars-changed, returns { ok: true, container }', (t) => {
+  const h = makeHarness(t);
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 90 });
+  assert.equal(result.ok, true);
+  assert.equal(result.container.id, 'personal');
+  assert.equal(result.container.retentionDays, 90);
+  assert.equal(h.jars.list().find((c) => c.id === 'personal').retentionDays, 90);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jars-changed');
+});
+
+test('jars-set-retention full rejection matrix: malformed payload / unknown jar / invalid days, no mutation', (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope', 'jars: set-retention — malformed-payload'],
+    ['undefined payload', undefined, 'jars: set-retention — malformed-payload'],
+    ['unknown id', { id: 'nope', days: 30 }, 'jars: set-retention — unknown-jar'],
+    ['burner', { id: 'burner', days: 30 }, 'jars: set-retention — unknown-jar'],
+    ['zero days', { id: 'personal', days: 0 }, 'jars: set-retention — invalid-days'],
+    ['non-integer days', { id: 'personal', days: 1.5 }, 'jars: set-retention — invalid-days'],
+    ['numeric-string days', { id: 'personal', days: '30' }, 'jars: set-retention — invalid-days'],
+    ['over-max days', { id: 'personal', days: 3651 }, 'jars: set-retention — invalid-days'],
+    ['null days', { id: 'personal', days: null }, 'jars: set-retention — invalid-days'],
+    ['missing days', { id: 'personal' }, 'jars: set-retention — invalid-days']
+  ];
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(h.invoke('jars-set-retention', payload), { ok: false, error }, label);
+  }
+  assert.equal(h.broadcasts().length, 0);
+  assert.equal(h.jars.list().find((c) => c.id === 'personal').retentionDays, 30, 'no partial mutation on any rejection');
+});
+
+test('jars-set-retention prune-on-change: deleted>0 broadcasts history-changed AFTER jars-changed', (t) => {
+  const h = makeHarness(t);
+  const dayMs = 86_400_000;
+  h.historyStore.seed('personal', Date.now() - 100 * dayMs); // far older than any preset
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  assert.equal(result.ok, true);
+  assert.equal(h.historyStore.count('personal'), 0);
+  const b = h.broadcasts();
+  assert.equal(b.length, 2);
+  assert.equal(b[0].channel, 'jars-changed');
+  assert.equal(b[1].channel, 'history-changed');
+  assert.deepEqual(b[1].payload, { jarId: 'personal' });
+});
+
+test('jars-set-retention prune-on-change: deleted===0 broadcasts ONLY jars-changed', (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seed('personal', Date.now()); // fresh — within any retention window
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 365 });
+  assert.equal(result.ok, true);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jars-changed');
+});
+
+test('jars-set-retention: jars-changed still broadcasts even when the prune throws (logged, fail-soft, no history-changed)', (t) => {
+  const h = makeHarness(t, { historyThrows: { pruneOneJar: true } });
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  assert.equal(result.ok, true);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jars-changed');
+});
+
+test('jars-set-retention to the CURRENT value is still ok:true and still broadcasts (idempotent, no special-casing)', (t) => {
+  const h = makeHarness(t);
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 30 });
+  assert.equal(result.ok, true);
+  assert.equal(h.broadcasts().length, 1);
+});
+
+test('internal-jars-set-retention shares behavior with jars-set-retention', (t) => {
+  const h = makeHarness(t);
+  const result = h.invokeInternal('internal-jars-set-retention', { id: 'work', days: 60 });
+  assert.equal(result.ok, true);
+  assert.equal(result.container.retentionDays, 60);
 });
 
 // ---------------------------------------------------------------------------

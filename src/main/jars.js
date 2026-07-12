@@ -311,6 +311,24 @@ function remove(id) {
   return removed;
 }
 
+// Retention edit (history flight M08 F3 / DD4). Unlike cleanRetention (the
+// load-time coercion above, which silently falls back to the default on any
+// invalid value), setRetention REJECTS an invalid days value outright — an
+// operator-facing edit control should surface an error, not silently persist
+// a different value than what was entered. Returns null for an unknown id OR
+// an invalid days value (0, non-integer, out-of-range, non-number); on
+// success mutates the record, persists, and returns the updated container —
+// same container-or-null contract as rename()/remove().
+/** @param {string} id @param {number} days */
+function setRetention(id, days) {
+  const container = containers.find((c) => c.id === id);
+  if (!container) return null;
+  if (!Number.isInteger(days) || days < 1 || days > 3650) return null;
+  container.retentionDays = days;
+  save();
+  return container;
+}
+
 // Returns boolean: unknown id or null-while-jars-exist → false (DD2 keeps the
 // invariant strict; Flight 3 can relax explicit Burner-as-default deliberately).
 // Setting the current holder again succeeds and still persists (cheap, simpler
@@ -343,6 +361,7 @@ module.exports = {
   remove,
   setDefault,
   getDefault,
+  setRetention,
   validateContainers,
   isSafeColor
 };

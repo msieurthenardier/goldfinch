@@ -73,16 +73,18 @@ export default [
     }
   },
   {
-    // M07 Flight 2 leg 5: the four page controllers are ES modules now
-    // (import their shared dependencies; renderer.js additionally publishes
-    // the explicit evaluate-reachable seam). Later-wins over the renderer
+    // M07 Flight 2 leg 5: the page controllers are ES modules now (import
+    // their shared dependencies; renderer.js additionally publishes the
+    // explicit evaluate-reachable seam). Later-wins over the renderer
     // script block above — sourceType flips to module; globals/rules merge,
     // so the browser globals (and the injected menu-controller globals)
     // persist. menu-controller.js is untouched — the product's one remaining
-    // classic script (DD6 carve-out).
+    // classic script (DD6 carve-out). jars-history-panel.js (M08 Flight 3,
+    // Leg 2) is jars.js's panel-content module — also a real ES module.
     files: [
       'src/renderer/renderer.js',
       'src/renderer/pages/jars.js',
+      'src/renderer/pages/jars-history-panel.js',
       'src/renderer/pages/settings.js',
       'src/renderer/menu-overlay.js'
     ],

@@ -347,6 +347,18 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     jarsWipe: (payload) => ipcRenderer.invoke('internal-jars-wipe', payload),
 
     /**
+     * Set a jar's retention window in days (M08 Flight 3, Leg 1 / flight DD4).
+     * Rejects (never coerces) an invalid `days` — 0, non-integer,
+     * out-of-range, or non-numeric — with { ok: false, error }; same for an
+     * unknown jar id or malformed payload. On success also prunes the jar's
+     * history immediately to the new window (rows older than the new
+     * retention are deleted right away) and resolves { ok: true, container }.
+     * @param {{id:string, days:number}} payload
+     * @returns {Promise<{ok:boolean, container?:object, error?:string}>}
+     */
+    jarsSetRetention: (payload) => ipcRenderer.invoke('internal-jars-set-retention', payload),
+
+    /**
      * Subscribe to jars-changed broadcasts. cb receives { containers, defaultId }
      * (defaultId null ⇔ Burner holds the flag). Returns a numeric handle for use
      * with offJarsChanged.

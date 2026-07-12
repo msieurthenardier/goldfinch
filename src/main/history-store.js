@@ -423,6 +423,38 @@ function pruneExpired(retentionByJarId, now) {
   return deleted;
 }
 
+/**
+ * Delete rows for ONE jar older than `now - days*86_400_000` — the single-jar
+ * counterpart to pruneExpired, for the retention-EDIT path (flight DD4,
+ * CRITICAL: a naive `pruneExpired({ [jarId]: days }, now)` call would treat
+ * every OTHER jar's id as orphaned — absent from the map — and delete their
+ * entire history; this method runs ONLY the per-jar cutoff delete, no orphan
+ * sweep, so it's safe by construction for a single-jar caller). Reuses the
+ * existing pruneJar prepared statement verbatim. Validates args in
+ * recordVisit's style: throws TypeError on a non-string jarId or a
+ * non-finite days/now (programmer error — the IPC layer is the validator for
+ * user-facing bounds; this is mechanism only).
+ * @param {string} jarId
+ * @param {number} days
+ * @param {number} now — ms epoch, caller-supplied
+ * @returns {number} number of rows deleted
+ */
+function pruneOneJar(jarId, days, now) {
+  assertOpen();
+  if (typeof jarId !== 'string' || jarId.length === 0) {
+    throw new TypeError('pruneOneJar: jarId must be a non-empty string');
+  }
+  if (typeof days !== 'number' || !Number.isFinite(days)) {
+    throw new TypeError('pruneOneJar: days must be a finite number');
+  }
+  if (typeof now !== 'number' || !Number.isFinite(now)) {
+    throw new TypeError('pruneOneJar: now must be a finite number');
+  }
+  const cutoff = now - days * 86_400_000;
+  const result = /** @type {any} */ (statements.pruneJar.run(jarId, cutoff));
+  return result.changes;
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -437,5 +469,6 @@ module.exports = {
   deleteVisit,
   clearJar,
   countByJar,
-  pruneExpired
+  pruneExpired,
+  pruneOneJar
 };

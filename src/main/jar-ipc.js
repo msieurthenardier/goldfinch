@@ -32,20 +32,27 @@
 // `ipcMain`; no deps-object change.
 //
 // This module is ELECTRON-FREE: every live handle (`ipcMain`, `session`,
-// `rerollSeed`, `revokeJarKey`, `settings`, `broadcast`) is injected at
-// registerJarIpc(deps), so the whole surface is unit-testable without Electron
-// (the init-profile / downloads-manager / menu-overlay-manager extraction
-// precedent — and it keeps the fourteen handlers out of the main.js god file).
+// `rerollSeed`, `revokeJarKey`, `settings`, `broadcast`, `historyStore`) is
+// injected at registerJarIpc(deps), so the whole surface is unit-testable
+// without Electron (the init-profile / downloads-manager / menu-overlay-manager
+// extraction precedent — and it keeps the fourteen-plus handlers out of the
+// main.js god file).
+//
+// M08 Flight 3, Leg 1 adds the `history` data class (DD1: discriminator-first
+// dispatch inside handleClearData — see the `custom` check below), history
+// purge on wipe/remove via the extracted `wipeJarData` helper (DD2), and the
+// `jars-set-retention` / `internal-jars-set-retention` twins (DD4).
 
 const { BURNER } = require('../shared/burner');
 const { jarDataClassById } = require('../shared/jar-data-classes');
 const { registerInternalHandler } = require('./internal-ipc');
 
 /**
- * Register the six jar-registry IPC channels plus the two per-jar data-control
- * channels (Flight 4, Leg 1 — clear-data/wipe) and return the jars-changed
- * broadcaster (main.js reuses it in the picker's `new-container-create` — the
- * second add entry point, whose renderer-tangled flow stays in main.js).
+ * Register the jar-registry IPC channels plus the per-jar data-control
+ * channels (Flight 4, Leg 1 — clear-data/wipe; Flight 3 Leg 1 — set-retention)
+ * and return the jars-changed broadcaster (main.js reuses it in the picker's
+ * `new-container-create` — the second add entry point, whose renderer-tangled
+ * flow stays in main.js).
  *
  * @param {{
  *   ipcMain: { handle: (channel: string, fn: (event: any, payload?: any) => any) => void },
@@ -54,10 +61,11 @@ const { registerInternalHandler } = require('./internal-ipc');
  *   rerollSeed: (ses: any) => void,
  *   revokeJarKey: (jarId: string, settings: any) => void,
  *   settings: { get: (k: string) => any, set: (k: string, v: any) => any, getAll: () => any },
- *   broadcast: (channel: string, payload: unknown) => void
+ *   broadcast: (channel: string, payload: unknown) => void,
+ *   historyStore: typeof import('./history-store')
  * }} deps
  */
-function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast }) {
+function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore }) {
   // `defaultId` derivation: getDefault() returns the module's own frozen BURNER
   // object (same reference) when the store is empty, so reference identity is
   // exact — null ⇔ Burner is the default. The containers array is jars.list()'s
@@ -118,10 +126,11 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     return jars.getDefault();
   }
 
-  // Delete composition (DD6). Order: remove → wipe → reroll → revoke →
-  // settings-changed → jars-changed. Only the wipe is fail-soft (registry
-  // removal already happened — matching identity-new's error containment);
-  // reroll/revoke/broadcasts run regardless.
+  // Delete composition (DD6). Order: remove → wipe (incl. history purge) →
+  // revoke → settings-changed → jars-changed. Only the wipe is fail-soft
+  // (registry removal already happened — matching identity-new's error
+  // containment); revoke/broadcasts run regardless. `handleRemove` emits no
+  // history broadcast — the section leaves the DOM entirely (flight DD2).
   async function handleRemove(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false };
     const removed = jars.remove(p.id);
@@ -132,14 +141,10 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     const ses = session.fromPartition(removed.partition);
     let wiped = true;
     try {
-      await ses.clearStorageData();
-      await ses.clearCache();
+      await wipeJarData(ses, removed.id);
     } catch {
       wiped = false;
     }
-    // Fresh persona if the slug is ever re-created (session objects are
-    // per-partition-string for the app's lifetime).
-    rerollSeed(ses);
     // Idempotent, hash-only (no-op when the jar had no automation key). The
     // settings-changed broadcast is unconditional — matching the mint path's
     // unconditional broadcast — so an open settings page never shows a stale
@@ -149,6 +154,41 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     broadcast('settings-changed', settings.getAll());
     broadcastJarsChanged();
     return { ok: true, removed, wiped };
+  }
+
+  // wipeJarData(ses, jarId): the clearStorageData + clearCache + rerollSeed
+  // composition, now also purging the jar's history — extracted here honoring
+  // the M06 F4 DD3 "revisit at the next copy" trigger's INTENT (this
+  // composition already appeared three times pre-flight — handleRemove,
+  // handleWipe, and main.js's identity-new — and this flight's new purge
+  // concern is what tips the extraction; main.js's identity-new copy stays
+  // separate per flight DD3, and deliberately does NOT purge history).
+  // Failure isolation (design review, pinned shape): the SESSION calls
+  // (clearStorageData/clearCache) and rerollSeed stay UN-CAUGHT here — they
+  // propagate to the caller's OWN existing try/catch around the wipeJarData()
+  // call, preserving handleRemove's fail-soft `wiped=false` continuation and
+  // handleWipe's fail-hard return exactly (a session throw skips rerollSeed
+  // AND the purge below — nothing was wiped, so neither should run). ONLY the
+  // `historyStore.clearJar(jarId)` line gets its own inner try/catch:
+  // fail-soft, logged (`console.error('[history]', …)`), never flips the
+  // caller's `ok`. It runs AFTER the session calls / reroll (session wipe
+  // first, purge second — flight DD2).
+  // @param {any} ses
+  // @param {string} jarId
+  // @returns {Promise<number>} purged-row count (0 on purge failure)
+  async function wipeJarData(ses, jarId) {
+    await ses.clearStorageData();
+    await ses.clearCache();
+    // Fresh persona if the slug is ever re-created (session objects are
+    // per-partition-string for the app's lifetime).
+    rerollSeed(ses);
+    let purged = 0;
+    try {
+      purged = historyStore.clearJar(jarId);
+    } catch (e) {
+      console.error('[history]', e);
+    }
+    return purged;
   }
 
   // Per-jar data controls (M06 Flight 4, Leg 1 / DD2, DD3). Partition lookup is
@@ -163,6 +203,13 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   // known BEFORE any session call runs (no partial application on a malformed
   // payload). Classes apply in payload order; duplicates are valid and simply
   // re-apply (harmless — not deduped, kept dumb per the leg spec).
+  //
+  // DD1 (M08 F3): dispatch is discriminator-FIRST — `d.custom === 'history'`
+  // routes to `historyStore.clearJar` before the `d.storages` check, so a
+  // naive storages-falsy fallthrough can never route a history clear into
+  // `ses.clearCache()`. The history branch gets its OWN error fragment
+  // (`history-failure`, static) for mixed-class diagnosability, and logs
+  // (`console.error('[history]', …)`, house convention) on a store throw.
   async function handleClearData(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: clear-data — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);
@@ -170,15 +217,27 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     if (!Array.isArray(p.classes) || p.classes.length === 0) {
       return { ok: false, error: 'jars: clear-data — invalid-classes' };
     }
-    const descriptors = [];
+    // Pre-validate every class id BEFORE any session/store call — strict
+    // fail-closed, no partial application on a malformed payload.
     for (const classId of p.classes) {
-      const d = jarDataClassById(classId);
-      if (!d) return { ok: false, error: `jars: clear-data — unknown-class: ${classId}` };
-      descriptors.push(d);
+      if (!jarDataClassById(classId)) return { ok: false, error: `jars: clear-data — unknown-class: ${classId}` };
     }
     const ses = session.fromPartition(entry.partition);
+    const cleared = [];
+    let historyDeleted = 0;
     try {
-      for (const d of descriptors) {
+      for (const classId of p.classes) {
+        const d = jarDataClassById(classId); // already validated above
+        if (d.custom === 'history') {
+          try {
+            historyDeleted = historyStore.clearJar(p.id);
+          } catch (e) {
+            console.error('[history]', e); // house convention (Q1: yes, log)
+            return { ok: false, error: 'jars: clear-data — history-failure' };
+          }
+          cleared.push(classId);
+          continue;
+        }
         if (d.storages) {
           await ses.clearStorageData({ storages: d.storages });
         } else {
@@ -187,36 +246,77 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
           await ses.clearCache();
           await ses.clearStorageData({ storages: ['shadercache'] });
         }
+        cleared.push(classId);
       }
     } catch (e) {
       // Fail-soft (matching the delete path's session-call containment stance):
       // a thrown session call returns { ok: false, error } with no partial-success shape.
       return { ok: false, error: `jars: clear-data — session-failure: ${String(e && e.message ? e.message : e)}` };
     }
-    return { ok: true, cleared: descriptors.map((d) => d.id) };
+    // Mixed ['history','cookies'] clears in request order with per-branch
+    // error attribution; the history-changed broadcast fires only when the
+    // history class was actually requested AND rows were deleted (n>0 gate,
+    // same as history-ipc's clear).
+    if (cleared.includes('history') && historyDeleted > 0) {
+      broadcast('history-changed', { jarId: p.id });
+    }
+    return { ok: true, cleared };
   }
 
   // handleWipe: the full identity wipe — same composition as identity-new
-  // (main.js:2461, `clearStorageData()` + `clearCache()` + `rerollSeed`) plus the
-  // `jar-wiped` broadcast (DD4), minus registry removal and automation-key
-  // revoke (the jar persists; its automation key stays valid — DD3). The
-  // broadcast fires BEFORE resolving (house broadcast-before-resolve rule) and
-  // ONLY on the success path — a thrown session call returns { ok: false, error }
-  // with no broadcast and no reroll (nothing was wiped; no reload should fire).
+  // (main.js:2461, `clearStorageData()` + `clearCache()` + `rerollSeed`), now
+  // routed through the shared `wipeJarData` helper (which also purges
+  // history — DD2), plus the `jar-wiped` broadcast (DD4), minus registry
+  // removal and automation-key revoke (the jar persists; its automation key
+  // stays valid — DD3). The `jar-wiped` broadcast fires BEFORE resolving
+  // (house broadcast-before-resolve rule) and ONLY on the success path — a
+  // thrown session call returns { ok: false, error } with no broadcast and no
+  // reroll/purge (nothing was wiped; no reload should fire). `jar-wiped`
+  // ordering stays exactly as shipped (it drives tab reloads); `history-changed
+  // { jarId }` fires immediately AFTER it, only when the purge deleted rows
+  // (n>0 gate) — a purge failure or a no-op purge stays silent, still ok:true.
   async function handleWipe(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: wipe — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);
     if (!entry) return { ok: false, error: 'jars: wipe — unknown-jar' };
     const ses = session.fromPartition(entry.partition);
+    /** @type {number} */
+    let purged;
     try {
-      await ses.clearStorageData();
-      await ses.clearCache();
+      purged = await wipeJarData(ses, entry.id);
     } catch (e) {
       return { ok: false, error: `jars: wipe — session-failure: ${String(e && e.message ? e.message : e)}` };
     }
-    rerollSeed(ses);
     broadcast('jar-wiped', { id: entry.id });
+    if (purged > 0) broadcast('history-changed', { jarId: entry.id });
     return { ok: true };
+  }
+
+  // handleSetRetention (flight DD4): jars.setRetention REJECTS invalid `days`
+  // (returns null) rather than coercing it like the load-time cleanRetention —
+  // so an unknown-jar rejection and an invalid-days rejection (both surface as
+  // `null` from setRetention) must be disambiguated by checking jars.list()
+  // membership FIRST. On success: broadcast jars-changed (existing
+  // broadcastJarsChanged) FIRST, then run historyStore.pruneOneJar in its own
+  // try/catch (fail-soft, logged — never flips `ok`), broadcasting
+  // history-changed { jarId } only when rows were deleted. Returns
+  // { ok: true, container } — the first `{ ok, container }` wrapper shape in
+  // this module (the validation-failure branches force an `ok` envelope;
+  // design review Q2: confirmed deliberate).
+  function handleSetRetention(_e, p) {
+    if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: set-retention — malformed-payload' };
+    const known = jars.list().some((j) => j.id === p.id);
+    if (!known) return { ok: false, error: 'jars: set-retention — unknown-jar' };
+    const container = jars.setRetention(p.id, p.days);
+    if (!container) return { ok: false, error: 'jars: set-retention — invalid-days' };
+    broadcastJarsChanged();
+    try {
+      const deleted = historyStore.pruneOneJar(p.id, p.days, Date.now());
+      if (deleted > 0) broadcast('history-changed', { jarId: p.id });
+    } catch (e) {
+      console.error('[history]', e);
+    }
+    return { ok: true, container };
   }
 
   // Chrome-trusted channels (unchanged trust domain — DD7).
@@ -228,6 +328,7 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   ipcMain.handle('jars-remove', handleRemove);
   ipcMain.handle('jars-clear-data', handleClearData);
   ipcMain.handle('jars-wipe', handleWipe);
+  ipcMain.handle('jars-set-retention', handleSetRetention);
 
   // Internal-origin-gated twins (F3 DD1) — same handler bodies, reached only by
   // an allowlisted goldfinch:// internal page (the jars management page).
@@ -239,6 +340,7 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   registerInternalHandler(ipcMain, 'internal-jars-remove', handleRemove);
   registerInternalHandler(ipcMain, 'internal-jars-clear-data', handleClearData);
   registerInternalHandler(ipcMain, 'internal-jars-wipe', handleWipe);
+  registerInternalHandler(ipcMain, 'internal-jars-set-retention', handleSetRetention);
 
   return { broadcastJarsChanged };
 }

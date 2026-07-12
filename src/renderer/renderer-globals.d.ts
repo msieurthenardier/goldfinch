@@ -245,6 +245,8 @@ interface GoldfinchInternalBridge {
   // --- per-jar data controls (Flight 4, Leg 1/3) ---
   jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
   jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
+  // --- per-jar retention edit (M08 Flight 3, Leg 1 / DD4) ---
+  jarsSetRetention(payload: { id: string; days: number }): Promise<{ ok: boolean; container?: object; error?: string }>;
   // --- per-jar history surface (M08 Flight 1, Leg 3; historyCount added M08 Flight 2, Leg 1) ---
   historyList(payload: any): Promise<any>;
   historySearch(payload: any): Promise<any>;
