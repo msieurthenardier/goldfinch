@@ -10,6 +10,91 @@
 
 ## Leg Progress
 
+### HAT re-verification (closing leg — completed 2026-07-13)
+
+**Disposition**: R1 + H1–H7 all confirmed resolved live (Re-Steps 1–7);
+the `jar-data-controls` behavior test re-ran 7/7 PASS (Re-Step 8). Two
+re-verification findings dispositioned as follow-ups (NOT this flight):
+H8 (internal-page keyboard focus — pre-existing, operator-ruled follow-up)
+and H9 (paging scroll anchor — banked fix). Leg `completed`; flight
+`landed`; mission ready for `/mission-debrief`.
+
+- **Re-Step 1 (R1 address select-all): PASS** — first click selects the
+  whole URL, second click places cursor, Ctrl+L selects, internal-tab
+  read-only bar unaffected.
+- **Re-Step 2 (H4 tabs restyle): PASS** — per-jar tab strip
+  (History · Cookies · Other site data), History default + count badge,
+  one panel at a time, tighter/professional look, arrow-key tab nav,
+  Burner has no tabs.
+- **Re-Step 3 (H1/H5 paging): FUNCTIONAL PASS, two findings** —
+  - **H8 (BUG — keyboard, needs diagnosis)**: operator reports keyboard
+    controls "not working within the jars page at all" on step 3. NOT the
+    modal (its keydown is scoped to the hidden-when-closed backdrop —
+    verified). Tension with re-Step 2's arrow-key tab-nav pass (likely a
+    visual pass, keyboard untested there). Disambiguation pending: does
+    Tab move the focus ring at all (→ no-focus, serious) vs. only specific
+    widgets lack key handlers (→ narrower). **DIAGNOSED**: first Tab jumps
+    to the chrome address bar then cycles the ~8 chrome toolbar stops —
+    OS keyboard focus is on the CHROME view, never the jars-page guest
+    view. Root cause: `tab-set-active` (main.js:2215) raises the active
+    guest view (`addChildView`) so mouse input works but NEVER calls
+    `webContents.focus()` on the guest, so the chrome keeps OS focus and
+    Tab traverses it. **PRE-EXISTING** (no F6 leg touched tab-set-active
+    or guest focus; internal-page keyboard traversal was never
+    test-covered). Cross-cutting fix (risks the find-overlay / menu-sheet
+    / tab-strip focus interplay — main.js:2241 already guards against
+    focus-stealing). **Operator ruling: FILE AS FOLLOW-UP** (mission
+    Known Issue + BACKLOG seed for a dedicated internal-page-keyboard-
+    focus flight with its own design + behavior test) — NOT fixed in this
+    history HAT.
+- **Re-Step 4 (H2 row links): PASS** — history rows are links; left AND
+  middle click open the page in a NEW tab in the SAME jar; jars page stays
+  open.
+- **Re-Step 5 (H3 trashcan): PASS** — per-row delete is a trashcan icon
+  with danger hover; deletes the entry, count drops.
+- **Re-Step 6 (H7 confirm modal): PASS** — destructive actions open an
+  unmissable centered modal + dimmed backdrop; Cancel/Escape/backdrop
+  dismiss; Confirm runs; focus lands on Cancel, Tab cycles Confirm↔Cancel.
+- **Re-Step 7 (H6 wipe closes tabs): PARTIAL — operator correction.**
+  History IS wiped and STAYS cleared (the reload→re-record root cause is
+  fixed — good) BUT the jar's open tab(s) did NOT close as intended.
+  onJarWiped's close sweep (renderer.js:172) looks correct on read
+  (filters `container.id===p.id && isWebTab && wcId!=null`, closes) — so
+  this is either a real bug or a test-setup nuance (the open tab may not
+  have been in the wiped jar). Being verified authoritatively by the
+  `jar-data-controls` behavior test (its Step 5 = wipe-closes-tab, rewritten
+  in Leg 05); fix inline if the test's Validator fails Step 5.
+  **RESOLVED — NOT A BUG.** Direct automation reproduction (clean instance,
+  port 49721): created jar `h6-probe`, opened a web tab in it (enumerate:
+  wc3/h6-probe active) + a `work` tab, wiped `h6-probe` → enumerate showed
+  ONLY the `work` tab; the h6-probe tab (wc3) was CLOSED, focus fell to
+  `work`. onJarWiped close-sweep works correctly. The operator's manual
+  observation was a test-setup nuance — the wiped jar's tab was likely the
+  ONLY web tab, so closeTab closed it AND spawned a fresh blank tab
+  (can't have zero tabs), reading as "a tab is still there." Re-Step 7 →
+  PASS.
+  - **H9 (fix — paging scroll anchor)**: paging from a full 50-row page to
+    a shorter page leaves the scroll position far down (short page doesn't
+    refill the viewport). On page change, anchor the jar's tabs/section
+    top back into view (scrollIntoView the section or History panel top).
+    **Banked as a follow-up** (not implemented this flight) — a small,
+    low-risk renderer fix for a future maintenance/UX pass.
+- **Re-Step 8 (`jar-data-controls` behavior test): 7/7 PASS** — live
+  two-agent Witnessed run (Sonnet Executor + Validator), fresh scratch
+  profile on port 49731, run log
+  `tests/behavior/jar-data-controls/runs/2026-07-13-15-09-25.md`. The
+  rewritten Step 5 (H6 close-not-reload) is now CONFIRMED against the real
+  environment: `jarsWipe({id:'personal'})` closed BOTH personal-jar tabs
+  (staged wcId 4 + boot wcId 2), post-wipe enumeration retained only the
+  work tab, and the stale eval against wcId 4 errored `no-such-contents`
+  (WebContents destroyed, not reloaded). The Validator independently
+  re-observed the closure. F4 clear/wipe/reject/isolation semantics
+  (Steps 1–4, 6–7) re-confirmed unregressed. Spec carry-forward applied
+  this run: Step 5's parenthetical, which wrongly implied the personal
+  boot tab survives, corrected to state the wipe closes ALL the jar's tabs
+  (work tab is the sole survivor). Two further spec carry-forwards banked
+  (burner-vs-unknown error granularity; explicit fixture URL).
+
 ### HAT walkthrough (live)
 
 - **Step 1 (recording sanity across jars): PASS** — counts per jar

@@ -385,3 +385,25 @@ Notes for that sweep:
   the new runtime as part of the bump.
 - Re-run the behavior-test net after the bump — chrome/guest event timing is the risk class
   a major moves.
+
+---
+
+## Internal-page keyboard focus (guest-view focus on tab activation)
+
+**Status:** follow-up seed — surfaced at Mission 08 Flight 6 HAT (2026-07-13).
+
+Activating an internal `goldfinch://` tab (settings/downloads/jars) raises the
+guest `WebContentsView` to the top so mouse input works (`tab-set-active`,
+`src/main/main.js:2215`, `addChildView`) but never calls
+`webContents.focus()` on it. OS keyboard focus stays on the chrome view, so
+pressing Tab inside an internal page jumps to the address bar and cycles the
+chrome toolbar rather than traversing the page's own controls — internal
+pages are effectively keyboard-inoperable.
+
+Pre-existing and never test-covered (`tab-keyboard-operability` covers the
+tab STRIP, not internal page content). The fix (focus the guest on
+activation) is cross-cutting: `main.js:2241` already documents that
+refocusing a guest can steal focus from tab-strip keyboard nav, and it must
+not fight the find-overlay or menu-overlay-sheet focus handoffs. Warrants its
+own flight: design the focus-handoff rules, then a behavior test covering
+internal-page Tab traversal + the find/sheet/tab-strip interactions.

@@ -205,6 +205,8 @@ Prior debriefs left concrete planning inputs this mission adopts:
 
 ## Known Issues
 
+- [ ] Internal-page keyboard focus: activating an internal `goldfinch://` tab raises the guest view but does not move OS keyboard focus into it (`tab-set-active`, main.js:2215 — no `webContents.focus()`), so Tab traverses the chrome toolbar instead of the page. Pre-existing (surfaced at M08 Flight 6 HAT); cross-cutting fix (find-overlay / menu-sheet / tab-strip focus interplay) — deferred to a dedicated follow-up flight.
+
 - **`rerollSeed` is skipped when a session call throws during jar delete**
   (`wipeJarData` extraction, Flight 3): if the same slug is re-minted in the
   SAME app process, a stale fingerprint seed could persist onto the
@@ -235,6 +237,8 @@ Prior debriefs left concrete planning inputs this mission adopts:
 - [x] Flight 5: Automation surface — jar-scoped history read tool through the
       existing identity façade; docs (mcp-automation.md, README) and the
       isolation behavior tests that close the mission's criteria.
-- [ ] Flight 6 *(optional)*: Alignment — vibe coding session on the jars-page
-      panels and omnibox feel (collapse behavior, anchor scroll, suggestion
-      ranking) with real-time human judgment.
+- [x] Flight 6 *(optional)*: Alignment — HAT walkthrough + fix legs (R1
+      address select-all, H4 tabs restyle, H1/H2/H3 history panel, H6/H7
+      confirm-modal + wipe-closes-tabs) and a closing HAT re-verification;
+      landed with `jar-data-controls` behavior test 7/7. H8 (internal-page
+      keyboard focus) + H9 (paging scroll anchor) filed as follow-ups.

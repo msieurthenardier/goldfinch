@@ -1,6 +1,6 @@
 # Flight: HAT & Alignment — Per-Jar History
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Per-Jar Browsing History](../../mission.md)
 
 ## Contributing to Criteria
