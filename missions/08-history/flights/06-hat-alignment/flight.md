@@ -1,6 +1,6 @@
 # Flight: HAT & Alignment — Per-Jar History
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Per-Jar Browsing History](../../mission.md)
 
 ## Contributing to Criteria
@@ -101,10 +101,44 @@ Decisions in the flight log. Findings commit as follow-up commits on
 
 ## In-Flight
 
+### Implementation phase
+
+The HAT walkthrough (discovery half) is complete — 11/11 functional pass,
+findings H1–H7 banked, rulings recorded in the flight log. This flight now
+implements the findings as sequenced legs via `/agentic-workflow`, closing
+with a HAT re-verification leg. Design-review legs get the Architect/
+Developer pass before implementation (same discipline as F1–F5); gates +
+affected behavior tests re-run; commits land on `flight/08-history-mission`.
+
+**Finding → leg map & rulings** (all rulings in the flight-log Decisions):
+- Leg 1 `address-select-all` — R1 (select-all on address focus). Standalone
+  renderer fix; no design review.
+- Leg 2 `jars-page-tabs` — H4 (per-jar tab strip replacing collapsible
+  panels; History default-selected, count as a badge). Restructures the F2
+  panel/confirm-region architecture. **Design-review.** Sequenced BEFORE
+  the history-content leg so the tab shell exists first.
+- Leg 3 `history-panel-content` — H1 (numbered paging bar; store
+  offset-paging + total via `countByJar`; absorbs H5's "of many" status
+  bug), H2 (rows → links opening a NEW TAB in the same jar; new
+  internal-bridge open-tab-in-jar IPC), H3 (trashcan icon for per-row
+  delete). **Design-review.** Lands inside Leg 2's tab shell.
+- Leg 4 `confirm-modal-and-wipe` — H7 (modal confirm replacing the
+  overlooked inline two-step, across all data-class + wipe + delete
+  confirms), H6 (close the jar's tabs on wipe instead of reloading +
+  confirm-copy warning; supersedes F4/DD4's reload sweep). **Design-review**
+  (cross-surface: main + renderer + jars page).
+- Leg 5 `hat-reverification` — the closing HAT leg (operator re-walks the
+  fixed surfaces; interactive, not agent-executed per the HAT protocol).
+
 ### Legs
 
-- [ ] `hat-and-alignment` — the guided session above (interactive;
-      designed lightweight per the HAT protocol — the script IS the leg).
+- [x] `hat-walkthrough` — the 11-step discovery session (done; 11/11
+      functional pass, findings H1–H7 banked, rulings R1–R6 recorded).
+- [ ] `address-select-all` — R1.
+- [ ] `jars-page-tabs` — H4 (design-review).
+- [ ] `history-panel-content` — H1/H2/H3 (design-review).
+- [ ] `confirm-modal-and-wipe` — H6/H7 (design-review).
+- [ ] `hat-reverification` — closing HAT (interactive).
 
 ---
 
