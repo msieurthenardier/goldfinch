@@ -107,3 +107,91 @@ test('isPaused: absent site → false', () => {
 test('isPaused: empty string → false', () => {
   assert.equal(shields.isPaused(''), false);
 });
+
+// ---------------------------------------------------------------------------
+// F3 + F8: pausedSites shape safety (load / set / isPaused / setPaused)
+// ---------------------------------------------------------------------------
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+function writeShieldsFixture(body) {
+  const dir = path.join(os.tmpdir(), 'goldfinch-test-userdata');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'shields.json');
+  fs.writeFileSync(file, JSON.stringify(body));
+  return file;
+}
+
+test('F3 load: null pausedSites coerces to [] and active never throws', () => {
+  const file = writeShieldsFixture({ pausedSites: null });
+  try {
+    const cfg = shields.load();
+    assert.deepEqual(cfg.pausedSites, []);
+    assert.doesNotThrow(() => shields.active('block', 'x.com'));
+    assert.equal(shields.active('block', 'x.com'), true);
+  } finally {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* ignore */
+    }
+    shields.set({ ...shields.DEFAULTS });
+  }
+});
+
+test('F3 load: string pausedSites coerces to [] (no char-split)', () => {
+  const file = writeShieldsFixture({ pausedSites: 'ab' });
+  try {
+    const cfg = shields.load();
+    assert.deepEqual(cfg.pausedSites, []);
+    assert.equal(shields.isPaused('a'), false);
+    assert.equal(shields.isPaused('b'), false);
+  } finally {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* ignore */
+    }
+    shields.set({ ...shields.DEFAULTS });
+  }
+});
+
+test('F8 set: non-array pausedSites does not corrupt state into single chars', () => {
+  shields.set({ ...shields.DEFAULTS });
+  shields.set({ pausedSites: 'ab' });
+  const sites = shields.get().pausedSites;
+  assert.ok(Array.isArray(sites), 'pausedSites must remain an array');
+  assert.deepEqual(sites, []);
+  assert.equal(sites.includes('a'), false);
+  assert.equal(sites.includes('b'), false);
+  // isPaused / active must not throw
+  assert.doesNotThrow(() => shields.isPaused('a'));
+  assert.doesNotThrow(() => shields.active('block', 'x.com'));
+});
+
+test('F3+F8 setPaused after a bad pausedSites value keeps a proper array', () => {
+  shields.set({ ...shields.DEFAULTS });
+  shields.set({ pausedSites: 'ab' });
+  shields.setPaused('safe.example.com', true);
+  try {
+    const sites = shields.get().pausedSites;
+    assert.ok(Array.isArray(sites));
+    assert.deepEqual(sites, ['safe.example.com']);
+    assert.equal(shields.isPaused('safe.example.com'), true);
+    assert.equal(shields.isPaused('a'), false);
+  } finally {
+    shields.setPaused('safe.example.com', false);
+    shields.set({ ...shields.DEFAULTS });
+  }
+});
+
+test('F8 set: unknown keys and wrong-typed flags are ignored', () => {
+  shields.set({ ...shields.DEFAULTS });
+  shields.set({ enabled: 'nope', notAKey: true, block: false });
+  const cfg = shields.get();
+  assert.equal(cfg.enabled, true, 'wrong-typed enabled must not apply');
+  assert.equal(cfg.block, false, 'boolean block must apply');
+  assert.equal(Object.hasOwn(cfg, 'notAKey'), false);
+  shields.set({ ...shields.DEFAULTS });
+});

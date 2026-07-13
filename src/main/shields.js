@@ -20,11 +20,20 @@ const DEFAULTS = {
 let config = { ...DEFAULTS };
 let configPath = null;
 
+// pausedSites must always be an array. A null/string from disk or a bad set()
+// patch would make isPaused throw (or use string .includes substring semantics)
+// and setPaused's `new Set(string)` explode into single-char entries — both
+// hit the request hot path via active().
+function normalizePausedSites(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function load() {
   try {
     configPath = path.join(app.getPath('userData'), 'shields.json');
     if (fs.existsSync(configPath)) {
       config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) };
+      config.pausedSites = normalizePausedSites(config.pausedSites);
     }
   } catch {
     /* defaults */
@@ -45,17 +54,29 @@ function get() {
 }
 
 function set(patch) {
-  config = { ...config, ...patch };
+  if (!patch || typeof patch !== 'object') return config;
+  const next = { ...config };
+  for (const key of Object.keys(patch)) {
+    // Only known DEFAULTS keys; ignore unknown / wrong-typed values.
+    if (!Object.hasOwn(DEFAULTS, key)) continue;
+    const val = patch[key];
+    if (key === 'pausedSites') {
+      next.pausedSites = normalizePausedSites(val);
+    } else if (typeof val === typeof DEFAULTS[key]) {
+      next[key] = val;
+    }
+  }
+  config = next;
   save();
   return config;
 }
 
 function isPaused(site) {
-  return !!site && config.pausedSites.includes(site);
+  return !!site && Array.isArray(config.pausedSites) && config.pausedSites.includes(site);
 }
 
 function setPaused(site, paused) {
-  const s = new Set(config.pausedSites);
+  const s = new Set(normalizePausedSites(config.pausedSites));
   paused ? s.add(site) : s.delete(site);
   config.pausedSites = [...s];
   save();

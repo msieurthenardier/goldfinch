@@ -133,8 +133,13 @@ const SERVER_NAME = 'goldfinch';
 // EXCLUSIVE: a body strictly over 1 MiB is rejected; exactly 1 MiB is allowed.
 const MAX_BODY_BYTES = 1024 * 1024;
 
+// A local automation consumer normally holds one session (occasionally a few
+// during reconnects). 64 leaves generous headroom for tooling while bounding
+// the permanent Server+transport pairs an initialize-only client can retain.
+const MAX_SESSIONS = 64;
+
 // Discriminated sentinel readJsonBody resolves when the body exceeds the cap, so
-// the caller distinguishes over-cap (413, already written) from the existing
+// the caller distinguishes over-cap (caller writes 413) from the existing
 // empty/parse-failure case (undefined → 400).
 const BODY_TOO_LARGE = Symbol('body-too-large');
 
@@ -323,6 +328,10 @@ function createMcpServer(opts = {}) {
   // by the `Mcp-Session-Id` header, evicted on transport `onclose`.
   /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport, identity: string }>} */
   const sessions = new Map();
+  // Reservations close the async gap between the capacity check and the
+  // transport's onsessioninitialized callback, so concurrent initializes cannot
+  // all observe the same free slot and exceed MAX_SESSIONS.
+  let pendingSessions = 0;
 
   /**
    * Build a fresh MCP Server with the 28 tools wired over a per-session,
@@ -382,6 +391,9 @@ function createMcpServer(opts = {}) {
   /** @type {import('http').Server | null} */
   let httpServer = null;
   let started = false;
+  // stop() advances this generation while a listen is pending. The completed
+  // listen then closes its freshly-bound server instead of committing an orphan.
+  let lifecycleGeneration = 0;
 
   /**
    * Read and JSON-parse a request body, capping accumulation at MAX_BODY_BYTES
@@ -391,8 +403,8 @@ function createMcpServer(opts = {}) {
    *     non-initialize / unparseable body without a valid session as a 400),
    *   - the BODY_TOO_LARGE sentinel when the cap is exceeded — distinct from the
    *     undefined case so the caller does NOT collapse it into the 400 path.
-   * On over-cap, `req.destroy()` stops buffering immediately (we do not read to
-   * end); the caller writes the 413.
+   * On over-cap, accumulation stops immediately (we do not read to end); the
+   * caller writes the 413 and destroys the request.
    * @param {import('http').IncomingMessage} req
    * @returns {Promise<any>}
    */
@@ -433,6 +445,19 @@ function createMcpServer(opts = {}) {
       req.on('error', () => settle(undefined));
       req.on('close', () => settle(undefined));
     });
+  }
+
+  /**
+   * Write the shared over-cap response and stop the inbound body stream.
+   * @param {import('http').IncomingMessage} req
+   * @param {import('http').ServerResponse} res
+   */
+  function rejectBodyTooLarge(req, res) {
+    if (!res.headersSent) {
+      res.writeHead(413);
+      res.end();
+    }
+    req.destroy();
   }
 
   /**
@@ -593,7 +618,18 @@ function createMcpServer(opts = {}) {
             }
           });
         }
-        await entry.transport.handleRequest(req, res);
+        // The SDK parses POST bodies itself, so pre-read them through the same
+        // capped path used by initialize and pass the parsed value through. GET
+        // remains a standalone bodyless SSE stream and must not be consumed here.
+        let body;
+        if (req.method === 'POST') {
+          body = await readJsonBody(req);
+          if (body === BODY_TOO_LARGE) {
+            rejectBodyTooLarge(req, res);
+            return;
+          }
+        }
+        await entry.transport.handleRequest(req, res, body);
         return;
       }
       // A session id was supplied but is unknown (stale/torn-down).
@@ -612,17 +648,22 @@ function createMcpServer(opts = {}) {
     // was abandoned mid-stream (the stream was paused at the cap); reply 413, then
     // destroy the request to stop the inbound flood now the response is flushed.
     if (body === BODY_TOO_LARGE) {
-      if (!res.headersSent) {
-        res.writeHead(413);
-        res.end();
-      }
-      req.destroy();
+      rejectBodyTooLarge(req, res);
       return;
     }
     if (!isInitializeRequest(body)) {
       sendJsonRpcError(res, 400, 'No valid session: initialize required to open one');
       return;
     }
+
+    // Reject before allocating another Server+transport pair. Include pending
+    // initializations so concurrent requests cannot race past the active cap.
+    if (sessions.size + pendingSessions >= MAX_SESSIONS) {
+      sendJsonRpcError(res, 429, 'Session limit reached: maximum ' + MAX_SESSIONS + ' active sessions');
+      return;
+    }
+    pendingSessions++;
+    let hasReservation = true;
 
     // Fresh PER-SESSION id holder (Leg 3 / DD8). Allocated ABOVE the transport so
     // onsessioninitialized can fill it AND it can be threaded into buildServer for
@@ -637,6 +678,10 @@ function createMcpServer(opts = {}) {
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: (sid) => {
+        if (hasReservation) {
+          pendingSessions--;
+          hasReservation = false;
+        }
         sessionRef.id = sid;
         sessions.set(sid, { server, transport, identity });
         // Mark the session active (Leg 3 / DD8) — fires the broadcast.
@@ -652,9 +697,28 @@ function createMcpServer(opts = {}) {
       }
     };
     const server = buildServer(identity, sessionRef);
-    await server.connect(transport);
-    // Pass the already-parsed body so the SDK does not try to re-read the stream.
-    await transport.handleRequest(req, res, body);
+    try {
+      await server.connect(transport);
+      // Pass the already-parsed body so the SDK does not try to re-read the stream.
+      await transport.handleRequest(req, res, body);
+    } finally {
+      if (hasReservation) {
+        pendingSessions--;
+        hasReservation = false;
+      }
+    }
+  }
+
+  /**
+   * Close a bound listener and force lingering keep-alive connections down so
+   * its port is immediately reusable.
+   * @param {import('http').Server} srv
+   * @returns {Promise<void>}
+   */
+  async function closeHttpServer(srv) {
+    const closed = new Promise((resolve) => srv.close(() => resolve(undefined)));
+    if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+    await closed;
   }
 
   /**
@@ -682,6 +746,7 @@ function createMcpServer(opts = {}) {
   async function start() {
     if (started) return;
     started = true;
+    const generation = ++lifecycleGeneration;
 
     // Cap retries so a pathological "every port in use" environment terminates.
     const MAX_BIND_ATTEMPTS = 20;
@@ -708,10 +773,14 @@ function createMcpServer(opts = {}) {
 
     // Reset state so a later retry / stop() / rebind still works.
     const resetAndReject = (/** @type {Error} */ err) => {
-      started = false;
-      httpServer = null;
+      if (lifecycleGeneration === generation) {
+        started = false;
+        httpServer = null;
+      }
       throw err;
     };
+
+    const wasStopped = () => !started || lifecycleGeneration !== generation;
 
     let attemptPort = preferred;
     for (let attempt = 0; attempt < MAX_BIND_ATTEMPTS; attempt++) {
@@ -719,9 +788,16 @@ function createMcpServer(opts = {}) {
       try {
         result = await tryListen(attemptPort);
       } catch (err) {
+        if (wasStopped()) return;
         // Non-EADDRINUSE error: reject as before (reset state).
         resetAndReject(/** @type {Error} */ (err));
         return; // resetAndReject always throws — unreachable, but explicit for readers
+      }
+      if (wasStopped()) {
+        // stop() ran while listen was pending. A successful bind must be closed
+        // here because stop() could not yet see it through httpServer.
+        if (!result.inUse) await closeHttpServer(result.server);
+        return;
       }
       if (!result.inUse) {
         // Bound. Keep the server + record the actually-bound port.
@@ -738,6 +814,7 @@ function createMcpServer(opts = {}) {
       // Fallback: probe for the next candidate above the busy port, then retry the
       // REAL listen (the advisory probe only chooses; the bind confirms).
       const next = await freePortInRange(attemptPort + 1);
+      if (wasStopped()) return;
       if (next == null) {
         resetAndReject(new Error(eaddrinuseMessage(attemptPort, /* exhausted */ true)));
         return; // resetAndReject always throws — unreachable, but explicit for readers
@@ -784,17 +861,14 @@ function createMcpServer(opts = {}) {
   async function stop() {
     if (!started) return;
     started = false;
+    lifecycleGeneration++;
 
     const srv = httpServer;
     httpServer = null;
     if (srv) {
-      // close() stops accepting and waits for existing connections to finish;
-      // lingering keep-alive sockets (the SDK client uses them) would otherwise
-      // hold the listen socket open and delay/deny an immediate restart on the
-      // same port. Forcibly destroy them so the port frees promptly.
-      const closed = new Promise((resolve) => srv.close(() => resolve(undefined)));
-      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
-      await closed;
+      // closeHttpServer stops accepting and forcibly destroys lingering SDK
+      // keep-alive sockets so the port frees promptly.
+      await closeHttpServer(srv);
     }
     // Close all live sessions. Each transport.close() fires its onclose, which
     // deletes the entry; snapshot first so iteration is not disturbed by that.

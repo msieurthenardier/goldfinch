@@ -659,15 +659,18 @@ test('no file + probe dir present → legacy seed by content; v2 file written', 
   }
 });
 
-test('v2-shaped envelope with the wrong version + no probe dir → fresh seed (neither the v1 nor the v2 arm)', () => {
+test('v2-shaped envelope with an unknown (future) version → containers preserved in memory, file left intact (F4)', () => {
   const dir = makeTempDir();
   try {
     writeStore(dir, { version: 3, defaultId: 'x', containers: [validPersonal] });
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work'], 'unknown version = reseed via probe');
-    assert.equal(store.getDefault().id, 'personal');
-    assert.equal(readStore(dir).version, 2, 'rewritten as the current envelope');
+    // F4: a readable envelope with an unknown version is still user data. Keep it
+    // in memory (validated), but never rewrite it during load, so a later
+    // compatible release can recover the original — NOT a destructive reseed.
+    assert.deepEqual(store.list().map((c) => c.id), ['personal'], 'unknown version = preserve, not reseed');
+    assert.equal(store.getDefault().id, 'personal', 'absent defaultId "x" repairs to the first surviving jar');
+    assert.equal(readStore(dir).version, 3, 'the unknown envelope is left untouched on disk');
   } finally {
     removeTempDir(dir);
   }
