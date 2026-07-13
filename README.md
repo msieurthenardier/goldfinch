@@ -164,8 +164,10 @@ or download **v0.7.0** directly:
   default** — the operator enables it via the **Settings `automationEnabled`
   toggle** (`goldfinch://settings` → Automation). Once enabled, every request
   must carry a per-jar API key. The surface is strictly local; no remote or
-  background driving. See [`docs/mcp-automation.md`](docs/mcp-automation.md) for
-  the full consumer reference.
+  background driving. A jar-scoped `getHistory` tool also gives an automation
+  client read access to its own jar's browsing-history memory. See
+  [`docs/mcp-automation.md`](docs/mcp-automation.md) for the full consumer
+  reference.
 
 ## Run
 

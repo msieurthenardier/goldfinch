@@ -79,14 +79,19 @@ Prior debriefs left concrete planning inputs this mission adopts:
 
 ## Success Criteria
 
-- [ ] Visits to web pages in jar-backed tabs are recorded (address, title,
+- [x] Visits to web pages in jar-backed tabs are recorded (address, title,
       visit time) and survive an app restart.
-- [ ] Burner tabs and internal (`goldfinch://`) pages never produce history
+      *(behavior-test-backed — `history-recording` 8/8, Flight 1)*
+- [x] Burner tabs and internal (`goldfinch://`) pages never produce history
       records — nothing from a burner session is persisted anywhere.
-      *(behavior-test-backed)*
-- [ ] Jar isolation holds for history on every surface: no web page, no
+      *(behavior-test-backed — `history-recording` 8/8, Flight 1)*
+- [x] Jar isolation holds for history on every surface: no web page, no
       address-bar session, and no jar-keyed automation client can observe
-      history from a jar other than its own. *(behavior-test-backed)*
+      history from a jar other than its own. *(behavior-test-backed —
+      automation surface: `history-automation-isolation` 7/7, Flight 5;
+      address-bar surface: behavior-tested at Flight 4 step 3; web-page
+      surface: structural — web content has no `ipcRenderer` and the
+      internal twins are origin-gated, unit-pinned since Flight 1)*
 - [x] The manage-jars page presents each jar's data in collapsible panels
       (history, cookies, other site data) with left-nav anchors; panels
       expand/collapse independently and anchors jump to the right jar/section.
@@ -104,9 +109,9 @@ Prior debriefs left concrete planning inputs this mission adopts:
       *(behavior-test-backed — Flight 4, pass 7/7)*
 - [x] Suggestions stay felt-instant at scale: prefix lookups remain responsive
       against a history of tens of thousands of entries.
-- [ ] A jar-keyed automation client can read its own jar's history through the
+- [x] A jar-keyed automation client can read its own jar's history through the
       automation surface; requests targeting any other jar are refused.
-      *(behavior-test-backed)*
+      *(behavior-test-backed — `history-automation-isolation` 7/7, Flight 5)*
 - [x] History adds no network egress: recording, search, retention, and
       suggestions operate entirely locally.
 
@@ -227,7 +232,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
       clear-data and jar wipe (`JAR_DATA_CLASSES` extension).
 - [x] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,
       keyboard/pointer selection, felt-instant at scale.
-- [ ] Flight 5: Automation surface — jar-scoped history read tool through the
+- [x] Flight 5: Automation surface — jar-scoped history read tool through the
       existing identity façade; docs (mcp-automation.md, README) and the
       isolation behavior tests that close the mission's criteria.
 - [ ] Flight 6 *(optional)*: Alignment — vibe coding session on the jars-page

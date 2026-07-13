@@ -69,13 +69,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 27 tools (17 drive + 4 observe + 2 eval + 2 devtools + 2 chrome/app-admin (getChromeTarget + downloadsList)), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 28 tools (17 drive + 4 observe + 2 eval + 2 devtools + 2 chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory)), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 27);
-  const allNames27 = [...ALL_NAMES, 'getChromeTarget', 'downloadsList'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames27].sort());
+  assert.equal(tools.length, 28);
+  const allNames28 = [...ALL_NAMES, 'getChromeTarget', 'downloadsList', 'getHistory'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames28].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -892,6 +892,97 @@ test('callTool downloadsList over a jar-scoped engine (throws admin-only) → is
   const engine = { getDownloadsList: () => { throw new Error(msg); } };
   const reg = buildToolRegistry(() => engine);
   const result = await reg.callTool('downloadsList', {});
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+// ---------------------------------------------------------------------------
+// getHistory — Mission 08 Flight 5 jar-confined history read (NOT admin-only)
+// NOTE: makeFakeEngine only covers ALL_NAMES (drive + observe), so getHistory
+// tests use plain objects (mirrors the getChromeTarget/downloadsList tests above).
+// ---------------------------------------------------------------------------
+
+test('getHistory is listed with jarId/query/limit/before all OPTIONAL at the schema level and no internal call/shape leak', () => {
+  const reg = buildToolRegistry(() => ({ getHistory: () => ({}) }));
+  const tools = reg.listTools();
+  const t = tools.find((x) => x.name === 'getHistory');
+  assert.ok(t, 'getHistory must be in listTools()');
+  assert.equal(t.inputSchema.type, 'object');
+  assert.deepEqual(Object.keys(t.inputSchema.properties ?? {}).sort(), ['before', 'jarId', 'limit', 'query']);
+  // No top-level `required` — the jar-optional / admin-required split is runtime
+  // (engine.js), not schema-level (a schema can't express "required for admin only").
+  assert.deepEqual(t.inputSchema.required ?? [], []);
+  assert.equal(t.inputSchema.properties.jarId.type, 'string');
+  assert.equal(t.inputSchema.properties.query.type, 'string');
+  assert.equal(t.inputSchema.properties.limit.type, 'integer');
+  assert.equal(t.inputSchema.properties.before.type, 'integer');
+  assert.deepEqual(Object.keys(t).sort(), ['description', 'inputSchema', 'name']);
+  assert.equal(typeof t.call, 'undefined', 'internal call must not leak');
+  // Description spells the identity semantics (flight DD1/leg contract item 3).
+  assert.match(t.description, /jar key/i);
+  assert.match(t.description, /admin/i);
+  assert.match(t.description, /out-of-jar/);
+  assert.match(t.description, /unknown-jar/);
+});
+
+test('callTool getHistory maps named args to the engine\'s (jarId, opts) positional signature', async () => {
+  const calls = [];
+  const engine = { getHistory: (jarId, opts) => { calls.push([jarId, opts]); return { jarId, visits: [] }; } };
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('getHistory', { jarId: 'work', query: 'example', limit: 10 });
+  assert.deepEqual(calls, [['work', { query: 'example', limit: 10, before: undefined }]]);
+});
+
+test('callTool getHistory with no args at all still calls engine.getHistory(undefined, opts)', async () => {
+  const calls = [];
+  const engine = { getHistory: (jarId, opts) => { calls.push([jarId, opts]); return { jarId: 'own', visits: [] }; } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', {});
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(calls, [[undefined, { query: undefined, limit: undefined, before: undefined }]]);
+});
+
+test('callTool getHistory over a fake jar engine returns the serialized { jarId, visits } (normal result)', async () => {
+  const payload = { jarId: 'personal', visits: [{ id: 1, url: 'https://a', title: 'A', visitedAt: 1000 }] };
+  const engine = { getHistory: () => payload };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', {});
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(JSON.parse(textOf(result)), payload);
+});
+
+test('callTool getHistory foreign-jarId out-of-jar throw → isError with the message', async () => {
+  const msg = 'automation: out-of-jar — a jar key may only read history for its own jar (personal)';
+  const engine = { getHistory: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', { jarId: 'work' });
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+test('callTool getHistory admin missing-jarId bad-args throw → isError with the message', async () => {
+  const msg = 'automation: bad-args — jarId required';
+  const engine = { getHistory: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', {});
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+test('callTool getHistory admin unknown-jarId throw → isError with the message', async () => {
+  const msg = 'automation: unknown-jar';
+  const engine = { getHistory: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', { jarId: 'ghost' });
+  assert.equal(result.isError, true);
+  assert.equal(textOf(result), msg);
+});
+
+test('callTool getHistory query+before bad-args throw → isError with the message', async () => {
+  const msg = 'automation: bad-args — query does not page';
+  const engine = { getHistory: () => { throw new Error(msg); } };
+  const reg = buildToolRegistry(() => engine);
+  const result = await reg.callTool('getHistory', { query: 'x', before: 5 });
   assert.equal(result.isError, true);
   assert.equal(textOf(result), msg);
 });

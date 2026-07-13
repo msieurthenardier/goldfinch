@@ -16,9 +16,10 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **27 tools** — 17 drive tools, 4
-observe tools, 2 eval tools, 2 devtools tools, and 2 admin chrome/app-level tools (`getChromeTarget`
-+ `downloadsList`). Tools are a thin adapter over Goldfinch's
+binds to **loopback only** (`127.0.0.1`), and advertises **28 tools** — 17 drive tools, 4
+observe tools, 2 eval tools, 2 devtools tools, 2 admin chrome/app-level tools (`getChromeTarget`
++ `downloadsList`), and 1 history tool (`getHistory`, jar-confined — not admin-only). Tools are a
+thin adapter over Goldfinch's
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
 
@@ -354,7 +355,7 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 27 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
+All 28 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level tools
 (`getChromeTarget`, `downloadsList`) take no `wcId`.
@@ -363,7 +364,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (non-internal, dom-ready) tabs |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (dom-ready) tabs. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
@@ -461,6 +462,46 @@ mirroring `captureWindow`).
 > chrome `wcId` to a wcId-first op are refused with `automation: out-of-jar` (chrome-exclusion
 > guard in `resolveContentsForJar`, defense-in-depth). Only admin sessions may discover or drive
 > the chrome.
+
+### History tools (1)
+
+`getHistory` reads recorded browsing-history visits for a jar (Mission 08 Flight 5) — a **custom,
+no-`wcId` op** like `enumerateTabs`/`openTab`/`captureWindow`/`getChromeTarget`/`downloadsList`
+above, but **jar-CONFINED, not admin-only**: like `enumerateTabs`/`openTab`, a jar key may call it
+successfully for its own jar — contrast with `captureWindow`/`getChromeTarget`/`downloadsList`,
+which are admin-only refusals for a jar key.
+
+| Tool | Input schema | Result shape |
+|------|--------------|--------------|
+| `getHistory` | `{ jarId?: string, query?: string, limit?: integer, before?: integer }` *(all optional)* | JSON text: `{ jarId, visits }` — `visits` is an array of `{ id, url, title, visitedAt }` (epoch-ms), newest-first for a recent-visits listing or relevance-ordered for a search. |
+
+**Identity semantics.**
+- **Jar key** — `jarId` is **optional**: omit it to read your own jar's history. If supplied, it
+  **must match** your own jar id; a foreign `jarId` is refused with `automation: out-of-jar`,
+  thrown by the scope façade **before** any store read (zero rows touched on refusal).
+- **Admin** — `jarId` is **required** (admin has no implicit jar, unlike a jar key) and may name
+  **any** known jar. A missing/non-string `jarId` is refused with `automation: bad-args — jarId
+  required`; a `jarId` that does not resolve against the jar registry is refused with
+  `automation: unknown-jar` (checked via an injected `isKnownJar` accessor — an explicit refusal,
+  not a silent empty result).
+
+**`query` vs. `before` (search has no cursor).** Omit `query` for a recent-visits listing —
+`before` optionally pages it backward as a cursor (an unknown/foreign `before` id yields an empty
+array, fail-closed, never a cross-jar cursor probe). Supply `query` for a text search over
+`url`/`title`; `before` has no meaning in search mode, so supplying **both** `query` and `before`
+together is refused with `automation: bad-args — query does not page` — for either identity, so a
+jar key hits this the same as admin. `limit` applies to either mode.
+
+**Refusal codes, by identity:**
+- **Jar key**: `automation: out-of-jar` (foreign `jarId`, façade-level, before any read) ·
+  `automation: bad-args — query does not page` (both `query` and `before` supplied).
+- **Admin**: `automation: bad-args — jarId required` (missing/non-string `jarId`) ·
+  `automation: unknown-jar` (`jarId` not in the jar registry) ·
+  `automation: bad-args — query does not page` (both `query` and `before` supplied).
+
+This is a **read-only** surface — there is no history mutation tool here (clear/delete stay
+operator-surface only, `goldfinch://jars`); agents get memory of a jar's history, not the ability
+to erase it.
 
 ## Result and refusal semantics
 

@@ -21,7 +21,7 @@ const find = require('./find');
  *
  * @param {() => (Electron.WebContents | null)} getChromeContents
  *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -41,9 +41,18 @@ const find = require('./find');
  *   on failure. Injected from main.js (Flight 3, Leg 1); kept out of observe.js so
  *   that module stays Electron-free and unit-testable. Absent → captureWindow throws
  *   'automation: chrome window unavailable' (same as before injection).
+ *   getHistoryReads — accessor pair for the per-jar history store (Mission 08
+ *   Flight 5): `{ listRecent(jarId, opts), search(jarId, query, opts) }`, threaded
+ *   from historyStore in main.js (the getDownloads injection precedent). Backs the
+ *   getHistory op (reads only; no mutation ops on the automation surface this
+ *   mission). Field named getHistoryReads to avoid shadowing the op name.
+ *   isKnownJar — accessor `(jarId) => boolean`, threaded from `jars.list()` in
+ *   main.js (already in scope there). getHistory validates a supplied jarId
+ *   against it before reading — an unknown jarId is refused with a distinct
+ *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null, getHistoryReads = null, isKnownJar = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -116,6 +125,28 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
         throw new Error('automation: downloads-unavailable — downloads manager not wired');
       }
       return getDownloads();
+    },
+    // Per-jar history read (Mission 08 Flight 5, DD1): no wcId, jar-CONFINED via the
+    // scope façade (NOT admin-only — contrast with getDownloadsList/captureWindow/
+    // getChromeTarget above). jarId is validated HERE (required, must resolve against
+    // isKnownJar); the own-jar-vs-foreign-jar confinement compare happens in scope.js.
+    // query and before are mutually exclusive (search has no cursor); query present
+    // (non-empty string) → search, else → listRecent (before passes through as a cursor).
+    getHistory: (/** @type {string} */ jarId, /** @type {{ query?: string, limit?: number, before?: number }} */ opts = {}) => {
+      if (typeof jarId !== 'string' || jarId.length === 0) {
+        throw new Error('automation: bad-args — jarId required');
+      }
+      if (typeof isKnownJar !== 'function' || !isKnownJar(jarId)) {
+        throw new Error('automation: unknown-jar');
+      }
+      const { query, limit, before } = opts || {};
+      if (query != null && before != null) {
+        throw new Error('automation: bad-args — query does not page');
+      }
+      const visits = typeof query === 'string' && query.length > 0
+        ? getHistoryReads.search(jarId, query, { limit })
+        : getHistoryReads.listRecent(jarId, { limit, before });
+      return { jarId, visits };
     },
   };
 }

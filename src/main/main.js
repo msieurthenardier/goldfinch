@@ -774,7 +774,16 @@ async function startMcpServerInstance() {
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
     // isTabViewWcId (F8 DD8 defense-in-depth): non-tab, non-chrome wcIds (e.g. the
     // menu-overlay sheet, the find overlay) resolve only at the admin tier.
-    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) }),
+    getEngine: (engineOpts) => createEngine(getChromeContents, {
+      ...engineOpts,
+      getDownloads: () => downloadsManager.listAll(),
+      grabWindow,
+      isTabViewWcId: (id) => tabViews.has(id),
+      // History read accessors (Mission 08 Flight 5): threaded the same way as
+      // getDownloads above, backing the getHistory op (jar-confined via scope.js).
+      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
+      isKnownJar: (id) => jars.list().some((j) => j.id === id),
+    }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -2700,7 +2709,15 @@ app.whenReady().then(() => {
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
     // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
     // dev seam is not admin-tier, so chrome-class overlay wcIds must refuse here too.
-    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) });
+    const engine = createEngine(getChromeContents, {
+      getDownloads: () => downloadsManager.listAll(),
+      grabWindow,
+      isTabViewWcId: (id) => tabViews.has(id),
+      // History read accessors (Mission 08 Flight 5): same injection as the MCP
+      // getEngine accessor above, kept in parity for this dev-only seam.
+      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
+      isKnownJar: (id) => jars.list().some((j) => j.id === id),
+    });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview

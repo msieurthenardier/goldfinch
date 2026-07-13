@@ -406,6 +406,70 @@ test('scopeEngine: unknown jar calling getDownloadsList throws no-such-jar (requ
   );
 });
 
+// ---------------------------------------------------------------------------
+// getHistory — Mission 08 Flight 5, DD1/DD4: jar-CONFINED (NOT admin-only) —
+// the first jar-confined no-wcId read. Own/absent jarId → engine call forced to
+// the caller's own jar.id; foreign jarId → out-of-jar, thrown BEFORE any engine
+// call (pin zero accessor/engine invocations); admin → engine unchanged.
+// ---------------------------------------------------------------------------
+
+test('scopeEngine: jar getHistory with NO jarId forces the caller\'s own jar.id to the engine', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return { jarId, visits: [] }; };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  const res = scoped.getHistory(undefined, { limit: 10 });
+  assert.deepEqual(res, { jarId: 'personal', visits: [] });
+  assert.deepEqual(engine.__calls, [['getHistory', 'personal', { limit: 10 }]]);
+});
+
+test('scopeEngine: jar getHistory(ownId) is allowed — engine gets own jar.id', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return { jarId, visits: [] }; };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  const res = scoped.getHistory('personal', { query: 'x' });
+  assert.deepEqual(res, { jarId: 'personal', visits: [] });
+  assert.deepEqual(engine.__calls, [['getHistory', 'personal', { query: 'x' }]]);
+});
+
+test('scopeEngine: jar getHistory(foreignId) throws out-of-jar, engine/accessor NOT reached', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getHistory = () => { throw new Error('should not reach engine'); };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  assert.throws(
+    () => scoped.getHistory('work', { limit: 5 }),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+  );
+  assert.equal(engine.__calls.length, 0, 'getHistory must never reach the engine on a foreign jarId (zero accessor invocations)');
+});
+
+test('scopeEngine: admin getHistory passes any jarId straight through to the engine unchanged', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world, { includeInternal: true });
+  const payload = { jarId: 'work', visits: [{ id: 1 }] };
+  engine.getHistory = (jarId, opts) => { engine.__calls.push(['getHistory', jarId, opts]); return payload; };
+  // admin → engine unchanged
+  const scoped = scopeEngine(engine, 'admin', makeCtx(world));
+  assert.equal(scoped, engine, 'admin must return the engine unchanged');
+  const res = scoped.getHistory('work', { limit: 20 });
+  assert.equal(res, payload);
+  assert.deepEqual(engine.__calls, [['getHistory', 'work', { limit: 20 }]]);
+});
+
+test('scopeEngine: unknown jar calling getHistory throws no-such-jar (requireJar fires first, before out-of-jar or engine)', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.getHistory = () => { throw new Error('should not reach engine'); };
+  const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
+  assert.throws(
+    () => scoped.getHistory('anything'),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-jar')
+  );
+  assert.equal(engine.__calls.length, 0, 'getHistory must never reach the engine for an unknown jar');
+});
+
 test('scopeEngine: a jar DELETED mid-session degrades to all-ops-error', () => {
   const world = makeWorld();
   const engine = makeFakeEngine(world);
