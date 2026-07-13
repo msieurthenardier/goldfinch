@@ -128,6 +128,19 @@ function deriveAuditDetail(op, args) {
 const DEFAULT_PORT = 49707;
 const SERVER_NAME = 'goldfinch';
 
+// Advertised in the initialize result's `instructions` field, which MCP clients
+// surface to the consuming LLM as server-level context. The tool descriptions
+// alone never say what Goldfinch IS — a model that has not heard the name has no
+// way to know these tools drive a real browser, so say it here, once.
+const SERVER_INSTRUCTIONS =
+  'Goldfinch is an Electron desktop web browser (Chromium-based). These tools drive and ' +
+  'observe real browser tabs in the running app: open and navigate pages, click/type/scroll, ' +
+  'capture screenshots, read the live DOM and accessibility tree, and evaluate JavaScript in ' +
+  'the page. Use it for web browsing, web-page testing, and UI verification against real ' +
+  'rendered pages. Tabs are addressed by wcId (from enumerateTabs/openTab) and live in ' +
+  'isolated cookie-jar containers; a jar-scoped key sees only its own jar\'s tabs, while an ' +
+  'admin key can also target the browser chrome itself (getChromeTarget).';
+
 // DD9: cap request-body accumulation at 1 MiB. Over-cap → 413, do not buffer
 // past the cap (the Flight-3 initialize body was buffered unbounded). The cap is
 // EXCLUSIVE: a body strictly over 1 MiB is rejected; exactly 1 MiB is allowed.
@@ -354,7 +367,7 @@ function createMcpServer(opts = {}) {
   function buildServer(identity, sessionRef) {
     const server = new Server(
       { name: SERVER_NAME, version },
-      { capabilities: { tools: {} } }
+      { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS }
     );
     const registry = buildToolRegistry(
       () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx)

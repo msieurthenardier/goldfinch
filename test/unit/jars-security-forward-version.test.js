@@ -67,7 +67,7 @@ test('load remaps privileged identity claims but preserves the built-in legacy d
     assert.equal(store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'), false);
     assert.deepEqual(
       store.list().find((jar) => jar.id === 'default'),
-      { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' }
+      { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch', retentionDays: 30 }
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -94,7 +94,8 @@ test('unknown-version envelope survives load without being overwritten', () => {
     const store = freshStore();
 
     assert.doesNotThrow(() => store.load(dir));
-    assert.deepEqual(store.list(), envelope.containers);
+    // In-memory records gain the retentionDays default; the on-disk envelope must not.
+    assert.deepEqual(store.list(), envelope.containers.map((c) => ({ ...c, retentionDays: 30 })));
     assert.equal(store.getDefault().id, 'research');
     assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytes, 'load must leave the envelope bytes untouched');
   } finally {
