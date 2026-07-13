@@ -25,7 +25,7 @@
 const { registerInternalHandler } = require('./internal-ipc');
 
 /**
- * Register the five history IPC channels (chrome-trusted + internal-origin-
+ * Register the six history IPC channels (chrome-trusted + internal-origin-
  * gated twins). Returns nothing — mutation broadcasts fire inside the
  * handlers via the injected `broadcast`; main.js needs no returned broadcaster
  * (unlike registerJarIpc, whose broadcastJarsChanged is reused by a second,
@@ -141,20 +141,44 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
     }
   }
 
+  // M08 Flight 4 Leg 1 / DD3-DD4: the omnibox suggestions dropdown. Read-only
+  // — no broadcast (querying never changes state). Handler injects `now`
+  // (the store's determinism contract — it never calls Date.now() itself).
+  function handleSuggest(_e, p) {
+    if (isMalformed(p)) return { ok: false, error: 'history: suggest — malformed-payload' };
+    if (!isKnownJar(p.jarId)) return { ok: false, error: 'history: suggest — unknown-jar' };
+    if (typeof p.query !== 'string' || (p.limit !== undefined && !isFiniteNumber(p.limit))) {
+      return { ok: false, error: 'history: suggest — bad-args' };
+    }
+    try {
+      /** @type {{ limit?: number, now: number }} */
+      const opts = { now: Date.now() };
+      if (p.limit !== undefined) opts.limit = p.limit;
+      return { ok: true, suggestions: historyStore.suggest(p.jarId, p.query, opts) };
+    } catch (err) {
+      console.error('[history]', err);
+      return { ok: false, error: 'history: suggest — store-failure' };
+    }
+  }
+
   // Chrome-trusted channels.
   ipcMain.handle('history-list', handleList);
   ipcMain.handle('history-search', handleSearch);
   ipcMain.handle('history-delete', handleDelete);
   ipcMain.handle('history-clear', handleClear);
   ipcMain.handle('history-count', handleCount);
+  ipcMain.handle('history-suggest', handleSuggest);
 
   // Internal-origin-gated twins — same handler bodies, reached only by an
   // allowlisted goldfinch:// internal page (the jars/history management page).
+  // internal-history-suggest is registered-but-unused this flight (DD3): the
+  // omnibox is chrome-only; the jars page has no suggestions surface.
   registerInternalHandler(ipcMain, 'internal-history-list', handleList);
   registerInternalHandler(ipcMain, 'internal-history-search', handleSearch);
   registerInternalHandler(ipcMain, 'internal-history-delete', handleDelete);
   registerInternalHandler(ipcMain, 'internal-history-clear', handleClear);
   registerInternalHandler(ipcMain, 'internal-history-count', handleCount);
+  registerInternalHandler(ipcMain, 'internal-history-suggest', handleSuggest);
 }
 
 module.exports = { registerHistoryIpc };

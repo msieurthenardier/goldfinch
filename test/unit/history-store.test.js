@@ -45,6 +45,7 @@ test('exposes exactly the repo interface', () => {
     'setTitle',
     'listRecent',
     'search',
+    'suggest',
     'deleteVisit',
     'clearJar',
     'countByJar',
@@ -64,6 +65,7 @@ test('every method throws "history store not open" before open(), except close()
   assert.throws(() => store.setTitle(1, 'x'), /history store not open/);
   assert.throws(() => store.listRecent('a'), /history store not open/);
   assert.throws(() => store.search('a', 'x'), /history store not open/);
+  assert.throws(() => store.suggest('a', 'x', { now: 1 }), /history store not open/);
   assert.throws(() => store.deleteVisit('a', 1), /history store not open/);
   assert.throws(() => store.clearJar('a'), /history store not open/);
   assert.throws(() => store.countByJar('a'), /history store not open/);
@@ -353,6 +355,242 @@ test('title backfill: setTitle updates the row AND the FTS shadow', () => {
 
     assert.deepEqual(store.search('a', 'Brand').map((r) => r.id), [id]);
     assert.deepEqual(store.search('a', 'Distinctive'), [], 'old title no longer indexed');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// suggest (M08 Flight 4 Leg 1 / flight DD3-DD4) — frecency-ranked, FTS-
+// narrowed omnibox suggestions. `now` is REQUIRED (no default, pruneOneJar-
+// style) — the store never calls Date.now() itself; all fixtures below use a
+// FIXED `now` for exact, reproducible bucket-boundary math.
+// ---------------------------------------------------------------------------
+const DAY_MS = 86_400_000;
+const SUGGEST_NOW = 1000 * DAY_MS;
+
+test('suggest: age-bucket boundaries — exactly N days scores the higher bucket, N days + 1ms falls to the next lower bucket', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    // Each row uses its own unambiguous token so a per-word query isolates it.
+    const rows = [
+      { word: 'alpha', ageMs: 4 * DAY_MS, expectedScore: 100 },
+      { word: 'bravo', ageMs: 4 * DAY_MS + 1, expectedScore: 70 },
+      { word: 'charlie', ageMs: 14 * DAY_MS, expectedScore: 70 },
+      { word: 'delta', ageMs: 14 * DAY_MS + 1, expectedScore: 50 },
+      { word: 'echo', ageMs: 31 * DAY_MS, expectedScore: 50 },
+      { word: 'foxtrot', ageMs: 31 * DAY_MS + 1, expectedScore: 30 },
+      { word: 'golf', ageMs: 90 * DAY_MS, expectedScore: 30 },
+      { word: 'hotel', ageMs: 90 * DAY_MS + 1, expectedScore: 10 }
+    ];
+    for (const r of rows) {
+      store.recordVisit({
+        jarId: 'a',
+        url: `https://${r.word}.example/`,
+        title: r.word,
+        visitedAt: SUGGEST_NOW - r.ageMs
+      });
+    }
+
+    for (const r of rows) {
+      const result = store.suggest('a', r.word, { now: SUGGEST_NOW });
+      assert.equal(result.length, 1, `${r.word} should match exactly one row`);
+      assert.equal(result[0].score, r.expectedScore, `${r.word} at age ${r.ageMs}ms`);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: frequent-old outranks recent-rare — repeated old visits can outscore one very recent visit', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    // One very recent visit: age 1 day, bucket 100.
+    store.recordVisit({
+      jarId: 'a',
+      url: 'https://recent.example/',
+      title: 'Recent',
+      visitedAt: SUGGEST_NOW - 1 * DAY_MS
+    });
+    // Eleven ancient visits (age > 90 days, bucket 10 each) to the SAME url:
+    // summed score 110 > the single recent visit's 100.
+    for (let i = 0; i < 11; i++) {
+      store.recordVisit({
+        jarId: 'a',
+        url: 'https://frequent.example/',
+        title: 'Frequent',
+        visitedAt: SUGGEST_NOW - (91 * DAY_MS + i)
+      });
+    }
+
+    const results = store.suggest('a', 'example', { now: SUGGEST_NOW, limit: 10 });
+    assert.deepEqual(results.map((r) => r.url), [
+      'https://frequent.example/',
+      'https://recent.example/'
+    ]);
+    assert.equal(results[0].score, 110);
+    assert.equal(results[1].score, 100);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: tie-break stability — equal score and equal lastVisitedAt order by url ASC', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    const sameVisitedAt = SUGGEST_NOW - 1 * DAY_MS;
+    store.recordVisit({ jarId: 'a', url: 'https://zzz.example/', title: 'tie', visitedAt: sameVisitedAt });
+    store.recordVisit({ jarId: 'a', url: 'https://aaa.example/', title: 'tie', visitedAt: sameVisitedAt });
+    store.recordVisit({ jarId: 'a', url: 'https://mmm.example/', title: 'tie', visitedAt: sameVisitedAt });
+
+    const results = store.suggest('a', 'tie', { now: SUGGEST_NOW });
+    assert.deepEqual(results.map((r) => r.url), [
+      'https://aaa.example/',
+      'https://mmm.example/',
+      'https://zzz.example/'
+    ]);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: per-jar isolation — suggestions never cross jars', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    store.recordVisit({ jarId: 'a', url: 'https://a.example/', title: 'isolate', visitedAt: SUGGEST_NOW - DAY_MS });
+    store.recordVisit({ jarId: 'b', url: 'https://b.example/', title: 'isolate', visitedAt: SUGGEST_NOW - DAY_MS });
+
+    const aResults = store.suggest('a', 'isolate', { now: SUGGEST_NOW });
+    assert.deepEqual(aResults.map((r) => r.url), ['https://a.example/']);
+
+    const bResults = store.suggest('b', 'isolate', { now: SUGGEST_NOW });
+    assert.deepEqual(bResults.map((r) => r.url), ['https://b.example/']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: dedupe-by-url — multiple visits to the same URL collapse to one row with the MOST-RECENT title', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    store.recordVisit({
+      jarId: 'a',
+      url: 'https://dupe.example/',
+      title: 'Old Title',
+      visitedAt: SUGGEST_NOW - 20 * DAY_MS
+    });
+    store.recordVisit({
+      jarId: 'a',
+      url: 'https://dupe.example/',
+      title: 'New Title',
+      visitedAt: SUGGEST_NOW - 1 * DAY_MS
+    });
+
+    const results = store.suggest('a', 'dupe', { now: SUGGEST_NOW });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].url, 'https://dupe.example/');
+    assert.equal(results[0].title, 'New Title');
+    assert.equal(results[0].lastVisitedAt, SUGGEST_NOW - 1 * DAY_MS);
+    // score = 50 (20-day visit, <=31-day bucket) + 100 (1-day visit) = 150.
+    assert.equal(results[0].score, 150);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: token-prefix row — "exampl" matches https://examplezzz.com/ (same prefix semantics as search, visible on every keystroke)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({
+      jarId: 'a',
+      url: 'https://examplezzz.com/',
+      title: 'Example ZZZ',
+      visitedAt: SUGGEST_NOW - DAY_MS
+    });
+
+    const results = store.suggest('a', 'exampl', { now: SUGGEST_NOW });
+    assert.deepEqual(results.map((r) => r.url), ['https://examplezzz.com/']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: limit clamp — SUGGEST_MIN_LIMIT/SUGGEST_MAX_LIMIT (1-10), distinct from the store\'s 1-500', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    for (let i = 0; i < 15; i++) {
+      store.recordVisit({
+        jarId: 'a',
+        url: `https://clamp${i}.example/`,
+        title: 'clamp',
+        visitedAt: SUGGEST_NOW - i * DAY_MS
+      });
+    }
+
+    assert.equal(store.suggest('a', 'clamp', { now: SUGGEST_NOW }).length, 6, 'default limit is 6');
+    assert.equal(
+      store.suggest('a', 'clamp', { now: SUGGEST_NOW, limit: 0 }).length,
+      1,
+      'limit clamped UP to SUGGEST_MIN_LIMIT (1), not the store-wide MIN_LIMIT'
+    );
+    assert.equal(
+      store.suggest('a', 'clamp', { now: SUGGEST_NOW, limit: 500 }).length,
+      10,
+      'limit clamped DOWN to SUGGEST_MAX_LIMIT (10), not the store-wide MAX_LIMIT (500) — 15 rows exist'
+    );
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest: empty/whitespace/operator-injection queries are safe', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://example.com/', title: 'x', visitedAt: SUGGEST_NOW - DAY_MS });
+
+    assert.deepEqual(store.suggest('a', '', { now: SUGGEST_NOW }), []);
+    assert.deepEqual(store.suggest('a', '   ', { now: SUGGEST_NOW }), []);
+    for (const q of ['"', '*', '(', ')', '-word', 'NEAR', '"unterminated', 'a" OR "b', '(a OR b)']) {
+      assert.doesNotThrow(() => store.suggest('a', q, { now: SUGGEST_NOW }), `query ${JSON.stringify(q)} must not throw`);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('suggest validates jarId/query types and requires a finite now (TypeError, pruneOneJar-style)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.throws(() => store.suggest('', 'x', { now: SUGGEST_NOW }), TypeError);
+    assert.throws(() => store.suggest(/** @type {any} */ (42), 'x', { now: SUGGEST_NOW }), TypeError);
+    assert.throws(() => store.suggest('a', /** @type {any} */ (42), { now: SUGGEST_NOW }), TypeError);
+    assert.throws(() => store.suggest('a', 'x'), TypeError, 'now has no default — omitting the opts bag entirely must throw');
+    assert.throws(() => store.suggest('a', 'x', /** @type {any} */ ({})), TypeError, 'now has no default — an opts bag without now must throw');
+    assert.throws(() => store.suggest('a', 'x', { now: NaN }), TypeError);
+    assert.throws(() => store.suggest('a', 'x', { now: /** @type {any} */ ('1') }), TypeError);
   } finally {
     removeTempDir(dir);
   }

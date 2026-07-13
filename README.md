@@ -107,6 +107,13 @@ or download **v0.7.0** directly:
     fingerprint-seed reroll that auto-reloads the jar's open tabs. Same
     operation as the Shield panel's per-tab New Identity above, just scoped to
     the whole jar from the management page — the two coexist.
+  - **Per-jar browsing history** — normal (http/https) browsing is recorded
+    per persistent jar, with configurable retention; each jar's management-page
+    section has a History panel (search, paging, per-row delete, clear). As
+    you type in the address bar, a dropdown surfaces frecency-ranked,
+    prefix-matched suggestions from the **active tab's own jar** history —
+    keyboard- or pointer-selectable, purely local (no network egress). Burner
+    and internal tabs never record or suggest.
 - **Pinnable toolbar icons** — the **Media**, **Shields**, and **DevTools** toolbar
   buttons are icon buttons (Media/Shields carry a count badge) that can be pinned
   or unpinned:

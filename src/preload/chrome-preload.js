@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   settingsGet: (key) => ipcRenderer.invoke('settings-get', key),
   onSettingsChanged: (cb) => ipcRenderer.on('settings-changed', (_e, all) => cb(all)),
 
+  // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history
+  // bridge method, bare-handle like settingsGet above) ---
+  historySuggest: (payload) => ipcRenderer.invoke('history-suggest', payload),
+
   // --- shields ---
   shieldsGet: () => ipcRenderer.invoke('shields-get'),
   shieldsSet: (patch) => ipcRenderer.invoke('shields-set', patch),
@@ -147,8 +151,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // Channel 1: open (or model-replace) a menu — {menuType, model, anchor, startIndex, token}.
   menuOverlayOpen: (payload) => ipcRenderer.send('menu-overlay:open', payload),
   // Channel 2: programmatic close — reason allowlisted main-side to 'toggle' (trigger
-  // re-click close, no focus move) | 'superseded' (default).
-  menuOverlayClose: (/** @type {{ reason?: 'toggle' | 'superseded' }} */ payload = {}) =>
+  // re-click close, no focus move) | 'superseded' (default) | 'escape' | 'blur' |
+  // 'navigation' | 'input-empty' | 'activated' (the omnibox-suggestions close
+  // triggers added this flight — DD5 amendment).
+  menuOverlayClose: (/** @type {{ reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }} */ payload = {}) =>
     ipcRenderer.send('menu-overlay:close', { reason: payload.reason }),
   // Channel 6: an item was activated on the sheet — {menuType, id}; chrome executes the action.
   onMenuOverlayActivated: (cb) => ipcRenderer.on('menu-overlay-activated', (_e, d) => cb(d)),

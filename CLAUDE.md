@@ -262,6 +262,91 @@ handle** rather than a whole-file rewrite.
   index on the **default `unicode61` tokenizer** — a `tokenchars` override
   turns a whole URL into one token and silently breaks prefix search.
 
+### Address-bar suggestions (`src/shared/omnibox-suggest-model.js`)
+
+As the operator types in the address bar, a dropdown of frecency-ranked,
+prefix-matched history suggestions renders on the **menu-overlay sheet** — the
+only surface that can composite below the toolbar, since chrome DOM is
+occluded by the guest view (M08 Flight 4).
+
+- **Surface — the `suggestions` sheet template.** Registered like the
+  info-popup precedent (no `items` getter; `onOpen` focuses nothing). Rows are
+  `role="listbox"`/`option` (`aria-selected` on the model's `selectedIndex`;
+  primary = title-or-URL, secondary = URL host; all via `textContent`). A row
+  click sends channel-4 `{ id: 'sug:<i>' }` — INDEX dispatch (the `spell:<i>`
+  idiom; `sanitizeActivatedValue`'s 24-char cap forbids a URL riding `value`).
+- **The `noFocus` regime.** `deliverInit` in `menu-overlay-manager.js` is the
+  sheet's SOLE focus site; a channel-1 `noFocus: true` payload flag
+  (`openOverlayMenu`'s optional 5th `opts` param, merged into the Ch1 payload)
+  gates that `view.webContents.focus?.()` call, so keyboard-driven and
+  programmatic suggestion repaints never move OS focus off `#address` — every
+  existing template/caller omits `opts` and is unaffected. A POINTER click
+  landing on the sheet still moves native focus per Chromium's click-to-focus
+  (the grace timer below exists for exactly that race).
+- **Chrome-owned close-trigger matrix.** Because the non-focusing regime means
+  no blur/outside-click dismissal ever fires while focus stays in the chrome,
+  every close trigger is fired explicitly from `renderer.js`, never sheet-side:
+  Enter-with-selection or a row click → `'activated'`; Escape → `'escape'`
+  (input keeps focus and text); input emptied → `'input-empty'`; `#address`
+  blur → `'blur'`, via a 150 ms grace timer (`SUGGEST_BLUR_GRACE_MS`) whose
+  callback re-checks the captured open-token AND `document.activeElement`
+  before closing (lets a pointer click's activation win the blur-vs-click
+  race it itself causes); tab switch/activation → main's existing
+  tab-switch sheet-close, PLUS the brand-new-tab path's explicit
+  `closeSuggestions('navigation')` (`createTab`'s synchronous `activateTab()`
+  runs before any `tab-set-active` IPC reaches main, so the ordinary
+  tab-switch close never fires in that one window) — `activateTab` also bumps
+  `suggest.seq` unconditionally on every activation, invalidating any
+  in-flight response for the previous tab's jar; navigation of the active tab
+  (`did-navigate`/`did-navigate-in-page`) → `'navigation'`. Main's Ch2 handler
+  (`menu-overlay:close`) validates the reason against an explicit
+  `MENU_CLOSE_REASONS` allowlist (`toggle`/`superseded`/`escape`/`blur`/
+  `navigation`/`input-empty`/`activated`) — an unrecognized reason falls back
+  to `'superseded'`.
+- **The Ch7-before-Ch6 activated-reset nuance.** Main emits channel 7 (close)
+  strictly BEFORE channel 6 (activated) for the same row-click activation. The
+  Ch7 sink (`onMenuOverlayClosed`) cancels the suggestion timers
+  unconditionally on every close — including `'activated'`, so the grace
+  timer dies the instant a real click wins its race rather than 150 ms later
+  — but clears `suggest.items`/`selectedIndex` for every OTHER reason,
+  deliberately leaving them intact on `'activated'` so the immediately
+  following Ch6 `sug:<i>` dispatch can still resolve the clicked row's URL
+  from `suggest.items`; the Ch6 handler finishes the reset itself once it has
+  read the target. A naive "reset on every reason including activated" would
+  silently break pointer-click navigation on every click — clearing the array
+  before the handler that reads it ever ran.
+- **Data path — `history-store.js`'s `suggest` query.** `suggest(jarId, query,
+  { limit = 6, now })` is an age-bucketed frecency query over the
+  FTS-narrowed subset (score = SUM of per-visit age-bucket weights: ≤4d→100,
+  ≤14d→70, ≤31d→50, ≤90d→30, else 10; grouped by URL, `ORDER BY score DESC,
+  MAX(visited_at) DESC, url`), reached via the `history-suggest`/
+  `internal-history-suggest` IPC twins and the chrome-only `historySuggest`
+  bridge method (`chrome-preload.js`). See "History store" above for the
+  store's general shape; `suggest` has its OWN 1–10 limit clamp
+  (`SUGGEST_MIN_LIMIT`/`SUGGEST_MAX_LIMIT`), distinct from the store's general
+  1–500 clamp — the dropdown is a small, fixed-height list, never a paged
+  view. Scale-probed at 50k rows (flight-4 leg-4 flight log has the numbers):
+  the **1-char query rides an UNCOVERED prefix path** — the FTS `prefix='2 3
+  4'` index only covers 2/3/4-char terms, so a 1-char query is a full-token
+  scan rather than an indexed prefix lookup, and is measured separately for
+  exactly that reason.
+- **Jar/burner/internal gates.** The pure `src/shared/omnibox-suggest-model.js`
+  module's `shouldQuery({ focused, isInternal, isBurner, value })` gate
+  (wired from the renderer's `suggestGateNow()`) engages suggestions only when
+  `#address` is focused, the active tab is neither internal
+  (`isInternalTab(tab)`) nor burner (`tab.container.burner`), and the trimmed
+  input is non-empty — burner and internal tabs structurally never issue a
+  query, with no dedicated skip code beyond the gate (the same "positive
+  allowlist, no negative exclusion" shape as the history recorder's jar
+  gate). Suggestions are scoped to the active tab's own jar (`tab.container.id`
+  passed as `jarId`) — jar exclusivity rides the store's existing per-jar
+  `WHERE jar_id = ?` scoping, the same isolation every other history op
+  relies on. A `historySuggest` response re-validates the FULL gate at
+  arrival (`acceptSuggestResponse`, the response-time revalidation gate)
+  before painting — a stale response from a since-switched tab or a
+  since-closed dropdown never model-replaces a menu the operator didn't ask
+  for (the kebab-while-typing race).
+
 ### Internal-bridge security model (`src/main/internal-ipc.js`)
 
 The trusted internal pages (`goldfinch://settings`, `goldfinch://downloads`, `goldfinch://jars`) have **privileged IPC channels** (`internal-settings-get/set`, `internal-shields-get/set`, `internal-downloads-*`, `internal-jars-*`) that must not be reachable by web content. Two guard layers defend this, with the main-side check as the authoritative boundary:

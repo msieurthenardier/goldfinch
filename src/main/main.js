@@ -541,13 +541,19 @@ ipcMain.on('menu-overlay:open', (event, payload) => {
   menuOverlay.openMenu(payload);
 });
 
-// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted to
-// 'toggle' (trigger re-click close — distinct in logs, no focus move) or
-// 'superseded' (mutual exclusion / other programmatic close; the default).
+// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted
+// (mirrors SHEET_DISMISS_REASONS' style below) — 'toggle' (trigger re-click
+// close), 'superseded' (mutual exclusion / other programmatic close; the
+// fallback for anything unrecognized), plus the omnibox-suggestions close
+// triggers added this flight (DD5 amendment): 'escape', 'blur', 'navigation',
+// 'input-empty', 'activated'.
+const MENU_CLOSE_REASONS = new Set([
+  'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
+]);
 ipcMain.on('menu-overlay:close', (event, payload) => {
   if (event.sender !== getChromeContents()) return;
   const r = payload && payload.reason;
-  menuOverlay.closeMenuOverlay(r === 'toggle' ? 'toggle' : 'superseded');
+  menuOverlay.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
 });
 
 // Channel 4 — sheet → main: item activated. Stale tokens dropped; channel 7 (from

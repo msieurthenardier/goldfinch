@@ -16,6 +16,7 @@ import { deriveSiteInfo } from '../shared/site-info.js';
 import { pageContextModel } from '../shared/page-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
+import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -311,6 +312,20 @@ const overlayMenus = {
       if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
       else els.address.focus();
     }
+  },
+  // Omnibox suggestions (M08 Flight 4 Leg 3 / flight DD5): the "trigger" is
+  // #address itself, which already holds focus in every keyboard path (the
+  // sheet's noFocus open never steals it) — aria-expanded rides this generic
+  // mechanism, no hand-rolled toggling (design review). refocus is NONE (flight
+  // pin: no surface ever moves focus away from #address on close). blurClosedAt
+  // is written by the generic Ch7 sink below but never READ here — this surface
+  // has no trigger-click path (overlayTriggerClick is not used for suggestions).
+  suggestions: {
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => els.address,
+    refocus() {} // NONE — see comment above
   }
 };
 const BLUR_REOPEN_SUPPRESS_MS = 300;
@@ -346,13 +361,17 @@ const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
 // Generic channel-1 open (Leg 3): mint token, mark open, send, set aria.
 // Mutual exclusion is main's model-replace (channel 7 'superseded' for the
 // outgoing menuType) — no chrome-side menu state exists to close.
-/** @param {string} menuType @param {any[]} model @param {any} anchor
- *  @param {number} startIndex 0 = first item; -1 = last (trigger ArrowUp) */
-const openOverlayMenu = (menuType, model, anchor, startIndex) => {
+// `opts` (M08 Flight 4 Leg 3): an optional bag merged into the Ch1 payload —
+// today only `{ noFocus }` (the suggestions controller's non-focusing open,
+// DD2). Every existing caller omits it and is unaffected (merges nothing).
+/** @param {string} menuType @param {any} model @param {any} anchor
+ *  @param {number} startIndex 0 = first item; -1 = last (trigger ArrowUp)
+ *  @param {{ noFocus?: boolean }} [opts] */
+const openOverlayMenu = (menuType, model, anchor, startIndex, opts = {}) => {
   const st = overlayMenus[menuType];
   st.token = ++menuOverlayToken;
   st.open = true; // channel-1 send IS the chrome-side open transition
-  window.goldfinch.menuOverlayOpen({ menuType, model, anchor, startIndex, token: st.token });
+  window.goldfinch.menuOverlayOpen({ menuType, model, anchor, startIndex, token: st.token, ...opts });
   const ariaEl = st.ariaTarget(); // null for page-context — no false AT signal
   if (ariaEl) ariaEl.setAttribute('aria-expanded', 'true');
 };
@@ -569,6 +588,20 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       }
       break;
     }
+    case 'suggestions': {
+      // INDEX dispatch (the spell:<i> idiom): the id carries only the row
+      // index; the URL resolves from `suggest.items`, which channel 7 (just
+      // above, fired before this) deliberately left intact for exactly this
+      // read on the 'activated' reason. Vanished/mismatched (e.g. a tab switch
+      // raced the click and bumped suggest.seq, invalidating suggest.items in
+      // between) → no-op, never throw.
+      const m = /^sug:(\d+)$/.exec(id);
+      const i = m ? Number(m[1]) : -1;
+      const item = Number.isInteger(i) && i >= 0 ? suggest.items[i] : undefined;
+      if (item && typeof item.url === 'string' && item.url) navigate(item.url);
+      resetSuggestState(); // finishes the reset channel 7 deferred for 'activated'
+      break;
+    }
   }
 });
 
@@ -593,6 +626,24 @@ window.goldfinch.onMenuOverlayClosed(({ menuType, reason, token }) => {
   if (ariaEl) ariaEl.setAttribute('aria-expanded', 'false');
   if (reason === 'blur') st.blurClosedAt = performance.now();
   st.refocus(reason);
+  // Suggestions branch (design review, HIGH): main-initiated closes (window
+  // blur, tab-switch, etc.) reach the sheet WITHOUT going through
+  // closeSuggestions() — this is the only place those reset local state, so
+  // every NON-STALE suggestions close resets it here too. Timers are ALWAYS
+  // cancelled (incl. 'activated' — this is what lets a real Ch6 activation win
+  // the pointer-blur grace-timer race: the timer must die the instant the row
+  // click's close lands, not 150 ms later). items/selectedIndex are the
+  // EXCEPTION on 'activated': channel 7 (this handler) fires strictly BEFORE
+  // channel 6 for the same activation (main emits 7 then 6 — round-2 design
+  // lock), so the Ch6 `sug:<i>` dispatch below still needs `suggest.items` to
+  // resolve the clicked row's URL. Ch6 finishes the reset once it has read it.
+  if (menuType === 'suggestions') {
+    cancelSuggestTimers();
+    if (reason !== 'activated') {
+      suggest.items = [];
+      suggest.selectedIndex = -1;
+    }
+  }
 });
 
 /* ------------------------------------------------------- container picker */
@@ -955,6 +1006,16 @@ function activateTab(id) {
   if (!tab) return;
   activeTabId = id;
 
+  // Suggestions invalidation (design review, HIGH): bump suggest.seq on EVERY
+  // activation, unconditionally — an in-flight historySuggest response for the
+  // PREVIOUS tab's jar must never paint after switching (acceptSuggestResponse
+  // rejects it on the seq mismatch). Also reset local paint state immediately;
+  // in the ordinary case (tab.wcId already set) main already closes the sheet
+  // on tab-switch (tab-set-active → closeMenuOverlay('tab-switch')) — do NOT
+  // double-send the close IPC here, the async Ch7 confirms this same reset.
+  suggest.seq++;
+  resetSuggestState();
+
   for (const t of tabs.values()) {
     const isActive = t.id === id;
     // All tabs (web + internal) are WebContentsViews; visibility managed via tab-set-active IPC.
@@ -988,6 +1049,11 @@ function activateTab(id) {
     // sends tabSetActive once wcId is available. Read the tracker BEFORE clearing.
     if (activeViewWcId != null) window.goldfinch.tabHide(activeViewWcId);
     activeViewWcId = null;
+    // Brand-new-tab path (design review, MEDIUM): createTab's synchronous
+    // activateTab() call runs before any tab-set-active IPC reaches main (wcId
+    // is still null here), so main's tab-switch close never fires in this
+    // window — close explicitly (no-op if nothing was open).
+    closeSuggestions('navigation');
   }
   renderMedia();
   renderPrivacy();
@@ -1180,8 +1246,152 @@ function toUrl(input) {
   return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
 }
 
+/* ------------------------------------------------------- omnibox suggestions */
+// Suggestions controller (M08 Flight 4 Leg 3 / flight DD5): chrome-owned
+// state, combobox-like. The pure decision module
+// (../shared/omnibox-suggest-model.js) holds the query gate, model building,
+// selection clamping, and the response-time revalidation gate — this block
+// only wires events (renderer.js growth discipline). `overlayMenus.suggestions`
+// (registered above, with the other menu entries) is the SINGLE SOURCE OF
+// TRUTH for open/closed (design review Q3 ruling) — no local `open` flag here.
+const SUGGEST_DEBOUNCE_MS = 100;
+const SUGGEST_BLUR_GRACE_MS = 150;
+const suggest = { seq: 0, items: [], selectedIndex: -1, graceTimer: null, debounceTimer: null, lastQuery: '' };
+
+function cancelSuggestTimers() {
+  if (suggest.graceTimer) { clearTimeout(suggest.graceTimer); suggest.graceTimer = null; }
+  if (suggest.debounceTimer) { clearTimeout(suggest.debounceTimer); suggest.debounceTimer = null; }
+}
+
+// Full local-state reset — cancels both timers and clears the painted rows/
+// selection. Called by closeSuggestions() (every chrome-initiated close),
+// the Ch7 sink above (every main-initiated close, plus the tail of an
+// 'activated' close once Ch6 has read `suggest.items`), and activateTab
+// (tab-switch invalidation).
+function resetSuggestState() {
+  cancelSuggestTimers();
+  suggest.items = [];
+  suggest.selectedIndex = -1;
+}
+
+// The query-gate snapshot for the CURRENT moment — shared by the input
+// listener's initial gate and the response-time revalidation gate
+// (acceptSuggestResponse). Burner/internal tabs never query (structural).
+function suggestGateNow() {
+  const tab = activeTab();
+  return shouldQuery({
+    focused: document.activeElement === els.address,
+    isInternal: isInternalTab(tab),
+    isBurner: !!(tab && tab.container && tab.container.burner),
+    value: els.address.value
+  });
+}
+
+// Close helper: no-op unless open (reads the single source of truth); sends
+// the channel-2 close, then resets local state immediately — the async Ch7
+// round-trip will also reset it (idempotent), but this avoids a visible
+// stale-row flash while it's in flight.
+/** @param {'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'} reason */
+function closeSuggestions(reason) {
+  if (!overlayMenus.suggestions.open) return;
+  window.goldfinch.menuOverlayClose({ reason });
+  resetSuggestState();
+}
+
+// Address-bar left edge, sheet-translated — the same leftAnchorOf idiom the
+// ▾ and 🔒 triggers use; y:0 (flush at the sheet top, DD12).
+const suggestAnchor = () => leftAnchorOf(els.address);
+
+// Paint (or re-paint on selection move) suggest.items/selectedIndex as a
+// model-replace — always noFocus (DD2): keyboard/programmatic updates never
+// move OS focus off #address.
+function paintSuggestions() {
+  const model = buildSuggestionModel(suggest.items, suggest.selectedIndex);
+  openOverlayMenu('suggestions', model, suggestAnchor(), 0, { noFocus: true });
+}
+
+// Query gate + 100 ms debounce + token/seq guard. `{ok:false}` responses close
+// if open, never throw.
+els.address.addEventListener('input', () => {
+  cancelSuggestTimers();
+  const value = els.address.value;
+  if (value.trim() === '') {
+    closeSuggestions('input-empty'); // close trigger: input emptied
+    return;
+  }
+  if (!suggestGateNow()) return; // not focused / internal / burner tab — never query
+  suggest.debounceTimer = setTimeout(() => {
+    suggest.debounceTimer = null;
+    const tab = activeTab();
+    if (!tab) return;
+    const requestSeq = ++suggest.seq;
+    suggest.lastQuery = value;
+    window.goldfinch.historySuggest({ jarId: tab.container.id, query: value }).then((res) => {
+      // Response-time gate revalidation (flight DD5 HIGH, the kebab-while-
+      // typing race): a stale response must never model-replace a menu the
+      // operator opened meanwhile.
+      const gateNow = suggestGateNow();
+      if (!acceptSuggestResponse({ requestSeq, currentSeq: suggest.seq, gateNow })) return;
+      if (!res || res.ok !== true) {
+        closeSuggestions('input-empty');
+        return;
+      }
+      suggest.items = Array.isArray(res.suggestions) ? res.suggestions : [];
+      suggest.selectedIndex = -1;
+      paintSuggestions();
+    }).catch(() => {
+      if (acceptSuggestResponse({ requestSeq, currentSeq: suggest.seq, gateNow: suggestGateNow() })) closeSuggestions('input-empty');
+    });
+  }, SUGGEST_DEBOUNCE_MS);
+});
+
+// Close trigger: address blur — a 150 ms grace timer (design review, HIGH):
+// a pointer click on a sheet row moves OS focus to the sheet BEFORE the row's
+// Ch4 activation lands at main, racing this blur; the grace window lets Ch6
+// win the race (the Ch7 sink above cancels this timer the instant the real
+// 'activated' close arrives). The callback re-checks BOTH the captured token
+// (a newer suggestions session opened within the window must not be closed by
+// the stale timer) AND document.activeElement (the operator came back —
+// retype, the in-bar zoom buttons, Ctrl+L — none of which mint a new token).
+els.address.addEventListener('blur', () => {
+  if (!overlayMenus.suggestions.open) return;
+  const tokenAtBlur = overlayMenus.suggestions.token;
+  if (suggest.graceTimer) clearTimeout(suggest.graceTimer);
+  suggest.graceTimer = setTimeout(() => {
+    suggest.graceTimer = null;
+    if (overlayMenus.suggestions.token !== tokenAtBlur) return; // a newer session opened within the window
+    if (document.activeElement === els.address) return; // the operator came back
+    closeSuggestions('blur');
+  }, SUGGEST_BLUR_GRACE_MS);
+});
+
+// The existing lone Enter handler grows (leg contract) to cover the full
+// keyboard contract: ArrowDown/ArrowUp move the selection and re-open
+// (model-replace, still noFocus); Enter with a selection navigates it; Enter
+// without one is the EXISTING behavior, byte-identical; Escape closes without
+// moving focus/clearing text.
 els.address.addEventListener('keydown', (e) => {
+  const open = overlayMenus.suggestions.open;
+  if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    suggest.selectedIndex = moveSelection(suggest.selectedIndex, e.key === 'ArrowDown' ? 1 : -1, suggest.items.length);
+    paintSuggestions();
+    return;
+  }
+  if (open && e.key === 'Escape') {
+    e.preventDefault(); // input keeps focus and text
+    closeSuggestions('escape');
+    return;
+  }
   if (e.key === 'Enter') {
+    if (open && suggest.selectedIndex >= 0 && suggest.items[suggest.selectedIndex]) {
+      const item = suggest.items[suggest.selectedIndex];
+      closeSuggestions('activated');
+      navigate(item.url);
+      els.address.blur();
+      return;
+    }
+    // Existing behavior — byte-identical when no suggestion is selected.
     navigate(els.address.value);
     els.address.blur();
   }
@@ -2765,6 +2975,8 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
+    // Close trigger: navigation of the active tab (flight DD5).
+    closeSuggestions('navigation');
   }
   tab.media = [];
   tab.selected.clear();
@@ -2793,6 +3005,8 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
+    // Close trigger: navigation (in-page variant) of the active tab (flight DD5).
+    closeSuggestions('navigation');
   }
 });
 

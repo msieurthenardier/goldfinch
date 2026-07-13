@@ -28,6 +28,8 @@ function makeFakeStore({ throws = {} } = {}) {
   /** @type {Map<string, Array<{id:number, url:string, title:string|null, visitedAt:number}>>} */
   const data = new Map();
   let nextId = 1;
+  /** @type {any} */
+  let lastSuggestOpts = null;
 
   function rows(jarId) {
     if (!data.has(jarId)) data.set(jarId, []);
@@ -41,6 +43,11 @@ function makeFakeStore({ throws = {} } = {}) {
       rows(jarId).push({ id, url, title, visitedAt: visitedAt ?? id });
       return id;
     },
+    // Test-only accessor — captures the opts bag the IPC handler passed to
+    // suggest() on its most recent call, so a test can assert `now` was injected.
+    get lastSuggestOpts() {
+      return lastSuggestOpts;
+    },
     listRecent(jarId, opts) {
       if (throws.listRecent) throw new Error('store blew up');
       const limit = opts && opts.limit !== undefined ? opts.limit : 100;
@@ -52,6 +59,15 @@ function makeFakeStore({ throws = {} } = {}) {
       return rows(jarId)
         .filter((v) => v.url.includes(query) || (v.title && v.title.includes(query)))
         .slice(0, limit);
+    },
+    suggest(jarId, query, opts) {
+      lastSuggestOpts = opts;
+      if (throws.suggest) throw new Error('store blew up');
+      const limit = opts && opts.limit !== undefined ? opts.limit : 6;
+      return rows(jarId)
+        .filter((v) => v.url.includes(query) || (v.title && v.title.includes(query)))
+        .slice(0, limit)
+        .map((v) => ({ url: v.url, title: v.title, score: 1, lastVisitedAt: v.visitedAt }));
     },
     deleteVisit(jarId, visitId) {
       if (throws.deleteVisit) throw new Error('store blew up');
@@ -109,7 +125,7 @@ function makeHarness({ storeThrows = {} } = {}) {
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the five chrome + five internal history channels, no others', () => {
+test('registers exactly the six chrome + six internal history channels, no others', () => {
   const h = makeHarness();
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
@@ -119,11 +135,13 @@ test('registers exactly the five chrome + five internal history channels, no oth
       'history-delete',
       'history-list',
       'history-search',
+      'history-suggest',
       'internal-history-clear',
       'internal-history-count',
       'internal-history-delete',
       'internal-history-list',
-      'internal-history-search'
+      'internal-history-search',
+      'internal-history-suggest'
     ]
   );
 });
@@ -142,7 +160,8 @@ test('an untrusted event (wrong origin) is rejected on every internal-history-* 
     'internal-history-search',
     'internal-history-delete',
     'internal-history-clear',
-    'internal-history-count'
+    'internal-history-count',
+    'internal-history-suggest'
   ]) {
     assert.throws(
       () => h.handlers.get(channel)(untrusted, { jarId: 'personal' }),
@@ -487,4 +506,91 @@ test('a count via internal-history-count sees rows recorded via the chrome twin 
   const internalResult = h.invokeInternal('internal-history-count', { jarId: 'personal' });
   assert.deepEqual(chromeResult, internalResult);
   assert.deepEqual(chromeResult, { ok: true, count: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// history-suggest (M08 Flight 4, Leg 1 / flight DD3-DD4) — the omnibox's 6th
+// op. Read-only, like history-count: no broadcast. internal-history-suggest
+// is registered-but-unused this flight (the omnibox is chrome-only) but is
+// still exercised here for registration-surface + trust-boundary parity.
+// ---------------------------------------------------------------------------
+test('history-suggest: malformed payload returns the static error, no store call', () => {
+  const h = makeHarness();
+  for (const bad of [undefined, null, 'nope', 42]) {
+    assert.deepEqual(h.invoke('history-suggest', bad), { ok: false, error: 'history: suggest — malformed-payload' });
+  }
+});
+
+test('history-suggest: unknown jarId returns the static error', () => {
+  const h = makeHarness();
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'nope', query: 'x' }), {
+    ok: false,
+    error: 'history: suggest — unknown-jar'
+  });
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'burner', query: 'x' }), {
+    ok: false,
+    error: 'history: suggest — unknown-jar'
+  });
+});
+
+test('history-suggest: non-string query or non-finite limit returns bad-args', () => {
+  const h = makeHarness();
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'personal', query: 42 }), {
+    ok: false,
+    error: 'history: suggest — bad-args'
+  });
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'personal', query: undefined }), {
+    ok: false,
+    error: 'history: suggest — bad-args'
+  });
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'personal', query: 'x', limit: 'ten' }), {
+    ok: false,
+    error: 'history: suggest — bad-args'
+  });
+  assert.deepEqual(h.invoke('history-suggest', { jarId: 'personal', query: 'x', limit: NaN }), {
+    ok: false,
+    error: 'history: suggest — bad-args'
+  });
+});
+
+test('history-suggest: empty string query is a valid string (bad-args only rejects non-string)', () => {
+  const h = makeHarness();
+  const result = h.invoke('history-suggest', { jarId: 'personal', query: '' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.suggestions, []);
+});
+
+test('history-suggest: success shape returns { ok: true, suggestions }', () => {
+  const h = makeHarness();
+  h.store.seed('personal', { url: 'https://example.com/report', title: 'Quarterly report' });
+  const result = h.invoke('history-suggest', { jarId: 'personal', query: 'report' });
+  assert.equal(result.ok, true);
+  assert.equal(result.suggestions.length, 1);
+  assert.equal(result.suggestions[0].url, 'https://example.com/report');
+});
+
+test('history-suggest: handler injects now: Date.now() into the store opts (the store never calls Date.now() itself)', () => {
+  const h = makeHarness();
+  h.store.seed('personal', { url: 'https://example.com/report', title: 'Quarterly report' });
+  const before = Date.now();
+  h.invoke('history-suggest', { jarId: 'personal', query: 'report' });
+  const after = Date.now();
+  const opts = h.store.lastSuggestOpts;
+  assert.equal(typeof opts.now, 'number');
+  assert.ok(opts.now >= before && opts.now <= after, 'now should be a fresh Date.now() snapshot from the handler');
+});
+
+test('history-suggest: a throwing store returns the static store-failure string, never rejects', () => {
+  const h = makeHarness({ storeThrows: { suggest: true } });
+  const result = h.invoke('history-suggest', { jarId: 'personal', query: 'x' });
+  assert.deepEqual(result, { ok: false, error: 'history: suggest — store-failure' });
+});
+
+test('a suggest via internal-history-suggest sees rows recorded before either twin was called (extract-don\'t-fork parity)', () => {
+  const h = makeHarness();
+  h.store.seed('personal', { url: 'https://example.com/report', title: 'Quarterly report' });
+  const chromeResult = h.invoke('history-suggest', { jarId: 'personal', query: 'report' });
+  const internalResult = h.invokeInternal('internal-history-suggest', { jarId: 'personal', query: 'report' });
+  assert.equal(chromeResult.ok, true);
+  assert.deepEqual(chromeResult.suggestions, internalResult.suggestions);
 });

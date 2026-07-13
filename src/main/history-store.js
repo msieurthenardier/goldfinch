@@ -67,6 +67,11 @@ END;
 const FILE_NAME = 'history.db';
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 500;
+// suggest()'s own clamp (flight-4 leg-1 / DD3-DD4) — deliberately distinct
+// from the store's general 1–500 MIN_LIMIT/MAX_LIMIT: the omnibox dropdown
+// is a small, fixed-height list, never a paged view.
+const SUGGEST_MIN_LIMIT = 1;
+const SUGGEST_MAX_LIMIT = 10;
 
 // ---------------------------------------------------------------------------
 // Module-scoped state (singleton, like settings-store / downloads-store)
@@ -183,6 +188,35 @@ function prepareStatements() {
         'JOIN visits v ON v.id = visits_fts.rowid ' +
         'WHERE visits_fts MATCH ?1 AND v.jar_id = ?2 ' +
         'ORDER BY v.visited_at DESC, v.id DESC LIMIT ?3'
+    ),
+    // Frecency-ranked, FTS-narrowed suggest query (flight-4 leg-1 / DD3-DD4,
+    // review-probe-verified — implement VERBATIM). Placeholders are ALL
+    // distinct (the listRecentWithCursor precedent above): ?1=now (reused
+    // FOUR times — the SAME logical value, deliberately, NOT the
+    // bare-`?`-mixing hazard the comment above warns about), ?2=ftsQuery,
+    // ?3=jarId, ?4=limit. ⚠ node:sqlite binds plain JS numbers as REAL, so
+    // the `(?1 - v.visited_at) / 86400000` division does NOT truncate to an
+    // integer — do NOT "fix" this with a CAST; that would change the
+    // probe-verified age-bucket boundary semantics. Rows are per-URL
+    // AGGREGATES (GROUP BY v.url) — `lastVisitedAt` (not `visitedAt`) is a
+    // deliberate divergence from the Visit row shape, don't normalize it.
+    // The bare `v.title` after `MAX(v.visited_at)` relies on SQLite's
+    // bare-column-follows-MAX rule (probe-verified under the FTS join).
+    suggest: d.prepare(
+      `SELECT v.url, MAX(v.visited_at) AS lastVisitedAt, v.title,
+         SUM(CASE
+           WHEN ((?1 - v.visited_at) / 86400000) <= 4  THEN 100
+           WHEN ((?1 - v.visited_at) / 86400000) <= 14 THEN 70
+           WHEN ((?1 - v.visited_at) / 86400000) <= 31 THEN 50
+           WHEN ((?1 - v.visited_at) / 86400000) <= 90 THEN 30
+           ELSE 10
+         END) AS score
+       FROM visits_fts
+       JOIN visits v ON v.id = visits_fts.rowid
+       WHERE visits_fts MATCH ?2 AND v.jar_id = ?3
+       GROUP BY v.url
+       ORDER BY score DESC, MAX(v.visited_at) DESC, v.url ASC
+       LIMIT ?4`
     ),
     deleteVisit: d.prepare('DELETE FROM visits WHERE id = ? AND jar_id = ?'),
     clearJar: d.prepare('DELETE FROM visits WHERE jar_id = ?'),
@@ -349,6 +383,48 @@ function search(jarId, query, { limit = 50 } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// suggest
+// ---------------------------------------------------------------------------
+
+/**
+ * Frecency-ranked, FTS-narrowed omnibox suggestions for one jar (flight-4
+ * leg-1, DD3/DD4): age-bucketed visit weights summed per URL, dedupe-by-url
+ * (most-recent title wins via the bare-column-after-MAX rule). `now` lives
+ * in the options bag but is REQUIRED — no default — matching the
+ * `pruneOneJar` determinism contract: this store never calls `Date.now()`
+ * itself; the caller (the IPC handler) supplies it.
+ * @param {string} jarId
+ * @param {string} query
+ * @param {{ limit?: number, now: number }} opts
+ * @returns {Array<{ url: string, title: string | null, score: number, lastVisitedAt: number }>}
+ */
+function suggest(jarId, query, { limit = 6, now } = /** @type {any} */ ({})) {
+  assertOpen();
+  if (typeof jarId !== 'string' || jarId.length === 0) {
+    throw new TypeError('suggest: jarId must be a non-empty string');
+  }
+  if (typeof query !== 'string') {
+    throw new TypeError('suggest: query must be a string');
+  }
+  if (typeof now !== 'number' || !Number.isFinite(now)) {
+    throw new TypeError('suggest: now must be a finite number');
+  }
+  const clampedLimit = Math.min(SUGGEST_MAX_LIMIT, Math.max(SUGGEST_MIN_LIMIT, limit));
+  const ftsQuery = sanitizeSearchQuery(query);
+  if (ftsQuery === null) return [];
+
+  const rows = /** @type {any[]} */ (
+    statements.suggest.all(now, ftsQuery, jarId, clampedLimit)
+  );
+  return rows.map((row) => ({
+    url: row.url,
+    title: row.title,
+    score: row.score,
+    lastVisitedAt: row.lastVisitedAt
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // deleteVisit / clearJar / countByJar
 // ---------------------------------------------------------------------------
 
@@ -466,6 +542,7 @@ module.exports = {
   setTitle,
   listRecent,
   search,
+  suggest,
   deleteVisit,
   clearJar,
   countByJar,

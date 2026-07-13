@@ -63,6 +63,9 @@ interface GoldfinchBridge {
   settingsGet(key?: string): Promise<any>;
   onSettingsChanged(cb: (all: any) => void): void;
 
+  // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history bridge method) ---
+  historySuggest(payload: any): Promise<any>;
+
   // --- shields ---
   shieldsGet(): Promise<any>;
   shieldsSet(patch: any): Promise<any>;
@@ -138,7 +141,9 @@ interface GoldfinchBridge {
   // --- menu-overlay sheet (M05 Flight 8, DD4 — chrome owns state/model/actions) ---
   /** Channel 1: open (or model-replace) a menu on the sheet. The model is
    * template-shaped per menuType (Leg 3): `menu` items {id,label,color?,variant?},
-   * `info-popup` rows {type,text?/label?/value?,id?}, `input-dialog` (empty). */
+   * `info-popup` rows {type,text?/label?/value?,id?}, `input-dialog` (empty),
+   * `suggestions` (M08 Flight 4 Leg 3) the omnibox OBJECT shape — distinct from
+   * every other template's flat item array (DD1). */
   menuOverlayOpen(payload: {
     menuType: string;
     model: Array<{
@@ -149,13 +154,21 @@ interface GoldfinchBridge {
       type?: 'item' | 'separator' | 'note' | 'row' | 'action';
       text?: string;
       value?: string;
-    }>;
+    }> | {
+      items: Array<{ primary?: string; secondary?: string }>;
+      selectedIndex: number;
+      emptyNote?: string;
+    };
     anchor: { alignRight?: number; alignLeft?: number; x?: number; y: number };
     startIndex: number;
     token: number;
+    /** M08 Flight 4 DD2: gates the sheet's sole focus site (`deliverInit`) — the
+     * suggestions controller opens the sheet without stealing OS focus from `#address`. */
+    noFocus?: boolean;
   }): void;
-  /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded'). */
-  menuOverlayClose(payload?: { reason?: 'toggle' | 'superseded' }): void;
+  /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded' |
+   * 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'). */
+  menuOverlayClose(payload?: { reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }): void;
   /** Channel 6: an item was activated on the sheet; chrome executes the action.
    * `value` (Leg 3) is the input-dialog's text — main-validated (string, ≤24). */
   onMenuOverlayActivated(cb: (d: { menuType: string; id: string; value?: string }) => void): void;

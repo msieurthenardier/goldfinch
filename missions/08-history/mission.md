@@ -98,16 +98,16 @@ Prior debriefs left concrete planning inputs this mission adopts:
 - [x] Each jar has its own retention policy (initial value 30 days), editable
       on the manage-jars page; entries older than the jar's retention are
       removed automatically without operator action.
-- [ ] Typing in the address bar surfaces matching suggestions drawn
+- [x] Typing in the address bar surfaces matching suggestions drawn
       exclusively from the active tab's jar history; a suggestion can be
       chosen by keyboard or pointer and navigates the tab.
-      *(behavior-test-backed)*
-- [ ] Suggestions stay felt-instant at scale: prefix lookups remain responsive
+      *(behavior-test-backed — Flight 4, pass 7/7)*
+- [x] Suggestions stay felt-instant at scale: prefix lookups remain responsive
       against a history of tens of thousands of entries.
 - [ ] A jar-keyed automation client can read its own jar's history through the
       automation surface; requests targeting any other jar are refused.
       *(behavior-test-backed)*
-- [ ] History adds no network egress: recording, search, retention, and
+- [x] History adds no network egress: recording, search, retention, and
       suggestions operate entirely locally.
 
 ## Stakeholders
@@ -225,7 +225,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
 - [x] Flight 3: History panel content — browse, search, per-entry delete,
       clear-all; per-jar retention control; history data-class wired into
       clear-data and jar wipe (`JAR_DATA_CLASSES` extension).
-- [ ] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,
+- [x] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,
       keyboard/pointer selection, felt-instant at scale.
 - [ ] Flight 5: Automation surface — jar-scoped history read tool through the
       existing identity façade; docs (mcp-automation.md, README) and the
