@@ -8,6 +8,9 @@ const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
 const { registerJarIpc } = require('./jar-ipc');
+const historyStore = require('./history-store');
+const { createHistoryRecorder } = require('./history-recorder');
+const { registerHistoryIpc } = require('./history-ipc');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { initProfileAndStores } = require('./init-profile');
@@ -129,7 +132,25 @@ const INTERNAL_PAGES = {
     '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
     // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
     // list, loaded before jars.js (see jars.html's script-order comment).
-    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js')
+    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
+    // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
+    // for the page's History/Cookies/Other-site-data tabs.
+    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js'),
+    // History panel content module (M08 Flight 3, Leg 2 / flight DD7) — a
+    // page-local module (src/renderer/pages/, not src/shared/), unlike the
+    // entries above.
+    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js'),
+    // Per-jar WAI-ARIA tab widget (H4, M08 Flight 6, Leg 3 — growth-checkpoint
+    // extraction): another page-local module, the jars-history-panel.js
+    // three-point-onboarding precedent (this entry, the jars.html module
+    // tag, and the jars-page-shared-scripts.test.js contract test, which
+    // self-derives from jars.html and needed no edit).
+    '/jars-tabs.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-tabs.js'),
+    // Confirm-modal module (H7, M08 Flight 6, Leg 5 — growth-checkpoint
+    // extraction, the SAME three-point-onboarding precedent as jars-tabs.js
+    // above): the ONE page-level confirm modal, replacing the per-region
+    // inline confirms every earlier flight used.
+    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js')
   }
 };
 
@@ -531,13 +552,19 @@ ipcMain.on('menu-overlay:open', (event, payload) => {
   menuOverlay.openMenu(payload);
 });
 
-// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted to
-// 'toggle' (trigger re-click close — distinct in logs, no focus move) or
-// 'superseded' (mutual exclusion / other programmatic close; the default).
+// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted
+// (mirrors SHEET_DISMISS_REASONS' style below) — 'toggle' (trigger re-click
+// close), 'superseded' (mutual exclusion / other programmatic close; the
+// fallback for anything unrecognized), plus the omnibox-suggestions close
+// triggers added this flight (DD5 amendment): 'escape', 'blur', 'navigation',
+// 'input-empty', 'activated'.
+const MENU_CLOSE_REASONS = new Set([
+  'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
+]);
 ipcMain.on('menu-overlay:close', (event, payload) => {
   if (event.sender !== getChromeContents()) return;
   const r = payload && payload.reason;
-  menuOverlay.closeMenuOverlay(r === 'toggle' ? 'toggle' : 'superseded');
+  menuOverlay.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
 });
 
 // Channel 4 — sheet → main: item activated. Stale tokens dropped; channel 7 (from
@@ -604,6 +631,13 @@ let mcpStatus = { enabled: false, host: '127.0.0.1', port: null, bound: false, e
 // NOTHING to the settings store — the persisted `automationEnabled` stays the sole
 // human-written value. Never active in a packaged build.
 let devEnableOverride = false;
+// The history recorder (M08 Flight 1, Leg 2). Module-scoped so wireTabViewEvents'
+// closure (built per tab-create, long before or after boot) can reach it — assigned
+// once in app.whenReady, right after the history store opens. Stays null until then;
+// every call site uses the `?.` guard, so navigations before boot (impossible in
+// practice — tabs are created via IPC after the chrome loads) are harmless no-ops.
+/** @type {ReturnType<typeof createHistoryRecorder> | null} */
+let historyRecorder = null;
 
 // Grab a screenshot of the main window as a base64 PNG (Flight 3, Leg 1).
 // Tries desktopCapturer first (with correct thumbnailSize); falls back to a
@@ -751,7 +785,16 @@ async function startMcpServerInstance() {
     // can build an allowInternal engine (DD6 / Leg 2). createEngine forwards it.
     // isTabViewWcId (F8 DD8 defense-in-depth): non-tab, non-chrome wcIds (e.g. the
     // menu-overlay sheet, the find overlay) resolve only at the admin tier.
-    getEngine: (engineOpts) => createEngine(getChromeContents, { ...engineOpts, getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) }),
+    getEngine: (engineOpts) => createEngine(getChromeContents, {
+      ...engineOpts,
+      getDownloads: () => downloadsManager.listAll(),
+      grabWindow,
+      isTabViewWcId: (id) => tabViews.has(id),
+      // History read accessors (Mission 08 Flight 5): threaded the same way as
+      // getDownloads above, backing the getHistory op (jar-confined via scope.js).
+      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
+      isKnownJar: (id) => jars.list().some((j) => j.id === id),
+    }),
     // Jar-scoping context (Leg 2). fromId / fromPartition are the SAME handles
     // the engine uses (webContents.fromId / session.fromPartition) so the
     // façade's membership compare and the engine's op resolve cannot diverge.
@@ -1253,7 +1296,11 @@ function wireGuestContents(contents) {
 // Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
 // Forwards did-navigate / title / favicon / loading to the chrome renderer; the
 // found-in-page count fans out to the find-overlay webContents (path B, DD3).
-function wireTabViewEvents(view, wcId) {
+// `partition` (M08 Flight 1, Leg 2 / DD5) is the SAME raw value passed to
+// tabViews.set at the call site (trusted ? INTERNAL_PARTITION : partition) — the
+// history recorder's positive-allowlist gate rejects the internal partition on
+// its own, so there is no divergence to keep in sync.
+function wireTabViewEvents(view, wcId, partition) {
   const wc = view.webContents;
   const sendToChrome = (channel, payload) => {
     const cc = getChromeContents();
@@ -1266,13 +1313,16 @@ function wireTabViewEvents(view, wcId) {
   wc.on('did-navigate', guard(() => {
     sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
     sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
   }));
   wc.on('did-navigate-in-page', guard(() => {
     sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
     sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
   }));
   wc.on('page-title-updated', guard((_e, title) => {
     sendToChrome('tab-title', { wcId, title });
+    historyRecorder?.handleTitleUpdated(wcId, title);
   }));
   wc.on('page-favicon-updated', guard((_e, favicons) => {
     sendToChrome('tab-favicon', { wcId, favicons });
@@ -2082,7 +2132,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   wireGuestContents(view.webContents);
 
   // Tab-strip event forwarding
-  wireTabViewEvents(view, wcId);
+  wireTabViewEvents(view, wcId, trusted ? INTERNAL_PARTITION : partition);
 
   view.webContents.loadURL(url).catch((err) => {
     console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
@@ -2100,6 +2150,7 @@ ipcMain.on('tab-close', (_event, wcId) => {
     entry.view.webContents.destroy();
   }
   tabViews.delete(wcId);
+  historyRecorder?.forgetTab(wcId);
   if (activeTabWcId === wcId) activeTabWcId = null;
   // Find-overlay session teardown (AC6d): the session target is being destroyed —
   // close the session with NO refocus (nothing sensible to focus; the stopFind inside
@@ -2467,7 +2518,46 @@ const { broadcastJarsChanged } = registerJarIpc({
   rerollSeed,
   revokeJarKey,
   settings,
+  broadcast: broadcastToChromeAndInternal,
+  historyStore
+});
+
+// --- per-jar history IPC (M08 Flight 1 Leg 3 / DD9) ---
+// The four history read/mutate channels live in history-ipc.js, twin-registered
+// exactly like the jar-registry channels above. Registered at module scope
+// (not inside whenReady, next to the leg-2 boot block) — handlers only touch
+// historyStore at invoke time, always after boot, the same lazy-closure
+// property that lets registerJarIpc run before jars.load().
+registerHistoryIpc({
+  ipcMain,
+  historyStore,
+  jars,
   broadcast: broadcastToChromeAndInternal
+});
+
+// H2 (M08 Flight 6 Leg 4, design review): history rows in the goldfinch://jars
+// panel open a NEW TAB IN THE SAME JAR. Registered DIRECTLY here (not threaded
+// through jar-ipc.js/history-ipc.js as a new dep) because it needs
+// getChromeContents() (a main.js module-scoped closure, not injected anywhere)
+// and isSafeTabUrl (already required above). Reuses the exact SAME
+// open-tab -> chrome's onOpenTab -> inheritFromPartition path that popups and
+// context-menu opens use (wireGuestContents's setWindowOpenHandler, above) —
+// a jar's own partition resolves to that jar's own container for free.
+// Validates the jar exists (jars.list().find) and isSafeTabUrl(url) main-side
+// (defense-in-depth — the downstream createTab untrusted branch re-checks it
+// too, the documented two-point boundary). Fail-closed static strings, no
+// interpolation.
+registerInternalHandler(ipcMain, 'internal-open-tab-in-jar', (_e, p) => {
+  if (p === null || typeof p !== 'object') {
+    return { ok: false, error: 'open-tab-in-jar — malformed-payload' };
+  }
+  const entry = jars.list().find((j) => j.id === p.jarId);
+  if (!entry) return { ok: false, error: 'open-tab-in-jar — unknown-jar' };
+  if (typeof p.url !== 'string' || !isSafeTabUrl(p.url)) {
+    return { ok: false, error: 'open-tab-in-jar — bad-args' };
+  }
+  getChromeContents()?.send('open-tab', { url: p.url, openerPartition: entry.partition });
+  return { ok: true };
 });
 
 // New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
@@ -2578,8 +2668,42 @@ app.on('session-created', (ses) => {
   applySpellcheck(ses, spellcheckOn);
 });
 
+// Builds the retentionByJarId map from the live registry and runs one prune pass
+// (M08 Flight 1 / DD6). Wrapped in try/catch — a prune failure must never crash the
+// hourly interval or the boot-time first pass. Broadcasts history-changed per jar
+// with a nonzero deletion count (pruneExpired already returns nonzero-only).
+function pruneAllJars() {
+  try {
+    const retentionByJarId = Object.fromEntries(jars.list().map((j) => [j.id, j.retentionDays]));
+    const deleted = historyStore.pruneExpired(retentionByJarId, Date.now());
+    for (const jarId of Object.keys(deleted)) {
+      broadcastToChromeAndInternal('history-changed', { jarId });
+    }
+  } catch (err) {
+    console.error('[history] prune failed:', err);
+  }
+}
+
 app.whenReady().then(() => {
   initProfileAndStores(app, { shields, settings, jars, downloads });
+  // History store: opened as a SIBLING call right after initProfileAndStores
+  // returns — deliberately NOT by widening that function's unit-pinned 4-store
+  // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
+  // dev-profile setPath redirect has already run by the time initProfileAndStores
+  // returns, so userData is correct here for free (Architect-pinned, flight DD8 /
+  // Technical Approach). historyRecorder is module-scoped so wireTabViewEvents'
+  // closure (built per tab-create) can see it.
+  historyStore.open(app.getPath('userData'));
+  historyRecorder = createHistoryRecorder({
+    store: historyStore,
+    listJars: () => jars.list(),
+    broadcast: broadcastToChromeAndInternal
+  });
+  // Prune once at open, then hourly — unref'd so the interval never holds the
+  // process open on its own (mirrors no other long-lived interval in main.js
+  // needing this, but the house pattern for background timers).
+  pruneAllJars();
+  setInterval(pruneAllJars, 60 * 60 * 1000).unref();
   // Instantiate the app-level downloads manager ONCE, right after the stores load,
   // injecting the loaded downloads-store. Module-scoped so the synchronous
   // session-created hook's wireDownloadHandler closure can reference it. (DD3)
@@ -2621,7 +2745,15 @@ app.whenReady().then(() => {
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
     // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
     // dev seam is not admin-tier, so chrome-class overlay wcIds must refuse here too.
-    const engine = createEngine(getChromeContents, { getDownloads: () => downloadsManager.listAll(), grabWindow, isTabViewWcId: (id) => tabViews.has(id) });
+    const engine = createEngine(getChromeContents, {
+      getDownloads: () => downloadsManager.listAll(),
+      grabWindow,
+      isTabViewWcId: (id) => tabViews.has(id),
+      // History read accessors (Mission 08 Flight 5): same injection as the MCP
+      // getEngine accessor above, kept in parity for this dev-only seam.
+      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
+      isKnownJar: (id) => jars.list().some((j) => j.id === id),
+    });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
       // check): this handler is NEVER registered in production (dev-gated), and a guest webview
@@ -2720,5 +2852,17 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     mcpServer?.stop();
     app.quit();
+  }
+});
+
+// History store close (M08 Flight 1 / DD2) — a NEW, deliberately LATER lifecycle
+// seam than before-quit's teardown: will-quit fires after windows are torn down,
+// guaranteeing no in-flight navigation can still be writing when the store closes
+// (Architect review). close() checkpoints the WAL file.
+app.on('will-quit', () => {
+  try {
+    historyStore.close();
+  } catch {
+    // best-effort — quit must not hang or crash on a close failure
   }
 });

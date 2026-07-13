@@ -33,9 +33,9 @@ test('JAR_DATA_CLASSES is frozen and every descriptor is frozen', () => {
   for (const c of JAR_DATA_CLASSES) assert.ok(Object.isFrozen(c), `descriptor "${c.id}" should be frozen`);
 });
 
-test('ids are unique and exactly [cookies, storage, cache] in order', () => {
+test('ids are unique and exactly [cookies, storage, cache, history] in order', () => {
   const ids = JAR_DATA_CLASSES.map((c) => c.id);
-  assert.deepEqual(ids, ['cookies', 'storage', 'cache']);
+  assert.deepEqual(ids, ['cookies', 'storage', 'cache', 'history']);
   assert.equal(new Set(ids).size, ids.length);
 });
 
@@ -74,6 +74,24 @@ test('cache is the null sentinel (not a clearStorageData storages set)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// history (M08 Flight 3 / DD1) — the `custom` discriminator
+// ---------------------------------------------------------------------------
+test('history is the null-storages sentinel, discriminated via custom: "history", frozen, labeled "History"', () => {
+  const history = jarDataClassById('history');
+  assert.ok(Object.isFrozen(history));
+  assert.equal(history.label, 'History');
+  assert.equal(history.storages, null);
+  assert.equal(history.custom, 'history');
+});
+
+test('history is the ONLY descriptor carrying a custom discriminator', () => {
+  for (const c of JAR_DATA_CLASSES) {
+    if (c.id === 'history') continue;
+    assert.equal(c.custom, undefined, `"${c.id}" should not carry a custom discriminator`);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // jarDataClassById
 // ---------------------------------------------------------------------------
 test('jarDataClassById round-trips every id in JAR_DATA_CLASSES', () => {
@@ -83,7 +101,7 @@ test('jarDataClassById round-trips every id in JAR_DATA_CLASSES', () => {
 });
 
 test('jarDataClassById returns null for an unknown id', () => {
-  assert.equal(jarDataClassById('history'), null);
+  assert.equal(jarDataClassById('nonexistent'), null);
   assert.equal(jarDataClassById(''), null);
   assert.equal(jarDataClassById('COOKIES'), null); // case-sensitive
 });

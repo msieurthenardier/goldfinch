@@ -116,6 +116,13 @@ When adding an internal page (Flight 5+): add a `host → pathname → file` ent
 
 **There are now THREE trusted internal origins (Flight 5 added `goldfinch://downloads`; M06 Flight 3 added `goldfinch://jars`): `goldfinch://settings`, `goldfinch://downloads`, and `goldfinch://jars`.** The trust boundary is **"internal page vs web," NOT "settings vs downloads vs jars"** — every internal origin is equally privileged, so the SAME `goldfinchInternal` bridge is exposed to each page and any internal page can call any `registerInternalHandler` channel. `isTrustedInternalSender` and `isInternalPageUrl` are **allowlist-based** (`INTERNAL_ORIGINS` / `INTERNAL_HOSTS` sets), not single-string matches. The `goldfinch://downloads` page (`downloads.{html,css,js}`) is the app-level downloads surface; its `internal-downloads-*` channels resolve the actionable `savePath` MAIN-SIDE by id (never trusting a renderer-supplied path) for open/show. The `goldfinch://jars` page (`jars.{html,css,js}`) is the cookie-jar management surface (M06 Flight 3); its `internal-jars-*` channels share their handler bodies with the chrome-trusted `jars-*` channels (see `src/main/jar-ipc.js`) rather than forking logic per trust domain. Flight 4 added two per-jar data-control pairs sharing the same twin-registration pattern: `jars-clear-data`/`internal-jars-clear-data` clears one or more requested data classes (cookies, site storage, or cache — see `src/shared/jar-data-classes.js`) from a jar's session partition, strict fail-closed on any unknown class/jar id; `jars-wipe`/`internal-jars-wipe` performs the full identity wipe (all storage + cache, plus a fingerprint-seed reroll) and broadcasts `jar-wiped { id }` on success so the chrome renderer can reload the jar's open tabs.
 
+**`goldfinch://jars` panel structure (M08 Flight 2).** Each persistent jar's section renders three independent WAI-ARIA disclosure panels — History / Cookies / Other site data (`src/shared/jar-panel-model.js`'s `JAR_PANELS`, default collapsed) — plus a footer (Wipe + Delete, jar-level identity actions, outside every panel). Panel toggle/region DOM ids use a **double-hyphen** separator, `jar-<jarId>--<panelId>` (e.g. `jar-work--history`), never single-hyphen — `slug()` collapses non-alnum runs to one `-` and never emits `--`, so a jar id that itself ends in a panel token (`jar-personal` vs a jar literally named "Personal Cookies") can't collide with the region id. The hash deep-link (`goldfinch://jars/#jar-<id>--<panel>`) and the scroll-spy nav both key off these same ids. The History panel's live visit count renders **only** inside its disclosure-button label (`<span class="jar-panel-count">`); `render()`/`updateJarSection` never write that span — its only two writers are the section's build-time fetch and the module-level `onHistoryChanged` handler, both re-querying via `historyCount` rather than trusting broadcast payloads. Burner has no panels (structurally driven by `row.isBurner`, never an id check).
+
+**History joins the data-class control as a fourth class; its panel gets its own content module (M08 Flight 3).** `JAR_DATA_CLASSES` (`src/shared/jar-data-classes.js`) gains a fourth descriptor, `{ id: 'history', label: 'History', storages: null, custom: 'history' }` — `storages: null` is already the `cache` sentinel, so `history` is distinguished via the `custom` discriminator, and `jar-ipc.js`'s `handleClearData` dispatches on `d.custom === 'history'` **first**, ahead of the storages-null cache fallback (a naive fallthrough would clear the session cache while reporting history cleared). `'history'` was added to `CONFIRM_REGIONS` and the History region now calls the shared `buildRegionControls()` like every other panel, so its "Clear history" button + confirm (copy: `"Clears this jar's browsing history."`) are auto-generated, not bespoke. The panel's actual content — retention select, search, the visit list, paging, per-row delete — lives in a **new page module**, `src/renderer/pages/jars-history-panel.js` (`createHistoryPanel({ bridge, jarId, mountEl, onError, getRetentionDays })`), one instance per persistent jar, mounted as the History region's second child (`div.jar-history-mount`) beside jars.js's own `.jar-data-controls` block — the DOM contract is exactly two children, and jars.js never writes inside the mount. This is Flight 2's DD2 growth-trigger firing proactively: jars.js grew only ~55 lines integrating the module instead of the ~400 direct implementation would have cost.
+- **Retention control.** A `<select>` at the top of the mount (presets 7/14/30/90/180/365 days plus the jar's current value as an extra option if it isn't a preset) applies instantly on `change` via `bridge.jarsSetRetention({ id, days })` (internal-bridge only — no chrome-preload parity, since the jars page is the only consumer); a failed call reverts the select and surfaces the section's error line.
+- **`setRetention` + `pruneOneJar`.** `jars.js` (the main-process store) gains `setRetention(id, days)`, which **rejects** (never coerces) an out-of-range/non-integer `days`. The `jars-set-retention`/`internal-jars-set-retention` IPC twins (`src/main/jar-ipc.js`) persist the new value, broadcast `jars-changed`, then immediately run `historyStore.pruneOneJar(jarId, days, Date.now())` — a **new single-jar store method** (`src/main/history-store.js`) added specifically so a retention edit can't reuse `pruneExpired`'s multi-jar map contract, which treats every absent jar id as orphaned and would otherwise delete every *other* jar's entire history on a single jar's retention edit. `pruneOneJar` runs only that jar's cutoff delete, no orphan sweep, and broadcasts `history-changed { jarId }` when it deletes rows — so shortening retention takes effect at once.
+- **History purges on wipe and on jar delete.** `handleWipe` and `handleRemove` (`src/main/jar-ipc.js`) both call a shared `wipeJarData(ses, jarId)` helper — the storage+cache+seed-reroll composition that already appeared three times pre-flight (`handleRemove`, `handleWipe`, and `main.js`'s `identity-new`); this flight's new history-purge concern is what tips the extraction per M06 F4 DD3's "revisit at the next copy" clause, not a literal fourth call site. `wipeJarData` now also purges that jar's history rows — in its own try/catch, fail-soft, after the session-data calls, so a purge failure never blocks the identity wipe or the `jar-wiped` broadcast. `handleWipe` broadcasts `history-changed { jarId }` when the purge actually deleted rows. `main.js`'s `identity-new` copy stays separate per flight DD3 (cross-module coupling for three lines was rejected in M06 F4 DD3's rationale and stands) and deliberately does **not** purge history — it is an anti-tracking identity break, not a data-visibility control; only the data-class control, jar wipe, and jar delete clear history.
+
 ### Settings store (`src/main/settings-store.js`)
 
 The **canonical home for app preferences** going forward. Do not scatter new preferences into ad-hoc constants or into `shields.js`.
@@ -173,6 +180,172 @@ The Unpin dispatch body also calls `els.address.focus()` **after** the send (a d
 **Two-audience fan-out — `broadcastToChromeAndInternal(channel, payload)`.** Changes to shared state (settings writes, shields writes from either surface) must reach **both** the chrome renderer (`getChromeContents()` — the chrome `WebContentsView`'s `webContents`, a `file://` surface) and any open `goldfinch://` internal guest. The helper in `main.js` does exactly that: it sends to `getChromeContents()` directly (excluded from the `__goldfinchInternal` filter below), then iterates `webContents.getAllWebContents()` and sends to every `wc` whose `wc.session.__goldfinchInternal === true`. Used for `settings-changed` (on any `internal-settings-set`) and `shields-changed` (on any write from either the chrome `shields-set`/`shields-pause` channels or the internal `internal-shields-set` channel).
 
 **Settings read channel for the chrome (`settings-get`).** `ipcMain.handle('settings-get', ...)` in `main.js` is intentionally **not** behind `registerInternalHandler` — its trust domain is the `file://` chrome (the `window.goldfinch` surface in `chrome-preload.js`), the same as `shields-get`. Web webviews have no `ipcRenderer.invoke`, so only the chrome and the internal guest can reach IPC at all.
+
+### History store (`src/main/history-store.js`)
+
+Durable, per-jar browsing-history persistence (M08 Flight 1). Unlike the
+JSON-file codec pattern (`settings-store.js` / `downloads-store.js`), the
+history store needs indexed range queries (recent paging) and full-text
+search at scale, so it is the **first house store built on a live SQLite
+handle** rather than a whole-file rewrite.
+
+- **Substrate ruling (DD1).** The store runs on Node's built-in `node:sqlite`
+  (`DatabaseSync`) — an operator ruling at mission design, not a vendored
+  native module — preserving Goldfinch's zero-runtime-dependency identity
+  (the M03 MCP-SDK precedent set the bar for what earns a dependency; a
+  storage engine the runtime already ships does not). Full decision record:
+  `missions/08-history/flights/01-history-store/flight.md` DD1.
+- **The accepted ongoing cost.** `node:sqlite` is an **experimental** Node
+  API: it emits `ExperimentalWarning` at require time (in the app console and
+  in `npm test` output — cosmetic, accepted) and its surface may shift across
+  Electron/Node upgrades. **Every future Electron major bump must re-run the
+  store's unit suite and treat a `node:sqlite` API break as a first-class
+  migration cost** — this is a standing tax, not a one-time risk.
+- **Recording pipeline.** `src/main/history-recorder.js` (`createHistoryRecorder`
+  — Electron-free, injected-deps factory, not a module singleton; one instance
+  built in `main.js` at boot) is the recording GATE, called from the existing
+  `did-navigate` / `did-navigate-in-page` / `page-title-updated` guards in
+  `wireTabViewEvents` (`main.js`), which threads the tab's **partition** into
+  the recorder alongside the events it already forwards. Decision gates, in
+  order: (1) **positive registered-jar allowlist** — records only when the
+  tab's partition exactly matches a live jar's `partition`
+  (`jars.list().find(j => j.partition === partition)`); this is a positive
+  resolution against the registry, never an "is not a burner" negative check,
+  so burner (`burner:<n>`) and internal (`goldfinch-internal`) partitions
+  structurally match nothing and record nothing — no dedicated exclusion code
+  exists or is needed for them; (2) an `http:`/`https:` scheme allowlist,
+  independently excluding `goldfinch://` and `about:blank`; (3) a per-jar
+  in-memory consecutive-duplicate suppression window (default 30 s) that
+  bounds reload/redirect spam without a DB read on the hot path. A per-`wcId`
+  map backfills titles arriving later via `page-title-updated`; `forgetTab(wcId)`
+  clears it on tab teardown (a crashed tab leaks its entry — accepted, bounded,
+  wcIds are never reused).
+- **`retentionDays` + prune cadence.** Each jar record (`jars.js`) carries a
+  `retentionDays` field (integer, 1–3650, default `30`, validated by
+  `cleanRetention`) — retention is operator-facing jar configuration, so it
+  lives on the jar record, not in the history store itself. `pruneAllJars()`
+  (`main.js`) builds a `{ jarId: retentionDays }` map from the live registry
+  and calls `historyStore.pruneExpired(...)` once at store open and again on
+  an hourly `setInterval(...).unref()`; it also garbage-collects orphan rows
+  whose `jar_id` no longer resolves to a registered jar (defense-in-depth for
+  jar deletions). Up to ~1 h of over-retention between ticks is accepted as
+  invisible at a 30-day granularity.
+- **`history-changed { jarId }` invalidation contract.** Every mutation (a
+  recorded visit, a title backfill, a per-entry delete, a jar clear, a prune
+  deletion) broadcasts `history-changed` with **only** `{ jarId }` via
+  `broadcastToChromeAndInternal` — never row data or counts. Subscribers
+  re-query through their own read path (the same invalidation-not-snapshot
+  lesson as `jars-changed`/`shields-changed`).
+- **IPC twins + static error strings.** `src/main/history-ipc.js`
+  (`registerHistoryIpc`) defines each handler body once and registers it
+  twice, mirroring `jar-ipc.js`'s extract-don't-fork pattern: a bare
+  `ipcMain.handle('history-*', ...)` on the chrome-trusted channel, and
+  `registerInternalHandler(ipcMain, 'internal-history-*', ...)` on the
+  internal-origin-gated twin (reached today only by `goldfinch://jars` — history
+  has no page of its own). The four ops (`list`/`search`/`delete`/`clear`)
+  validate fail-closed, in order (malformed payload → unknown jar → bad args),
+  and every failure returns a **static, non-interpolated** `history: <op> —
+  <code>` string — deliberately not repeating `jar-ipc.js`'s
+  `clear-data`/`wipe` dynamic-interpolation branches.
+- **`history.db` WAL file family.** The store opens `userData/history.db` in
+  `journal_mode=WAL` + `synchronous=NORMAL`, so the live database is actually
+  a **three-file family on disk**: `history.db`, `history.db-wal`, and
+  `history.db-shm`. `app.on('will-quit', ...)` closes the store (checkpointing
+  the WAL) — a deliberately later lifecycle seam than `before-quit`'s
+  teardown, chosen so no in-flight navigation can still be writing once
+  windows are torn down. A corrupt `history.db` (and its `-wal`/`-shm`
+  siblings) is quarantined to a `.corrupt-<ms-epoch>` sibling and recreated
+  fresh on next `open()` — the app must boot.
+- **Two live-probed sqlite gotchas** (design review, verified live): never mix
+  a bare `?` placeholder with numbered `?1`/`?2`/… placeholders in the same
+  statement (SQLite collapses them onto one bound slot), and keep the FTS5
+  index on the **default `unicode61` tokenizer** — a `tokenchars` override
+  turns a whole URL into one token and silently breaks prefix search.
+
+### Address-bar suggestions (`src/shared/omnibox-suggest-model.js`)
+
+As the operator types in the address bar, a dropdown of frecency-ranked,
+prefix-matched history suggestions renders on the **menu-overlay sheet** — the
+only surface that can composite below the toolbar, since chrome DOM is
+occluded by the guest view (M08 Flight 4).
+
+- **Surface — the `suggestions` sheet template.** Registered like the
+  info-popup precedent (no `items` getter; `onOpen` focuses nothing). Rows are
+  `role="listbox"`/`option` (`aria-selected` on the model's `selectedIndex`;
+  primary = title-or-URL, secondary = URL host; all via `textContent`). A row
+  click sends channel-4 `{ id: 'sug:<i>' }` — INDEX dispatch (the `spell:<i>`
+  idiom; `sanitizeActivatedValue`'s 24-char cap forbids a URL riding `value`).
+- **The `noFocus` regime.** `deliverInit` in `menu-overlay-manager.js` is the
+  sheet's SOLE focus site; a channel-1 `noFocus: true` payload flag
+  (`openOverlayMenu`'s optional 5th `opts` param, merged into the Ch1 payload)
+  gates that `view.webContents.focus?.()` call, so keyboard-driven and
+  programmatic suggestion repaints never move OS focus off `#address` — every
+  existing template/caller omits `opts` and is unaffected. A POINTER click
+  landing on the sheet still moves native focus per Chromium's click-to-focus
+  (the grace timer below exists for exactly that race).
+- **Chrome-owned close-trigger matrix.** Because the non-focusing regime means
+  no blur/outside-click dismissal ever fires while focus stays in the chrome,
+  every close trigger is fired explicitly from `renderer.js`, never sheet-side:
+  Enter-with-selection or a row click → `'activated'`; Escape → `'escape'`
+  (input keeps focus and text); input emptied → `'input-empty'`; `#address`
+  blur → `'blur'`, via a 150 ms grace timer (`SUGGEST_BLUR_GRACE_MS`) whose
+  callback re-checks the captured open-token AND `document.activeElement`
+  before closing (lets a pointer click's activation win the blur-vs-click
+  race it itself causes); tab switch/activation → main's existing
+  tab-switch sheet-close, PLUS the brand-new-tab path's explicit
+  `closeSuggestions('navigation')` (`createTab`'s synchronous `activateTab()`
+  runs before any `tab-set-active` IPC reaches main, so the ordinary
+  tab-switch close never fires in that one window) — `activateTab` also bumps
+  `suggest.seq` unconditionally on every activation, invalidating any
+  in-flight response for the previous tab's jar; navigation of the active tab
+  (`did-navigate`/`did-navigate-in-page`) → `'navigation'`. Main's Ch2 handler
+  (`menu-overlay:close`) validates the reason against an explicit
+  `MENU_CLOSE_REASONS` allowlist (`toggle`/`superseded`/`escape`/`blur`/
+  `navigation`/`input-empty`/`activated`) — an unrecognized reason falls back
+  to `'superseded'`.
+- **The Ch7-before-Ch6 activated-reset nuance.** Main emits channel 7 (close)
+  strictly BEFORE channel 6 (activated) for the same row-click activation. The
+  Ch7 sink (`onMenuOverlayClosed`) cancels the suggestion timers
+  unconditionally on every close — including `'activated'`, so the grace
+  timer dies the instant a real click wins its race rather than 150 ms later
+  — but clears `suggest.items`/`selectedIndex` for every OTHER reason,
+  deliberately leaving them intact on `'activated'` so the immediately
+  following Ch6 `sug:<i>` dispatch can still resolve the clicked row's URL
+  from `suggest.items`; the Ch6 handler finishes the reset itself once it has
+  read the target. A naive "reset on every reason including activated" would
+  silently break pointer-click navigation on every click — clearing the array
+  before the handler that reads it ever ran.
+- **Data path — `history-store.js`'s `suggest` query.** `suggest(jarId, query,
+  { limit = 6, now })` is an age-bucketed frecency query over the
+  FTS-narrowed subset (score = SUM of per-visit age-bucket weights: ≤4d→100,
+  ≤14d→70, ≤31d→50, ≤90d→30, else 10; grouped by URL, `ORDER BY score DESC,
+  MAX(visited_at) DESC, url`), reached via the `history-suggest`/
+  `internal-history-suggest` IPC twins and the chrome-only `historySuggest`
+  bridge method (`chrome-preload.js`). See "History store" above for the
+  store's general shape; `suggest` has its OWN 1–10 limit clamp
+  (`SUGGEST_MIN_LIMIT`/`SUGGEST_MAX_LIMIT`), distinct from the store's general
+  1–500 clamp — the dropdown is a small, fixed-height list, never a paged
+  view. Scale-probed at 50k rows (flight-4 leg-4 flight log has the numbers):
+  the **1-char query rides an UNCOVERED prefix path** — the FTS `prefix='2 3
+  4'` index only covers 2/3/4-char terms, so a 1-char query is a full-token
+  scan rather than an indexed prefix lookup, and is measured separately for
+  exactly that reason.
+- **Jar/burner/internal gates.** The pure `src/shared/omnibox-suggest-model.js`
+  module's `shouldQuery({ focused, isInternal, isBurner, value })` gate
+  (wired from the renderer's `suggestGateNow()`) engages suggestions only when
+  `#address` is focused, the active tab is neither internal
+  (`isInternalTab(tab)`) nor burner (`tab.container.burner`), and the trimmed
+  input is non-empty — burner and internal tabs structurally never issue a
+  query, with no dedicated skip code beyond the gate (the same "positive
+  allowlist, no negative exclusion" shape as the history recorder's jar
+  gate). Suggestions are scoped to the active tab's own jar (`tab.container.id`
+  passed as `jarId`) — jar exclusivity rides the store's existing per-jar
+  `WHERE jar_id = ?` scoping, the same isolation every other history op
+  relies on. A `historySuggest` response re-validates the FULL gate at
+  arrival (`acceptSuggestResponse`, the response-time revalidation gate)
+  before painting — a stale response from a since-switched tab or a
+  since-closed dropdown never model-replaces a menu the operator didn't ask
+  for (the kebab-while-typing race).
 
 ### Internal-bridge security model (`src/main/internal-ipc.js`)
 
@@ -256,7 +429,7 @@ Flight 3 introduces **`@modelcontextprotocol/sdk`** (pinned to an **exact** vers
 
 - **`mcp-server.js`** stands up an MCP `Server` fronted by a Node `http.createServer` bound to **`127.0.0.1` only**, default port **`49707`** (the `automationPort` setting with free-fallback; `GOLDFINCH_MCP_PORT` is a **dev-only** override, honored only when `!app.isPackaged`), via the SDK's `StreamableHTTPServerTransport`. The transport's `handleRequest(req, res)` consumes the **raw Node `(req, res)` pair** — no Express, no Fetch shim (premise verified live at the scaffold leg). Session model is **stateful** (per-connection `randomUUID` session id) — the SDK's robust handshake path for one local consumer.
 - **SC7 Origin/Host guard runs FIRST.** `src/main/automation/origin-guard.js` is a **pure, dependency-free** loopback Origin/Host allow-list predicate (`isAllowed({ host, origin, peerAddress })`), unit-tested exhaustively. The http handler runs it before any MCP processing; a denied request gets a `403` and never reaches the SDK. A `127.0.0.1` bind is necessary but not sufficient — *this browser renders hostile pages*, which can reach a loopback server via DNS-rebinding unless Origin/Host are pinned.
-- **Bound by the Settings toggle (production) or `--automation-dev` (dev).** `shouldBindAutomation` (`src/shared/automation-dev.js`) is the single bind rule: in production the **`automationEnabled` toggle is the sole bind gate**; on an unpackaged dev run, `--automation-dev` force-binds via the dev-enable override (`isMcpAutomationEnabled` AND `!app.isPackaged`) **without writing the setting** — every dev-flag call site ANDs `!app.isPackaged`, so the flag is a **complete no-op when packaged** (DD4, Flight 8). The flag is **structurally independent** of any legacy browser-process CDP debugging switch (that ungated path was removed in F9), so `--automation-dev` over the loopback MCP transport is the sole path that starts the MCP server. Dev runs are **profile-isolated** (`~/.config/goldfinch-dev`, DD1). Launch the dev harness with **`npm run dev:automation`**; a packaged binary binds via the toggle (no dev launch needed for dogfooding/external drives). The server advertises **27 tools** — **17 drive** (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `navigate`, `goBack`, `goForward`, `reload`, `getZoom`, `setZoom`, `printToPDF`, `findInPage`, `stopFindInPage`, `click`, `typeText`, `scroll`, `pressKey`) + **4 observe** (`captureScreenshot`, `captureWindow`, `readDom`, `readAxTree`) + **2 eval** (`evaluate`, `injectScript` — debugger-free `webContents.executeJavaScript` in the guest main world, ZERO CDP; the internal `goldfinch://settings` session is excluded even for admin, and `evaluate`'s return must be JSON-serializable) + **2 devtools** (`openDevTools`, `closeDevTools` — `webContents.openDevTools({mode:'detach'})` / `closeDevTools()`, NO CDP from the ops themselves; the detached DevTools front-end IS a CDP client, so a concurrent `readAxTree`/`scroll` surfaces `attach-failed` while `evaluate`/`injectScript` keep working; internal session excluded even for admin) + **2 admin chrome/app-level** (`getChromeTarget` — admin-only, returns the chrome renderer's `wcId` so drive/observe tools can act on the app shell; `downloadsList` — admin-only, app-level, no `wcId`, returns the app-level downloads records `{ id, url, filename, savePath, state, received, total, … }`; jar keys get `automation: admin-only`). Result semantics (DD6): drive ops → JSON text (`{"ok":true}` for void ops, boolean/`null`/array otherwise), screenshots → image content, DOM/a11y → JSON text; the `openTab`-`null` and `readAxTree` `debugger-unavailable` outcomes are **normal results** (read and react), while genuine engine throws are `isError`. See `docs/mcp-automation.md` for the consumer reference (endpoint, Origin/Host requirement, full tool reference, refusal semantics, the a11y stale-handle caveat) and `scripts/mcp-example-client.mjs` for a runnable SDK-client example. The repo's `.mcp.json` ships an empty `mcpServers` map (no standing `goldfinch` entry — off-by-default); a consumer who opts in adds the entry at their configured port (the Settings UI shows the live address).
+- **Bound by the Settings toggle (production) or `--automation-dev` (dev).** `shouldBindAutomation` (`src/shared/automation-dev.js`) is the single bind rule: in production the **`automationEnabled` toggle is the sole bind gate**; on an unpackaged dev run, `--automation-dev` force-binds via the dev-enable override (`isMcpAutomationEnabled` AND `!app.isPackaged`) **without writing the setting** — every dev-flag call site ANDs `!app.isPackaged`, so the flag is a **complete no-op when packaged** (DD4, Flight 8). The flag is **structurally independent** of any legacy browser-process CDP debugging switch (that ungated path was removed in F9), so `--automation-dev` over the loopback MCP transport is the sole path that starts the MCP server. Dev runs are **profile-isolated** (`~/.config/goldfinch-dev`, DD1). Launch the dev harness with **`npm run dev:automation`**; a packaged binary binds via the toggle (no dev launch needed for dogfooding/external drives). The server advertises **28 tools** — **17 drive** (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `navigate`, `goBack`, `goForward`, `reload`, `getZoom`, `setZoom`, `printToPDF`, `findInPage`, `stopFindInPage`, `click`, `typeText`, `scroll`, `pressKey`) + **4 observe** (`captureScreenshot`, `captureWindow`, `readDom`, `readAxTree`) + **2 eval** (`evaluate`, `injectScript` — debugger-free `webContents.executeJavaScript` in the guest main world, ZERO CDP; the internal `goldfinch://settings` session is excluded even for admin, and `evaluate`'s return must be JSON-serializable) + **2 devtools** (`openDevTools`, `closeDevTools` — `webContents.openDevTools({mode:'detach'})` / `closeDevTools()`, NO CDP from the ops themselves; the detached DevTools front-end IS a CDP client, so a concurrent `readAxTree`/`scroll` surfaces `attach-failed` while `evaluate`/`injectScript` keep working; internal session excluded even for admin) + **2 admin chrome/app-level** (`getChromeTarget` — admin-only, returns the chrome renderer's `wcId` so drive/observe tools can act on the app shell; `downloadsList` — admin-only, app-level, no `wcId`, returns the app-level downloads records `{ id, url, filename, savePath, state, received, total, … }`; jar keys get `automation: admin-only`) + **1 history (jar-confined)** (`getHistory` — Mission 08 Flight 5; NOT admin-only, contrast with the admin chrome/app-level pair above: a jar key reads its own jar's history (`jarId` optional, must match if supplied); admin reads any known jar (`jarId` required). Backed by two accessors injected into `createEngine` the same way as `getDownloads` — `getHistoryReads` (`{ listRecent, search }`, threaded from `historyStore`) and `isKnownJar` (threaded from `jars.list()`), both wired at both engine-construction sites in `main.js`). Result semantics (DD6): drive ops → JSON text (`{"ok":true}` for void ops, boolean/`null`/array otherwise), screenshots → image content, DOM/a11y → JSON text; the `openTab`-`null` and `readAxTree` `debugger-unavailable` outcomes are **normal results** (read and react), while genuine engine throws are `isError`. See `docs/mcp-automation.md` for the consumer reference (endpoint, Origin/Host requirement, full tool reference, refusal semantics, the a11y stale-handle caveat) and `scripts/mcp-example-client.mjs` for a runnable SDK-client example. The repo's `.mcp.json` ships an empty `mcpServers` map (no standing `goldfinch` entry — off-by-default); a consumer who opts in adds the entry at their configured port (the Settings UI shows the live address).
 
 ## Release / CI
 

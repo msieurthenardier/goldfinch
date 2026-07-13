@@ -347,6 +347,18 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     jarsWipe: (payload) => ipcRenderer.invoke('internal-jars-wipe', payload),
 
     /**
+     * Set a jar's retention window in days (M08 Flight 3, Leg 1 / flight DD4).
+     * Rejects (never coerces) an invalid `days` — 0, non-integer,
+     * out-of-range, or non-numeric — with { ok: false, error }; same for an
+     * unknown jar id or malformed payload. On success also prunes the jar's
+     * history immediately to the new window (rows older than the new
+     * retention are deleted right away) and resolves { ok: true, container }.
+     * @param {{id:string, days:number}} payload
+     * @returns {Promise<{ok:boolean, container?:object, error?:string}>}
+     */
+    jarsSetRetention: (payload) => ipcRenderer.invoke('internal-jars-set-retention', payload),
+
+    /**
      * Subscribe to jars-changed broadcasts. cb receives { containers, defaultId }
      * (defaultId null ⇔ Burner holds the flag). Returns a numeric handle for use
      * with offJarsChanged.
@@ -360,7 +372,82 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * a pagehide handler to prevent accumulation across reloads.
      * @param {number} h
      */
-    offJarsChanged: (h) => off(h)
+    offJarsChanged: (h) => off(h),
+
+    // Per-jar history surface (M08 Flight 1 Leg 3 / DD9). The history UI has no
+    // page of its own — it renders inside goldfinch://jars — so these wrappers
+    // are thin ipcRenderer.invoke calls onto the internal-origin-gated
+    // internal-history-* channels (registerHistoryIpc / history-ipc.js), which
+    // share their exact handler bodies with the chrome-trusted history-*
+    // channels (no chrome-preload consumer this flight — see history-ipc.js).
+
+    /**
+     * Offset-paged visits for the History panel's numbered pager bar
+     * (H1/H5, M08 F6 Leg 4 — replaces the removed historyList/history-list).
+     * Rejects on an unknown jar id or malformed args (non-positive-integer
+     * page/pageSize included) with { ok: false, error }.
+     * @param {{jarId:string, page:number, pageSize?:number}} payload
+     * @returns {Promise<{ok:boolean, visits?:Array<object>, total?:number, error?:string}>}
+     */
+    historyPage: (payload) => ipcRenderer.invoke('internal-history-page', payload),
+
+    /**
+     * Full-text search a jar's history. Rejects the same way as historyPage.
+     * @param {{jarId:string, query:string, limit?:number}} payload
+     * @returns {Promise<any>}
+     */
+    historySearch: (payload) => ipcRenderer.invoke('internal-history-search', payload),
+
+    /**
+     * Delete a single visit by id, scoped to the jar. Resolves { ok: false,
+     * error: 'history: delete — not-found' } when the visit doesn't exist.
+     * @param {{jarId:string, visitId:number}} payload
+     * @returns {Promise<any>}
+     */
+    historyDelete: (payload) => ipcRenderer.invoke('internal-history-delete', payload),
+
+    /**
+     * Clear all visits for a jar. Idempotent — clearing an empty jar resolves
+     * { ok: true, cleared: 0 } with no broadcast.
+     * @param {{jarId:string}} payload
+     * @returns {Promise<any>}
+     */
+    historyClear: (payload) => ipcRenderer.invoke('internal-history-clear', payload),
+
+    /**
+     * Read the live visit count for a jar (M08 Flight 2, Leg 1 / flight DD6).
+     * Rejects the same way as historyPage/historySearch on a malformed
+     * payload or unknown jar id.
+     * @param {{jarId:string}} payload
+     * @returns {Promise<any>}
+     */
+    historyCount: (payload) => ipcRenderer.invoke('internal-history-count', payload),
+
+    /**
+     * Subscribe to history-changed broadcasts. cb receives { jarId }.
+     * Returns a numeric handle for use with offHistoryChanged.
+     * @param {(p: any) => void} cb
+     * @returns {number}
+     */
+    onHistoryChanged: (cb) => on('history-changed', cb),
+
+    /**
+     * Unsubscribe the history-changed listener registered under handle h. Call
+     * from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offHistoryChanged: (h) => off(h),
+
+    /**
+     * Open a URL as a NEW TAB IN THE SAME JAR (H2, M08 Flight 6 Leg 4) — the
+     * open-target for a History panel row link. Main validates the jar exists
+     * and re-checks isSafeTabUrl(url) before forwarding to the chrome
+     * renderer's open-tab -> inheritFromPartition path (defense-in-depth; the
+     * downstream createTab untrusted branch checks it a second time too).
+     * @param {{jarId:string, url:string}} payload
+     * @returns {Promise<{ok:boolean, error?:string}>}
+     */
+    openTabInJar: (payload) => ipcRenderer.invoke('internal-open-tab-in-jar', payload)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

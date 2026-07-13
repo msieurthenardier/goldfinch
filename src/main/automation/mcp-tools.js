@@ -118,7 +118,7 @@ const PRESS_KEY_NAMES =
 const DRIVE_TOOLS = [
   {
     name: 'enumerateTabs',
-    description: 'List all drivable (non-internal, dom-ready) tabs as an array of { wcId, url, title, jarId, active }.',
+    description: 'List all drivable (dom-ready) tabs as an array of { wcId, url, title, jarId, active }. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter).',
     inputSchema: { type: 'object', properties: {} },
     call: (engine) => engine.enumerateTabs(),
   },
@@ -514,11 +514,40 @@ const CHROME_TOOLS = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Tool definitions — history ops (1, Mission 08 Flight 5). JAR-CONFINED, NOT
+// admin-only (unlike CHROME_TOOLS above) — a jar key reads its OWN jar's history;
+// admin reads ANY jar. Confinement (own vs. foreign jarId) is enforced in
+// scope.js; this ToolDef is a thin adapter like every other tool (DD5). No wcId
+// in the schema, so the wcId-first guard machinery (scope.js's WCID_FIRST_OPS)
+// is irrelevant to this op (flight DD1) — it is a custom façade op like openTab/
+// captureWindow/getChromeTarget/downloadsList.
+// ---------------------------------------------------------------------------
+
+/** @type {ToolDef[]} */
+const HISTORY_TOOLS = [
+  {
+    name: 'getHistory',
+    description: 'Read browsing-history visits. Jar key: jarId is OPTIONAL and, if supplied, MUST be its own jar (a foreign jarId is refused with automation: out-of-jar). Admin: jarId is REQUIRED (admin has no implicit jar) and may name any known jar (an unknown jarId is refused with automation: unknown-jar). Provide query for a text search over url/title (before is not accepted together with query — automation: bad-args). Omit query to list recent visits (before pages backward). limit applies to either mode. Returns { jarId, visits } as JSON text.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        jarId: { type: 'string', description: 'Target jar id. Jar key: optional, must be its own jar if supplied. Admin: required.' },
+        query: { type: 'string', description: 'Text search query over recorded visits. Omit for recent visits. Cannot be combined with before.' },
+        limit: { type: 'integer', description: 'Max visits to return.' },
+        before: { type: 'integer', description: 'Pagination cursor for the recent-visits listing (not accepted together with query).' },
+      },
+    },
+    call: (engine, { jarId, query, limit, before }) => engine.getHistory(jarId, { query, limit, before }),
+  },
+];
+
 // The full tool table — 17 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 2
-// chrome/app-admin (getChromeTarget + downloadsList) = 27 (Leg 3 + Flight 6 + Flight 9 +
-// Flight 1 zoom + printToPDF + find + Flight 5 downloadsList),
-// iterated by buildToolRegistry for both discovery and dispatch.
-const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS];
+// chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory) = 28
+// (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find + Flight 5
+// downloadsList + Mission 08 Flight 5 getHistory), iterated by buildToolRegistry
+// for both discovery and dispatch.
+const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS];
 
 // ---------------------------------------------------------------------------
 // Registry builder

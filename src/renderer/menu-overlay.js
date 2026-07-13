@@ -1,6 +1,7 @@
-// Menu-overlay sheet page script (M05 Flight 8, Legs 2-3 / DD4). Presentation-only:
-// receives the serialized menu model over `menu-overlay:init` (channel 3), renders
-// it under #menu-root via a TEMPLATE REGISTRY keyed by menuType (Leg 3):
+// Menu-overlay sheet page script (M05 Flight 8, Legs 2-3 / M08 Flight 4 Leg 2).
+// Presentation-only: receives the serialized menu model over `menu-overlay:init`
+// (channel 3), renders it under #menu-root via a TEMPLATE REGISTRY keyed by
+// menuType (Leg 3, suggestions added M08 F4 Leg 2 — FOUR templates now):
 //
 //   menu         (kebab, container)  — role="menu" item list, APG roving via the
 //                                      SHARED menu-controller.js
@@ -10,10 +11,15 @@
 //   input-dialog (new-container)     — fixed label+input+Create/Cancel layout,
 //                                      centered via CSS (anchor ignored), dialog-
 //                                      local Tab-cycle; model may be empty
+//   suggestions  (address-bar)       — role="listbox" rows, NO items getter (like
+//                                      info-popup) AND no local keydown at all —
+//                                      the sheet never takes focus in this
+//                                      template's regime (M08 F4 DD2); Escape/
+//                                      arrows/typing all live in the chrome
 //
 // EVERY template registers a menuController entry and opens via menuController.open,
 // so the controller's global pointerdown/blur listeners deliver outside-click/blur
-// dismissal uniformly for all three (an unregistered dialog would dangle on
+// dismissal uniformly for all four (an unregistered dialog would dangle on
 // sheet-blur). Exactly ONE of `menu-overlay:activated` {id, value?, token} /
 // `menu-overlay:dismissed` {reason, token} is reported per open token (first send
 // wins). No business logic, no privileged APIs beyond window.menuOverlay.
@@ -433,20 +439,105 @@ import { isSafeColor } from '../shared/safe-color.js';
     }
   });
 
+  /* --------------------------------------------------------- template: suggestions */
+  // Address-bar suggestions (M08 Flight 4 Leg 2, DD1/DD2): a listbox of frecency-
+  // ranked history rows, fully model-replaced by the chrome on every keystroke/
+  // selection change — the sheet holds ZERO suggestion state of its own. Registered
+  // WITHOUT an items getter — like info-popup, the controller's roving contract
+  // no-ops (`!entry.items` — see menu-controller.js's menu-keydown guard); `onOpen`
+  // focuses NOTHING (DD2 — the sheet's non-focusing regime; deliverInit's noFocus
+  // gate is the machinery, this template's onOpen must never move focus) so
+  // keystrokes keep flowing to the chrome's own #address listeners. Own keydown:
+  // NONE — a pointer click giving the sheet native focus makes Escape here a true
+  // no-op; recovery is blur/outside-click/model-replace only (design review,
+  // accepted, documented).
+
+  const suggestionsNode = document.createElement('div');
+  suggestionsNode.id = 'sheet-suggestions';
+  suggestionsNode.setAttribute('role', 'listbox');
+  suggestionsNode.setAttribute('aria-label', 'Address suggestions');
+  suggestionsNode.tabIndex = -1;
+  suggestionsNode.classList.add('hidden');
+  root.appendChild(suggestionsNode);
+
+  const suggestionsEntry = menuController.register({
+    trigger: suggestionsNode,
+    menu: suggestionsNode,
+    // no `items` — roving no-ops (controller guard); NOTHING focused (DD2).
+    onOpen() {
+      suggestionsNode.classList.remove('hidden');
+    },
+    onClose() {
+      suggestionsNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  /** Render the suggestions listbox. All text via textContent (DD8). `model` for
+   * this template is the omnibox model shape `{ items: Array<{primary, secondary}>,
+   * selectedIndex, emptyNote? }` — distinct from the other templates' flat item
+   * arrays (DD1/leg contract). `selectedIndex` may be -1 (no selection).
+   * @param {string} menuType @param {any} model @param {any} anchor */
+  function renderSuggestions(menuType, model, anchor) {
+    suggestionsNode.textContent = '';
+    suggestionsNode.dataset.menuType = menuType;
+    const list = model && Array.isArray(model.items) ? model.items : [];
+    const selectedIndex = model && typeof model.selectedIndex === 'number' ? model.selectedIndex : -1;
+    if (!list.length) {
+      const note = document.createElement('div');
+      note.className = 'sg-note';
+      note.textContent = String((model && model.emptyNote) || '');
+      suggestionsNode.appendChild(note);
+    } else {
+      list.forEach((item, i) => {
+        const row = document.createElement('div');
+        row.className = 'sg-option' + (i === selectedIndex ? ' selected' : '');
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(i === selectedIndex));
+        const primary = document.createElement('span');
+        primary.className = 'sg-primary';
+        primary.textContent = String(item && item.primary != null ? item.primary : '');
+        const secondary = document.createElement('span');
+        secondary.className = 'sg-secondary';
+        secondary.textContent = String(item && item.secondary != null ? item.secondary : '');
+        row.append(primary, secondary);
+        // Row click → sug:<i> index dispatch, the exact menu/info-popup idiom
+        // (one-shot guard + token auto-injection via sendActivatedOnce) — NEVER
+        // the raw preload sendActivated (design review).
+        row.addEventListener('click', () => {
+          if (sendActivatedOnce({ id: 'sug:' + i })) menuController.close(suggestionsEntry);
+        });
+        suggestionsNode.appendChild(row);
+      });
+    }
+    // Standard anchor mechanics only (alignLeft + y clamp) — no template-specific
+    // positioning code (leg contract).
+    suggestionsNode.classList.remove('hidden');
+    positionNode(suggestionsNode, anchor);
+  }
+
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
     'page-context': 'menu', // Leg 4 — point-anchored, separator/note item types
     'site-info': 'info-popup',
-    'new-container': 'input-dialog'
+    'new-container': 'input-dialog',
+    // LOAD-BEARING (M08 Flight 4 DD2): the fallback below (`TEMPLATES[menuType] ||
+    // 'menu'`) is the FOCUSING menu template — an unregistered/missing entry here
+    // would silently fall into it and break the suggestions template's
+    // non-focusing guarantee. The suggestions template must NEVER focus the
+    // sheet — never remove this entry without an equivalent non-focusing fallback.
+    suggestions: 'suggestions'
   };
   const NODE_OF_ENTRY = new Map([
     [menuEntry, menuNode],
     [popupEntry, popupNode],
-    [dialogEntry, dialogNode]
+    [dialogEntry, dialogNode],
+    [suggestionsEntry, suggestionsNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -476,7 +567,17 @@ import { isSafeColor } from '../shared/safe-color.js';
 
   window.menuOverlay.onInit((payload) => {
     const { menuType, model, anchor, startIndex, token } = payload || {};
-    if (typeof menuType !== 'string' || !Array.isArray(model) || typeof token !== 'number') return;
+    if (typeof menuType !== 'string' || typeof token !== 'number') return;
+    // Template resolved BEFORE the model-shape check (M08 Flight 4 Leg 3, design
+    // review): every template except `suggestions` carries a flat item array;
+    // `suggestions` carries the omnibox OBJECT shape (`{items, selectedIndex,
+    // emptyNote?}` — DD1). A bare `Array.isArray(model)` guard would reject that
+    // object outright and the sheet would silently never render suggestions.
+    const template = TEMPLATES[menuType] || 'menu';
+    const modelShapeOk = template === 'suggestions'
+      ? model && typeof model === 'object' && !Array.isArray(model)
+      : Array.isArray(model);
+    if (!modelShapeOk) return;
 
     // Silence any still-open prior render (model-replace / re-open of a persisted
     // DOM after a main-initiated close): null the token FIRST so the closing
@@ -488,7 +589,6 @@ import { isSafeColor } from '../shared/safe-color.js';
     lastStimulus = 'blur';
     currentToken = token;
 
-    const template = TEMPLATES[menuType] || 'menu';
     if (template === 'menu') {
       renderMenu(menuType, model, anchor);
       // Open through the shared controller (roving tabindex + focus via focusItem;
@@ -499,6 +599,12 @@ import { isSafeColor } from '../shared/safe-color.js';
       // startIndex is meaningless without items — onOpen focuses the action
       // button ("Site settings →") when present, the chrome popup's contract.
       menuController.open(popupEntry, 0);
+    } else if (template === 'suggestions') {
+      renderSuggestions(menuType, model, anchor);
+      // startIndex is meaningless without items — onOpen focuses NOTHING (DD2).
+      // Still opened through the shared controller so the global outside-click/
+      // blur listeners cover this template uniformly (module header rule).
+      menuController.open(suggestionsEntry, 0);
     } else {
       // input-dialog: fixed layout, model may be empty; centered via CSS —
       // the anchor is deliberately ignored.

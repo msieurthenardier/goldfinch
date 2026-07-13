@@ -1,6 +1,6 @@
 # Mission: Per-Jar Browsing History
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -79,35 +79,40 @@ Prior debriefs left concrete planning inputs this mission adopts:
 
 ## Success Criteria
 
-- [ ] Visits to web pages in jar-backed tabs are recorded (address, title,
+- [x] Visits to web pages in jar-backed tabs are recorded (address, title,
       visit time) and survive an app restart.
-- [ ] Burner tabs and internal (`goldfinch://`) pages never produce history
+      *(behavior-test-backed — `history-recording` 8/8, Flight 1)*
+- [x] Burner tabs and internal (`goldfinch://`) pages never produce history
       records — nothing from a burner session is persisted anywhere.
-      *(behavior-test-backed)*
-- [ ] Jar isolation holds for history on every surface: no web page, no
+      *(behavior-test-backed — `history-recording` 8/8, Flight 1)*
+- [x] Jar isolation holds for history on every surface: no web page, no
       address-bar session, and no jar-keyed automation client can observe
-      history from a jar other than its own. *(behavior-test-backed)*
-- [ ] The manage-jars page presents each jar's data in collapsible panels
+      history from a jar other than its own. *(behavior-test-backed —
+      automation surface: `history-automation-isolation` 7/7, Flight 5;
+      address-bar surface: behavior-tested at Flight 4 step 3; web-page
+      surface: structural — web content has no `ipcRenderer` and the
+      internal twins are origin-gated, unit-pinned since Flight 1)*
+- [x] The manage-jars page presents each jar's data in collapsible panels
       (history, cookies, other site data) with left-nav anchors; panels
       expand/collapse independently and anchors jump to the right jar/section.
-- [ ] The history panel supports browsing recent visits, text search, deleting
+- [x] The history panel supports browsing recent visits, text search, deleting
       an individual entry, and clearing all history for that jar.
-- [ ] History participates in the jar data controls: clearing history via the
+- [x] History participates in the jar data controls: clearing history via the
       data-class control and wiping a jar both remove that jar's history
       alongside its other data classes.
-- [ ] Each jar has its own retention policy (initial value 30 days), editable
+- [x] Each jar has its own retention policy (initial value 30 days), editable
       on the manage-jars page; entries older than the jar's retention are
       removed automatically without operator action.
-- [ ] Typing in the address bar surfaces matching suggestions drawn
+- [x] Typing in the address bar surfaces matching suggestions drawn
       exclusively from the active tab's jar history; a suggestion can be
       chosen by keyboard or pointer and navigates the tab.
-      *(behavior-test-backed)*
-- [ ] Suggestions stay felt-instant at scale: prefix lookups remain responsive
+      *(behavior-test-backed — Flight 4, pass 7/7)*
+- [x] Suggestions stay felt-instant at scale: prefix lookups remain responsive
       against a history of tens of thousands of entries.
-- [ ] A jar-keyed automation client can read its own jar's history through the
+- [x] A jar-keyed automation client can read its own jar's history through the
       automation surface; requests targeting any other jar are refused.
-      *(behavior-test-backed)*
-- [ ] History adds no network egress: recording, search, retention, and
+      *(behavior-test-backed — `history-automation-isolation` 7/7, Flight 5)*
+- [x] History adds no network egress: recording, search, retention, and
       suggestions operate entirely locally.
 
 ## Stakeholders
@@ -200,7 +205,15 @@ Prior debriefs left concrete planning inputs this mission adopts:
 
 ## Known Issues
 
-*(none yet — populated during execution as flights surface problems)*
+- [ ] Internal-page keyboard focus: activating an internal `goldfinch://` tab raises the guest view but does not move OS keyboard focus into it (`tab-set-active`, main.js:2215 — no `webContents.focus()`), so Tab traverses the chrome toolbar instead of the page. Pre-existing (surfaced at M08 Flight 6 HAT); cross-cutting fix (find-overlay / menu-sheet / tab-strip focus interplay) — deferred to a dedicated follow-up flight.
+
+- **`rerollSeed` is skipped when a session call throws during jar delete**
+  (`wipeJarData` extraction, Flight 3): if the same slug is re-minted in the
+  SAME app process, a stale fingerprint seed could persist onto the
+  re-created jar's partition. Bounded (restart closes it; the precondition
+  already left storage uncleaned pre-Flight-3). Discovered in Flight 3,
+  adjudicated acceptable at flight review; candidate for a future hardening
+  touch.
 
 ## Flights
 
@@ -208,22 +221,25 @@ Prior debriefs left concrete planning inputs this mission adopts:
 > planned and created one at a time as work progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] Flight 1: Per-jar history store on built-in `node:sqlite` (decision
+- [x] Flight 1: Per-jar history store on built-in `node:sqlite` (decision
       record written, incl. write-path pin) — record visits (jar-backed tabs
       only; burner/internal structurally excluded via positive partition
       allowlist), persist across restarts, retention pruning,
       invalidation-signal broadcasts, `registerXIpc`-style wiring.
-- [ ] Flight 2: Manage-jars page reorganization — collapsible per-data-class
+- [x] Flight 2: Manage-jars page reorganization — collapsible per-data-class
       panels (history, cookies, other site data) with left-nav anchors;
       panel/anchor architecture serves all data classes.
-- [ ] Flight 3: History panel content — browse, search, per-entry delete,
+- [x] Flight 3: History panel content — browse, search, per-entry delete,
       clear-all; per-jar retention control; history data-class wired into
       clear-data and jar wipe (`JAR_DATA_CLASSES` extension).
-- [ ] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,
+- [x] Flight 4: Address-bar suggestions — active-jar prefix search, ranking,
       keyboard/pointer selection, felt-instant at scale.
-- [ ] Flight 5: Automation surface — jar-scoped history read tool through the
+- [x] Flight 5: Automation surface — jar-scoped history read tool through the
       existing identity façade; docs (mcp-automation.md, README) and the
       isolation behavior tests that close the mission's criteria.
-- [ ] Flight 6 *(optional)*: Alignment — vibe coding session on the jars-page
-      panels and omnibox feel (collapse behavior, anchor scroll, suggestion
-      ranking) with real-time human judgment.
+- [x] Flight 6 *(optional)*: Alignment — HAT walkthrough + fix legs (R1
+      address select-all, H4 tabs restyle, H1/H2/H3 history panel, H6/H7
+      confirm-modal + wipe-closes-tabs), a closing HAT re-verification
+      (`jar-data-controls` behavior test 7/7), and a follow-up H9 paging
+      scroll-anchor leg. H8 (internal-page keyboard focus) filed as a
+      separate follow-up flight; clear-history ruled keep-as-is.

@@ -58,6 +58,7 @@
           placeholder="Search or enter address"
           autocomplete="off"
           aria-label="Address and search bar"
+          aria-autocomplete="list"
         />
         <!-- In-address-bar page-zoom control (HAT redesign, replaces the old toolbar #zoom-chip).
              Right-justified inside the rounded address field. Faded out at steady state; revealed
@@ -204,6 +205,7 @@
     <script src="../shared/page-context-model.js" type="module"></script>
     <script src="../shared/default-routing.js" type="module"></script>
     <script src="../shared/inherit-container.js" type="module"></script>
+    <script src="../shared/omnibox-suggest-model.js" type="module"></script>
     <!-- safe-color.js loads before automation-indicator-model.js (F7): the
          model's jar-color resolution defense-in-depth-checks isSafeColor. Both
          are real ES modules now — the model imports safe-color directly, so the

@@ -13,6 +13,14 @@ import { buildJarPageModel, PALETTE, pickNewJarColor } from './jar-page-model.js
 import { JAR_DATA_CLASSES } from './jar-data-classes.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { isSafeColor } from './safe-color.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createHistoryPanel } from './jars-history-panel.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createJarTabs } from './jars-tabs.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createConfirmModal } from './jars-confirm-modal.js';
 
 /**
  * jars.js — the goldfinch://jars internal page controller.
@@ -21,31 +29,106 @@ import { isSafeColor } from './safe-color.js';
  * into a settings-style master-detail layout (DD1): a dynamic left nav + one
  * always-expanded `<section>` per jar (including a read-only Burner section,
  * DD7), with instant-apply inline rename/recolor replacing the old edit-mode
- * row (DD6). The state half is unchanged: `state = { containers, defaultId }`
- * is a persisted mirror of the last broadcast/boot read (module-scope) —
- * render() is a pure function of `state` plus the transient `ui` object, so a
- * UI-only action (opening the create panel) can re-render without a fresh IPC
- * round trip. `ui = { mode, rowId, action, draft }` tracks AT MOST one open
+ * row (DD6). Mission 08 Flight 2 Leg 2 reworked each persistent jar's section
+ * again: the data-class controls and the count moved into three collapsible
+ * PANELS (History / Cookies / Other site data — DD1/DD3 of that flight),
+ * default collapsed (DD4). Mission 08 Flight 6's HAT leg (H4, this leg)
+ * replaces those three independently-collapsible panels with a WAI-ARIA
+ * **tab strip** — one region visible at a time, History default-selected,
+ * with the live History visit count rendered as a badge on the History tab
+ * (supersedes the F2 collapsible ruling — operator authority, recorded in
+ * the flight-log Decisions). Wipe and Delete stay OUTSIDE the tab widget, in
+ * a section footer — jar-level identity actions, not data-class actions.
+ *
+ * The state half is unchanged: `state = { containers, defaultId }` is a
+ * persisted mirror of the last broadcast/boot read (module-scope) — render()
+ * is a pure function of `state` plus the transient `ui` object, so a UI-only
+ * action (opening the create panel) can re-render without a fresh IPC round
+ * trip. `ui = { mode, rowId, action, draft }` tracks AT MOST one open
  * transient surface at a time (`mode` is 'create' | 'confirm' | null) —
  * exclusivity is enforced by construction, since opening any transient surface
- * always replaces `ui` wholesale. Confirm `action` is 'delete' (its own
- * mechanism, unchanged) or one of the DATA_ACTIONS keys (`clear-cookies` /
- * `clear-storage` / `clear-cache` / `wipe`, Flight 4 Leg 3 / DD5) — every data
- * action shares ONE data-confirm area per section, rendered below the
- * always-visible button row and diffed on the open `(action, rowId)` pair
- * (updateDataConfirmArea), not on a boolean like the delete area's
- * updateDeleteArea. Every render() reconciles `ui` against the fresh row set:
- * if the row a confirm was open for no longer exists (deleted from another
- * surface), the transient state collapses silently, without error.
+ * always replaces `ui` wholesale. Confirm `action` is one of the DATA_ACTIONS
+ * keys — `clear-cookies` / `clear-storage` / `clear-cache` / `wipe` / `delete`
+ * (Flight 2 Leg 2 folded delete's own two-step confirm into this same table,
+ * with a `silentSuccess` flag preserving its historic no-op-on-success
+ * behavior — see DATA_ACTIONS below). Every destructive action confirms via
+ * ONE page-level modal (H7, M08 Flight 6 Leg 5 — supersedes the per-region
+ * inline confirms every earlier flight used), a growth-checkpoint extraction
+ * living in the sibling `jars-confirm-modal.js` module (own doc comment):
+ * its `update()` diffs the open `(action, rowId)` key exactly like the
+ * retired per-region areas did — still gated by the ONE global `ui`
+ * singleton (exclusivity unchanged:
+ * opening any confirm anywhere replaces `ui` wholesale), just diffed once
+ * page-wide instead of once per region. The modal is focus-trapped
+ * (Confirm↔Cancel, Cancel default-focused — destructive-safe) and blocks
+ * every other page control while open, so a tab switch or a second trigger
+ * click can no longer race an open confirm — see jars-tabs.js's own doc
+ * comment for the confirm-close-on-switch branch this retired. Every
+ * render() reconciles `ui` against the fresh row set: if the row a confirm
+ * was open for no longer exists (deleted from another surface), the
+ * transient state collapses silently, without error.
  *
  * Rendering reconciles PER-SECTION, keyed by jar id — existing sections/nav
  * entries are updated in place (never wholesale-rebuilt), so a re-render never
  * clobbers a focused name input's value/caret, a focused swatch grid's
- * aria-checked state, or a focused nav link (the uniform focus rule — one rule,
- * three appearances, no per-widget carve-outs). The create panel follows the
- * same principle at a coarser grain: it is rebuilt only on an actual ui-mode
- * transition (open/close), never on a state-only render pass, so typing in it
- * survives an unrelated broadcast.
+ * aria-checked state, a focused nav link, or an open panel/confirm (the
+ * uniform focus rule — one rule, several appearances, no per-widget
+ * carve-outs). The create panel follows the same principle at a coarser
+ * grain: it is rebuilt only on an actual ui-mode transition (open/close),
+ * never on a state-only render pass, so typing in it survives an unrelated
+ * broadcast.
+ *
+ * Tabs (H4, M08 Flight 6): each persistent jar's data regions are a WAI-ARIA
+ * tab widget — `role="tablist"` of three `role="tab"` buttons +
+ * `role="tabpanel"` regions, in `JAR_PANELS` order, History default-selected.
+ * Tab-panel ids keep the pre-existing `jar-<id>--<panel>` double-hyphen
+ * scheme (unchanged — deep-link + `aria-controls` target). Selection state
+ * lives in the section's `SectionRefs.activeTab` (a single panel id, default
+ * `'history'`) + `SectionRefs.tabRefs` map (`{ tab, panel, countSpan? }` per
+ * panel id) — diffed nowhere: render() NEVER touches `activeTab` or
+ * tab/tabpanel DOM (static labels/content give it nothing to reconcile there
+ * beyond `updateConfirmAreas`), so switching tabs is a pure, synchronous,
+ * render-free concern. The tablist build + the local roving-tabindex keydown
+ * handler (ArrowLeft/Right + Home/End; `menu-controller.js` is NOT loaded by
+ * jars.html and its Up/Down + open/close/return-focus semantics don't fit a
+ * persistent horizontal tablist, so it is never reused here) + the shared
+ * `selectTab(refs, panelId)` function live in the sibling module
+ * **`jars-tabs.js`** (growth-checkpoint extraction, the `jars-history-panel.js`
+ * three-point-onboarding precedent — see that module's own doc comment).
+ * `selectTab` is the SOLE tab-switch path — used by tab click, the roving
+ * handler, AND jars.js's hash deep-link (`tryExpandFromHash`, below) — a
+ * second inline flip anywhere would bypass the confirm guard. It reads `ui`
+ * (injected via `getUi()`) → `closeTransient()` if switching AWAY from a
+ * region that owns the open confirm → flips `aria-selected`/`tabindex`/
+ * `hidden` on the same live nodes, and moves focus to the newly-selected tab
+ * when the switch would otherwise strand focus on `<body>` (a focused
+ * control in the outgoing tabpanel silently loses focus when its panel goes
+ * `hidden`). This is what makes an active tab — or an open confirm inside it
+ * — survive an unrelated `jars-changed`/`history-changed` broadcast. jars.js
+ * itself keeps ONLY the per-tabpanel CONTENT (data-controls + confirm area,
+ * and the History mount) via the `buildPanelContent` callback it hands to
+ * `jarTabs.build()`.
+ *
+ * History count (DD6, repointed to the tab strip): the count renders ONLY
+ * as a badge (`<span class="jar-tab-count">`) inside the History tab
+ * button's own label, glanceable regardless of which tab is active.
+ * **INVARIANT**: render()/updateJarSection NEVER write this span — the
+ * count isn't derivable from `row`/`state`, so a render-path write would
+ * blank it on every unrelated broadcast with nothing to restore it. The ONLY
+ * two writers are `fetchHistoryCount`'s call sites: build-time (uniform for
+ * every section, boot-time and jarsAdd-created alike) and the module-level
+ * `onHistoryChanged` handler (invalidation-signal semantics — re-query on
+ * `{ jarId }`, never trust payload data).
+ *
+ * Lazy history fetch (design review): `historyPanel.onExpanded()` fires when
+ * the section scrolls into view (the existing scroll-spy
+ * `IntersectionObserver`, `observeSectionsIfChanged`), NOT at build time —
+ * History being the default-active tab would otherwise fire a full 50-row
+ * refresh for EVERY persistent jar on every page load. `selectTab` also
+ * fires it on a direct switch TO the History tab (click/keyboard/hash), for
+ * a jar section that's already on-screen but was showing another tab —
+ * `onExpanded`'s own `if (initialFetchStarted) return;` guard is
+ * source-agnostic, so both triggers are safely idempotent together.
  *
  * The create panel's DOM POSITION is likewise a single stable node, never
  * torn down and recreated (HAT step-2 finding F4): it is not part of the row
@@ -167,6 +250,18 @@ import { isSafeColor } from './safe-color.js';
     pageErrorEl.textContent = '';
   }
 
+  /**
+   * Read a jar's RAW store record by id — carries `retentionDays`, unlike
+   * the page-model `JarRow` built by `buildJarPageModel` (leg spec #2: the
+   * History panel's `getRetentionDays` callback needs the raw record, never
+   * the page-model row).
+   * @param {string} id
+   * @returns {any}
+   */
+  function currentRowFor(id) {
+    return state.containers.find((c) => c.id === id) || null;
+  }
+
   // A data-action success note stays on screen for a few seconds before
   // self-clearing (Acceptable Variation — timing is HAT-adjustable).
   const DATA_STATUS_OK_TTL_MS = 4000;
@@ -174,11 +269,12 @@ import { isSafeColor } from './safe-color.js';
   /**
    * Write to a section's shared status line (`refs.errorLine`, aria-live —
    * reused for rename/recolor/set-default errors AND data-action success
-   * notes). `ok` toggles the `is-ok` modifier class so a success note never
-   * renders in the error color (review finding). Message discipline:
-   * last-write-wins (any call supersedes a pending timer), and a
-   * timeout-based clear only fires if the content is UNCHANGED since it was
-   * set (so a later message is never stomped by an earlier message's timer).
+   * notes, regardless of which panel/region triggered them). `ok` toggles the
+   * `is-ok` modifier class so a success note never renders in the error color
+   * (review finding). Message discipline: last-write-wins (any call
+   * supersedes a pending timer), and a timeout-based clear only fires if the
+   * content is UNCHANGED since it was set (so a later message is never
+   * stomped by an earlier message's timer).
    * @param {SectionRefs} refs
    * @param {string} text
    * @param {boolean} ok
@@ -401,7 +497,13 @@ import { isSafeColor } from './safe-color.js';
 
   // ---------------------------------------------------------------------------
   // Scroll-spy (settings.js:40-100 IntersectionObserver pattern, adapted for
-  // dynamic sections — re-observe only when the section SET changes)
+  // dynamic sections — re-observe only when the section SET changes). DD7:
+  // tab switching changes no scroll geometry (unlike the old collapsible
+  // panels), so this is unaffected by the tab conversion. Reused (design
+  // review) as the lazy-history-fetch trigger too (H4/M08 F6): a section
+  // becoming intersecting is also "scrolled into view" for its History tab's
+  // `onExpanded()` — cheaper than a second observer, and the callback
+  // already visits every intersecting section on each firing.
   // ---------------------------------------------------------------------------
 
   /** @type {IntersectionObserver|null} */
@@ -430,8 +532,20 @@ import { isSafeColor } from './safe-color.js';
     scrollObserver = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) visible.add(entry.target.id);
-          else visible.delete(entry.target.id);
+          if (entry.isIntersecting) {
+            visible.add(entry.target.id);
+            // Lazy history fetch (design review): fires for every
+            // persistent-jar section as it scrolls into view, regardless of
+            // which tab is currently active — cheap and idempotent
+            // (onExpanded's own guard), and means History has already
+            // fetched by the time a later switch-to-History reaches it.
+            // no-ops for Burner (no historyPanel) and the create panel
+            // (never in `sections`).
+            const rowId = entry.target.id.slice('jar-'.length);
+            sectionMap.get(rowId)?.historyPanel?.onExpanded();
+          } else {
+            visible.delete(entry.target.id);
+          }
         }
         for (const section of sections) {
           if (visible.has(section.id)) {
@@ -455,11 +569,12 @@ import { isSafeColor } from './safe-color.js';
    *   dot: HTMLElement, h2: HTMLElement, pill: HTMLElement,
    *   nameInput?: HTMLInputElement, swatchContainer?: HTMLElement,
    *   swatchGrid?: (HTMLElement|null), errorLine?: HTMLElement,
-   *   makeDefaultBtn?: HTMLButtonElement, deleteArea?: HTMLElement,
-   *   deleteConfirmOpen?: boolean, pendingColor?: (string|null),
-   *   dataButtons?: Map<string, HTMLButtonElement>, dataConfirmArea?: HTMLElement,
-   *   dataConfirmOpenKey?: (string|null), statusClearHandle?: (number|null),
-   *   nameDirty?: boolean
+   *   makeDefaultBtn?: HTMLButtonElement, pendingColor?: (string|null),
+   *   dataButtons?: Map<string, HTMLButtonElement>,
+   *   activeTab?: string,
+   *   tabRefs?: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }>,
+   *   statusClearHandle?: (number|null), nameDirty?: boolean,
+   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null)
    * }} SectionRefs
    */
 
@@ -467,15 +582,63 @@ import { isSafeColor } from './safe-color.js';
   const sectionMap = new Map();
 
   /**
+   * One region's always-visible button row (leg spec #4/#8) — reused
+   * verbatim for the History panel (Flight 3, Leg 2 — zero-arg call, same as
+   * every other caller), the Cookies panel, the Other-site-data panel, and
+   * the section footer; no per-region singleton selectors (design review
+   * verified reuse is safe). Used to build its own per-region confirm area
+   * too, before H7 (M08 Flight 6 Leg 5) retired the per-region inline
+   * confirms in favor of ONE page-level modal — see `jars-confirm-modal.js`.
+   * @returns {{ root: HTMLElement, buttonRow: HTMLElement }}
+   */
+  function buildRegionControls() {
+    const root = document.createElement('div');
+    root.className = 'jar-data-controls';
+    const buttonRow = document.createElement('div');
+    buttonRow.className = 'jar-data-controls-buttons';
+    root.appendChild(buttonRow);
+    return { root, buttonRow };
+  }
+
+  /**
+   * Full-size text danger button with a leading trash icon (HAT step-1
+   * finding F3). The icon is aria-hidden decoration (buildIcon sets it) — the
+   * visible "Delete jar…" text (plus the per-jar aria-label, unchanged) is
+   * what carries the accessible name. Lives in the section FOOTER now (DD1),
+   * beside "Clear identity" — its click opens the generic data-confirm
+   * machinery under action 'delete' (folded in, Flight 2 Leg 2), same as
+   * every other DATA_ACTIONS trigger.
+   * @param {JarRow} row
+   * @returns {HTMLButtonElement}
+   */
+  function buildDeleteButton(row) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'jar-btn jar-btn-danger jar-btn-icon-label';
+    btn.appendChild(buildIcon(ICON_DELETE));
+    btn.appendChild(document.createTextNode('Delete jar…'));
+    btn.setAttribute('aria-label', `Delete ${row.name}`);
+    btn.addEventListener('click', () => openDataConfirm(row.id, 'delete'));
+    return btn;
+  }
+
+  // jarTabs (H4, M08 Flight 6, growth-checkpoint extraction — jars-tabs.js's
+  // own doc comment): the ONE instance shared by every persistent jar's
+  // section build below. Leg 5 retired the confirm-close-on-switch branch
+  // (a page-level modal now blocks tab-strip interaction while a confirm is
+  // open, so a switch can never race an open confirm) — `createJarTabs` no
+  // longer takes the ui-accessor/close/region-routing deps it used to.
+  const jarTabs = createJarTabs({ panels: JAR_PANELS });
+
+  /**
    * Build the always-expanded section for a persistent (non-Burner) jar:
    * header (dot + name + a header-slot occupied by EITHER the Default pill OR
-   * the "Make default" text button — HAT step-1 finding F1: the button moved
-   * into the same slot the pill occupies, so only one of the two is ever
-   * visible, toggled via `.hidden` in updateJarSection; both stay attached to
-   * the header permanently, which is what keeps the swap in place instead of
-   * a rebuild), inline name input + swatch grid (instant apply, DD6), the
-   * data-controls block (button row + shared confirm area, DD5/leg 3), and
-   * Delete. "Make default" stays a text button (F3 HAT ruling).
+   * the "Make default" text button — HAT step-1 finding F1), inline name
+   * input + swatch grid (instant apply, DD6), a WAI-ARIA tab widget (History /
+   * Cookies / Other site data — H4/M08 Flight 6, History default-selected;
+   * built by `jarTabs.build()`), and a footer hosting Wipe + Delete
+   * (jar-level identity actions, outside the tab widget — DD1). "Make
+   * default" stays a text button (F3 HAT ruling).
    * @param {JarRow} row
    * @returns {SectionRefs}
    */
@@ -524,15 +687,117 @@ import { isSafeColor } from './safe-color.js';
     errorLine.setAttribute('aria-live', 'polite');
     section.appendChild(errorLine);
 
-    const dataControls = buildDataControlsBlock(row.id);
-    section.appendChild(dataControls.root);
+    // -------------------------------------------------------------------
+    // Tab widget (H4, M08 Flight 6): the tablist build, roving-tabindex
+    // keydown handler, and shared selectTab() all live in jars-tabs.js
+    // (growth-checkpoint extraction — that module's own doc comment). This
+    // page keeps only each tabpanel's CONTENT: the standard jars.js-owned
+    // data controls (Clear-<class> button, `buildRegionControls()`) for
+    // every panel, plus History's SECOND child — the module-owned mount
+    // (DD7 DOM contract — the panel has exactly two children; jars.js never
+    // writes inside the mount). Each button's confirm now opens the ONE
+    // page-level modal (H7, Leg 5) instead of an inline per-region area.
 
-    const deleteArea = document.createElement('div');
-    deleteArea.className = 'jar-delete-area';
-    section.appendChild(deleteArea);
+    /** @type {Map<string, HTMLButtonElement>} */
+    const dataButtons = new Map();
+    // regionId ('cookies' | 'site-data') -> its tabpanel's button row, so the
+    // JAR_DATA_CLASSES loop below can route each clear-* button in (leg spec #3).
+    /** @type {Map<string, HTMLElement>} */
+    const panelButtonRows = new Map();
 
+    // Forward-declared: `buildPanelContent`'s History branch (below) and its
+    // module instance both close over `refs`, which is only assigned once
+    // the section is otherwise fully built (see the SectionRefs literal
+    // below). Safe — neither closure is ever invoked until after
+    // buildJarSection returns, by which point `refs` is set.
     /** @type {SectionRefs} */
-    const refs = {
+    let refs;
+    /** @type {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null} */
+    let historyPanel = null;
+
+    /**
+     * @param {string} panelId
+     * @param {HTMLElement} panelEl
+     */
+    function buildPanelContent(panelId, panelEl) {
+      const controls = buildRegionControls();
+      panelButtonRows.set(panelId, controls.buttonRow);
+      panelEl.appendChild(controls.root);
+
+      if (panelId === 'history') {
+        const historyMount = document.createElement('div');
+        historyMount.className = 'jar-history-mount';
+        panelEl.appendChild(historyMount);
+
+        historyPanel = createHistoryPanel({
+          bridge,
+          jarId: row.id,
+          mountEl: historyMount,
+          onError: (message) => setSectionStatus(refs, message, false),
+          getRetentionDays: () => currentRowFor(row.id)?.retentionDays ?? 30,
+          // H9 (M08 F6 Leg 7): on a user-initiated pager page change, scroll
+          // this jar's own section back into view so the tab strip lands at
+          // the top — same closes-over-`refs` pattern as `buildPanelContent`
+          // above (refs is only assigned once the section is fully built,
+          // but this callback is never invoked until after that point).
+          // `block: 'start'` (not tryExpandFromHash's 'nearest') puts the
+          // tabs at the top per the leg's ruling; reduced-motion is handled
+          // by the existing page-wide CSS gate (jars.css's `scroll-behavior:
+          // smooth` only under `prefers-reduced-motion: no-preference`), so
+          // no JS-side media-query check is needed here.
+          onPageChange: () => refs.root.scrollIntoView({ block: 'start' })
+        });
+      }
+    }
+
+    const { tabsWrap, tabRefs } = jarTabs.build(row, { getRefs: () => refs, buildPanelContent });
+    section.appendChild(tabsWrap);
+
+    // Clear-* buttons route into their panel via panelForDataClass (leg
+    // spec #3) — data-driven, so a future JAR_DATA_CLASSES entry (Flight
+    // 3's "history" class) slots into the right panel with no new wiring.
+    for (const cls of JAR_DATA_CLASSES) {
+      const panelId = panelForDataClass(cls.id);
+      const buttonRow = panelId ? panelButtonRows.get(panelId) : null;
+      if (!buttonRow) continue; // fail-closed: an unrouted class renders no control
+      const action = 'clear-' + cls.id;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'jar-btn';
+      btn.textContent = `Clear ${cls.label.toLowerCase()}`;
+      btn.addEventListener('click', () => openDataConfirm(row.id, action));
+      dataButtons.set(action, btn);
+      buttonRow.appendChild(btn);
+    }
+
+    // Footer (DD1): Wipe ("Clear identity") + Delete are jar-LEVEL identity
+    // actions, outside all panels — rendered side by side (leg spec #3),
+    // sharing the same page-level confirm modal (H7, Leg 5) as every other
+    // trigger. The delete button MUST be registered in `dataButtons` (design
+    // review): it now stays visible beside the open modal, so the
+    // trigger-disable guard in jars-confirm-modal.js's buildContent is
+    // load-bearing against double-fire for delete, exactly as it already is
+    // for wipe/clear-*.
+    const footer = document.createElement('div');
+    footer.className = 'jar-section-footer';
+    const footerControls = buildRegionControls();
+
+    const wipeBtn = document.createElement('button');
+    wipeBtn.type = 'button';
+    wipeBtn.className = 'jar-btn jar-btn-danger';
+    wipeBtn.textContent = 'Clear identity';
+    wipeBtn.addEventListener('click', () => openDataConfirm(row.id, 'wipe'));
+    dataButtons.set('wipe', wipeBtn);
+    footerControls.buttonRow.appendChild(wipeBtn);
+
+    const deleteBtn = buildDeleteButton(row);
+    dataButtons.set('delete', deleteBtn);
+    footerControls.buttonRow.appendChild(deleteBtn);
+
+    footer.appendChild(footerControls.root);
+    section.appendChild(footer);
+
+    refs = {
       root: section,
       isBurner: false,
       row: null,
@@ -544,14 +809,13 @@ import { isSafeColor } from './safe-color.js';
       swatchGrid: null,
       errorLine,
       makeDefaultBtn,
-      deleteArea,
-      deleteConfirmOpen: undefined,
       pendingColor: null,
-      dataButtons: dataControls.buttons,
-      dataConfirmArea: dataControls.confirmArea,
-      dataConfirmOpenKey: undefined,
+      dataButtons,
+      activeTab: 'history',
+      tabRefs,
       statusClearHandle: null,
-      nameDirty: false
+      nameDirty: false,
+      historyPanel
     };
 
     makeDefaultBtn.addEventListener('click', () => handleSetDefault(row.id));
@@ -584,6 +848,15 @@ import { isSafeColor } from './safe-color.js';
     nameInput.addEventListener('blur', () => commitOrRevertName(row.id, refs));
 
     updateJarSection(refs, row);
+
+    // Initial count fetch (design review, HIGH): mandatory + uniform for
+    // EVERY section build — boot-time jars and jars added later via jarsAdd
+    // alike (no local "assume 0" special case; a fresh query is ~0.1ms).
+    const historyTabRef = tabRefs.get('history');
+    if (historyTabRef && historyTabRef.countSpan) {
+      fetchHistoryCount(row.id, historyTabRef.countSpan);
+    }
+
     return refs;
   }
 
@@ -610,8 +883,14 @@ import { isSafeColor } from './safe-color.js';
     refs.nameInput.setAttribute('aria-label', `Name for ${row.name}`);
 
     updateSwatchGrid(refs, row);
-    updateDataConfirmArea(refs, row);
-    updateDeleteArea(refs, row);
+    // Active-tab selection and tab/tabpanel DOM (incl. the History count
+    // badge) are NEVER touched here (module doc INVARIANT) — static
+    // labels/content give this function nothing else to reconcile in the
+    // tab widget. The History module's own content is reconciled by itself
+    // — no arg, per its module contract; it re-reads retentionDays via its
+    // own callback. The confirm modal (H7, Leg 5) is reconciled ONCE
+    // page-wide, in render() via confirmModal.update() — not per section.
+    refs.historyPanel?.onJarsRow();
   }
 
   /**
@@ -726,38 +1005,60 @@ import { isSafeColor } from './safe-color.js';
   }
 
   // ---------------------------------------------------------------------------
-  // Data controls (Leg 3, DD5): confirm-everything clear/wipe actions.
+  // Data controls (Leg 3, DD5; regrouped into panels + footer at Flight 2
+  // Leg 2 / DD1/DD3): confirm-everything clear/wipe/delete actions.
   // ---------------------------------------------------------------------------
 
   // Confirm copy (verbatim — flight Acceptable Variations, operator-adjustable
   // at HAT) is deliberately NAME-FREE: this is what makes the (action, rowId)
-  // pair alone a sufficient transition key for updateDataConfirmArea below. If
+  // pair alone a sufficient transition key for updateConfirmAreas below. If
   // a future revision interpolates the jar's name into any of these strings,
   // the transition key MUST widen to include the row's current name too — a
   // name-only change while that confirm is open would otherwise not trigger a
   // rebuild, leaving stale copy on screen.
+  // Keyed by the data-CLASS id (`cls.id`), NOT the action id (design review,
+  // HIGH — DATA_ACTIONS sources copy via CLEAR_COPY[cls.id]; a 'clear-history'
+  // key here would render undefined confirm copy). This mistake nearly
+  // shipped — double-check any future entry is keyed by class id.
   const CLEAR_COPY = {
     cookies: "Clears this jar's cookies. Sites in this jar will sign you out.",
     storage: "Clears this jar's site storage — data sites saved locally in this jar.",
-    cache: "Clears this jar's cached files. Sites reload them on next visit."
+    cache: "Clears this jar's cached files. Sites reload them on next visit.",
+    history: "Clears this jar's browsing history."
   };
   const CLEAR_OK_NOTE = {
     cookies: 'Cookies cleared.',
     storage: 'Site storage cleared.',
-    cache: 'Cache cleared.'
+    cache: 'Cache cleared.',
+    history: 'History cleared.'
   };
+  // H6 (M08 Flight 6 HAT, flight-log Decisions): wiping a jar now CLOSES its
+  // open web tabs instead of reloading them (renderer.js onJarWiped) — the
+  // reload was re-recording a fresh visit in the just-cleared history. The
+  // copy must warn tabs will close, not reload (design review — was
+  // "reload").
   const WIPE_COPY =
-    "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will reload.";
+    "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will close.";
   const WIPE_OK_NOTE = 'Identity cleared — data wiped, fingerprint rerolled.';
+  // Delete's confirm copy — byte-identical to the pre-relayout buildDeleteConfirm
+  // string (grepped verbatim before this refactor; leg spec AC).
+  const DELETE_COPY = 'Deletes this jar and wipes its cookies, site storage, and cache. Open tabs in this jar will close.';
 
   /**
    * Data-controls action table (leg spec guidance #2): one entry per confirm
-   * action → { copy, run(id), okNote, failNote }. Clear-* entries derive their
-   * action key, bridge call, and class list from JAR_DATA_CLASSES, so a future
-   * data class needs zero new action-plumbing beyond that list; copy/okNote
-   * stay literal per class (operator-facing bespoke wording, not generated
-   * from the label).
-   * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string } }}
+   * action → { copy, run(id), okNote, failNote, silentSuccess? }. Clear-*
+   * entries derive their action key, bridge call, and class list from
+   * JAR_DATA_CLASSES, so a future data class needs zero new action-plumbing
+   * beyond that list; copy/okNote stay literal per class (operator-facing
+   * bespoke wording, not generated from the label). `delete` folds the
+   * former standalone two-step confirm into this same table (design review,
+   * MEDIUM-HIGH): its RUN BODY and COPY are preserved verbatim, but its
+   * SUCCESS PATH stays the historic no-op (`silentSuccess: true` — see
+   * jars-confirm-modal.js's buildContent) rather than adopting the generic
+   * ok-note-then-close behavior, avoiding a transient flash under the documented
+   * broadcast-before-resolve race (the section disappears via the next
+   * jars-changed broadcast + reconcileUi instead).
+   * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean } }}
    */
   const DATA_ACTIONS = {};
   for (const cls of JAR_DATA_CLASSES) {
@@ -774,271 +1075,110 @@ import { isSafeColor } from './safe-color.js';
     okNote: WIPE_OK_NOTE,
     failNote: "Couldn't wipe jar"
   };
+  DATA_ACTIONS.delete = {
+    copy: DELETE_COPY,
+    run: (id) => bridge.jarsRemove({ id }),
+    okNote: '',
+    failNote: "Couldn't delete jar",
+    silentSuccess: true
+  };
 
-  /**
-   * The always-visible data-controls button row + the single shared confirm
-   * area below it (FD ruling; cycle-2 ACs). Buttons are ENABLED — each opens
-   * its confirm via `ui` wholesale replacement (openDataConfirm); exclusivity
-   * and Escape-dismiss hold automatically via the existing global handler.
-   * @param {string} id
-   * @returns {{ root: HTMLElement, buttons: Map<string, HTMLButtonElement>, confirmArea: HTMLElement }}
-   */
-  function buildDataControlsBlock(id) {
-    const root = document.createElement('div');
-    root.className = 'jar-data-controls';
-
-    const buttonRow = document.createElement('div');
-    buttonRow.className = 'jar-data-controls-buttons';
-
-    /** @type {Map<string, HTMLButtonElement>} */
-    const buttons = new Map();
-    for (const cls of JAR_DATA_CLASSES) {
-      const action = 'clear-' + cls.id;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'jar-btn';
-      btn.textContent = `Clear ${cls.label.toLowerCase()}`;
-      btn.addEventListener('click', () => openDataConfirm(id, action));
-      buttons.set(action, btn);
-      buttonRow.appendChild(btn);
-    }
-    const wipeBtn = document.createElement('button');
-    wipeBtn.type = 'button';
-    wipeBtn.className = 'jar-btn jar-btn-danger';
-    wipeBtn.textContent = 'Clear identity';
-    wipeBtn.addEventListener('click', () => openDataConfirm(id, 'wipe'));
-    buttons.set('wipe', wipeBtn);
-    buttonRow.appendChild(wipeBtn);
-
-    root.appendChild(buttonRow);
-
-    const confirmArea = document.createElement('div');
-    confirmArea.className = 'jar-data-confirm-area';
-    root.appendChild(confirmArea);
-
-    return { root, buttons, confirmArea };
+  // Per-action modal title table (design review — the modal's confirm body
+  // has no heading of its own; H7's modal needs one for aria-labelledby).
+  // Clear-* titles are derived from JAR_DATA_CLASSES, same as DATA_ACTIONS'
+  // own action-plumbing above — a future data class needs no new title
+  // wiring.
+  /** @type {{ [action: string]: string }} */
+  const CONFIRM_TITLE = {};
+  for (const cls of JAR_DATA_CLASSES) {
+    CONFIRM_TITLE['clear-' + cls.id] = `Clear ${cls.label.toLowerCase()}?`;
   }
+  CONFIRM_TITLE.wipe = 'Clear identity?';
+  CONFIRM_TITLE.delete = 'Delete jar?';
+
+  // confirmModal (H7, M08 Flight 6 Leg 5, growth-checkpoint extraction —
+  // jars-confirm-modal.js's own doc comment): the ONE page-level confirm
+  // modal instance, replacing the per-region inline confirms every earlier
+  // flight used. `getSectionRefs` and `setSectionStatus`/`closeTransient`
+  // are the exact same lookups/functions every other confirm path in this
+  // file already uses.
+  const confirmModal = createConfirmModal({
+    dataActions: DATA_ACTIONS,
+    titles: CONFIRM_TITLE,
+    getUi: () => ui,
+    closeTransient,
+    getSectionRefs: (rowId) => sectionMap.get(rowId),
+    setSectionStatus,
+    fallbackFocusEl: newBtn
+  });
 
   /** @param {string} id @param {string} action */
   function openDataConfirm(id, action) {
+    // Capture the trigger for focus-restore on close (H7, design review) —
+    // MUST happen before `ui` is reassigned (see jars-confirm-modal.js's own
+    // doc comment on captureTrigger's timing).
+    confirmModal.captureTrigger();
     ui = { mode: 'confirm', rowId: id, action, draft: null };
     render();
   }
 
+  // ---------------------------------------------------------------------------
+  // History count (Flight 2, Leg 2 / DD6)
+  // ---------------------------------------------------------------------------
+
   /**
-   * Build the confirm block for one data action (cycle-2 AC): action-specific
-   * copy, a Confirm button, Cancel, and its own confirm-LOCAL error line
-   * (delete-confirm precedent, jars.js's buildDeleteConfirm — NOT the
-   * section's shared line).
+   * Format the History tab's count-badge suffix: "History —
+   * N visits" / "History — no visits" (DD6, repointed from the old
+   * disclosure-button label to the tab badge — H4/M08 Flight 6). Pre-fetch
+   * and failure states leave the bare "History" label (an empty suffix) —
+   * this function is only ever called on a successful count resolution; see
+   * fetchHistoryCount.
+   * @param {number} count
+   * @returns {string}
+   */
+  function historyCountSuffix(count) {
+    return count > 0 ? ` — ${count} visit${count === 1 ? '' : 's'}` : ' — no visits';
+  }
+
+  /**
+   * Fetch and patch one jar's History-panel count span. These are the ONLY
+   * TWO call sites for writing this span in the whole file (design review,
+   * HIGH) — build-time (buildJarSection, uniform for boot-time jars AND jars
+   * added later via jarsAdd) and the module-level onHistoryChanged handler
+   * below. render()/updateJarSection NEVER write it (module doc INVARIANT):
+   * the count isn't derivable from `row`/`state`, so a render-path write
+   * would blank it on every unrelated broadcast with nothing to restore it.
    *
-   * In-flight guard (cycle-2 AC (b)): Confirm disables itself AND this
-   * action's trigger button (in the always-visible row) the instant it's
-   * clicked — since the five buttons stay clickable while a confirm is open,
-   * leaving the trigger enabled would let a second click double-fire the same
-   * request. Disabling it also makes a "swap away and back to this action
-   * mid-flight" impossible by construction (the trigger can't be clicked to
-   * reopen it), which is the double-fire hole the sibling-visible design
-   * opens. The trigger always re-enables on settle, success or failure,
-   * independent of whether this confirm is still the one showing. Resolve/
-   * reject additionally verify `ui` still points at THIS (action, rowId)
-   * before mutating `ui` (closing the confirm) or writing the local error —
-   * an abandoned promise from a swapped-away confirm must not close or
-   * relabel a NEWER confirm the user opened instead.
-   * @param {string} id
-   * @param {string} action
-   * @param {SectionRefs} refs
-   * @returns {{ root: HTMLElement, confirmBtn: HTMLButtonElement }}
+   * Teardown race guard (design review): `countSpan` is closure-captured by
+   * the CALLER at fetch-issue time (never re-derived via `sectionMap` after
+   * the await) — a write to a since-detached node (section removed by a
+   * jars-changed broadcast that raced this fetch) is a harmless no-op.
+   * historyCount rejecting (invoke error) is caught and leaves the neutral
+   * label — this never throws into its caller.
+   * @param {string} jarId
+   * @param {HTMLElement} countSpan
    */
-  function buildDataConfirm(id, action, refs) {
-    const entry = DATA_ACTIONS[action];
-    const wrap = document.createElement('div');
-    wrap.className = 'jar-confirm';
-
-    const text = document.createElement('p');
-    text.className = 'jar-confirm-text';
-    text.textContent = entry.copy;
-    wrap.appendChild(text);
-
-    const errorLine = document.createElement('p');
-    errorLine.className = 'jar-error-line';
-    errorLine.setAttribute('aria-live', 'polite');
-    wrap.appendChild(errorLine);
-
-    const actionsEl = document.createElement('div');
-    actionsEl.className = 'jar-form-actions';
-
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'jar-btn jar-btn-danger';
-    confirmBtn.textContent = 'Confirm';
-
-    const triggerBtn = refs.dataButtons ? refs.dataButtons.get(action) : null;
-
-    confirmBtn.addEventListener('click', () => {
-      confirmBtn.disabled = true;
-      if (triggerBtn) triggerBtn.disabled = true;
-      entry.run(id)
+  function fetchHistoryCount(jarId, countSpan) {
+    try {
+      bridge.historyCount({ jarId })
         .then((result) => {
-          if (triggerBtn) triggerBtn.disabled = false;
-          const stillOpen = ui.mode === 'confirm' && ui.rowId === id && ui.action === action;
-          if (result && result.ok) {
-            setSectionStatus(refs, entry.okNote, true);
-            if (stillOpen) closeTransient();
-            return;
-          }
-          if (stillOpen) {
-            errorLine.textContent = entry.failNote;
-            confirmBtn.disabled = false;
-          }
+          if (result && result.ok) countSpan.textContent = historyCountSuffix(result.count);
         })
         .catch(() => {
-          if (triggerBtn) triggerBtn.disabled = false;
-          const stillOpen = ui.mode === 'confirm' && ui.rowId === id && ui.action === action;
-          if (stillOpen) {
-            errorLine.textContent = entry.failNote;
-            confirmBtn.disabled = false;
-          }
+          // Pre-fetch/failure state is the bare "History" label (edge case) —
+          // leave the span untouched rather than writing an error into it.
         });
-    });
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'jar-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => closeTransient());
-
-    actionsEl.appendChild(confirmBtn);
-    actionsEl.appendChild(cancelBtn);
-    wrap.appendChild(actionsEl);
-    return { root: wrap, confirmBtn };
-  }
-
-  /**
-   * Toggle the shared data-confirm area between empty and the open action's
-   * confirm block. Cycle-2 AC (a): the transition key is the open
-   * `(action, rowId)` pair as a STRING-OR-NULL — NOT a boolean like
-   * updateDeleteArea's `deleteConfirmOpen` — so a same-row action SWAP (e.g.
-   * clear-cookies → wipe, the edge-case section's example) is itself a key
-   * change and forces a rebuild; a literal boolean copy would wrongly treat
-   * "still open" as "unchanged" and skip the rebuild, leaving the OLD
-   * action's copy/handler on screen (cycle-2 review finding). Cycle-2 AC (c):
-   * focuses the new confirm's Confirm button, gated by the key actually
-   * changing, so an unrelated re-render (e.g. a sibling jar's rename
-   * broadcast) never hijacks focus.
-   * @param {SectionRefs} refs
-   * @param {JarRow} row
-   */
-  function updateDataConfirmArea(refs, row) {
-    const key =
-      ui.mode === 'confirm' && ui.rowId === row.id && ui.action != null && DATA_ACTIONS[ui.action]
-        ? ui.action + ':' + row.id
-        : null;
-    if (key === refs.dataConfirmOpenKey) return;
-    refs.dataConfirmOpenKey = key;
-    refs.dataConfirmArea.textContent = '';
-    if (key === null) return;
-    const built = buildDataConfirm(row.id, /** @type {string} */ (ui.action), refs);
-    refs.dataConfirmArea.appendChild(built.root);
-    built.confirmBtn.focus();
-  }
-
-  /**
-   * Full-size text danger button with a leading trash icon (HAT step-1
-   * finding F3). The icon is aria-hidden decoration (buildIcon sets it) — the
-   * visible "Delete jar…" text (plus the per-jar aria-label, unchanged) is
-   * what carries the accessible name, so adding the icon doesn't touch it.
-   * @param {JarRow} row
-   * @returns {HTMLButtonElement}
-   */
-  function buildDeleteButton(row) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'jar-btn jar-btn-danger jar-btn-icon-label';
-    btn.appendChild(buildIcon(ICON_DELETE));
-    btn.appendChild(document.createTextNode('Delete jar…'));
-    btn.setAttribute('aria-label', `Delete ${row.name}`);
-    btn.addEventListener('click', () => openConfirmDelete(row));
-    return btn;
-  }
-
-  /**
-   * The in-section two-step delete confirmation (DD5 verbatim F3 copy). Only
-   * Confirm calls jarsRemove; Confirm disables once clicked (handleRemove is
-   * async — a double-fire would surface a needless {ok:false} inline error).
-   * On success the section + nav entry disappear via the next broadcast
-   * reconcile — nothing to close here.
-   * @param {JarRow} row
-   * @returns {HTMLElement}
-   */
-  function buildDeleteConfirm(row) {
-    const wrap = document.createElement('div');
-    wrap.className = 'jar-confirm';
-
-    const text = document.createElement('p');
-    text.className = 'jar-confirm-text';
-    text.textContent = 'Deletes this jar and wipes its cookies, site storage, and cache. Open tabs in this jar will close.';
-    wrap.appendChild(text);
-
-    const errorLine = document.createElement('p');
-    errorLine.className = 'jar-error-line';
-    errorLine.setAttribute('aria-live', 'polite');
-    wrap.appendChild(errorLine);
-
-    const actions = document.createElement('div');
-    actions.className = 'jar-form-actions';
-
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'jar-btn jar-btn-danger';
-    confirmBtn.textContent = 'Confirm';
-    confirmBtn.addEventListener('click', () => {
-      confirmBtn.disabled = true;
-      bridge.jarsRemove({ id: row.id })
-        .then((result) => {
-          if (!result || !result.ok) {
-            errorLine.textContent = "Couldn't delete jar";
-            confirmBtn.disabled = false;
-          }
-        })
-        .catch(() => {
-          errorLine.textContent = "Couldn't delete jar";
-          confirmBtn.disabled = false;
-        });
-    });
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'jar-btn';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => closeTransient());
-
-    actions.appendChild(confirmBtn);
-    actions.appendChild(cancelBtn);
-    wrap.appendChild(actions);
-    return wrap;
-  }
-
-  /**
-   * Toggle the delete area between the Delete button and the confirm block.
-   * Only rebuilds when this row's confirm-open-ness actually changes — an
-   * unrelated broadcast while the confirm is open (e.g. another jar renamed)
-   * must not reset an in-flight Confirm click's disabled state.
-   * @param {SectionRefs} refs
-   * @param {JarRow} row
-   */
-  function updateDeleteArea(refs, row) {
-    const shouldBeOpen = ui.mode === 'confirm' && ui.action === 'delete' && ui.rowId === row.id;
-    if (shouldBeOpen === refs.deleteConfirmOpen) return;
-    refs.deleteConfirmOpen = shouldBeOpen;
-    refs.deleteArea.textContent = '';
-    refs.deleteArea.appendChild(shouldBeOpen ? buildDeleteConfirm(row) : buildDeleteButton(row));
+    } catch {
+      // Defensive: never let a count fetch throw into a caller (build-time or
+      // the onHistoryChanged handler), consistent with the file's style.
+    }
   }
 
   /**
    * Build the read-only Burner section (DD7): header line (dot + name +
    * Default pill when flagged) + the F4 hint copy. NO name input, swatches,
-   * make-default, data controls, or delete — structurally driven by
-   * row.isBurner (never an id === 'burner' string check in DOM code).
+   * make-default, panels, or footer — structurally driven by row.isBurner
+   * (never an id === 'burner' string check in DOM code).
    * @param {JarRow} row
    * @returns {SectionRefs}
    */
@@ -1088,7 +1228,9 @@ import { isSafeColor } from './safe-color.js';
    * ones are built and inserted in model order (store order + Burner last —
    * buildJarPageModel's own ordering, so no special-casing needed here).
    * insertBefore never disturbs an already-attached node's focus, so this
-   * reordering pass is safe even mid-edit.
+   * reordering pass is safe even mid-edit. Structurally unchanged by the
+   * Flight 2 Leg 2 panel relayout (leg spec #9) — only buildJarSection/
+   * updateJarSection's own bodies changed.
    *
    * Burner gets its own positioning branch (F4 fix): the create panel is NOT
    * part of `rows`, but it lives in #jars-sections too (anchored just before
@@ -1112,6 +1254,7 @@ import { isSafeColor } from './safe-color.js';
         const removed = sectionMap.get(id);
         // No timers firing into removed DOM (leg spec AC — feedback timing).
         if (removed.statusClearHandle != null) clearTimeout(removed.statusClearHandle);
+        removed.historyPanel?.destroy();
         removed.root.remove();
         sectionMap.delete(id);
       }
@@ -1286,12 +1429,6 @@ import { isSafeColor } from './safe-color.js';
   // Transient-state open/close + set-default
   // ---------------------------------------------------------------------------
 
-  /** @param {{ id: string, name: string, color: string }} row */
-  function openConfirmDelete(row) {
-    ui = { mode: 'confirm', rowId: row.id, action: 'delete', draft: null };
-    render();
-  }
-
   /** @param {string} id */
   function handleSetDefault(id) {
     clearPageError();
@@ -1311,12 +1448,53 @@ import { isSafeColor } from './safe-color.js';
     }
   });
 
-  // Escape dismisses ANY open transient state — create panel or delete confirm
-  // (FD ruling at design review: keyboard consistency across every ui.mode).
-  // The name input's own keydown handler stopPropagation()s its Escape, so
-  // this never double-fires against an in-progress name edit.
+  // Escape dismisses ANY open transient state — create panel or a data/delete
+  // confirm (FD ruling at design review: keyboard consistency across every
+  // ui.mode). The name input's own keydown handler stopPropagation()s its
+  // Escape, so this never double-fires against an in-progress name edit.
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && ui.mode !== null) closeTransient();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Hash deep-link (DD4, repointed to tabs — design review, HIGH): select +
+  // scroll to the tab named by location.hash, after the FIRST successful
+  // applyState render (boot-race guard, design review — sections don't exist
+  // before then). Matched by EXACT id equality only (design review:
+  // 'site-data' itself contains a hyphen, so splitting the hash on '-' would
+  // misparse it) — resolved via getElementById + cross-checked against a
+  // live tabRefs panel, never by string surgery on the hash. Routes through
+  // the SAME shared `selectTab()` as click and the roving keydown handler —
+  // NOT an inline flip — so it carries the confirm-close guard and the
+  // never-strand-focus-on-body rule for free.
+  // ---------------------------------------------------------------------------
+
+  let appliedInitialHash = false;
+
+  /** Resolve location.hash to a live tabpanel (if any) and select + scroll to its section. */
+  function tryExpandFromHash() {
+    const hash = location.hash;
+    if (!hash || hash.length < 2) return;
+    const targetId = hash.slice(1);
+    const el = document.getElementById(targetId);
+    if (!el || !el.classList.contains('jar-tabpanel')) return;
+    for (const refs of sectionMap.values()) {
+      if (refs.isBurner || !refs.tabRefs) continue;
+      for (const [panelId, tabRef] of refs.tabRefs) {
+        if (tabRef.panel === el) {
+          jarTabs.selectTab(refs, panelId);
+          refs.root.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      }
+    }
+  }
+
+  // Runtime hash changes (in addition to the boot-race-guarded initial check
+  // in applyState below). Acceptable to drop if it fights the scroll-spy in
+  // practice (leg spec — log as a deviation if so).
+  window.addEventListener('hashchange', () => {
+    tryExpandFromHash();
   });
 
   // ---------------------------------------------------------------------------
@@ -1345,6 +1523,10 @@ import { isSafeColor } from './safe-color.js';
     anchorCreatePanel(rows);
     observeSectionsIfChanged(rows);
     maybeRenderCreatePanel();
+    // Confirm modal (H7, Leg 5) reconciled AFTER renderSections — see
+    // jars-confirm-modal.js's update() doc comment for why the ordering
+    // matters.
+    confirmModal.update();
   }
 
   /**
@@ -1365,6 +1547,13 @@ import { isSafeColor } from './safe-color.js';
   function applyState(payload) {
     state = { containers: Array.isArray(payload.containers) ? payload.containers : [], defaultId: payload.defaultId };
     render();
+    // Boot-race pin (design review): sections only exist after this first
+    // successful render — running the hash check any earlier would find
+    // nothing to expand.
+    if (!appliedInitialHash) {
+      appliedInitialHash = true;
+      tryExpandFromHash();
+    }
   }
 
   // Boot/broadcast race (leg edge case): subscribe FIRST, then boot-read, so a
@@ -1372,6 +1561,25 @@ import { isSafeColor } from './safe-color.js';
   // replaces `state`, so whichever arrives last wins.
   const handle = bridge.onJarsChanged((payload) => {
     if (payload && Array.isArray(payload.containers)) applyState(payload);
+  });
+
+  // history-changed subscription (Flight 2, Leg 2 / DD6) — the page's first
+  // history-changed consumer. Invalidation-signal semantics: the payload
+  // carries only { jarId }; on receipt, re-query that jar's count (never
+  // trust payload data). No-ops for a jarId with no live section (page not
+  // scrolled there / already removed) or Burner (never has a history panel).
+  const historyChangedHandle = bridge.onHistoryChanged((payload) => {
+    if (!payload || typeof payload.jarId !== 'string') return;
+    const refs = sectionMap.get(payload.jarId);
+    if (!refs || refs.isBurner) return;
+    // In addition to the count refresh below (Flight 2's existing wiring),
+    // the History module re-runs its own current view's top page — a no-op
+    // if the panel was never expanded (leg spec #5).
+    refs.historyPanel?.onHistoryChanged();
+    if (!refs.tabRefs) return;
+    const historyTabRef = refs.tabRefs.get('history');
+    if (!historyTabRef || !historyTabRef.countSpan) return;
+    fetchHistoryCount(payload.jarId, historyTabRef.countSpan);
   });
 
   Promise.all([bridge.jarsList(), bridge.jarsGetDefault()])
@@ -1384,6 +1592,7 @@ import { isSafeColor } from './safe-color.js';
   // reloads (settings.js:138-142 pattern).
   window.addEventListener('pagehide', () => {
     bridge.offJarsChanged(handle);
+    bridge.offHistoryChanged(historyChangedHandle);
     if (scrollObserver) scrollObserver.disconnect();
   }, { once: true });
 })();

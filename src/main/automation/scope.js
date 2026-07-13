@@ -19,7 +19,12 @@
 //              is jar-targeted (DD3, Flight 6): the façade forces the caller's own
 //              jar.id, refuses a foreign jarId (out-of-jar), and delegates to the
 //              engine. Admin openTab passes any jarId straight through to the renderer
-//              container-lookup, which refuses unknown jarIds (unknown-jar).
+//              container-lookup, which refuses unknown jarIds (unknown-jar). getHistory
+//              is jar-CONFINED (Mission 08 Flight 5, DD1) — the first jar-confined
+//              no-wcId read: a jar key reads only its OWN jar's history (a supplied
+//              jarId must match, or be absent → defaulted to own jar); a foreign
+//              jarId is refused (out-of-jar), thrown BEFORE any engine call. Admin
+//              (engine unchanged) may name any KNOWN jar.
 //
 // ELECTRON-FREE: every Electron handle (fromId, fromPartition, getChromeContents,
 // jars) is injected via ctx, so this module unit-tests offline with fakes.
@@ -177,6 +182,23 @@ function scopeEngine(engine, identity, ctx) {
   facade.getDownloadsList = () => {
     requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow/getChromeTarget
     throw new Error('automation: admin-only — downloadsList (app-level downloads view) is restricted to the admin identity');
+  };
+
+  // getHistory → jar-CONFINED custom op (Mission 08 Flight 5, DD1/DD4) — the FIRST
+  // jar-confined no-wcId read: contrast with captureWindow/getChromeTarget/
+  // getDownloadsList above, which are admin-only refusals. A jar key may read its
+  // OWN jar's history: a supplied jarId must match this identity (or be absent →
+  // defaulted to own jar); a foreign jarId is refused with out-of-jar, thrown
+  // BEFORE any engine/accessor call (zero accessor invocations on refusal — pinned
+  // by the unit test). Admin (engine unchanged, above) may target any KNOWN jar; a
+  // missing or unknown jarId is validated engine-side (bad-args / unknown-jar),
+  // since admin has no implicit jar.
+  facade.getHistory = (/** @type {string|undefined} */ jarId, /** @type {any} */ opts) => {
+    const jar = requireJar();
+    if (jarId != null && jarId !== jar.id) {
+      throw new Error('automation: out-of-jar — a jar key may only read history for its own jar (' + jar.id + ')');
+    }
+    return engine.getHistory(jar.id, opts);
   };
 
   return facade;

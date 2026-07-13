@@ -246,9 +246,9 @@ test('__proto__ entry does not pollute the resulting object', () => {
   assert.ok(safe, 'valid entry with extra __proto__ key should be kept');
   assert.ok(!Object.prototype.hasOwnProperty.call(safe, '__proto__'), '__proto__ must not appear as own property');
   assert.ok(!('polluted' in safe), 'prototype pollution must not occur');
-  // Only the four expected keys
+  // Only the five expected keys (retentionDays added M08 F1 DD6)
   const keys = Object.keys(safe);
-  assert.deepEqual(keys.sort(), ['color', 'id', 'name', 'partition']);
+  assert.deepEqual(keys.sort(), ['color', 'id', 'name', 'partition', 'retentionDays']);
 });
 
 // ---------------------------------------------------------------------------
@@ -424,6 +424,33 @@ test('validateContainers: injection payload color falls back to default; other f
   assert.equal(entry.color, '#b06ef5', 'injection payload color should fall back to default');
   assert.equal(entry.name, 'PoisonedColor', 'name should be preserved');
   assert.equal(entry.partition, 'persist:container:poisoned', 'partition should be preserved');
+});
+
+// ---------------------------------------------------------------------------
+// retentionDays validator coercion table (history flight M08 F1 / DD6).
+// cleanRetention keeps an integer in [1, 3650] as-is; everything else
+// (missing, out-of-range, non-integer, and — deliberately — a NON-DEFAULT
+// numeric STRING so string-coercion bugs can't hide behind the default value)
+// falls back to 30.
+// ---------------------------------------------------------------------------
+test('validateContainers: retentionDays coercion table', () => {
+  const cases = [
+    [undefined, 30, 'missing field (pre-upgrade record)'],
+    [0, 30, 'zero is out of range'],
+    [-1, 30, 'negative is out of range'],
+    [3651, 30, 'one past the max is out of range'],
+    [1.5, 30, 'non-integer'],
+    ['15', 30, "numeric STRING '15' (not the default) must not silently coerce"],
+    [null, 30, 'null'],
+    [1, 1, 'min boundary kept'],
+    [30, 30, 'default value kept as-is'],
+    [3650, 3650, 'max boundary kept']
+  ];
+  for (const [input, expected, label] of cases) {
+    const entry = { id: 'x', name: 'X', color: '#111111', partition: 'persist:container:x', retentionDays: input };
+    const result = validateContainers([entry]);
+    assert.equal(result[0].retentionDays, expected, label);
+  }
 });
 
 // ===========================================================================
@@ -746,6 +773,78 @@ test('empty v2 envelope is NOT rewritten into a seed — empty-is-valid is untou
   }
 });
 
+// ===========================================================================
+// retentionDays upgrade / seed-path coverage (history flight M08 F1 / DD6).
+// All four assembly sites (add, validateContainers, FRESH_SEED, LEGACY_DEFAULTS)
+// must land the field — these tests exercise each load-time path independently.
+// ===========================================================================
+
+test('upgrade path: a v2 file shaped exactly like the real dev-profile (three containers, no retentionDays) — every kept record gains retentionDays: 30', () => {
+  const dir = makeTempDir();
+  try {
+    // validPersonal/validWork/validDefault carry no retentionDays field, matching
+    // a real pre-M08 containers.json on disk.
+    writeStore(dir, v2([validDefault, validPersonal, validWork], 'default'));
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work']);
+    for (const c of store.list()) {
+      assert.equal(c.retentionDays, 30, `${c.id} should upgrade to the default retention`);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('seed path: a fresh install (no file, no probe dir) seeds jars carrying retentionDays: 30', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    for (const c of store.list()) {
+      assert.equal(c.retentionDays, 30);
+    }
+    for (const c of readStore(dir).containers) {
+      assert.equal(c.retentionDays, 30, 'persisted seed carries the field too');
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to v2 with retentionDays: 30 on every kept record', () => {
+  const dir = makeTempDir();
+  try {
+    // v1 bare array, matching a real pre-M06 containers.json — no retentionDays.
+    writeStore(dir, [validDefault, validPersonal, validWork, validBanking]);
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
+    for (const c of store.list()) {
+      assert.equal(c.retentionDays, 30);
+    }
+    for (const c of readStore(dir).containers) {
+      assert.equal(c.retentionDays, 30, 'the v2 rewrite persists the upgraded field');
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('persisted round-trip: a custom retentionDays value on disk survives load unchanged (file edited directly)', () => {
+  const dir = makeTempDir();
+  try {
+    const custom = { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: 90 };
+    writeStore(dir, v2([custom], 'personal'));
+    const store = freshStore();
+    store.load(dir);
+    assert.equal(store.list()[0].retentionDays, 90, 'a valid custom value is kept as-is, not reset to the default');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
 test('seed clone integrity: a mutation after a legacy load never leaks into a later reseed', () => {
   const dir = makeTempDir();
   try {
@@ -830,7 +929,7 @@ test('save is atomic and writes the v2 envelope {version, defaultId, containers}
     assert.equal(onDisk.version, 2);
     assert.equal(onDisk.defaultId, 'alpha');
     assert.deepEqual(onDisk.containers, [
-      { id: 'alpha', name: 'Alpha', color: '#111111', partition: 'persist:container:alpha' }
+      { id: 'alpha', name: 'Alpha', color: '#111111', partition: 'persist:container:alpha', retentionDays: 30 }
     ]);
     assert.equal(fs.existsSync(storeFile(dir) + '.tmp'), false, 'tmp file must be renamed away');
   } finally {
@@ -851,7 +950,7 @@ test('mutations round-trip through a reload', () => {
     store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list(), [
-      { id: 'work', name: 'Job', color: '#000', partition: 'persist:container:work' }
+      { id: 'work', name: 'Job', color: '#000', partition: 'persist:container:work', retentionDays: 30 }
     ]);
     assert.equal(store.getDefault().id, 'work');
   } finally {
@@ -891,6 +990,18 @@ test('add into a non-empty store does NOT move the default flag', () => {
     const store = loadedStore(dir, [validPersonal], 'personal');
     store.add('Beta');
     assert.equal(store.getDefault().id, 'personal');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('add() default-pins retentionDays: 30 on the constructed record (history flight DD6)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [], null);
+    const created = store.add('Alpha');
+    assert.equal(created.retentionDays, 30);
+    assert.equal(readStore(dir).containers[0].retentionDays, 30, 'persisted too');
   } finally {
     removeTempDir(dir);
   }
@@ -961,7 +1072,8 @@ test('remove returns the removed container (the IPC layer needs its partition)',
       id: 'work',
       name: 'Work',
       color: '#2196f3',
-      partition: 'persist:container:work'
+      partition: 'persist:container:work',
+      retentionDays: 30
     });
     assert.deepEqual(store.list().map((c) => c.id), ['personal']);
   } finally {
@@ -1058,12 +1170,96 @@ test('setDefault is idempotent: current holder → true; null-while-empty → tr
   }
 });
 
+// ===========================================================================
+// setRetention (history flight M08 F3 / DD4) — REJECTS invalid input (unlike
+// cleanRetention's load-time coercion-to-default).
+// ===========================================================================
+
+test('setRetention: happy path mutates, persists, and returns the updated container', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const updated = store.setRetention('personal', 90);
+    assert.equal(updated.retentionDays, 90);
+    assert.equal(store.list()[0].retentionDays, 90);
+    assert.equal(readStore(dir).containers[0].retentionDays, 90, 'persisted');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: unknown id returns null, no throw, nothing persisted', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    assert.equal(store.setRetention('ghost', 90), null);
+    assert.equal(store.list()[0].retentionDays, 30, 'unchanged');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: rejection table — invalid days values return null and do not mutate', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const cases = [
+      [0, 'zero is out of range'],
+      [1.5, 'non-integer'],
+      ['30', 'numeric string must not coerce'],
+      [3651, 'one past the max'],
+      [null, 'null']
+    ];
+    for (const [input, label] of cases) {
+      assert.equal(store.setRetention('personal', /** @type {any} */ (input)), null, label);
+      assert.equal(store.list()[0].retentionDays, 30, `${label}: value must stay unchanged`);
+    }
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: boundary values 1 and 3650 are accepted', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    assert.equal(store.setRetention('personal', 1).retentionDays, 1);
+    assert.equal(store.setRetention('personal', 3650).retentionDays, 3650);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('setRetention: current-value write is still ok, still persists (idempotent, no special-casing)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    const updated = store.setRetention('personal', 30);
+    assert.equal(updated.retentionDays, 30);
+    assert.equal(readStore(dir).containers[0].retentionDays, 30);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('rename() still ignores retention — a rename patch never touches retentionDays', () => {
+  const dir = makeTempDir();
+  try {
+    const store = loadedStore(dir, [validPersonal], 'personal');
+    store.setRetention('personal', 90);
+    store.rename('personal', { name: 'Renamed', color: '#abcdef' });
+    assert.equal(store.list()[0].retentionDays, 90, 'rename must not reset or touch retentionDays');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
 test('list() returns the live array (consumers depend on it) with no isDefault field', () => {
   const dir = makeTempDir();
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.list(), store.list(), 'same array identity across calls');
-    assert.deepEqual(Object.keys(store.list()[0]).sort(), ['color', 'id', 'name', 'partition']);
+    assert.deepEqual(Object.keys(store.list()[0]).sort(), ['color', 'id', 'name', 'partition', 'retentionDays']);
   } finally {
     removeTempDir(dir);
   }

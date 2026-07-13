@@ -62,7 +62,7 @@
  *   removeChildView: (v: SheetViewLike) => void
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
- *   anchor: any, startIndex?: number, token: number }} MenuOpenPayload
+ *   anchor: any, startIndex?: number, token: number, noFocus?: boolean }} MenuOpenPayload
  */
 
 /**
@@ -101,7 +101,7 @@ function createMenuOverlayManager({
   function deliverInit(payload) {
     if (!view || view.webContents.isDestroyed()) return;
     view.webContents.send?.('menu-overlay:init', payload);
-    view.webContents.focus?.();
+    if (!payload.noFocus) view.webContents.focus?.();
   }
 
   // Full teardown (crash recovery + window `closed`): remove from the stack if
@@ -196,6 +196,7 @@ function createMenuOverlayManager({
   function openMenu(payload) {
     if (!payload || typeof payload.menuType !== 'string' || typeof payload.token !== 'number') return;
     if (!getContentView()) return; // window gone — nothing to open on
+    const wasOpen = !!currentMenu;
     if (currentMenu) {
       // Mutual exclusion: model-replace (NO hide/re-show flicker); the superseded
       // menu's channel 7 carries ITS token so chrome resets the right trigger.
@@ -207,7 +208,10 @@ function createMenuOverlayManager({
     }
     currentMenu = { menuType: payload.menuType, token: payload.token };
     show();
-    hideFindOverlay(); // DD5: find bar hidden while a menu is open (parity)
+    // DD5: find bar hidden while a menu is open (parity) — only on the FIRST
+    // open of a session (model-replace keeps the same open session; the call
+    // is idempotent anyway, this just avoids redundant per-keystroke calls).
+    if (!wasOpen) hideFindOverlay();
     if (ready && view && !view.webContents.isDestroyed()) {
       pendingInit = null;
       deliverInit(payload);

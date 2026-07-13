@@ -543,6 +543,78 @@ test('openMenu validates the payload shape (missing token/menuType → no-op)', 
   assert.equal(hideFindCalls, 0);
 });
 
+// ---------------------------------------------------------------------------
+// Leg 2 (DD2) — noFocus gate: deliverInit skips focus() when payload.noFocus
+// ---------------------------------------------------------------------------
+
+test('openMenu with noFocus:true delivers init WITHOUT focusing (ready path)', () => {
+  setupProto();
+  readySheet();
+  const p = { ...payloadFor(1, 'suggestions'), noFocus: true };
+  mgr.openMenu(p);
+  const v = createdViews[0];
+  assert.ok(
+    v.calls.some((c) => c[0] === 'send' && c[1] === 'menu-overlay:init'),
+    'init still delivered'
+  );
+  assert.equal(
+    v.calls.some((c) => c[0] === 'focus'),
+    false,
+    'noFocus:true must suppress the sheet focus() call'
+  );
+});
+
+test('openMenu with noFocus:true queued before load delivers WITHOUT focusing', () => {
+  setupProto();
+  mgr.openMenu({ ...payloadFor(1, 'suggestions'), noFocus: true });
+  const v = createdViews[0];
+  v.webContents.emit('did-finish-load');
+  assert.ok(
+    v.calls.some((c) => c[0] === 'send' && c[1] === 'menu-overlay:init'),
+    'queued init delivered on did-finish-load'
+  );
+  assert.equal(
+    v.calls.some((c) => c[0] === 'focus'),
+    false,
+    'noFocus:true survives the pendingInit queue'
+  );
+});
+
+test('openMenu WITHOUT noFocus still focuses (existing behavior unchanged)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1));
+  const v = createdViews[0];
+  assert.ok(
+    v.calls.some((c) => c[0] === 'focus'),
+    'no-flag payloads keep focusing exactly as before'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Leg 2 (DD2) — find-hide fires only on the FIRST open of a session, not on
+// every model-replace within it; a close + re-open starts a NEW session.
+// ---------------------------------------------------------------------------
+
+test('find-hide fires once across a same-menuType model-replace sequence', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'suggestions'));
+  mgr.openMenu(payloadFor(2, 'suggestions')); // model-replace, same session
+  mgr.openMenu(payloadFor(3, 'suggestions')); // another model-replace
+  assert.equal(hideFindCalls, 1, 'hideFindOverlay called exactly once for the session');
+});
+
+test('find-hide fires again after a close + re-open (new session)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'suggestions'));
+  assert.equal(hideFindCalls, 1);
+  mgr.closeMenuOverlay('escape');
+  mgr.openMenu(payloadFor(2, 'suggestions'));
+  assert.equal(hideFindCalls, 2, 'a fresh open after a close re-hides the find overlay');
+});
+
 test('show() itself still never focuses the sheet — focus enters ONLY via openMenu', () => {
   setupProto();
   readySheet();

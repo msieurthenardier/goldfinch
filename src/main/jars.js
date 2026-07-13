@@ -5,7 +5,9 @@
 // seed is keyed per session, its own fingerprint persona too.
 //
 // v2 model (M06 Flight 1 / DD1, DD2, DD8). On-disk shape:
-//   { version: 2, defaultId: string|null, containers: [ { id, name, color, partition } ] }
+//   { version: 2, defaultId: string|null, containers: [ { id, name, color, partition, retentionDays } ] }
+//   (retentionDays added M08 Flight 1 / DD6 — additive field, no envelope-version bump;
+//   existing files upgrade in place via validateContainers' field-by-field rebuild.)
 //
 // - `defaultId` is a TOP-LEVEL pointer, so "exactly one default" is structural.
 //   Invariant (DD2): defaultId MUST reference an existing entry whenever any
@@ -43,21 +45,30 @@ const { BURNER } = require('../shared/burner');
 const FILE_NAME = 'containers.json';
 const SCHEMA_VERSION = 2;
 const FALLBACK_COLOR = '#b06ef5';
+// History flight DD6: retention lives on the jar record, default 30 days,
+// valid range 1-3650 (integer). ALL FOUR assembly sites below (FRESH_SEED,
+// LEGACY_DEFAULTS, add(), validateContainers() via cleanRetention) must carry
+// this field — missing any one silently drops it (an undefined retention
+// reaches history-store's pruneExpired as a NaN cutoff, which binds without
+// throwing and matches ZERO rows, so pruning silently never runs for that
+// jar). A future single-assembly refactor routing load() branch (c) through
+// validateContainers() would collapse this to one site — not done here.
+const DEFAULT_RETENTION_DAYS = 30;
 
 // New-install seed (v2): Personal (default) + Work.
 const FRESH_SEED = [
-  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal' },
-  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work' }
+  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: DEFAULT_RETENTION_DAYS },
+  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work', retentionDays: DEFAULT_RETENTION_DAYS }
 ];
 
 // Legacy-install seed (DD3c): the four-jar set a pre-v2 profile shipped with,
 // used by load() when there is no readable store but the base partition dir
 // proves the app has run before.
 const LEGACY_DEFAULTS = [
-  { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch' },
-  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal' },
-  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work' },
-  { id: 'banking', name: 'Banking', color: '#f5c518', partition: 'persist:container:banking' }
+  { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch', retentionDays: DEFAULT_RETENTION_DAYS },
+  { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: DEFAULT_RETENTION_DAYS },
+  { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:container:work', retentionDays: DEFAULT_RETENTION_DAYS },
+  { id: 'banking', name: 'Banking', color: '#f5c518', partition: 'persist:container:banking', retentionDays: DEFAULT_RETENTION_DAYS }
 ];
 
 let containers = FRESH_SEED.map((c) => ({ ...c }));
@@ -78,6 +89,16 @@ function cleanName(name) {
 
 function cleanColor(color) {
   return isSafeColor(color) ? color : FALLBACK_COLOR;
+}
+
+// History flight DD6 validator: an integer in [1, 3650] is kept as-is;
+// anything else (missing field on an upgrading v2 file, a non-integer, an
+// out-of-range value, a numeric string) falls back to the default. Deliberately
+// strict on type (Number.isInteger rejects '15' as well as 1.5) — a lenient
+// coercion would let a corrupt/attacker-controlled string silently become a
+// number here.
+function cleanRetention(v) {
+  return Number.isInteger(v) && v >= 1 && v <= 3650 ? v : DEFAULT_RETENTION_DAYS;
 }
 
 function validateContainers(saved) {
@@ -126,7 +147,8 @@ function validateContainers(saved) {
       id,
       name: cleanName(name),
       color: cleanColor(color),
-      partition
+      partition,
+      retentionDays: cleanRetention(entry.retentionDays)
     });
   }
 
@@ -251,7 +273,8 @@ function add(name, color) {
     id,
     name: cleanName(name),
     color: cleanColor(color),
-    partition: `persist:container:${id}`
+    partition: `persist:container:${id}`,
+    retentionDays: DEFAULT_RETENTION_DAYS
   };
   containers.push(container);
   // DD2: null-with-jars-present is forbidden — the first jar added into an empty
@@ -288,6 +311,24 @@ function remove(id) {
   return removed;
 }
 
+// Retention edit (history flight M08 F3 / DD4). Unlike cleanRetention (the
+// load-time coercion above, which silently falls back to the default on any
+// invalid value), setRetention REJECTS an invalid days value outright — an
+// operator-facing edit control should surface an error, not silently persist
+// a different value than what was entered. Returns null for an unknown id OR
+// an invalid days value (0, non-integer, out-of-range, non-number); on
+// success mutates the record, persists, and returns the updated container —
+// same container-or-null contract as rename()/remove().
+/** @param {string} id @param {number} days */
+function setRetention(id, days) {
+  const container = containers.find((c) => c.id === id);
+  if (!container) return null;
+  if (!Number.isInteger(days) || days < 1 || days > 3650) return null;
+  container.retentionDays = days;
+  save();
+  return container;
+}
+
 // Returns boolean: unknown id or null-while-jars-exist → false (DD2 keeps the
 // invariant strict; Flight 3 can relax explicit Burner-as-default deliberately).
 // Setting the current holder again succeeds and still persists (cheap, simpler
@@ -320,6 +361,7 @@ module.exports = {
   remove,
   setDefault,
   getDefault,
+  setRetention,
   validateContainers,
   isSafeColor
 };

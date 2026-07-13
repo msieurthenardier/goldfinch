@@ -107,6 +107,13 @@ or download **v0.7.0** directly:
     fingerprint-seed reroll that auto-reloads the jar's open tabs. Same
     operation as the Shield panel's per-tab New Identity above, just scoped to
     the whole jar from the management page — the two coexist.
+  - **Per-jar browsing history** — normal (http/https) browsing is recorded
+    per persistent jar, with configurable retention; each jar's management-page
+    section has a History panel (search, paging, per-row delete, clear). As
+    you type in the address bar, a dropdown surfaces frecency-ranked,
+    prefix-matched suggestions from the **active tab's own jar** history —
+    keyboard- or pointer-selectable, purely local (no network egress). Burner
+    and internal tabs never record or suggest.
 - **Pinnable toolbar icons** — the **Media**, **Shields**, and **DevTools** toolbar
   buttons are icon buttons (Media/Shields carry a count badge) that can be pinned
   or unpinned:
@@ -157,8 +164,10 @@ or download **v0.7.0** directly:
   default** — the operator enables it via the **Settings `automationEnabled`
   toggle** (`goldfinch://settings` → Automation). Once enabled, every request
   must carry a per-jar API key. The surface is strictly local; no remote or
-  background driving. See [`docs/mcp-automation.md`](docs/mcp-automation.md) for
-  the full consumer reference.
+  background driving. A jar-scoped `getHistory` tool also gives an automation
+  client read access to its own jar's browsing-history memory. See
+  [`docs/mcp-automation.md`](docs/mcp-automation.md) for the full consumer
+  reference.
 
 ## Run
 
