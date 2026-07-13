@@ -405,6 +405,70 @@ and H9 (paging scroll anchor — banked fix). Leg `completed`; flight
   follows, this being the last autonomous leg per the sequencing note
   above).
 
+### Leg 07: `history-paging-scroll-anchor` (H9) — landed
+
+- **Anchor approach chosen: callback (option 2), not self-contained
+  `mountEl.closest(...)`.** A DOM-structure check confirmed a stable
+  wrapper selector DOES exist (`.jar-history-mount`'s ancestor
+  `section.jar-section` contains both the mount and that jar's tab strip,
+  and `section.jar-section { scroll-margin-top: 24px }` already exists to
+  clear the page's sticky nav on anchor jumps) — so option 1 was
+  technically viable. It was rejected anyway because `jars-history-panel.js`'s
+  own module doc explicitly states the module "never touches anything
+  outside its own `mountEl`" (DD7's DOM-contract divert criterion,
+  M08 F3 Leg 2) — a `closest()` walk out of the mount would violate that
+  documented boundary for a leg that doesn't need to. Instead,
+  `createHistoryPanel` gained an optional `onPageChange: () => void`
+  constructor callback (same injected-deps shape as the existing `onError`/
+  `getRetentionDays`), and `jars.js` (which already owns the section element
+  as `refs.root`, from `tryExpandFromHash`'s identical
+  `refs.root.scrollIntoView(...)` precedent at jars.js:1475) implements it:
+  `onPageChange: () => refs.root.scrollIntoView({ block: 'start' })` —
+  `'start'` (not `tryExpandFromHash`'s `'nearest'`) per the operator's
+  "tabs at the top" wording. The callback closes over `refs` the same way
+  `buildPanelContent`'s History branch already does (forward-declared `let
+  refs`, only assigned once the section is fully built, never invoked
+  before then) — no new pattern introduced.
+- **One-shot intent mechanism**: a module-scoped `let pendingScrollAnchor =
+  false` in `createHistoryPanel`. `goToPage(page)` sets it `true`
+  immediately before calling `refresh()` — the ONLY site that arms it (the
+  search-debounce handler resets `currentPage` and calls `refresh()`
+  directly, never through `goToPage`, so it can never arm the flag).
+  `refresh()`'s `.then((result) => {...})` success handler captures it into
+  a local (`shouldScrollAnchor`) and clears the module flag to `false` as
+  the FIRST statement in the handler — before the `token !== viewGen`
+  stale-token check, before the `!result.ok` error check, and before the
+  page-overshoot self-correction branch. This guarantees: a stale response
+  never scrolls (flag already cleared, early return follows); an error
+  never scrolls; and the self-correction re-fetch never scrolls even when
+  it was triggered by the very click that armed the flag — the captured
+  local is simply dropped in that branch (recursive `refresh()` call starts
+  its own fresh, unarmed cycle). `onPageChange` is invoked only at the very
+  end of the non-search paint branch, after `paintPager` repaints, gated on
+  `shouldScrollAnchor && onPageChange`. `destroy()` needed no change: it
+  already bumps `viewGen`, which routes any in-flight paint through the
+  same stale-token early return.
+- **Reduced-motion**: no new JS-side `matchMedia` check — `jars.css`
+  already gates `html { scroll-behavior: smooth }` behind
+  `@media (prefers-reduced-motion: no-preference)` (jars.css:53-58), the
+  same mechanism `tryExpandFromHash`'s existing `scrollIntoView` call
+  already relies on. The new `onPageChange` call inherits it for free.
+- Files touched: `src/renderer/pages/jars-history-panel.js` (added the
+  `onPageChange` param + JSDoc, the `pendingScrollAnchor` flag, the arm site
+  in `goToPage`, the capture/clear + fire site in `refresh()`, and an H9
+  module-doc paragraph) — **553 lines** (was 512). `src/renderer/pages/
+  jars.js` (added the `onPageChange` callback + a comment at the
+  `createHistoryPanel` call site) — **1,598 lines** (well under the ~1,800
+  DD2 growth-checkpoint trigger; +11 lines net for this leg).
+- Gates: `npm run lint` clean, `npm run typecheck` clean, `npm test`
+  1502/1502 pass (no hang).
+- Live scroll feel (does the tab strip visibly land at the top on a
+  full-page → short-page pager click) is operator-verified per the leg's
+  Verification Steps — internal-page DOM scroll position isn't
+  eval-observable (M06 F4 DD9); no behavior test for this leg.
+- Leg status → `landed`. Not committed (flight-level review + commit
+  deferred to the Flight Director).
+
 ---
 
 ## Decisions
@@ -501,3 +565,51 @@ Operator rulings (2026-07-13 HAT):
   flight logs. Branches consolidated first: `flight/08-history-mission`
   = the five flight commits, PR #79 (supersedes #74–#78, closed). HAT
   fixes will land as follow-up commits on that branch.
+- **2026-07-13 (post-landing reopen)**: Operator continued HAT testing after
+  the flight landed. Two items:
+  - **Clear-history tab behavior — investigated, NO code change.** Operator
+    observed "clear history did not close the tabs, and the modal doesn't
+    warn about tabs closing." Source check (`jars.js`): clear-history runs
+    `jarsClearData({classes:['history']})` — a granular data-class clear
+    (copy "Clears this jar's browsing history."), same family as
+    cookies/storage/cache. Granular clears intentionally do NOT close or
+    reload tabs (behavior test confirmed via the surviving `__bt_alive`
+    expando); only Wipe/Delete close tabs and their copy already warns
+    ("Open tabs in this jar will close."). This is conventional (Chrome/
+    Firefox don't close tabs on clear-history either). **Operator ruling:
+    keep clear-history as-is** (non-destructive record clear; Wipe stays the
+    tab-closing tool).
+  - **H9 (paging scroll anchor) — promoted from banked follow-up to Leg 07.**
+    Operator: "make the scroll position change too, just add a leg." Flight
+    reopened `landed` → `in-flight`; `07-history-paging-scroll-anchor.md`
+    authored (status `ready`). Scope: scroll the jar's tab strip / History
+    panel top into view ONLY on a user pager page-change, never on the
+    shared `refresh()` funnel's other callers (initial/search/broadcast/
+    self-correction). Reduced-motion instant.
+
+## Flight Director Notes (leg 07 cycle)
+
+- **Leg 07 (history-paging-scroll-anchor) risk-tier: LOW.** Additive,
+  single-surface renderer change in `jars-history-panel.js`, within the
+  established pager→`goToPage`→`refresh()` pattern. No schema/interface/
+  lifecycle/security surface; does not contradict a prior leg. → per-leg
+  design review SKIPPED; flight-end Reviewer covers the code. Design authored
+  directly by the FD (equivalent to a /leg pass) with full acceptance
+  criteria, since the change and seam were already fully characterized during
+  H9 diagnosis. Deferred single review + commit after this (only) leg.
+- **Leg 07 review fix (non-blocking correctness):** the one-shot
+  `pendingScrollAnchor` capture/clear in `refresh()`'s success handler was
+  originally placed BEFORE the `token !== viewGen` stale-token check, so a
+  stale/superseded response could clear the flag out from under a still-
+  in-flight, genuinely current page click (e.g. click page 3 then page 5
+  before the page-3 fetch resolves; if the page-3 response resolves first,
+  it wiped the flag and page 5's paint never scrolled). Fixed by moving the
+  stale-token check to run first (pure no-op on the flag when stale), with
+  the capture/clear now happening after it but still before the error
+  early-return and the page-overshoot self-correction re-fetch, so those two
+  paths continue to consume/clear the flag and never scroll. Verified: the
+  four background `refresh()` callers (initial fetch, search debounce,
+  `onHistoryChanged` broadcast, and the self-correction re-fetch itself)
+  still never scroll; reduced-motion handling and the optional `onPageChange`
+  guard in `jars.js` are untouched. Gates green: `npm test` (1502 passed),
+  `npm run typecheck`, `npm run lint`.

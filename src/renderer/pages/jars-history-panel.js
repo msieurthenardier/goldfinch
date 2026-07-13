@@ -55,6 +55,25 @@
  * copy for the canonical source if the icon ever needs to change again —
  * change BOTH copies.
  *
+ * H9 — paging scroll anchor (M08 F6 Leg 7, design review): a numbered-pager
+ * page CHANGE (never the initial fetch, a search fetch, an `onHistoryChanged`
+ * broadcast repaint, or the page-overshoot self-correction re-fetch — all
+ * five funnel through the shared `refresh()`) should scroll the jar's tab
+ * strip back into view, so paging from a full page to a short page doesn't
+ * leave the viewport parked low. Implemented as an optional `onPageChange`
+ * constructor callback rather than a self-contained `mountEl.closest(...)`
+ * walk, because reaching outside `mountEl` would violate the DD7 DOM-contract
+ * boundary stated above ("never touches anything outside its own `mountEl`")
+ * — `jars.js` already owns the section element (`refs.root`) and does the
+ * actual `scrollIntoView` itself. A module-scoped one-shot `pendingScrollAnchor`
+ * flag is armed ONLY in `goToPage` and captured-then-cleared in `refresh()`'s
+ * success handler immediately AFTER the stale-token check (so a superseded
+ * response is a pure no-op on the flag and leaves it intact for the
+ * still-in-flight current view) but before the self-correction branch, so it
+ * can never leak into a paint that didn't originate from that user click —
+ * including the self-correction re-fetch, which intentionally drops the
+ * captured intent rather than re-arming it.
+ *
  * Patch discipline: the retention `<select>` and the search `<input>` are
  * built ONCE at construction and never destroyed/recreated — only the list
  * container's children, the status line, and the pager bar's children are
@@ -127,11 +146,12 @@ const ICON_DELETE = [
  *   jarId: string,
  *   mountEl: HTMLElement,
  *   onError: (message: string) => void,
- *   getRetentionDays: () => number
+ *   getRetentionDays: () => number,
+ *   onPageChange?: () => void
  * }} deps
  * @returns {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void }}
  */
-export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetentionDays }) {
+export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetentionDays, onPageChange }) {
   // ---------------------------------------------------------------------
   // Mount DOM (built once at construction; all textContent — never markup
   // from data). Order: retention row, search row, list container, status
@@ -227,6 +247,18 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
   let totalPages = 1;
   /** @type {number|null} */
   let searchDebounceHandle = null;
+
+  // H9 (M08 F6 Leg 7): a one-shot scroll-anchor intent, set ONLY by a user
+  // pager click (goToPage) and consumed on that fetch's successful,
+  // non-stale, non-search paint — never on the initial fetch, a search
+  // fetch, an onHistoryChanged broadcast repaint, or the page-overshoot
+  // self-correction re-fetch below. Captured into a local and cleared in
+  // refresh()'s success handler immediately AFTER the stale-token check (a
+  // stale response is a pure no-op on this flag, so it survives for the
+  // still-in-flight current view) but before the error/self-correction
+  // branches, so an erroring/self-correcting response can never leak a
+  // leftover intent into a later background repaint.
+  let pendingScrollAnchor = false;
 
   /**
    * H2 (design review): the primary line is a real `<a href>`. Both `click`
@@ -336,6 +368,7 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
     const clamped = Math.max(1, Math.min(page, totalPages));
     if (clamped === currentPage) return;
     currentPage = clamped;
+    pendingScrollAnchor = true; // H9: this is the ONLY site that arms the intent
     refresh();
   }
 
@@ -414,7 +447,14 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
 
     request
       .then((result) => {
-        if (token !== viewGen) return; // stale — a newer view superseded this fetch
+        if (token !== viewGen) return; // stale — a newer view superseded this fetch; leave pendingScrollAnchor untouched for the current in-flight view
+
+        // H9: capture + clear the one-shot intent before any remaining early
+        // return (error/self-correction) — so it can never leak into a later
+        // paint that didn't originate from this user page click.
+        const shouldScrollAnchor = pendingScrollAnchor;
+        pendingScrollAnchor = false;
+
         if (!result || !result.ok) {
           onError('Could not load history');
           return;
@@ -423,7 +463,11 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
         // Self-correction: if the jar's row count shrank (e.g. a delete
         // emptied the last page) and currentPage now overshoots the new
         // total, snap back and re-fetch a valid page. The re-fetch bumps
-        // viewGen again, so this (now-stale) paint is skipped.
+        // viewGen again, so this (now-stale) paint is skipped. H9: the
+        // captured `shouldScrollAnchor` is intentionally dropped here — the
+        // self-correction re-fetch never scrolls, even if the original page
+        // click that triggered it did (acceptance criteria: the overshoot
+        // re-fetch is one of the paths that must never scroll).
         if (!isSearch) {
           const freshTotalPages = Math.max(1, Math.ceil((result.total || 0) / PAGE_LIMIT));
           if (currentPage > freshTotalPages) {
@@ -452,6 +496,9 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
         } else {
           statusLine.textContent = rows.length === 0 ? 'No visits recorded' : '';
           paintPager(currentPage, totalPages);
+          // H9: fire ONLY on this non-search, non-stale, successfully-painted
+          // page repaint, and ONLY when the intent came from goToPage.
+          if (shouldScrollAnchor && onPageChange) onPageChange();
         }
       })
       .catch(() => {

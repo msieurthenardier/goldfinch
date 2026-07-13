@@ -734,7 +734,18 @@ import { createConfirmModal } from './jars-confirm-modal.js';
           jarId: row.id,
           mountEl: historyMount,
           onError: (message) => setSectionStatus(refs, message, false),
-          getRetentionDays: () => currentRowFor(row.id)?.retentionDays ?? 30
+          getRetentionDays: () => currentRowFor(row.id)?.retentionDays ?? 30,
+          // H9 (M08 F6 Leg 7): on a user-initiated pager page change, scroll
+          // this jar's own section back into view so the tab strip lands at
+          // the top — same closes-over-`refs` pattern as `buildPanelContent`
+          // above (refs is only assigned once the section is fully built,
+          // but this callback is never invoked until after that point).
+          // `block: 'start'` (not tryExpandFromHash's 'nearest') puts the
+          // tabs at the top per the leg's ruling; reduced-motion is handled
+          // by the existing page-wide CSS gate (jars.css's `scroll-behavior:
+          // smooth` only under `prefers-reduced-motion: no-preference`), so
+          // no JS-side media-query check is needed here.
+          onPageChange: () => refs.root.scrollIntoView({ block: 'start' })
         });
       }
     }

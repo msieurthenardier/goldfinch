@@ -134,11 +134,14 @@ affected behavior tests re-run; commits land on `flight/08-history-mission`.
 
 - [x] `hat-walkthrough` — the 11-step discovery session (done; 11/11
       functional pass, findings H1–H7 banked, rulings R1–R6 recorded).
-- [ ] `address-select-all` — R1.
-- [ ] `jars-page-tabs` — H4 (design-review).
-- [ ] `history-panel-content` — H1/H2/H3 (design-review).
-- [ ] `confirm-modal-and-wipe` — H6/H7 (design-review).
-- [ ] `hat-reverification` — closing HAT (interactive).
+- [x] `address-select-all` — R1.
+- [x] `jars-page-tabs` — H4 (design-review).
+- [x] `history-panel-content` — H1/H2/H3 (design-review).
+- [x] `confirm-modal-and-wipe` — H6/H7 (design-review).
+- [x] `hat-reverification` — closing HAT (interactive); `jar-data-controls`
+      behavior test 7/7.
+- [x] `history-paging-scroll-anchor` — H9 (follow-up added post-landing;
+      operator request).
 
 ---
 
@@ -146,10 +149,11 @@ affected behavior tests re-run; commits land on `flight/08-history-mission`.
 
 ### Completion Checklist
 
-- [ ] HAT script completed (or operator-halted with disposition)
-- [ ] All inline fixes committed + gates green
-- [ ] Rulings recorded; deferred items filed
-- [ ] Flight → landed; mission ready for `/mission-debrief`
+- [x] HAT script completed (or operator-halted with disposition)
+- [x] All inline fixes committed + gates green
+- [x] Rulings recorded; deferred items filed (H8 → follow-up flight;
+      clear-history → keep-as-is; H9 → implemented as leg 07)
+- [x] Flight → landed; mission ready for `/mission-debrief`
 
 ### Verification
 

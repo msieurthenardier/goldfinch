@@ -239,6 +239,7 @@ Prior debriefs left concrete planning inputs this mission adopts:
       isolation behavior tests that close the mission's criteria.
 - [x] Flight 6 *(optional)*: Alignment — HAT walkthrough + fix legs (R1
       address select-all, H4 tabs restyle, H1/H2/H3 history panel, H6/H7
-      confirm-modal + wipe-closes-tabs) and a closing HAT re-verification;
-      landed with `jar-data-controls` behavior test 7/7. H8 (internal-page
-      keyboard focus) + H9 (paging scroll anchor) filed as follow-ups.
+      confirm-modal + wipe-closes-tabs), a closing HAT re-verification
+      (`jar-data-controls` behavior test 7/7), and a follow-up H9 paging
+      scroll-anchor leg. H8 (internal-page keyboard focus) filed as a
+      separate follow-up flight; clear-history ruled keep-as-is.
