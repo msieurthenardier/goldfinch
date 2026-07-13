@@ -1,6 +1,6 @@
 # Flight: Address-Bar Suggestions
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Per-Jar Browsing History](../../mission.md)
 
 ## Contributing to Criteria

@@ -1,6 +1,6 @@
 # Flight: Manage-Jars Page Panels
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Per-Jar Browsing History](../../mission.md)
 
 ## Contributing to Criteria
