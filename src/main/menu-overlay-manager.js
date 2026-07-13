@@ -122,6 +122,7 @@ function createMenuOverlayManager({
     view = null;
     visible = false;
     ready = false;
+    currentMenu = null;
     pendingInit = null;
   }
 
@@ -133,6 +134,7 @@ function createMenuOverlayManager({
       view = null;
       visible = false;
       ready = false;
+      currentMenu = null;
       pendingInit = null;
     }
     if (view) return view;

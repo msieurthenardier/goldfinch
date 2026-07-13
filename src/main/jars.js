@@ -13,20 +13,22 @@
 //   while `containers` is empty. Empty is a VALID persisted state — no reseed.
 // - Ids and partitions are IMMUTABLE (DD5): rename touches name/color only.
 //   `persist:goldfinch` is valid only on id `default` (the legacy jar).
-// - The Burner is NEVER a store entry (DD4, src/shared/burner.js); the id
-//   namespace `burner`/`burner-*` is reserved and remapped, never dropped.
+// - The Burner is NEVER a store entry (DD4, src/shared/burner.js); its namespace
+//   plus privileged identity ids are reserved and remapped, never dropped.
 // - Durability follows downloads-store (DD8): atomic tmp+rename save, version
 //   envelope, per-entry validator-drop, load never throws.
 // - Load migration (DD3), three shapes: (a) a v2 envelope is validated +
 //   repaired in place; (b) a v1 bare array is validated under the v2 rules and
 //   rewritten as a v2 envelope (defaultId `default` if that id survives, else
 //   the first entry; zero survivors fall through to (c)); (c) no file /
-//   corrupt / unknown version probes `userData/Partitions/goldfinch` (existence
+//   corrupt / unknown shape probes `userData/Partitions/goldfinch` (existence
 //   only, never contents) — present means the app has run before → legacy
 //   four-jar seed, absent means a true first run → fresh seed. Both (c)
 //   branches persist synchronously inside load(): main.js pre-warms
 //   `persist:goldfinch` on every launch, so an unsaved fresh seed would
 //   re-probe as legacy on launch #2.
+//   A known envelope shape with an unknown version is kept in memory but never
+//   rewritten by load, so a later compatible release can recover it.
 //
 // This module is ELECTRON-FREE: the userData path is injected at load(userDataPath),
 // like settings-store/downloads-store, so the unit suite needs no electron stub.
@@ -64,10 +66,16 @@ let containers = FRESH_SEED.map((c) => ({ ...c }));
 let defaultId = FRESH_SEED[0].id;
 let storePath = null;
 
-// Reserved burner namespace (DD4): burner-tab ids are minted as `burner-<n>` and
-// the Burner identity is `burner` — no persistent jar may claim either shape.
+// Reserved identities (DD4): burner-tab ids are minted as `burner-<n>`, while
+// admin/internal/default have privileged or built-in meanings outside user jars.
 function isReservedId(id) {
-  return id === 'burner' || id.startsWith('burner-');
+  return (
+    id === 'burner' ||
+    id.startsWith('burner-') ||
+    id === 'admin' ||
+    id === 'internal' ||
+    id === 'default'
+  );
 }
 
 // Same validation rules as add()/validateContainers — shared so rename() cannot
@@ -104,13 +112,15 @@ function validateContainers(saved) {
     let id = entry.id;
     if (typeof id !== 'string' || !id) continue;
     if (typeof partition !== 'string' || !/^persist:/.test(partition)) continue;
+    // The directly-seeded legacy default is the one legitimate use of this
+    // reserved id; add()/slug() can never mint its persist:goldfinch partition.
+    const legacyDefault = id === 'default' && partition === 'persist:goldfinch';
     // Reserve the default session: a non-default entry must not alias persist:goldfinch
     if (id !== 'default' && partition === 'persist:goldfinch') continue;
-    // Reserved namespace remap (DD4) BEFORE the dedup check: `burner`/`burner-*`
-    // entries move to a `jar-`-prefixed id via the same collision-suffix loop as
-    // add(). Partition and name are untouched — jar resolution is by partition
-    // string, so the entry's data survives under its new id.
-    if (isReservedId(id)) {
+    // Reserved-id remap (DD4) BEFORE the dedup check: entries move to a `jar-`
+    // prefixed id via the same collision-suffix loop as add(). Partition and
+    // name are untouched, so the entry's data survives under its new id.
+    if (isReservedId(id) && !legacyDefault) {
       const base = `jar-${id}`;
       let remapped = base;
       let n = 1;
@@ -144,8 +154,8 @@ function load(userDataPath) {
   try {
     const file = path.join(userDataPath, FILE_NAME);
     // Persistence is unconditional post-migration: every shape below either keeps
-    // the file as-is (v2) or rewrites it (v1 / seed), so storePath is assigned
-    // once, before the dispatch.
+    // the file as-is (v2 / unknown envelope) or rewrites it (v1 / seed), so
+    // storePath is assigned once, before the dispatch.
     storePath = file;
     let saved;
     try {
@@ -181,7 +191,15 @@ function load(userDataPath) {
         return containers;
       }
     }
-    // (c) no readable store (missing file, corrupt JSON, unknown version/shape):
+    // A readable envelope with an unknown version is still user data. Keep a
+    // best-effort in-memory view, but never rewrite it during load — a future
+    // compatible release can then recover the original envelope unchanged.
+    if (saved !== null && typeof saved === 'object' && !Array.isArray(saved) && Array.isArray(saved.containers)) {
+      containers = validateContainers(saved.containers);
+      defaultId = repairDefaultId(containers, saved.defaultId);
+      return containers;
+    }
+    // (c) no readable store (missing file, corrupt JSON, unknown shape):
     // probe the legacy base partition — existence only, never contents (DD3).
     // Present → the app has run before → legacy four-jar seed; absent → true
     // first run → fresh seed. Persist synchronously: main.js pre-warms
@@ -237,8 +255,8 @@ function slug(name) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 24) || 'jar';
-  // Mint-time half of the reserved-namespace rule (DD4): a name that slugs into
-  // `burner`/`burner-*` moves to the `jar-` prefix (display name untouched).
+  // Mint-time half of the reserved-id rule (DD4): a reserved slug moves to the
+  // `jar-` prefix (display name untouched).
   return isReservedId(base) ? `jar-${base}` : base;
 }
 

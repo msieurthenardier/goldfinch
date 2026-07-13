@@ -851,3 +851,53 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
     removeTempDir(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// F9 / F14 / F17 — set() fallback validation, own-key guard, failed-save state
+// ---------------------------------------------------------------------------
+
+test('spellcheck — set throws on a string via the typeof fallback', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.throws(
+      () => store.set('spellcheck', 'true'),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('spellcheck'), false);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('set rejects inherited Object.prototype keys as unknown settings keys', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.throws(
+      () => store.set('toString', 'x'),
+      (err) => err instanceof TypeError && err.message.includes('unknown settings key')
+    );
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('failed serialization leaves the prior config live', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir, {
+      serialize: () => {
+        throw new Error('serialize failed');
+      }
+    });
+    const prior = store.get('homePage');
+    assert.throws(() => store.set('homePage', 'https://rejected.example.com/'), /serialize failed/);
+    assert.equal(store.get('homePage'), prior);
+  } finally {
+    removeTempDir(dir);
+  }
+});

@@ -2475,6 +2475,11 @@ const { broadcastJarsChanged } = registerJarIpc({
 ipcMain.handle('identity-new', async (_e, { partition }) => {
   if (!partition) return { ok: false };
   const ses = session.fromPartition(partition);
+  // Same internal-session guard as privacy-cookies (the privacy panel can stay open
+  // across a switch to Settings / goldfinch:// — never wipe the privileged partition).
+  if (/** @type {any} */ (ses).__goldfinchInternal) {
+    return { ok: false };
+  }
   try {
     await ses.clearStorageData();
     await ses.clearCache();

@@ -199,11 +199,13 @@ function load(userDataPath, opts = {}) {
       for (const key of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
         if (Object.prototype.hasOwnProperty.call(stored, key)) {
           const val = stored[key];
-          if (VALIDATORS[key]) {
-            if (VALIDATORS[key](val)) {
+          const validator = Object.hasOwn(VALIDATORS, key) ? VALIDATORS[key] : null;
+          const normalizer = Object.hasOwn(NORMALIZERS, key) ? NORMALIZERS[key] : null;
+          if (validator) {
+            if (validator(val)) {
               // Apply normalizer to the validated value (e.g. deep-merge toolbarPins
               // onto defaults for forward-compat — a future 3rd item fills in here).
-              merged[key] = NORMALIZERS[key] ? NORMALIZERS[key](val) : val;
+              merged[key] = normalizer ? normalizer(val) : val;
             }
             // else: keep the default (repair)
           } else {
@@ -211,7 +213,7 @@ function load(userDataPath, opts = {}) {
             // NOTE: typeof null === 'object' — object-typed keys must have an explicit
             // validator (see VALIDATORS above) to avoid accepting null/arrays here.
             if (typeof val === typeof DEFAULTS[key]) {
-              merged[key] = NORMALIZERS[key] ? NORMALIZERS[key](val) : val;
+              merged[key] = normalizer ? normalizer(val) : val;
             }
           }
         }
@@ -239,10 +241,10 @@ function load(userDataPath, opts = {}) {
  * rename is atomic on the same filesystem.
  * Errors PROPAGATE — do not swallow (callers / the bridge learn the set failed).
  */
-function save() {
+function save(nextConfig = config) {
   const file = path.join(/** @type {string} */ (dir), 'settings.json');
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, codec.serialize(config));
+  fs.writeFileSync(tmp, codec.serialize(nextConfig));
   fs.renameSync(tmp, file);
 }
 
@@ -296,16 +298,18 @@ function set(key, value) {
   if (dir === null) {
     throw new Error('settings-store: set before load');
   }
-  if (!(key in DEFAULTS)) {
+  if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) {
     throw new TypeError('unknown settings key: "' + key + '"');
   }
-  if (VALIDATORS[key] && !VALIDATORS[key](value)) {
+  const validator = Object.hasOwn(VALIDATORS, key) ? VALIDATORS[key] : null;
+  if (validator ? !validator(value) : typeof value !== typeof DEFAULTS[key]) {
     throw new TypeError('invalid value for "' + key + '"');
   }
   // Normalize after validation (e.g. partial toolbarPins → full map).
-  const v = NORMALIZERS[key] ? NORMALIZERS[key](value) : value;
-  config = { ...config, [key]: v };
-  save(); // propagates on error
+  const normalizer = Object.hasOwn(NORMALIZERS, key) ? NORMALIZERS[key] : null;
+  const nextConfig = { ...config, [key]: normalizer ? normalizer(value) : value };
+  save(nextConfig); // propagates on error
+  config = nextConfig;
   return config;
 }
 

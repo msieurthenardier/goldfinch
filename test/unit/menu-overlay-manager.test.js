@@ -354,6 +354,14 @@ function readySheet() {
 
 const closes = () => chromeSends.filter((c) => c[0] === 'menu-overlay-closed');
 
+test('bare teardown clears an open menu state and drops the sheet view', () => {
+  setupProto();
+  mgr.openMenu(payloadFor(1));
+  mgr.teardown();
+  assert.equal(mgr.isMenuOpen(), false);
+  assert.equal(mgr.getView(), null);
+});
+
 test('openMenu shows, hides the find overlay, delivers init then focuses (ready path)', () => {
   setupProto();
   readySheet();

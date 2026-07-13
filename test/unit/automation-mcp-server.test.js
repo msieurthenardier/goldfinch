@@ -333,6 +333,31 @@ test('clean stop() tears everything down — a subsequent start on the same port
   }
 });
 
+test('REGRESSION F12: stop during an in-flight start leaves no orphan listener', async () => {
+  const server = createMcpServer({
+    getEngine: (engineOpts) => fakeEngine(engineOpts),
+    getSettings: () => fakeSettings(),
+    scopeCtx: fakeScopeCtx(),
+    port: TEST_PORT,
+  });
+
+  // start() yields while listen is pending; stop() must cancel that bind even
+  // though the listener has not yet been committed to httpServer.
+  const starting = server.start();
+  await server.stop();
+  await starting;
+
+  // The same instance must be able to bind again immediately. Before F12 the
+  // first listen committed late with started=false, so this threw EADDRINUSE.
+  await assert.doesNotReject(server.start());
+  try {
+    const client = await connectClient();
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test('rebind primitive — start→stop→start on a DIFFERENT port binds on B, not A (Leg 7)', async () => {
   // The live port-rebind (Flight 5, Leg 7) is exactly this primitive: stop the
   // current server, then create+start a fresh one on the (now-changed) resolved
@@ -540,6 +565,29 @@ test('body cap — 413 for a body strictly over 1 MiB (distinct from 400)', asyn
     const huge = JSON.stringify({ pad: 'x'.repeat(1024 * 1024 + 1024) });
     const res = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, huge);
     assert.equal(res.status, 413, 'over-cap body is 413, not 400');
+  } finally {
+    await server.stop();
+  }
+});
+
+test('REGRESSION F10: established-session POSTs are also capped at 1 MiB', async () => {
+  const server = await startServer();
+  try {
+    const sid = await rawInitSession();
+    const huge = JSON.stringify({ pad: 'x'.repeat(1024 * 1024 + 1024) });
+    const res = await rawPost(
+      { authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': sid },
+      huge
+    );
+    assert.equal(res.status, 413, 'over-cap established-session body is 413');
+
+    // The capped request is refused before delegation without killing the
+    // session; a later in-spec request still reaches the same transport.
+    const normal = await rawPost(
+      { authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': sid },
+      { jsonrpc: '2.0', id: 12, method: 'tools/list', params: {} }
+    );
+    assert.equal(normal.status, 200, 'normal established-session body is unaffected');
   } finally {
     await server.stop();
   }
@@ -794,6 +842,31 @@ test('live re-validation — toggle-off mid-session → the next request on the 
     assert.equal(res.status, 401, 'toggle-off makes the next request 401 (live re-validation)');
   } finally {
     await disabled.stop();
+  }
+});
+
+test('REGRESSION F11: initialize rejects once 64 active sessions are retained', async () => {
+  const server = await startServer();
+  try {
+    for (let i = 0; i < 64; i++) await rawInitSession();
+    assert.equal(server.getActivity().sessions.length, 64, 'the configured active-session capacity is reachable');
+
+    const over = await rawPost({ authorization: 'Bearer ' + VALID_KEY }, initBody());
+    assert.equal(over.status, 429, 'the next initialize is rejected at the cap');
+    const rpc = JSON.parse(over.body);
+    assert.equal(rpc.error.code, -32000);
+    assert.match(rpc.error.message, /Session limit reached: maximum 64 active sessions/);
+    assert.equal(server.getActivity().sessions.length, 64, 'rejection allocates no additional session');
+
+    // Existing sessions remain active and are not evicted by a rejected initialize.
+    const [sid] = server.getActivity().sessions.map((s) => s.sessionId);
+    const normal = await rawPost(
+      { authorization: 'Bearer ' + VALID_KEY, 'mcp-session-id': sid },
+      { jsonrpc: '2.0', id: 13, method: 'tools/list', params: {} }
+    );
+    assert.equal(normal.status, 200, 'an existing session remains usable at capacity');
+  } finally {
+    await server.stop();
   }
 });
 

@@ -537,8 +537,15 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
         if (typeof p.selectionText === 'string' && p.selectionText) createTab(toUrl(p.selectionText), srcContainer);
       } else if (id.startsWith('edit:')) {
         // Allowlisted edit-action dispatch (main re-validates the allowlist too).
+        // Also re-check the captured editFlags that gated menu construction
+        // (page-context-model.js: canCut/canCopy/canPaste/canUndo/canRedo).
         const action = id.slice('edit:'.length);
-        if (p.isEditable && ['cut', 'copy', 'paste', 'undo', 'redo'].includes(action)) {
+        const flagKey = 'can' + action.charAt(0).toUpperCase() + action.slice(1);
+        if (
+          p.isEditable &&
+          ['cut', 'copy', 'paste', 'undo', 'redo'].includes(action) &&
+          p.editFlags && p.editFlags[/** @type {'canCut'|'canCopy'|'canPaste'|'canUndo'|'canRedo'} */ (flagKey)]
+        ) {
           window.goldfinch.pageContextAction({ webContentsId: wcId, action });
         }
       } else if (id.startsWith('spell:')) {
@@ -991,6 +998,17 @@ function activateTab(id) {
   }
   renderMedia();
   renderPrivacy();
+  // Cookies are fetched on demand when the Privacy panel opens. On tab switch the
+  // panel re-renders but does not re-fetch — kick one off for web tabs whose cookies
+  // are still null so the Cookies section doesn't stay "Loading…".
+  if (
+    !els.privacyPanel.classList.contains('collapsed') &&
+    isWebTab(tab) &&
+    tab.privacy &&
+    tab.privacy.cookies == null
+  ) {
+    fetchCookies();
+  }
   updateNavButtons();
 
   // Tab-scoped toolbar disable (HAT polish). The pinnable buttons (Media, Shields,
@@ -1272,8 +1290,9 @@ function togglePanel(force) {
     // restore focus to the toggle. Guard avoids stealing focus on programmatic
     // closes where focus isn't in the panel (e.g. opening the privacy panel).
     // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
-    // silent no-op that strands focus on <body> — skip it when the button is hidden.
+    // silent no-op that strands focus on <body> — fall back to the address bar.
     if (!els.toggleMedia.classList.contains('hidden')) els.toggleMedia.focus();
+    else els.address.focus();
   }
 }
 els.toggleMedia.addEventListener('click', () => { togglePanel(); sendActiveBounds(); });
@@ -1847,8 +1866,9 @@ function togglePrivacy(force) {
     // Closing while focus is inside the (now zero-width) panel would strand it:
     // restore focus to the toggle. Guard avoids stealing focus on programmatic closes.
     // Focus-restoration guard: if the button is unpinned (hidden), .focus() is a
-    // silent no-op that strands focus on <body> — skip it when the button is hidden.
+    // silent no-op that strands focus on <body> — fall back to the address bar.
     if (!els.togglePrivacy.classList.contains('hidden')) els.togglePrivacy.focus();
+    else els.address.focus();
   }
 }
 
@@ -2359,6 +2379,10 @@ function pJar() {
   btn.className = 'text-btn small';
   btn.textContent = 'New identity';
   btn.title = 'Wipe this jar (cookies + storage) and reroll the fingerprint';
+  // Tab-scoped disable: the privacy panel can stay open across a switch to an
+  // internal goldfinch:// tab — never offer a wipe of the privileged partition.
+  // (Main's identity-new handler also refuses __goldfinchInternal as defense-in-depth.)
+  btn.disabled = isInternalTab(tab);
   btn.addEventListener('click', newIdentity);
   row.appendChild(btn);
   s.appendChild(row);
@@ -2367,11 +2391,11 @@ function pJar() {
 
 async function newIdentity() {
   const tab = activeTab();
-  if (!tab) return;
+  // Belt-and-suspenders with pJar()'s disabled state + main's internal-session guard.
+  if (!tab || isInternalTab(tab)) return;
   const res = await window.goldfinch.identityNew({ partition: tab.container.partition });
   if (res && res.ok) {
     toast('New identity', 'Jar wiped + fingerprint rerolled');
-    // Internal tabs are excluded by the New Identity button's tab-scoped disable; only web tabs reach here.
     if (isWebTab(tab) && tab.wcId != null) window.goldfinch.tabNavigate({ wcId: tab.wcId, verb: 'reload', args: [] });
   } else {
     toast('New identity failed', (res && res.error) || '');
