@@ -1,6 +1,6 @@
 # Mission: Per-Jar Browsing History
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
