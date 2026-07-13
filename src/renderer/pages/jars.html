@@ -8,20 +8,25 @@
     <!-- Fully-module page (M07 Flight 2 leg 5): burner.js (frozen BURNER
          identity), jar-data-classes.js (pure clearable-data-class list),
          safe-color.js (injection-safe color validator), jar-page-model.js
-         (the pure row-model importing burner), and jars.js (the page
-         controller, which imports all four via flat serving-path specifiers)
-         are all real ES modules (type="module"). The module loader guarantees
-         the dependencies; the explicit tag order is kept for load-order
-         legibility (the module map dedupes evaluation). The script-tag
-         contract test (test/unit/jars-page-shared-scripts.test.js) pins this
-         all-module tag set and would flag any future classic script (the F2 D1
-         shared-scope-collision lesson). -->
+         (the pure row-model importing burner), jars-tabs.js (the per-jar
+         WAI-ARIA tab widget — H4/M08 Flight 6 growth-checkpoint extraction),
+         jars-confirm-modal.js (the ONE page-level confirm modal — H7/M08
+         Flight 6 Leg 5, the SAME growth-checkpoint extraction), and jars.js
+         (the page controller, which imports all via flat serving-path
+         specifiers) are all real ES modules (type="module"). The module
+         loader guarantees the dependencies; the explicit tag order is kept
+         for load-order legibility (the module map dedupes evaluation). The
+         script-tag contract test (test/unit/jars-page-shared-scripts.test.js)
+         pins this all-module tag set and would flag any future classic
+         script (the F2 D1 shared-scope-collision lesson). -->
     <script src="burner.js" type="module"></script>
     <script src="jar-data-classes.js" type="module"></script>
     <script src="safe-color.js" type="module"></script>
     <script src="jar-page-model.js" type="module"></script>
     <script src="jar-panel-model.js" type="module"></script>
     <script src="jars-history-panel.js" type="module"></script>
+    <script src="jars-tabs.js" type="module"></script>
+    <script src="jars-confirm-modal.js" type="module"></script>
     <script src="jars.js" type="module"></script>
   </head>
   <body>

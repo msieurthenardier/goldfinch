@@ -80,11 +80,16 @@ export default [
     // so the browser globals (and the injected menu-controller globals)
     // persist. menu-controller.js is untouched — the product's one remaining
     // classic script (DD6 carve-out). jars-history-panel.js (M08 Flight 3,
-    // Leg 2) is jars.js's panel-content module — also a real ES module.
+    // Leg 2) is jars.js's panel-content module; jars-tabs.js (H4, M08
+    // Flight 6, Leg 3) is jars.js's per-jar tab-widget module; jars-confirm-
+    // modal.js (H7, M08 Flight 6, Leg 5) is jars.js's page-level confirm
+    // modal module — also a real ES module.
     files: [
       'src/renderer/renderer.js',
       'src/renderer/pages/jars.js',
       'src/renderer/pages/jars-history-panel.js',
+      'src/renderer/pages/jars-tabs.js',
+      'src/renderer/pages/jars-confirm-modal.js',
       'src/renderer/pages/settings.js',
       'src/renderer/menu-overlay.js'
     ],

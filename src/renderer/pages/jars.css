@@ -377,8 +377,10 @@ main {
   border-radius: 8px;
 }
 
-/* ── Data controls (Leg 3, DD5): always-visible button row + one shared
-   confirm area below it, diffed on the open (action, rowId) pair. ── */
+/* ── Data controls (Leg 3, DD5): always-visible button row. Each button's
+   confirm opens the ONE page-level modal below (H7, M08 Flight 6 Leg 5) —
+   the per-region confirm-area rule this block used to reserve space for is
+   retired. ── */
 .jar-data-controls {
   margin: 4px 0 16px;
 }
@@ -389,77 +391,110 @@ main {
   gap: 8px;
 }
 
-.jar-data-confirm-area:not(:empty) {
-  margin-top: 8px;
-}
-
-/* ── Panels (Flight 2, Leg 2 / DD3): WAI-ARIA disclosure pattern —
-   h3 > button[aria-expanded] + role="region" aria-labelledby, NOT <details>
-   (full control of the reconcile + CSS). Default collapsed (DD4); toggle is
-   INSTANT — no height animation (leg spec #8). ── */
-.jar-panel {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 12px;
-  overflow: hidden;
-  scroll-margin-top: 24px; /* clears the sticky nav on hash-deep-link scrolls */
-}
-
-.jar-panel-heading {
-  margin: 0;
-}
-
-.jar-panel-toggle {
+/* ── Confirm modal (H7, M08 Flight 6 Leg 5): ONE page-level dialog replacing
+   the per-region inline confirms. Backdrop dims the whole page; the card is
+   centered and reuses .jar-confirm/.jar-confirm-text/.jar-form-actions
+   (above) for its mounted buildDataConfirm() content — those rules are
+   REUSED, not duplicated. Respects reduced-motion by having no motion at
+   all: no transition/animation property anywhere below, open/close is an
+   instant hidden-attribute flip, same discipline as the tablist below. ── */
+.jar-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 55%);
+}
+
+.jar-modal-backdrop[hidden] {
+  display: none;
+}
+
+.jar-modal-card {
   width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 20px;
   background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.jar-modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
   color: var(--fg);
+}
+
+/* The modal reuses .jar-confirm's own padding/background/border (In-section
+   two-step delete confirm rule, above) for its mounted content — cancel that
+   nested chrome here so the card isn't double-framed. */
+.jar-modal-card .jar-confirm {
+  margin-top: 0;
+  padding: 0;
+  background: none;
   border: none;
-  padding: 10px 14px;
+  border-radius: 0;
+}
+
+/* ── Tabs (H4, M08 Flight 6): WAI-ARIA tablist/tab/tabpanel, replacing the
+   F2 collapsible-panel trio for a tighter, professional look (HAT step-3
+   finding — the dropdowns read cartoonish). Flat + tight: an underline
+   tablist, no card chrome per tab. History default-selected. Tab switching
+   is INSTANT — no transition property anywhere below, so there is nothing
+   for prefers-reduced-motion to disable (leg spec: reduced-motion = instant
+   tab switch, satisfied by construction). ── */
+.jar-tabs {
+  margin: 4px 0 16px;
+}
+
+.jar-tablist {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.jar-tab {
+  appearance: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* sit flush on the tablist's own border-bottom */
+  padding: 8px 14px;
   font: inherit;
   font-size: 14px;
   font-weight: 600;
-  text-align: left;
   cursor: pointer;
 }
 
-.jar-panel-toggle:hover {
-  background: var(--bg-3);
+.jar-tab:hover {
+  color: var(--fg);
 }
 
-.jar-panel-toggle:focus-visible {
+.jar-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-/* Chevron via aria-expanded attribute selector — content swap, not an
-   animated rotation (no transition property — instant toggle per leg spec). */
-.jar-panel-toggle::before {
-  content: '';
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  margin-right: 10px;
-  border-right: 2px solid var(--fg-dim);
-  border-bottom: 2px solid var(--fg-dim);
-  transform: rotate(-45deg);
+.jar-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
 }
 
-.jar-panel-toggle[aria-expanded="true"]::before {
-  transform: rotate(45deg);
-}
-
-.jar-panel-count {
+.jar-tab-count {
   font-weight: 400;
   color: var(--fg-dim);
   margin-left: 4px;
 }
 
-.jar-panel-region {
-  padding: 14px;
-  border-top: 1px solid var(--border);
-  scroll-margin-top: 24px;
+.jar-tabpanel {
+  padding: 14px 2px;
 }
 
 /* ── History panel content (Flight 3, Leg 2 / flight DD5-DD7) — the
@@ -537,13 +572,28 @@ main {
   flex: 1 1 auto;
 }
 
+/* H2 (M08 F6 Leg 4, design review): a real <a href> — hover shows the
+   destination, keyboard-focusable. Neutral styling: no UA link-blue/
+   visited-purple, underline only on hover/focus. */
 .jar-history-row-primary {
+  display: block;
   margin: 0;
   color: var(--fg);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
+}
+
+.jar-history-row-primary:hover,
+.jar-history-row-primary:focus-visible {
+  text-decoration: underline;
+}
+
+.jar-history-row-primary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .jar-history-row-secondary {
@@ -555,7 +605,12 @@ main {
   white-space: nowrap;
 }
 
+/* H3 (M08 F6 Leg 4, design review): icon-only trashcan button (was a '×'
+   text glyph) — center the duplicated buildIcon() SVG (.jar-icon). */
 .jar-history-row-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
   background: transparent;
   color: var(--fg-dim);
@@ -563,8 +618,6 @@ main {
   border-radius: 6px;
   width: 24px;
   height: 24px;
-  line-height: 1;
-  font-size: 15px;
   cursor: pointer;
 }
 
@@ -584,12 +637,35 @@ main {
   font-size: 12px;
 }
 
-.jar-history-show-more {
-  margin-top: 4px;
+/* H1 (M08 F6 Leg 4, design review): numbered pager bar — replaces the old
+   Show-more button. Hidden entirely for a single-page view (module JS). */
+.jar-history-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.jar-history-pager-nav,
+.jar-history-pager-page {
+  min-width: 28px;
+  padding: 4px 8px;
+}
+
+.jar-history-pager-page-current {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.jar-history-pager-ellipsis {
+  padding: 0 4px;
+  color: var(--fg-dim);
 }
 
 /* ── Section footer (DD1): Wipe + Delete are jar-LEVEL identity actions,
-   rendered outside all panels — reuses .jar-data-controls/-buttons/
+   rendered outside the tab widget — reuses .jar-data-controls/-buttons/
    -confirm-area (design review verified safe: no per-region singleton
    selectors). ── */
 .jar-section-footer {

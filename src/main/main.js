@@ -134,12 +134,23 @@ const INTERNAL_PAGES = {
     // list, loaded before jars.js (see jars.html's script-order comment).
     '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
     // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
-    // for the page's collapsible History/Cookies/Other-site-data panels.
+    // for the page's History/Cookies/Other-site-data tabs.
     '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js'),
     // History panel content module (M08 Flight 3, Leg 2 / flight DD7) — a
     // page-local module (src/renderer/pages/, not src/shared/), unlike the
     // entries above.
-    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js')
+    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js'),
+    // Per-jar WAI-ARIA tab widget (H4, M08 Flight 6, Leg 3 — growth-checkpoint
+    // extraction): another page-local module, the jars-history-panel.js
+    // three-point-onboarding precedent (this entry, the jars.html module
+    // tag, and the jars-page-shared-scripts.test.js contract test, which
+    // self-derives from jars.html and needed no edit).
+    '/jars-tabs.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-tabs.js'),
+    // Confirm-modal module (H7, M08 Flight 6, Leg 5 — growth-checkpoint
+    // extraction, the SAME three-point-onboarding precedent as jars-tabs.js
+    // above): the ONE page-level confirm modal, replacing the per-region
+    // inline confirms every earlier flight used.
+    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js')
   }
 };
 
@@ -2522,6 +2533,31 @@ registerHistoryIpc({
   historyStore,
   jars,
   broadcast: broadcastToChromeAndInternal
+});
+
+// H2 (M08 Flight 6 Leg 4, design review): history rows in the goldfinch://jars
+// panel open a NEW TAB IN THE SAME JAR. Registered DIRECTLY here (not threaded
+// through jar-ipc.js/history-ipc.js as a new dep) because it needs
+// getChromeContents() (a main.js module-scoped closure, not injected anywhere)
+// and isSafeTabUrl (already required above). Reuses the exact SAME
+// open-tab -> chrome's onOpenTab -> inheritFromPartition path that popups and
+// context-menu opens use (wireGuestContents's setWindowOpenHandler, above) —
+// a jar's own partition resolves to that jar's own container for free.
+// Validates the jar exists (jars.list().find) and isSafeTabUrl(url) main-side
+// (defense-in-depth — the downstream createTab untrusted branch re-checks it
+// too, the documented two-point boundary). Fail-closed static strings, no
+// interpolation.
+registerInternalHandler(ipcMain, 'internal-open-tab-in-jar', (_e, p) => {
+  if (p === null || typeof p !== 'object') {
+    return { ok: false, error: 'open-tab-in-jar — malformed-payload' };
+  }
+  const entry = jars.list().find((j) => j.id === p.jarId);
+  if (!entry) return { ok: false, error: 'open-tab-in-jar — unknown-jar' };
+  if (typeof p.url !== 'string' || !isSafeTabUrl(p.url)) {
+    return { ok: false, error: 'open-tab-in-jar — bad-args' };
+  }
+  getChromeContents()?.send('open-tab', { url: p.url, openerPartition: entry.partition });
+  return { ok: true };
 });
 
 // New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,

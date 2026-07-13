@@ -218,6 +218,15 @@ function prepareStatements() {
        ORDER BY score DESC, MAX(v.visited_at) DESC, v.url ASC
        LIMIT ?4`
     ),
+    // Numbered-pager statement (H1, M08 F6 Leg 4 / design review): distinct
+    // placeholders per the listRecentWithCursor gotcha above — jarId=?1,
+    // pageSize=?2, offset=?3. Offset paging is O(offset) in SQLite but bounded
+    // by the visits_jar_time index range-scan and a human-scale page depth —
+    // keyset-per-page-number is not worth the complexity for a numbered bar.
+    listByOffset: d.prepare(
+      'SELECT id, url, title, visited_at FROM visits WHERE jar_id = ?1 ' +
+        'ORDER BY visited_at DESC, id DESC LIMIT ?2 OFFSET ?3'
+    ),
     deleteVisit: d.prepare('DELETE FROM visits WHERE id = ? AND jar_id = ?'),
     clearJar: d.prepare('DELETE FROM visits WHERE jar_id = ?'),
     countByJar: d.prepare('SELECT COUNT(*) AS c FROM visits WHERE jar_id = ?'),
@@ -339,6 +348,36 @@ function listRecent(jarId, { limit = 100, before = null } = {}) {
 
   const rows = /** @type {any[]} */ (
     statements.listRecentWithCursor.all(jarId, cursorRow.visited_at, before, clampedLimit)
+  );
+  return rows.map(rowToVisit);
+}
+
+// ---------------------------------------------------------------------------
+// listByPage (H1 — numbered paging, M08 F6 Leg 4 / design review)
+// ---------------------------------------------------------------------------
+
+/**
+ * Offset-paged visits for the History panel's numbered pager bar. `page` is
+ * 1-based and clamped to a minimum of 1 (mirrors the MIN_LIMIT/MAX_LIMIT
+ * clamp style — a non-positive or fractional page floors to a sane value
+ * rather than throwing; the IPC layer is the strict validator for
+ * user-facing bad-args, this is mechanism only). `pageSize` is clamped the
+ * same way `listRecent`'s `limit` is. An out-of-range page (beyond the last
+ * page) returns an empty array — OFFSET past the row count is a normal,
+ * empty SQLite result, no special-casing needed. Page 1's order is IDENTICAL
+ * to `listRecent`'s first page (same ORDER BY, same effective LIMIT/OFFSET 0).
+ * @param {string} jarId
+ * @param {{ page?: number, pageSize?: number }} [opts]
+ * @returns {Array<{ id: number, url: string, title: string | null, visitedAt: number }>}
+ */
+function listByPage(jarId, { page = 1, pageSize = 50 } = {}) {
+  assertOpen();
+  const clampedPage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1));
+  const clampedPageSize = Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, pageSize));
+  const offset = (clampedPage - 1) * clampedPageSize;
+
+  const rows = /** @type {any[]} */ (
+    statements.listByOffset.all(jarId, clampedPageSize, offset)
   );
   return rows.map(rowToVisit);
 }
@@ -541,6 +580,7 @@ module.exports = {
   recordVisit,
   setTitle,
   listRecent,
+  listByPage,
   search,
   suggest,
   deleteVisit,

@@ -149,19 +149,41 @@ const jarsBoot = Promise.all([
 window.goldfinch.onJarsChanged((p) => {
   if (p && Array.isArray(p.containers)) applyJarsState(p.containers, p.defaultId);
 });
-// DD4 reload sweep (Flight 4, Leg 3): a full wipe broadcasts jar-wiped { id } —
-// reload every open tab whose container matches, using the same isWebTab guard
-// + tabNavigate reload idiom as newIdentity (renderer.js:~2346). Internal tabs
-// are excluded by the guard; burner tabs never match (jars-wipe rejects
-// burner, so no tab.container ever equals it). Granular clears broadcast
-// nothing — nothing else calls this.
+// H6 close sweep (M08 Flight 6 HAT, flight-log Decisions — SUPERSEDES the F4
+// DD4 reload sweep): a full wipe broadcasts jar-wiped { id } — CLOSE every
+// open tab whose container matches, instead of reloading it. Reloading was
+// re-recording a fresh visit in the just-cleared history (H6 root cause);
+// closing means no reload → no re-recorded visit → history stays cleared.
+// The wipe confirm copy (jars.js WIPE_COPY) warns tabs will close. Same
+// isWebTab guard as the old reload sweep — internal tabs are excluded;
+// burner tabs never match (jars-wipe rejects burner, so no tab.container
+// ever equals it). Granular clears broadcast nothing — nothing else calls
+// this.
+//
+// Reuses the DD6 ordered-sweep shape (renderer.js:174-195, refreshOpenTabJars)
+// for the identical multi-close-with-active pattern, to avoid the
+// active-tab tabSetActive flicker (design review): snapshot first (closeTab
+// mutates `tabs`), activate a surviving NON-matching tab FIRST when the
+// active tab is among the matches (so closeTab's own active-tab fallback
+// never fires mid-sweep, and no intermediate matching tab is transiently
+// activated only to be closed again), then close every match — the
+// originally-active match last, if it's still the active tab (i.e. no
+// survivor existed).
 window.goldfinch.onJarWiped((p) => {
   if (!p || typeof p.id !== 'string') return;
-  for (const t of tabs.values()) {
-    if (t.container && t.container.id === p.id && isWebTab(t) && t.wcId != null) {
-      window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
-    }
+  const snapshot = [...tabs.values()];
+  const matches = snapshot.filter((t) => t.container && t.container.id === p.id && isWebTab(t) && t.wcId != null);
+  if (matches.length === 0) return;
+
+  if (matches.some((t) => t.id === activeTabId)) {
+    const survivor = snapshot.find((t) => !matches.includes(t));
+    if (survivor) activateTab(survivor.id);
   }
+  const activeMatch = matches.find((t) => t.id === activeTabId);
+  for (const t of matches) {
+    if (t !== activeMatch) closeTab(t.id);
+  }
+  if (activeMatch) closeTab(activeMatch.id);
 });
 
 // Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
@@ -1309,6 +1331,21 @@ function paintSuggestions() {
   const model = buildSuggestionModel(suggest.items, suggest.selectedIndex);
   openOverlayMenu('suggestions', model, suggestAnchor(), 0, { noFocus: true });
 }
+
+// Select-all on first click into a populated, non-readOnly address bar
+// (browser convention — Ruling R1, HAT step 2): a mousedown that is what's
+// FOCUSING the input (not already the active element) preventDefault()s the
+// default cursor-placement and programmatically focus()+select()s instead.
+// A second click while already focused falls through to normal cursor
+// placement. readOnly (internal goldfinch:// tabs) is left alone entirely.
+// Mirrors the existing Ctrl+L (`focus-address`) focus()+select() pair.
+els.address.addEventListener('mousedown', (e) => {
+  if (els.address.readOnly) return; // internal tabs: leave alone
+  if (document.activeElement === els.address) return; // already focused → normal cursor placement
+  e.preventDefault();
+  els.address.focus();
+  els.address.select();
+});
 
 // Query gate + 100 ms debounce + token/seq guard. `{ok:false}` responses close
 // if open, never throw.

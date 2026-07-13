@@ -44,6 +44,7 @@ test('exposes exactly the repo interface', () => {
     'recordVisit',
     'setTitle',
     'listRecent',
+    'listByPage',
     'search',
     'suggest',
     'deleteVisit',
@@ -64,6 +65,7 @@ test('every method throws "history store not open" before open(), except close()
   assert.throws(() => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: 1 }), /history store not open/);
   assert.throws(() => store.setTitle(1, 'x'), /history store not open/);
   assert.throws(() => store.listRecent('a'), /history store not open/);
+  assert.throws(() => store.listByPage('a'), /history store not open/);
   assert.throws(() => store.search('a', 'x'), /history store not open/);
   assert.throws(() => store.suggest('a', 'x', { now: 1 }), /history store not open/);
   assert.throws(() => store.deleteVisit('a', 1), /history store not open/);
@@ -842,6 +844,116 @@ test('paging: listRecent pages via `before` with no duplicates/gaps, incl. same-
     }
 
     assert.deepEqual(collected, expectedOrder, 'paged collection matches the full DESC order with no dupes/gaps');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// listByPage (H1 — numbered paging, M08 F6 Leg 4 / design review)
+// ---------------------------------------------------------------------------
+test('listByPage: page boundaries — full pages, no dupes/gaps across the whole set', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+
+    // 5 rows, DESC order by visited_at then id (same ordering as listRecent).
+    const ids = [];
+    for (let i = 0; i < 5; i++) {
+      ids.push(store.recordVisit({ jarId: 'a', url: `https://x/${i}`, visitedAt: 1000 + i }));
+    }
+    const expectedOrder = [...ids].reverse();
+
+    const page1 = store.listByPage('a', { page: 1, pageSize: 2 });
+    const page2 = store.listByPage('a', { page: 2, pageSize: 2 });
+    const page3 = store.listByPage('a', { page: 3, pageSize: 2 }); // last, partial
+
+    assert.deepEqual(page1.map((r) => r.id), expectedOrder.slice(0, 2));
+    assert.deepEqual(page2.map((r) => r.id), expectedOrder.slice(2, 4));
+    assert.deepEqual(page3.map((r) => r.id), expectedOrder.slice(4, 5), 'last page is a partial page');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('listByPage: out-of-range page returns an empty array, never throws', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://x/0', visitedAt: 1000 });
+
+    assert.deepEqual(store.listByPage('a', { page: 5, pageSize: 2 }), []);
+    assert.deepEqual(store.listByPage('a', { page: 999, pageSize: 50 }), []);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('listByPage: page 1 order is identical to listRecent\'s first page', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    for (let i = 0; i < 5; i++) {
+      store.recordVisit({ jarId: 'a', url: `https://x/${i}`, visitedAt: 1000 + i });
+    }
+
+    const viaPage = store.listByPage('a', { page: 1, pageSize: 50 });
+    const viaRecent = store.listRecent('a', { limit: 50 });
+    assert.deepEqual(viaPage.map((r) => r.id), viaRecent.map((r) => r.id));
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('listByPage: page/pageSize are clamped — non-positive/fractional page floors to 1, pageSize clamps to 1-500', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    for (let i = 0; i < 5; i++) {
+      store.recordVisit({ jarId: 'a', url: `https://x/${i}`, visitedAt: 1000 + i });
+    }
+
+    const page1 = store.listByPage('a', { page: 1, pageSize: 50 });
+    for (const page of [0, -1, 0.5, NaN, Infinity]) {
+      assert.deepEqual(
+        store.listByPage('a', { page, pageSize: 50 }).map((r) => r.id),
+        page1.map((r) => r.id),
+        `page ${page} should floor/clamp to page 1`
+      );
+    }
+    assert.equal(store.listByPage('a', { page: 1, pageSize: 0 }).length, 1, 'pageSize clamped up to 1');
+    assert.equal(store.listByPage('a', { page: 1, pageSize: 5000 }).length, 5, 'pageSize clamped down to 500, only 5 rows exist');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('listByPage: default page/pageSize (no opts) returns page 1 at the default 50 size', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://x/0', visitedAt: 1000 });
+    assert.deepEqual(store.listByPage('a').map((r) => r.url), ['https://x/0']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('listByPage: cross-jar isolation — paging jar A never returns jar B rows', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://a.example/', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'b', url: 'https://b.example/', visitedAt: 1000 });
+
+    const aRows = store.listByPage('a', { page: 1, pageSize: 50 });
+    assert.deepEqual(aRows.map((r) => r.url), ['https://a.example/']);
   } finally {
     removeTempDir(dir);
   }

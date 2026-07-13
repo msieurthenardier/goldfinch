@@ -382,15 +382,17 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     // channels (no chrome-preload consumer this flight — see history-ipc.js).
 
     /**
-     * List recent visits for a jar, most-recent-first. Rejects on an unknown
-     * jar id or malformed args ({ ok: false, error }).
-     * @param {{jarId:string, limit?:number, before?:number|null}} payload
-     * @returns {Promise<any>}
+     * Offset-paged visits for the History panel's numbered pager bar
+     * (H1/H5, M08 F6 Leg 4 — replaces the removed historyList/history-list).
+     * Rejects on an unknown jar id or malformed args (non-positive-integer
+     * page/pageSize included) with { ok: false, error }.
+     * @param {{jarId:string, page:number, pageSize?:number}} payload
+     * @returns {Promise<{ok:boolean, visits?:Array<object>, total?:number, error?:string}>}
      */
-    historyList: (payload) => ipcRenderer.invoke('internal-history-list', payload),
+    historyPage: (payload) => ipcRenderer.invoke('internal-history-page', payload),
 
     /**
-     * Full-text search a jar's history. Rejects the same way as historyList.
+     * Full-text search a jar's history. Rejects the same way as historyPage.
      * @param {{jarId:string, query:string, limit?:number}} payload
      * @returns {Promise<any>}
      */
@@ -414,7 +416,7 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
 
     /**
      * Read the live visit count for a jar (M08 Flight 2, Leg 1 / flight DD6).
-     * Rejects the same way as historyList/historySearch on a malformed
+     * Rejects the same way as historyPage/historySearch on a malformed
      * payload or unknown jar id.
      * @param {{jarId:string}} payload
      * @returns {Promise<any>}
@@ -434,7 +436,18 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * from a pagehide handler to prevent accumulation across reloads.
      * @param {number} h
      */
-    offHistoryChanged: (h) => off(h)
+    offHistoryChanged: (h) => off(h),
+
+    /**
+     * Open a URL as a NEW TAB IN THE SAME JAR (H2, M08 Flight 6 Leg 4) — the
+     * open-target for a History panel row link. Main validates the jar exists
+     * and re-checks isSafeTabUrl(url) before forwarding to the chrome
+     * renderer's open-tab -> inheritFromPartition path (defense-in-depth; the
+     * downstream createTab untrusted branch checks it a second time too).
+     * @param {{jarId:string, url:string}} payload
+     * @returns {Promise<{ok:boolean, error?:string}>}
+     */
+    openTabInJar: (payload) => ipcRenderer.invoke('internal-open-tab-in-jar', payload)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

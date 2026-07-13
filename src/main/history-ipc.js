@@ -18,6 +18,12 @@
 // dynamic-interpolation branches in jar-ipc are the precedent this module must
 // NOT repeat (leg spec, flight DD9).
 //
+// M08 Flight 6 Leg 4 (H1/H5, design review): `history-list` (cursor-paged) is
+// REMOVED — the goldfinch://jars History panel was its only consumer and it
+// migrates to `history-page` (offset-paged, numbered pager bar); automation's
+// `getHistory` calls the store's `listRecent` DIRECTLY (not this IPC), so the
+// removal doesn't touch it. Net twin count stays SIX (drop list, add page).
+//
 // This module is ELECTRON-FREE: `ipcMain`, `historyStore`, `jars`, and
 // `broadcast` are all injected at registerHistoryIpc(deps), so the whole
 // surface is unit-testable without Electron (the jar-ipc.js precedent).
@@ -59,27 +65,40 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
   // chrome-trusted channel, once through registerInternalHandler on the
   // internal-origin-gated `internal-history-*` twin.
 
-  function handleList(_e, p) {
-    if (isMalformed(p)) return { ok: false, error: 'history: list — malformed-payload' };
-    if (!isKnownJar(p.jarId)) return { ok: false, error: 'history: list — unknown-jar' };
-    // `before: null` is the documented no-cursor value (edge case, leg spec) —
-    // explicitly excluded from the bad-args check, not just "absent".
-    if ((p.limit !== undefined && !isFiniteNumber(p.limit)) ||
-        (p.before !== undefined && p.before !== null && !isFiniteNumber(p.before))) {
-      return { ok: false, error: 'history: list — bad-args' };
+  /**
+   * A page/pageSize value that must be a POSITIVE INTEGER — `isFiniteNumber`
+   * alone would accept 0, negatives, and fractional values (design review).
+   * @param {unknown} v
+   */
+  function isPositiveInteger(v) {
+    return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v > 0;
+  }
+
+  // H1 (numbered paging bar, M08 F6 Leg 4 / design review): replaces
+  // `history-list` (removed). Validates BOTH `page` and `pageSize` as
+  // positive integers — `page: 0`/negative/fractional is bad-args, not
+  // silently clamped (the store clamps defensively too, but the IPC layer
+  // is the strict user-facing validator). Returns `total` (countByJar) so
+  // the panel can compute total pages for the pager bar.
+  function handlePage(_e, p) {
+    if (isMalformed(p)) return { ok: false, error: 'history: page — malformed-payload' };
+    if (!isKnownJar(p.jarId)) return { ok: false, error: 'history: page — unknown-jar' };
+    if (!isPositiveInteger(p.page) ||
+        (p.pageSize !== undefined && !isPositiveInteger(p.pageSize))) {
+      return { ok: false, error: 'history: page — bad-args' };
     }
     try {
-      /** @type {{ limit?: number, before?: number | null }} */
-      const opts = {};
-      if (p.limit !== undefined) opts.limit = p.limit;
-      // `before: null` is the documented no-cursor value — pass it through
-      // (the store's default param already treats null the same as absent);
-      // an explicit `undefined` is simply omitted (opts key absent either way).
-      if (p.before !== undefined) opts.before = p.before;
-      return { ok: true, visits: historyStore.listRecent(p.jarId, opts) };
+      /** @type {{ page: number, pageSize?: number }} */
+      const opts = { page: p.page };
+      if (p.pageSize !== undefined) opts.pageSize = p.pageSize;
+      return {
+        ok: true,
+        visits: historyStore.listByPage(p.jarId, opts),
+        total: historyStore.countByJar(p.jarId)
+      };
     } catch (err) {
       console.error('[history]', err);
-      return { ok: false, error: 'history: list — store-failure' };
+      return { ok: false, error: 'history: page — store-failure' };
     }
   }
 
@@ -162,7 +181,7 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
   }
 
   // Chrome-trusted channels.
-  ipcMain.handle('history-list', handleList);
+  ipcMain.handle('history-page', handlePage);
   ipcMain.handle('history-search', handleSearch);
   ipcMain.handle('history-delete', handleDelete);
   ipcMain.handle('history-clear', handleClear);
@@ -173,7 +192,7 @@ function registerHistoryIpc({ ipcMain, historyStore, jars, broadcast }) {
   // allowlisted goldfinch:// internal page (the jars/history management page).
   // internal-history-suggest is registered-but-unused this flight (DD3): the
   // omnibox is chrome-only; the jars page has no suggestions surface.
-  registerInternalHandler(ipcMain, 'internal-history-list', handleList);
+  registerInternalHandler(ipcMain, 'internal-history-page', handlePage);
   registerInternalHandler(ipcMain, 'internal-history-search', handleSearch);
   registerInternalHandler(ipcMain, 'internal-history-delete', handleDelete);
   registerInternalHandler(ipcMain, 'internal-history-clear', handleClear);

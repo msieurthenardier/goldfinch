@@ -260,14 +260,17 @@ interface GoldfinchInternalBridge {
   jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
   // --- per-jar retention edit (M08 Flight 3, Leg 1 / DD4) ---
   jarsSetRetention(payload: { id: string; days: number }): Promise<{ ok: boolean; container?: object; error?: string }>;
-  // --- per-jar history surface (M08 Flight 1, Leg 3; historyCount added M08 Flight 2, Leg 1) ---
-  historyList(payload: any): Promise<any>;
+  // --- per-jar history surface (M08 Flight 1, Leg 3; historyCount added M08
+  //     Flight 2, Leg 1; historyList -> historyPage + openTabInJar added M08
+  //     Flight 6, Leg 4 / H1-H2 design review) ---
+  historyPage(payload: any): Promise<any>;
   historySearch(payload: any): Promise<any>;
   historyDelete(payload: any): Promise<any>;
   historyClear(payload: any): Promise<any>;
   historyCount(payload: any): Promise<any>;
   onHistoryChanged(cb: (p: any) => void): number;
   offHistoryChanged(h: number): void;
+  openTabInJar(payload: { jarId: string; url: string }): Promise<{ ok: boolean; error?: string }>;
 }
 
 interface Window {
