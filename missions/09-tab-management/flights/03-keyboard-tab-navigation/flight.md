@@ -1,6 +1,6 @@
 # Flight: Keyboard Tab Navigation Parity
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
