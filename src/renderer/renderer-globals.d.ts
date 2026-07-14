@@ -183,8 +183,24 @@ interface GoldfinchBridge {
   // --- tab lifecycle (Flight 3, Leg 1 — web tab WebContentsView substrate) ---
   /** Create a web tab view in main; returns the guest wcId (invoke). */
   tabCreate(payload: { url: string; partition: string; trusted: boolean }): Promise<number>;
-  /** Close/destroy a web tab view (fire-and-forget). */
-  tabClose(wcId: number): void;
+  /** Close/destroy a web tab view (fire-and-forget). `stripIndex` (M09 F4 Leg 1,
+   * optional/additive) is the tab's visual strip position at close time, snapshotted
+   * pre-DOM-removal — rides to main for a closed-tab-stack entry's positional reopen. */
+  tabClose(wcId: number, stripIndex?: number): void;
+  /** Pop the closed-tab stack (M09 F4 Leg 2, DD2 step 2; invoke). Returns the popped
+   * entry, or `null` on an empty stack (renderer no-ops silently). `partition` is
+   * present iff the entry's original jar still exists (main-side resolved against
+   * `jars.list()`); otherwise omitted with `jarFallback: true`. `url` has already
+   * been re-validated main-side (`isSafeTabUrl`, defense-in-depth). */
+  tabReopen(): Promise<{
+    url: string;
+    title: string;
+    partition?: string;
+    stripIndex: number;
+    navEntries: unknown[];
+    navIndex: number;
+    jarFallback: boolean;
+  } | null>;
   /** Hide a web tab view without closing (fire-and-forget). */
   tabHide(wcId: number): void;
   /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */

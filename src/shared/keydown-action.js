@@ -21,12 +21,13 @@
  *   - Tab-cycle (Ctrl+Tab/Ctrl+Shift+Tab, Ctrl+PageDown/Ctrl+PageUp) and
  *     tab-jump (Ctrl+1..9) are NOT lightbox-deferred — tab switching must
  *     always work, matching the new-tab/close-tab precedent (M09 F3, DD1).
- *   - The rest of the chain (t/w/l/m/j, Shift+P, Ctrl+Shift+I, r) is NOT
+ *   - The rest of the chain (t/w/l/m/j, Shift+P, Shift+T, Ctrl+Shift+I, r) is NOT
  *     lightbox-gated — EXCEPT Ctrl+Shift+I (devtools), which IS lightbox-guarded
  *     in the live handler, matching the F12 devtools entry point. Ctrl+J
  *     (downloads) is app-level like new-tab, so it is NOT lightbox-gated.
- *   - Ctrl+Shift+I (devtools) vs Ctrl+Shift+P (toggle-privacy) is disambiguated
- *     by the key letter, so chain order cannot double-handle.
+ *   - Ctrl+Shift+I (devtools) vs Ctrl+Shift+P (toggle-privacy) vs Ctrl+Shift+T
+ *     (reopen-closed-tab, M09 F4) is disambiguated by the key letter, so chain
+ *     order cannot double-handle.
  *
  * `alt` (M09 F3, i18n design-review ruling) defaults to `false` so every
  * existing pin (which never passes it) is unaffected. It gates ONLY the digit
@@ -53,6 +54,7 @@
  *   | 'tab-next' | 'tab-prev'
  *   | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *   | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
+ *   | 'reopen-closed-tab'
  *   | null}
  */
 export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = false }) {
@@ -86,6 +88,13 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
   if (!alt && key >= '1' && key <= '9') {
     return key === '9' ? 'tab-jump-last' : /** @type {any} */ (`tab-jump-${key}`);
   }
+
+  // Ctrl+Shift+T -> reopen-closed-tab (M09 F4, DD2 step 1) — RETIRES the
+  // reservation this chord previously held unassigned (see the flight's design
+  // decisions). Matches both cases (capslock-with-shift parity, same as the
+  // Ctrl+Shift+I/P chords below); NOT lightbox-gated (tab management is global,
+  // same class as tab-cycle/jump above).
+  if (shift && (key === 'T' || key === 't')) return 'reopen-closed-tab';
 
   // The rest of the chain (NOT lightbox-gated, except Ctrl+Shift+I below).
   if (key === 't') return 'new-tab';

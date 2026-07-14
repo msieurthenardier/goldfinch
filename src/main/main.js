@@ -51,6 +51,9 @@ const { crossViewNavAction } = require('../shared/cross-view-nav');
 // handleGuestChromeShortcut below.
 const { keydownToAction } = require('../shared/keydown-action');
 const { isChromeActionForwardable, isRepeatSafeAction } = require('../shared/guest-forward-allowlist');
+// M09 F4 Leg 1 (DD1): pure, bounded closed-tab stack — main owns the singleton
+// instance (created below, near tabViews); the capture/reopen wiring lives here.
+const { createClosedTabStack } = require('../shared/closed-tab-stack.js');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -216,6 +219,10 @@ const getChromeContents = () => (chromeView ? chromeView.webContents : null);
 const tabViews = new Map();
 // Active tab's wcId (null when no web tab is active)
 let activeTabWcId = null;
+
+// M09 F4 Leg 1 (DD1): the closed-tab stack singleton — pure data structure,
+// main owns capture (tab-close, below) and reopen (Leg 2) wiring around it.
+const closedTabStack = createClosedTabStack();
 
 // --- Find-overlay view state (M05 Flight 7, DD1/DD2) ---------------------------------
 // The floating find bar is a dedicated chrome-class WebContentsView stacked above the
@@ -1095,10 +1102,10 @@ function handleGuestCrossViewNav(event, input) {
 // swallowed under guest focus with no forward anywhere): new-tab is now just
 // one member of the WEB/INTERNAL allowlists, going through the same classify+
 // allowlist path as every other forwarded action. Ctrl+T still forwards on both
-// guest branches (no regression) — Ctrl+Shift+T does NOT (keydownToAction only
-// matches lowercase 't'): an intentional drop, not a bug — parity with chrome
-// focus, and Ctrl+Shift+T is reserved unassigned for a future "reopen closed
-// tab" feature (FD ruling, pinned by a classifier-level unit test).
+// guest branches as new-tab (no regression) — Ctrl+Shift+T forwards as
+// reopen-closed-tab on both guest kinds too (M09 F4 DD2 — retires the former
+// reserved-unassigned/intentional-drop status; pinned by a classifier-level
+// unit test).
 //
 // Main-side-handled keys (zoom/print/find/downloads/devtools) are NOT in either
 // allowlist, so this forwarder no-ops for them (returns false, no
@@ -2089,7 +2096,7 @@ ipcMain.handle('new-container-create', async (_event, { name }) => {
 // Tab view IPC handlers (Flight 3, Leg 1 — web tab lifecycle via WebContentsView)
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
+ipcMain.handle('tab-create', (_event, { url, partition, trusted, restoreHistory }) => {
   // -----------------------------------------------------------------------
   // Pick webPreferences by trust level (Leg 3).
   //
@@ -2147,17 +2154,60 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   // Tab-strip event forwarding
   wireTabViewEvents(view, wcId, trusted ? INTERNAL_PARTITION : partition);
 
-  view.webContents.loadURL(url).catch((err) => {
-    console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
-  });
+  // M09 F4 Leg 2 (DD2 step 4) — reopen-chain restore branch (design-review race
+  // fix). When the payload carries `restoreHistory`, SKIP `loadURL(url)`
+  // entirely and call `navigationHistory.restore()` instead — `restore()`
+  // triggers its own navigation, so calling `loadURL` too would race two
+  // competing navigations against the same fresh WebContentsView. `index` is
+  // passed EXPLICITLY: omitting it loads the newest entry, silently wrong for
+  // a tab that had navigated back before it was closed. `restore()` already
+  // attaches a noop rejection handler (Electron docs) — the `.catch` here is
+  // purely diagnostic logging, mirroring the `loadURL` branch below.
+  if (restoreHistory && Array.isArray(restoreHistory.entries)) {
+    view.webContents.navigationHistory.restore({
+      entries: restoreHistory.entries,
+      index: restoreHistory.index,
+    }).catch((err) => {
+      console.warn('[tab-create] navigationHistory.restore rejected:', err && (err.code || err.message || err));
+    });
+  } else {
+    view.webContents.loadURL(url).catch((err) => {
+      console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
+    });
+  }
   return wcId;
 });
 
-ipcMain.on('tab-close', (_event, wcId) => {
+ipcMain.on('tab-close', (_event, wcId, stripIndex) => {
   const entry = tabViews.get(wcId);
   if (!entry) return;
   // Captured BEFORE the null-out below — one line lower and this is always false.
   const wasActive = activeTabWcId === wcId;
+  // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
+  // tabViews.delete below (the webContents and its navigationHistory must still be
+  // alive to read). Positive persist-jar allowlist (the history-recorder idiom):
+  // resolve the tab's partition against jars.list() — burner (`burner:<n>`) and
+  // internal (INTERNAL_PARTITION) partitions structurally match nothing here, so
+  // they are never captured, with NO "is not a burner" negative check anywhere.
+  // `!entry.trusted` is belt-and-suspenders (the internal partition already fails
+  // the allowlist on its own). Whole block try/catch — capture must never break close.
+  try {
+    const jar = !entry.trusted && jars.list().find((j) => j.partition === entry.partition);
+    if (jar && !entry.view.webContents.isDestroyed()) {
+      const wc = entry.view.webContents;
+      closedTabStack.push({
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        jarId: jar.id,
+        stripIndex: Number.isInteger(stripIndex) ? stripIndex : -1,
+        navEntries: wc.navigationHistory.getAllEntries(),
+        navIndex: wc.navigationHistory.getActiveIndex(),
+        closedAt: Date.now(),
+      });
+    }
+  } catch (err) {
+    console.error('[closed-tab-stack] capture failed:', err);
+  }
   mainWindow.contentView.removeChildView(entry.view);
   if (!entry.view.webContents.isDestroyed()) {
     entry.view.webContents.destroy();
@@ -2184,6 +2234,38 @@ ipcMain.on('tab-close', (_event, wcId) => {
   }
   const anyWebTabLeft = [...tabViews.values()].some((e) => e.trusted === false);
   if (!anyWebTabLeft) hideFindOverlay();
+});
+
+// M09 F4 Leg 2 (DD2 step 2) — reopen-chain invoke #1. Pops the closed-tab stack
+// and returns the entry the renderer needs to reconstruct the tab (renderer-
+// orchestrated: this handler never constructs a view itself — see DD2's
+// design-review correction). Returns `null` on an empty stack (renderer no-ops
+// silently, no error surface).
+ipcMain.handle('tab-reopen', () => {
+  const entry = closedTabStack.pop();
+  if (!entry) return null;
+  // Defense-in-depth re-validation (two-point-boundary parity — DD2 ruling): the
+  // URL was already safety-checked at capture-adjacent points, but main re-checks
+  // before handing it back to the renderer, same discipline as internal-open-tab-
+  // in-jar above. A failed re-check silently drops the reopen (never surfaces a
+  // now-unsafe URL) rather than erroring — parity with the empty-stack no-op.
+  if (!isSafeTabUrl(entry.url)) return null;
+  // Resolve the entry's original jar by id (NOT by partition — the entry stores
+  // jarId, resolved at capture time against the SAME jars.list() this re-resolves
+  // against). Absent => the jar was deleted between close and reopen: omit
+  // `partition` and flag `jarFallback` so the renderer's existing fallback chain
+  // (inheritFromPartition -> resolveNewTabContainer -> makeBurner) picks the
+  // resolved default, and announces the fallback explicitly.
+  const jar = jars.list().find((j) => j.id === entry.jarId);
+  return {
+    url: entry.url,
+    title: entry.title,
+    ...(jar ? { partition: jar.partition } : {}),
+    stripIndex: entry.stripIndex,
+    navEntries: entry.navEntries,
+    navIndex: entry.navIndex,
+    jarFallback: !jar,
+  };
 });
 
 ipcMain.on('tab-hide', (_event, wcId) => {

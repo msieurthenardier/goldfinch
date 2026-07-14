@@ -369,3 +369,60 @@ refocusing a guest can steal focus from tab-strip keyboard nav, and it must
 not fight the find-overlay or menu-overlay-sheet focus handoffs. Warrants its
 own flight: design the focus-handoff rules, then a behavior test covering
 internal-page Tab traversal + the find/sheet/tab-strip interactions.
+
+---
+
+## Classifier hand-mirror unification (`sheet-accelerator.js` / `keydown-action.js`)
+
+**Status:** maintenance candidate — flagged in the M09 Flight 3 debrief (Technical section).
+**Captured:** 2026-07-14, during M09 Flight 4 Leg 2 (Flight 3 debrief carry — BACKLOG edits
+ride flights, not debriefs).
+
+`sheet-accelerator.js` hand-mirrors `keydown-action.js`'s action table rather than sharing it —
+`sheetAcceleratorAction`'s own doc comment flags this as a "DOCUMENTED RISK." Every classifier
+change (the action set itself, and i18n semantics like the `alt`/AltGr guard) must land in BOTH
+files in lockstep or the sheet path silently diverges. Four lockstep updates have now landed
+incident-free (M09 Flight 3's tab-cycle/jump additions, Flight 4's `reopen-closed-tab` reservation
+retirement), but that measures review vigilance, not structure — a future change landed in only
+one file would be a silent product bug (Ctrl+Shift+<x> works from chrome/guest focus but not from
+an open menu, or vice versa), with no test to catch the omission short of a line-by-line diff.
+Disposition: unify via a shared mapping table, or a shared-subset call the sheet forwards through,
+at a future maintenance pass — not this flight's or Flight 3's scope, since both landed via
+careful lockstep edits with dedicated end-to-end pin tests.
+
+---
+
+## `pressKey` MCP tool's `KEY_MAP` lacks PageDown/PageUp
+
+**Status:** small, self-contained automation-surface fix — flagged in the M09 Flight 3 debrief
+(Technical section), hit live at the `tab-cycling` behavior spec's Step 5 / Out of Scope note.
+**Captured:** 2026-07-14, during M09 Flight 4 Leg 2 (Flight 3 debrief carry).
+
+The `pressKey` MCP tool's key-name resolver (`src/main/automation/input.js`'s `KEY_MAP`) does not
+recognize `PageDown`/`PageUp` — calling `pressKey(wcId, 'PageDown', ['control'])` throws
+`automation: unknown key PageDown` today. This is a gap in the **automation surface itself**, not
+a product defect: `keydownToAction`/`sheetAcceleratorAction` both map `PageDown`/`PageUp`
+identically to `Tab`/`Shift+Tab` (`'tab-next'`/`'tab-prev'`), pinned by the unit suite, and
+`dispatchChromeAction` dispatches on the resulting action string only — it cannot distinguish
+which key produced it. `tests/behavior/tab-cycling.md`'s Step 5 substitutes `Ctrl+Tab` for the
+scroll-suppression check on that documented basis. Extending `KEY_MAP` to add `PageDown`/`PageUp`
+(+ its `mcp-tools.js` description string) is small and self-contained — route to a future
+maintenance pass, then upgrade `tab-cycling` Step 5 to the real keys.
+
+---
+
+## `isRepeatSafeAction`'s `tab-*` prefix carve-out is wider than needed
+
+**Status:** known-issue note — flagged in the M09 Flight 3 debrief (Technical section).
+**Captured:** 2026-07-14, during M09 Flight 4 Leg 2 (Flight 3 debrief carry).
+
+`isRepeatSafeAction` (`src/shared/guest-forward-allowlist.js`) exempts the WHOLE `tab-*`-prefixed
+action family from the guest forwarder's auto-repeat guard, on the reasoning that
+`tab-next`/`tab-prev`/`tab-jump-*` are either intentionally repeat-friendly (held-key cycling,
+Chrome parity) or idempotent under repeat (jumps re-land on the same target every keydown). Only
+`tab-next`/`tab-prev` actually need the carve-out — a future non-idempotent `tab-*`-prefixed
+action would silently classify repeat-safe by prefix match alone, with no test forcing a second
+look. (M09 Flight 4's `reopen-closed-tab` stayed correctly guarded only because that action does
+NOT start with `tab-` — a naming coincidence the flight relied on, not a structural guarantee.)
+Narrow the carve-out to an explicit allowlist, or add a design-time checklist item flagging any
+new `tab-*` action for a repeat-safety review, at a future maintenance pass.

@@ -138,7 +138,16 @@ contextBridge.exposeInMainWorld('goldfinch', {
 
   // --- web tab lifecycle (Flight 3, Leg 1) ---
   tabCreate: (payload) => ipcRenderer.invoke('tab-create', payload),
-  tabClose: (wcId) => ipcRenderer.send('tab-close', wcId),
+  // stripIndex (M09 F4 Leg 1, optional/additive): the tab's visual position
+  // at close time (from the renderer's orderedTabIds(), snapshotted BEFORE
+  // DOM removal), carried so main can record it on a closed-tab-stack entry.
+  tabClose: (wcId, stripIndex) => ipcRenderer.send('tab-close', wcId, stripIndex),
+  // tabReopen (M09 F4 Leg 2, DD2 step 2): pops the closed-tab stack main-side and
+  // returns the popped entry (or null on an empty stack, a silent renderer no-op) —
+  // {url, title, partition?, stripIndex, navEntries, navIndex, jarFallback}.
+  // `partition` is present iff the entry's original jar still exists; otherwise
+  // omitted with `jarFallback: true` so the renderer knows to announce the fallback.
+  tabReopen: () => ipcRenderer.invoke('tab-reopen'),
   tabHide: (wcId) => ipcRenderer.send('tab-hide', wcId),
   tabNavigate: (payload) => ipcRenderer.send('tab-navigate', payload),
   tabSetActive: (wcId, bounds) => ipcRenderer.send('tab-set-active', { wcId, bounds }),

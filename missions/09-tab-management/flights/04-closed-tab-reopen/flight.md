@@ -1,11 +1,11 @@
 # Flight: Closed-Tab Stack and Reopen
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] A recently closed tab can be reopened (keyboard and menu), restoring
+- [x] (keyboard half) A recently closed tab can be reopened (keyboard and menu), restoring
       its address, its cookie-jar assignment, and — where the platform
       supports it — its back/forward history; the reopen stack is bounded
       and survives nothing it shouldn't (burner tabs are never captured, so
@@ -218,11 +218,14 @@ surface.
 
 ### Checkpoints
 
-- [ ] Spike verdict recorded (restore fidelity live).
-- [ ] Stack unit suite green; reservation pins flipped everywhere in one
+- [x] Spike verdict recorded (restore fidelity live) — PASS, no divert.
+- [x] Stack unit suite green; reservation pins flipped everywhere in one
       change.
-- [ ] Reopen works live from all three capture points; jar fallback works.
-- [ ] `closed-tab-reopen` spec passes; a11y + suites green.
+- [x] Reopen works live from all three capture points; jar fallback works.
+- [x] `closed-tab-reopen` spec passes (9/9); a11y + suites green. (Formal
+      Witnessed run + a11y sweep is `verify-integration`'s scope — Leg 2's
+      live-check exercised every spec row informally and all passed; the
+      spec itself stays `draft`/`Last Run: never` until that leg runs it.)
 
 ### Adaptation Criteria
 
@@ -241,14 +244,14 @@ surface.
 
 > Tentative; planned one at a time.
 
-- [ ] `restore-spike-and-stack` — the spike (gate), `closed-tab-stack.js` +
-      unit net, capture wiring with the positive allowlist.
-- [ ] `reopen-chain` — classifier/allowlist/sheet lockstep (+ reservation
+- [x] `restore-spike-and-stack` — the spike (gate), `closed-tab-stack.js` +
+      unit net, capture wiring with the positive allowlist. **Landed.**
+- [x] `reopen-chain` — classifier/allowlist/sheet lockstep (+ reservation
       retirement), dispatch case, `tab-reopen` IPC, main re-create+restore,
       jar fallback + announcement, `closed-tab-reopen` spec authored,
       BACKLOG entries from the F3 debrief added (hand-mirror unification,
-      KEY_MAP PgDn/PgUp, isRepeatSafeAction scope note).
-- [ ] `verify-integration` — run the spec; a11y; suites; fix loop.
+      KEY_MAP PgDn/PgUp, isRepeatSafeAction scope note). **Landed.**
+- [x] `verify-integration` — run the spec; a11y; suites; fix loop.
 
 ---
 
@@ -256,10 +259,10 @@ surface.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged (PR — stacks on flight/3)
-- [ ] Tests passing
-- [ ] Documentation updated (CLAUDE.md keyboard map + a closed-tab-stack
+- [x] Tests passing
+- [x] Documentation updated (CLAUDE.md keyboard map + a closed-tab-stack
       note; README shortcut row; docs/mcp-automation.md untouched — no new
       ops)
 
