@@ -1,6 +1,6 @@
 # Flight: Closed-Tab Stack and Reopen
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
