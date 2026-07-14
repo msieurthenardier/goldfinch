@@ -1,6 +1,6 @@
 # Flight: Tab Order Model and Reorder
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
