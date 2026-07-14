@@ -197,6 +197,20 @@ interface GoldfinchBridge {
   tabFind(payload: { wcId: number; text?: string; options?: any; stop?: boolean }): void;
   /** Send rescan-media to a specific web tab view (fire-and-forget). */
   rescanMedia(payload: { wcId: number }): void;
+  /** Read the durable app-level tab session and restore setting. */
+  tabSessionGet(): Promise<{ restoreOnStartup: boolean; restoreWindowIndex: number; suppressInitialTab: boolean; state: { version: number; windows: Array<{ tabs: any[]; activeIndex: number }>; closedTabs: any[] } } | null>;
+  /** Replace this window's durable tab snapshot. */
+  tabSessionSaveWindow(payload: { tabs: any[]; activeIndex: number }): Promise<any>;
+  /** Add one non-burner tab to the bounded app-level recently-closed stack. */
+  tabSessionPushClosed(record: any): Promise<number>;
+  /** Remove and return the most recently closed non-burner tab. */
+  tabSessionPopClosed(): Promise<{ record: any | null; count: number }>;
+  /** Keep each window's recently-closed menu state synchronized. */
+  onTabClosedCountChanged(cb: (count: number) => void): void;
+  /** Move an existing guest WebContentsView to another Goldfinch window. */
+  tabTransfer(payload: { wcId: number; record: any; target: 'new-window' | { screenX: number; screenY: number } }): Promise<boolean>;
+  /** Receive a live guest view re-parented from another Goldfinch window. */
+  onTabAdopt(cb: (payload: { wcId: number; record: any }) => void): void;
 
   // FIX 1 belt-and-suspenders: main triggers an immediate bounds re-send on maximize/unmaximize/resize.
   onTriggerSendBounds(cb: () => void): void;

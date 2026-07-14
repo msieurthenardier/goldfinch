@@ -62,6 +62,9 @@ body {
 #sheet-menu[data-menu-type='page-context'] {
   min-width: 200px;
 }
+#sheet-menu[data-menu-type='tab-context'] {
+  min-width: 210px;
+}
 /* Section separator — chrome #page-context-menu .cm-sep parity (literals, no
    styles.css here). Reused by the container menu (F1a, HAT step-1 finding) to
    divide the jar rows (incl. Burner) from the action rows below. */

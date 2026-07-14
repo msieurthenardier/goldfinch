@@ -19,7 +19,8 @@ const { keydownToAction } = require('../../src/shared/keydown-action');
 // WEB guests: the full chrome-class set (design-review enumeration — 6 actions)
 // ---------------------------------------------------------------------------
 
-const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload'];
+const TAB_MANAGEMENT = ['reopen-closed', 'next-tab', 'previous-tab', 'move-tab-left', 'move-tab-right', 'tab-1', 'tab-2', 'tab-3', 'tab-4', 'tab-5', 'tab-6', 'tab-7', 'tab-8', 'tab-last'];
+const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', ...TAB_MANAGEMENT];
 
 for (const action of WEB_FORWARDABLE) {
   test(`web guest: '${action}' is forwardable (chrome-class parity set)`, () => {
@@ -48,6 +49,10 @@ test('internal guest: new-tab is forwardable (absorbs the former handleGuestNewT
 
 test('internal guest: close-tab is forwardable (Ctrl+W closes an internal tab)', () => {
   assert.equal(isChromeActionForwardable('close-tab', 'internal'), true);
+});
+
+test('internal guest: app-level tab management is forwardable', () => {
+  for (const action of TAB_MANAGEMENT) assert.equal(isChromeActionForwardable(action, 'internal'), true, action);
 });
 
 const INTERNAL_NOT_FORWARDABLE = ['focus-address', 'toggle-panel', 'toggle-privacy', 'reload', ...WEB_MAIN_SIDE];
@@ -86,11 +91,11 @@ test('unrecognized action string never forwards', () => {
 // forwards on both guest kinds — no regression on the F2 D2 fix.
 // ---------------------------------------------------------------------------
 
-test('Ctrl+Shift+T classifies to null (keydownToAction only matches lowercase t) -> never forwards on either guest kind', () => {
+test('Ctrl+Shift+T classifies to reopen and forwards on both guest kinds', () => {
   const action = keydownToAction({ key: 'T', ctrl: true, meta: false, shift: true, lightboxOpen: false });
-  assert.equal(action, null);
-  assert.equal(isChromeActionForwardable(action, 'web'), false);
-  assert.equal(isChromeActionForwardable(action, 'internal'), false);
+  assert.equal(action, 'reopen-closed');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), true);
 });
 
 test('Ctrl+T (unshifted, either case main.js before-input-event reports) still forwards as new-tab on both guest kinds — no regression', () => {

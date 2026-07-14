@@ -17,6 +17,7 @@ import { pageContextModel } from '../shared/page-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
+import { moveItem, normalizeTabRecord, normalizeTabTransferRecord, tabContextModel } from '../shared/tab-management.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -116,6 +117,47 @@ let tabSeq = 0;
 let activeViewWcId = null;
 // RAF pending flag for debounced geometry sends.
 let rafGeometryPending = false;
+let restoringSession = true;
+let closedTabCount = 0;
+let sessionSaveTimer = 0;
+
+/** @param {Tab} tab */
+function persistedTab(tab) {
+  return normalizeTabRecord(tab);
+}
+
+function scheduleSessionSave() {
+  if (restoringSession) return;
+  window.clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = window.setTimeout(() => {
+    const ordered = [...tabs.values()];
+    const records = ordered.map((tab) => ({ tab, record: persistedTab(tab) })).filter((x) => x.record);
+    const activeIndex = Math.max(0, records.findIndex((x) => x.tab.id === activeTabId));
+    window.goldfinch.tabSessionSaveWindow({ tabs: records.map((x) => x.record), activeIndex }).catch(() => {});
+  }, 80);
+}
+
+function reorderTab(id, targetIndex) {
+  const ordered = [...tabs.values()];
+  const from = ordered.findIndex((tab) => tab.id === id);
+  if (from < 0) return false;
+  const next = moveItem(ordered, from, targetIndex);
+  if (next.every((tab, index) => tab === ordered[index])) return false;
+  tabs.clear();
+  for (const tab of next) {
+    tabs.set(tab.id, tab);
+    els.tabs.appendChild(tab.btn);
+  }
+  scheduleSessionSave();
+  return true;
+}
+
+function cycleTab(delta) {
+  const ids = [...tabs.keys()];
+  if (!ids.length) return;
+  const current = Math.max(0, ids.indexOf(activeTabId));
+  activateTab(ids[(current + delta + ids.length) % ids.length]);
+}
 
 /* ----------------------------------------------------- jars / containers */
 
@@ -181,9 +223,9 @@ window.goldfinch.onJarWiped((p) => {
   }
   const activeMatch = matches.find((t) => t.id === activeTabId);
   for (const t of matches) {
-    if (t !== activeMatch) closeTab(t.id);
+    if (t !== activeMatch) closeTab(t.id, { recordClosed: false });
   }
-  if (activeMatch) closeTab(activeMatch.id);
+  if (activeMatch) closeTab(activeMatch.id, { recordClosed: false });
 });
 
 // Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
@@ -237,9 +279,9 @@ function refreshOpenTabJars() {
   }
   const activeOrphan = orphans.find((t) => t.id === activeTabId);
   for (const t of orphans) {
-    if (t !== activeOrphan) closeTab(t.id);
+    if (t !== activeOrphan) closeTab(t.id, { recordClosed: false });
   }
-  if (activeOrphan) closeTab(activeOrphan.id);
+  if (activeOrphan) closeTab(activeOrphan.id, { recordClosed: false });
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
@@ -335,6 +377,16 @@ const overlayMenus = {
       else els.address.focus();
     }
   },
+  'tab-context': {
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus(reason) {
+      const tab = tabCtx.tabId && tabs.get(tabCtx.tabId);
+      if (reason === 'escape' && tab?.btn?.isConnected) tab.btn.focus();
+    }
+  },
   // Omnibox suggestions (M08 Flight 4 Leg 3 / flight DD5): the "trigger" is
   // #address itself, which already holds focus in every keyboard path (the
   // sheet's noFocus open never steals it) — aria-expanded rides this generic
@@ -424,6 +476,15 @@ const openNewContainerOverlay = () => openOverlayMenu('new-container', [], conta
 /** @param {{ x: number, y: number }} anchor */
 const openPageContextOverlaySheet = (anchor) =>
   openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem), anchor, 0);
+
+/** @param {string} tabId @param {{ x: number, y: number }} anchor */
+const openTabContextOverlay = (tabId, anchor) => {
+  const ordered = [...tabs.keys()];
+  const index = ordered.indexOf(tabId);
+  if (index < 0) return;
+  tabCtx.tabId = tabId;
+  openOverlayMenu('tab-context', tabContextModel({ index, count: ordered.length, canReopen: closedTabCount > 0 }), anchor, 0);
+};
 
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
 // 'toggle' close (the sheet's blur usually resolves the close first — see the
@@ -617,6 +678,31 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       }
       break;
     }
+    case 'tab-context': {
+      const tabId = tabCtx.tabId;
+      const tab = tabId ? tabs.get(tabId) : null;
+      if (id === 'tab:reopen-closed') {
+        reopenClosedTab();
+        break;
+      }
+      if (!tab) break;
+      const ordered = [...tabs.values()];
+      const index = ordered.indexOf(tab);
+      if (id === 'tab:close') {
+        closeTab(tab.id);
+      } else if (id === 'tab:close-others') {
+        activateTab(tab.id);
+        for (const other of ordered) if (other !== tab) closeTab(other.id);
+      } else if (id === 'tab:close-right') {
+        for (const other of ordered.slice(index + 1).reverse()) closeTab(other.id);
+      } else if (id === 'tab:duplicate') {
+        const record = persistedTab(tab);
+        if (record) createTab(record.url, record.container, { trusted: record.trusted, restored: record });
+      } else if (id === 'tab:move-new-window') {
+        moveTabToNewWindow(tab.id);
+      }
+      break;
+    }
     case 'suggestions': {
       // INDEX dispatch (the spell:<i> idiom): the id carries only the row
       // index; the URL resolves from `suggest.items`, which channel 7 (just
@@ -795,6 +881,8 @@ function siteInfoModel(tab) {
 /** @type {{ wcId: number|null, params: any, returnFocus: HTMLElement|null, toolbarItem: ('media'|'shields'|'devtools'|null) }} */
 const pageCtx = { wcId: null, params: null, returnFocus: null,
   toolbarItem: null };  // 'media' | 'shields' | 'devtools' | null  (null = page-content mode)
+/** @type {{ tabId: string|null }} */
+const tabCtx = { tabId: null };
 
 /** Derive a download filename from a media URL's basename (mirrors media-panel naming). */
 function basenameFromUrl(url) {
@@ -919,7 +1007,84 @@ function internalJarName(url) {
   }
 }
 
-function createTab(url = currentHomePage(), container = null, { trusted = false } = {}) {
+async function reopenClosedTab() {
+  const result = await window.goldfinch.tabSessionPopClosed().catch(() => null);
+  const record = result?.record || null;
+  if (Number.isInteger(result?.count)) closedTabCount = result.count;
+  if (!record) {
+    closedTabCount = 0;
+    return null;
+  }
+  return createTab(record.url, record.container, { trusted: record.trusted === true, restored: record });
+}
+
+async function transferTab(id, target) {
+  const tab = tabs.get(id);
+  if (!tab || tab.wcId == null) return false;
+  const record = normalizeTabTransferRecord(tab);
+  if (!record) return false;
+  const moved = await window.goldfinch.tabTransfer({ wcId: tab.wcId, record, target }).catch(() => false);
+  if (!moved) return false;
+  removeTransferredTab(id);
+  return true;
+}
+
+function moveTabToNewWindow(id) {
+  return transferTab(id, 'new-window');
+}
+
+function removeTransferredTab(id) {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  const ids = [...tabs.keys()];
+  const index = ids.indexOf(id);
+  const adjacent = ids[index + 1] || ids[index - 1] || null;
+  if (tab.wcId === activeViewWcId) activeViewWcId = null;
+  tab.btn.remove();
+  tabs.delete(id);
+  if (activeTabId === id) {
+    if (adjacent && tabs.has(adjacent)) activateTab(adjacent);
+    else createTab();
+  }
+  scheduleSessionSave();
+}
+
+function bindTabDrag(btn, id) {
+  let drag = null;
+  btn.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || /** @type {HTMLElement} */ (event.target).closest('.tab-close')) return;
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, dragging: false };
+    try { btn.setPointerCapture(event.pointerId); } catch { /* synthetic test events have no capture target */ }
+  });
+  btn.addEventListener('pointermove', (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+    drag.dragging = true;
+    btn.classList.add('dragging');
+    const ordered = [...tabs.values()];
+    let target = ordered.length - 1;
+    for (let i = 0; i < ordered.length; i++) {
+      const rect = ordered[i].btn.getBoundingClientRect();
+      if (event.clientX < rect.left + rect.width / 2) { target = i; break; }
+    }
+    reorderTab(id, target);
+  });
+  const finish = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const wasDragging = drag.dragging;
+    drag = null;
+    btn.classList.remove('dragging');
+    if (!wasDragging) return;
+    btn.dataset.suppressClick = 'true';
+    const strip = els.tabstrip.getBoundingClientRect();
+    const outside = event.clientX < strip.left || event.clientX > strip.right || event.clientY < strip.top || event.clientY > strip.bottom;
+    if (outside) transferTab(id, { screenX: event.screenX, screenY: event.screenY });
+  };
+  btn.addEventListener('pointerup', finish);
+  btn.addEventListener('pointercancel', finish);
+}
+
+function createTab(url = currentHomePage(), container = null, { trusted = false, restored = null, activate = true, adoptWcId = null } = {}) {
   // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
   // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
   // so web content reaching here via onOpenTab can never select the internal branch.
@@ -941,12 +1106,12 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
     id,
     webview: null, // no <webview> element — all tabs are WebContentsViews (Leg 3)
     trusted,
-    title: 'New tab',
+    title: restored && typeof restored.title === 'string' ? restored.title : 'New tab',
     url,
-    favicon: null,
+    favicon: restored && typeof restored.favicon === 'string' ? restored.favicon : null,
     media: [],
     selected: new Set(),
-    wcId: null,
+    wcId: Number.isInteger(adoptWcId) ? adoptWcId : null,
     privacy: blankPrivacy(),
     container: jar
   };
@@ -974,6 +1139,11 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
       : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
   btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;
   btn.addEventListener('click', (e) => {
+    if (btn.dataset.suppressClick === 'true') {
+      delete btn.dataset.suppressClick;
+      e.preventDefault();
+      return;
+    }
     if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
       if (tabs.size > 1) freezeTabWidths(); // DD5: defer reflow on pointer-close (not last tab)
       closeTab(id);
@@ -981,40 +1151,69 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
     }
     activateTab(id);
   });
+  btn.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    releaseTabWidths();
+    closeTab(id);
+  });
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openTabContextOverlay(id, chromePointToSheet(e.clientX, e.clientY));
+  });
+  bindTabDrag(btn, id);
   els.tabs.appendChild(btn);
   tab.btn = btn;
+  if (tab.title !== 'New tab') {
+    const titleNode = btn.querySelector('.tab-title');
+    if (titleNode) titleNode.textContent = tab.title;
+    btn.title = tab.title;
+    btn.setAttribute('aria-label', tab.title);
+    btn.querySelector('.tab-close')?.setAttribute('aria-label', `Close tab: ${tab.title}`);
+  }
+  if (tab.favicon) {
+    const fav = /** @type {HTMLImageElement|null} */ (btn.querySelector('.tab-fav'));
+    if (fav) { fav.src = tab.favicon; fav.classList.remove('hidden'); }
+  }
 
   // All tabs (web and internal) use WebContentsView via IPC (Leg 3).
   // For internal tabs: trusted:true causes main to construct with internal webPreferences
   // (internal-preload.js, contextIsolation:true, sandbox:true, partition:INTERNAL_PARTITION).
   // For web tabs: trusted:false → web prefs (webview-preload.js, contextIsolation:false).
-  window.goldfinch.tabCreate({ url, partition: jar.partition, trusted }).then((wcId) => {
-    if (!tabs.has(id)) return; // tab was closed before wcId arrived
-    tab.wcId = wcId;
-    // If this tab is still active, refresh state now that wcId is available.
-    if (tab.id === activeTabId) {
-      // Make the WebContentsView visible now that its wcId has arrived.
-      // activateTab() ran synchronously in createTab() with wcId still null,
-      // so the tab-set-active IPC was skipped — send it here to show the view.
-      // Full slot: find never insets the guest (DD8 — the overlay floats).
-      window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
-      // Track the now-visible view (web or internal) for the outgoing-hide path.
-      activeViewWcId = tab.wcId;
-      updateNavButtons();
-      refreshZoomControl(tab);
-      if (!els.privacyPanel.classList.contains('collapsed')) {
-        fetchCookies();
+  if (tab.wcId == null) {
+    window.goldfinch.tabCreate({ url, partition: jar.partition, trusted }).then((wcId) => {
+      if (!tabs.has(id) || !Number.isInteger(wcId)) return; // tab was closed before wcId arrived
+      tab.wcId = wcId;
+      // If this tab is still active, refresh state now that wcId is available.
+      if (tab.id === activeTabId) {
+        window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
+        activeViewWcId = tab.wcId;
+        updateNavButtons();
+        refreshZoomControl(tab);
+        if (!els.privacyPanel.classList.contains('collapsed')) {
+          fetchCookies();
+        }
       }
-    }
-  });
+    });
+  }
 
-  activateTab(id);
+  if (activate) activateTab(id);
+  scheduleSessionSave();
   return tab;
 }
 
-function closeTab(id) {
+function closeTab(id, { recordClosed = true } = {}) {
   const tab = tabs.get(id);
   if (!tab) return;
+  const orderedIds = [...tabs.keys()];
+  const closedIndex = orderedIds.indexOf(id);
+  const adjacentId = orderedIds[closedIndex + 1] || orderedIds[closedIndex - 1] || null;
+  const record = recordClosed ? persistedTab(tab) : null;
+  if (record) {
+    window.goldfinch.tabSessionPushClosed(record)
+      .then((count) => { closedTabCount = Number.isInteger(count) ? count : closedTabCount; })
+      .catch(() => {});
+  }
   // All tabs are WebContentsViews (Leg 3). Internal tabs (trusted) use tabClose just like web tabs.
   if (tab.wcId != null) {
     if (tab.wcId === activeViewWcId) activeViewWcId = null;
@@ -1024,10 +1223,10 @@ function closeTab(id) {
   tabs.delete(id);
 
   if (activeTabId === id) {
-    const next = [...tabs.keys()].pop();
-    if (next) activateTab(next);
+    if (adjacentId && tabs.has(adjacentId)) activateTab(adjacentId);
     else createTab(); // never leave the window with zero tabs
   }
+  scheduleSessionSave();
 }
 
 function activateTab(id) {
@@ -1121,6 +1320,7 @@ function activateTab(id) {
   } else {
     setDevtoolsPressed(false);
   }
+  scheduleSessionSave();
 }
 
 function activeTab() {
@@ -1502,6 +1702,18 @@ els.tabs.addEventListener('keydown', (e) => {
   // `.closest()` returns Element regardless of receiver, and `.dataset` is HTMLElement-only.
   const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || activeTabId;
   const idx = Math.max(0, ids.indexOf(cur));
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    return; // global shortcut dispatcher owns keyboard reorder
+  }
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault();
+    const tab = cur && tabs.get(cur);
+    if (tab?.btn) {
+      const rect = tab.btn.getBoundingClientRect();
+      openTabContextOverlay(tab.id, chromePointToSheet(rect.left + rect.width / 2, rect.bottom));
+    }
+    return;
+  }
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault();
     const next = ids[(idx + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length];
@@ -2846,6 +3058,21 @@ window.goldfinch.onOpenTab(({ url, openerPartition }) => {
   createTab(url, inheritContainerFromPartition(openerPartition));
 });
 
+window.goldfinch.onTabAdopt(({ wcId, record: raw }) => {
+  const record = normalizeTabTransferRecord(raw);
+  if (!record || !Number.isInteger(wcId)) return;
+  restoringSession = false;
+  createTab(record.url, record.container, {
+    trusted: record.trusted,
+    restored: record,
+    adoptWcId: wcId,
+  });
+});
+
+window.goldfinch.onTabClosedCountChanged((count) => {
+  if (Number.isInteger(count) && count >= 0) closedTabCount = count;
+});
+
 /* --------------------------------------------------------------- shortcuts */
 
 /**
@@ -2897,6 +3124,26 @@ function dispatchChromeAction(action) {
     case 'close-tab':
       if (activeTabId) closeTab(activeTabId);
       return true;
+    case 'reopen-closed':
+      reopenClosedTab();
+      return true;
+    case 'next-tab':
+      cycleTab(1);
+      return true;
+    case 'previous-tab':
+      cycleTab(-1);
+      return true;
+    case 'move-tab-left':
+    case 'move-tab-right': {
+      if (!activeTabId) return false;
+      const ids = [...tabs.keys()];
+      const index = ids.indexOf(activeTabId);
+      if (index < 0) return false;
+      const target = Math.max(0, Math.min(ids.length - 1, index + (action === 'move-tab-left' ? -1 : 1)));
+      reorderTab(activeTabId, target);
+      focusTab(activeTabId);
+      return true;
+    }
     case 'focus-address':
       els.address.focus();
       els.address.select();
@@ -2922,6 +3169,14 @@ function dispatchChromeAction(action) {
       const t = activeTab();
       if (!(t && isInternalTab(t))) openDownloads();
       return true;
+    }
+    default: {
+      if (/^tab-[1-8]$/.test(action) || action === 'tab-last') {
+        const ordered = [...tabs.keys()];
+        const index = action === 'tab-last' ? ordered.length - 1 : Number(action.slice(4)) - 1;
+        if (ordered[index]) activateTab(ordered[index]);
+        return true;
+      }
     }
   }
   return false;
@@ -3056,6 +3311,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
     // typing in the address bar). No find-overlay-closed echo comes back (we know).
     if (tab.id === activeTabId) window.goldfinch.findOverlayClose();
   }
+  scheduleSessionSave();
 });
 
 window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
@@ -3069,6 +3325,7 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
     // Close trigger: navigation (in-page variant) of the active tab (flight DD5).
     closeSuggestions('navigation');
   }
+  scheduleSessionSave();
 });
 
 window.goldfinch.onTabTitle(({ wcId, title }) => {
@@ -3081,6 +3338,7 @@ window.goldfinch.onTabTitle(({ wcId, title }) => {
   tab.btn.setAttribute('aria-label', name);
   const close = tab.btn.querySelector('.tab-close');
   if (close) close.setAttribute('aria-label', `Close tab: ${name}`);
+  scheduleSessionSave();
 });
 
 window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
@@ -3091,6 +3349,7 @@ window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
   tab.favicon = fav;
   const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
   if (img) { img.src = fav; img.classList.remove('hidden'); }
+  scheduleSessionSave();
 });
 
 window.goldfinch.onTabLoading(({ wcId, loading }) => {
@@ -3209,8 +3468,40 @@ async function createContainerAndOpenTab(rawName) {
 // undefined → burner routing), so this can never be blocked by a jars IPC error.
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
-  jarsBoot
-]).then(([url]) => createTab(url || HOMEPAGE));
+  jarsBoot,
+  window.goldfinch.tabSessionGet().catch(() => null)
+]).then(([url, , sessionPayload]) => {
+  const state = sessionPayload?.state;
+  closedTabCount = Array.isArray(state?.closedTabs) ? state.closedTabs.length : 0;
+  const restoreIndex = Number.isInteger(sessionPayload?.restoreWindowIndex) ? sessionPayload.restoreWindowIndex : 0;
+  const saved = sessionPayload?.restoreOnStartup === true && Array.isArray(state?.windows)
+    ? state.windows[restoreIndex]
+    : null;
+  /** @type {Tab[]} */
+  const restored = [];
+  if (saved && Array.isArray(saved.tabs)) {
+    for (const raw of saved.tabs) {
+      const record = normalizeTabRecord(raw);
+      if (!record) continue;
+      const tab = createTab(record.url, record.container, {
+        trusted: record.trusted,
+        restored: record,
+        activate: false,
+      });
+      if (tab) restored.push(tab);
+    }
+  }
+  restoringSession = false;
+  if (restored.length) {
+    const index = Number.isInteger(saved.activeIndex)
+      ? Math.max(0, Math.min(saved.activeIndex, restored.length - 1))
+      : 0;
+    activateTab(restored[index].id);
+    scheduleSessionSave();
+  } else if (sessionPayload?.suppressInitialTab !== true) {
+    createTab(url || HOMEPAGE);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Evaluate-reachable automation/dogfooding seam (M07 Flight 2 leg 5, FD-approved).

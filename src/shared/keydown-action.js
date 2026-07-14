@@ -34,7 +34,10 @@
  * }} descriptor
  * @returns {'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'find'
  *   | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
- *   | 'toggle-privacy' | 'reload' | 'downloads' | null}
+ *   | 'toggle-privacy' | 'reload' | 'downloads' | 'reopen-closed'
+ *   | 'next-tab' | 'previous-tab' | 'move-tab-left' | 'move-tab-right'
+ *   | 'tab-1' | 'tab-2' | 'tab-3' | 'tab-4' | 'tab-5' | 'tab-6'
+ *   | 'tab-7' | 'tab-8' | 'tab-last' | null}
  */
 export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
   // F12 (no modifier) — must be decided BEFORE the modifier gate, else it never
@@ -43,6 +46,19 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen }) {
 
   const mod = ctrl || meta;
   if (!mod) return null;
+
+  // Tab management. Match shifted chords before the legacy lowercase-only
+  // branches so Ctrl+Shift+T is reopen, never a new tab.
+  if (shift && (key === 'T' || key === 't')) return 'reopen-closed';
+  if (key === 'Tab') return shift ? 'previous-tab' : 'next-tab';
+  if (key === 'PageDown') return 'next-tab';
+  if (key === 'PageUp') return 'previous-tab';
+  if (shift && key === 'ArrowLeft') return 'move-tab-left';
+  if (shift && key === 'ArrowRight') return 'move-tab-right';
+  if (!shift && /^[1-8]$/.test(key)) {
+    return /** @type {'tab-1'|'tab-2'|'tab-3'|'tab-4'|'tab-5'|'tab-6'|'tab-7'|'tab-8'} */ (`tab-${key}`);
+  }
+  if (!shift && key === '9') return 'tab-last';
 
   // Page-zoom (=/+/-/0) — lightbox-deferred.
   if (key === '=' || key === '+' || key === '-' || key === '0') {

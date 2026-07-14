@@ -33,7 +33,8 @@ const { isSafeTabUrl } = require('../shared/url-safety');
  *   automationKeyHashes: Record<string, string>,
  *   automationAdminKeyHash: string,
  *   automationPort: number,
- *   spellcheck: boolean
+ *   spellcheck: boolean,
+ *   restoreOnStartup: boolean
  * }} Settings
  */
 
@@ -63,7 +64,10 @@ const DEFAULTS = {
   // settings file written before this leg auto-populates to false. Gated at the SESSION
   // layer in main.js (setSpellCheckerLanguages), never in the WebContentsView's webPreferences
   // (immutable after construction), so the toggle can reach already-open tabs.
-  spellcheck: false
+  spellcheck: false,
+  // Reopen the prior non-burner window/tab session. Off by default so adopting
+  // session restore is an explicit user choice.
+  restoreOnStartup: false
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -136,7 +140,9 @@ const VALIDATORS = {
   // Number.isInteger rejects strings, null, arrays, booleans, and non-integers —
   // no extra guards needed.
   automationPort: (v) =>
-    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535
+    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535,
+
+  restoreOnStartup: (v) => typeof v === 'boolean'
 };
 
 // ---------------------------------------------------------------------------

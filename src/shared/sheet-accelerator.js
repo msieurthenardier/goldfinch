@@ -39,9 +39,7 @@
  *
  * @param {{ key: string, control: boolean, meta: boolean, shift: boolean }} input
  * @returns {{ scope: 'guest' | 'chrome',
- *   action: 'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'find'
- *     | 'downloads' | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
- *     | 'reload' | 'toggle-privacy',
+ *   action: string,
  *   autoRepeatGuard?: boolean } | null}
  */
 export function sheetAcceleratorAction({ key, control, meta, shift }) {
@@ -63,7 +61,15 @@ export function sheetAcceleratorAction({ key, control, meta, shift }) {
   if (key === 'f' || key === 'F') return { scope: 'guest', action: 'find' };
   if (key === 'j' || key === 'J') return { scope: 'guest', action: 'downloads', autoRepeatGuard: true };
 
-  // Chrome-class (mirrors keydownToAction's lowercase-only matches).
+  // Chrome-class (mirrors keydownToAction, including tab management).
+  if (shift && (key === 'T' || key === 't')) return { scope: 'chrome', action: 'reopen-closed' };
+  if (key === 'Tab') return { scope: 'chrome', action: shift ? 'previous-tab' : 'next-tab' };
+  if (key === 'PageDown') return { scope: 'chrome', action: 'next-tab' };
+  if (key === 'PageUp') return { scope: 'chrome', action: 'previous-tab' };
+  if (shift && key === 'ArrowLeft') return { scope: 'chrome', action: 'move-tab-left' };
+  if (shift && key === 'ArrowRight') return { scope: 'chrome', action: 'move-tab-right' };
+  if (!shift && /^[1-8]$/.test(key)) return { scope: 'chrome', action: `tab-${key}` };
+  if (!shift && key === '9') return { scope: 'chrome', action: 'tab-last' };
   if (key === 't') return { scope: 'chrome', action: 'new-tab' };
   if (key === 'w') return { scope: 'chrome', action: 'close-tab' };
   if (key === 'l') return { scope: 'chrome', action: 'focus-address' };

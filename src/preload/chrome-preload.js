@@ -145,6 +145,13 @@ contextBridge.exposeInMainWorld('goldfinch', {
   tabSetBounds: (wcId, bounds) => ipcRenderer.send('tab-set-bounds', { wcId, bounds }),
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
   rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
+  tabSessionGet: () => ipcRenderer.invoke('tab-session:get'),
+  tabSessionSaveWindow: (payload) => ipcRenderer.invoke('tab-session:save-window', payload),
+  tabSessionPushClosed: (record) => ipcRenderer.invoke('tab-session:push-closed', record),
+  tabSessionPopClosed: () => ipcRenderer.invoke('tab-session:pop-closed'),
+  onTabClosedCountChanged: (cb) => ipcRenderer.on('tab-session:closed-count-changed', (_e, count) => cb(count)),
+  tabTransfer: (payload) => ipcRenderer.invoke('tab-transfer', payload),
+  onTabAdopt: (cb) => ipcRenderer.on('tab-adopt', (_e, payload) => cb(payload)),
 
   // --- menu-overlay sheet (M05 Flight 8, DD4) ---
   // The chrome owns menu state/model-building/actions; the sheet is presentation-only.

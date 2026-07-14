@@ -152,11 +152,10 @@ html.platform-darwin #window-controls {
 }
 #tabs {
   display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  flex: 0 1 auto; /* size to tabs' content; can shrink below content so its own scroll engages */
+  gap: 2px;
+  overflow: hidden;
+  flex: 0 1 auto; /* size to preferred tab widths, then shrink the complete set to fit */
   min-width: 0;
-  scrollbar-width: thin;
 }
 /* Flexible drag spacer: absorbs the slack between the pill and the window controls,
    and inherits the #tabstrip drag region so it becomes the window-move area. */
@@ -199,10 +198,11 @@ html.platform-darwin #window-controls {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 0 1 240px; /* Chrome-matched preferred width, no grow (so the pill hugs the tabs), shrinks to the floor */
+  flex: 1 1 240px; /* every open tab participates in the same shrink-to-fit row */
   width: 240px; /* drive the flex base size: overflow:hidden makes the content-size the text width, so #tabs would auto-size narrow without an explicit width */
-  min-width: 88px; /* floor — favicon + jar dot + ellipsized title + close stay visible (tune at HAT) */
+  min-width: 0; /* no scrollbar at any count; inactive affordances collapse below */
   max-width: 240px; /* cap so a handful of tabs don't stretch absurdly wide */
+  container: tab / inline-size;
   overflow: hidden; /* hard guarantee: content never spills past the tab slot at the floor */
   padding: 7px 10px;
   background: var(--bg-2);
@@ -211,8 +211,15 @@ html.platform-darwin #window-controls {
   font-size: 12px;
   white-space: nowrap;
 }
+.tab.dragging {
+  opacity: 0.62;
+  box-shadow: inset 0 2px 0 var(--accent), 0 0 0 1px var(--accent);
+}
 .tab.active {
   background: var(--bg-3);
+  /* Reserve the dot/favicon/close budget even at extreme tab counts; inactive
+     tabs absorb the remaining shrink so the active close affordance is never clipped. */
+  min-width: 82px;
   /* Non-color cue (WCAG 1.4.1): an accent inset top-bar + heavier weight so the
      active tab is distinguishable without relying on the background tint alone. */
   box-shadow: inset 0 2px 0 var(--accent);
@@ -247,6 +254,17 @@ html.platform-darwin #window-controls {
 .tab .tab-close:hover {
   background: rgba(255, 255, 255, 0.15);
   color: var(--fg);
+}
+@container tab (max-width: 92px) {
+  .tab:not(.active) .tab-close {
+    display: none;
+  }
+}
+@container tab (max-width: 58px) {
+  .tab:not(.active) .tab-title,
+  .tab:not(.active) .tab-jar {
+    display: none;
+  }
 }
 .tab:focus-visible,
 .tab .tab-close:focus-visible {

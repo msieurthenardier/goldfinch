@@ -52,16 +52,19 @@ test('Ctrl+t -> new-tab', () => {
   assert.equal(keydownToAction(desc({ key: 't', ctrl: true })), 'new-tab');
 });
 
-// DD8 (M06 F3 Leg 4, FD ruling): Ctrl+Shift+T is intentionally NOT 'new-tab' —
-// only lowercase 't' matches. This is the classifier fact the guest-focus
-// forwarder's parity depends on (unifying the guest capture onto this same
-// classifier intentionally drops shifted-T under guest focus, where the OLD
-// handleGuestNewTab one-off used to match BOTH cases — see
-// guest-forward-allowlist.test.js for the end-to-end pin). Ctrl+Shift+T is
-// conventionally "reopen closed tab" — reserved unassigned for that future
-// feature, not a bug.
-test('Ctrl+Shift+t (uppercase T) -> null, NOT new-tab (intentional — reserved for a future "reopen closed tab")', () => {
-  assert.equal(keydownToAction(desc({ key: 'T', ctrl: true, shift: true })), null);
+test('Ctrl+Shift+T -> reopen-closed', () => {
+  assert.equal(keydownToAction(desc({ key: 'T', ctrl: true, shift: true })), 'reopen-closed');
+});
+
+test('standard tab navigation, direct selection, and keyboard reorder shortcuts classify', () => {
+  assert.equal(keydownToAction(desc({ key: 'Tab', ctrl: true })), 'next-tab');
+  assert.equal(keydownToAction(desc({ key: 'Tab', ctrl: true, shift: true })), 'previous-tab');
+  assert.equal(keydownToAction(desc({ key: 'PageDown', ctrl: true })), 'next-tab');
+  assert.equal(keydownToAction(desc({ key: 'PageUp', ctrl: true })), 'previous-tab');
+  assert.equal(keydownToAction(desc({ key: '1', ctrl: true })), 'tab-1');
+  assert.equal(keydownToAction(desc({ key: '9', ctrl: true })), 'tab-last');
+  assert.equal(keydownToAction(desc({ key: 'ArrowLeft', ctrl: true, shift: true })), 'move-tab-left');
+  assert.equal(keydownToAction(desc({ key: 'ArrowRight', ctrl: true, shift: true })), 'move-tab-right');
 });
 
 test('Ctrl+w -> close-tab', () => {

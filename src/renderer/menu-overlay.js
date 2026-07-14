@@ -128,7 +128,8 @@ import { isSafeColor } from '../shared/safe-color.js';
   const MENU_LABELS = {
     kebab: 'More menu',
     container: 'Open new tab in a container', // parity with chrome #container-menu
-    'page-context': 'Page actions' // parity with chrome #page-context-menu (index.html:54)
+    'page-context': 'Page actions', // parity with chrome #page-context-menu (index.html:54)
+    'tab-context': 'Tab actions'
   };
   // Non-item header row per menuType (role="presentation" — parity with the old
   // container menu's "Open new tab in…" .cm-title; excluded from the item set).
@@ -203,6 +204,9 @@ import { isSafeColor } from '../shared/safe-color.js';
       btn.className = 'cm-item';
       btn.setAttribute('role', 'menuitem');
       btn.tabIndex = -1;
+      if (item.disabled === true) {
+        btn.setAttribute('aria-disabled', 'true');
+      }
       if (item.color !== undefined) {
         const dot = document.createElement('span');
         dot.className = 'cm-dot';
@@ -221,6 +225,7 @@ import { isSafeColor } from '../shared/safe-color.js';
         btn.appendChild(badge);
       }
       btn.addEventListener('click', () => {
+        if (item.disabled === true) return;
         // Exactly one report per token: activation wins over the dismissal the
         // controller's onClose would otherwise send.
         if (sendActivatedOnce({ id: item.id })) menuController.close(menuEntry);

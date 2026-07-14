@@ -50,6 +50,21 @@ test('defaults on first load — no settings.json present', () => {
     assert.equal(result.homePage, 'https://www.google.com');
     assert.equal(store.get('homePage'), 'https://www.google.com');
     assert.equal(store.get('version'), 1);
+    assert.equal(store.get('restoreOnStartup'), false);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('restoreOnStartup is a validated additive boolean setting', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('restoreOnStartup', true);
+    assert.equal(store.load(dir).restoreOnStartup, true);
+    assert.throws(() => store.set('restoreOnStartup', 'true'), TypeError);
+    assert.equal(store.get('restoreOnStartup'), true);
   } finally {
     removeTempDir(dir);
   }

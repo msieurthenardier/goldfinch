@@ -8,9 +8,9 @@
 ## Intent
 
 Verify three rendered-layout behaviors of the restructured tab strip and frameless window that
-only exist in the running app: (1) tabs **shrink/grow to fit** the available width — no
-always-on horizontal scrollbar — with a usable floor (favicon + close stay visible) and scroll
-returning only past that floor; (2) closing a tab **by pointer defers the reflow** — remaining
+only exist in the running app: (1) tabs **shrink to fit** the available width with **no tab-strip
+scrollbar at any count**; titles truncate first and inactive close buttons collapse while the
+active close button remains; (2) closing a tab **by pointer defers the reflow** — remaining
 tabs keep their width and slide left under the cursor until the pointer leaves the strip, then
 re-expand; and (3) the frameless window's **maximize/restore button reflects window state**
 through an observable DOM read path. These need a behavior test because they are *layout geometry
@@ -100,8 +100,8 @@ covered by `npm run a11y`.)
 |---|---------|------------------|
 | 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. Take a baseline `captureWindow()` and record the current tab count via `readAxTree(wcId)`. | `tools/list` **includes** (presence-checked, not an exact count) the tools this spec drives: `getChromeTarget`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` where `wcId` is a **numeric** chrome identifier. Record `wcId`. If not, halt — preconditions not met. |
 | 2 | Open a **small** number of tabs (e.g. 3–4) at distinct fixture URLs. Take a `captureWindow()` screenshot and observe each tab's rendered width. | Tabs **expand to share** the available strip width (each is comfortably wide, well above the floor — judged visually from the screenshot). `#tabs` shows **no** horizontal scroll affordance (no scrollbar/overflow visible in the frame). |
-| 3 | Open **many** more tabs (enough to exceed the comfortable width — e.g. 12–20+). Take a fresh `captureWindow()` and observe tab widths vs. Step 2. | Tabs **shrink** to share the width (visibly narrower than Step 2); each remaining tab's **favicon and close button stay visible** in the frame and the title ellipsizes. Tabs do **not** keep a fixed 120–220px width with an always-on scrollbar (the old behavior). [a11y] |
-| 4 | Keep opening tabs until even the floor width cannot fit all tabs in the strip. Take a `captureWindow()`. | Only **now** does a horizontal scroll affordance appear in the frame (the strip overflows) — scroll is the last-resort fallback, not the default. |
+| 3 | Open **many** more tabs (enough to exceed the comfortable width — e.g. 12–20+). Take a fresh `captureWindow()` and observe tab widths vs. Step 2. | Tabs **shrink** to share the width (visibly narrower than Step 2); titles ellipsize and inactive close buttons collapse as slots narrow, while the active tab retains its close button. No horizontal scrollbar appears. [a11y] |
+| 4 | Keep opening tabs well past the prior floor/overflow threshold. Take a `captureWindow()`. | Every tab continues participating in the same shrinking row; `#tabs` never exposes a horizontal scrollbar. The active tab remains identifiable and closable. |
 | 5 | With many tabs open, take a `captureWindow()` and locate a **middle** tab's close button; record (a) that tab's position in the frame and (b) the apparent left positions + widths of the tabs to its right. `click(wcId, x, y)` on that close button to close it **by pointer**, keeping the click coordinate over the strip (do not click elsewhere afterward). Take an after `captureWindow()` and compare. | The tab is removed (count −1). Comparing the before/after frames: remaining tabs **keep their previous widths** (no resize); the tab that was immediately to the right has **slid left into the closed tab's slot**, so its close button is now under the (unmoved) click coordinate. A trailing empty gap appears at the right end of the strip. |
 | 6 | **Without** clicking outside the strip yet, close **another** tab with `click(wcId, x, y)` on the close button now under the previous coordinate. Take a `captureWindow()`. Then induce `mouseleave` by `click(wcId, x, y)` at a safe coordinate **outside** `#tabstrip` (e.g. mid web-content). Take a final `captureWindow()` and compare. | The second pointer-close again removes a tab with **no resize** (before/after frames: next tab slides under the coordinate, widths unchanged). After the click **outside the strip** induces `mouseleave`, the final frame shows the remaining tabs **re-expanded** to fill the available width (widths grew; trailing gap gone). *(If the Validator cannot cleanly separate "reflow on `mouseleave`" from "reflow on the outside-click itself," flag this checkpoint as a candidate F8-eval defer and record — do not invent a numeric read.)* |
 | 7 | Take a `captureWindow()` to locate the **maximize/restore** window-control button (Linux/Windows custom control); `click(wcId, x, y)` on it. Read its accessible name / icon / `data-state` via `readDom(wcId)`/`readAxTree(wcId)`. `click(wcId, x, y)` on it again. | After the first click the window maximizes **and** the button's observable state flips to indicate **Restore** (accessible name and/or icon/`data-state` reflects "restore"/maximized); after the second click the window un-maximizes and the button returns to indicate **Maximize**. The button state tracks real window state (DD7 read path). **WSLg caveat**: if `win.maximize()` does not reliably maximize/fire `maximize` on the dev compositor (open question), this step is `needs-human-recheck` — assert at least that the click reached the IPC seam and fall back to a manual maximize/restore observation. [a11y] |
@@ -118,8 +118,8 @@ covered by `npm run a11y`.)
   timing*, not the nav contract).
 - Window **drag-to-move**, **Close** (harness-destructive), and **minimize** (backgrounded
   renderer) — manual checks per the flight's verification section.
-- Exact floor px and scroll-onset count — tuned during leg design / HAT; this spec asserts the
-  *qualitative* shrink-then-scroll behavior, not specific pixel thresholds.
+- Exact close-collapse threshold — tuned during HAT; this spec asserts the qualitative
+  truncate-then-collapse behavior, not a specific pixel threshold.
 
 ## Variants (optional)
 

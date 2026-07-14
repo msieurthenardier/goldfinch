@@ -117,6 +117,22 @@ async function copyText(text, messageEl) {
 /* ---- home-page controller ---- */
 
 (function () {
+  if (!window.goldfinchInternal) return;
+  const input = /** @type {HTMLInputElement|null} */ (document.getElementById('restore-on-startup'));
+  if (!input) return;
+  window.goldfinchInternal.settingsGet('restoreOnStartup')
+    .then((value) => { input.checked = value === true; })
+    .catch(() => {});
+  input.addEventListener('change', () => {
+    window.goldfinchInternal.settingsSet('restoreOnStartup', input.checked).catch(() => {});
+  });
+  const handle = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && typeof all.restoreOnStartup === 'boolean') input.checked = all.restoreOnStartup;
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(handle), { once: true });
+})();
+
+(function () {
   // Guard: only run when the internal bridge is present (goldfinch://settings origin).
   if (!window.goldfinchInternal) return;
 

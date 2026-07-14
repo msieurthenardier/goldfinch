@@ -72,6 +72,17 @@ test('Ctrl+T/W/L/M/R → chrome new-tab/close-tab/focus-address/toggle-panel/rel
   assert.deepEqual(ctrl('r'), { scope: 'chrome', action: 'reload' });
 });
 
+test('tab-management shortcuts remain available while a sheet owns focus', () => {
+  assert.deepEqual(ctrl('T', { shift: true }), { scope: 'chrome', action: 'reopen-closed' });
+  assert.deepEqual(ctrl('Tab'), { scope: 'chrome', action: 'next-tab' });
+  assert.deepEqual(ctrl('Tab', { shift: true }), { scope: 'chrome', action: 'previous-tab' });
+  assert.deepEqual(ctrl('PageDown'), { scope: 'chrome', action: 'next-tab' });
+  assert.deepEqual(ctrl('PageUp'), { scope: 'chrome', action: 'previous-tab' });
+  assert.deepEqual(ctrl('ArrowLeft', { shift: true }), { scope: 'chrome', action: 'move-tab-left' });
+  assert.deepEqual(ctrl('1'), { scope: 'chrome', action: 'tab-1' });
+  assert.deepEqual(ctrl('9'), { scope: 'chrome', action: 'tab-last' });
+});
+
 test('Ctrl+Shift+P → chrome toggle-privacy (shift disambiguates from guest print)', () => {
   assert.deepEqual(ctrl('P', { shift: true }), { scope: 'chrome', action: 'toggle-privacy' });
   assert.deepEqual(ctrl('p', { shift: true }), { scope: 'chrome', action: 'toggle-privacy' });
@@ -83,9 +94,9 @@ test('meta works as the modifier wherever control does (mac chords)', () => {
   assert.deepEqual(k('=', { meta: true }), { scope: 'guest', action: 'zoom-in' });
 });
 
-test('uppercase T/W/L/M/R (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
+test('uppercase W/L/M/R (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
   // keydownToAction matches these lowercase-only; the union must not widen them.
-  for (const key of ['T', 'W', 'L', 'M', 'R']) {
+  for (const key of ['W', 'L', 'M', 'R']) {
     assert.equal(ctrl(key, { shift: true }), null, `Ctrl+Shift+${key} must not match`);
   }
 });
@@ -107,7 +118,7 @@ test('unmodified letters/symbols are null (no accidental forwarding)', () => {
 });
 
 test('modified NON-union keys are null (e.g. Ctrl+A, Ctrl+S, Ctrl+ArrowDown)', () => {
-  for (const key of ['a', 's', 'd', 'q', 'ArrowDown', 'Escape', 'Enter', 'Tab']) {
+  for (const key of ['a', 's', 'd', 'q', 'ArrowDown', 'Escape', 'Enter']) {
     assert.equal(ctrl(key), null, `Ctrl+${key} must not match`);
   }
 });

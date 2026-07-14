@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -51,6 +51,16 @@ const { crossViewNavAction } = require('../shared/cross-view-nav');
 // handleGuestChromeShortcut below.
 const { keydownToAction } = require('../shared/keydown-action');
 const { isChromeActionForwardable } = require('../shared/guest-forward-allowlist');
+const { normalizeTabTransferRecord, pushClosedTab } = require('../shared/tab-management');
+const { createTabSessionStore } = require('./tab-session-store');
+
+const tabSessionStore = createTabSessionStore();
+const sessionWindowSnapshots = new Map();
+let isQuitting = false;
+
+function saveRuntimeTabSession(closedTabs = tabSessionStore.get().closedTabs) {
+  return tabSessionStore.save({ windows: [...sessionWindowSnapshots.values()], closedTabs });
+}
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -216,6 +226,77 @@ const getChromeContents = () => (chromeView ? chromeView.webContents : null);
 const tabViews = new Map();
 // Active tab's wcId (null when no web tab is active)
 let activeTabWcId = null;
+
+// Multi-window registry. The legacy shell code below operates on one set of
+// module-scoped aliases; activating a context swaps those aliases atomically.
+// Event/IPC entry points activate the owner before touching window-local state.
+const windowContexts = new Map();
+let activeWindowContext = null;
+let windowSeq = 0;
+/** @type {ReturnType<typeof createMenuOverlayManager> | null} */
+let menuOverlay = null;
+
+function saveActiveWindowContext() {
+  if (!activeWindowContext) return;
+  Object.assign(activeWindowContext, {
+    mainWindow, chromeView, activeTabWcId,
+    overlayView, overlayVisible, lastGuestBounds, findOverlayTabWcId,
+    findOverlayLastQueryText, overlayReady, pendingOverlayInit, menuOverlay,
+  });
+}
+
+function activateWindowContext(ctx) {
+  if (!ctx || activeWindowContext === ctx) return !!ctx;
+  saveActiveWindowContext();
+  activeWindowContext = ctx;
+  ({
+    mainWindow, chromeView, activeTabWcId,
+    overlayView, overlayVisible, lastGuestBounds, findOverlayTabWcId,
+    findOverlayLastQueryText, overlayReady, pendingOverlayInit, menuOverlay,
+  } = ctx);
+  return true;
+}
+
+function inWindowContext(ctx, fn) {
+  const previous = activeWindowContext;
+  activateWindowContext(ctx);
+  try {
+    return fn();
+  } finally {
+    saveActiveWindowContext();
+    if (previous && previous !== ctx && windowContexts.has(previous.id)) activateWindowContext(previous);
+  }
+}
+
+function contextForChromeContents(contents) {
+  for (const ctx of windowContexts.values()) {
+    if (ctx.chromeView?.webContents === contents) return ctx;
+  }
+  return null;
+}
+
+function contextForTab(wcId) {
+  const windowId = tabViews.get(wcId)?.windowId;
+  return windowId == null ? null : windowContexts.get(windowId) || null;
+}
+
+function activateContextForTab(wcId) {
+  return activateWindowContext(contextForTab(wcId));
+}
+
+function activateContextForSender(contents) {
+  let ctx = contextForChromeContents(contents);
+  if (!ctx) ctx = contextForTab(contents?.id);
+  if (!ctx) {
+    for (const candidate of windowContexts.values()) {
+      if (candidate.overlayView?.webContents === contents || candidate.menuOverlay?.getView()?.webContents === contents) {
+        ctx = candidate;
+        break;
+      }
+    }
+  }
+  return activateWindowContext(ctx);
+}
 
 // --- Find-overlay view state (M05 Flight 7, DD1/DD2) ---------------------------------
 // The floating find bar is a dedicated chrome-class WebContentsView stacked above the
@@ -440,6 +521,7 @@ function createSheetView() {
   // set and the chrome keydownToAction set via the pure mapper; unmodified APG keys
   // (Arrow/Home/End/Enter/Space/Escape/Tab) return null and stay with the sheet page.
   view.webContents.on('before-input-event', (event, input) => {
+    activateContextForSender(view.webContents);
     if (input.type !== 'keyDown') return;
     const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift });
     if (!hit) return;
@@ -504,7 +586,8 @@ function createSheetView() {
   return view;
 }
 
-const menuOverlay = createMenuOverlayManager({
+function buildMenuOverlay() {
+  return createMenuOverlayManager({
   getContentView: () => (mainWindow ? mainWindow.contentView : null),
   createSheetView,
   // Channel-7 emitter (menu-overlay-closed → chrome).
@@ -532,8 +615,9 @@ const menuOverlay = createMenuOverlayManager({
   // Reason-resolved refocus, main-side half (escape/activated): webContents-level
   // focus — chrome-side els.kebab.focus() alone cannot move keyboard focus off the
   // sheet in a multi-view BaseWindow (F7 closeFindOverlaySession precedent).
-  focusChrome: () => getChromeContents()?.focus()
-});
+    focusChrome: () => getChromeContents()?.focus()
+  });
+}
 
 // --- Menu-overlay DD4 IPC (channels 1/2/4/5). Chrome-class trust domain, but every
 // handler validates event.sender by IDENTITY (DD8, F7 pattern): chrome contents for
@@ -542,14 +626,16 @@ const menuOverlay = createMenuOverlayManager({
 
 // True iff the sender is the live sheet webContents.
 function isSheetSender(event) {
-  const v = menuOverlay.getView();
+  activateContextForSender(event.sender);
+  const v = menuOverlay?.getView();
   return !!v && !v.webContents.isDestroyed() && event.sender === v.webContents;
 }
 
 // Channel 1 — chrome → main: open (or model-replace) a menu on the sheet.
 ipcMain.on('menu-overlay:open', (event, payload) => {
+  activateContextForSender(event.sender);
   if (event.sender !== getChromeContents()) return;
-  menuOverlay.openMenu(payload);
+  menuOverlay?.openMenu(payload);
 });
 
 // Channel 2 — chrome → main: programmatic close. `reason` is allowlisted
@@ -562,9 +648,10 @@ const MENU_CLOSE_REASONS = new Set([
   'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
 ]);
 ipcMain.on('menu-overlay:close', (event, payload) => {
+  activateContextForSender(event.sender);
   if (event.sender !== getChromeContents()) return;
   const r = payload && payload.reason;
-  menuOverlay.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
+  menuOverlay?.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
 });
 
 // Channel 4 — sheet → main: item activated. Stale tokens dropped; channel 7 (from
@@ -577,9 +664,9 @@ ipcMain.on('menu-overlay:activated', (event, payload) => {
   if (!isSheetSender(event)) return;
   const { id, token, value } = payload || {};
   if (typeof id !== 'string' || typeof token !== 'number') return;
-  const cur = menuOverlay.getCurrentMenu();
+  const cur = menuOverlay?.getCurrentMenu();
   if (!cur || token !== cur.token) return; // stale sheet report
-  menuOverlay.closeMenuOverlay('activated', token);
+  menuOverlay?.closeMenuOverlay('activated', token);
   /** @type {{ menuType: string, id: string, value?: string }} */
   const out = { menuType: cur.menuType, id };
   const v = sanitizeActivatedValue(value);
@@ -595,7 +682,7 @@ ipcMain.on('menu-overlay:dismissed', (event, payload) => {
   if (!isSheetSender(event)) return;
   const { reason, token } = payload || {};
   if (typeof token !== 'number') return;
-  menuOverlay.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
+  menuOverlay?.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
 });
 
 
@@ -887,7 +974,26 @@ function currentAutomationStatus() {
   };
 }
 
-function createWindow() {
+function deliverPendingAdoptions(ctx) {
+  const wc = ctx?.chromeView?.webContents;
+  if (!wc || wc.isDestroyed() || !ctx.chromeReady) return;
+  for (const payload of ctx.pendingAdoptions.splice(0)) wc.send('tab-adopt', payload);
+}
+
+function createWindow({ allowStartupRestore = false, restoreWindowIndex = 0, suppressInitialTab = false, position = null } = {}) {
+  saveActiveWindowContext();
+  const windowId = ++windowSeq;
+  mainWindow = null;
+  chromeView = null;
+  activeTabWcId = null;
+  overlayView = null;
+  overlayVisible = false;
+  lastGuestBounds = null;
+  findOverlayTabWcId = null;
+  findOverlayLastQueryText = null;
+  overlayReady = false;
+  pendingOverlayInit = null;
+  menuOverlay = null;
   const isMac = process.platform === 'darwin';
   /** @type {Electron.BaseWindowConstructorOptions} */
   const frameOpts = isMac
@@ -899,6 +1005,15 @@ function createWindow() {
   // and the per-platform frameOpts carry over unchanged (DD4/DD6).
   const initialWidth = 1400;
   const initialHeight = 900;
+  let initialPosition = {};
+  if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+    const point = { x: Math.round(position.x), y: Math.round(position.y) };
+    const workArea = screen.getDisplayNearestPoint(point).workArea;
+    initialPosition = {
+      x: Math.max(workArea.x, Math.min(point.x, workArea.x + Math.max(0, workArea.width - initialWidth))),
+      y: Math.max(workArea.y, Math.min(point.y, workArea.y + Math.max(0, workArea.height - initialHeight))),
+    };
+  }
   mainWindow = new BaseWindow({
     width: initialWidth,
     height: initialHeight,
@@ -907,6 +1022,7 @@ function createWindow() {
     backgroundColor: '#1e1f25',
     title: 'Goldfinch',
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    ...initialPosition,
     ...frameOpts,
   });
 
@@ -928,6 +1044,28 @@ function createWindow() {
       ...(isMcpAutomationEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
     }
   });
+  menuOverlay = buildMenuOverlay();
+  const ctx = {
+    id: windowId,
+    mainWindow,
+    chromeView,
+    activeTabWcId,
+    overlayView,
+    overlayVisible,
+    lastGuestBounds,
+    findOverlayTabWcId,
+    findOverlayLastQueryText,
+    overlayReady,
+    pendingOverlayInit,
+    menuOverlay,
+    allowStartupRestore,
+    restoreWindowIndex,
+    suppressInitialTab,
+    pendingAdoptions: [],
+    chromeReady: false,
+  };
+  windowContexts.set(windowId, ctx);
+  activeWindowContext = ctx;
 
   // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
   // the window itself (DD3).
@@ -940,12 +1078,18 @@ function createWindow() {
   // platforms and flash a gap); steady-state geometry is owned by the resize handler below.
   chromeView.setBounds({ x: 0, y: 0, width: initialWidth, height: initialHeight });
 
+  chromeView.webContents.on('did-finish-load', () => {
+    ctx.chromeReady = true;
+    deliverPendingAdoptions(ctx);
+  });
   chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  mainWindow.on('focus', () => activateWindowContext(ctx));
 
 
   mainWindow.on('closed', () => {
-    mainWindow = null;
-    chromeView = null;
+    const previous = activeWindowContext;
+    activateWindowContext(ctx);
     // Find-overlay teardown (DD1): destroys the lazy singleton and clears the find
     // session + ready flag + queued init (AC6f — no refocus concern, everything is
     // tearing down; teardownFindOverlayView never refocuses).
@@ -957,8 +1101,26 @@ function createWindow() {
     // Menu-overlay close family (F8 DD4): emit the 'teardown' close (channel 7 is a
     // no-op here — chrome contents already nulled — but the menu state is reset so a
     // relaunch starts clean), then destroy the lazy singleton (DD9).
-    menuOverlay.closeMenuOverlay('teardown');
-    menuOverlay.teardown();
+    menuOverlay?.closeMenuOverlay('teardown');
+    menuOverlay?.teardown();
+    for (const [wcId, entry] of tabViews) {
+      if (entry.windowId !== ctx.id) continue;
+      tabViews.delete(wcId);
+      if (!entry.view.webContents.isDestroyed()) /** @type {any} */ (entry.view.webContents).destroy();
+    }
+    windowContexts.delete(ctx.id);
+    if (!isQuitting) {
+      sessionWindowSnapshots.delete(ctx.id);
+      saveRuntimeTabSession();
+    }
+    mainWindow = null;
+    chromeView = null;
+    menuOverlay = null;
+    activeWindowContext = null;
+    const fallback = previous && previous !== ctx && windowContexts.has(previous.id)
+      ? previous
+      : windowContexts.values().next().value;
+    if (fallback) activateWindowContext(fallback);
   });
 
   // Menu-overlay close family (F8 DD4): BaseWindow blur — app switch closes any open
@@ -969,7 +1131,9 @@ function createWindow() {
   // NOT in the close family: where the platform fires blur on minimize the menu
   // closes via this path; where it doesn't (WSLg uncertainty), a menu surviving
   // minimize-restore is an accepted variation (leg AC3) — HAT observes.
-  mainWindow.on('blur', () => menuOverlay.closeMenuOverlay('blur'));
+  mainWindow.on('blur', () => {
+    inWindowContext(ctx, () => menuOverlay?.closeMenuOverlay('blur'));
+  });
 
   // DD3: keep the chrome view sized to the window. No-op if the view is already gone
   // (resize can fire during teardown).
@@ -978,10 +1142,12 @@ function createWindow() {
   // and resends the active guest's bounds. Belt-and-suspenders alongside the
   // renderer-side ResizeObserver (which fires per CSS layout frame during transitions).
   mainWindow.on('resize', () => {
-    if (!chromeView) return;
-    const { width, height } = mainWindow.getContentBounds();
-    chromeView.setBounds({ x: 0, y: 0, width, height });
-    getChromeContents()?.send('trigger-send-bounds');
+    inWindowContext(ctx, () => {
+      if (!chromeView) return;
+      const { width, height } = mainWindow.getContentBounds();
+      chromeView.setBounds({ x: 0, y: 0, width, height });
+      getChromeContents()?.send('trigger-send-bounds');
+    });
   });
 
   // Forward maximize state to the renderer so the custom window controls can
@@ -990,13 +1156,19 @@ function createWindow() {
   // zero-match grep). The maximize/unmaximize event REGISTRATION stays on mainWindow — a
   // BaseWindow still emits these — and is Leg 2's concern (DD4 window-control re-point).
   mainWindow.on('maximize', () => {
-    getChromeContents()?.send('window-maximized-change', true);
-    getChromeContents()?.send('trigger-send-bounds');
+    inWindowContext(ctx, () => {
+      getChromeContents()?.send('window-maximized-change', true);
+      getChromeContents()?.send('trigger-send-bounds');
+    });
   });
   mainWindow.on('unmaximize', () => {
-    getChromeContents()?.send('window-maximized-change', false);
-    getChromeContents()?.send('trigger-send-bounds');
+    inWindowContext(ctx, () => {
+      getChromeContents()?.send('window-maximized-change', false);
+      getChromeContents()?.send('trigger-send-bounds');
+    });
   });
+  saveActiveWindowContext();
+  return ctx;
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,6 +1320,7 @@ function wireGuestContents(contents) {
   // the opener closed before this IPC lands) yields `openerPartition: undefined`,
   // which inheritFromPartition resolves to default routing — never a throw.
   contents.setWindowOpenHandler(({ url }) => {
+    activateContextForTab(contents.id);
     const openerPartition = tabViews.get(contents.id)?.partition;
     getChromeContents()?.send('open-tab', { url, openerPartition });
     return { action: 'deny' };
@@ -1172,6 +1345,7 @@ function wireGuestContents(contents) {
   if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      activateContextForTab(contents.id);
       // Cross-view keyboard bridge (M05 F5 Leg 2) FIRST — Ctrl+L / unmodified Tab hand
       // focus back to the chrome view. Contained approach: this single call sits above
       // the existing accelerator branches, which stay UNTOUCHED (no regression surface
@@ -1255,7 +1429,8 @@ function wireGuestContents(contents) {
     // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
     // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
     const sendDevtoolsState = (open) => {
-      getChromeContents()?.send('devtools-state-changed', { wcId: contents.id, open });
+      const cc = contextForTab(contents.id)?.chromeView?.webContents;
+      cc?.send('devtools-state-changed', { wcId: contents.id, open });
     };
     contents.on('devtools-opened', () => sendDevtoolsState(true));
     contents.on('devtools-closed', () => sendDevtoolsState(false));
@@ -1266,6 +1441,7 @@ function wireGuestContents(contents) {
     // guests are excluded by the !__goldfinchInternal guard (DD6).
     contents.on('context-menu', (event, params) => {
       event.preventDefault();
+      activateContextForTab(contents.id);
       if (!mainWindow) return;
       if (isInternalContents(contents)) return;
       getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
@@ -1287,6 +1463,7 @@ function wireGuestContents(contents) {
     // Cross-view nav MUST run first (early return) — see the ordering comment on
     // handleGuestChromeShortcut (Ctrl+L double-dispatch otherwise).
     contents.on('before-input-event', (event, input) => {
+      activateContextForTab(contents.id);
       if (handleGuestCrossViewNav(event, input)) return;
       handleGuestChromeShortcut(event, input, 'internal');
     });
@@ -1303,7 +1480,7 @@ function wireGuestContents(contents) {
 function wireTabViewEvents(view, wcId, partition) {
   const wc = view.webContents;
   const sendToChrome = (channel, payload) => {
-    const cc = getChromeContents();
+    const cc = contextForTab(wcId)?.chromeView?.webContents;
     if (cc && !cc.isDestroyed()) cc.send(channel, payload);
   };
   // guard: wraps a handler so it no-ops if the webContents is already destroyed.
@@ -1341,6 +1518,7 @@ function wireTabViewEvents(view, wcId, partition) {
     sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
   }));
   wc.on('found-in-page', guard((_e, result) => {
+    activateContextForTab(wcId);
     // Count path B (DD3, M05 Flight 7): when the overlay find session targets THIS
     // tab, fan the count directly to the overlay webContents — no renderer round-trip
     // (the old chrome fan-out was retired at the F7 cutover; the chrome count display
@@ -1711,7 +1889,7 @@ function applyShields(ses) {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     const granted = !SENSITIVE_PERMISSIONS.has(permission);
     const id = wc ? wc.id : null;
-    const cc = getChromeContents();
+    const cc = id == null ? null : contextForTab(id)?.chromeView?.webContents;
     if (cc && id != null && !cc.isDestroyed()) {
       cc.send('privacy-permission', { webContentsId: id, permission, granted });
     }
@@ -1737,9 +1915,9 @@ ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.g
  * @param {unknown} payload
  */
 function broadcastToChromeAndInternal(channel, payload) {
-  const cc = getChromeContents();
-  if (cc && !cc.isDestroyed()) {
-    cc.send(channel, payload);
+  for (const ctx of windowContexts.values()) {
+    const cc = ctx.chromeView?.webContents;
+    if (cc && !cc.isDestroyed()) cc.send(channel, payload);
   }
   for (const wc of webContents.getAllWebContents()) {
     if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
@@ -2036,15 +2214,125 @@ ipcMain.on('shields-farble', (event, url) => {
 });
 
 // --- window controls (custom frameless min/max/close, win+linux) ---
-ipcMain.on('window-minimize', () => mainWindow && mainWindow.minimize());
-ipcMain.on('window-toggle-maximize', () => {
+ipcMain.on('window-minimize', (event) => {
+  activateContextForSender(event.sender);
+  if (mainWindow) mainWindow.minimize();
+});
+ipcMain.on('window-toggle-maximize', (event) => {
+  activateContextForSender(event.sender);
   if (!mainWindow) return;
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
   else mainWindow.maximize();
 });
 // DD6: close() → 'closed' → 'window-all-closed' → app.quit() (non-darwin); NOT app.quit() directly.
-ipcMain.on('window-close', () => mainWindow && mainWindow.close());
-ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximized()));
+ipcMain.on('window-close', (event) => {
+  activateContextForSender(event.sender);
+  if (mainWindow) mainWindow.close();
+});
+ipcMain.handle('window-is-maximized', (event) => {
+  activateContextForSender(event.sender);
+  return !!(mainWindow && mainWindow.isMaximized());
+});
+
+// App-level tab/session persistence. The chrome sends normalized snapshots after
+// structural/navigation changes; the main-side store re-validates every record.
+ipcMain.handle('tab-session:get', (event) => {
+  activateContextForSender(event.sender);
+  if (event.sender !== getChromeContents()) return null;
+  return {
+    restoreOnStartup: activeWindowContext?.allowStartupRestore === true && settings.get('restoreOnStartup') === true,
+    restoreWindowIndex: activeWindowContext?.restoreWindowIndex || 0,
+    suppressInitialTab: activeWindowContext?.suppressInitialTab === true,
+    state: tabSessionStore.get()
+  };
+});
+ipcMain.handle('tab-session:save-window', (event, windowState) => {
+  activateContextForSender(event.sender);
+  if (event.sender !== getChromeContents()) return null;
+  sessionWindowSnapshots.set(activeWindowContext.id, windowState);
+  return saveRuntimeTabSession();
+});
+function broadcastClosedTabCount(count) {
+  for (const ctx of windowContexts.values()) {
+    const cc = ctx.chromeView?.webContents;
+    if (cc && !cc.isDestroyed()) cc.send('tab-session:closed-count-changed', count);
+  }
+}
+ipcMain.handle('tab-session:push-closed', (event, record) => {
+  activateContextForSender(event.sender);
+  if (event.sender !== getChromeContents()) return 0;
+  const current = tabSessionStore.get();
+  const next = saveRuntimeTabSession(pushClosedTab(current.closedTabs, record));
+  broadcastClosedTabCount(next.closedTabs.length);
+  return next.closedTabs.length;
+});
+ipcMain.handle('tab-session:pop-closed', (event) => {
+  activateContextForSender(event.sender);
+  if (event.sender !== getChromeContents()) return null;
+  const current = tabSessionStore.get();
+  const record = current.closedTabs[0] || null;
+  const next = record ? saveRuntimeTabSession(current.closedTabs.slice(1)) : current;
+  broadcastClosedTabCount(next.closedTabs.length);
+  return { record, count: next.closedTabs.length };
+});
+
+// Re-parent a live guest view into an existing window under the drop point, or
+// into a fresh window. The WebContents is never recreated, preserving Chromium
+// navigation history and the original cookie-jar session.
+ipcMain.handle('tab-transfer', (event, payload) => {
+  const wcId = payload?.wcId;
+  const entry = tabViews.get(wcId);
+  const source = entry ? windowContexts.get(entry.windowId) : null;
+  const record = normalizeTabTransferRecord(payload?.record);
+  if (!entry || !source || !record || event.sender !== source.chromeView?.webContents) return false;
+
+  let target = null;
+  if (payload.target && payload.target !== 'new-window') {
+    const x = Number(payload.target.screenX);
+    const y = Number(payload.target.screenY);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      for (const candidate of windowContexts.values()) {
+        if (candidate === source || !candidate.mainWindow) continue;
+        const b = candidate.mainWindow.getBounds();
+        if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
+          target = candidate;
+          break;
+        }
+      }
+    }
+  }
+  if (!target) {
+    const sourceBounds = source.mainWindow?.getBounds();
+    const pointer = payload.target && payload.target !== 'new-window'
+      ? { x: Number(payload.target.screenX) - 120, y: Number(payload.target.screenY) - 20 }
+      : null;
+    const position = pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)
+      ? pointer
+      : sourceBounds
+        ? { x: sourceBounds.x + 28, y: sourceBounds.y + 28 }
+        : null;
+    target = createWindow({ suppressInitialTab: true, position });
+  }
+
+  activateWindowContext(source);
+  if (activeTabWcId === wcId) {
+    closeFindOverlaySession({ refocusGuest: false });
+    menuOverlay?.closeMenuOverlay('tab-close');
+    source.activeTabWcId = null;
+    activeTabWcId = null;
+  }
+  source.mainWindow?.contentView.removeChildView(entry.view);
+  entry.active = false;
+  entry.view.setVisible(false);
+  entry.windowId = target.id;
+  target.mainWindow?.contentView.addChildView(entry.view);
+  target.pendingAdoptions.push({ wcId, record });
+  deliverPendingAdoptions(target);
+  target.mainWindow?.show();
+  target.mainWindow?.focus();
+  activateWindowContext(target);
+  return true;
+});
 
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
@@ -2076,7 +2364,9 @@ ipcMain.handle('new-container-create', async (_event, { name }) => {
 // Tab view IPC handlers (Flight 3, Leg 1 — web tab lifecycle via WebContentsView)
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
+ipcMain.handle('tab-create', (event, { url, partition, trusted }) => {
+  activateContextForSender(event.sender);
+  if (event.sender !== getChromeContents() || !activeWindowContext || !mainWindow) return null;
   // -----------------------------------------------------------------------
   // Pick webPreferences by trust level (Leg 3).
   //
@@ -2124,7 +2414,7 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   view.setVisible(false);
 
   const wcId = view.webContents.id;
-  tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
+  tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false, windowId: activeWindowContext.id });
 
   // Explicit construction-time wiring: web-contents-created fires synchronously
   // during new WebContentsView(), so the global handler cannot identify the view yet.
@@ -2140,12 +2430,13 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted }) => {
   return wcId;
 });
 
-ipcMain.on('tab-close', (_event, wcId) => {
+ipcMain.on('tab-close', (event, wcId) => {
+  activateContextForTab(wcId);
   const entry = tabViews.get(wcId);
-  if (!entry) return;
+  if (!entry || event.sender !== getChromeContents()) return;
   // Captured BEFORE the null-out below — one line lower and this is always false.
   const wasActive = activeTabWcId === wcId;
-  mainWindow.contentView.removeChildView(entry.view);
+  mainWindow?.contentView.removeChildView(entry.view);
   if (!entry.view.webContents.isDestroyed()) {
     entry.view.webContents.destroy();
   }
@@ -2167,13 +2458,15 @@ ipcMain.on('tab-close', (_event, wcId) => {
   // covers it.
   if (wasActive) {
     hideFindOverlay();
-    menuOverlay.closeMenuOverlay('tab-close');
+    menuOverlay?.closeMenuOverlay('tab-close');
   }
-  const anyWebTabLeft = [...tabViews.values()].some((e) => e.trusted === false);
+  const anyWebTabLeft = [...tabViews.values()].some((e) => e.windowId === entry.windowId && e.trusted === false);
   if (!anyWebTabLeft) hideFindOverlay();
 });
 
-ipcMain.on('tab-hide', (_event, wcId) => {
+ipcMain.on('tab-hide', (event, wcId) => {
+  activateContextForTab(wcId);
+  if (event.sender !== getChromeContents()) return;
   // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
   // takes the overlay out of the stack too. Restore needs no code here —
   // late-activation lands in tab-set-active's re-add.
@@ -2183,7 +2476,7 @@ ipcMain.on('tab-hide', (_event, wcId) => {
   // here would paint the bar over a hidden guest).
   if (wcId === activeTabWcId) {
     hideFindOverlay();
-    menuOverlay.closeMenuOverlay('tab-hide');
+    menuOverlay?.closeMenuOverlay('tab-hide');
   }
   const entry = tabViews.get(wcId);
   if (!entry) return;
@@ -2194,7 +2487,9 @@ ipcMain.on('tab-hide', (_event, wcId) => {
   if (activeTabWcId === wcId) activeTabWcId = null;
 });
 
-ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
+ipcMain.on('tab-navigate', (event, { wcId, verb, args }) => {
+  activateContextForTab(wcId);
+  if (event.sender !== getChromeContents()) return;
   const wc = getTabContents(wcId);
   if (!wc || wc.isDestroyed()) return;
   if (verb === 'loadURL' && args && args[0]) {
@@ -2212,7 +2507,9 @@ ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
   }
 });
 
-ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
+ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
+  activateContextForTab(wcId);
+  if (event.sender !== getChromeContents()) return;
   // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
   const entry = tabViews.get(wcId);
   if (entry) {
@@ -2251,14 +2548,14 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
     // Menu-overlay sheet (F8 DD4/DD9/DD7): strictly AFTER the guest re-add AND the
     // find-overlay re-assert above, so the sheet sits top-of-stack. No entry.trusted
     // gate — the sheet serves internal tabs too (DD7).
-    if (rounded) menuOverlay.syncBounds(rounded);
+    if (rounded) menuOverlay?.syncBounds(rounded);
     if (activeTabWcId !== null && activeTabWcId !== wcId) {
       // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
       // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
       // skips the find-restore for 'tab-switch' — this handler's own per-tab
       // find-restore logic above governs.
-      menuOverlay.closeMenuOverlay('tab-switch');
-    } else if (menuOverlay.isMenuOpen()) {
+      menuOverlay?.closeMenuOverlay('tab-switch');
+    } else if (menuOverlay?.isMenuOpen()) {
       // Same-tab re-activation with a menu open: the re-add keeps the sheet
       // top-of-stack via re-add-last.
       menuOverlay.show();
@@ -2275,7 +2572,9 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
   activeTabWcId = wcId;
 });
 
-ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
+ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
+  activateContextForTab(wcId);
+  if (event.sender !== getChromeContents()) return;
   const entry = tabViews.get(wcId);
   if (!entry || entry.view.webContents.isDestroyed()) return;
   const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
@@ -2291,11 +2590,13 @@ ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
     // Menu-overlay geometry-follow (F8 DD12): identity mapping — the sheet's bounds
     // ARE the active guest's rounded bounds. The manager stores always, applies only
     // while visible.
-    menuOverlay.syncBounds(rounded);
+    menuOverlay?.syncBounds(rounded);
   }
 });
 
-ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
+ipcMain.on('tab-find', (event, { wcId, text, options, stop }) => {
+  activateContextForTab(wcId);
+  if (event.sender !== getChromeContents()) return;
   const wc = getTabContents(wcId);
   if (!wc || wc.isDestroyed()) return;
   if (stop) {
@@ -2311,6 +2612,7 @@ ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
 
 // Sender: the chrome webContents ONLY (the renderer's openFind / activateTab restore).
 ipcMain.on('find-overlay:open', (event, payload) => {
+  activateContextForSender(event.sender);
   if (event.sender !== getChromeContents()) return;
   const { wcId, findText } = payload || {};
   openFindOverlaySession(wcId, typeof findText === 'string' ? findText : '');
@@ -2325,6 +2627,7 @@ ipcMain.on('find-overlay:open', (event, payload) => {
 //   redirect must not yank OS focus into the guest, e.g. mid-typing in the address
 //   bar) and NO notification (the chrome initiated it; no echo needed).
 ipcMain.on('find-overlay:close', (event) => {
+  activateContextForSender(event.sender);
   const overlayWc = overlayView && !overlayView.webContents.isDestroyed() ? overlayView.webContents : null;
   const fromOverlay = overlayWc != null && event.sender === overlayWc;
   if (!fromOverlay && event.sender !== getChromeContents()) return;
@@ -2352,6 +2655,7 @@ ipcMain.on('find-overlay:close', (event) => {
 // immediately instead of advancing the stale session. (The pre-F7 inset bar had the
 // same inversion — pre-existing defect, not carried contract.)
 ipcMain.on('find-overlay:query', (event, payload) => {
+  activateContextForSender(event.sender);
   if (!overlayView || overlayView.webContents.isDestroyed() || event.sender !== overlayView.webContents) return;
   const wc = getTabContents(findOverlayTabWcId);
   if (!wc) return;
@@ -2691,6 +2995,7 @@ function pruneAllJars() {
 
 app.whenReady().then(() => {
   initProfileAndStores(app, { shields, settings, jars, downloads });
+  tabSessionStore.load(app.getPath('userData'));
   // History store: opened as a SIBLING call right after initProfileAndStores
   // returns — deliberately NOT by widening that function's unit-pinned 4-store
   // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
@@ -2732,7 +3037,15 @@ app.whenReady().then(() => {
   /** @type {any} */ (internalSession).__goldfinchInternal = true; // belt-and-suspenders for any later applyShields call
   internalSession.protocol.handle('goldfinch', handleInternal);
 
-  createWindow();
+  const priorTabSession = tabSessionStore.get();
+  const firstWindow = createWindow({ allowStartupRestore: true, restoreWindowIndex: 0 });
+  if (priorTabSession.windows[0]) sessionWindowSnapshots.set(firstWindow.id, priorTabSession.windows[0]);
+  if (settings.get('restoreOnStartup') === true) {
+    for (let i = 1; i < priorTabSession.windows.length; i++) {
+      const ctx = createWindow({ allowStartupRestore: true, restoreWindowIndex: i });
+      sessionWindowSnapshots.set(ctx.id, priorTabSession.windows[i]);
+    }
+  }
 
   // In-memory dev-enable override (DD3/DD4). Computed ONCE here (after app.whenReady,
   // so app.isPackaged is settled), alongside the launch logic. It writes NOTHING to the
@@ -2841,6 +3154,7 @@ app.whenReady().then(() => {
 // including macOS (where window-all-closed does NOT quit). stop() is idempotent,
 // so both this and the window-all-closed secondary firing is safe.
 app.on('before-quit', () => {
+  isQuitting = true;
   // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
   // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
   // guaranteed — a sync handler racing an I/O write — and the contract remains
