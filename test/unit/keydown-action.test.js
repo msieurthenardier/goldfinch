@@ -207,3 +207,58 @@ test('Ctrl+Shift+I and Ctrl+Shift+P map distinctly (key-letter disambiguation)',
   assert.equal(keydownToAction(desc({ key: 'I', ctrl: true, shift: true })), 'devtools');
   assert.equal(keydownToAction(desc({ key: 'P', ctrl: true, shift: true })), 'toggle-privacy');
 });
+
+// ---------------------------------------------------------------------------
+// Tab-cycle / tab-jump (M09 F3 Leg 1, DD1 + i18n rulings)
+// ---------------------------------------------------------------------------
+
+test('Ctrl+Tab -> tab-next; Ctrl+Shift+Tab -> tab-prev', () => {
+  assert.equal(keydownToAction(desc({ key: 'Tab', ctrl: true })), 'tab-next');
+  assert.equal(keydownToAction(desc({ key: 'Tab', ctrl: true, shift: true })), 'tab-prev');
+});
+
+test('Cmd+Tab (meta) -> tab-next (meta is equivalent to ctrl)', () => {
+  assert.equal(keydownToAction(desc({ key: 'Tab', meta: true })), 'tab-next');
+});
+
+test('Ctrl+PageDown -> tab-next; Ctrl+PageUp -> tab-prev', () => {
+  assert.equal(keydownToAction(desc({ key: 'PageDown', ctrl: true })), 'tab-next');
+  assert.equal(keydownToAction(desc({ key: 'PageUp', ctrl: true })), 'tab-prev');
+});
+
+test('Ctrl+Tab / Ctrl+PageDown / Ctrl+PageUp with lightbox open -> still fire (NOT lightbox-gated)', () => {
+  assert.equal(keydownToAction(desc({ key: 'Tab', ctrl: true, lightboxOpen: true })), 'tab-next');
+  assert.equal(keydownToAction(desc({ key: 'PageDown', ctrl: true, lightboxOpen: true })), 'tab-next');
+  assert.equal(keydownToAction(desc({ key: 'PageUp', ctrl: true, lightboxOpen: true })), 'tab-prev');
+});
+
+test('Ctrl+1..8 -> tab-jump-1..tab-jump-8; Ctrl+9 -> tab-jump-last', () => {
+  for (let n = 1; n <= 8; n++) {
+    assert.equal(keydownToAction(desc({ key: String(n), ctrl: true })), `tab-jump-${n}`);
+  }
+  assert.equal(keydownToAction(desc({ key: '9', ctrl: true })), 'tab-jump-last');
+});
+
+test('Ctrl+7 with lightbox open -> tab-jump-7 (NOT lightbox-gated)', () => {
+  assert.equal(keydownToAction(desc({ key: '7', ctrl: true, lightboxOpen: true })), 'tab-jump-7');
+});
+
+// i18n ruling (a): AltGr digits report ctrl+alt and must never produce a
+// tab-jump — the guard is scoped to digits only.
+test('Ctrl+Alt+7 -> null (AltGr guard — digit gated on !alt)', () => {
+  assert.equal(keydownToAction(desc({ key: '7', ctrl: true, alt: true })), null);
+});
+
+test('Ctrl+Alt+9 -> null (AltGr guard applies to the "last" digit too)', () => {
+  assert.equal(keydownToAction(desc({ key: '9', ctrl: true, alt: true })), null);
+});
+
+// i18n ruling (b): the digit match is on `key` alone, regardless of shift
+// (AZERTY needs Shift to produce digit characters).
+test('Ctrl+Shift+7 (shifted digit, AZERTY) -> tab-jump-7 (shift-tolerant match)', () => {
+  assert.equal(keydownToAction(desc({ key: '7', ctrl: true, shift: true })), 'tab-jump-7');
+});
+
+test('alt defaults to false when omitted (existing pins unaffected)', () => {
+  assert.equal(keydownToAction({ key: '7', ctrl: true, meta: false, shift: false, lightboxOpen: false }), 'tab-jump-7');
+});

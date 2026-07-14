@@ -3184,6 +3184,40 @@ function dispatchChromeAction(action) {
       if (!(t && isInternalTab(t))) openDownloads();
       return true;
     }
+    // Tab-cycle / tab-jump (M09 F3 Leg 1, DD1): global chrome shortcuts, work
+    // regardless of focus location (address bar, guest content, internal tab) —
+    // always handled/preventDefault-ed, even for an out-of-range jump (Chrome-
+    // parity: Ctrl+7 with 5 tabs swallows the key and does nothing visible).
+    // Follows VISUAL (DOM) order via orderedTabIds() — the F2 order authority —
+    // so jumps/cycling track a keyboard/pointer reorder. A single-tab cycle is a
+    // harmless self-activate (activateTab falls out of the modulo naturally).
+    case 'tab-next':
+    case 'tab-prev': {
+      const ids = orderedTabIds();
+      const len = ids.length;
+      if (!len) return true; // never-zero invariant — defensive only
+      const cur = Math.max(ids.indexOf(activeTabId), 0);
+      const idx = action === 'tab-next' ? (cur + 1) % len : (cur - 1 + len) % len;
+      activateTab(ids[idx]);
+      return true;
+    }
+    case 'tab-jump-1':
+    case 'tab-jump-2':
+    case 'tab-jump-3':
+    case 'tab-jump-4':
+    case 'tab-jump-5':
+    case 'tab-jump-6':
+    case 'tab-jump-7':
+    case 'tab-jump-8':
+    case 'tab-jump-last': {
+      const ids = orderedTabIds();
+      const len = ids.length;
+      if (!len) return true; // never-zero invariant — defensive only
+      const idx = action === 'tab-jump-last' ? len - 1 : Number(action.slice('tab-jump-'.length)) - 1;
+      if (idx >= len) return true; // out-of-range jump: Chrome-parity no-op
+      activateTab(ids[idx]);
+      return true;
+    }
   }
   return false;
 }
@@ -3203,6 +3237,9 @@ document.addEventListener('keydown', (e) => {
     meta: e.metaKey,
     shift: e.shiftKey,
     lightboxOpen: !els.lightbox.classList.contains('hidden'),
+    // Real e.altKey threaded through (M09 F3, i18n ruling): AltGr digits report
+    // ctrl+alt on European layouts and must not be misread as a tab-jump.
+    alt: e.altKey,
   });
   if (!action) return;
   if (dispatchChromeAction(action)) e.preventDefault();

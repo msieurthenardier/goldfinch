@@ -210,7 +210,12 @@ drive and observe tabs. It is exposed in no released build — see
 | `F12`           | Open/close DevTools (active web tab) |
 | `Ctrl+Shift+I`  | Open/close DevTools (active web tab) |
 | `Enter` / `Shift+Enter` | Next / previous match (find bar) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle to next / previous tab (wraps) |
+| `Ctrl+PgDn` / `Ctrl+PgUp` | Cycle to next / previous tab (wraps) |
+| `Ctrl+1`–`Ctrl+8` | Jump to tab 1–8  |
+| `Ctrl+9`        | Jump to the last tab |
 | `←` / `→`       | Move between tabs (when a tab is focused) |
+| `Ctrl+Shift+←` / `Ctrl+Shift+→` | Move the focused tab left / right |
 | `Home` / `End`  | First / last tab    |
 | `Delete` / `Backspace` | Close the focused tab |
 | `Esc`           | Close an open menu / panel / find bar |

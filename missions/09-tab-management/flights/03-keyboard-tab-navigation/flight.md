@@ -1,11 +1,11 @@
 # Flight: Keyboard Tab Navigation Parity
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] The operator can cycle and jump between tabs from the keyboard
+- [x] The operator can cycle and jump between tabs from the keyboard
       (next/previous cycling and direct jump-to-position, including
       jump-to-last), and it works whether focus is in the chrome or in web
       page content. *(behavior-test-backed — new `tab-cycling` spec)*
@@ -187,11 +187,11 @@ planned.
 
 ### Checkpoints
 
-- [ ] Unit pins green (classifier, allowlist, sheet mapper).
-- [ ] All three capture points verified live (chrome focus, guest content,
+- [x] Unit pins green (classifier, allowlist, sheet mapper).
+- [x] All three capture points verified live (chrome focus, guest content,
       sheet open).
-- [ ] `tab-cycling` behavior spec passes end-to-end.
-- [ ] Doc-pass rider landed; a11y + suites green.
+- [x] `tab-cycling` behavior spec passes end-to-end (11/11 first run).
+- [x] Doc-pass rider landed; a11y + suites green.
 
 ### Adaptation Criteria
 
@@ -211,10 +211,10 @@ planned.
 
 > **Note:** Tentative; planned one at a time.
 
-- [ ] `cycle-and-jump` — classifier + dispatch + guest forwarding + sheet
+- [x] `cycle-and-jump` — classifier + dispatch + guest forwarding + sheet
       union + unit pins + live capture-point checks + `tab-cycling` spec
       authored.
-- [ ] `verify-and-docs` — run `tab-cycling`; a11y sweep; suites; the DD5
+- [x] `verify-and-docs` — run `tab-cycling`; a11y sweep; suites; the DD5
       CLAUDE.md doc pass; fix loop as needed.
 
 ---
@@ -223,10 +223,10 @@ planned.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged (PR — stacks on flight/2)
-- [ ] Tests passing
-- [ ] Documentation updated (DD5 rider + shortcut tables in README/docs if
+- [x] Tests passing
+- [x] Documentation updated (DD5 rider + shortcut tables in README/docs if
       they enumerate chords)
 
 ### Verification

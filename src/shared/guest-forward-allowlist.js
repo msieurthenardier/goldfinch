@@ -23,6 +23,20 @@
 // a time at future leg design, never widen silently). Cross-view nav (Ctrl+L /
 // Tab) is a SEPARATE, pre-existing mechanism (handleGuestCrossViewNav) and is
 // not part of this allowlist at all.
+//
+// Tab-cycle/jump (M09 F3 Leg 1, DD1/DD2): tab switching is navigation-neutral
+// chrome behavior — an internal settings page must not trap the operator — so
+// these actions are added to BOTH guest kinds (not gated by the internal
+// allowlist's usual conservative-extend-one-at-a-time posture, per the flight's
+// explicit ruling).
+const TAB_CYCLE_JUMP_ACTIONS = [
+  'tab-next',
+  'tab-prev',
+  'tab-jump-1', 'tab-jump-2', 'tab-jump-3', 'tab-jump-4',
+  'tab-jump-5', 'tab-jump-6', 'tab-jump-7', 'tab-jump-8',
+  'tab-jump-last',
+];
+
 const WEB_CHROME_ACTIONS = new Set([
   'new-tab',
   'close-tab',
@@ -30,9 +44,10 @@ const WEB_CHROME_ACTIONS = new Set([
   'toggle-panel',
   'toggle-privacy',
   'reload',
+  ...TAB_CYCLE_JUMP_ACTIONS,
 ]);
 
-const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab']);
+const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
 
 /**
  * isChromeActionForwardable(action, guestKind)
@@ -48,7 +63,29 @@ function isChromeActionForwardable(action, guestKind) {
   return guestKind === 'internal' ? INTERNAL_CHROME_ACTIONS.has(action) : WEB_CHROME_ACTIONS.has(action);
 }
 
+// Repeat-safe action set (M09 F3 fix-cycle, FD ruling). The guest forwarder's
+// blanket `!input.isAutoRepeat` guard (handleGuestChromeShortcut, main.js) exists
+// to stop a HELD key from stacking/repeat-firing new-tab/close-tab/downloads-style
+// actions — but it must NOT suppress tab-cycle repeat under guest focus: the
+// leg's Edge Cases ruling is "allow repeat cycling" (Chrome allows held-Ctrl+Tab
+// to cycle), and silently dropping that under guest focus would be a
+// chrome/guest parity regression. Jumps (tab-jump-N / tab-jump-last) are
+// idempotent under repeat (re-landing on the same target every keyDown), so
+// exempting the whole `tab-*` family alongside the two cycle actions is
+// harmless and simpler than special-casing just tab-next/tab-prev.
+//
+// @param {string | null | undefined} action
+// @returns {boolean}
+function isRepeatSafeAction(action) {
+  return typeof action === 'string' && action.startsWith('tab-');
+}
+
 // CJS-only (main-only consumer today — no page loads this via <script>; dual
 // export is added the moment a renderer-side consumer needs it, per the
 // src/shared/ dual-export pattern's own convention).
-module.exports = { isChromeActionForwardable, WEB_CHROME_ACTIONS, INTERNAL_CHROME_ACTIONS };
+module.exports = {
+  isChromeActionForwardable,
+  isRepeatSafeAction,
+  WEB_CHROME_ACTIONS,
+  INTERNAL_CHROME_ACTIONS,
+};

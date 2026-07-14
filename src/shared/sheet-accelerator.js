@@ -22,7 +22,15 @@
  *     Ctrl+J             → downloads       (autoRepeatGuard — held chord must not stack tabs)
  *   chrome-class (the chrome keydownToAction set, src/shared/keydown-action.js):
  *     Ctrl+T new-tab, Ctrl+W close-tab, Ctrl+L focus-address, Ctrl+M toggle-panel,
- *     Ctrl+R reload, Ctrl+Shift+P toggle-privacy
+ *     Ctrl+R reload, Ctrl+Shift+P toggle-privacy, Ctrl+Tab/Ctrl+Shift+Tab tab-next/
+ *     tab-prev, Ctrl+PageDown/Ctrl+PageUp tab-next/tab-prev, Ctrl+1..8/Ctrl+9
+ *     tab-jump-1..8/tab-jump-last (M09 F3 Leg 1)
+ *
+ * DOCUMENTED RISK (design review Q3, mission-debrief carry): this mapper
+ * hand-mirrors keydownToAction rather than sharing it — every classifier change
+ * (including this flight's `alt` addition) must land in BOTH files in lockstep
+ * or the sheet path silently diverges on AltGr locales. Unification is a future
+ * maintenance candidate, not this flight.
  *
  * Unmodified Arrow/Home/End/Enter/Space/Escape/Tab stay with the sheet page (the
  * APG menu contract wins inside the menu): every mapping below requires
@@ -37,14 +45,23 @@
  * only (the chrome handler never matched their shifted forms); f/F, j/J, p/P,
  * i/I match both cases where their source branches do.
  *
- * @param {{ key: string, control: boolean, meta: boolean, shift: boolean }} input
+ * `alt` (M09 F3, threaded in lockstep with keydown-action.js's own i18n ruling)
+ * defaults to `false` and gates ONLY the digit tab-jump branch, for the same
+ * AltGr reason documented there: `Ctrl+Alt+7..9` must keep producing its
+ * character, never a tab-jump. The digit match is on `key` alone, regardless
+ * of `shift` (AZERTY parity, same as the `=` zoom match above).
+ *
+ * @param {{ key: string, control: boolean, meta: boolean, shift: boolean, alt?: boolean }} input
  * @returns {{ scope: 'guest' | 'chrome',
  *   action: 'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'find'
  *     | 'downloads' | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
- *     | 'reload' | 'toggle-privacy',
+ *     | 'reload' | 'toggle-privacy'
+ *     | 'tab-next' | 'tab-prev'
+ *     | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
+ *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last',
  *   autoRepeatGuard?: boolean } | null}
  */
-export function sheetAcceleratorAction({ key, control, meta, shift }) {
+export function sheetAcceleratorAction({ key, control, meta, shift, alt = false }) {
   // F12 — the sole modifier-less accelerator (guest devtools branch).
   if (key === 'F12') return { scope: 'guest', action: 'devtools', autoRepeatGuard: true };
 
@@ -62,6 +79,18 @@ export function sheetAcceleratorAction({ key, control, meta, shift }) {
   if (key === 'p' || key === 'P') return { scope: 'guest', action: 'print' };
   if (key === 'f' || key === 'F') return { scope: 'guest', action: 'find' };
   if (key === 'j' || key === 'J') return { scope: 'guest', action: 'downloads', autoRepeatGuard: true };
+
+  // Chrome-class tab-cycle (M09 F3 Leg 1) — mirrors keydownToAction's Tab/PageDown/
+  // PageUp mapping, not lightbox-gated (there is no lightbox concept on the sheet).
+  if (key === 'Tab') return { scope: 'chrome', action: shift ? 'tab-prev' : 'tab-next' };
+  if (key === 'PageDown') return { scope: 'chrome', action: 'tab-next' };
+  if (key === 'PageUp') return { scope: 'chrome', action: 'tab-prev' };
+
+  // Chrome-class tab-jump (M09 F3 Leg 1) — same `!alt` AltGr guard and shift-
+  // tolerant digit match as keydownToAction; must stay in lockstep with it.
+  if (!alt && key >= '1' && key <= '9') {
+    return { scope: 'chrome', action: /** @type {any} */ (key === '9' ? 'tab-jump-last' : `tab-jump-${key}`) };
+  }
 
   // Chrome-class (mirrors keydownToAction's lowercase-only matches).
   if (key === 't') return { scope: 'chrome', action: 'new-tab' };
