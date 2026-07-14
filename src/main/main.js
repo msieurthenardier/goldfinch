@@ -2268,6 +2268,32 @@ ipcMain.handle('tab-reopen', () => {
   };
 });
 
+// M09 F5 Leg 1 (DD3) — two tiny chrome-trust-domain invokes for the tab context
+// menu's duplicate + reopen-closed items. Bare ipcMain.handle (same trust domain
+// as tab-reopen/get-zoom above) — no new privileged surface, both return data the
+// chrome already receives through other flows.
+
+// Snapshot a live web tab's navigation history for Duplicate (DD1's resolved open
+// question: address + jar + nav history). Acts on the PASSED webContentsId (TOCTOU
+// guard, same discipline as toggle-devtools/page-context-correct) — never
+// activeTab(). Web tabs only: a dead/missing/internal target returns null (the
+// renderer's duplicate dispatch then no-ops rather than duplicating nothing).
+ipcMain.handle('tab-history-snapshot', (_e, { webContentsId }) => {
+  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
+  if (!wc || wc.isDestroyed()) return null;
+  if (isInternalContents(wc)) return null;
+  return {
+    entries: wc.navigationHistory.getAllEntries(),
+    index: wc.navigationHistory.getActiveIndex(),
+  };
+});
+
+// Read-only closed-tab-stack size for the tab-context model's reopen-closed
+// omission rule (empty stack → item omitted, per the sheet's omitted-only
+// discipline — no disabled-item shape exists). Trivial wrapper over the existing
+// closedTabStack.size() the tab-reopen handler already shares.
+ipcMain.handle('closed-tab-stack-size', () => closedTabStack.size());
+
 ipcMain.on('tab-hide', (_event, wcId) => {
   // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
   // takes the overlay out of the stack too. Restore needs no code here —

@@ -1,6 +1,6 @@
 # Flight: Tab Context Menu
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -13,8 +13,9 @@
       landed F1; "move to new window" is deferred to the multi-window
       flights per the mission flight list — the criterion completes there;
       behavior-test-backed — new `tab-context-menu` spec)*
-- [ ] Completes the reopen criterion's **menu half** (SC5 — F4's DD3
-      deferral).
+- [x] Completes the reopen criterion's **menu half** (SC5 — F4's DD3
+      deferral). *(Witnessed: `tab-context-menu` steps 8–9 — menu reopen
+      incl. the mid-strip positional case and the empty-stack omission.)*
 
 ---
 
@@ -26,7 +27,7 @@ Give every tab a context menu, rendered from the menu-overlay sheet like
 all chrome menus: right-click (or the Context-Menu key / Shift+F10 on a
 focused tab) opens Close / Close other tabs / Close tabs to the right /
 Duplicate / Reopen closed tab, anchored at the tab. Reopen reuses Flight
-4's dispatch chain verbatim and renders disabled when the stack is empty.
+4's dispatch chain verbatim and is omitted when the stack is empty.
 Duplicate copies address + jar + navigation history (nearly free via the
 F4 restore seam). "Move to new window" is deliberately absent until the
 multi-window flight adds it to this same model.
@@ -69,8 +70,8 @@ item array), ids namespaced `tab:*` (`tab:close`, `tab:close-others`,
 `tab:close-right`, `tab:duplicate`, `tab:reopen-closed`) per the
 page-context-model vocabulary. Rules: `close-others` omitted when the tab
 is the only tab; `close-right` omitted when none to its right;
-`reopen-closed` omitted (or disabled, per the design-review verify) when
-`stackSize === 0`. Unit-tested offline.
+`reopen-closed` omitted when `stackSize === 0` (omitted-only — the sheet
+has no disabled-item shape). Unit-tested offline.
 
 **DD2 — Trigger + sheet wiring on the established page-context pattern.**
 `contextmenu` on tab buttons (chrome DOM; preventDefault) + the
@@ -140,7 +141,7 @@ CLAUDE.md (menu note).
 - [x] page-context-model + sheet channel protocol current (CLAUDE.md
       sections read; the sheet hosts multi-template menus).
 - [x] F4's tabReopen dispatch case + restoreHistory/insertAt seams live.
-- [ ] Right-click delivery premise (design review + leg-start check): the
+- [x] Right-click delivery premise (design review + leg-start check): the
       `click` tool's `button:'right'` fires the chrome's contextmenu
       handler (guest right-click goes through main's context-menu event —
       but the STRIP is chrome DOM, so the DOM contextmenu event is the
@@ -167,9 +168,12 @@ lines (watch item stands; the F6 module-split decision is next flight).
 
 ### Checkpoints
 
-- [ ] Model unit suite green (omission rules).
-- [ ] Menu opens live from both trigger paths; all actions correct.
-- [ ] `tab-context-menu` spec passes; a11y sweep green — **the audit's
+- [x] Model unit suite green (omission rules).
+- [x] Menu opens live from both trigger paths; all actions correct.
+      *(pointer path live-verified + Witnessed; the literal
+      ContextMenu/F10 keypress is a KEY_MAP apparatus gap — structurally
+      verified, HAT-scoped.)*
+- [x] `tab-context-menu` spec passes; a11y sweep green — **the audit's
       SHEET_STATES gains a `tab-context` entry + an
       `openTabContextMenuForAudit()` hook** (mirrors
       openPageContextMenuForAudit; representative tab with items-to-right
@@ -192,11 +196,12 @@ parity).
 
 > Tentative; planned one at a time.
 
-- [ ] `menu-model-and-wiring` — model + unit net, triggers (pointer +
+- [x] `menu-model-and-wiring` — model + unit net, triggers (pointer +
       keyboard incl. double-fire dedupe), sheet template registration,
       channel-6 dispatch, the two invokes, doc grep-ACs.
-- [ ] `verify-integration` — right-click premise check, `tab-context-menu`
-      spec authored + run, a11y (sheet-state list check), suites.
+- [x] `verify-integration` — right-click premise check, `tab-context-menu`
+      spec authored + run (PASS 10/10 first run), a11y (sheet-state list
+      check), suites.
 
 ---
 
@@ -204,11 +209,13 @@ parity).
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged (PR — stacks on flight/4)
-- [ ] Tests passing
-- [ ] Documentation updated (README context-menu note; CLAUDE.md menu
-      hosted-surfaces list + tab-strip section)
+- [x] All legs completed
+- [ ] Code merged (PR opened, stacks on flight/4 — operator merges)
+- [x] Tests passing (1646/1646; lint + typecheck + a11y green)
+- [x] Documentation updated (README context-menu note; CLAUDE.md menu
+      hosted-surfaces list + tab-strip section; review fix cycle also
+      refreshed the seam count, sheet-state enumeration, escape-only
+      phrasing, and docs/renderer-menu.md consumer list)
 
 ### Verification
 

@@ -128,7 +128,8 @@ import { isSafeColor } from '../shared/safe-color.js';
   const MENU_LABELS = {
     kebab: 'More menu',
     container: 'Open new tab in a container', // parity with chrome #container-menu
-    'page-context': 'Page actions' // parity with chrome #page-context-menu (index.html:54)
+    'page-context': 'Page actions', // parity with chrome #page-context-menu (index.html:54)
+    'tab-context': 'Tab menu' // M09 Flight 5 Leg 1 — right-click / Context-Menu-key on a tab
   };
   // Non-item header row per menuType (role="presentation" — parity with the old
   // container menu's "Open new tab in…" .cm-title; excluded from the item set).

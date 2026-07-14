@@ -23,8 +23,8 @@ The sheet page (`src/renderer/menu-overlay.js`) registers one controller entry p
 (all via `menuController.register({...})`, every one with **`trigger === menu`** — the sheet
 has no in-document trigger buttons; opens are programmatic on `menu-overlay:init`):
 
-- **`menu` template** (kebab ⋮, container ▾, page-context incl. toolbar-Unpin mode — one
-  shared entry) — has `items` (the rendered `role="menuitem"` buttons; separators/notes are
+- **`menu` template** (kebab ⋮, container ▾, page-context incl. toolbar-Unpin mode,
+  tab-context — one shared entry) — has `items` (the rendered `role="menuitem"` buttons; separators/notes are
   excluded by the getter, so roving skips them for free).
 - **`info-popup` template** (site-info 🔒) — **no `items`** (the roving contract no-ops); the
   template's own `keydown` handler covers Escape/Tab dismissal.

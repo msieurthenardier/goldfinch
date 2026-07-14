@@ -267,9 +267,12 @@ Planning inputs adopted from prior artifacts:
 - [x] Flight 4: Closed-tab stack + reopen — bounded stack, `Ctrl+Shift+T`
       (the reserved binding goes live), jar re-assignment, nav-history
       restore where feasible, burner exclusion by positive allowlist.
-- [ ] Flight 5: Tab context menu — sheet-rendered tab-scoped menu (close,
+- [x] Flight 5: Tab context menu — sheet-rendered tab-scoped menu (close,
       close others, close to the right, duplicate, reopen closed; move-to-new-
       window lands with the multi-window flight), Context-Menu key path.
+      *(Landed 2026-07-14; `tab-context-menu` spec PASS 10/10 first run; the
+      literal Context-Menu/F10 keypress is HAT-scoped — KEY_MAP apparatus
+      gap; wiring structurally verified.)*
 - [ ] Flight 6: Multi-window shell, part 1 — re-parenting spike (gate; mid-
       motion visual acceptance bar), singular-window behavior-test audit,
       window registry + per-window chrome/tabViews structure, lifecycle
