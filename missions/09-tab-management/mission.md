@@ -254,7 +254,7 @@ Planning inputs adopted from prior artifacts:
 > planned and created one at a time as work progresses. This list will evolve
 > based on discoveries during implementation.
 
-- [ ] Flight 1: Shrink-to-fit tab strip — progressive shrink to a compact
+- [x] Flight 1: Shrink-to-fit tab strip — progressive shrink to a compact
       floor, no scrollbar at any count, active tab keeps close, middle-click
       close; evolve `responsive-tab-strip` spec. (BACKLOG entry executes here.)
 - [ ] Flight 2: Tab order model + reorder — explicit order model

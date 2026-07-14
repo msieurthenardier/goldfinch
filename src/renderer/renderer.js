@@ -972,7 +972,11 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
     jar.id === 'internal'
       ? ''
       : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
-  btn.innerHTML = `${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button>`;
+  // .tab-row wraps the visible content (flex row + padding): a CSS container query cannot
+  // restyle the element that establishes the container itself, so the padding-compress
+  // disclosure stage (styles.css) needs a descendant of `.tab` (the query container) to
+  // target — see the styles.css comment above `.tab-row`.
+  btn.innerHTML = `<span class="tab-row">${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button></span>`;
   btn.addEventListener('click', (e) => {
     if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
       if (tabs.size > 1) freezeTabWidths(); // DD5: defer reflow on pointer-close (not last tab)
@@ -980,6 +984,16 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
       return;
     }
     activateTab(id);
+  });
+  // Middle-click close (M09 F1 DD3): rides the identical deferred-reflow pointer-close path as
+  // the ✕ button. Filter to button 1 (middle) — auxclick also fires for buttons 3/4 (back/
+  // forward) which must no-op here. preventDefault documents intent (middle-click autoscroll is
+  // already foreclosed by the chrome document's overflow:hidden).
+  btn.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    if (tabs.size > 1) freezeTabWidths();
+    closeTab(id);
   });
   els.tabs.appendChild(btn);
   tab.btn = btn;

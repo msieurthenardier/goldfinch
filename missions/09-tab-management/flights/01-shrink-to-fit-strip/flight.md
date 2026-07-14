@@ -1,15 +1,15 @@
 # Flight: Shrink-to-Fit Tab Strip
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] The tab strip never shows a scrollbar at any tab count: tabs shrink
+- [x] The tab strip never shows a scrollbar at any tab count: tabs shrink
       progressively (title truncates, then inactive tabs lose their close
       affordance, down to a compact floor) while the active tab keeps its
       close affordance. *(behavior-test-backed — `responsive-tab-strip`)*
-- [ ] (partial) Tab context menu criterion's middle-click clause: middle-click
+- [x] (partial) Tab context menu criterion's middle-click clause: middle-click
       on a tab closes it. *(pulled forward into this flight — it is tab-strip
       pointer behavior, same surface as the deferred-reflow close path; the
       context-menu flight inherits it done)*
@@ -173,10 +173,10 @@ the regression net moves with the behavior, never trailing it.
 
 ### Checkpoints
 
-- [ ] Progressive shrink renders correctly live (spot-check via dev launch)
+- [x] Progressive shrink renders correctly live (spot-check via dev launch)
       before the spec rewrite locks numeric thresholds.
-- [ ] Evolved `responsive-tab-strip` behavior test passes end-to-end.
-- [ ] `npm run a11y` chrome sweep green (strip states unchanged at
+- [x] Evolved `responsive-tab-strip` behavior test passes end-to-end (run 2: 10/10).
+- [x] `npm run a11y` chrome sweep green (strip states unchanged at
       comfortable widths).
 
 ### Adaptation Criteria
@@ -207,11 +207,11 @@ the regression net moves with the behavior, never trailing it.
 > planned and created one at a time as the flight progresses. This list will
 > evolve based on discoveries during implementation.
 
-- [ ] `progressive-shrink-and-middle-click` — CSS container-query staged
+- [x] `progressive-shrink-and-middle-click` — CSS container-query staged
       shrink (DD1/DD2), active-tab close carve-out, middle-click close (DD3),
       live render spot-check, `responsive-tab-strip.md` spec evolution (DD4/
       DD5), BACKLOG entry retirement.
-- [ ] `verify-integration` — run the evolved `/behavior-test
+- [x] `verify-integration` — run the evolved `/behavior-test
       responsive-tab-strip` against the live app; `npm run a11y` sweep;
       `npm test` / `lint` / `typecheck`; confirm `tab-keyboard-operability`
       spec needs no text change (audit only).
@@ -222,10 +222,10 @@ the regression net moves with the behavior, never trailing it.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated (BACKLOG entry retired; CLAUDE.md tab-strip note
+- [x] All legs completed
+- [ ] Code merged (PR open — merges after flight review)
+- [x] Tests passing
+- [x] Documentation updated (BACKLOG entry retired; CLAUDE.md tab-strip note
       if the strip's described behavior changed)
 
 ### Verification
