@@ -1,6 +1,6 @@
 # Flight: Shrink-to-Fit Tab Strip
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
