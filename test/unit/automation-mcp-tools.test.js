@@ -5,7 +5,7 @@
 //
 // SDK-free + Electron-free: mcp-tools.js imports nothing, so these tests run
 // under plain `node --test` with a fake recording engine (no SDK, no Electron).
-// They pin the discovery contract (17 drive tool names + schemas, no `call` leak),
+// They pin the discovery contract (18 drive tool names + schemas, no `call` leak),
 // the named→positional dispatch mapping, DD6 success serialization, the
 // openTab-null operational case, every throw→isError class, unknown-tool→isError,
 // and the per-call getEngine discipline.
@@ -23,7 +23,7 @@ const DRIVE_NAMES = [
   'enumerateTabs', 'openTab', 'closeTab', 'activateTab', 'navigate',
   'goBack', 'goForward', 'reload', 'getZoom', 'setZoom', 'printToPDF',
   'findInPage', 'stopFindInPage',
-  'click', 'typeText', 'scroll', 'pressKey',
+  'click', 'typeText', 'scroll', 'pressKey', 'dragPointer',
 ];
 
 const OBSERVE_NAMES = ['captureScreenshot', 'captureWindow', 'readDom', 'readAxTree'];
@@ -69,13 +69,13 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 28 tools (17 drive + 4 observe + 2 eval + 2 devtools + 2 chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory)), named 1:1 with engine ops', () => {
+test('listTools returns exactly the 29 tools (18 drive + 4 observe + 2 eval + 2 devtools + 2 chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory)), named 1:1 with engine ops', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 28);
-  const allNames28 = [...ALL_NAMES, 'getChromeTarget', 'downloadsList', 'getHistory'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames28].sort());
+  assert.equal(tools.length, 29);
+  const allNames29 = [...ALL_NAMES, 'getChromeTarget', 'downloadsList', 'getHistory'];
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames29].sort());
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -149,6 +149,16 @@ test('input schemas carry the correct required fields per the discovery contract
   assert.match(pkDesc, /\bname\b/);
   assert.match(pkDesc, /\bkey\b/);
   assert.match(pkDesc, /modifiers/); // chord usage documented
+  // dragPointer (M09 F2 Leg 2) — wcId, from, to required; steps optional
+  assert.deepEqual(req('dragPointer'), ['wcId', 'from', 'to']);
+  const dragProps = byName.get('dragPointer').inputSchema.properties;
+  assert.equal(dragProps.wcId.type, 'integer');
+  assert.deepEqual(dragProps.from.required, ['x', 'y']);
+  assert.deepEqual(dragProps.to.required, ['x', 'y']);
+  assert.equal(dragProps.steps.type, 'integer');
+  assert.equal(dragProps.stepDelayMs.type, 'integer');
+  assert.ok(!req('dragPointer').includes('steps'), 'steps is optional');
+  assert.ok(!req('dragPointer').includes('stepDelayMs'), 'stepDelayMs is optional');
 });
 
 // ---------------------------------------------------------------------------
@@ -260,6 +270,20 @@ test('scroll maps to engine.scroll(wcId, x, y, dx, dy)', async () => {
   const reg = buildToolRegistry(() => engine);
   await reg.callTool('scroll', { wcId: 5, x: 1, y: 2, dx: 3, dy: 4 });
   assert.deepEqual(calls.scroll[0], [5, 1, 2, 3, 4]);
+});
+
+test('dragPointer maps to engine.dragPointer(wcId, from, to, { steps, stepDelayMs })', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('dragPointer', { wcId: 7, from: { x: 10, y: 20 }, to: { x: 100, y: 20 }, steps: 5, stepDelayMs: 2 });
+  assert.deepEqual(calls.dragPointer[0], [7, { x: 10, y: 20 }, { x: 100, y: 20 }, { steps: 5, stepDelayMs: 2 }]);
+});
+
+test('dragPointer without steps/stepDelayMs passes an opts object with both undefined (engine defaults apply)', async () => {
+  const { engine, calls } = makeFakeEngine();
+  const reg = buildToolRegistry(() => engine);
+  await reg.callTool('dragPointer', { wcId: 7, from: { x: 0, y: 0 }, to: { x: 1, y: 1 } });
+  assert.deepEqual(calls.dragPointer[0], [7, { x: 0, y: 0 }, { x: 1, y: 1 }, { steps: undefined, stepDelayMs: undefined }]);
 });
 
 test('enumerateTabs invokes engine.enumerateTabs() with no args', async () => {
@@ -396,6 +420,8 @@ test('void ops (resolve undefined) serialize to the {"ok":true} success shape', 
   assert.equal(textOf(scrolled), '{"ok":true}');
   const pressed = await reg.callTool('pressKey', { wcId: 1, name: 'Enter' });
   assert.equal(textOf(pressed), '{"ok":true}');
+  const dragged = await reg.callTool('dragPointer', { wcId: 1, from: { x: 0, y: 0 }, to: { x: 10, y: 0 } });
+  assert.equal(textOf(dragged), '{"ok":true}');
 });
 
 // ---------------------------------------------------------------------------
@@ -418,10 +444,10 @@ test('each resolveContents throw class (bad-handle / no-such-contents / internal
   ];
   for (const msg of cases) {
     // exercise across a wcId-taking op AND across close/activate (which also resolve)
-    for (const name of ['navigate', 'closeTab', 'activateTab', 'click', 'pressKey']) {
+    for (const name of ['navigate', 'closeTab', 'activateTab', 'click', 'pressKey', 'dragPointer']) {
       const { engine } = makeFakeEngine({ throws: { [name]: new Error(msg) } });
       const reg = buildToolRegistry(() => engine);
-      const args = { wcId: 1, url: 'https://a.test', x: 0, y: 0, name: 'Enter' };
+      const args = { wcId: 1, url: 'https://a.test', x: 0, y: 0, name: 'Enter', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } };
       const result = await reg.callTool(name, args);
       assert.equal(result.isError, true, name + ' / ' + msg);
       assert.equal(textOf(result), msg);

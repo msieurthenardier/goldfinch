@@ -173,6 +173,10 @@
     <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
     <!-- Visually-hidden live region for media-panel status announcements -->
     <div id="media-status" class="sr-only" role="status" aria-live="polite"></div>
+    <!-- Visually-hidden live region for tab-strip status announcements (M09 F2 DD3):
+         a dedicated sibling to #media-status so tab-reorder announcements never
+         race media-panel ones. -->
+    <div id="tab-status" class="sr-only" role="status" aria-live="polite"></div>
 
     <!-- Image lightbox with zoom + pan -->
     <div id="lightbox" class="hidden" role="dialog" aria-modal="true" aria-label="Image viewer">
@@ -189,7 +193,7 @@
       <div id="lightbox-stage"></div>
     </div>
 
-    <!-- Fully-module page (M07 Flight 2 leg 5): all ten ../shared/ scripts AND
+    <!-- Fully-module page (M07 Flight 2 leg 5): all ../shared/ scripts AND
          renderer.js (the page controller, which imports its shared
          dependencies) are real ES modules (type="module") — no classic script
          remains on this page, so the DD3 transitional defer rule is vacuous
@@ -206,6 +210,9 @@
     <script src="../shared/default-routing.js" type="module"></script>
     <script src="../shared/inherit-container.js" type="module"></script>
     <script src="../shared/omnibox-suggest-model.js" type="module"></script>
+    <!-- Tab-order decision model (M09 Flight 2 DD1): pure reorder/keyboard-move
+         logic, no INTERNAL_PAGES entry needed (chrome-only consumer). -->
+    <script src="../shared/tab-order.js" type="module"></script>
     <!-- safe-color.js loads before automation-indicator-model.js (F7): the
          model's jar-color resolution defense-in-depth-checks isSafeColor. Both
          are real ES modules now — the model imports safe-color directly, so the

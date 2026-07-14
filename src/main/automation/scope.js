@@ -63,6 +63,10 @@ const WCID_FIRST_OPS = [
   // Find in page (Flight 2 / Mission 4): wcId-first, jar-membership-checked. A jar key
   // may find in its OWN guests. The op-local internal guard in find.js covers admin.
   'findInPage', 'stopFindInPage',
+  // Pointer drag (M09 F2 Leg 2, DD4): wcId-first, jar-membership-checked like click. A
+  // jar key may drag within its OWN guest's viewport; admin may drag the chrome (tab
+  // reorder). No new trust surface — same tier as click.
+  'dragPointer',
 ];
 
 /**

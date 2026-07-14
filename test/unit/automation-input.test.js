@@ -13,10 +13,12 @@ const {
   keyEvents,
   mouseClickEvents,
   charEvents,
+  dragEvents,
   sendInput,
   click,
   typeText,
   pressKey,
+  dragPointer,
 } = require('../../src/main/automation/input');
 
 // ---------------------------------------------------------------------------
@@ -333,6 +335,54 @@ test('mouseClickEvents: mouseMove has no button/clickCount/buttons (move-type ev
 });
 
 // ---------------------------------------------------------------------------
+// dragEvents (M09 F2 Leg 2 DD4) — ordering, interpolation, buttons bitmask
+// ---------------------------------------------------------------------------
+
+test('dragEvents: returns mouseMove → mouseDown → N interpolated mouseMove → mouseUp (default steps 12)', () => {
+  const evs = dragEvents({ x: 0, y: 0 }, { x: 120, y: 0 });
+  assert.equal(evs.length, 2 + 12 + 1); // move-to-start + down + 12 interpolated moves + up
+  assert.equal(evs[0].type, 'mouseMove');
+  assert.equal(evs[1].type, 'mouseDown');
+  for (let i = 2; i < 14; i++) assert.equal(evs[i].type, 'mouseMove', 'event ' + i + ' should be an interpolated mouseMove');
+  assert.equal(evs[14].type, 'mouseUp');
+});
+
+test('dragEvents: custom steps controls the interpolated-move count', () => {
+  const evs = dragEvents({ x: 0, y: 0 }, { x: 10, y: 0 }, 3);
+  assert.equal(evs.length, 2 + 3 + 1);
+});
+
+test('dragEvents: mouseDown carries buttons:1 at `from`; every interpolated move also carries buttons:1', () => {
+  const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 50 }, 4);
+  assert.equal(evs[1].type, 'mouseDown');
+  assert.equal(evs[1].x, 0); assert.equal(evs[1].y, 0);
+  assert.equal(evs[1].buttons, 1);
+  for (let i = 2; i < 2 + 4; i++) assert.equal(evs[i].buttons, 1, 'interpolated move ' + i + ' must hold buttons:1');
+});
+
+test('dragEvents: mouseUp carries buttons:0 at `to`', () => {
+  const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 50 }, 4);
+  const up = evs[evs.length - 1];
+  assert.equal(up.type, 'mouseUp');
+  assert.equal(up.x, 100); assert.equal(up.y, 50);
+  assert.equal(up.buttons, 0);
+});
+
+test('dragEvents: interpolated moves progress linearly from `from` to `to` (final move lands exactly on `to`)', () => {
+  const evs = dragEvents({ x: 0, y: 0 }, { x: 100, y: 0 }, 4);
+  const moves = evs.slice(2, 2 + 4); // the 4 interpolated moves
+  assert.deepEqual(moves.map((m) => m.x), [25, 50, 75, 100]);
+  const lastMove = moves[moves.length - 1];
+  assert.equal(lastMove.x, 100, 'the final interpolated move must land exactly on `to`');
+});
+
+test('dragEvents: steps <= 0 or non-numeric clamps to at least 1 interpolated move', () => {
+  assert.equal(dragEvents({ x: 0, y: 0 }, { x: 10, y: 0 }, 0).length, 2 + 1 + 1);
+  assert.equal(dragEvents({ x: 0, y: 0 }, { x: 10, y: 0 }, -5).length, 2 + 1 + 1);
+  assert.equal(dragEvents({ x: 0, y: 0 }, { x: 10, y: 0 }, undefined).length, 2 + 12 + 1);
+});
+
+// ---------------------------------------------------------------------------
 // charEvents — character in keyCode, one event per char
 // ---------------------------------------------------------------------------
 
@@ -486,6 +536,75 @@ test('click: internal-session wcId → throws, activate not called, no events se
   );
   assert.equal(activateCalls.length, 0);
   assert.equal(internalWc._received.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// dragPointer — foreground-to-act behavior (DD3), mirrors click's three cases
+// ---------------------------------------------------------------------------
+
+test('dragPointer: guest target — activate called once with wcId BEFORE sendInputEvent calls', async () => {
+  const guestWc = makeGuestWc(21);
+  const callLog = [];
+  const activate = async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); };
+  const originalSend = guestWc.sendInputEvent.bind(guestWc);
+  guestWc.sendInputEvent = (ev) => { callLog.push({ what: 'sendInputEvent', type: ev.type }); originalSend(ev); };
+
+  const deps = { fromId: makeFakeFromId({ 21: guestWc }), chromeContents: null, activate };
+
+  await dragPointer(21, { x: 0, y: 0 }, { x: 40, y: 0 }, deps, { steps: 4 });
+
+  const activateIdx = callLog.findIndex((e) => e.what === 'activate');
+  const firstSendIdx = callLog.findIndex((e) => e.what === 'sendInputEvent');
+  assert.ok(activateIdx !== -1, 'activate must be called');
+  assert.ok(firstSendIdx !== -1, 'sendInputEvent must be called');
+  assert.ok(activateIdx < firstSendIdx, 'activate must be called before the first sendInputEvent');
+
+  const activateCalls = callLog.filter((e) => e.what === 'activate');
+  assert.equal(activateCalls.length, 1);
+  assert.equal(activateCalls[0].id, 21);
+
+  // mouseMove(to from) + mouseDown + 4 interpolated moves + mouseUp = 7 events
+  assert.equal(guestWc._received.length, 7);
+  assert.equal(guestWc._received[0].type, 'mouseMove');
+  assert.equal(guestWc._received[1].type, 'mouseDown');
+  assert.equal(guestWc._received[guestWc._received.length - 1].type, 'mouseUp');
+});
+
+test('dragPointer: chrome target — activate NOT called (chrome is always live)', async () => {
+  const chromeWc = makeGuestWc(2);
+  const activateCalls = [];
+  const activate = async (id) => { activateCalls.push(id); };
+
+  const deps = { fromId: makeFakeFromId({ 2: chromeWc }), chromeContents: chromeWc, activate };
+
+  await dragPointer(2, { x: 0, y: 0 }, { x: 10, y: 0 }, deps, { steps: 2 });
+
+  assert.equal(activateCalls.length, 0, 'activate must NOT be called for a chrome target');
+  assert.equal(chromeWc._received.length, 5, 'mouseMove + mouseDown + 2 interpolated moves + mouseUp');
+});
+
+test('dragPointer: internal-session wcId → throws, activate not called, no events sent', async () => {
+  const internalWc = makeInternalWc(78);
+  const activateCalls = [];
+  const activate = async (id) => { activateCalls.push(id); };
+
+  const deps = { fromId: makeFakeFromId({ 78: internalWc }), chromeContents: null, activate };
+
+  await assert.rejects(
+    () => dragPointer(78, { x: 0, y: 0 }, { x: 10, y: 0 }, deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
+  );
+  assert.equal(activateCalls.length, 0);
+  assert.equal(internalWc._received.length, 0);
+});
+
+test('dragPointer: default steps (12) used when opts is omitted', async () => {
+  const guestWc = makeGuestWc(22);
+  const deps = { fromId: makeFakeFromId({ 22: guestWc }), chromeContents: null };
+
+  await dragPointer(22, { x: 0, y: 0 }, { x: 120, y: 0 }, deps);
+
+  assert.equal(guestWc._received.length, 2 + 12 + 1);
 });
 
 // ---------------------------------------------------------------------------

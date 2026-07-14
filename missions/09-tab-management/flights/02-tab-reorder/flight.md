@@ -1,15 +1,15 @@
 # Flight: Tab Order Model and Reorder
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] The operator can reorder tabs within the strip by pointer drag, with a
+- [x] The operator can reorder tabs within the strip by pointer drag, with a
       live visual indication of the pending drop position — and dragging a
       tab never fights the strip's window-move drag zone.
       *(behavior-test-backed — new `tab-reorder` spec)*
-- [ ] (partial) Every tab-management pointer gesture has a keyboard-reachable
+- [x] (partial) Every tab-management pointer gesture has a keyboard-reachable
       equivalent: **reorder from the keyboard** lands here, and the existing
       tablist keyboard contract still holds. *(behavior-test-backed —
       `tab-keyboard-operability` extended)*
@@ -153,8 +153,10 @@ foreground-to-act + re-resolve discipline like every input op. Registration
 is FOUR places, not two (design review — the documented "leg-05 SC8 gap"):
 `input.js` op body, `engine.js` dispatch, **`scope.js` `WCID_FIRST_OPS`**
 (miss it and jar keys throw "engine.dragPointer is not a function"; the
-`automation-scope.test.js` guard will catch a miss), and the MCP tool
-(mcp-server.js) + `docs/mcp-automation.md` (29 tools).
+`automation-scope.test.js` guard will catch a miss), and the MCP ToolDef
+(**mcp-tools.js** — corrected at leg-2 design review; mcp-server.js is
+transport-only) + `docs/mcp-automation.md` (29 tools; count also pinned by
+two unit tests).
 **Premise spike first (design review)**: the scroll op's history (sendInputEvent
 `mouseWheel` produced zero movement → CDP fallback) makes "interpolated
 `mouseMove` produces real `pointermove` in the chrome renderer" a
@@ -239,13 +241,13 @@ input op; no IPC, no session, no guest-view changes.
 
 ### Checkpoints
 
-- [ ] `tab-order.js` unit suite green (midpoint rule incl. dragged-slot
+- [x] `tab-order.js` unit suite green (midpoint rule incl. dragged-slot
       exclusion, bounds, no-op moves).
-- [ ] Keyboard reorder works live; `tab-keyboard-operability` (extended)
+- [x] Keyboard reorder works live; `tab-keyboard-operability` (extended)
       passes.
-- [ ] Pointer drag works live (spot-check with rect-containment-honest
+- [x] Pointer drag works live (spot-check with rect-containment-honest
       reads, per the flight-1 lesson); `tab-reorder` spec passes.
-- [ ] `npm run a11y` green; suites green.
+- [x] `npm run a11y` green; suites green.
 
 ### Adaptation Criteria
 
@@ -270,14 +272,14 @@ input op; no IPC, no session, no guest-view changes.
 > planned and created one at a time as the flight progresses. This list will
 > evolve based on discoveries during implementation.
 
-- [ ] `order-model-and-keyboard-reorder` — `tab-order.js` + unit tests,
+- [x] `order-model-and-keyboard-reorder` — `tab-order.js` + unit tests,
       `orderedTabIds()` + consumer swaps (grep-AC), Ctrl+Shift+Arrow
       reorder, live-region announcement, `tab-keyboard-operability`
       extension.
-- [ ] `pointer-drag-and-drag-op` — drag gesture (DD2) + drag-state CSS,
+- [x] `pointer-drag-and-drag-op` — drag gesture (DD2) + drag-state CSS,
       `dragPointer` engine op + MCP tool + docs, new `tab-reorder` behavior
       spec authored.
-- [ ] `verify-integration` — run `tab-reorder` + extended
+- [x] `verify-integration` — run `tab-reorder` + extended
       `tab-keyboard-operability` behavior tests, a11y sweep, suites; fix
       loop as needed.
 
@@ -287,10 +289,10 @@ input op; no IPC, no session, no guest-view changes.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged (PR — stacks on flight 1's branch until PR #84 merges)
-- [ ] Tests passing
-- [ ] Documentation updated (`docs/mcp-automation.md` tool count + dragPointer
+- [x] Tests passing
+- [x] Documentation updated (`docs/mcp-automation.md` tool count + dragPointer
       reference; CLAUDE.md automation tool-count line)
 
 ### Verification

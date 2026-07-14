@@ -23,7 +23,7 @@ const { hashKey, validateKey } = require('../../src/main/automation/automation-a
 
 const TEST_PORT = 7790;
 const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
-const EXPECTED_TOOL_COUNT = 28;
+const EXPECTED_TOOL_COUNT = 29;
 
 // The valid key the test harness mints. The injected settings stub stores its
 // hash and reports the surface enabled, so a Bearer with this key passes the gate.
@@ -248,7 +248,7 @@ function initBody() {
   };
 }
 
-test('first client initializes and tools/list returns 28 tools', async () => {
+test('first client initializes and tools/list returns 29 tools', async () => {
   const server = await startServer();
   try {
     const client = await connectClient();
@@ -1288,10 +1288,22 @@ test('deriveAuditDetail — null-returning ops yield null', () => {
   }
 });
 
+test('deriveAuditDetail — dragPointer returns (fx,fy)->(tx,ty)', () => {
+  assert.equal(
+    deriveAuditDetail('dragPointer', { wcId: 1, from: { x: 10, y: 20 }, to: { x: 100, y: 20 } }),
+    '(10,20)->(100,20)'
+  );
+});
+
+test('deriveAuditDetail — dragPointer with missing from/to yields null', () => {
+  assert.equal(deriveAuditDetail('dragPointer', { wcId: 1 }), null);
+});
+
 test('deriveAuditDetail — null-safe: returns null when args is undefined', () => {
   assert.equal(deriveAuditDetail('navigate', undefined), null);
   assert.equal(deriveAuditDetail('typeText', undefined), null);
   assert.equal(deriveAuditDetail('click', undefined), null);
+  assert.equal(deriveAuditDetail('dragPointer', undefined), null);
 });
 
 test('audit — navigate tool call records detail=url=… in the log entry', async () => {

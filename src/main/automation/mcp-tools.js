@@ -89,7 +89,7 @@ function imageResult(b64) {
 }
 
 // ---------------------------------------------------------------------------
-// Tool definitions — drive ops (15). Each: { name, description, inputSchema,
+// Tool definitions — drive ops (18). Each: { name, description, inputSchema,
 // call(engine, args) }. `call` is the named→positional seam (kept tiny and
 // explicit); it is internal and is NOT leaked by listTools().
 // ---------------------------------------------------------------------------
@@ -346,6 +346,38 @@ const DRIVE_TOOLS = [
       return engine.pressKey(args.wcId, args.name ?? args.key, args.modifiers);
     },
   },
+  {
+    name: 'dragPointer',
+    description: 'Synthetic pointer drag in the target tab\'s viewport (M09 F2 Leg 2 DD4): mouseDown at `from`, ' +
+      'N interpolated mouseMove events with the button held, then mouseUp at `to`. Coordinates are viewport-relative ' +
+      '(same space as click). Use for drag-and-drop gestures a plain click cannot express (e.g. tab reorder). ' +
+      '`steps` (default 12) controls the number of interpolated intermediate mouseMove events; each event is paced ' +
+      'one macrotask apart (`stepDelayMs`, default 4ms) — an unpaced synchronous burst gets coalesced by Chromium ' +
+      'down to essentially the first + last move (confirmed at the premise spike), starving the drop-position logic ' +
+      'of intermediate reads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab (or the chrome wcId from getChromeTarget)' },
+        from: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+          description: 'drag start point (viewport coordinates)',
+        },
+        to: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+          description: 'drag end point (viewport coordinates)',
+        },
+        steps: { type: 'integer', description: 'number of interpolated intermediate mouseMove events (default 12)' },
+        stepDelayMs: { type: 'integer', description: 'delay (ms) between paced events (default 4)' },
+      },
+      required: ['wcId', 'from', 'to'],
+    },
+    call: (engine, { wcId, from, to, steps, stepDelayMs }) => engine.dragPointer(wcId, from, to, { steps, stepDelayMs }),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -542,11 +574,11 @@ const HISTORY_TOOLS = [
   },
 ];
 
-// The full tool table — 17 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 2
-// chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory) = 28
+// The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 2
+// chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory) = 29
 // (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find + Flight 5
-// downloadsList + Mission 08 Flight 5 getHistory), iterated by buildToolRegistry
-// for both discovery and dispatch.
+// downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2 dragPointer),
+// iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS];
 
 // ---------------------------------------------------------------------------

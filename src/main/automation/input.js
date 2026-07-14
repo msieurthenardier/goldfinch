@@ -148,6 +148,46 @@ function charEvents(text) {
   return [...String(text)].map((ch) => ({ type: 'char', keyCode: ch }));
 }
 
+/**
+ * Build the ordered mouse event array for a synthetic pointer drag (M09 F2 Leg 2
+ * DD4): mouseMove(to `from`) → mouseDown(buttons:1) → N interpolated
+ * mouseMove(buttons:1) → mouseUp(buttons:0). Mirrors mouseClickEvents' recipe
+ * (the SAME buttons bitmask so the renderer's real pointerdown/pointermove/
+ * pointerup handlers — and any `e.buttons` check — see the held button
+ * throughout) so the interpolated moves arm a chrome-side pointermove-driven
+ * drag gesture exactly like a real mouse drag would. `steps` (default 12)
+ * linearly interpolates from `from` to `to`, inclusive of the final point;
+ * each intermediate point is rounded to an integer pixel (sendInputEvent takes
+ * integer coordinates). This recipe was confirmed live against the chrome
+ * renderer at the M09 F2 Leg 2 premise spike (see the flight log): interpolated
+ * mouseMove events with buttons:1 held DO produce real pointermove events and
+ * drive drag-arming state in the renderer — no CDP fallback was needed (unlike
+ * `scroll`'s mouseWheel, which produced zero movement).
+ *
+ * @param {{x:number,y:number}} from
+ * @param {{x:number,y:number}} to
+ * @param {number} [steps]
+ * @returns {object[]}
+ */
+function dragEvents(from, to, steps = 12) {
+  const parsed = Number(steps);
+  const n = Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : 12;
+  /** @type {object[]} */
+  const events = [
+    { type: 'mouseMove', x: from.x, y: from.y },
+    // buttons:1 mirrors mouseClickEvents' proven recipe — a page's event.buttons sees the press.
+    { type: 'mouseDown', x: from.x, y: from.y, button: 'left', clickCount: 1, buttons: 1 },
+  ];
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const x = Math.round(from.x + (to.x - from.x) * t);
+    const y = Math.round(from.y + (to.y - from.y) * t);
+    events.push({ type: 'mouseMove', x, y, buttons: 1 });
+  }
+  events.push({ type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1, buttons: 0 });
+  return events;
+}
+
 // ---------------------------------------------------------------------------
 // Low-level single-event primitive (no foreground-to-act)
 // ---------------------------------------------------------------------------
@@ -202,6 +242,36 @@ async function actOn(wcId, events, deps) {
 }
 
 /**
+ * Resolve + conditionally activate (identical to actOn), then send events ONE AT A
+ * TIME with a small `await` yield between each (M09 F2 Leg 2 premise-spike finding):
+ * a same-tick synchronous burst of sendInputEvent mouseMoves gets coalesced by
+ * Chromium's input pipeline down to essentially the first + last move (confirmed
+ * live — see the flight log), which starves a pointermove-driven drag gesture of the
+ * intermediate positions it needs to compute a live drop index. Yielding a macrotask
+ * between sends (setTimeout, not just a microtask — a Promise-only `await` did not
+ * reliably force a new event-loop turn ahead of Chromium's coalescing window) gives
+ * each event its own dispatch pass. `stepDelayMs` is deliberately small — the whole
+ * gesture must stay well under any human-perceptible drag duration.
+ *
+ * @param {number} wcId
+ * @param {object[]} events
+ * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
+ * @param {number} stepDelayMs
+ */
+async function actOnPaced(wcId, events, deps, stepDelayMs) {
+  const { chromeContents, activate } = deps;
+  let wc = resolveContents(wcId, deps);
+  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+    await activate(wcId);
+    wc = resolveContents(wcId, deps);
+  }
+  for (const ev of events) {
+    wc.sendInputEvent(ev);
+    if (stepDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, stepDelayMs));
+  }
+}
+
+/**
  * Synthetic click at (x, y) in the target's viewport.
  * Coordinate space for guests is guest-viewport-relative — confirmed/tuned in Leg 6.
  *
@@ -222,6 +292,34 @@ const click = (wcId, x, y, deps, opts) => actOn(wcId, mouseClickEvents(x, y, opt
  * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
  */
 const typeText = (wcId, text, deps) => actOn(wcId, charEvents(text), deps);
+
+// Default pacing between drag events (ms) — see actOnPaced's doc comment for why a
+// same-tick synchronous burst gets coalesced. 12 steps * 4ms ≈ 48ms of extra wall
+// time: well under the "keep total < 500ms" guidance.
+const DRAG_STEP_DELAY_MS = 4;
+
+/**
+ * Synthetic pointer drag from (from.x, from.y) to (to.x, to.y) in the target's
+ * viewport (M09 F2 Leg 2 DD4) — mouseDown, N interpolated mouseMoves (buttons:1
+ * held), mouseUp, PACED one event per macrotask (actOnPaced — the premise-spike
+ * finding: an unpaced synchronous burst coalesces down to ~first+last event).
+ * Mirrors click's actOn wrapper otherwise (foreground-to-act, DD3). Coordinate
+ * space matches click: guest-viewport-relative for guests, chrome-document-
+ * relative for the chrome target.
+ *
+ * @param {number} wcId
+ * @param {{x:number,y:number}} from
+ * @param {{x:number,y:number}} to
+ * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ steps?: number, stepDelayMs?: number }} [opts]
+ */
+const dragPointer = (wcId, from, to, deps, opts) =>
+  actOnPaced(
+    wcId,
+    dragEvents(from, to, opts && opts.steps),
+    deps,
+    (opts && opts.stepDelayMs) ?? DRAG_STEP_DELAY_MS
+  );
 
 /**
  * Scroll via the in-process CDP debugger (Input.dispatchMouseEvent / mouseWheel).
@@ -304,9 +402,11 @@ module.exports = {
   keyEvents,
   mouseClickEvents,
   charEvents,
+  dragEvents,
   sendInput,
   click,
   typeText,
   scroll,
   pressKey,
+  dragPointer,
 };
