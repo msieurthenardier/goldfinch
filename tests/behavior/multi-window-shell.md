@@ -3,7 +3,22 @@
 **Slug**: `multi-window-shell`
 **Status**: active
 **Created**: 2026-07-15
-**Last Run**: 2026-07-15-05-54-21 — pass (9/9, run 2; run 1 surfaced three spec errata, folded — see runs/) — [run log](multi-window-shell/runs/2026-07-15-05-54-21.md)
+**Last Run**: 2026-07-15-22-21-56 — **partial** (post-rewrite re-run; **product green on every row**, but
+**two spec-instrument errata survived the rewrite** and were folded after — see the run log). **A clean
+re-run of the FOLDED spec is OWED at this spec's next touch (F8 exercises this shell and inherits the
+carry).** — [run log](multi-window-shell/runs/2026-07-15-22-21-56.md).
+Every F7 decision this spec exists to verify held live: DD5's inversion (window 2's `sheetWcId` **absent
+→ 7** while window 1's row carried none; V1 read **two simultaneously-visible, distinctly-identified
+sheets**; V2 dismissal scoped to the owner), DD2's walk-free discovery, DD1's all-windows census,
+DD3's lifecycle split, DD4's append-sentinel LIFO, the re-parent discriminator (window 3's sole tab kept
+T2's original `wcId` with jar and live history intact), and quit-on-last in 2s with no wedge.
+The load-bearing erratum is worth reading: **step 8's `ERR_ABORTED` count gate — added by F7 leg 4
+specifically to make a silent failure loud — named `getHistory` as if it were a per-tab
+navigation-history op.** It is M08 F5's **jar-confined visits reader**, so it refused `bad-args` on every
+run **regardless of whether the defect occurred** — a gate that discriminated nothing. Folded to
+`evaluate(wcId, "history.length")`; the behavior it protects was correct all along.
+Prior: 2026-07-15-05-54-21 — pass (9/9, run 2; run 1 surfaced three spec errata, folded) — [run log](multi-window-shell/runs/2026-07-15-05-54-21.md). **Note that run predates F7**: this spec was a
+**planned red from F7 leg 1 until leg 4 rewrote it** (157 → 249 lines).
 
 > **REWRITTEN 2026-07-15 (M09 F7 leg 4) — this spec was a PLANNED RED from F7 leg 1 until now.**
 > Three F7 decisions falsified it, and each is discharged here at the assertion that carried it:

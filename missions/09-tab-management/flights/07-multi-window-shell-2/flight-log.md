@@ -1992,3 +1992,48 @@ _(none yet)_
   silently degrades it to a reachable (and much quieter) missing-tab bug.
   Leg 1's invariant set is now enumerated by name. Flight `planning` → `ready`.
   Proceeding to leg 1.
+
+- 2026-07-15 — **FD ERROR, caught at commit: AC27 never ran, and the deferral has
+  now ROLLED TWICE and landed unowned.** The FD's commit brief asserted "AC25/26/27
+  are discharged." **Only AC25 is.** The commit Developer checked rather than
+  trusting and found **no run log exists for any of the five remaining AC13
+  invariant specs** (`kebab-menu`, `internal-tab-menus`, `page-context-menu`,
+  `tab-context-menu`, `tab-surface-geometry`) post-leg-4 — their `Last Run` headers
+  are all pre-F7. AC27 is correctly **left unchecked**.
+  **The provenance is the finding.** The leg-1 scoping ruling deferred these five
+  *to leg 4* on the explicit reasoning that "they are re-run at leg 4 anyway, when
+  they are re-pointed onto `enumerateWindows`, so running them twice buys one extra
+  day of confidence at triple the cost." Leg 4 **re-pointed** them (the code change
+  landed) but **never re-ran** them — and the FD then asserted the AC discharged
+  without checking. So a deferral justified by "leg 4 will do it" was inherited by a
+  leg that did half of it, and the FD's own assertion closed the loop. **This is the
+  third time in this flight the FD reasoned from a label rather than an artifact**
+  (after the `menu-dismissal` topic-name ruling and the "nine DD7 tests" claim), and
+  the first time it would have shipped an untrue ticked box.
+  **Ruling: AC27 is an OPEN CARRY, owned by F8.** F8 exercises this exact shell and
+  re-runs this corpus. The five specs are **re-pointed but unproven** — their
+  `enumerateWindows` discovery is landed code with unit coverage and the flight's
+  a11y gate is green, so the risk is bounded, but "re-pointed" is not "re-run" and
+  the flight must not claim otherwise. Recorded here and in the debrief rather than
+  ticked.
+- 2026-07-15 — **Flight landed. `[COMPLETE:flight]`** Single flight commit
+  `b2d3afc` — **61 files, +10613/-872**, `git status --porcelain` **empty** after.
+  **The commit hazard a behavior-test Validator flagged was real and was cleared**:
+  `git commit -a`/`git add -u` would have silently dropped **four product source
+  files** (`find-overlay-manager.js`, `capture-timeout.js`, `window-census.js`,
+  `capture-source-picker.js`), five unit-test files, the tabstrip fixtures, the new
+  spec, all four leg artifacts, and the run logs — every one of them untracked. `git
+  add -A` used; verified empty afterward. **Worth the debrief: the flight's
+  commit-once pattern makes `-a` actively dangerous, and nothing in the workflow
+  says so.**
+  Three ACs left unchecked, each with a reason recorded rather than ticked: **AC23**
+  (leg 4's `src/` byte-unchanged pin — deliberately broken by the errata fold, which
+  fixed a real product defect; a deviation, not a scope escape), **AC26**
+  (`multi-window-shell` ran **partial**, not pass), and **AC27** (never ran — above).
+  Leg 1's AC13 also stays unchecked per the exposure-triple scoping deviation.
+  **Two honest flags from the commit Developer, both recorded not buried**: leg 3's
+  AC10 is ticked though one clause ("passes unmodified") is not literally true —
+  `:599` pins the engine-dispatch signature, which DD3 changes by design, so the test
+  failed on *correct* code; its substance is fully evidenced and now pinned more
+  directly. And `multi-window-shell.md`'s header was stale (still citing the F6-era
+  run while its newest run was partial) — fixed.
