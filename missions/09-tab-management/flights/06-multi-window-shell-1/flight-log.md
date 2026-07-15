@@ -1212,3 +1212,37 @@ the leg-4 Anomalies resolution.
   No fix cycle needed. Proceeding to commit. Log Summary — a stale
   "flight in planning" placeholder that survived the whole flight — rewritten
   by the FD at the same time.
+- 2026-07-15 — **Flight landed. `[COMPLETE:flight]`** Single flight commit
+  `21a5182` (55 files, +5608/-423 — the whole flight: code + artifacts +
+  specs + run logs + audit). All five legs `landed` → `completed`, flight
+  `in-flight` → `landed`, F6 checked off in the mission. PR
+  [#89](https://github.com/msieurthenardier/goldfinch/pull/89), based on
+  `flight/5-tab-context-menu` per the mission's stacking pattern — "Code
+  merged" stays UNTICKED in the Post-Flight checklist; the operator merges
+  the stack. Debrief follows.
+- 2026-07-15 — **Debrief complete; flight `landed` → `completed`.** Two crew
+  interviews (Developer + Architect, spawned in parallel — independent by
+  design). Human interview SKIPPED: the log is comprehensive and the operator
+  authorized autonomous completion; no gaps worth a blocking question.
+  Both interviews converged independently on the same structural finding, and
+  it is the most valuable thing this flight produced: **the destroyed-window
+  rule is not enough — the class should be made unrepresentable.** The
+  registry's API was already correct (`remove(winId)` takes a primitive); the
+  gap is the raw-Electron-event boundary that calls it. An `onWindowClosed`
+  wrapper capturing at registration time (while the window is alive) and
+  handing the callback only primitives makes the mistake unwritable; an
+  ESLint `no-restricted-syntax` selector complements it where the wrapper
+  isn't used. The rule has already slipped past two design reviews, a full
+  unit suite, and three passing specs once, and F7 adds MORE lifecycle
+  surface. Also converged: prose design review is structurally blind to
+  implementation-fidelity defects (all three passes' findings are in the
+  "design is incomplete" register — "line 1209 will throw" is unreachable
+  from there); the spike asked nine questions and missed the one that
+  mattered (guest liveness at `closed` verified, container BaseWindow never
+  asked about); and targeted-kill teardown hid the close path for two legs.
+  Architect's independent catch: the leg-2 Deviations entry (main.js "2994 →
+  3166") went stale — landed count is 3461, so main.js has now passed the
+  size that triggered the RENDERER's scheduled split and never had a target
+  of its own. Test metrics: 1715/1715, 13 suites, ~1.11s, zero
+  skips/flakes; +69 vs F5 reconciles leg-by-leg (13+20+36+0); wall-clock flat
+  across F4/F5/F6, corroborating the M06 F3 startup-dominates finding.

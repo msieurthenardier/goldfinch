@@ -1,6 +1,6 @@
 # Flight: Multi-Window Shell, Part 1
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
