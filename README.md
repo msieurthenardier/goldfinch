@@ -38,8 +38,21 @@ or download **v0.9.0** directly:
 - **Frameless window**: Goldfinch runs in a custom frameless window —
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.
+- **Multiple windows**: open a second (third, …) full browser window with
+  `Ctrl+N` or the overflow menu's **New window** — each window has its own tab
+  strip, toolbar, and menus. **Move to new window** (in the tab context menu)
+  tears a tab out into a fresh window by re-parenting the live page — playing
+  media, scroll position, and back/forward history all survive the move, and
+  the tab keeps its cookie jar. Closing one window never quits the app;
+  closing the last one does (except on macOS). Two documented divergences from
+  Chrome: **Reopen closed tab pops one global stack** (a tab closed in any
+  window can be reopened from whichever window you invoke it in — it returns
+  to its original strip position only in its own window, and is appended
+  otherwise), and **closing the last tab of a moved-out window leaves that
+  window open with a fresh home tab** rather than closing the window.
 - **Overflow menu** (the **⋮** button at the right end of the toolbar row):
-  opens a menu with **Settings** (opens `goldfinch://settings` in a new tab —
+  opens a menu with **New window** (a fresh browser window, same as `Ctrl+N`)
+  and **Settings** (opens `goldfinch://settings` in a new tab —
   a Chrome-style shell with a sticky left section-nav and five titled sections:
   Appearance, Privacy & Shields, On startup, Downloads, and About; the
   **Privacy & Shields** section has working global Shields toggles and the
@@ -138,9 +151,11 @@ or download **v0.9.0** directly:
 - **Tab context menu** — right-click a tab (or focus it and press Shift+F10 /
   the Context-Menu key) for a tab-scoped context menu: **Close**, **Close other
   tabs**, **Close tabs to the right**, **Duplicate** (copies the address, jar,
-  and navigation history), and **Reopen closed tab** (reuses the same
-  closed-tab stack `Ctrl+Shift+T` pops — see Keyboard shortcuts below; the
-  item is omitted when the stack is empty). "Close
+  and navigation history), **Move to new window** (re-parents the live tab
+  into a fresh window — see Multiple windows above; omitted for a window's
+  only tab and for `goldfinch://` internal tabs), and **Reopen closed tab**
+  (reuses the same closed-tab stack `Ctrl+Shift+T` pops — see Keyboard
+  shortcuts below; the item is omitted when the stack is empty). "Close
   other tabs" / "Close tabs to the right" are omitted when there is nothing to
   close (a single tab, or nothing to its right). Right-clicking (or
   Menu-keying) a background tab opens its menu without switching to it.
@@ -205,6 +220,7 @@ drive and observe tabs. It is exposed in no released build — see
 | Shortcut        | Action              |
 |-----------------|---------------------|
 | `Ctrl+T`        | New tab             |
+| `Ctrl+N`        | New window          |
 | `Ctrl+Shift+T`  | Reopen most recently closed tab — restores address, cookie jar, history, and strip position; burner tabs are never captured |
 | `Ctrl+W`        | Close tab           |
 | `Ctrl+L`        | Focus address bar   |

@@ -98,6 +98,20 @@ test('Ctrl+Shift+T / Ctrl+Shift+t -> chrome reopen-closed-tab (M09 F4 DD2 — re
   assert.deepEqual(ctrl('t', { shift: true }), { scope: 'chrome', action: 'reopen-closed-tab' });
 });
 
+// M09 F6 DD5 (review L1): Ctrl+N -> chrome new-window, autoRepeat-GUARDED even
+// though new-tab carries no guard — windows are far heavier than tabs, and a
+// held chord must not machine-gun BaseWindows (the Ctrl+J precedent). LOCKSTEP
+// with keydown-action.test.js's own Ctrl+N pin (the hand-mirror rule).
+test('Ctrl+N (lowercase n) -> chrome new-window, autoRepeat-guarded (M09 F6 DD5 / review L1)', () => {
+  assert.deepEqual(ctrl('n'), { scope: 'chrome', action: 'new-window', autoRepeatGuard: true });
+  assert.deepEqual(k('n', { meta: true }), { scope: 'chrome', action: 'new-window', autoRepeatGuard: true });
+});
+
+test('Ctrl+Shift+N (uppercase) does NOT match — lowercase-only case discipline (incognito chord unassigned)', () => {
+  assert.equal(ctrl('N', { shift: true }), null);
+  assert.equal(k('n'), null, 'unmodified n must not match');
+});
+
 // ---------------------------------------------------------------------------
 // APG-key exclusions (by construction: control||meta required except F12)
 // ---------------------------------------------------------------------------

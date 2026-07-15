@@ -637,3 +637,144 @@ test('show() itself still never focuses the sheet — focus enters ONLY via open
     're-add/show never adds focus calls'
   );
 });
+
+// ===========================================================================
+// Leg 4 (M09 F6, DD7 / review M1) — attachment tracking: record at show,
+// remove from the RECORDED attachment, re-raise without re-resolve,
+// attachment-window-routed channel 7 / focus, cross-window model-replace.
+// ===========================================================================
+
+let winSends; // recorded sendToChrome calls WITH the win arg: [channel, payload, win]
+let focusWins; // recorded focusChrome(win) args
+
+function setupAttach() {
+  cv = makeFakeContentView(); // the getContentView FALLBACK — attachment opens must never touch it
+  createdViews = [];
+  winSends = [];
+  focusWins = [];
+  hideFindCalls = 0;
+  mgr = createMenuOverlayManager({
+    getContentView: () => cv,
+    createSheetView: () => {
+      const v = makeFakeView();
+      createdViews.push(v);
+      return v;
+    },
+    sendToChrome: (channel, payload, win) => {
+      winSends.push([channel, payload, win]);
+    },
+    focusChrome: (win) => {
+      focusWins.push(win);
+    },
+    hideFindOverlay: () => {
+      hideFindCalls++;
+    }
+  });
+}
+
+function makeAttachment(bounds = null) {
+  return { contentView: makeFakeContentView(), win: { id: ++attachWinSeq }, bounds };
+}
+let attachWinSeq = 100;
+
+test('DD7: openMenu records the attachment — show adds to ITS contentView, never the fallback resolve', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(1), att);
+  assert.equal(att.contentView.calls.filter((c) => c[0] === 'addChildView').length, 1);
+  assert.equal(cv.calls.length, 0, 'the getContentView fallback was never touched');
+  assert.equal(mgr.getAttachedWindow(), att.win);
+});
+
+test('DD7: hide (via close) removes from the RECORDED attachment — never a hide-time re-resolve', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(1), att);
+  mgr.closeMenuOverlay('escape');
+  assert.equal(att.contentView.calls.filter((c) => c[0] === 'removeChildView').length, 1);
+  assert.equal(cv.calls.length, 0, 'the fallback resolve was never consulted at hide time');
+  assert.equal(mgr.getAttachedWindow(), null, 'attachment cleared with the session');
+});
+
+test('DD7: the re-raise show() (tab-set-active path) uses the recorded attachment, never re-resolves', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(1), att);
+  mgr.show(); // same-tab re-activation re-raise
+  mgr.show();
+  assert.equal(att.contentView.calls.filter((c) => c[0] === 'addChildView').length, 3);
+  assert.equal(cv.calls.length, 0, 'no re-resolve on re-raise');
+});
+
+test('DD7: channel-7 closes and escape/activated focus deliver the ATTACHMENT window', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(2), att);
+  mgr.closeMenuOverlay('escape');
+  const close = winSends.find((c) => c[0] === 'menu-overlay-closed');
+  assert.ok(close, 'channel 7 emitted');
+  assert.equal(close[2], att.win, 'channel 7 carries the attachment window');
+  assert.deepEqual(focusWins, [att.win], 'focusChrome received the attachment window');
+});
+
+test('DD7: cross-window model-replace — superseded ch7 to the OLD window, view moved to the NEW contentView', () => {
+  setupAttach();
+  const attA = makeAttachment();
+  const attB = makeAttachment();
+  mgr.openMenu(payloadFor(1, 'kebab'), attA);
+  mgr.openMenu(payloadFor(2, 'container'), attB);
+  // Superseded close went to A's window.
+  const superseded = winSends.find((c) => c[0] === 'menu-overlay-closed' && c[1].reason === 'superseded');
+  assert.ok(superseded);
+  assert.deepEqual(superseded[1], { menuType: 'kebab', reason: 'superseded', token: 1 });
+  assert.equal(superseded[2], attA.win, 'superseded ch7 delivered to the OLD attachment window');
+  // The view physically moved: removed from A, added to B.
+  assert.equal(attA.contentView.calls.filter((c) => c[0] === 'removeChildView').length, 1, 'detached from A');
+  assert.equal(attB.contentView.calls.filter((c) => c[0] === 'addChildView').length, 1, 'attached to B');
+  assert.equal(mgr.getAttachedWindow(), attB.win);
+  // The new window's find bar is hidden too (cross-window replace re-hides).
+  assert.equal(hideFindCalls, 2, 'find-hide ran for BOTH windows across the cross-window replace');
+  // The eventual close is B's.
+  mgr.closeMenuOverlay('escape');
+  const finalClose = winSends.filter((c) => c[0] === 'menu-overlay-closed').at(-1);
+  assert.equal(finalClose[2], attB.win);
+  assert.deepEqual(finalClose[1], { menuType: 'container', reason: 'escape', token: 2 });
+});
+
+test('DD7: SAME-window model-replace does not detach/re-hide (no flicker regression)', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(1, 'suggestions'), att);
+  mgr.openMenu(payloadFor(2, 'suggestions'), { contentView: att.contentView, win: att.win, bounds: null });
+  assert.equal(att.contentView.calls.filter((c) => c[0] === 'removeChildView').length, 0, 'no detach on same-window replace');
+  assert.equal(hideFindCalls, 1, 'find-hide once per session (per-keystroke replaces stay cheap)');
+});
+
+test('DD7: attachment bounds seed the show geometry (per-window bounds fetch, review M1)', () => {
+  setupAttach();
+  const bounds = { x: 0, y: 88, width: 1200, height: 700 };
+  mgr.syncBounds({ x: 9, y: 9, width: 9, height: 9 }); // the polluted single slot (another window wrote it)
+  mgr.openMenu(payloadFor(1), makeAttachment(bounds));
+  const v = createdViews[0];
+  const firstBounds = v.calls.find((c) => c[0] === 'setBounds');
+  assert.deepEqual(firstBounds, ['setBounds', bounds], 'show used the ATTACHMENT bounds, not the polluted slot');
+});
+
+test('DD7: teardown removes from the recorded attachment and clears it', () => {
+  setupAttach();
+  const att = makeAttachment();
+  mgr.openMenu(payloadFor(1), att);
+  mgr.teardown();
+  assert.equal(att.contentView.calls.filter((c) => c[0] === 'removeChildView').length, 1);
+  assert.equal(cv.calls.length, 0);
+  assert.equal(mgr.getAttachedWindow(), null);
+});
+
+test('DD7: attachment-less opens (fallback resolve) keep a null attached window', () => {
+  setupAttach();
+  mgr.openMenu(payloadFor(1)); // no att — the pre-F6 unit-test shape
+  assert.equal(mgr.getAttachedWindow(), null, 'fallback attachment carries win: null');
+  assert.equal(cv.calls.filter((c) => c[0] === 'addChildView').length, 1, 'fallback contentView used');
+  mgr.closeMenuOverlay('escape');
+  assert.equal(cv.calls.filter((c) => c[0] === 'removeChildView').length, 1, 'fallback recorded and removed-from');
+});

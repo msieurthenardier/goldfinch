@@ -7,8 +7,8 @@
 // stack size, returns the typed item array the sheet renders.
 //
 // NAMESPACED id space: `tab:*` (`tab:close`, `tab:close-others`,
-// `tab:close-right`, `tab:duplicate`, `tab:reopen-closed`) — the vocabulary
-// page-context-model established.
+// `tab:close-right`, `tab:duplicate`, `tab:move-new-window`,
+// `tab:reopen-closed`) — the vocabulary page-context-model established.
 //
 // Omission rules (flight DD1, design-review ruling — OMITTED-ONLY: the sheet's
 // renderMenu has no disabled-interactive-item shape, only item/separator/note):
@@ -17,6 +17,10 @@
 //     positional claim).
 //   - `tab:close-right` omitted when there are no tabs to this tab's right
 //     (`tabsToRight === 0`).
+//   - `tab:move-new-window` (M09 F6 DD5) omitted at `isLastTab` (moving a
+//     sole tab is a no-op window swap) AND for internal tabs (`isInternal` —
+//     app-UI pages never move between windows; F6 design review M4). Defaults
+//     false so every pre-F6 caller is unaffected.
 //   - `tab:reopen-closed` omitted when the closed-tab stack is empty
 //     (`stackSize === 0`).
 //   - `tab:duplicate` is ALWAYS present, even at a single tab (Chrome parity —
@@ -28,10 +32,10 @@
 //   { type: 'separator' }         — role="separator", non-focusable, skipped by roving
 
 /**
- * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number }} params
+ * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number, isInternal?: boolean }} params
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>}
  */
-export function tabContextModel({ isLastTab, tabsToRight, stackSize }) {
+export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false }) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>} */
   const model = [];
   let needSep = false;
@@ -52,9 +56,12 @@ export function tabContextModel({ isLastTab, tabsToRight, stackSize }) {
   if (!isLastTab) item('tab:close-others', 'Close other tabs');
   if (tabsToRight > 0) item('tab:close-right', 'Close tabs to the right');
 
-  // --- duplicate (always) ---
+  // --- duplicate (always) + move-to-new-window (M09 F6 DD5; same section —
+  // Chrome adjacency). Move is omitted at isLastTab (sole-tab move = no-op
+  // window swap) and for internal tabs (design review M4). ---
   sep();
   item('tab:duplicate', 'Duplicate');
+  if (!isLastTab && !isInternal) item('tab:move-new-window', 'Move to new window');
 
   // --- reopen closed (omit empty stack) ---
   if (stackSize > 0) {

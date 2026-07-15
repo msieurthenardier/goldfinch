@@ -49,7 +49,7 @@
  *   alt?: boolean,
  * }} descriptor
  * @returns {'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'find'
- *   | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
+ *   | 'new-tab' | 'close-tab' | 'new-window' | 'focus-address' | 'toggle-panel'
  *   | 'toggle-privacy' | 'reload' | 'downloads'
  *   | 'tab-next' | 'tab-prev'
  *   | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
@@ -99,6 +99,12 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
   // The rest of the chain (NOT lightbox-gated, except Ctrl+Shift+I below).
   if (key === 't') return 'new-tab';
   if (key === 'w') return 'close-tab';
+  // Ctrl+N -> new-window (M09 F6 DD5). App-level like new-tab, so NOT
+  // lightbox-gated; lowercase-only match (the t/w/l/m/r case discipline —
+  // Ctrl+Shift+N is Chrome's incognito chord and deliberately stays unassigned).
+  // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this classifier — this
+  // addition lands in both files in the same change (the hand-mirror rule).
+  if (key === 'n') return 'new-window';
   if (key === 'l') return 'focus-address';
   if (key === 'm') return 'toggle-panel';
   if (key === 'j' || key === 'J') return 'downloads';

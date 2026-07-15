@@ -3,7 +3,7 @@
 **Slug**: `closed-tab-reopen`
 **Status**: active
 **Created**: 2026-07-14
-**Last Run**: 2026-07-14-21-48-13
+**Last Run**: 2026-07-15-06-19-34 — pass (9/9, F6 flight-end regression) — [run log](closed-tab-reopen/runs/2026-07-15-06-19-34.md)
 
 ## Intent
 

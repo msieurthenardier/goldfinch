@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('goldfinch', {
   unpinToolbarItem: (item) => ipcRenderer.send('unpin-toolbar-item', item),
   windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   onWindowMaximizedChange: (cb) => ipcRenderer.on('window-maximized-change', (_e, isMax) => cb(isMax)),
+  // New Window command (M09 F6 Leg 4, DD5): kebab item + Ctrl/Cmd+N →
+  // dispatchChromeAction('new-window') → this invoke. Resolves the new
+  // BaseWindow id (unused by the renderer today — informational).
+  windowCreate: () => ipcRenderer.invoke('window-create'),
+  // Boot-config invoke (DD5/L4 + the H1 readiness barrier): joins the boot-gating
+  // Promise.all; { bootTab: false } only for move-created windows. Serving it
+  // main-side is what releases any queued adopt-tab/tab-nav-state pair.
+  windowBootConfig: () => ipcRenderer.invoke('window-boot-config'),
 
   // --- downloads ---
   downloadMedia: (payload) => ipcRenderer.invoke('download-media', payload),
@@ -153,6 +161,21 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // and read the closed-tab stack's size for the reopen-closed omission rule.
   tabHistorySnapshot: ({ webContentsId }) => ipcRenderer.invoke('tab-history-snapshot', { webContentsId }),
   closedTabStackSize: () => ipcRenderer.invoke('closed-tab-stack-size'),
+  // DD6 push-cache (M09 F6 Leg 3): main pushes { size } on every closed-tab-stack
+  // mutation; the chrome caches it so the tab-context opener is synchronous. The
+  // closedTabStackSize invoke above remains as the cache's boot seed only.
+  onClosedTabStackChanged: (cb) => ipcRenderer.on('closed-tab-stack-changed', (_e, d) => cb(d)),
+  // Move to new window (M09 F6 Leg 4, DD5 / review H2): the invoke carries the
+  // SOURCE renderer's strip snapshot — a burner's synthesized container and the
+  // favicon exist only renderer-side; main shape-validates, re-parents the live
+  // guest, and relays into adopt-tab (target) + tab-moved-away (source).
+  tabMoveToNewWindow: (payload) => ipcRenderer.invoke('tab-move-to-new-window', payload),
+  // adopt-tab (main → target chrome, queued behind the window-boot-config
+  // barrier): strip insertion WITHOUT createTab — the webContents already lives.
+  onAdoptTab: (cb) => ipcRenderer.on('adopt-tab', (_e, d) => cb(d)),
+  // tab-moved-away (main → source chrome): strip removal WITHOUT destroy — the
+  // closeTab mirror minus stack capture and the tabClose IPC.
+  onTabMovedAway: (cb) => ipcRenderer.on('tab-moved-away', (_e, d) => cb(d)),
   tabHide: (wcId) => ipcRenderer.send('tab-hide', wcId),
   tabNavigate: (payload) => ipcRenderer.send('tab-navigate', payload),
   tabSetActive: (wcId, bounds) => ipcRenderer.send('tab-set-active', { wcId, bounds }),

@@ -273,11 +273,14 @@ Planning inputs adopted from prior artifacts:
       *(Landed 2026-07-14; `tab-context-menu` spec PASS 10/10 first run; the
       literal Context-Menu/F10 keypress is HAT-scoped — KEY_MAP apparatus
       gap; wiring structurally verified.)*
-- [ ] Flight 6: Multi-window shell, part 1 — re-parenting spike (gate; mid-
+- [x] Flight 6: Multi-window shell, part 1 — re-parenting spike (gate; mid-
       motion visual acceptance bar), singular-window behavior-test audit,
       window registry + per-window chrome/tabViews structure, lifecycle
       (close-one vs quit-on-last), "Move to new window" (menu + command) as
       the first cross-window operation.
+      *(Landed 2026-07-15; `multi-window-shell` spec PASS 9/9. Overlay
+      multi-instance conversion and automation multi-window semantics carry
+      to Flight 7.)*
 - [ ] Flight 7: Multi-window shell, part 2 — per-window find overlay and
       menu-overlay sheet, `grabWindow`/capture semantics, automation surface
       multi-window semantics (`enumerateTabs` span, `getChromeTarget`,

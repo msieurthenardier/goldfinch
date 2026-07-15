@@ -2,21 +2,38 @@
 // @ts-check
 
 // Menu-overlay sheet lifecycle + menu-open state machine (M05 Flight 8,
-// DD2/DD4/DD5/DD9). Electron-free: every live Electron handle is injected (the
-// automation resolve.js / createEngine precedent), so this module is
-// `node --test`-able with fakes and never imports Electron. main.js injects:
-//   - getContentView(): the BaseWindow's contentView (or null during startup/teardown)
+// DD2/DD4/DD5/DD9; DD7 roaming attachment tracking M09 F6 Leg 4). Electron-free:
+// every live Electron handle is injected (the automation resolve.js /
+// createEngine precedent), so this module is `node --test`-able with fakes and
+// never imports Electron. main.js injects:
+//   - getContentView(): FALLBACK contentView resolve (last-focused record) —
+//     used only when no attachment is recorded (defensive; every real open
+//     supplies an attachment)
 //   - createSheetView(): constructs the transparent chrome-class WebContentsView
 //     (webPreferences, setBackgroundColor('#00000000'), loadFile — all Electron
 //     construction stays in main.js)
-//   - sendToChrome(channel, payload): channel-7 emitter (getChromeContents()?.send)
+//   - sendToChrome(channel, payload, win): channel-7 emitter. `win` is the
+//     ATTACHMENT window handle recorded at show (null when none) — main.js
+//     resolves THAT window's chrome (DD7: wrong-window delivery = stuck
+//     aria-expanded), falling back to the accessor only for a null win
 //   - hideFindOverlay(): DD5 sheet-show hook
 //   - restoreFindOverlay(reason): DD5 close hook — the main.js impl skips the
 //     tab-lifecycle reasons ('tab-switch'/'tab-hide'/'tab-close', the three-reason
 //     skip set) and re-shows iff the find session targets the active tab
-//   - focusChrome(): main-side half of the reason-resolved refocus contract
-//     (getChromeContents()?.focus()) — chrome-side element focus alone cannot move
-//     view-level keyboard focus off the sheet in a multi-view BaseWindow (F7 precedent)
+//   - focusChrome(win): main-side half of the reason-resolved refocus contract —
+//     focuses the ATTACHMENT window's chrome webContents (F7 precedent; DD7)
+//
+// DD7 ATTACHMENT TRACKING (M09 F6, review M1 — the named defect was the
+// hide-time getContentView() RE-RESOLVE: removing a child from a non-parent
+// contentView is documented-undefined, and with two windows the re-resolve can
+// pick the wrong one). The manager records `{ contentView, win, bounds }` at
+// show (openMenu receives it, resolved by main.js from the open-sender's
+// record, bounds = that window's CURRENT active-guest bounds — the per-window
+// bounds fetch replacing the any-window-polluted single slot); hide()/teardown()
+// remove from the RECORDED attachment; the re-raise show() (tab-set-active
+// path) uses the recorded attachment and never re-resolves. A cross-window
+// model-replace (open in B while A's menu is open) detaches from A's recorded
+// contentView before attaching to B's.
 //
 // Lifecycle (Leg 1, unchanged): lazy singleton; destroyed-recreate guard;
 // render-process-gone self-teardown; show = add-after-guest (re-add raises;
@@ -63,16 +80,17 @@
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
  *   anchor: any, startIndex?: number, token: number, noFocus?: boolean }} MenuOpenPayload
+ * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 
 /**
  * @param {{
  *   getContentView: () => (ContentViewLike | null),
  *   createSheetView: () => SheetViewLike,
- *   sendToChrome?: (channel: string, payload: any) => void,
+ *   sendToChrome?: (channel: string, payload: any, win?: any) => void,
  *   hideFindOverlay?: () => void,
  *   restoreFindOverlay?: (reason: string) => void,
- *   focusChrome?: () => void
+ *   focusChrome?: (win?: any) => void
  * }} deps
  */
 function createMenuOverlayManager({
@@ -93,6 +111,16 @@ function createMenuOverlayManager({
   let currentMenu = null;
   /** @type {MenuOpenPayload | null} */
   let pendingInit = null; // at most ONE queued init (latest wins — F7 pattern)
+  // DD7 attachment (M09 F6): the contentView/window the sheet is attached to,
+  // RECORDED at show — hide/teardown remove from THIS, never a re-resolve.
+  /** @type {Attachment | null} */
+  let attachment = null;
+
+  // The contentView to operate on: the RECORDED attachment when one exists,
+  // else the injected fallback resolve (defensive — pre-attachment paths only).
+  function attachedContentView() {
+    return attachment ? attachment.contentView : getContentView();
+  }
 
   // Deliver channel 3 + focus the sheet webContents (focus AFTER init delivery —
   // the page's init handler builds/focuses the menu DOM; view-level focus makes
@@ -111,7 +139,8 @@ function createMenuOverlayManager({
   function teardown() {
     if (view) {
       if (visible) {
-        const cv = getContentView();
+        // DD7: remove from the RECORDED attachment, never a re-resolve.
+        const cv = attachedContentView();
         if (cv) cv.removeChildView(view);
       }
       const wc = view.webContents;
@@ -124,6 +153,7 @@ function createMenuOverlayManager({
     ready = false;
     currentMenu = null;
     pendingInit = null;
+    attachment = null;
   }
 
   // Lazy-construct the sheet view. Destroyed-recreate guard: a destroyed
@@ -170,8 +200,11 @@ function createMenuOverlayManager({
   // State-preserving no-op when the window is gone (F7 parity — `visible` must
   // NOT flip). NEVER focuses the sheet's webContents — focus enters the sheet
   // ONLY via openMenu's post-init focus (the re-add/restore path must not steal it).
+  // DD7: operates on the RECORDED attachment (the tab-set-active re-raise must
+  // never re-resolve — re-raising window A's open menu into window B's
+  // contentView is exactly the wrong-window class M1 names).
   function show() {
-    const cv = getContentView();
+    const cv = attachedContentView();
     if (!cv) return;
     const v = ensureView();
     if (lastGuestBounds) v.setBounds(lastGuestBounds);
@@ -183,9 +216,12 @@ function createMenuOverlayManager({
   // Hide = removeChildView, gated on visibility (never setVisible(false)-only).
   // Idempotent; the view is kept for reuse. Lifecycle-only — menu closes MUST
   // route through closeMenuOverlay (AC2: the single close path).
+  // DD7: removes from the RECORDED attachment — the hide-time getContentView()
+  // re-resolve was the review-M1 named defect (removing from a non-parent is
+  // documented-undefined behavior).
   function hide() {
     if (!visible) return;
-    const cv = getContentView();
+    const cv = attachedContentView();
     if (cv && view) cv.removeChildView(view);
     visible = false;
   }
@@ -193,27 +229,50 @@ function createMenuOverlayManager({
   /**
    * Open a menu on the sheet (channel-1 entry; DD4). See module header for the
    * model-replace / pending-init / focus contract.
+   * DD7 (M09 F6): `att` is the attachment resolved from the OPEN-SENDER's window
+   * record — { contentView, win, bounds } — recorded here for the whole menu
+   * session. `bounds` is the requesting window's CURRENT active-guest bounds
+   * (per-window fetch at show; never trust the single syncBounds slot, which any
+   * window's tab-set-bounds pollutes). Omitted att (unit-test/defensive paths)
+   * falls back to the injected getContentView().
    * @param {MenuOpenPayload} payload
+   * @param {Attachment} [att]
    */
-  function openMenu(payload) {
+  function openMenu(payload, att) {
     if (!payload || typeof payload.menuType !== 'string' || typeof payload.token !== 'number') return;
-    if (!getContentView()) return; // window gone — nothing to open on
+    const fallbackCv = att ? null : getContentView();
+    /** @type {Attachment | null} */
+    const nextAtt = att || (fallbackCv ? { contentView: fallbackCv, win: null, bounds: null } : null);
+    if (!nextAtt) return; // window gone — nothing to open on
     const wasOpen = !!currentMenu;
+    const crossWindow = wasOpen && attachment != null && attachment.contentView !== nextAtt.contentView;
     if (currentMenu) {
       // Mutual exclusion: model-replace (NO hide/re-show flicker); the superseded
-      // menu's channel 7 carries ITS token so chrome resets the right trigger.
+      // menu's channel 7 carries ITS token so chrome resets the right trigger —
+      // delivered to the SUPERSEDED menu's attachment window's chrome (DD7:
+      // window B's open must reset window A's trigger, not B's).
       sendToChrome('menu-overlay-closed', {
         menuType: currentMenu.menuType,
         reason: 'superseded',
         token: currentMenu.token
-      });
+      }, attachment ? attachment.win : null);
+      // Cross-window model-replace: detach from the OLD recorded attachment
+      // before attaching to the new window (the one case where model-replace
+      // must physically move the view).
+      if (crossWindow && visible && view) {
+        /** @type {Attachment} */ (attachment).contentView.removeChildView(view);
+        visible = false;
+      }
     }
+    attachment = nextAtt;
+    if (nextAtt.bounds) lastGuestBounds = nextAtt.bounds; // per-window bounds at show (DD7)
     currentMenu = { menuType: payload.menuType, token: payload.token };
     show();
-    // DD5: find bar hidden while a menu is open (parity) — only on the FIRST
-    // open of a session (model-replace keeps the same open session; the call
-    // is idempotent anyway, this just avoids redundant per-keystroke calls).
-    if (!wasOpen) hideFindOverlay();
+    // DD5: find bar hidden while a menu is open (parity) — on the FIRST open of
+    // a session (model-replace keeps the same open session; the call is
+    // idempotent anyway, this just avoids redundant per-keystroke calls), and on
+    // a cross-window replace (the new window's find bar must hide too).
+    if (!wasOpen || crossWindow) hideFindOverlay();
     if (ready && view && !view.webContents.isDestroyed()) {
       pendingInit = null;
       deliverInit(payload);
@@ -237,14 +296,18 @@ function createMenuOverlayManager({
     const closed = currentMenu;
     currentMenu = null;
     pendingInit = null;
-    hide();
-    sendToChrome('menu-overlay-closed', { menuType: closed.menuType, reason, token: closed.token });
+    hide(); // removes from the RECORDED attachment (DD7)
+    const att = attachment;
+    attachment = null; // the menu session is over — the next open records afresh
+    // DD7: channel 7 + the refocus both target the ATTACHMENT window's chrome
+    // (wrong-window delivery = stuck aria-expanded / focus into the wrong window).
+    sendToChrome('menu-overlay-closed', { menuType: closed.menuType, reason, token: closed.token }, att ? att.win : null);
     // Reason-resolved refocus, main-side half: escape/activated move keyboard
     // focus back to the chrome view (webContents-level); chrome then focuses the
     // trigger element on channel 7. Every other reason moves NO focus ('toggle'
     // — the physical click already OS-focused chrome; 'blur' — never steal focus
     // from the other app; tab lifecycle/teardown — the incoming guest keeps it).
-    if (reason === 'escape' || reason === 'activated') focusChrome();
+    if (reason === 'escape' || reason === 'activated') focusChrome(att ? att.win : null);
     restoreFindOverlay(reason);
   }
 
@@ -270,7 +333,14 @@ function createMenuOverlayManager({
     isReady: () => ready,
     getView: () => view,
     getCurrentMenu: () => currentMenu,
-    isMenuOpen: () => currentMenu != null
+    isMenuOpen: () => currentMenu != null,
+    // DD7 (M09 F6): the recorded attachment window (null when no menu session /
+    // no window recorded). main.js conditions every cross-cutting hook on
+    // owner-window === attachment-window through this read (tab-set-active's
+    // syncBounds + tab-switch close + re-raise, tab-set-bounds' live sync,
+    // tab-hide/tab-close closes, win 'blur'/'close' closes, accelerator scope,
+    // channel-6/7 delivery).
+    getAttachedWindow: () => (attachment ? attachment.win : null)
   };
 }
 

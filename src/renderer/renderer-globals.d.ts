@@ -43,6 +43,13 @@ interface GoldfinchBridge {
   unpinToolbarItem(item: string): void;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
+  /** New Window command (M09 F6 Leg 4, DD5): creates a fresh window (boots its
+   * home tab normally); resolves the new BaseWindow id, or null when refused. */
+  windowCreate(): Promise<number | null>;
+  /** Boot-config invoke (M09 F6 Leg 4, DD5/L4 + review H1): joins the renderer's
+   * boot-gating Promise.all. bootTab defaults true; false for move-created
+   * windows. Serving it main-side releases the queued adopt-protocol sends. */
+  windowBootConfig(): Promise<{ bootTab: boolean }>;
 
   // --- downloads ---
   downloadMedia(payload: any): Promise<any>;
@@ -205,9 +212,40 @@ interface GoldfinchBridge {
    * history for Duplicate. Web tabs only — a dead/missing/internal target
    * (TOCTOU-guarded on the passed webContentsId) resolves `null`. */
   tabHistorySnapshot(payload: { webContentsId: number }): Promise<{ entries: unknown[]; index: number } | null>;
-  /** Tab context menu (M09 F5 Leg 1, DD3): the closed-tab stack's current size,
-   * feeding the model's reopen-closed omission rule (empty stack → omitted). */
+  /** Tab context menu (M09 F5 Leg 1, DD3): the closed-tab stack's current size.
+   * Since M09 F6 Leg 3 (DD6) this is the push-cache's BOOT SEED only — live
+   * updates arrive via onClosedTabStackChanged below. */
   closedTabStackSize(): Promise<number>;
+  /** DD6 push-cache (M09 F6 Leg 3): pushed by main with `{ size }` on every
+   * closed-tab-stack mutation (capture pushes, reopen pops). The renderer caches
+   * it — a push always wins over the boot-seed invoke's resolve — so the
+   * tab-context opener builds its model synchronously. */
+  onClosedTabStackChanged(cb: (d: { size: number }) => void): void;
+  /** Move a tab to a NEW window (M09 F6 Leg 4, DD5 / review H2). The payload is
+   * the SOURCE renderer's strip snapshot — favicon and (burner) container exist
+   * only renderer-side. Resolves { ok, windowId } or null when refused
+   * (vanished/internal/sole-tab target — validated no-op). */
+  tabMoveToNewWindow(payload: {
+    wcId: number;
+    url: string;
+    title: string;
+    favicon: string | null;
+    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+  }): Promise<{ ok: boolean; windowId: number } | null>;
+  /** adopt-tab (M09 F6 Leg 4, DD5 step 3): the TARGET chrome adopts an already-
+   * live webContents — strip insertion WITHOUT createTab. Queued main-side
+   * behind the window-boot-config barrier (review H1). */
+  onAdoptTab(cb: (d: {
+    wcId: number;
+    url: string;
+    title: string;
+    favicon: string | null;
+    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+  }) => void): void;
+  /** tab-moved-away (M09 F6 Leg 4, DD5 step 3): the SOURCE chrome removes the
+   * moved tab's strip entry WITHOUT destroy — the closeTab mirror minus stack
+   * capture and the tabClose IPC. */
+  onTabMovedAway(cb: (d: { wcId: number }) => void): void;
   /** Hide a web tab view without closing (fire-and-forget). */
   tabHide(wcId: number): void;
   /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */

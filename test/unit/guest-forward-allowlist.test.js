@@ -19,7 +19,7 @@ const { keydownToAction } = require('../../src/shared/keydown-action');
 // WEB guests: the full chrome-class set (design-review enumeration — 6 actions)
 // ---------------------------------------------------------------------------
 
-const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
+const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'new-window', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
 
 for (const action of WEB_FORWARDABLE) {
   test(`web guest: '${action}' is forwardable (chrome-class parity set)`, () => {
@@ -54,6 +54,12 @@ test('internal guest: close-tab is forwardable (Ctrl+W closes an internal tab)',
 // an internal settings page must not trap the operator from reopen either.
 test('internal guest: reopen-closed-tab is forwardable (M09 F4 DD2 — navigation-neutral, like tab-cycle/jump)', () => {
   assert.equal(isChromeActionForwardable('reopen-closed-tab', 'internal'), true);
+});
+
+// new-window (M09 F6 DD5): both guest kinds — the same app-level class as
+// new-tab (an internal page must not trap the operator from opening a window).
+test('internal guest: new-window is forwardable (M09 F6 DD5 — app-level like new-tab)', () => {
+  assert.equal(isChromeActionForwardable('new-window', 'internal'), true);
 });
 
 const INTERNAL_NOT_FORWARDABLE = ['focus-address', 'toggle-panel', 'toggle-privacy', 'reload', ...WEB_MAIN_SIDE];
@@ -107,6 +113,19 @@ test('Ctrl+T (unshifted, either case main.js before-input-event reports) still f
 });
 
 // ---------------------------------------------------------------------------
+// Ctrl+N new-window (M09 F6 DD5) — pinned END-TO-END through the SAME
+// classify(keydownToAction) -> allowlist pipeline handleGuestChromeShortcut
+// runs. Forwards on BOTH guest kinds (app-level like new-tab).
+// ---------------------------------------------------------------------------
+
+test('Ctrl+N classifies to new-window end-to-end and forwards on both guest kinds (M09 F6 DD5)', () => {
+  const action = keydownToAction({ key: 'n', ctrl: true, meta: false, shift: false, lightboxOpen: false });
+  assert.equal(action, 'new-window');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), true);
+});
+
+// ---------------------------------------------------------------------------
 // Tab-cycle/jump (M09 F3 Leg 1, DD1/DD2): unlike the rest of the WEB-only set,
 // these forward on BOTH guest kinds — tab switching is navigation-neutral
 // chrome behavior, and an internal settings page must not trap the operator.
@@ -155,7 +174,12 @@ for (const action of TAB_CYCLE_JUMP) {
   });
 }
 
-const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
+// new-window (M09 F6 DD5, review L1): NOT `tab-`-prefixed, so the guest-forward
+// path's blanket `!isAutoRepeat` guard covers it with NO code change (the
+// reopen-closed-tab precedent) — windows are heavier than tabs, and a held
+// Ctrl+N under guest focus must not machine-gun BaseWindows. This loop is the
+// dedicated pin the leg AC names.
+const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'new-window', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
 
 for (const action of NOT_REPEAT_SAFE) {
   test(`isRepeatSafeAction('${action}') is false (held key must not stack/repeat-fire)`, () => {

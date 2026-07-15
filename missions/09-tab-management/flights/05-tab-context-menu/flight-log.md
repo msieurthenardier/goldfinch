@@ -284,3 +284,7 @@ clean, `npm run typecheck` clean.
   dispatch TOCTOU re-validation makes any consequence harmless. Recorded
   here rather than patched — fold into the F6 module-split touch if that
   refactor reshapes the opener.
+  **Addendum (2026-07-15)**: folded in at F6 leg 3 (`stack-and-cache`,
+  flight DD6) — the push-cache made `openTabContextMenu` synchronous; the
+  awaited invoke and the stale-resolve guard are deleted, so this edge no
+  longer exists structurally.

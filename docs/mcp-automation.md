@@ -353,6 +353,39 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 > packaged binary** too: it is gated purely on the `GOLDFINCH_AUTOMATION_ADMIN` env presence (plus a
 > minted admin key) — env-only, with no dev/`isPackaged` coupling.
 
+## Multi-window semantics (interim — M09 Flight 6; F7 redefines)
+
+Goldfinch supports multiple windows (M09 F6). The automation surface's multi-window semantics are
+an **explicit interim contract** — first-class multi-window automation (window enumeration,
+per-window capture) is Flight 7's work. What holds today:
+
+- **The window-level ops follow the `last-focused` window.** `getChromeTarget`, `enumerateTabs`,
+  and `openTab` resolve **the main-tracked last-focused window** — tracked in the window registry,
+  **seeded at window create and at programmatic focus** (so creating a window or moving a tab to a
+  new window deterministically retargets the surface, even on compositors that never deliver real
+  focus events — WSLg), membership-validated at read with a first-record fallback when the
+  last-focused window has been closed. This is deliberately **not** OS focus: a driver should
+  treat "which window am I bound to?" as answered by `getChromeTarget`, never by focus probes.
+- **`enumerateTabs` is window-scoped, not an app census.** It lists the last-focused window's
+  tabs only. With N windows, another window's tabs are simply absent — address them by their
+  recorded `wcId`s instead (below). Tab-count bookkeeping must be per-window.
+- **Raw-`wcId` ops work cross-window.** Every wcId-first op (`navigate`, `evaluate`, `readDom`,
+  `readAxTree`, `click`, `pressKey`, `captureScreenshot`, …) resolves tabs in **any** window at
+  its existing tier: tab membership is all-windows, and **every window's chrome** is a chrome-class
+  wcId — admin-addressable like the first window's (jar keys are refused on any registered chrome,
+  same as before). Discover a new window's chrome via `getChromeTarget` right after the window is
+  created (the accessor has just retargeted to it), then pin your work to the returned `wcId`.
+- **`captureWindow` two-window caveat.** `captureWindow` composites ONE window — the
+  accessor-resolved record — and its `desktopCapturer` best-size-match heuristic can grab the
+  **wrong** window when two similar-sized windows exist (a pre-F6 heuristic, unchanged by design;
+  its WSLg fallback path likewise composites only the accessor's record). **With more than one
+  window open, prefer per-`wcId` `captureScreenshot`**; treat `captureWindow` as single-window
+  tooling until F7 gives it a window discriminator.
+
+The per-spec impact of these semantics on the behavior-test corpus is catalogued in
+[`docs/behavior-specs-single-window-audit.md`](behavior-specs-single-window-audit.md) — the F7
+input artifact.
+
 ## Tool reference
 
 All 29 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
@@ -364,7 +397,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (dom-ready) tabs. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (dom-ready) tabs **of the last-focused window** (window-scoped since M09 F6 — see *Multi-window semantics*). Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
 | `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
@@ -394,7 +427,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `captureScreenshot` | `{ wcId: integer, delayMs?: integer }` *(`wcId` required)* | **Image content** (PNG, `image/png`). The tab is brought to front first; `delayMs` optionally tunes the paint-settle wait after foregrounding |
-| `captureWindow` | *(none)* | **Image content** (PNG, `image/png`) of the whole browser window (chrome + composited guests) |
+| `captureWindow` | *(none)* | **Image content** (PNG, `image/png`) of the whole browser window (chrome + composited guests) — the **last-focused window**; with two or more windows open prefer per-`wcId` `captureScreenshot` (see the two-window caveat under *Multi-window semantics*) |
 | `readDom` | `{ wcId: integer }` *(required)* | JSON text: `{ url, title, html }` — the full live `document.documentElement` outerHTML (no trimming), foreground-first |
 | `readAxTree` | `{ wcId: integer }` *(required)* | JSON text: the accessibility-tree `AXNode` array — **or** a `{ automation: "debugger-unavailable", reason, wcId }` refusal (a **normal** result, see below). Foreground-first; uses the in-process debugger |
 
@@ -455,7 +488,7 @@ mirroring `captureWindow`).
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `getChromeTarget` | *(none)* | JSON text: `{ wcId, kind: "chrome", url }` — the chrome renderer's automation target. Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). |
+| `getChromeTarget` | *(none)* | JSON text: `{ wcId, kind: "chrome", url }` — the **last-focused window's** chrome renderer (M09 F6 interim — see *Multi-window semantics*). Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). |
 | `downloadsList` | *(none)* | JSON text: the app-level downloads records — an array of `{ id, url, filename, savePath, state, received, total, … }` (in-progress + completed history, persisted across restart). `filename` is the sanitized save name; `savePath` is the real on-disk path (`null` until known); `state` is the download lifecycle (`progressing` / `completed` / `interrupted` / …); `received`/`total` are byte counts. The internal `goldfinch://downloads` **page** that renders this model lives in the internal session and is **not** readable via the eval/observe tools — `downloadsList` is the automation-surface view of the same model. |
 
 > **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring

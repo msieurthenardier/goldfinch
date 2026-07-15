@@ -28,15 +28,15 @@ function waitForPaint(_wc, { delayMs = 80 } = {}) {
  * internal — the op-local guard is what excludes it.
  *
  * @param {number} wcId
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, activate?: (wcId: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, isChromeContents?: (wc: any) => boolean, allowInternal?: boolean, activate?: (wcId: number) => Promise<void> }} deps
  * @param {object} [_opts] reserved for forward-compat print options (none in v1)
  * @returns {Promise<string>} base64-encoded PDF
  */
 async function printToPDF(wcId, deps, _opts = {}) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);
   if (isInternalContents(wc)) throw new Error('automation: printToPDF — internal-session excluded');
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);
     wc = resolveContents(wcId, deps); // post-activate stale-handle re-resolve
     await waitForPaint(wc); // fixed default paint-settle

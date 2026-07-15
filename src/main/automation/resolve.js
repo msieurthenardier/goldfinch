@@ -30,23 +30,33 @@ function isInternalContents(wc) {
 }
 
 /**
- * Returns 'chrome' when wc is the chrome renderer contents, 'guest' otherwise.
+ * Returns 'chrome' when wc is a chrome renderer contents, 'guest' otherwise.
  *
- * chromeContents is mainWindow.webContents at the call site (injected, not
+ * chromeContents is the DD8 accessor's chrome at the call site (injected, not
  * imported). A nullish chromeContents injection simply never matches a real
  * wc, returning 'guest' — the engine glue (Leg 5) is responsible for
- * injecting a live mainWindow.webContents before any classification matters.
+ * injecting a live chrome webContents before any classification matters.
+ *
+ * M09 F6 (DD8 widening): the optional isChromeContents predicate — main.js's
+ * window-registry "is any registered chrome" — makes EVERY registered window's
+ * chrome classify 'chrome', not just the accessor's (the leg-1 spike residual:
+ * without it a second window's chrome classified 'guest' and the foreground-
+ * first eval activation mistreated it). Absent predicate = identity-only
+ * (offline tests / legacy callers unchanged).
  *
  * Never throws on a valid wc. The security guard (isInternalContents) does not
  * depend on chromeContents, so a null chrome injection cannot weaken the
  * internal-session rejection in resolveContents.
  *
  * @param {any} wc  the resolved webContents
- * @param {any} chromeContents  mainWindow.webContents (injected)
+ * @param {any} chromeContents  the accessor chrome webContents (injected)
+ * @param {((wc: any) => boolean) | undefined} [isChromeContents]  any-registered-chrome predicate (injected)
  * @returns {'chrome' | 'guest'}
  */
-function classifyContents(wc, chromeContents) {
-  return wc === chromeContents ? 'chrome' : 'guest';
+function classifyContents(wc, chromeContents, isChromeContents) {
+  if (wc === chromeContents) return 'chrome';
+  if (typeof isChromeContents === 'function' && isChromeContents(wc)) return 'chrome';
+  return 'guest';
 }
 
 /**
@@ -62,10 +72,14 @@ function classifyContents(wc, chromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean }} deps
  *   fromId   — webContents.fromId at the call site (injected)
- *   chromeContents — mainWindow.webContents (injected; passed through for
- *                    callers that immediately classify the result)
+ *   chromeContents — the accessor chrome webContents (injected; passed through
+ *                    for callers that immediately classify the result)
+ *   isChromeContents — (M09 F6, DD8) "is any registered chrome" predicate; a
+ *                    second window's chrome is exempted from the non-tab-contents
+ *                    guard exactly like the accessor's chrome (jar tiers still
+ *                    refuse every chrome via resolveContentsForJar's exclusion)
  *   allowInternal — when true (one of admin's TWO relaxations — see below), the
  *                   internal-session throw is SKIPPED. Defaults to false/undefined:
  *                   existing callers that pass no allowInternal behave exactly as
@@ -81,7 +95,7 @@ function classifyContents(wc, chromeContents) {
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId }) {
+function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isChromeContents }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -111,7 +125,14 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
   // these on session identity in resolveContentsForJar (out-of-jar) — this
   // resolver-level rule is robust against a future sheet-gets-a-partition change.
   // Fires only when main.js threads the predicate; admin (allowInternal) is exempt.
-  if (!allowInternal && typeof isTabViewWcId === 'function' && wc !== chromeContents && !isTabViewWcId(wcId)) {
+  // M09 F6: ANY registered chrome is exempt (isChromeContents), mirroring the
+  // accessor-chrome identity exemption — a second window's chrome is not an overlay.
+  if (
+    !allowInternal && typeof isTabViewWcId === 'function' &&
+    wc !== chromeContents &&
+    !(typeof isChromeContents === 'function' && isChromeContents(wc)) &&
+    !isTabViewWcId(wcId)
+  ) {
     throw new Error('automation: non-tab-contents — wcId ' + wcId + ' is not a tab view (chrome-class overlay contents resolve only at the admin tier)');
   }
 
@@ -151,7 +172,7 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
  *
  * @param {number} wcId  the webContentsId to resolve
  * @param {{ id: string, partition: string } | null | undefined} jar  the jar to confine to
- * @param {{ fromId: (id: number) => any, chromeContents?: any, fromPartition: (partition: string) => any, allowInternal?: boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, fromPartition: (partition: string) => any, allowInternal?: boolean, isChromeContents?: (wc: any) => boolean }} deps
  * @returns {any} the live, in-jar webContents
  * @throws {Error} bad-handle / no-such-contents / internal-session (via
  *   resolveContents) or `automation: out-of-jar` on a chrome-exclusion hit or
@@ -164,7 +185,13 @@ function resolveContentsForJar(wcId, jar, deps) {
   // no jar partition aliases it (so the session check below already refuses it), but object-
   // identity exclusion is robust against any future config change that gives the chrome a
   // jar-aliased session. Backstops getChromeTarget's admin-only façade gate for the wcId-first ops.
-  if (deps.chromeContents != null && wc === deps.chromeContents) {
+  // M09 F6 (DD8 / review L5): the exclusion widens from identity-with-THE-chrome to
+  // "is any registered chrome" — a second window's chrome must be equally
+  // undrivable by a jar key.
+  if (
+    (deps.chromeContents != null && wc === deps.chromeContents) ||
+    (typeof deps.isChromeContents === 'function' && deps.isChromeContents(wc))
+  ) {
     throw new Error('automation: out-of-jar — wcId ' + wcId + ' is the chrome renderer and is not drivable by a jar key');
   }
   if (!jar || wc.session !== deps.fromPartition(jar.partition)) {

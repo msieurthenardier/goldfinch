@@ -79,6 +79,7 @@ const WCID_FIRST_OPS = [
  *   fromId: (id: number) => any,
  *   fromPartition: (partition: string) => any,
  *   getChromeContents: () => any,
+ *   isChromeContents?: (wc: any) => boolean,
  * }} ctx
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
@@ -86,7 +87,7 @@ function scopeEngine(engine, identity, ctx) {
   // Admin bypasses jar-scoping entirely — the engine is already allowInternal.
   if (identity === 'admin') return engine;
 
-  const { jars, fromId, fromPartition, getChromeContents } = ctx;
+  const { jars, fromId, fromPartition, getChromeContents, isChromeContents } = ctx;
 
   // Resolve the jar LAZILY each call would be ideal for runtime jars-add, but
   // the jar's existence is fixed for a session's lifetime against jars.list().
@@ -121,6 +122,9 @@ function scopeEngine(engine, identity, ctx) {
     fromId,
     chromeContents: getChromeContents(),
     fromPartition,
+    // M09 F6 (DD8 / review L5): the chrome-exclusion compare widens to "is any
+    // registered chrome" — window 2's chrome is equally out of a jar key's reach.
+    ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}),
   });
 
   /** @type {{ [op: string]: (...args: any[]) => any }} */

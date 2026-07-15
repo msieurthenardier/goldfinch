@@ -21,7 +21,7 @@ const find = require('./find');
  *
  * @param {() => (Electron.WebContents | null)} getChromeContents
  *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -30,9 +30,15 @@ const find = require('./find');
  *   engine with `{ allowInternal: true }`; jar engines (and every other caller)
  *   leave it false. Threaded into deps() and forwarded to EVERY resolveContents
  *   call site.
- *   isTabViewWcId — main.js's tabViews-membership predicate (M05 F8 DD8),
- *   threaded into deps() so resolveContents can refuse non-tab, non-chrome
- *   wcIds at non-admin tiers. Absent → no behavior change.
+ *   isTabViewWcId — main.js's tab-membership predicate (M05 F8 DD8; M09 F6
+ *   widened it to ALL-WINDOWS membership via the window registry), threaded
+ *   into deps() so resolveContents can refuse non-tab, non-chrome wcIds at
+ *   non-admin tiers. Absent → no behavior change.
+ *   isChromeContents — main.js's "is any registered chrome" predicate (M09 F6,
+ *   DD8): rides deps so classifyContents recognizes EVERY window's chrome (a
+ *   second window's chrome must not classify 'guest' — the leg-1 spike
+ *   residual) and resolveContents/resolveContentsForJar apply their chrome
+ *   exemption/exclusion to every registered chrome. Absent → identity-only.
  *   getDownloads — accessor for the app-level downloads list (Flight 5). When
  *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
  *   op returns the merged download records. Absent → getDownloadsList throws a clean
@@ -52,7 +58,7 @@ const find = require('./find');
  *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null, getHistoryReads = null, isKnownJar = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null, isChromeContents = null, getHistoryReads = null, isKnownJar = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -76,7 +82,7 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // engine and the scope façade share ONE Session→partition resolver — the
     // membership compare in resolveContentsForJar uses the same interned Session
     // that resolveContents sees, so they cannot diverge.
-    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}) };
+    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.
