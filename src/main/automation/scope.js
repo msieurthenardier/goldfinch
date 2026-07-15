@@ -183,6 +183,18 @@ function scopeEngine(engine, identity, ctx) {
     throw new Error('automation: admin-only — getChromeTarget (chrome renderer discovery) is restricted to the admin identity');
   };
 
+  // enumerateWindows → REFUSED for jar keys (admin-only, app-level — mirrors
+  // getChromeTarget/captureWindow/downloadsList). WINDOW TOPOLOGY IS ADMIN (F7 DD2):
+  // the census names windows a jar identity may hold no tabs in at all, which is the
+  // getDownloadsList doctrine exactly — "an app-level cross-jar view is an admin
+  // capability … new tools must not widen the surface's reach" (DD6). Contrast with
+  // enumerateTabs, which stays jar-CONFINED by resolved session: a jar key now sees
+  // all WINDOWS' tabs for ITS OWN jar (DD1's intent), but never the window list.
+  facade.enumerateWindows = () => {
+    requireJar(); // unknown jar errors no-such-jar first, mirroring captureWindow/getChromeTarget
+    throw new Error('automation: admin-only — enumerateWindows (window topology discovery) is restricted to the admin identity');
+  };
+
   // downloadsList → REFUSED for jar keys (admin-only, app-level — mirrors getChromeTarget/captureWindow).
   // An app-level cross-jar view is an admin capability; a jar key must not learn what other jars
   // downloaded ("new tools must not widen the surface's reach", DD6). Explicit block, NOT a WCID_FIRST_OPS

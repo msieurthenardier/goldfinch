@@ -16,7 +16,37 @@ export default [
     // file must FAIL lint, the leg-1 blocker class).
     files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
-    rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+      // M09 F7 DD8 — destroyed-window rule (CLAUDE.md), complementing onWindowClosed
+      // and test/unit/window-closed-invariant.test.js. A BaseWindow `closed` handler
+      // must never read through the window: property access on a destroyed BaseWindow
+      // THROWS, and an uncaught throw inside the native `closed` emission aborts the
+      // listener chain AND permanently wedges the Wayland close path with zero error
+      // output (the F6 leg-4 fix-cycle root cause).
+      //
+      // The `>` CHILD COMBINATOR IS LOAD-BEARING (recon S5): as a bare descendant
+      // match the trailing MemberExpression also matches the `win.on` CALLEE itself,
+      // firing on EVERY registration including correct ones — verified empirically on
+      // a 14-case fixture via Linter.verify (7 findings, 4 false positives). Do not
+      // "simplify" this selector; copy it verbatim.
+      //
+      // Scope note: this matches Electron's `'closed'` ONLY. Node's stream/server
+      // `'close'` (used throughout automation/mcp-server.js) is a DIFFERENT event that
+      // differs by exactly one character — do NOT widen the value to `'close'`.
+      //
+      // Known limits (which is why the WRAPPER is the primary net, not this rule):
+      // defeated by aliasing (`const w = win`), indirection (`helper(win)`), and
+      // MemberExpression objects (`this.win`, `rec.win`).
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name=/^(on|once)$/][arguments.0.value='closed'] > :matches(ArrowFunctionExpression, FunctionExpression) MemberExpression[object.name='win']",
+          message:
+            "Destroyed-window rule (CLAUDE.md): a `closed` handler must not read through `win` — a destroyed BaseWindow property access throws and wedges the native close path. Capture what you need at registration time; use onWindowClosed(win, handler) (main.js), which passes the captured winId."
+        }
+      ]
+    }
   },
   {
     // M07 Flight 2 end-state: src/shared/ is real ESM. This block no longer

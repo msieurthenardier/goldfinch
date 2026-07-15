@@ -44,11 +44,12 @@ close-others/close-right); and Escape returns focus to the **invoking tab** (the
   on `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`. Admin is required: a jar key cannot `getChromeTarget`
   (the tab strip is chrome DOM — every right-click and tab-rect read targets the chrome `wcId`)
   and cannot resolve the sheet's wcId (non-tab wcIds resolve only at the admin tier).
-- **Fixture pages** — reuse the `fixtures-tabstrip` set (`Fixture Page 1 — tabstrip` ..
-  `Fixture Page N — tabstrip`, distinct titles), served locally via
-  `python3 -m http.server 8000` from the fixture directory, reachable at
-  `http://127.0.0.1:8000/pageN.html`. Five pages are used below; confirm pairwise-distinct titles
-  via `readAxTree` before relying on tab identity.
+- **Fixture pages — the committed `tabstrip` set**, `tests/behavior/fixtures/tabstrip/`
+  (`page1.html` .. `page6.html`, titled `Fixture Page 1 — tabstrip` .. `Fixture Page 6 — tabstrip`;
+  that directory's README pins the content and the serve command). Serve it **from that directory**
+  via `python3 -m http.server 8000`, reachable at `http://127.0.0.1:8000/pageN.html`. **This spec
+  uses pages 1–5.** Confirm pairwise-distinct titles via `readAxTree` before relying on tab
+  identity.
 - **Three targets — chrome, sheet, guests.** The right-click fires on the **chrome** `wcId`
   (**C**, via `getChromeTarget()`) at a tab button's coordinates; the **rendered menu** lives on
   the **sheet** `wcId` (probed) as `#sheet-menu[data-menu-type="tab-context"]`; history fidelity
@@ -58,11 +59,11 @@ close-others/close-right); and Escape returns focus to the **invoking tab** (the
   el.getBoundingClientRect().toJSON()}))")` and right-click at a rect's center — deterministic,
   and robust to strip reflow between steps (re-read after every strip mutation; F1's
   shrink-to-fit means rects move whenever the tab count changes).
-- **Sheet wcId discovery (background-tab-safe probe walk).** The sheet is NOT in `enumerateTabs`;
-  probe the small id-space (`evaluate(id, "location.href")` returning `menu-overlay.html`
-  identifies it), **skipping every `enumerateTabs` wcId and C** (the eval ops are
-  foreground-first — probing a background tab activates it, closing the menu under test). The
-  sheet materializes lazily on first menu open; discover once per run, after Step 3's first open.
+- **Sheet wcId discovery — `enumerateWindows` (M09 F7 DD2).** The sheet is a per-window
+  `WebContentsView`, never in `enumerateTabs`. Resolve it **exactly**: `enumerateWindows()` returns one
+  row per window carrying `sheetWcId` and `sheetVisible` — take this window's row and read `sheetWcId`.
+  **Admin-only**, which this spec already is. The sheet is lazy, so **`sheetWcId` is absent until the
+  first menu open** — resolve it after Step 3's open, not before.
 - **Menu open is synchronous (M09 F6 DD6 — wording updated; the pre-F6 opener was async).**
   `openTabContextMenu` builds its model from the push-fed stack-size cache
   (`closed-tab-stack-changed` broadcasts; the `closedTabStackSize()` invoke survives as the boot

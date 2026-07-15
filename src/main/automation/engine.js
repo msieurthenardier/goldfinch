@@ -19,9 +19,12 @@ const find = require('./find');
  * engine.js itself uses no webContents.debugger (DD8); it wires ./observe, whose readAxTree is
  * the engine's sole debugger user.
  *
- * @param {() => (Electron.WebContents | null)} getChromeContents
- *   Accessor for the current chrome WebContents (may return null if the window/view is closed).
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: (() => Promise<string|null>) | null, isTabViewWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {(windowId?: number) => (Electron.WebContents | null)} getChromeContents
+ *   Accessor for a chrome WebContents (may return null if the window/view is closed).
+ *   F7 DD3: takes an OPTIONAL windowId — omitted → the last-focused record (the
+ *   pre-F7 contract every existing caller relies on); supplied → that window's
+ *   chrome, or null when the id names no registered window.
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -39,6 +42,29 @@ const find = require('./find');
  *   second window's chrome must not classify 'guest' — the leg-1 spike
  *   residual) and resolveContents/resolveContentsForJar apply their chrome
  *   exemption/exclusion to every registered chrome. Absent → identity-only.
+ *   chromeForTab — main.js's class-3 owner routing (M09 F7 DD6): the OWNING
+ *   window's chrome webContents for a tab, resolved AT EVENT TIME. activateTab
+ *   dispatches through it instead of executeInRenderer's LAST-FOCUSED chrome,
+ *   which is what made a cross-window activate silently no-op (recon S1).
+ *   Absent → no behavior change (activateTab falls back to the pre-F7
+ *   executeInRenderer dispatch, no raise, no refusal).
+ *   raiseWindowForTab — main.js's window raise for a tab's owning window (M09 F7
+ *   DD6): win.focus() + registry.noteFocus(), the main.js:2646-2649 idiom (both
+ *   halves — programmatic focus fires no focus event under WSLg). Called AFTER a
+ *   successful dispatch. Absent → no behavior change (dispatch without raise).
+ *   listWindows — main.js's registry seam for DD1's ALL-WINDOWS tab census: the
+ *   registered windows in insertion order, each as { windowId, chrome, booted,
+ *   ownsTab }. tabs.enumerateTabs assembles one executeInChrome round-trip per
+ *   booted window and stamps windowId from the REGISTRY (the renderer never learns
+ *   it). Rides base by the conditional-spread idiom. Absent → no behavior change
+ *   (the pre-F7 single-window enumeration, emitting no windowId) — and because that
+ *   fallback is SILENT, both live injection sites are grep-pinned by the leg.
+ *   enumerateWindows — main.js's window-topology accessor (M09 F7 DD2), backed by
+ *   the pure window-census.js. Reads NOTHING but the live registry records at call
+ *   time (zero state). Backs the enumerateWindows op AND getChromeTarget's windowId
+ *   resolution, so the two cannot become separate topology sources. Absent →
+ *   enumerateWindows throws a clean `windows-unavailable` (the downloads-unavailable
+ *   precedent below) and getChromeTarget keeps its pre-F7 last-focused path.
  *   getDownloads — accessor for the app-level downloads list (Flight 5). When
  *   wired (main.js threads `() => downloadsManager.listAll()`), the getDownloadsList
  *   op returns the merged download records. Absent → getDownloadsList throws a clean
@@ -58,7 +84,7 @@ const find = require('./find');
  *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, isTabViewWcId = null, isChromeContents = null, getHistoryReads = null, isKnownJar = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, enumerateWindows = null, isTabViewWcId = null, isChromeContents = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -74,6 +100,14 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
       if (!chromeContents) throw new Error('automation: chrome window unavailable');
       return chromeContents.executeJavaScript(code);
     };
+    // F7 DD6: dispatch onto a SPECIFIC chrome (the tab's owning window's), as opposed
+    // to executeInRenderer's last-focused one. Built here beside executeInRenderer, with
+    // the same null guard, so tabs.js stays ELECTRON-FREE — it never receives a raw
+    // webContents to call methods on beyond this seam.
+    const executeInChrome = (/** @type {any} */ chrome, /** @type {string} */ code) => {
+      if (!chrome) throw new Error('automation: chrome window unavailable');
+      return chrome.executeJavaScript(code);
+    };
     // allowInternal (DD6 / Leg 2 + F8 DD8): one of admin's TWO relaxations
     // (internal-session AND non-tab-contents both lift under it), forwarded to
     // every resolveContents call site via deps. isTabViewWcId (F8 DD8) rides the
@@ -82,13 +116,43 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // engine and the scope façade share ONE Session→partition resolver — the
     // membership compare in resolveContentsForJar uses the same interned Session
     // that resolveContents sees, so they cannot diverge.
-    const base = { fromId, chromeContents, executeInRenderer, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}) };
+    // chromeForTab / raiseWindowForTab (F7 DD6) ride base by the SAME conditional-spread
+    // idiom as isTabViewWcId/isChromeContents: absent → the key is not present at all →
+    // tabs.activateTab takes its pre-F7 executeInRenderer path. executeInChrome is
+    // unconditional (it is built here, not injected).
+    // listWindows (F7 DD1) rides base by the SAME conditional-spread idiom: absent →
+    // the key is not present at all → tabs.enumerateTabs takes its pre-F7
+    // single-window executeInRenderer path.
+    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.
     /** @type {(wcId: number) => Promise<void>} */
     const activate = (wcId) => /** @type {Promise<any>} */ (tabs.activateTab(wcId, base));
     return { ...base, activate };
+  };
+
+  /**
+   * F7 DD3's shared discriminator check: resolve a supplied windowId against DD2's
+   * census, or throw the NAMED refusal. Omitted windowId → null (the caller takes
+   * its last-focused path, unchanged).
+   *
+   * A silent fall-back to last-focused on an unknown id is EXACTLY the class this
+   * flight exists to kill: captureWindow({windowId: <a closed window>}) would return
+   * ANOTHER window's pixels and report success — recon S1's silent-success, restated
+   * at window scope, in the very leg that fixes capture's binding.
+   *
+   * @param {number | undefined} windowId
+   * @returns {any | null} the census row for windowId, or null when omitted
+   */
+  const requireWindow = (windowId) => {
+    if (windowId == null) return null;
+    if (typeof enumerateWindows !== 'function') {
+      throw new Error('automation: windows-unavailable — window registry not wired');
+    }
+    const row = enumerateWindows().find((/** @type {any} */ r) => r.windowId === windowId);
+    if (!row) throw new Error('automation: no-such-window — no window ' + windowId);
+    return row;
   };
 
   return {
@@ -111,7 +175,31 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     getZoom: (/** @type {number} */ wcId) => zoom.getZoom(wcId, deps()),
     setZoom: (/** @type {number} */ wcId, /** @type {number} */ factor) => zoom.setZoom(wcId, factor, deps()),
     captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),
-    captureWindow: () => observe.captureWindow(deps()),
+    // F7 DD3: accepts the windowId discriminator (omitted → last-focused). Its WIRE
+    // SHAPE IS UNCHANGED — a bare base64 string, because mcp-tools.js's imageResult
+    // consumes it POSITIONALLY. Wrapping it to add windowId would yield a malformed
+    // image with NO error (the DD1 incomplete-marker failure mode, one DD over).
+    // enumerateWindows is the topology read: a caller who needs to know which window
+    // it captured asks the discovery primitive; the capture op returns pixels.
+    captureWindow: (/** @type {{ windowId?: number }} */ { windowId } = {}) => {
+      // Validate the discriminator HERE, against DD2's census — the same single
+      // topology source getChromeTarget derives from. Deliberately NOT inferred from
+      // grabWindow returning null: null is ALSO how a genuine capture failure on a
+      // VALID window reports, so inferring the refusal downstream would answer
+      // "no-such-window" for a window that plainly exists. A named refusal must name
+      // the real cause.
+      requireWindow(windowId);
+      return observe.captureWindow(deps(), { windowId });
+    },
+    // F7 DD2: the flight's single window-topology discovery primitive. Admin-only via
+    // the scope façade (scope.js), never filtered here. Zero state — main.js's
+    // accessor derives every row from the live registry records at call time.
+    enumerateWindows: () => {
+      if (typeof enumerateWindows !== 'function') {
+        throw new Error('automation: windows-unavailable — window registry not wired');
+      }
+      return enumerateWindows();
+    },
     readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
     readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),
     evaluate: (/** @type {number} */ wcId, /** @type {string} */ expression) => observe.evaluate(wcId, expression, deps()),
@@ -121,10 +209,28 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     printToPDF: (/** @type {number} */ wcId) => print.printToPDF(wcId, deps()),
     findInPage: (/** @type {number} */ wcId, /** @type {string} */ text, /** @type {any} */ opts) => find.findInPage(wcId, text, deps(), opts),
     stopFindInPage: (/** @type {number} */ wcId) => find.stopFindInPage(wcId, deps()),
-    getChromeTarget: () => {
-      const cc = getChromeContents();
+    // F7 DD3: an optional windowId discriminator; omitted → the last-focused chrome
+    // (F6's accessor, kept — an OS-focus read would regress determinism under WSLg).
+    // The return gains windowId: unlike captureWindow's, it is a JSON object and
+    // nothing consumes it positionally, so the field rides cleanly.
+    //
+    // The windowId resolution derives from DD2's census (requireWindow), which is
+    // what keeps enumerateWindows "the flight's SINGLE discovery primitive" rather
+    // than letting a second topology source drift alongside it.
+    getChromeTarget: (/** @type {{ windowId?: number }} */ { windowId } = {}) => {
+      const row = requireWindow(windowId);   // throws no-such-window on an unknown id
+      const cc = getChromeContents(windowId);
+      // Kept VERBATIM: a null chrome is a DISTINCT, already-pinned condition from
+      // no-such-window (the window exists but its view is closed/starting up).
       if (!cc) throw new Error('automation: chrome-window-unavailable — chrome contents is null (closed or starting up)');
-      return { wcId: cc.id, kind: 'chrome', url: cc.getURL() };
+      // windowId from the RESOLVED row when supplied; otherwise from the census row
+      // whose chrome IS this one — never re-derived from a second source.
+      const resolved = row
+        ? row.windowId
+        : (typeof enumerateWindows === 'function'
+          ? (enumerateWindows().find((/** @type {any} */ r) => r.chromeWcId === cc.id) || {}).windowId
+          : undefined);
+      return { wcId: cc.id, kind: 'chrome', url: cc.getURL(), ...(resolved != null ? { windowId: resolved } : {}) };
     },
     // App-level downloads view (Flight 5, DD6): no wcId, admin-only via the scope façade.
     // Reads the merged download records from the wired accessor; never touches a session.

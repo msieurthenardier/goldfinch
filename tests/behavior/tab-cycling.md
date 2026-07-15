@@ -35,12 +35,11 @@ live routing through three independently-wired capture points. (M09 Flight 3 DD1
   chrome `wcId` directly (record as **C**). `enumerateTabs()` lists guest `wcId`s (web + internal)
   by creation order (NOT visual order — see the tab-reorder spec's own Out of Scope note; this
   spec addresses tabs by `wcId`, never by enumerate-position).
-- **The menu-overlay sheet is a separate, non-enumerated `WebContentsView` — drive/read it by
-  PROBED wcId** (the established technique, see `menu-overlay.md`'s Observables note): probe the
-  id-space around the known chrome/guest ids with `readDom`, **skipping every `enumerateTabs`
-  wcId and the chrome wcId** (the eval/read ops are foreground-first; probing a background TAB
-  would activate it, closing the menu under test before the accelerator fires). Discover once,
-  right before the sheet-open step.
+- **The menu-overlay sheet is a separate, non-enumerated per-window `WebContentsView` — resolve it
+  via `enumerateWindows()`** (M09 F7 DD2; see `menu-overlay.md`'s Observables note): its per-window
+  row carries `sheetWcId` and `sheetVisible`. Take this window's row and drive/read that wcId. The op
+  is **admin-only**, which this spec already requires. **`sheetWcId` is absent until the sheet's first
+  open** (it is lazy) — resolve it at the sheet-open step, not before.
 - **Input delivered as trusted events** via the MCP tools (`pressKey(wcId, name[, modifiers])`,
   `click(wcId, x, y)`, `typeText(wcId, text)`) — only trusted events fire the renderer's real
   handlers, the guest `before-input-event` capture, and the sheet's accelerator forwarding.
@@ -50,10 +49,16 @@ live routing through three independently-wired capture points. (M09 Flight 3 DD1
   the address bar's live value (`document.getElementById('address').value`), and guest scroll
   position (`window.scrollY`). `readAxTree(wcId)` for tab titles/selected-state as a second,
   independent read. `captureWindow()` corroborates rendered truth (menu open/closed, focus ring).
-- **Fixture-distinctness probe** (folded into Step 2): reuse the tab-strip fixture set (six
-  distinct static pages titled `Fixture Page 1 — tabstrip` .. `Fixture Page 6 — tabstrip`) served
-  locally over HTTP, the same fixture set `tab-reorder.md` uses. Confirm pairwise-distinct titles
-  via `readAxTree` before relying on tab identity for any later step.
+- **Fixture-distinctness probe** (folded into Step 2): the committed `tabstrip` set,
+  `tests/behavior/fixtures/tabstrip/` — six distinct static pages `page1.html` .. `page6.html`
+  titled `Fixture Page 1 — tabstrip` .. `Fixture Page 6 — tabstrip` (that directory's README pins
+  the content and the serve command). Serve it **from that directory** via
+  `python3 -m http.server 8000`, reachable at `http://127.0.0.1:8000/pageN.html`. **This spec uses
+  all six — it is the set's largest consumer and the reason the set has six pages.** Confirm
+  pairwise-distinct titles via `readAxTree` before relying on tab identity for any later step.
+  *(Corrected at the M09 F7 leg-4 errata fold: this line previously said the set was "the same
+  fixture set `tab-reorder.md` uses". It is not — `tab-reorder` names no shared set and titles its
+  pages `Tab1..Tab5`.)*
 - **Active precondition probe** (Step 1): confirm `tools/list` includes (presence-checked, not an
   exact count) `getChromeTarget`, `evaluate`, `pressKey`, `enumerateTabs`, `click`, `readAxTree`.
 - **Apparatus disqualification:** the `chrome-devtools` MCP does **NOT** qualify (launches its own

@@ -118,7 +118,7 @@ const PRESS_KEY_NAMES =
 const DRIVE_TOOLS = [
   {
     name: 'enumerateTabs',
-    description: 'List all drivable (dom-ready) tabs as an array of { wcId, url, title, jarId, active }. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter).',
+    description: 'List all drivable (dom-ready) tabs across ALL windows as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes ZERO rows — call enumerateWindows and poll until every `booted` is true if a total census is required. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows\' tabs for its own jar, never the window topology.',
     inputSchema: { type: 'object', properties: {} },
     call: (engine) => engine.enumerateTabs(),
   },
@@ -410,14 +410,18 @@ const OBSERVE_TOOLS = [
   },
   {
     name: 'captureWindow',
-    description: 'Capture a PNG screenshot of the whole browser window (chrome + composited guests). Takes no input. Returns image content.',
-    inputSchema: { type: 'object', properties: {} },
-    call: (engine) => engine.captureWindow(),
+    description: 'Capture a PNG screenshot of a whole browser window (chrome + composited guests). windowId is OPTIONAL: omitted captures the last-focused window; an unknown id is refused with automation: no-such-window. Returns image content. Call enumerateWindows to learn the window ids (and which one is last-focused) — this op returns pixels, not topology.',
+    inputSchema: { type: 'object', properties: { windowId: { type: 'integer' } } },
+    call: (engine, { windowId }) => engine.captureWindow({ windowId }),
+    // F7 DD3: shape stays imageResult — this op's WIRE SHAPE IS UNCHANGED. imageResult
+    // consumes the engine's return POSITIONALLY (a bare base64 string), so bolting a
+    // windowId field onto it would yield a malformed image with NO error. Topology is
+    // read via enumerateWindows, at the admin tier where it belongs.
     shape: imageResult,
   },
   {
     name: 'readDom',
-    description: 'Read the live DOM of the tab identified by wcId (foreground-first). Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).',
+    description: 'Read the live DOM of the tab identified by wcId. Does NOT foreground its target (M09 F7 DD6): a background tab — including one in another, unfocused window — is read where it sits, without activating it or raising its window. Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
@@ -445,7 +449,8 @@ const OBSERVE_TOOLS = [
   },
   {
     name: 'evaluate',
-    description: 'Evaluate a JavaScript expression in the target tab\'s MAIN WORLD (foreground-first) via webContents.executeJavaScript (no CDP). ' +
+    description: 'Evaluate a JavaScript expression in the target tab\'s MAIN WORLD via webContents.executeJavaScript (no CDP). ' +
+      'Does NOT foreground its target (M09 F7 DD6): a background tab — including one in another, unfocused window — is evaluated where it sits, without activating it or raising its window. ' +
       'A returned Promise is natively awaited, so an async expression like axe.run(document) resolves before its value crosses back. ' +
       'The RETURN VALUE must be JSON-serializable — it is returned as JSON text. A non-JSON-serializable return (function, DOM node, circular object) ' +
       'is refused with "automation: evaluate — return value is not JSON-serializable". An in-page throw surfaces as an error result (isError). ' +
@@ -524,19 +529,27 @@ const DEVTOOLS_TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tool definitions — chrome discovery (1). Admin-only; jar keys are refused
-// at the scope façade (scope.js:getChromeTarget), never filtered here.
-// No result-shaping needed — { wcId, kind, url } rides the default JSON-text
-// serialize. This is the discovery affordance added in Flight 6 (DD1).
+// Tool definitions — chrome/window discovery (2). Admin-only; jar keys are refused
+// at the scope façade (scope.js:getChromeTarget / :enumerateWindows), never
+// filtered here. No result-shaping needed — both returns ride the default
+// JSON-text serialize. getChromeTarget is Flight 6's affordance (DD1);
+// enumerateWindows is F7's single window-topology primitive (DD2), which retires
+// the id-space probe walk.
 // ---------------------------------------------------------------------------
 
 /** @type {ToolDef[]} */
 const CHROME_TOOLS = [
   {
     name: 'getChromeTarget',
-    description: 'ADMIN ONLY. Return the chrome renderer\'s automation target: { wcId, kind: "chrome", url }. The returned wcId is passed to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). Jar keys are refused with automation: admin-only.',
-    inputSchema: { type: 'object', properties: {} }, // no-input, mirrors captureWindow's schema
-    call: (engine) => engine.getChromeTarget(),
+    description: 'ADMIN ONLY. Return a chrome renderer\'s automation target: { wcId, kind: "chrome", url, windowId }. The returned wcId is passed to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). windowId is OPTIONAL: omitted returns the last-focused window\'s chrome; an unknown id is refused with automation: no-such-window. Jar keys are refused with automation: admin-only.',
+    inputSchema: { type: 'object', properties: { windowId: { type: 'integer' } } },
+    call: (engine, { windowId }) => engine.getChromeTarget({ windowId }),
+  },
+  {
+    name: 'enumerateWindows',
+    description: 'ADMIN ONLY. List every open browser window as an array of { windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }. The single window-topology discovery primitive: it resolves per-window overlay wcIds exactly (no id-space probing), and `booted` is the completeness signal for enumerateTabs — a window whose chrome has not booted contributes zero tab rows, so poll until every booted is true for a total census. sheetWcId/findWcId are ABSENT when that overlay has never been created (they are lazy); sheetVisible/findVisible are separate so "instantiated but hidden" is distinguishable from "never shown". lastFocused is main-side tracked, NOT an OS-focus claim. Jar keys are refused with automation: admin-only.',
+    inputSchema: { type: 'object', properties: {} }, // no input, mirrors getChromeTarget's pre-F7 schema
+    call: (engine) => engine.enumerateWindows(),
   },
   {
     name: 'downloadsList',
@@ -574,10 +587,11 @@ const HISTORY_TOOLS = [
   },
 ];
 
-// The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 2
-// chrome/app-admin (getChromeTarget + downloadsList) + 1 history (getHistory) = 29
-// (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find + Flight 5
-// downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2 dragPointer),
+// The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 3
+// chrome/app-admin (getChromeTarget + enumerateWindows + downloadsList) + 1 history
+// (getHistory) = 30 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find
+// + Flight 5 downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2
+// dragPointer + M09 F7 DD2 enumerateWindows),
 // iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS];
 

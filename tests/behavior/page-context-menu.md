@@ -53,14 +53,14 @@ test reproduces the guest→main→chrome→sheet path, the real `dictionarySugg
   cannot resolve the sheet's wcId (non-tab wcIds resolve only at the admin tier).
 - **Three targets — guest, chrome, sheet.** The right-click fires on the **guest** `wcId`
   (`enumerateTabs`); the trigger-side state and focus-return live on the **chrome** `wcId`
-  (`getChromeTarget()`); the **rendered menu** lives on the **sheet** `wcId` (probed) as
+  (`getChromeTarget()`); the **rendered menu** lives on the **sheet** `wcId` as
   `#sheet-menu[data-menu-type="page-context"]`. Read the menu via `readDom(sheetWcId)` /
   `readAxTree(sheetWcId)` / `captureWindow()`; drive its keyboard via `pressKey(sheetWcId, …)`.
-- **Sheet wcId discovery (background-tab-safe probe walk — F8 Leg-5 lesson).** The sheet is NOT in
-  `enumerateTabs`; probe the small id-space around the known ids (`readDom(id)` returning the
-  `menu-overlay.html` markup identifies it), **skipping every `enumerateTabs` wcId and the chrome
-  wcId** (`readDom`/`evaluate` are foreground-first — probing a background tab activates it, closing
-  the menu under test). The sheet materializes lazily on first menu open. Discover once per run.
+- **Sheet wcId discovery — `enumerateWindows` (M09 F7 DD2).** The sheet is a per-window
+  `WebContentsView` and is never in `enumerateTabs`. Resolve it **exactly**: `enumerateWindows()`
+  returns one row per window carrying `sheetWcId` and `sheetVisible` — take the row for the window
+  under test. **Admin-only**, like `getChromeTarget`; this spec is already admin. The sheet is lazy, so
+  **`sheetWcId` is absent until the first menu open** — resolve after it, not in Preconditions.
 - **The ACT side fires a REAL guest `context-menu` event — proven driver.**
   `click(guestWcId, x, y, { button: 'right' })` on the active web tab's content dispatches a genuine
   native `context-menu` event in the guest (**verified live at F8 Leg 4** — the sheet menu

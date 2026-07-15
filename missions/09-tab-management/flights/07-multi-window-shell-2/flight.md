@@ -1,6 +1,6 @@
 # Flight: Multi-Window Shell, Part 2
 
-**Status**: ready
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -221,8 +221,27 @@ an injected accessor; refusal mirrors `scope.js:181-184`'s `admin-only`.
   overlay discovery unsolved and the probe walk alive.
 
 **DD3 — `getChromeTarget({windowId?})` and `captureWindow({windowId?})`:
-optional discriminator; omitted = last-focused (F6's accessor, kept).** Both
-return shapes gain `windowId`.
+optional discriminator; omitted = last-focused (F6's accessor, kept).**
+`getChromeTarget`'s return shape gains `windowId`. **`captureWindow`'s does
+NOT** — see the correction below.
+
+> **DD3 CORRECTION, ratified at leg-3 design: `captureWindow` accepts the
+> `windowId` param but its WIRE SHAPE is unchanged.** As originally written this
+> DD was **not implementable**. `captureWindow`'s return is a bare base64 string
+> consumed **positionally** by `imageResult` (`mcp-tools.js:87-89`, declared
+> `shape:` at `:416`) and pinned by `automation-mcp-tools.test.js:591-599`.
+> Wrapping it to add a `windowId` field yields a **malformed image with no
+> error** — which is **the exact DD1 `incomplete`-marker failure mode, one DD
+> over**: a topology field bolted onto a return shape whose consumer parses it
+> positionally, failing silently rather than loudly. The resolution is DD1's own,
+> verbatim: **`enumerateWindows` is the topology read.** A caller who needs to
+> know which window it captured asks the discovery primitive; the capture op
+> returns pixels. `getChromeTarget` is unaffected — its return is a JSON object
+> and gains `windowId` cleanly.
+> That this recurred **one DD later, in the same flight, after the first
+> instance was caught at design review** is the finding, not the fix: the shape
+> is *"add a field to a return type without checking how the consumer parses
+> it."* Carry to the debrief.
 - Rationale: back-compatible by construction — all 33 `getChromeTarget` and 26
   `captureWindow` specs keep passing unmodified within a single-window run. F6's
   last-focused accessor stays the ownerless default per the debrief's Rec 3:
@@ -297,9 +316,9 @@ the write, `main.js:2812`,`:2861`; DD7 fixed only the read).
   survive the move") → becomes `managerFor(source.win)`.
 
 **DD6 — Cross-window acts route to the OWNING window's chrome. The raise is
-governed by a stated predicate, ruled for ALL EIGHT activate sites.** Activate
+governed by a stated predicate, ruled for ALL NINE activate sites.** Activate
 dispatch resolves the tab's owning window at event time via F6's
-`getChromeForTab` (`window-registry.js:156-159`, the established class-1b
+`getChromeForTab` (**`window-registry.js:170-173`** — the established class-1b
 routing) instead of `executeInRenderer`'s last-focused chrome. `activateTab`'s
 boolean stops being discarded: a `false` becomes a **named refusal**, never a
 silent no-op.
@@ -313,11 +332,34 @@ silent no-op.
 | `observe.js:282` | `readAxTree` | **yes** — the AX tree is a rendered artifact; `observe.js:239-240` already documents "a contents that has not rendered an AX tree yet" returning `[]`, so backgrounding plausibly changes the result, and `npm run a11y` is a flight checkpoint |
 | `print.js:40` | `printToPDF` | **yes** — awaits `waitForPaint` after activate; same rendered-output logic as capture |
 | `find.js:102` | `findInPage` | **yes** — keeps current behavior; match highlighting is UI-bearing and changing it is unmotivated here |
-| `input.js:235` | `click` | **yes** — explicit act |
-| `input.js:265` | `typeText` (paced) | **yes** — explicit act |
-| `input.js:368` | `activateTab` and the explicit-act group | **yes** — the act *is* the raise |
+| `input.js:235` | `actOn` — serves `click`, `typeText`, `pressKey` | **yes** — explicit acts |
+| `input.js:265` | `actOnPaced` — serves `dragPointer` | **yes** — explicit act |
+| `input.js:368` | `scroll` | **yes** — explicit act |
 | `observe.js:195` | `readDom` | **no** — `executeJavaScript` (`:200`); works fine on a background guest |
 | `observe.js:342` | `evaluate` | **no** — `executeJavaScript`, same as `readDom` |
+
+> **Three corrections folded at leg-2 design (all caught by re-deriving against
+> the tree rather than trusting this table):** the count is **nine, not eight**
+> (this DD said "eight" three times while its own table listed nine rows — the
+> flight's sixth count error, same shape as the other five: *a total stated in
+> prose instead of an enumeration read off the tool*). The site **labels** were
+> wrong — `input.js:235` is `actOn` (serving click/typeText/pressKey, not just
+> click); `:265` is `actOnPaced` (serving `dragPointer` — `typeText` is **not**
+> paced); `:368` is **`scroll`**, not `activateTab`, which is not a site at all
+> but the primitive (`engine.js:90`). **Every ruling survives; only labels were
+> wrong.** And `getChromeForTab` was cited at `window-registry.js:156-159`,
+> which is **stale and dangerous**: `:156-162` is now `getWindowForGuest` — a
+> different-but-plausible function that **would type-check at the call site**.
+
+**DD6 refusal scope — forced by the code, ruled at leg-2 design.** The named
+refusal applies **only to registry-owned tabs**. Taken literally it would break
+`npm run a11y`, a flight checkpoint: `classifyContents` calls anything non-chrome
+a `'guest'`, so the sheet and find overlay classify as guests, and
+`activate(overlayWcId)` returns `false` today **and is discarded — which is
+precisely why the probe walk works.** A blanket throw would break the a11y audit
+(its own `catch` swallows the throw, then fails), all ten probe-walk specs,
+`find-overlay-geometry`'s `readDom` probe, and overlay `captureScreenshot`. This
+is a scoping correction the code forced, not a re-litigation of DD6.
 
 - Rationale: S1 is a correctness fix to shipped code, not a preference — the
   current path acts on an unraised, unrendered surface and reports success. But
@@ -528,7 +570,7 @@ one.
 
 > Tentative; planned one at a time.
 
-- [ ] `overlay-per-window` — **HIGH risk** (structural conversion of a
+- [x] `overlay-per-window` — **HIGH risk** (structural conversion of a
       unit-test-exempt surface + a lifecycle relocation). DD5 + DD8: extract
       `createFindOverlayManager`; instantiate both managers per window into the
       registry record's `findOverlay`/`sheet` slots; delete the nine DD7
@@ -539,7 +581,7 @@ one.
       the ESLint rule + the source-scan tripwire (proving its mechanism). Unit
       net mirroring `menu-overlay-manager.test.js`. **Invariant AC: the
       enumerated set above passes UNMODIFIED.**
-- [ ] `live-defect-fixes` — **HIGH risk.** *(Re-tiered from MEDIUM at pass 2:
+- [x] `live-defect-fixes` — **HIGH risk.** *(Re-tiered from MEDIUM at pass 2:
       "no API change" was the wrong frame — there is no **tool-schema** change,
       but this leg changes the shared automation surface's **observable
       contract**: `activateTab` starts refusing where it silently succeeded, and
@@ -550,7 +592,7 @@ one.
       re-checks. Independently verifiable; no dependency on legs 3–4 (verified:
       `getChromeForTab` exists today, and the five capture sites are independent
       of DD2/DD3).
-- [ ] `automation-window-semantics` — **HIGH risk** (shared interface with
+- [x] `automation-window-semantics` — **HIGH risk** (shared interface with
       external consumers). DD1/DD2/DD3/DD4/DD9: all-windows `enumerateTabs` with
       `windowId` + registry-authoritative ownership; `enumerateWindows`; the
       `windowId` param on `getChromeTarget`/`captureWindow`; the
@@ -561,7 +603,7 @@ one.
       unfiltered (`:212-221`) and `npm run a11y` is a flight checkpoint; it
       cannot move earlier because it re-points onto `enumerateWindows`, which
       this leg creates.
-- [ ] `spec-realignment-and-verify` — **MEDIUM risk**. Re-verify the audit's
+- [x] `spec-realignment-and-verify` — **MEDIUM risk**. Re-verify the audit's
       dated rows (S7); `kebab-menu.md` full-body refresh (the ONE genuinely owed
       row); **`multi-window-shell` FULL rewrite** (DD5 + DD2 + DD1 all falsify
       it — see Technical Approach), incl. its pre-registered two-menus variant
@@ -578,10 +620,10 @@ one.
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged (PR opened, stacks on flight/6 — operator merges)
-- [ ] Tests passing
-- [ ] Documentation updated (`docs/mcp-automation.md` multi-window section
+- [x] Tests passing
+- [x] Documentation updated (`docs/mcp-automation.md` multi-window section
       rewritten from interim to final; CLAUDE.md find-overlay + routing +
       op-count sections; the audit annotated as discharged)
 

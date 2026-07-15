@@ -196,40 +196,44 @@ async function getGuestWcId(client, substring) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---------- discover the menu-overlay sheet's wcId (M05 F8, DD6/DD8) ----------
-// The sheet is a lazy-singleton chrome-class WebContentsView created on the
-// FIRST menu open. It is deliberately absent from enumerateTabs (never in
-// tabViews — DD8), so the audit discovers it by probing the wcId space for the
-// menu-overlay.html document (the F7 probed-id-space technique; admin-only —
-// non-tab wcIds resolve only under the admin relaxation). Called ONCE per run,
-// after the first sheet state opens; the wcId is stable across states unless
-// the sheet crashes (self-teardown + recreate would mint a new one).
+// ---------- discover the menu-overlay sheet's wcId (M05 F8 DD6/DD8; M09 F7 DD2) ----------
+// The sheet is a per-window lazy-singleton chrome-class WebContentsView created on
+// the FIRST menu open in its window. It is deliberately absent from enumerateTabs
+// (never in tabViews — DD8). Called ONCE per run, after the first sheet state opens;
+// the wcId is stable across states unless the sheet crashes (self-teardown +
+// recreate would mint a new one).
 //
-// SKIP every wcId enumerateTabs reports (and the chrome's own wcId): `evaluate`
-// is FOREGROUND-FIRST, so probing a background TAB would activate it — a
-// tab-switch that closes the just-opened menu out from under the audit. The
-// sheet is never in enumerateTabs (DD8), so skipping tab ids loses nothing.
-async function findSheetWcId(client, skipWcIds) {
-  const skip = new Set(skipWcIds || []);
-  try {
-    const { value: tabs, isError } = await callTool(client, 'enumerateTabs', {});
-    if (!isError && Array.isArray(tabs)) for (const t of tabs) skip.add(t.wcId);
-  } catch {
-    // enumerateTabs unavailable — fall back to the unfiltered walk
-  }
-  for (let id = 1; id <= 64; id++) {
-    if (skip.has(id)) continue;
-    try {
-      const { value, isError } = await callTool(client, 'evaluate', { wcId: id, expression: 'location.href' });
-      if (!isError && typeof value === 'string' && value.includes('menu-overlay.html')) return id;
-    } catch {
-      // bad handle / dead / excluded target — keep walking
-    }
+// M09 F7 DD2: the sheet's wcId now comes from `enumerateWindows` — an EXACT, O(1)
+// read. This RETIRES the id-space probe walk (build a skip set from enumerateTabs +
+// the chrome's own id, then evaluate location.href against every id in 1..64 looking
+// for menu-overlay.html). Why the walk existed at all, and why it can go:
+//   - No op could ENUMERATE non-tab contents. The admin relaxation made overlay views
+//     ADDRESSABLE, never LISTABLE — so the only way to find the sheet was to guess an
+//     id and ask. enumerateWindows is the op that LISTS them.
+//   - The walk's enumerateTabs-failure branch fell back to an UNFILTERED walk, and
+//     the skip set it built was window-scoped in a multi-window app.
+//   - Its foreground-first hazard (probing a background TAB would activate it,
+//     switching tabs and closing the just-opened menu) is separately gone since F7
+//     DD6 removed the activate from `evaluate` — an optimization now, not a safety
+//     requirement. The O(64)-guess-vs-O(1)-exact argument is what retires it.
+//
+// NO FALLBACK — if enumerateWindows fails, `npm run a11y` fails LOUDLY. That is the
+// point: a silent fallback to the walk would let DD2 be broken while this checkpoint
+// stayed green.
+async function findSheetWcId(client) {
+  const { value: wins, isError } = await callTool(client, 'enumerateWindows', {});
+  if (!isError && Array.isArray(wins)) {
+    // Prefer the window actually SHOWING a sheet; else any window that has ever
+    // instantiated one (sheetWcId present but hidden). An ABSENT sheetWcId means the
+    // sheet was never created in that window (lazy — DD5), which is not a candidate.
+    const row = wins.find((w) => w.sheetVisible && w.sheetWcId != null)
+      || wins.find((w) => w.sheetWcId != null);
+    if (row) return row.sheetWcId;
   }
   fail(
-    'menu-overlay sheet wcId not found by the probe walk (1..64) — the sheet is a ' +
-      'lazy singleton, so a menu state must have OPENED before discovery (and the ' +
-      'audit needs the ADMIN key: non-tab wcIds resolve admin-only).'
+    'menu-overlay sheet wcId not found via enumerateWindows — the sheet is a per-window ' +
+      'lazy singleton, so a menu state must have OPENED before discovery (and the audit ' +
+      'needs the ADMIN key: enumerateWindows is admin-only).'
   );
 }
 
@@ -409,7 +413,7 @@ async function main() {
       for (const state of SHEET_STATES) {
         await evaluate(client, wcId, state.open);
         await sleep(400);
-        if (sheetWcId == null) sheetWcId = await findSheetWcId(client, [wcId]); // once — stable across states
+        if (sheetWcId == null) sheetWcId = await findSheetWcId(client); // once — stable across states
         allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
         const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
         if (dismissed !== 'escaped') {

@@ -162,7 +162,50 @@ shapes, nothing else.
 
 ## F7 consumption note
 
-What F7 must decide, and which specs it touches when it does:
+> # ✅ DISCHARGED — M09 Flight 7, leg 4 (2026-07-15)
+>
+> **Every open item below is decided and landed.** This note is kept, not deleted: it is an
+> **inspection record**, and its per-spec table is the corpus's only classification. What follows is
+> what F7 actually did to each item — enumerated, so a reader never has to infer it from the
+> questions.
+>
+> | Open item | F7's answer | Landed as |
+> |---|---|---|
+> | **`enumerateTabs` scope** | **DD1 — ALL-WINDOWS**, every row stamped with `windowId`; the return stays a **plain array** (a `{tabs, incomplete}` wrapper was rejected: the jar facade `.filter()`s the result, and an array-with-own-properties is silently dropped). The **registry** is the ownership authority. A **mid-boot window contributes ZERO rows**; `enumerateWindows().booted` is the completeness discriminator. | leg 3 |
+> | **`getChromeTarget` arity** | **DD3 — optional `windowId`**; omitted = last-focused (F6's accessor, kept). Return gains `windowId`. Back-compatible: all 33 specs pass unmodified in a single-window run. | leg 3 |
+> | **`captureWindow` signature** | **DD3/DD4 — optional `windowId`, bound by window IDENTITY** (`getMediaSourceId`); the best-size-match heuristic is **deleted**. **WIRE SHAPE UNCHANGED** — the return stays a bare image parsed positionally; wrapping it to add `windowId` would have been a malformed image with no error, so **`enumerateWindows` is the topology read and `captureWindow` returns pixels**. The mis-pick caveat is retired — **but NOT claimed live (S2: this rig is Wayland, the `desktopCapturer` branch is dead code here, and any live assertion would pass vacuously)**. Unit-scoped + HAT-scoped. | leg 3 |
+> | **Overlay discovery** | **DD2 — `enumerateWindows()`**, one admin-only op, the single discovery primitive: `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }`, derived live with zero cached state. **The probe walk is RETIRED for all 10 probe-walk specs + `multi-window-shell`** — the walk, its skip set, and the "discover once per run" rule are deleted, not re-pointed. | leg 3 (op) + leg 4 (specs) |
+> | **Foreground-to-act under N windows** | **DD6 — ACTS RAISE, READS DON'T**, by a stated predicate: *an op that needs rendered output raises the owning window; an op that reads live JS/DOM state does not.* Ruled for **all nine** activate sites. `readDom`/`evaluate` do **not** raise; everything else does. `activateTab`'s boolean stops being discarded — a `false` becomes a **named refusal**, never a silent no-op (the S1 fix). | leg 2 |
+> | **Capture-vs-re-parent race** | **DD7 — all five `capturePage` awaits are timeout-guarded**, with a **named** refusal. Layer degradation: an overlay-layer timeout **drops that layer**; a chrome/guest timeout **hard-refuses** (those *are* the capture). | leg 2 |
+>
+> **The sequencing order below (last bullet) was FOLLOWED — and its own arithmetic is corrected here:**
+> - *"the **2** stale-enumeration rows"* → **1**. `tab-context-menu` step 3 was **already satisfied**
+>   (updated by FD ruling at the F6 leg-5 re-run; re-ran green 10/10 the same day). **`kebab-menu` was
+>   the one genuinely owed row** — refreshed at leg 4 to the six-item model (New window, Settings,
+>   Downloads, Cookie jars, Print…, Exit), read off the renderer. *(Five sites, not the four the row's
+>   own annotation named — its **Observables** line was missed by the annotation itself.)*
+> - *"the **5** count-precondition specs"* → **3** for restatement purposes. Read off the tool
+>   (`grep -c enumerateTabs`): `closed-tab-reopen` **11**, `kebab-menu` **6**, `popup-jar-inheritance`
+>   **1** — these three are restated. **`tab-keyboard-operability` (0) and `unified-tab-controls` (0)
+>   count tabs EXCLUSIVELY via `readAxTree(chromeWcId)`'s `tablist`** — a chrome document's tablist is
+>   **per-window by construction**, so **DD1 cannot touch them** and they need no restatement. The
+>   class-5 label below is a valid *exposure* marker; its class **definition** assumed the instrument
+>   was `enumerateTabs`, and for 2 of the 5 it isn't.
+> - *"the pure-pixel captureWindow specs last (they need the new capture op)"* — correct as sequenced;
+>   the wire shape did not change, so they needed no edit.
+>
+> ## ⚠ THIS TABLE IS DATED — as of F7 leg 4 (2026-07-15)
+>
+> **S7 stands: this audit drifted within hours of authorship, and it has drifted again since.** The
+> per-spec table below reflects the corpus **as of F7 leg 4** and is a **snapshot, not a live index**.
+> F7 leg 4 alone rewrote `multi-window-shell`, re-pointed 10 specs, restated 3, folded errata into 4,
+> and authored `multi-window-automation` (**not in the table below at all**). **Do NOT sequence F8 off
+> this table blind** — re-derive against the working tree first. *(The one artifact in this flight that
+> never erred is the one that enumerated rather than counting; this table's own totals were wrong twice
+> — 2→1 and 5→3 — in exactly the way a carried-forward count is.)*
+
+What F7 must decide, and which specs it touches when it does *(historical — each item's answer is in
+the DISCHARGED table above)*:
 
 - **`enumerateTabs` scope** — per-window (status quo, but selectable?) vs
   all-windows with a `windowId` field. The 5 count-precondition specs and

@@ -3,6 +3,10 @@
 const { resolveContents, classifyContents, isInternalContents } = require('./resolve');
 const { withDebuggerSession } = require('./cdp');
 const { setDevTools } = require('../devtools');
+// F7 DD7: bounded capturePage race. Reaching up to src/main/ is the established shape
+// here (see ../devtools above); capture-timeout.js is itself Electron-free, so this
+// module's Electron-free property is preserved.
+const { withCaptureTimeout } = require('../capture-timeout');
 // Automation engine — READ half (observe). Foreground-first, debugger-free screenshots
 // via webContents.capturePage() (DD1): a guest is brought to front before capture or it
 // returns blank (Flight-1 spike). Results are base64 PNG strings (NativeImage.toPNG().
@@ -24,14 +28,23 @@ const { setDevTools } = require('../devtools');
 //
 // Flight-9 eval ops (evaluate / injectScript): debugger-free webContents.executeJavaScript
 // ops (DD1: ZERO CDP — they never touch cdp.js / withDebuggerSession). They are co-located
-// here with readDom because they share the exact resolve → activate → re-resolve skeleton,
-// EVEN THOUGH injectScript is a *write* (it defines globals / patches prototypes). The
-// "observe" filename is historical; a future reader should not trip on a write living here.
-// Both run the FINAL isInternalContents(wc) refusal AFTER the (optional) activate branch —
-// the load-bearing DD2-HIGH guard: admin's allowInternal:true makes resolveContents permissive,
-// so without this op-local check admin could run arbitrary JS in goldfinch://settings and reach
-// the privileged goldfinchInternal bridge. The check covers BOTH the activate path (guest) and
-// the no-activate path (chrome / admin without activate).
+// here with readDom because they share its resolve → read skeleton, EVEN THOUGH injectScript
+// is a *write* (it defines globals / patches prototypes). The "observe" filename is
+// historical; a future reader should not trip on a write living here.
+//
+// M09 F7 DD6 — THE ACTIVATE SKELETON IS NO LONGER SHARED BY THIS MODULE'S OPS. The
+// predicate: an op that needs RENDERED OUTPUT raises the owning window; an op that reads
+// live JS/DOM state does not. So captureScreenshot (pixels) and readAxTree (the AX tree is
+// a rendered artifact) still resolve → activate → re-resolve; readDom and evaluate DO NOT
+// ACTIVATE AT ALL — executeJavaScript works fine on a background guest, and making a *read*
+// steal the operator's foreground is a worse bug than the one DD6 fixes. Both halves are
+// pinned in automation-observe.test.js; do not "harmonize" them.
+//
+// evaluate / injectScript run the FINAL isInternalContents(wc) refusal — the load-bearing
+// DD2-HIGH guard: admin's allowInternal:true makes resolveContents permissive, so without
+// this op-local check admin could run arbitrary JS in goldfinch://settings and reach the
+// privileged goldfinchInternal bridge. It now runs on the ONE resolved wc (there is no
+// activate branch left in those two ops for it to sit after).
 //
 // Flight-9 devtools ops (openDevTools / closeDevTools): webContents.openDevTools({mode:'detach'})
 // / webContents.closeDevTools() — synchronous/void → {"ok":true}. They are co-located here (NOT a
@@ -129,7 +142,12 @@ async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPain
     wc = resolveContents(wcId, deps);
     await waitForPaint(wc, { delayMs });                        // paint-settle after foregrounding
   }
-  const image = await wc.capturePage();                         // capturePage() is a Promise in Electron ^42
+  // F7 DD7 (recon S3): capturePage() is a Promise in Electron ^42 — and on a
+  // DETACHED-but-live view it NEVER settles, wedging the request forever with no
+  // server-side recovery. resolveContents proves this wc LIVE, never ATTACHED, so
+  // every isDestroyed() guard above has already passed. Hard-refuse at the bound:
+  // this capture IS the op's result, so there is nothing to degrade to.
+  const image = await withCaptureTimeout(wc.capturePage(), 'wcId ' + wcId);
   return image.toPNG().toString('base64');
 }
 
@@ -146,13 +164,21 @@ const READ_DOM_SNIPPET = '(() => ({' +
   '}))()';
 
 /**
- * Foreground-first, debugger-free read of a target tab's full-fidelity live DOM (DD2/DD4/DD5).
- * Mirrors captureScreenshot / input.js actOn: resolve → (guest) await activate → RE-RESOLVE
- * (stale-handle guard) → read via wc.executeJavaScript. Chrome is always live (no activate).
+ * Debugger-free read of a target tab's full-fidelity live DOM (DD2/DD4/DD5), taken WITHOUT
+ * foregrounding it: resolve → read via wc.executeJavaScript. One resolve, no async hop.
  *
- * Resolve-before-activate means an internal-session / bad-handle / dead wcId throws via
- * resolveContents BEFORE activate or executeJavaScript is reached — on the internal-session
- * path NEITHER activate NOR executeJavaScript runs (DD6 absolute exclusion).
+ * [M09 F7 DD6] THIS OP NO LONGER ACTIVATES ITS TARGET — a deliberate contract change, not
+ * an omission. The predicate: an op that needs RENDERED OUTPUT raises the owning window; an
+ * op that reads live JS/DOM state does not. executeJavaScript works fine on a background
+ * guest (there are no pixels involved), and under N windows a read that steals the
+ * operator's foreground is a worse bug than the cross-window no-op DD6 fixes. Contrast
+ * captureScreenshot / readAxTree in this same module, which DO still activate — both sides
+ * of that asymmetry are pinned in automation-observe.test.js so a future "restore symmetry"
+ * refactor fails loudly. Side-effect DD6 records: the probe walk's foreground-first hazard
+ * (a probe on a background tab activating it, closing the menu under audit) DISAPPEARS.
+ *
+ * An internal-session / bad-handle / dead wcId throws via resolveContents BEFORE
+ * executeJavaScript is reached (DD6 absolute exclusion).
  *
  * The read is one round-trip (READ_DOM_SNIPPET) returning a consistent { url, title, html }
  * snapshot. `html` is the FULL document.documentElement.outerHTML — no trimming or length cap
@@ -177,26 +203,21 @@ const READ_DOM_SNIPPET = '(() => ({' +
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   isChromeContents?: (wc: any) => boolean,
- *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
- *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
- *              chrome-only callers, in which case a guest is read without foregrounding
- *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
+ *   allowInternal — admin's DD6 relaxation, forwarded to resolveContents
+ *   NOTE: deps.activate is deliberately NOT read here (F7 DD6). A caller may still supply
+ *   it — the engine's shared deps bag carries one for the ops that do raise — and this op
+ *   ignores it. That is the contract, pinned by test.
  * @returns {Promise<{ url: string, title: string, html: string }>} a consistent live-DOM
  *   snapshot: location.href, document.title, and the full documentElement outerHTML.
  */
 async function readDom(wcId, deps) {
-  const { chromeContents, isChromeContents, activate } = deps;
-  let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                                       // DD5 foreground-to-act (guest only)
-    // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
-    // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
-    wc = resolveContents(wcId, deps);
-  }
+  // ONE resolve, no async hop ⇒ no stale handle ⇒ no post-activate re-resolve (F7 DD6
+  // deleted the activate branch; the re-resolve that guarded it would be dead code).
+  const wc = resolveContents(wcId, deps);
   return wc.executeJavaScript(READ_DOM_SNIPPET);
 }
 
@@ -209,12 +230,23 @@ async function readDom(wcId, deps) {
  * reused, not a new variant). grabWindow is injected from main.js (Flight 3, Leg 1) and keeps
  * observe.js Electron-free.
  *
- * @param {{ grabWindow: (() => Promise<string|null>) | null }} deps
+ * F7 DD3: threads an OPTIONAL windowId through to grabWindow (omitted → last-focused,
+ * the pre-F7 behavior). The RETURN SHAPE IS UNCHANGED — a bare base64 string. It is
+ * consumed POSITIONALLY by mcp-tools.js's imageResult (:87-89, declared shape: at
+ * :416), so wrapping it to carry windowId would yield a MALFORMED IMAGE WITH NO
+ * ERROR. enumerateWindows is the topology read; this op returns pixels.
+ *
+ * An unknown windowId is refused UPSTREAM with a named no-such-window (engine.js's
+ * requireWindow), so a null from grabWindow here still means exactly what it always
+ * meant — the capture itself failed — and keeps its verbatim message.
+ *
+ * @param {{ grabWindow: ((windowId?: number) => Promise<string|null>) | null }} deps
+ * @param {{ windowId?: number }} [opts]
  * @returns {Promise<string>} base64-encoded PNG
  */
-async function captureWindow({ grabWindow }) {
+async function captureWindow({ grabWindow }, { windowId } = {}) {
   if (!grabWindow) throw new Error('automation: chrome window unavailable');
-  const result = await grabWindow();
+  const result = await grabWindow(windowId);
   if (!result) throw new Error('automation: chrome window unavailable');
   return result;
 }
@@ -299,9 +331,14 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
 
 /**
  * Evaluate an arbitrary expression in the target tab's MAIN WORLD via
- * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve → (guest)
- * await activate → RE-RESOLVE (stale-handle guard) → FINAL isInternalContents
- * refusal → wc.executeJavaScript(expression). Chrome is always live (no activate).
+ * wc.executeJavaScript (DD1/DD2 — ZERO CDP). Mirrors readDom: resolve → FINAL
+ * isInternalContents refusal → wc.executeJavaScript(expression).
+ *
+ * [M09 F7 DD6] THIS OP NO LONGER ACTIVATES ITS TARGET — see readDom's note for the
+ * predicate and the rationale. This is the op every probe walk and every cross-window
+ * drive runs on, so the change is what retires the probe walk's foreground-first hazard
+ * (scripts/a11y-audit.mjs:212-235 probes ids 1..64 with it; pre-F7 a probe landing on a
+ * background TAB would activate it and close the menu under audit).
  *
  * executeJavaScript natively awaits a returned Promise, so an async expression
  * (e.g. `axe.run(document)`) resolves before its value crosses back. We `await`
@@ -319,32 +356,28 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
  *     serialize), whose throw would surface as a raw message via errResult.
  *
  * [HIGH] DD2 internal-session exclusion EVEN FOR ADMIN: the isInternalContents
- * refusal runs on the FINAL wc (after the optional activate branch), so it covers
- * the no-activate path too. Admin builds the engine with allowInternal:true, so
- * resolveContents will NOT throw on an internal wcId — this op-local check is the
- * sole guard against arbitrary JS in goldfinch://settings reaching the privileged
- * goldfinchInternal bridge. Refuses regardless of allowInternal.
+ * refusal is LOAD-BEARING and survives F7 DD6's removal of the activate branch — it
+ * now simply runs on the ONE resolved wc. Admin builds the engine with
+ * allowInternal:true, so resolveContents will NOT throw on an internal wcId — this
+ * op-local check is the sole guard against arbitrary JS in goldfinch://settings
+ * reaching the privileged goldfinchInternal bridge. Refuses regardless of
+ * allowInternal. (Pinned by test: it did NOT go out with the activate branch.)
  *
  * @param {number} wcId
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
  *   isChromeContents?: (wc: any) => boolean,
- *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
+ *   NOTE: deps.activate is deliberately NOT read here (F7 DD6) — see readDom.
  * @returns {Promise<any>} the JSON-serializable evaluated value
  */
 async function evaluate(wcId, expression, deps) {
-  const { chromeContents, isChromeContents, activate } = deps;
-  let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                                       // DD5 foreground-to-act (guest only)
-    // Re-resolve AFTER the async activate: the pre-activate handle may be stale.
-    wc = resolveContents(wcId, deps);
-  }
-  // [HIGH] DD2: internal-session exclusion EVEN FOR ADMIN — runs on the FINAL wc,
-  // after the (optional) activate branch, so it covers the no-activate path too.
+  // ONE resolve, no async hop (F7 DD6 deleted the activate branch — see readDom).
+  const wc = resolveContents(wcId, deps);
+  // [HIGH] DD2: internal-session exclusion EVEN FOR ADMIN. With the activate branch
+  // gone this runs on the sole resolved wc — the guard itself is unchanged.
   if (isInternalContents(wc)) {
     throw new Error('automation: evaluate — internal-session excluded');
   }
@@ -368,11 +401,16 @@ async function evaluate(wcId, expression, deps) {
  * (e.g. the axe-core source, a farbling hook) and returns `undefined` → the MCP
  * adapter serializes that to the one success shape `{"ok":true}`.
  *
- * Asymmetry vs evaluate (DD2 — intentional, pinned by a unit test): injectScript
- * SKIPS foreground-to-act activation. Defining a global / patching a prototype does
- * not need a paint, so there is NO activate call here — resolve → FINAL
- * isInternalContents refusal → executeJavaScript. evaluate keeps foreground-to-act
- * for parity with reads.
+ * No foreground-to-act activation (DD2 — intentional, pinned by a unit test):
+ * injectScript SKIPS it. Defining a global / patching a prototype does not need a
+ * paint, so there is NO activate call here — resolve → FINAL isInternalContents
+ * refusal → executeJavaScript.
+ *
+ * [M09 F7 DD6] This is NO LONGER an asymmetry vs evaluate. The old text here read
+ * "evaluate keeps foreground-to-act for parity with reads" — DD6 deleted evaluate's
+ * activate branch (see evaluate/readDom above), so the two ops now agree: neither
+ * activates. The DD2 asymmetry this note documented is gone; what remains is a
+ * shared no-activate contract for the JS-state ops.
  *
  * NO persistence guarantee: window globals defined here are NOT promised to survive
  * across a later evaluate gap (a navigation clears them). The a11y driver (leg 3)

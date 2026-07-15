@@ -9,7 +9,22 @@
 
 ## Intent
 
-Verify the DD1/DD5 **foreground-to-act** discipline over the MCP surface: when a capture or input tool targets a tab that is currently in the **background**, the engine brings that tab to the **front first**, so the screenshot shows the **target** tab's content (not blank, not the previously-active tab) and the input lands on the **target** tab. This needs a behavior test rather than a unit test because the blank-capture / wrong-tab hazard is a real Chromium compositor/visibility effect (the Flight-1 spike) that only manifests on a live foreground/background guest pair — the unit test fakes `activate` and cannot observe a real composited frame.
+Verify the DD1/DD5 **foreground-to-act** discipline over the MCP surface: when a **capture or input** tool targets a tab that is currently in the **background**, the engine brings that tab to the **front first**, so the screenshot shows the **target** tab's content (not blank, not the previously-active tab) and the input lands on the **target** tab. This needs a behavior test rather than a unit test because the blank-capture / wrong-tab hazard is a real Chromium compositor/visibility effect (the Flight-1 spike) that only manifests on a live foreground/background guest pair — the unit test fakes `activate` and cannot observe a real composited frame.
+
+> **Scope of "act" — the read/act asymmetry is a CONTRACT LINE, not an accident (M09 F7 DD6).**
+> Foreground-to-act is a **capture-and-input** contract; it was never a *read* contract, and under
+> multiple windows the two must be stated apart. The governing predicate:
+>
+> > **An op that needs RENDERED OUTPUT raises the owning window; an op that reads live JS/DOM state
+> > does not.**
+>
+> So `captureScreenshot`, `readAxTree`, `printToPDF`, `findInPage`, `click`, `typeText`, `pressKey`,
+> `dragPointer`, and `scroll` **raise**; **`readDom` and `evaluate` do NOT** — they run via
+> `executeJavaScript` and work correctly against a background guest. This spec drives only the raising
+> ops (capture + input), which is why its steps stand unchanged under DD6. *(Making a **read** steal the
+> operator's foreground would be a worse bug than the one this spec protects against — the asymmetry is
+> deliberate. `multi-window-automation.md` asserts the no-raise half directly, with a same-run raise as
+> its positive control.)*
 
 ## Preconditions
 
@@ -35,7 +50,7 @@ Verify the DD1/DD5 **foreground-to-act** discipline over the MCP surface: when a
 
 ## Out of Scope
 
-- **Invisible/background driving** (acting on a tab *without* bringing it to front) — explicitly NOT a v1 capability; v1 foreground-to-act always foregrounds. If a future "drive without stealing focus" mode is added, cover it separately.
+- **Invisible/background driving** (**acting** on a tab *without* bringing it to front) — still NOT a capability: every **act** foregrounds. *(Corrected M09 F7 leg 4: this bullet used to add "If a future 'drive without stealing focus' mode is added, cover it separately." **DD6 IS that mode** — for `readDom` and `evaluate`, which read live JS/DOM state and deliberately do **not** raise. It is no longer "future", and it is not covered "separately" by accident: the read/act asymmetry is now a stated contract line — see Intent — and `multi-window-automation.md` asserts the no-raise half. The **act** half of this bullet stands unchanged.)*
 - The exact paint-settle delay value (`DEFAULT_PAINT_DELAY_MS` tuning) — a Leg-5 smoke tuning concern, not a behavior assertion here.
 - Screenshot **fidelity** beyond "right tab, not blank" (color accuracy, sub-pixel) — out of scope; the assertion is which page is shown.
 

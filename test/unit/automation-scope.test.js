@@ -365,6 +365,53 @@ test('scopeEngine: unknown jar calling getChromeTarget throws no-such-jar (requi
 });
 
 // ---------------------------------------------------------------------------
+// enumerateWindows refusal (M09 F7 DD2/AC7 — admin-only, DISTINCT from out-of-jar)
+//
+// WINDOW TOPOLOGY IS ADMIN: the census names windows a jar identity may hold no tabs
+// in at all — the getDownloadsList cross-jar doctrine exactly. Contrast enumerateTabs,
+// which stays jar-CONFINED by resolved session (a jar key now sees all WINDOWS' tabs
+// for ITS OWN jar — DD1's intent, not a leak).
+// ---------------------------------------------------------------------------
+
+test('scopeEngine: jar enumerateWindows throws admin-only (NOT out-of-jar), engine NOT reached', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.enumerateWindows = () => { engine.__calls.push(['enumerateWindows']); return []; };
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  assert.throws(
+    () => scoped.enumerateWindows(),
+    (err) => err instanceof Error
+      && err.message.includes('automation: admin-only')
+      && !err.message.includes('out-of-jar')
+  );
+  assert.equal(engine.__calls.filter((c) => c[0] === 'enumerateWindows').length, 0,
+    'enumerateWindows must never reach the engine for a jar key — zero accessor invocations on refusal');
+});
+
+test('scopeEngine: admin enumerateWindows reaches the engine and returns its value', () => {
+  const world = makeWorld();
+  const engine = makeFakeEngine(world, { includeInternal: true });
+  const census = [{ windowId: 1, chromeWcId: 11, booted: true, activeTabWcId: null, lastFocused: true, sheetVisible: false, findVisible: false }];
+  engine.enumerateWindows = () => census;
+  const scoped = scopeEngine(engine, 'admin', makeCtx(world));
+  assert.equal(scoped, engine, 'admin must return the engine unchanged');
+  assert.equal(scoped.enumerateWindows(), census);
+});
+
+test('scopeEngine: unknown jar calling enumerateWindows throws no-such-jar (requireJar fires FIRST)', () => {
+  // requireJar() before the admin-only throw, mirroring captureWindow/getChromeTarget:
+  // an unknown jar must still learn no-such-jar rather than admin-only.
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  engine.enumerateWindows = () => { throw new Error('should not reach engine'); };
+  const scoped = scopeEngine(engine, 'ghost', makeCtx(world));
+  assert.throws(
+    () => scoped.enumerateWindows(),
+    (err) => err instanceof Error && err.message.includes('automation: no-such-jar')
+  );
+});
+
+// ---------------------------------------------------------------------------
 // downloadsList refusal (admin-only, app-level — outside WCID_FIRST_OPS; the
 // three-place guard does NOT cover app-level ops, so this dedicated test is required)
 // ---------------------------------------------------------------------------

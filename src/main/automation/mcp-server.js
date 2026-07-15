@@ -355,7 +355,7 @@ function createMcpServer(opts = {}) {
   let pendingSessions = 0;
 
   /**
-   * Build a fresh MCP Server with the 29 tools wired over a per-session,
+   * Build a fresh MCP Server with the 30 tools wired over a per-session,
    * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
    *   - wrapped by scopeEngine(engine, identity, ctx) — admin → unchanged; jar →

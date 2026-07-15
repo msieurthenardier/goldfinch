@@ -281,10 +281,14 @@ Planning inputs adopted from prior artifacts:
       *(Landed 2026-07-15; `multi-window-shell` spec PASS 9/9. Overlay
       multi-instance conversion and automation multi-window semantics carry
       to Flight 7.)*
-- [ ] Flight 7: Multi-window shell, part 2 — per-window find overlay and
+- [x] Flight 7: Multi-window shell, part 2 — per-window find overlay and
       menu-overlay sheet, `grabWindow`/capture semantics, automation surface
       multi-window semantics (`enumerateTabs` span, `getChromeTarget`,
       `captureWindow`), docs.
+      *(Landed 2026-07-15; per-window overlays retire F6's roaming interim;
+      two live F6 defects fixed; `multi-window-automation` spec PASS 9/9. The
+      DD7 blur-conditioning gap is an accepted permanent gap — unreachable by
+      any single-window test, and WSLg delivers no OS blur.)*
 - [ ] Flight 8: Tear-off and cross-window drag — drag beyond the strip
       detaches into a new window; drag into another window's strip re-parents
       there; keyboard equivalents; jar identity preserved.

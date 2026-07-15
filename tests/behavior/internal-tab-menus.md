@@ -39,12 +39,12 @@ sheet's DOM (menu present) and the chrome's trigger state (`aria-expanded`).
   `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1` and a pinned `GOLDFINCH_MCP_PORT` (free
   loopback port). Capture the `adminKey` from the `AUTOMATION_DEV_MINT` stdout line — required (a jar key
   cannot drive the chrome, and the sheet's wcId resolves only at the admin tier).
-- **Sheet wcId discovery (background-tab-safe probe walk — F8 Leg-5 lesson).** The sheet is NOT in
-  `tabViews`: it never appears in `enumerateTabs` and is addressable only by **probed wcId** — walk the
-  small id-space around the known ids, `readDom(id)` returning the `menu-overlay.html` markup identifies
-  it. **Skip every `enumerateTabs` wcId and the chrome wcId in the walk**: `evaluate`/`readDom` are
-  foreground-first, so probing a background TAB activates it — a tab-switch that closes the menu under
-  test. The sheet is never in `enumerateTabs`, so skipping tabs loses nothing. Discover once per run.
+- **Sheet wcId discovery — `enumerateWindows` (M09 F7 DD2).** The sheet is NOT in `tabViews` and never
+  appears in `enumerateTabs`: it is a per-window `WebContentsView`. Resolve it **exactly** —
+  `enumerateWindows()` returns one row per window carrying `sheetWcId` and `sheetVisible`; take the row
+  for the window under test. The op is **admin-only**, which this spec already requires (above).
+  **`sheetWcId` is absent until the sheet is first created** (lazy), so resolve after the first menu
+  open — an early read returns `undefined`, not an error.
 - **Opening internal tabs:** internal `goldfinch://` tabs are **not enumerable/drivable through the jar
   MCP surface** (the internal-session exclusion), and **`evaluate` refuses internal wcIds by design even
   for admin** — so internal-tab checks re-base on **chrome tab state + pixels**: confirm the internal
@@ -86,7 +86,7 @@ sheet's DOM (menu present) and the chrome's trigger state (`aria-expanded`).
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Connect the admin MCP client; `getChromeTarget()`. Probe the sheet's wcId (background-tab-safe walk — see Preconditions). Locate the kebab (⋮) via `captureWindow()`; open it (`click(chromeWcId, x, y)`) and activate the **Settings** item on the sheet (click its coordinates on `sheetWcId`, or arrow-focus + `evaluate` `activeElement.click()`). Take a `captureWindow()` and `readDom(chromeWcId)`. | (setup) The Settings internal page is the active tab — its content renders in the `#webviews` region (pixels) and the chrome address chip shows `data-state="internal"` (internal tabs don't appear in `enumerateTabs`, and `evaluate` refuses internal wcIds — chrome state + pixels are the observables). Record chrome + sheet `wcId`s. |
+| 1 | Connect the admin MCP client; `getChromeTarget()`. Resolve the sheet's wcId from `enumerateWindows()` — this window's row carries `sheetWcId` once the sheet exists (see Preconditions; it is absent until the first menu open below). Locate the kebab (⋮) via `captureWindow()`; open it (`click(chromeWcId, x, y)`) and activate the **Settings** item on the sheet (click its coordinates on `sheetWcId`, or arrow-focus + `evaluate` `activeElement.click()`). Take a `captureWindow()` and `readDom(chromeWcId)`. | (setup) The Settings internal page is the active tab — its content renders in the `#webviews` region (pixels) and the chrome address chip shows `data-state="internal"` (internal tabs don't appear in `enumerateTabs`, and `evaluate` refuses internal wcIds — chrome state + pixels are the observables). Record chrome + sheet `wcId`s. |
 | 2 | **Kebab renders above the live internal view:** with Settings active, locate and open the kebab via `captureWindow()` + `click(chromeWcId, x, y)`. Take a `captureWindow()` (authoritative on the OS-grab path), `readDom(sheetWcId)`, and `readDom(chromeWcId)`. | **Authoritative (pixels):** the kebab menu is visibly composited **above** the Settings page (the exact F3 occlusion regression, now protected on the sheet path); the internal view is LIVE underneath — no still, no blanking. **Corroborating:** `readDom(sheetWcId)` shows `#sheet-menu` `data-menu-type="kebab"` rendered; the chrome kebab trigger has `aria-expanded="true"`. [render-correct] |
 | 3 | **Dismiss restores cleanly:** `pressKey(sheetWcId, 'Escape')`. Take a `captureWindow()` and `readDom(chromeWcId)`. | The menu is gone from the pixels; the live Settings view renders at full bounds; kebab `aria-expanded="false"` and the kebab trigger holds focus (Escape refocus). A sub-frame WSLg blip is recorded, not failed. |
 | 4 | **Container menu renders above the internal view:** with Settings still active, locate and open the container (▾) menu via a fresh `captureWindow()` + `click(chromeWcId, x, y)`. Take a `captureWindow()`, `readDom(sheetWcId)`, and `readDom(chromeWcId)`. | **Authoritative (pixels):** the container menu is composited above the live Settings page. **Corroborating:** `#sheet-menu` `data-menu-type="container"` rendered on the sheet; `#new-tab-menu` `aria-expanded="true"` on the chrome. [render-correct] |

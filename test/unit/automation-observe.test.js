@@ -291,10 +291,50 @@ test('captureScreenshot: returns the base64 of the PNG buffer', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// readDom — guest foreground-first (DD5), debugger-free executeJavaScript read
+// M09 F7 DD7 (recon S3) — captureScreenshot's capturePage await is BOUNDED.
 // ---------------------------------------------------------------------------
 
-test('readDom: guest — activate called BEFORE executeJavaScript (ordering via callLog)', async () => {
+test('captureScreenshot: capturePage that NEVER settles → REJECTS at the bound with the named capture-timeout (F7 DD7)', async (t) => {
+  // The detached-but-live view model: resolveContents proves a view LIVE, never
+  // ATTACHED, so every isDestroyed() guard passes and capturePage() hangs forever.
+  // Pre-F7 this wedged the request with no server-side recovery (reproduced live on
+  // the rig at leg-2 smoke step 0: no response in 20s). MockTimers per-test (never
+  // file-global), per CLAUDE.md's recipe.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const guestWc = makeGuestWc(70);
+  guestWc.capturePage = () => new Promise(() => {});   // never settles — the S3 model
+
+  const deps = { fromId: makeFakeFromId({ 70: guestWc }), chromeContents: null, activate: async () => {} };
+
+  const p = captureScreenshot(70, deps, { waitForPaint: noopWaitForPaint });
+  const assertion = assert.rejects(
+    () => p,
+    (err) => err instanceof Error && /^automation: capture-timeout — wcId 70 did not settle within 3000ms/.test(err.message),
+  );
+
+  await new Promise((r) => setImmediate(r));   // let the op reach its await
+  t.mock.timers.tick(3000);                    // fire the bound
+  await assertion;
+});
+
+// ---------------------------------------------------------------------------
+// readDom — NEVER foregrounds its target (M09 F7 DD6), debugger-free
+// executeJavaScript read.
+//
+// The contract INVERTED at F7 leg 2. Pre-F7 these pinned "activate called BEFORE
+// executeJavaScript" and "the post-activate re-resolve is the handle read"; DD6
+// deleted the activate branch outright, so the ordering no longer exists and the
+// second resolve is gone. The two are RENAMED WITH INVERTED ASSERTIONS rather than
+// deleted-and-readded, so `git blame` carries the intent shift. See captureScreenshot
+// / readAxTree for the OTHER side of the asymmetry — those still activate, on purpose.
+// ---------------------------------------------------------------------------
+
+test('readDom: guest — activate is NEVER called, even when an activate dep IS present (F7 DD6)', async () => {
+  // INVERTED at F7 leg 2 (was: 'activate called BEFORE executeJavaScript'). The primary
+  // AC5 pin: a read must not steal the operator's foreground. Supplying a LIVE activate
+  // dep is what makes this a real test rather than a tautology — the engine's shared deps
+  // bag always carries one, so an absent-dep case would prove nothing about the op itself.
   const guestWc = makeGuestWc(120);
   const callLog = [];
 
@@ -311,18 +351,18 @@ test('readDom: guest — activate called BEFORE executeJavaScript (ordering via 
 
   const result = await readDom(120, deps);
 
-  const activateIdx = callLog.findIndex((e) => e.what === 'activate');
-  const execIdx = callLog.findIndex((e) => e.what === 'executeJavaScript');
-  assert.ok(activateIdx !== -1, 'activate must be called');
-  assert.ok(execIdx !== -1, 'executeJavaScript must be called');
-  assert.ok(activateIdx < execIdx, 'activate must be called before executeJavaScript');
+  assert.equal(callLog.filter((e) => e.what === 'activate').length, 0,
+    'activate must NOT be called: readDom reads a background guest without foregrounding it (DD6)');
+  assert.equal(callLog.filter((e) => e.what === 'executeJavaScript').length, 1,
+    'the read must still happen');
   assert.deepEqual(result, CANNED_DOM);
 });
 
-test('readDom: RE-RESOLVE proof — the SECOND (post-activate) handle is the one read', async () => {
-  // Counter-backed fromId returns a DISTINCT second handle on the re-resolve. The
-  // executeJavaScript that fires must be the SECOND handle's — proving the stale-handle
-  // re-resolve, not merely that activate ran (mirrors the captureScreenshot re-resolve proof).
+test('readDom: guest — resolves ONCE (no activate ⇒ no async hop ⇒ no stale-handle re-resolve) (F7 DD6)', async () => {
+  // INVERTED at F7 leg 2 (was: 'RE-RESOLVE proof — the SECOND post-activate handle is the
+  // one read'). With the activate branch gone there is no async hop between resolve and
+  // read, so the handle cannot go stale and a second resolve would be dead code. Pinning
+  // the SINGLE resolve is what stops it being "helpfully" restored.
   const firstHandle = makeGuestWc(122);
   const secondHandle = makeGuestWc(122);
 
@@ -337,13 +377,18 @@ test('readDom: RE-RESOLVE proof — the SECOND (post-activate) handle is the one
 
   const result = await readDom(122, deps);
 
-  assert.equal(lookups, 2, 'fromId must be called twice (initial resolve + post-activate re-resolve)');
-  assert.equal(firstHandle._execCount, 0, 'the STALE pre-activate handle must NOT be read');
-  assert.equal(secondHandle._execCount, 1, 'the FRESH post-activate handle must be the one read');
+  assert.equal(lookups, 1, 'fromId must be called EXACTLY once — there is no post-activate re-resolve');
+  assert.equal(firstHandle._execCount, 1, 'the sole resolved handle is the one read');
+  assert.equal(secondHandle._execCount, 0, 'no second handle is ever resolved');
   assert.deepEqual(result, CANNED_DOM);
 });
 
-test('readDom: chrome target — activate NOT called (chrome is always live)', async () => {
+test('readDom: chrome target — activate NOT called (chrome never classifies guest; F7 DD6 makes this uniform)', async () => {
+  // RE-WORDED at F7 leg 2. This passed pre-F7 because chrome was EXEMPT from the guest
+  // activate branch ('chrome is always live'). That branch is gone, so the original
+  // rationale no longer operates — it now passes because readDom activates NOTHING. Kept
+  // (not retired) as the chrome-target read regression, with the reason corrected so the
+  // next reader is not misled about the mechanism.
   const chromeWc = makeGuestWc(1);  // this object will be chromeContents
   const activateCalls = [];
   const activate = async (id) => { activateCalls.push(id); };
@@ -362,14 +407,62 @@ test('readDom: chrome target — activate NOT called (chrome is always live)', a
 });
 
 test('readDom: guest with no activate dep — reads WITHOUT foregrounding', async () => {
-  // activate absent from deps → guest path is guarded by typeof activate === 'function'
-  // (matches actOn / captureScreenshot); the guest is read without foregrounding.
+  // NOTE (F7 leg 2): pre-F7 the absent-dep case was a SPECIAL case — the discriminator
+  // between "foregrounds" and "does not". DD6 made it the GENERAL case, so this no longer
+  // discriminates anything by itself. Retained only as the absent-dep smoke (the op must
+  // not deref a missing dep); the REAL AC5 pin is the 'activate is NEVER called, even when
+  // an activate dep IS present' test above.
   const guestWc = makeGuestWc(123);
 
   const result = await readDom(123, { fromId: makeFakeFromId({ 123: guestWc }), chromeContents: null });
 
   assert.equal(guestWc._execCount, 1, 'executeJavaScript must be called even with no activate dep');
   assert.deepEqual(result, CANNED_DOM);
+});
+
+// ---------------------------------------------------------------------------
+// M09 F7 DD6 — THE READ/ACT ASYMMETRY, pinned in ONE place.
+//
+// The predicate: an op that needs RENDERED OUTPUT raises the owning window; an op
+// that reads live JS/DOM state does not. The individual ops are pinned above and
+// below; this test states the CONTRAST directly, so a future refactor that
+// "harmonizes the observe ops" (in EITHER direction) fails here with the reason
+// spelled out, rather than silently re-breaking one half of S1.
+// ---------------------------------------------------------------------------
+
+test('[F7 DD6] the observe read/act asymmetry: captureScreenshot + readAxTree ACTIVATE; readDom + evaluate DO NOT — same guest, same deps', async () => {
+  const calls = { capture: [], ax: [], dom: [], evaluate: [] };
+
+  const mk = (/** @type {number} */ id, /** @type {string} */ bucket) => {
+    const wc = makeGuestWc(id);
+    wc.debugger = makeDebugger({ axNodes: [] });
+    return {
+      wc,
+      deps: {
+        fromId: makeFakeFromId({ [id]: wc }),
+        chromeContents: null,                 // → classifies 'guest' for all four ops
+        activate: async (/** @type {number} */ i) => { calls[bucket].push(i); },
+      },
+    };
+  };
+
+  const a = mk(900, 'capture');
+  const b = mk(901, 'ax');
+  const c = mk(902, 'dom');
+  const d = mk(903, 'evaluate');
+
+  await captureScreenshot(900, a.deps, { waitForPaint: noopWaitForPaint });
+  await readAxTree(901, b.deps);
+  await readDom(902, c.deps);
+  await evaluate(903, 'location.href', d.deps);
+
+  // RENDERED-OUTPUT ops raise (pixels; the AX tree is a rendered artifact).
+  assert.deepEqual(calls.capture, [900], 'captureScreenshot MUST activate — it needs pixels');
+  assert.deepEqual(calls.ax, [901], 'readAxTree MUST activate — the AX tree is a rendered artifact');
+  // LIVE-STATE reads do not — executeJavaScript works fine on a background guest, and a
+  // read that steals the operator's foreground is a worse bug than the one DD6 fixes.
+  assert.deepEqual(calls.dom, [], 'readDom MUST NOT activate (DD6)');
+  assert.deepEqual(calls.evaluate, [], 'evaluate MUST NOT activate (DD6)');
 });
 
 // ---------------------------------------------------------------------------
@@ -773,7 +866,12 @@ function makeEvalGuestWc(id, retVal = { ok: 1 }, { internal = false } = {}) {
 
 // --- evaluate ---
 
-test('evaluate: guest — activate called BEFORE executeJavaScript, returns the serializable value', async () => {
+test('evaluate: guest — activate is NEVER called even when an activate dep IS present; returns the serializable value (F7 DD6)', async () => {
+  // INVERTED at F7 leg 2 (was: 'activate called BEFORE executeJavaScript, returns the
+  // serializable value'). The "returns the serializable value" half is KEPT; the ordering
+  // half is gone with the branch. evaluate is the op EVERY probe walk runs on
+  // (scripts/a11y-audit.mjs:212-235), so this pin is what keeps the walk from activating
+  // a background tab and closing the menu under audit.
   const guestWc = makeEvalGuestWc(400, { violations: 3 });
   const callLog = [];
   const origExec = guestWc.executeJavaScript.bind(guestWc);
@@ -787,10 +885,9 @@ test('evaluate: guest — activate called BEFORE executeJavaScript, returns the 
 
   const result = await evaluate(400, 'axe.run(document)', deps);
 
-  const activateIdx = callLog.findIndex((e) => e.what === 'activate');
-  const execIdx = callLog.findIndex((e) => e.what === 'exec');
-  assert.ok(activateIdx !== -1 && execIdx !== -1, 'both activate and executeJavaScript must run');
-  assert.ok(activateIdx < execIdx, 'activate must be called before executeJavaScript (foreground-to-act)');
+  assert.equal(callLog.filter((e) => e.what === 'activate').length, 0,
+    'activate must NOT be called: evaluate reads a background guest without foregrounding it (DD6)');
+  assert.equal(callLog.filter((e) => e.what === 'exec').length, 1, 'the evaluation must still happen');
   assert.equal(guestWc._lastExecCode, 'axe.run(document)', 'the expression is passed verbatim');
   assert.deepEqual(result, { violations: 3 });
 });
@@ -805,7 +902,9 @@ test('evaluate: awaits a returned Promise so the RESOLVED value is returned (nat
   assert.deepEqual(result, { resolved: true });
 });
 
-test('evaluate: RE-RESOLVE proof — the SECOND (post-activate) handle is the one evaluated', async () => {
+test('evaluate: guest — resolves ONCE (no activate ⇒ no async hop ⇒ no stale-handle re-resolve) (F7 DD6)', async () => {
+  // INVERTED at F7 leg 2 (was: 'RE-RESOLVE proof — the SECOND post-activate handle is the
+  // one evaluated'). See readDom's twin. The single resolve is now the contract.
   const firstHandle = makeEvalGuestWc(402, { which: 'first' });
   const secondHandle = makeEvalGuestWc(402, { which: 'second' });
   let lookups = 0;
@@ -817,13 +916,17 @@ test('evaluate: RE-RESOLVE proof — the SECOND (post-activate) handle is the on
 
   const result = await evaluate(402, 'x', { fromId, chromeContents: null, activate: async () => {} });
 
-  assert.equal(lookups, 2, 'fromId called twice (initial resolve + post-activate re-resolve)');
-  assert.equal(firstHandle._execCount, 0, 'the STALE pre-activate handle must NOT be evaluated');
-  assert.equal(secondHandle._execCount, 1, 'the FRESH post-activate handle must be the one evaluated');
-  assert.deepEqual(result, { which: 'second' });
+  assert.equal(lookups, 1, 'fromId must be called EXACTLY once — there is no post-activate re-resolve');
+  assert.equal(firstHandle._execCount, 1, 'the sole resolved handle is the one evaluated');
+  assert.equal(secondHandle._execCount, 0, 'no second handle is ever resolved');
+  assert.deepEqual(result, { which: 'first' });
 });
 
-test('evaluate: chrome target — activate NOT called (chrome is always live)', async () => {
+test('evaluate: chrome target — activate NOT called (chrome never classifies guest; F7 DD6 makes this uniform)', async () => {
+  // RE-WORDED at F7 leg 2 — see readDom's chrome-target twin. Pre-F7 this passed because
+  // chrome was exempt from the guest activate branch; it now passes because evaluate
+  // activates nothing. Load-bearing for tab-reorder.md step 7, whose evaluate targets the
+  // CHROME (:62/:106) and therefore never activated, before or after DD6.
   const chromeWc = makeEvalGuestWc(1, { chrome: true });
   const activateCalls = [];
   const deps = {
@@ -877,8 +980,14 @@ test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true —
     (err) => err instanceof Error && err.message === 'automation: evaluate — internal-session excluded',
   );
   assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run on the internal-session path (even for admin)');
-  // activate fires before the FINAL guard (the guest activate branch runs first); the guard still
-  // refuses on the re-resolved handle BEFORE executeJavaScript — that is the load-bearing invariant.
+  // F7 leg 2 / AC5 — THE GUARD DID NOT GO OUT WITH THE ACTIVATE BRANCH. DD6 deleted
+  // evaluate's guest-activate block; this DD2-HIGH refusal was written to run "on the FINAL
+  // wc, AFTER the (optional) activate branch", so a careless deletion could plausibly have
+  // taken it along. It now runs on the ONE resolved wc and still refuses before any JS runs.
+  // (The pre-F7 version of this comment said "activate fires before the FINAL guard" — that
+  // is now false, hence the assertion below, which pins the new truth rather than leaving a
+  // comment that lies.)
+  assert.equal(activateCalls.length, 0, 'F7 DD6: evaluate must not activate ANY target, internal included');
 });
 
 // --- injectScript ---
