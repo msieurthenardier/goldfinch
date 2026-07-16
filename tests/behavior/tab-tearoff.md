@@ -331,6 +331,24 @@ wcId**, never a guest: `captureScreenshot`/`readAxTree` **activate and raise** g
 and would mutate the very state under test. Window identity is always read from
 `enumerateWindows`, never inferred from OS focus.
 
+**⚠ RESIDUAL COVERAGE OWED (HIGH-1, NEVER RUN) — the DISPLACED MENU, sibling to row 8a.**
+The same pre-set of `target.activeTabWcId` that row 8a pins disarms **one** `tab-set-active`
+guard gating **two** effects: the outgoing-tab hide (8a) **and**
+`owner.sheet?.closeMenuOverlay('tab-switch')`. So an adopt into an existing window **that has
+its OWN menu open** must close that menu; without the mirror the round-trip's `tab-set-active`
+instead hits `else if (owner.sheet?.isMenuOpen()) owner.sheet.show()` and **re-shows W2's
+stale menu** at the moved tab's freshly-synced bounds (its active guest changed underneath
+it). **This does NOT slot into the linear row 8→9 chain** — it needs its OWN menu-open setup
+on the target, and mutating W2's tab population mid-chain would wedge row 9. A future run must
+build it in ISOLATION: two windows; open a menu ON W2 (`click(C2, <a W2 tab center>, button:
+'right')`, poll `enumerateWindows()` until **W2's `sheetVisible` is `true`**); then move a W1
+web tab into W2 by row 8's keyboard path; then re-read `enumerateWindows()` and **assert W2's
+`sheetVisible` is now `false`**. **Instrument is the census `sheetVisible`, never a
+screenshot** — same as 8a, the stale menu sits over the moved guest and pixels can't
+discriminate it. **Exclusive to the existing-window path** (a move-created target has no menu
+to displace). The STRUCTURAL fix (stop pre-setting `target.activeTabWcId`) is F9's; until then
+the move core mirrors the close synchronously, right where it mirrors 8a's hide.
+
 ## Out of Scope
 
 - **CROSS-WINDOW DRAG — NOT VERIFIED, BY RULING. See the banner at the top of this spec.**

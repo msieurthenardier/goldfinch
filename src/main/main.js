@@ -2898,6 +2898,19 @@ function moveTabIntoWindow(source, p, resolveTarget) {
     // survives its view's destruction.
     if (!prevActive.view.webContents.isDestroyed()) prevActive.view.setVisible(false);
     prevActive.active = false;
+    // AND CLOSE THE TARGET'S OPEN MENU HERE, FOR THE SAME REASON THE HIDE IS HERE.
+    // The pre-set below disarms `tab-set-active`'s guard
+    // (`owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`), and that ONE
+    // guard gates TWO effects: the outgoing-tab hide (mirrored just above) AND
+    // `owner.sheet?.closeMenuOverlay('tab-switch')`. Disarmed, the adopt round-trip's
+    // `tab-set-active` takes the `else if (owner.sheet?.isMenuOpen()) owner.sheet.show()`
+    // branch instead — RE-SHOWING the target's stale menu (its active guest changed
+    // underneath it) at the moved tab's freshly-synced bounds. So the move core must
+    // close it ITSELF, synchronously, before the pre-set — same as the hide, and for
+    // the same round-trip-can't-do-it reason. Idempotent when no menu is open, and
+    // `target.sheet` is null-tolerant on a live record. The STRUCTURAL fix (stop
+    // pre-setting `target.activeTabWcId` and let the round-trip's guard fire) is F9's.
+    target.sheet?.closeMenuOverlay('tab-switch');
   }
   target.activeTabWcId = p.wcId;
 
