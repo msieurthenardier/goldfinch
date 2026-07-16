@@ -1,6 +1,6 @@
 # Flight: Tear-off and Cross-Window Drag
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 > **Citation convention (adopted after design-review pass 1, and load-bearing).**

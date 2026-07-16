@@ -352,9 +352,15 @@ Planning inputs adopted from prior artifacts:
       two live F6 defects fixed; `multi-window-automation` spec PASS 9/9. The
       DD7 blur-conditioning gap is an accepted permanent gap — unreachable by
       any single-window test, and WSLg delivers no OS blur.)*
-- [ ] Flight 8: Tear-off and cross-window drag — drag beyond the strip
+- [x] Flight 8: Tear-off and cross-window drag — drag beyond the strip
       detaches into a new window; drag into another window's strip re-parents
       there; keyboard equivalents; jar identity preserved.
+      *(Landed 2026-07-16, PR #91. RE-SCOPED at leg 2: ships tear-off by drag +
+      cross-window move by keyboard. The cross-window DRAG criterion is UNSATISFIED —
+      a second-instrument spike measured Electron's cross-window coordinates a cached
+      fiction on this rig; deferred to an HTML5-drag spike (candidate 2, never measured).
+      DD2 proven live for the first time. The DD7 blur gap is reachable and F7's
+      accepted-gap ruling was refuted.)*
 - [ ] Flight 9: Session restore — setting-gated startup restore of windows +
       tabs (addresses + jars), persistence layer shared with the closed-tab
       stack, burner exclusion, unchanged default-off behavior.
