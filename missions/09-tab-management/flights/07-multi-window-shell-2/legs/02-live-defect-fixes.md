@@ -142,8 +142,20 @@ What must be true before this leg runs:
 
 ### DD7 — the five bounded capture sites
 
-- [x] **AC7** — **`src/main/capture-timeout.js` exists**, is **pure and Electron-free** (`grep -c "require('electron')" src/main/capture-timeout.js` → **0**), and exports a bounded race that **always rejects on timeout** with `/^automation: capture-timeout — /`. It borrows from `find.js` **the 3000ms budget** (`find.js:106`) and **a `done`-guarded settle** (`find.js:130-135`) — **and nothing else.**
+- [x] **AC7** — **`src/main/capture-timeout.js` exists**, is **pure and Electron-free** (**comment-masked** reading → **0**), and exports a bounded race that **always rejects on timeout** with `/^automation: capture-timeout — /`. It borrows from `find.js` **the 3000ms budget** (`find.js:106`) and **a `done`-guarded settle** (`find.js:130-135`) — **and nothing else.**
 
+  > **Corrected M09 F8 leg 1 — the instrument, not the verdict.** This AC was checked
+  > `[x]` claiming the **naive** `grep -c "require('electron')" src/main/capture-timeout.js`
+  > → **0**. It **returns 1** — matching the file's own `// ELECTRON-FREE by construction
+  > (no require('electron'))` header **comment**. The AC was checked against a reading the
+  > command never returned. **The verdict was right and the instrument was wrong**, which
+  > is the harder failure to see: the helper *is* Electron-free.
+  > **The naive grep has discrimination ZERO** — re-measured, it reads **1** on all three
+  > of `capture-timeout.js` (a comment), `automation/observe.js` (a comment), and
+  > `automation/engine.js` (a **real** `require('electron')` at engine.js:7). It cannot
+  > tell a claim about Electron from a use of it. **Comment-masking splits them 0 / 0 / 1**
+  > — `engine.js` is the genuine positive control that proves the masked reading still
+  > detects a real require rather than masking everything.
   **find.js's semantics are the OPPOSITE of what this needs and are explicitly NOT carried.** On timeout `find.js:155` does `finish(last)` where `last = {activeMatchOrdinal: 0, matches: 0}` (`:122`) — it **resolves with a benign zero-match success**. Copying that into capture yields a silently-empty capture: the exact silent-success class S1/DD6 exists to kill. The mechanism differs too: find.js wraps an **event-listener** flow in a Promise constructor; `capturePage()` is an **unrejectable promise you must `Promise.race`**. **The race + named rejection is NEW.**
 
   The helper has exactly **one** semantic (reject on timeout). Layer degradation is the **call site's** policy (AC9), never the helper's — so no call site can accidentally inherit a benign settle.
@@ -232,8 +244,19 @@ grep -cE '^\s*raiseWindowForTab(,|:)' src/main/main.js                # → 2
 # AC4 — the raise idiom carries BOTH halves
 grep -c 'noteFocus' src/main/main.js                                 # → >= 3
 
-# AC7 — the helper is Electron-free
-grep -c "require('electron')" src/main/capture-timeout.js            # → 0
+# AC7 — the helper is Electron-free.
+# The naive grep below reads 1, NOT 0 — it matches the file's own ELECTRON-FREE header
+# COMMENT. It also reads 1 on automation/observe.js (a comment) and on
+# automation/engine.js (a REAL require) — discrimination ZERO. Comment-mask before
+# counting; masked it reads 0 / 0 / 1, and engine.js is the positive control.
+# (Corrected M09 F8 leg 1. Run each grep -c STANDALONE: it exits 1 on zero matches
+# and will silently break an && chain.)
+node -e "const{maskComments}=require('./test/helpers/source-scan');const fs=require('fs');
+for(const f of ['src/main/capture-timeout.js','src/main/automation/observe.js','src/main/automation/engine.js'])
+console.log(f,(maskComments(fs.readFileSync(f,'utf8')).match(/require\('electron'\)/g)||[]).length);"
+#   → src/main/capture-timeout.js 0      (the subject)
+#   → src/main/automation/observe.js 0   (Electron-free control)
+#   → src/main/automation/engine.js 1    (genuine positive control — a real require)
 
 # AC8 — five bounded capturePage call sites
 grep -rn 'capturePage()' src/main/main.js src/main/automation/observe.js
@@ -669,5 +692,3 @@ The review returned **approve-with-changes**, independently re-verifying **all ~
 ### One spec the flight never mentions
 
 `tests/behavior/foreground-to-act.md` — checked because DD6 changes the contract it is named after. **Not falsified as a gate**: its steps drive only `captureScreenshot` / `click` / `typeText`, all of which keep raising (its `readDom` at step 5 is a read-back on an already-activated tab), and it is `draft` / `Last Run: never` / AUTHORED-ONLY. But its **Intent** and its **Out of Scope** (*"Invisible/background driving … explicitly NOT a v1 capability … If a future 'drive without stealing focus' mode is added, cover it separately"*) **are** falsified — DD6 *is* that mode. Queued for leg 4 as a prose erratum (this leg edits no spec files). `tests/behavior/observe-refusal-contract.md` was checked the same way and is **not** falsified (draft/never-run; scoped to `readAxTree`'s tri-state; does not enumerate refusals exhaustively).
-</content>
-</invoke>

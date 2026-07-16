@@ -8,7 +8,8 @@
 //
 // NAMESPACED id space: `tab:*` (`tab:close`, `tab:close-others`,
 // `tab:close-right`, `tab:duplicate`, `tab:move-new-window`,
-// `tab:reopen-closed`) — the vocabulary page-context-model established.
+// `tab:move-window:<windowId>`, `tab:reopen-closed`) — the vocabulary
+// page-context-model established.
 //
 // Omission rules (flight DD1, design-review ruling — OMITTED-ONLY: the sheet's
 // renderMenu has no disabled-interactive-item shape, only item/separator/note):
@@ -21,6 +22,22 @@
 //     sole tab is a no-op window swap) AND for internal tabs (`isInternal` —
 //     app-UI pages never move between windows; F6 design review M4). Defaults
 //     false so every pre-F6 caller is unaffected.
+//   - `tab:move-window:<windowId>` (M09 F8 DD8) — one FLAT item per OTHER open
+//     window, gated on the SAME `!isLastTab && !isInternal` pair as
+//     `tab:move-new-window`, because main's move core refuses on exactly those
+//     two conditions (`sole-tab`, `internal`). One gate, so the omitted set and
+//     the refused set cannot drift apart. Absent/empty `moveTargets` (the
+//     single-window case) emits NOTHING — no header, no note, no empty
+//     submenu, per the OMITTED-ONLY ruling above. Defaults `[]` so every
+//     pre-F8 caller is unaffected.
+//     NO SUBMENU: the sheet's renderMenu has item/separator/note and nothing
+//     else (DD8 — no submenu capability is assumed of it).
+//     The id carries the target's `windowId`, NOT its ordinal (DD8, reversed at
+//     review): a caller resolves the destination by id through the registry, so
+//     a window closing between build and dispatch REFUSES rather than
+//     re-pointing at whichever window now sits at that position. The `spell:<i>`
+//     index-dispatch idiom's shape, deliberately carrying the stable key instead
+//     of the position.
 //   - `tab:reopen-closed` omitted when the closed-tab stack is empty
 //     (`stackSize === 0`).
 //   - `tab:duplicate` is ALWAYS present, even at a single tab (Chrome parity —
@@ -32,10 +49,14 @@
 //   { type: 'separator' }         — role="separator", non-focusable, skipped by roving
 
 /**
- * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number, isInternal?: boolean }} params
+ * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number, isInternal?: boolean, moveTargets?: Array<{ windowId: number, label: string }> }} params
+ *   moveTargets — the OTHER open windows (M09 F8 DD8), each already captioned
+ *   main-side from its active tab's title. This module stays PURE and
+ *   Electron-free: it never reaches for a window list, it renders the one it is
+ *   handed, so its item count is driven entirely by the caller's window count.
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>}
  */
-export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false }) {
+export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false, moveTargets = [] }) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>} */
   const model = [];
   let needSep = false;
@@ -61,7 +82,14 @@ export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal 
   // window swap) and for internal tabs (design review M4). ---
   sep();
   item('tab:duplicate', 'Duplicate');
-  if (!isLastTab && !isInternal) item('tab:move-new-window', 'Move to new window');
+  if (!isLastTab && !isInternal) {
+    item('tab:move-new-window', 'Move to new window');
+    // One flat item per OTHER window (M09 F8 DD8) — same section as the
+    // new-window move (Chrome adjacency, the F6 precedent above).
+    for (const t of moveTargets || []) {
+      item(`tab:move-window:${t.windowId}`, `Move to window "${t.label}"`);
+    }
+  }
 
   // --- reopen closed (omit empty stack) ---
   if (stackSize > 0) {

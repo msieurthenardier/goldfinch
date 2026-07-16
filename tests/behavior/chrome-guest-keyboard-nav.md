@@ -3,7 +3,7 @@
 **Slug**: `chrome-guest-keyboard-nav`
 **Status**: active
 **Created**: 2026-07-07
-**Last Run**: never
+**Last Run**: 2026-07-08-21-06-32 (pass — see `chrome-guest-keyboard-nav/runs/2026-07-08-21-06-32.md`)
 
 ## Intent
 Verify the multi-`WebContentsView` keyboard/focus **bridge** between the chrome shell and the guest page —

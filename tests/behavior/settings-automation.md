@@ -174,5 +174,3 @@ disconnected — it cannot be observed over the MCP surface, which is itself a s
   staging from `mcp-jar-scoping` is folded in, or add a no-`--automation-dev` variant asserting the
   whole section reads "Not running" honestly (note: that variant still has the harness admin session
   if driven over MCP — it would need the leg-9 HAT framing for a true zero-state read).
-</content>
-</invoke>

@@ -3,7 +3,14 @@
 **Slug**: `tab-context-menu`
 **Status**: active
 **Created**: 2026-07-14
-**Last Run**: 2026-07-15-06-05-04 — pass (10/10, F6 flight-end regression incl. the Move-to-new-window row deltas) — [run log](tab-context-menu/runs/2026-07-15-06-05-04.md)
+**Last Run**: 2026-07-16-06-33-26 — **pass (10/10, no repairs)** (M09 F8 leg 5; F8 leg 4 modifies this
+menu and **broke nothing** — zero `Move to window` strings across 31 evidence files, single-window
+confirmed at six checkpoints) — [run log](tab-context-menu/runs/2026-07-16-06-33-26.md).
+**⚠ DD8's omission rule is UNFALSIFIABLE WITHIN THIS SPEC — these passes are valid F5/F6 assertions and
+must NOT be read as DD8 coverage.** At one window, "no `Move to window` item" reads identically whether
+the gate works, the `move-targets` push is broken, or the DD8 loop was never written. **The PRESENCE
+side lives in `tab-tearoff.md` row 8; the pair is CROSS-SPEC and neither half works alone.**
+*(Prior: 2026-07-15-06-05-04 — pass (10/10, F6 flight-end regression) — [run log](tab-context-menu/runs/2026-07-15-06-05-04.md).)*
 
 ## Intent
 

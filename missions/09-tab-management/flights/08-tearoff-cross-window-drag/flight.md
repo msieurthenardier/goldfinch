@@ -1,6 +1,6 @@
 # Flight: Tear-off and Cross-Window Drag
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 > **Citation convention (adopted after design-review pass 1, and load-bearing).**
@@ -17,8 +17,11 @@
 - [ ] A tab can be moved into its own new window — by drag (tear-off beyond the strip)
       and by explicit command. *(F6 delivered the command + a complete window; **F8
       delivers the drag**.)*
-- [ ] A tab dragged from one window's strip into another window's strip moves there,
-      keeping its cookie-jar identity and its page state.
+- [ ] ~~A tab **dragged** from one window's strip into another window's strip moves
+      there~~ — **NOT SATISFIED BY F8** (re-scoped at leg 2: the transport is dead on
+      this rig; the drag is the criterion's subject). **The tab still moves A→B keeping
+      jar identity and page state — by keyboard** (leg 4). **Mission-level entry
+      required.**
 - [ ] Every tab-management pointer gesture has a keyboard-reachable equivalent.
 - [ ] Privacy and isolation hold everywhere tabs now move: a tab keeps its jar identity
       through tear-off and cross-window drag.
@@ -93,7 +96,49 @@ one webContents. → DD9.
 
 ### Design Decisions
 
-**DD1 — Coordinate authority: the source chrome renderer, exclusively.**
+> ## ⚠️ RE-SCOPED AT LEG 2. Read DD16 first — DD1, DD3, and DD15 are STRUCK.
+>
+> The transport spike brought a **second instrument** (Win32 `GetWindowRect` over WSLg's
+> RAIL surface) and refuted DD1's premise: **Electron's window coordinates on this rig
+> are a cached fiction.** `setPosition` is a **no-op**; a **real** OS move fires **no
+> event** and leaves `getBounds` unchanged; a virgin window is **born 363px wrong**.
+> `screenX ≡ getBounds.x − 16` — **two proxies of one value**, which is why V2 "passed".
+>
+> **DD1 banned the `screen` module for returning `{0,0}` silently, then adopted a
+> coordinate that is wrong *plausibly*. `{0,0}` is obviously wrong on sight; `564` is
+> not.** DD1 upgraded a loud fiction to a quiet one — the exact failure its own rationale
+> named as worst.
+>
+> **F8 lands tear-off (drag) + cross-window move (keyboard). The cross-window DRAG
+> gesture does not ship**, and its mission criterion goes **unsatisfied**. Full rulings
+> and the deferral's real content — *the chosen transport is dead; the alternative
+> (HTML5 drag) was foreclosed by omission and never measured* — are in the flight log
+> under **Flight Director Rulings on Leg 2**.
+>
+> **DD2, DD5-DD14 stand.** DD4 stands and is confirmed dead-but-harmless (placement was
+> already cosmetic-only). The DDs below are preserved **as written at design time** —
+> they are the record of what was decided and why it was wrong, and striking their text
+> would destroy the evidence.
+
+**DD16 — Tear-off uses WINDOW-LOCAL coordinates only. No global coordinate exists in
+this flight.** *(Supersedes DD1 and DD3 after leg 2.)*
+- "Did the pointer leave the strip?" is answered against **the strip's own rect in the
+  source window's own viewport** (`e.clientX/Y` vs `getBoundingClientRect()`). **Nothing
+  reads `screenX`, `getBounds`, `getPosition`, or the `screen` module.**
+- **This is why tear-off survives the spike intact**: it never needed a shared coordinate
+  space. Only the *cross-window* drop did, and only that is deferred.
+- **The `screen`-module ban from DD1 SURVIVES and widens**: `src/**` may use **no**
+  cross-window coordinate source — not `screen`, not `getBounds`, not `screenX` — because
+  **none of them is falsifiable from inside Electron.** Pinned by leg 1's source-scan
+  helper.
+- **The transferable rule, and this flight's most portable product**:
+  > **A read-back is not a second reading unless it is a second instrument.**
+  > An instrument cannot discriminate against itself. Every coordinate reading in recon
+  > and DD1 was Electron reporting on Electron; the premise survived two design reviews
+  > and died to one `powershell.exe` call.
+
+**DD1 — Coordinate authority: the source chrome renderer, exclusively.** ~~*(STRUCK at
+leg 2 — the premise was measured false. Preserved as written; see DD16.)*~~
 The gesture's global space is `window.screenX + e.clientX` / `window.screenY + e.clientY`,
 computed in the **source window's chrome renderer**, and it is the **only** coordinate
 authority in the flight.
@@ -127,7 +172,10 @@ movement.**
   cost?"*).
 - Trade-off: no fallback. A case that can't re-parent is refused (DD5), not degraded.
 
-**DD3 — Drop resolution is main-side, from one global point.**
+**DD3 — Drop resolution is main-side, from one global point.** ~~*(STRUCK at leg 2 — the
+hit-test cannot see its own failure: default state refuses EVERY drop; after any
+`setPosition` the origins are distinct, plausible, and WRONG, so the guard never trips
+and main adopts into the wrong window silently. Preserved as written; see DD16.)*~~
 On drop the source renderer sends `{ globalX, globalY, wcId, ... }`; main hit-tests
 `rec.win.getBounds()` across `registry.records()` and returns a discriminated outcome.
 - **This is the mission's "screen-coordinate hit-testing on drop" candidate** — adopted,
@@ -404,7 +452,11 @@ unreachable code**.
 Under F7's tiering leg 6 would be LOW, and F7's leg 4, which authored the `getHistory`
 gate, is precisely the leg that shipped the flight's worst defect.
 
-**DD15 — The OS window-move region is a first-class hazard, not a CSS detail.**
+**DD15 — The OS window-move region is a first-class hazard, not a CSS detail.** ~~*(STRUCK
+at leg 2 — mechanism, hazard, and control each independently refuted: `#tabstrip-drag`
+computes `none` (`-webkit-app-region` does NOT inherit); a real OS move fires NOTHING, so
+the named `'move'`-not-`'resize'` hazard is unreachable; and V2, designated its control,
+is false-positive-by-construction. Leg 3 must NOT build the suppression.)*~~
 *(Entirely missing from the draft; recon flagged it and the spec never referenced it.)*
 `#tabstrip-drag` is a `flex:1` spacer that **inherits `-webkit-app-region: drag`** from
 the strip — it spans the whole slack between the tabs and the window controls, and **it
@@ -575,43 +627,51 @@ by `windowId` — no new chord, no classifier change, no lockstep.
    debrief's gloss dropped); **V8** `#tabstrip-drag` / OS window-move, recording
    `window.screenX` before/during/after — **ordered AFTER V2, which is its positive
    control** (a screenX that never updates reads identically to "the OS didn't take it").
-3. **`03-drag-zone-model`** — *(risk: **HIGH**)* New pure `src/shared/` zone module;
-   `drag` gains `startY`; **transform-only** detach-pending feedback; `pendingDrop`
-   introduced distinct from `drag`, **with DD6's `dropSeq` contract**. **Assert DD6's
-   cancel-path claim against the real call sites** — there are **seven**, and the draft
-   named three, all mis-cited. **DD15's `no-drag` suppression is CONTINGENT on V8 —
-   do not pre-build it** (V8 is predicted negative; `-webkit-app-region` decides at
-   pointerdown and the drag arms on a `no-drag` `.tab`).
-4. **`04-drop-resolution`** — *(risk: **HIGH**)* Factor the move core out of the
-   `tab-move-to-new-window` handler; main-side hit-test **with DD3's identical-origins
-   guard**; `adopt-tab` index; tear-off placement; the **eight-condition** discriminated
-   refusal (six inherited + target-absent + hit-test-ambiguous).
-   **The factored move core MUST stay synchronous, and leg 1's pin must still cover it.**
-   Leg 1 pins the *handler*; **factoring is exactly the edit that could move the
-   delete/set pair into a helper and make it async without anyone noticing** — the pin
-   must follow the pair, not the handler's name. **`renderer-globals.d.ts` must change
-   with the return shape** — `npm run typecheck` is a completion gate. **`main.js` budget
-   stated in the leg.**
-5. **`05-keyboard-equivalent`** — *(risk: **MEDIUM**, downgraded from HIGH once DD8
-   collapsed)* Flat "Move to window …" items keyed by `windowId` over leg 4's move core;
-   stale-window refusal via `registry.get`. No new architectural boundary is crossed.
-6. **`06-verification-and-artifact-debt`** — *(risk: **HIGH** per DD14)* New
-   `tab-tearoff-cross-window` spec (honestly scoped per DD9); the owed clean
-   `multi-window-shell` re-run; `tab-context-menu`; `tab-reorder`. Plus the artifact
-   debt moved here at review (it is artifact work, and not `main.js`-coupled): the
+3. **`03-tearoff-by-drag`** — *(risk: **HIGH**)* **RE-SCOPED at leg 2; merges the former
+   legs 3+4.** With no hit-test and no globals, the old leg 4's substance *was* the
+   hit-test. Zone model on **window-local coordinates only** (DD16); `drag` gains
+   `startY`; **transform-only** detach-pending feedback; `pendingDrop` with DD6's
+   `dropSeq` contract; drop-commit tear-off calling a factored move core.
+   **Assert DD6's cancel-path claim against the real call sites** — there are **seven**,
+   and the draft named three, all mis-cited.
+   **Do NOT build DD15's suppression** — struck at leg 2 (mechanism, hazard, and control
+   each refuted).
+   **The factored move core MUST stay synchronous, and it drags leg 1's pin with it** —
+   leg 1 anchors on the *handler*, and factoring is exactly the edit that moves the
+   delete/set pair out of it. Leg 1's vacuity guard makes that fail loudly; **re-anchor
+   the pin to the pair's new home.**
+   Also: **correct `renderer.js`'s false pointer-capture comment** — the spike measured
+   `hasPointerCapture()` **false throughout**; F2's drag works **only** because the
+   listeners are document-level.
+   **`main.js` budget stated in the leg.**
+4. **`04-keyboard-cross-window-move`** — *(risk: **MEDIUM**)* Flat "Move to window …"
+   items keyed by `windowId` over leg 3's move core; stale-window refusal via
+   `registry.get`. **This is now the ONLY way a tab crosses windows in F8**, so it
+   carries the mission criterion's surviving substance.
+5. **`05-verification`** — *(risk: **HIGH** per DD14)* New `tab-tearoff` spec, **scoped to
+   tear-off**; the owed clean `multi-window-shell` re-run; `tab-context-menu` (leg 4
+   modifies it); `tab-reorder` (F2 regression net). Plus the artifact debt: the
    **repo-wide leaked-wrapper scan** (recon found **3 more** instances in mission 03 that
    the debrief's "delete 2 lines" would have left live — and the FD reproduced the defect
    while writing this flight's own log), the `renderer.js` kebab comment (four → six,
    naming `new-window` and `jars`), the AC27 record correction, and the **repo-wide
-   stale-header scrub — 10 specs, not the 3 the draft carried** (DD12).
-   **Under V5-negative the new spec covers tear-off only**, and says so in its own text
-   rather than verifying a reachable subset and reading as though it covered the feature.
+   stale-header scrub — 10 specs, not 3** (DD12).
+   > **The spec must NOT verify cross-window drag, and must say why.** V5 measured that
+   > synthetic coordinates are **never clipped** — so a synthetic cross-window test
+   > **runs and goes GREEN** while driving a handoff through fiction-space that a human
+   > misses by 1353px. **A passing test over a broken feature is worse than no test**;
+   > it would promote an S1 silent success into the regression net. This is the flight's
+   > `multi-window-shell` lesson (a green spec over a real bug) caught **before** it
+   > shipped rather than after.
 
-> **Six legs, upheld at review.** Legs 2-5 are one decision cluster (DD1→DD3→DD6→DD5→DD7
-> are mutually entailed) plus a mission constraint that *couples* leg 5 to them rather
-> than merely bundling it. The draft's proposed cut (leg 5 + half of leg 4 → an F8b) is
-> **exactly the V1-negative adaptation outcome** — already encoded as an empirical gate at
-> leg 2. Pre-cutting spends the option value of V1-positive for nothing.
+> **Six legs became five at leg 2, and the review's reasoning is why that was right.**
+> Pass 2 upheld six and refused the FD's proposed pre-cut on the grounds that *"the
+> proposed cut is exactly the V1-negative adaptation outcome — already encoded as an
+> empirical gate at leg 2; pre-cutting spends the option value for nothing."* **The gate
+> fired (on V4, not V1) and the cut happened on measured evidence rather than on a
+> designer's hunch — which is exactly what the review predicted and what the option was
+> for.** The flight paid one spike leg to learn the transport was fiction; the
+> alternative was building legs 3-5 on it.
 
 ---
 

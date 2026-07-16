@@ -35,13 +35,20 @@
 //      broadcastsSettingsChanged marker checks against the SAME masked text, so
 //      only live code can trip (or satisfy) the net.
 // String literal contents are left untouched by the mask (so `'http://...'`
-// keeps its `//`; the string branch below intentionally never re-enters comment
+// keeps its `//`; the string branch intentionally never re-enters comment
 // detection while inside quotes).
+//
+// This file ORIGINATED maskComments + findMatchingBracket (M06 F4 L1) and carried them
+// locally until M09 F8 leg 1 extracted them to test/helpers/source-scan.js — proving the
+// move by BYTE-IDENTITY of the function bodies rather than by "the suite still passes".
+// This file's copies are the ones that survived the extraction verbatim; see the helper's
+// header for that ruling and for maskComments's known regex-literal blind spot.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
 const JAR_IPC_JS = path.join(__dirname, '../../src/main/jar-ipc.js');
@@ -56,98 +63,6 @@ const BROADCAST_MARKER = 'settings-changed';
 // pinned by the dedicated test below.
 /** @type {Set<string>} */
 const ALLOWLIST = new Set([]);
-
-/**
- * Replace every // line comment and /* block comment *\/ body with spaces
- * (newlines preserved), leaving string/template literal contents untouched, so
- * neither registration-site regexes nor marker checks can be fooled by text
- * that only appears in a comment. Output is the SAME LENGTH as the input, so
- * indices found against the masked copy are valid offsets into the original.
- * @param {string} source
- * @returns {string}
- */
-function maskComments(source) {
-  let out = '';
-  let i = 0;
-  const n = source.length;
-  while (i < n) {
-    const ch = source[i];
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch;
-      out += ch;
-      i++;
-      while (i < n && source[i] !== quote) {
-        if (source[i] === '\\' && i + 1 < n) {
-          out += source[i] + source[i + 1];
-          i += 2;
-        } else {
-          out += source[i];
-          i++;
-        }
-      }
-      if (i < n) {
-        out += source[i]; // closing quote
-        i++;
-      }
-      continue;
-    }
-    if (ch === '/' && source[i + 1] === '/') {
-      while (i < n && source[i] !== '\n') {
-        out += ' ';
-        i++;
-      }
-      continue; // the newline itself (if any) is handled by the default branch
-    }
-    if (ch === '/' && source[i + 1] === '*') {
-      out += '  ';
-      i += 2;
-      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
-        out += source[i] === '\n' ? '\n' : ' ';
-        i++;
-      }
-      if (i < n) {
-        out += '  ';
-        i += 2;
-      }
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
-}
-
-/**
- * Find the index of the bracket matching `open` at `openIdx` (masked[openIdx]
- * must equal `open`), skipping over string/template literal contents so a
- * quoted `(`/`)`/`{`/`}` never desyncs the depth count. Operates on already
- * comment-masked text.
- * @param {string} masked
- * @param {number} openIdx
- * @param {string} open
- * @param {string} close
- * @returns {number}
- */
-function findMatchingBracket(masked, openIdx, open, close) {
-  let depth = 0;
-  for (let i = openIdx; i < masked.length; i++) {
-    const ch = masked[i];
-    if (ch === open) {
-      depth++;
-    } else if (ch === close) {
-      depth--;
-      if (depth === 0) return i;
-    } else if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch;
-      i++;
-      while (i < masked.length && masked[i] !== quote) {
-        if (masked[i] === '\\') i++;
-        i++;
-      }
-    }
-  }
-  return -1;
-}
 
 /** @param {string} slice */
 function mutatesSettings(slice) {

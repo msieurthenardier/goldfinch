@@ -28,15 +28,20 @@
 // `'closed'`. Widening this regex to `'close'` would manufacture false positives
 // across the whole MCP server. Do not.
 //
-// The scan reuses the house toolkit verbatim (maskComments + findMatchingBracket) so a
+// The scan uses the shared toolkit (test/helpers/source-scan.js) so a
 // registration-shaped mention inside a COMMENT cannot trip it — this file's own
 // wrapper doc comment mentions `.on('closed'` twice, exactly the footgun
-// broadcast-invariant.test.js:278-285 guards against.
+// broadcast-invariant.test.js guards against. This file previously carried its own copy
+// of maskComments + findMatchingBracket + collectSources; M09 F8 leg 1 extracted them,
+// proving the move by BYTE-IDENTITY of the function bodies rather than by "the suite
+// still passes". See the helper's header for the ruling on which of the two copies'
+// divergent text survived, and for maskComments's known regex-literal blind spot.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { maskComments, findMatchingBracket, collectSources } = require('../helpers/source-scan');
 
 const MAIN_DIR = path.join(__dirname, '../../src/main');
 
@@ -53,110 +58,7 @@ const ALLOWLIST = new Set([]);
 
 const VIOLATION_RE = /\.(?:on|once)\(\s*'closed'/g;
 
-// --- house toolkit (broadcast-invariant.test.js:69-150) --------------------------
-
-/**
- * Replace every // line comment and block-comment body with spaces (newlines
- * preserved), leaving string/template literal contents untouched. Output is the SAME
- * LENGTH as the input, so indices found against the masked copy are valid offsets into
- * the original.
- * @param {string} source
- * @returns {string}
- */
-function maskComments(source) {
-  let out = '';
-  let i = 0;
-  const n = source.length;
-  while (i < n) {
-    const ch = source[i];
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch;
-      out += ch;
-      i++;
-      while (i < n && source[i] !== quote) {
-        if (source[i] === '\\' && i + 1 < n) {
-          out += source[i] + source[i + 1];
-          i += 2;
-        } else {
-          out += source[i];
-          i++;
-        }
-      }
-      if (i < n) {
-        out += source[i];
-        i++;
-      }
-      continue;
-    }
-    if (ch === '/' && source[i + 1] === '/') {
-      while (i < n && source[i] !== '\n') {
-        out += ' ';
-        i++;
-      }
-      continue;
-    }
-    if (ch === '/' && source[i + 1] === '*') {
-      out += '  ';
-      i += 2;
-      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
-        out += source[i] === '\n' ? '\n' : ' ';
-        i++;
-      }
-      if (i < n) {
-        out += '  ';
-        i += 2;
-      }
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
-}
-
-/**
- * Index of the bracket matching `open` at `openIdx`, skipping string/template literal
- * contents. Operates on already comment-masked text.
- * @param {string} masked
- * @param {number} openIdx
- * @param {string} open
- * @param {string} close
- * @returns {number}
- */
-function findMatchingBracket(masked, openIdx, open, close) {
-  let depth = 0;
-  for (let i = openIdx; i < masked.length; i++) {
-    const ch = masked[i];
-    if (ch === open) {
-      depth++;
-    } else if (ch === close) {
-      depth--;
-      if (depth === 0) return i;
-    } else if (ch === '"' || ch === "'" || ch === '`') {
-      const quote = ch;
-      i++;
-      while (i < masked.length && masked[i] !== quote) {
-        if (masked[i] === '\\') i++;
-        i++;
-      }
-    }
-  }
-  return -1;
-}
-
 // --- the scan -------------------------------------------------------------------
-
-/** Every .js file under src/main/**, recursively. */
-function collectSources(dir) {
-  /** @type {string[]} */
-  const out = [];
-  for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, dirent.name);
-    if (dirent.isDirectory()) out.push(...collectSources(full));
-    else if (dirent.name.endsWith('.js')) out.push(full);
-  }
-  return out;
-}
 
 /**
  * Mask comments, then excise onWindowClosed's own function body (bracket-balanced) —

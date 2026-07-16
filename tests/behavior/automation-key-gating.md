@@ -99,4 +99,3 @@ OFF) is what makes Steps 2–6 observable over MCP — note it in the run log.
 - Parametrize across multiple jars (a keyed + a keyless jar) to assert the gating is uniform across
   rows (the keyed/keyless distinction only changes the mint label + Revoke's `hasKey` gate, never the
   toggle gate on mint).
-</content>

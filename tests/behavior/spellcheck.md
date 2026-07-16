@@ -3,7 +3,7 @@
 **Slug**: `spellcheck`
 **Status**: draft
 **Created**: 2026-06-19
-**Last Run**: never
+**Last Run**: 2026-07-08-20-07-43 (partial — see `spellcheck/runs/2026-07-08-20-07-43.md`)
 
 > **Known environment limitation (WSLg).** Under WSLg the red spellcheck **squiggle does not paint into a
 > `captureWindow` frame** even when `isSpellCheckerEnabled() === true` (Leg-2 premise-audit, Electron

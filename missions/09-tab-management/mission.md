@@ -127,7 +127,14 @@ Planning inputs adopted from prior artifacts:
       controls all function there. *(behavior-test-backed)*
 - [ ] A tab dragged from one window's strip into another window's strip moves
       there, keeping its cookie-jar identity and its page state.
-      *(behavior-test-backed)*
+      *(behavior-test-backed)* — **ATTEMPTED AT F8, TRANSPORT MEASURED DEAD, DEFERRED.
+      NOT "not yet reached".** The tab **does** move A→B keeping jar identity and page
+      state **by keyboard** (F8 leg 4 — measured live: same `wcId`, jar intact,
+      `history.length` held, `goBack` landed). But **the DRAG is this criterion's
+      subject**, and the drag does **not** ship: F8's chosen transport was refuted by a
+      **second instrument** mid-flight. **UNSATISFIED, and a spike is owed before this is
+      planned again — see Known Issues ("Cross-window drag transport").** Do not schedule
+      this as ordinary pending work.
 - [ ] With several windows open, closing one leaves the others fully
       functional; closing the last window still quits the app on
       Windows/Linux; per-window surfaces (find, menus, active-tab state)
@@ -246,7 +253,63 @@ Planning inputs adopted from prior artifacts:
 
 ## Known Issues
 
-*(populated during execution as flights surface mission-level problems)*
+- [ ] **Cross-window drag transport: two of the mission's three candidates are MEASURED
+      DEAD; the third was never measured** *(surfaced and measured at F8 leg 2's transport
+      spike; the criterion above is UNSATISFIED, not pending)*. **A spike is owed before
+      cross-window drag is planned again — planning it as ordinary work will re-derive a
+      dead transport.**
+      - **What was measured, and with WHAT.** F8 adopted candidate 1 (*pointer tracking
+        across window bounds + IPC handshake*) and candidate 3 (*screen-coordinate
+        hit-testing on drop*), then brought a **second instrument** — Win32 `GetWindowRect`
+        over WSLg's RAIL surface — and refuted their shared premise: **Electron's window
+        coordinates on this rig are a cached fiction.** `setPosition` is a **no-op**; a
+        **real** OS move fires **no event** and leaves `getBounds` unchanged; a virgin
+        window is born **363px wrong**; and `screenX ≡ getBounds.x − 16` — **two proxies of
+        one value**, which is why the first flight's own cross-check "passed".
+      - **Both readings, and the second one is the point:** Electron reporting on Electron
+        → self-consistent and **plausible** (`564`); Win32/RAIL on the same window → a
+        **different** number. **An instrument cannot discriminate against itself.** *(The
+        transferable rule, and F8's most portable product: **a read-back is not a second
+        reading unless it is a second instrument.** Every coordinate reading in F8's recon
+        and its DD1 was Electron reporting on Electron; the premise survived **two** design
+        reviews and died to one `powershell.exe` call.)*
+      - **Candidates 1 and 3 are dead for ONE shared reason, so their deaths are not
+        independent evidence.** Both need **app-level global coordinates**. There is no such
+        thing on this rig, so **neither can be fixed by more care** and neither is a
+        fallback for the other.
+      - **Candidate 2 — HTML5 drag with a custom MIME — was FORECLOSED BY OMISSION and has
+        NEVER BEEN MEASURED.** F8's spec ruled it out in a single clause without probing it.
+        **It is the only candidate that needs no app-level coordinate at all, because the
+        BROWSER owns the transport** — the drop lands in the target window's own DOM and no
+        global point is ever computed. It is therefore **structurally immune to the exact
+        failure that killed the other two**, and it is the one candidate whose viability is
+        genuinely unknown rather than refuted.
+      - **Owner**: a future flight, **gated on an HTML5-drag spike** (candidate 2) that must
+        (a) use a **second instrument** for any coordinate it reads, and (b) report a **GO /
+        NO-GO verdict** before any leg builds on it. **A NO-GO is a real outcome** and
+        retires the criterion honestly; what is not acceptable is planning the drag again on
+        an unmeasured transport.
+      - **Also unmeasured → HAT** (V1, F8 leg 2): whether a **real OS pointer** delivers
+        `pointermove`/`pointerup` to the source window's renderer while it is **over another
+        window**. Candidate 1 needs this too; candidate 2 does not.
+- [ ] **`npm run a11y` has exit-code discrimination ZERO between "not configured" and
+      "a11y is broken"** *(surfaced F7-era, measured and confirmed at F8 leg 5 / AC7;
+      → maintenance, not a fix for this flight)*. `scripts/a11y-audit.mjs` routes every
+      error through `fail()` (`:99-102`) → `process.exit(1)`, and a genuine NEW violation
+      also exits **1** (`:476`). **Both readings taken on the live rig at F8 leg 5:**
+      - **without** the admin key → **exit 1**, `a11y-audit: no automation key — set
+        GOLDFINCH_MCP_ADMIN_KEY …`
+      - **with** the admin key → **exit 0**, *"No NEW violations — every violation node is
+        in the ACCEPTED baseline"* (22 accepted baseline nodes, informational)
+
+      So the red an unwary reader meets means *"no instrument"* far more often than
+      *"a11y regressed"* — and the two are **indistinguishable by exit code**, which is
+      the only thing a CI step or an `&&` chain reads. **Fix**: reserve a distinct
+      non-1 exit (e.g. `2` = apparatus/not-configured, `1` = real violation) so
+      "not run" can never be misread as "green" or as "broken". *(Same family as
+      DD10: an instrument that cannot discriminate between two states is not
+      measuring them. **Not run ≠ green**, and a gate that cannot say which is
+      not a gate.)*
 
 ## Flights
 

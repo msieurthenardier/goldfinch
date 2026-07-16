@@ -3,7 +3,7 @@
 **Slug**: `internal-tab-menus`
 **Status**: active
 **Created**: 2026-06-26
-**Last Run**: never
+**Last Run**: 2026-07-08-18-34-54 (pass — see `internal-tab-menus/runs/2026-07-08-18-34-54.md`)
 
 > **Why this spec exists.** Flight 3 (DD0) pulled internal `goldfinch://` tabs onto the
 > `WebContentsView` substrate, making them **opaque views** like web tabs. The chrome's menus were

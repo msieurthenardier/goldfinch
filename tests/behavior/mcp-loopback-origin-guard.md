@@ -3,7 +3,7 @@
 **Slug**: `mcp-loopback-origin-guard`
 **Status**: active
 **Created**: 2026-06-13
-**Last Run**: never
+**Last Run**: 2026-07-08-18-48-41 (pass — see `mcp-loopback-origin-guard/runs/2026-07-08-18-48-41.md`)
 
 ## Intent
 

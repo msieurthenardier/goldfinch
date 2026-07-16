@@ -109,3 +109,88 @@ test('minimal model (only tab, empty stack): just close + duplicate, one separat
     { type: 'item', id: 'tab:duplicate', label: 'Duplicate' }
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// tab:move-window:<windowId> (M09 F8 DD8) — one FLAT item per OTHER window.
+//
+// AC1's two readings live here and in move-targets.test.js's builder half. This
+// side proves the MODEL's count is driven by the target list it is handed rather
+// than fixed: a model that ignored moveTargets would emit the same items either
+// way, which is discrimination zero.
+// ---------------------------------------------------------------------------
+const win = (windowId, label) => ({ windowId, label });
+
+test('AC1 — one window (no other windows): ZERO move-to-window items', () => {
+  const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, moveTargets: [] });
+  assert.deepEqual(ids(model).filter((i) => i.startsWith('tab:move-window:')), []);
+  // The new-window move is unaffected — it needs no second window.
+  assert.ok(ids(model).includes('tab:move-new-window'));
+});
+
+test('AC1 — three windows (two others): TWO move-to-window items, captioned from their active tabs', () => {
+  const model = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    moveTargets: [win(7, 'GitHub'), win(9, 'Wikipedia')]
+  });
+  assert.deepEqual(ids(model).filter((i) => i.startsWith('tab:move-window:')), [
+    'tab:move-window:7', 'tab:move-window:9'
+  ]);
+  const items = model.filter((m) => m.type === 'item');
+  assert.equal(items.find((i) => i.id === 'tab:move-window:7').label, 'Move to window "GitHub"');
+  assert.equal(items.find((i) => i.id === 'tab:move-window:9').label, 'Move to window "Wikipedia"');
+});
+
+test('AC3 — the item is keyed by windowId, NOT by its position in the list', () => {
+  // The reversed ordinal scheme would have emitted tab:move-window:0 / :1 here.
+  // Same two windows, opposite ORDER: each item keeps its own id, so nothing
+  // downstream can resolve a target by position.
+  const forward = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    moveTargets: [win(7, 'A'), win(9, 'B')]
+  });
+  const reversed = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    moveTargets: [win(9, 'B'), win(7, 'A')]
+  });
+  assert.deepEqual(ids(forward).filter((i) => i.startsWith('tab:move-window:')), ['tab:move-window:7', 'tab:move-window:9']);
+  assert.deepEqual(ids(reversed).filter((i) => i.startsWith('tab:move-window:')), ['tab:move-window:9', 'tab:move-window:7']);
+  // The SET of destinations is order-invariant — only the render order moved.
+  assert.deepEqual(
+    ids(forward).filter((i) => i.startsWith('tab:move-window:')).sort(),
+    ids(reversed).filter((i) => i.startsWith('tab:move-window:')).sort()
+  );
+});
+
+test('AC1 — move-to-window items ride the SAME gate as move-new-window (sole tab / internal)', () => {
+  const targets = [win(7, 'GitHub'), win(9, 'Wikipedia')];
+  // Sole tab: main's core refuses `sole-tab`, so the items are omitted, not offered.
+  const sole = tabContextModel({ tabId: 't1', isLastTab: true, tabsToRight: 0, stackSize: 0, moveTargets: targets });
+  assert.deepEqual(ids(sole).filter((i) => i.startsWith('tab:move-window:')), []);
+  assert.ok(!ids(sole).includes('tab:move-new-window'));
+  // Internal tab: main's core refuses `internal`. Same gate, same omission.
+  const internal = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, isInternal: true, moveTargets: targets
+  });
+  assert.deepEqual(ids(internal).filter((i) => i.startsWith('tab:move-window:')), []);
+  assert.ok(!ids(internal).includes('tab:move-new-window'));
+});
+
+test('the move items are flat items in the duplicate section — no submenu, no note, no header', () => {
+  const model = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0,
+    moveTargets: [win(7, 'GitHub')]
+  });
+  // Every entry is still one of the two types the sheet's renderMenu knows (DD8:
+  // no submenu capability is assumed of it).
+  for (const m of model) assert.ok(m.type === 'item' || m.type === 'separator', `unexpected type ${m.type}`);
+  // Adjacency: the window moves render directly after tab:move-new-window.
+  const i = ids(model).indexOf('tab:move-new-window');
+  assert.equal(ids(model)[i + 1], 'tab:move-window:7');
+});
+
+test('absent moveTargets defaults to none — every pre-F8 caller is unaffected', () => {
+  const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3 });
+  assert.deepEqual(ids(model), [
+    'tab:close', 'tab:close-others', 'tab:close-right', 'tab:duplicate', 'tab:move-new-window', 'tab:reopen-closed'
+  ]);
+});

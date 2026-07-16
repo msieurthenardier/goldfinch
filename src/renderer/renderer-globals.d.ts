@@ -232,6 +232,52 @@ interface GoldfinchBridge {
     favicon: string | null;
     container: { id: string; name: string; color: string; partition: string; burner?: boolean };
   }): Promise<{ ok: boolean; windowId: number } | null>;
+  /** Tear a tab off into its own new window by DRAG (M09 F8 Leg 3, DD5/DD16). Same
+   * payload and the same main-side core as tabMoveToNewWindow, and it carries NO
+   * coordinate: "did the pointer leave the strip?" was answered window-locally, against
+   * the strip's own rect in this window's own viewport, before this was called. Unlike
+   * the menu path it NEVER resolves a bare null — a drag cannot be omitted at build time
+   * the way a menu item can, so every refusal arrives with a `reason` to announce
+   * (DD5: silence is not an outcome). */
+  tabTearOff(payload: {
+    wcId: number;
+    url: string;
+    title: string;
+    favicon: string | null;
+    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+  }): Promise<
+    | { ok: true; windowId: number }
+    | { ok: false; reason: 'no-source' | 'bad-payload' | 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }
+  >;
+  /** Move a tab into an EXISTING window (M09 F8 Leg 4, DD8) — the only way a tab
+   * crosses windows in F8 (the cross-window DRAG was deferred at leg 2). Same strip
+   * snapshot as the two paths above, plus the destination `windowId`, and it likewise
+   * carries no coordinate: the menu path never needed one.
+   * AUTHORITY (DD8): `windowId` is a DESTINATION REQUEST, never a claim of ownership.
+   * Main resolves the SOURCE from the sender, requires the tab to be in that window's
+   * own record, and re-resolves `windowId` through the registry — a window closed since
+   * the menu was built refuses with `no-target` rather than mis-targeting a survivor. */
+  tabMoveToWindow(payload: {
+    wcId: number;
+    url: string;
+    title: string;
+    favicon: string | null;
+    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+    windowId: number;
+  }): Promise<
+    | { ok: true; windowId: number }
+    | { ok: false; reason: 'no-source' | 'bad-payload' | 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }
+  >;
+  /** DD8 push-cache boot seed (M09 F8 Leg 4): the OTHER open windows, each captioned
+   * from its active tab's title. Sender-resolved main-side — the asking window is never
+   * in its own list. Live updates arrive via onMoveTargetsChanged below. */
+  moveTargets(): Promise<{ windowId: number; label: string }[]>;
+  /** DD8 push-cache (M09 F8 Leg 4): pushed by main with `{ targets }` whenever the
+   * window set, an active tab, or an active tab's title changes. The renderer caches it
+   * — a push always wins over the boot-seed invoke's resolve — so the tab-context opener
+   * builds its model synchronously. Only the LABEL is cached; the windowId is
+   * re-validated main-side at dispatch. */
+  onMoveTargetsChanged(cb: (d: { targets: { windowId: number; label: string }[] }) => void): void;
   /** adopt-tab (M09 F6 Leg 4, DD5 step 3): the TARGET chrome adopts an already-
    * live webContents — strip insertion WITHOUT createTab. Queued main-side
    * behind the window-boot-config barrier (review H1). */
