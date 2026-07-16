@@ -5,7 +5,7 @@
 
 ## Summary
 
-_(Flight in planning — recon complete; spec design-reviewed ×2 and `approve with changes` applied; ready to execute.)_
+_(**LANDED** 2026-07-16, commit `7b47498`. Re-scoped at leg 2: ships tear-off by drag + cross-window move by keyboard; the cross-window DRAG criterion is recorded UNSATISFIED on measured evidence. DD2 proven live for the first time. 1892 tests, lint, typecheck, a11y green.)_
 
 > **Log hygiene note (F7 debrief carry).** F7's Summary line read "flight in planning"
 > for the *entire flight* and was only corrected at flight end. This line is updated at
