@@ -19,8 +19,9 @@ import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
 import { keyboardMove } from '../shared/tab-order.js';
-import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // delegates to dropIndexFromPointer
+import { classifyDragPoint, shouldArm } from '../shared/tab-drag-zone.js'; // delegates to dropIndexFromPointer
 import { createPushCache } from '../shared/push-cache.js';
+import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -1254,7 +1255,8 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
   });
   // Pointer drag (M09 F2 Leg 2 DD2): pointerdown on a non-✕ target, button 0, activates
   // immediately (Chrome parity) and records a POTENTIAL drag (armed only once the pointer
-  // crosses DRAG_ARM_THRESHOLD_PX — see the document-level pointermove listener below).
+  // crosses tab-drag-zone.js's DRAG_ARM_THRESHOLD_PX via shouldArm — see the document-level
+  // pointermove listener below).
   // Middle/right-button pointerdowns (button !== 0) are left alone entirely: middle-close
   // rides the existing auxclick path above, and right-click has no wired behavior yet.
   btn.addEventListener('pointerdown', (e) => {
@@ -1411,16 +1413,15 @@ function commitTabMove(id, targetIndex) {
 //
 // DD2: pointer events + transform-only live displacement; drop commits instantly. Module-
 // scoped `drag` session state (null when idle). `armed` flips true once the pointer crosses
-// DRAG_ARM_THRESHOLD_PX from the pointerdown origin — a plain click never arms (pointerup
-// below is then a silent no-op beyond clearing `drag`), so the click handler's activate
-// fallback is never in tension with an unarmed potential-drag.
+// tab-drag-zone.js's DRAG_ARM_THRESHOLD_PX (via shouldArm) from the pointerdown origin — a
+// plain click never arms (pointerup below is then a silent no-op beyond clearing `drag`), so
+// the click handler's activate fallback is never in tension with an unarmed potential-drag.
 //
 // M09 F8 Leg 3 gives the gesture a SECOND AXIS and a zone (DD16): inside the strip it
 // reorders exactly as F2 left it; released outside, the tab tears off. The zone decision is
 // pure (tab-drag-zone.js). Every coordinate is WINDOW-LOCAL — `e.clientX/Y` against this
 // window's own rects, never `screenX`/`getBounds`/`screen`, which the spike measured to be
 // a cached fiction on this rig.
-const DRAG_ARM_THRESHOLD_PX = 5;
 /** @type {{ pointerId: number, tabId: string, startX: number, startY: number, startedAt: number, armed: boolean, startOrder: string[]|null, draggedIndex: number, slotRects: {left:number,width:number}[]|null, stripRect: {left:number,top:number,right:number,bottom:number}|null, currentDropIndex: number|null, tearOff: boolean }|null} */
 let drag = null;
 
@@ -1555,7 +1556,7 @@ document.addEventListener('pointermove', (e) => {
     // TWO-AXIS threshold: F2's `Math.abs(dx)` was complete while the only outcome was a
     // horizontal reorder, but a straight-down tear-off holds dx at 0 and would never arm.
     // Strictly more permissive — every gesture that armed before still arms.
-    if (Math.hypot(dx, dy) < DRAG_ARM_THRESHOLD_PX) return;
+    if (!shouldArm(dx, dy)) return;
     armDrag();
   }
   const tab = tabs.get(drag.tabId);
@@ -4065,9 +4066,31 @@ async function createContainerAndOpenTab(rawName) {
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
   jarsBoot,
-  window.goldfinch.windowBootConfig().catch(() => ({ bootTab: true }))
+  window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
 ]).then(([url, , bootConfig]) => {
-  if (!bootConfig || bootConfig.bootTab !== false) createTab(url || HOMEPAGE);
+  // Session restore (M09 F9 / DD4 / AC5): when main serves an ordered saved tab list, CREATE
+  // each tab FRESH in its saved jar — never adopt (no live source view exists at cold start).
+  // This is the reopen precedent MINUS restoreHistory/insertAt (address+jar only, DD5), and it
+  // must NOT use inheritContainerFromPartition: that helper takes a partition and carries a
+  // default-jar/fresh-burner fallback that would silently re-home a deleted jar tab (DD4).
+  // resolveRestoreContainer maps the saved jarId to a live jar over the awaited `containers`
+  // snapshot; a deleted jar resolves null and the entry is DROPPED (continue) — never
+  // home-substituted. Loop order gives insertion-order fidelity; each createTab self-activates,
+  // so the saved-active tab is re-activated last. (Comments kept OUTSIDE the branch on purpose:
+  // renderer.js trips maskComments' documented regex-literal blind spot before this point, so
+  // the wiring test extracts a pure-code branch body — see session-restore-wiring.test.js.)
+  if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {
+    let activeTab = null;
+    for (const t of bootConfig.restoreTabs) {
+      const container = resolveRestoreContainer(t.jarId, containers);
+      if (!container) continue;
+      const tab = createTab(t.url, container, { trusted: false });
+      if (tab && t.active) activeTab = tab;
+    }
+    if (activeTab) activateTab(activeTab.id);
+  } else if (!bootConfig || bootConfig.bootTab !== false) {
+    createTab(url || HOMEPAGE);
+  }
 });
 
 // ---------------------------------------------------------------------------

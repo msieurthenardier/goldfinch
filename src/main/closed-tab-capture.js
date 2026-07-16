@@ -12,6 +12,12 @@
 // `getTitle`/`navigationHistory`/`isDestroyed`), so the module unit-tests
 // offline with fakes. All Electron wiring (event registration, the stack
 // singleton, the size broadcast) stays in main.js.
+//
+// The persist-jar allowlist predicate is single-sourced in persist-jar-gate.js
+// (M09 F9 L2 AC0) — both this module and session-snapshot.js call it, so the
+// mission's burner boundary has ONE definition two suites cannot drift on.
+
+const { resolvePersistJar } = require('./persist-jar-gate');
 
 /**
  * `stripIndex` append sentinel (M09 F4): "position unknown / not this strip" —
@@ -52,7 +58,7 @@ const APPEND_SENTINEL = -1;
  * @returns {TaggedClosedTabEntry | null}
  */
 function captureClosedTabEntry({ tabEntry, jarsList, stripIndex, windowId }) {
-  const jar = !tabEntry.trusted && jarsList.find((j) => j.partition === tabEntry.partition);
+  const jar = resolvePersistJar(tabEntry, jarsList);
   if (!jar) return null;
   const wc = tabEntry.view.webContents;
   if (!wc || wc.isDestroyed()) return null;

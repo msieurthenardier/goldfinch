@@ -41,7 +41,8 @@
  *   bootConfigServed: boolean,
  *   pendingChromeSends: Array<() => [string, any]>,
  *   findOverlay: any,
- *   sheet: any
+ *   sheet: any,
+ *   restoreTabs?: Array<{ url: string, jarId: string, active: boolean }>
  * }} WindowRecord
  */
 

@@ -33,7 +33,8 @@ const { isSafeTabUrl } = require('../shared/url-safety');
  *   automationKeyHashes: Record<string, string>,
  *   automationAdminKeyHash: string,
  *   automationPort: number,
- *   spellcheck: boolean
+ *   spellcheck: boolean,
+ *   restoreSession: boolean
  * }} Settings
  */
 
@@ -63,7 +64,13 @@ const DEFAULTS = {
   // settings file written before this leg auto-populates to false. Gated at the SESSION
   // layer in main.js (setSpellCheckerLanguages), never in the WebContentsView's webPreferences
   // (immutable after construction), so the toggle can reach already-open tabs.
-  spellcheck: false
+  spellcheck: false,
+  // Restore session on startup (M09 Flight 9 / DD7). Opt-in, default OFF: with it
+  // off, startup is behaviorally byte-identical to today (the mission's absolute
+  // regression baseline). Follows the automationEnabled template — an explicit
+  // strict-boolean validator (NOT spellcheck's typeof-fallback). Additive, no schema
+  // version bump. Read directly by main at whenReady (startup-only, no live side-effect).
+  restoreSession: false
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -115,6 +122,10 @@ const VALIDATORS = {
 
   // automationEnabled: strictly boolean (no truthy coercion).
   automationEnabled: (v) => typeof v === 'boolean',
+
+  // restoreSession: strictly boolean (M09 Flight 9 / DD7) — the automationEnabled
+  // template, so a truthy 'yes'/1 is rejected rather than silently enabling restore.
+  restoreSession: (v) => typeof v === 'boolean',
 
   // automationKeyHashes: a plain object (NOT null, NOT an array) whose every
   // value is a 64-char lowercase-hex SHA-256 digest. Deliberately strict — it

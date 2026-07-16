@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { maskComments } = require('../helpers/source-scan');
-const { classifyDragPoint } = require('../../src/shared/tab-drag-zone');
+const { classifyDragPoint, shouldArm } = require('../../src/shared/tab-drag-zone');
 const { dropIndexFromPointer } = require('../../src/shared/tab-order');
 
 const MODULE_PATH = path.join(__dirname, '../../src/shared/tab-drag-zone.js');
@@ -169,4 +169,35 @@ test('the MASK is what carries those two readings — unmasked, the real file re
     'the header names the banned symbols — if this ever reads 0 the scans above went vacuous'
   );
   assert.equal((maskComments(unmasked).match(GLOBAL_COORD_RE) || []).length, 0, 'masked → 0');
+});
+
+// ---------------------------------------------------------------------------
+// AC4 (M09 F9 Leg 1) — shouldArm: the extracted arm-threshold predicate, BOTH
+// directions on BOTH axes. The F8 change this pins was made for the straight-DOWN case
+// (dx=0), which F2's `Math.abs(dx)` could never arm; the boundary is `>=`.
+// ---------------------------------------------------------------------------
+
+test('shouldArm arms a straight-DOWN gesture past the threshold — the F8 case (dx=0)', () => {
+  // dx held at 0: the exact gesture F2's `Math.abs(dx)` gate could never arm. This is the
+  // reason the predicate is two-axis, so it is the case the test is anchored on.
+  assert.equal(shouldArm(0, 6), true);
+});
+
+test('shouldArm does NOT arm a straight-down gesture below the threshold (dx=0)', () => {
+  assert.equal(shouldArm(0, 4), false);
+});
+
+test('shouldArm arms a lateral gesture past the threshold, not below it — both directions', () => {
+  assert.equal(shouldArm(6, 0), true);
+  assert.equal(shouldArm(4, 0), false);
+});
+
+test('shouldArm arms exactly AT the threshold — the boundary is `>=`', () => {
+  assert.equal(shouldArm(0, 5), true);
+});
+
+test('shouldArm reads the hypotenuse, not either axis alone — (3,4) is distance 5', () => {
+  // Neither axis reaches 5, but their hypotenuse is exactly 5. A gate on either axis alone
+  // (`Math.abs(dx)` or `Math.abs(dy)`) would read this as below threshold; hypot arms it.
+  assert.equal(shouldArm(3, 4), true);
 });

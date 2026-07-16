@@ -1,6 +1,6 @@
 # Flight: Session Restore
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -311,11 +311,11 @@ Four legs, ordered so the risky lifecycle change lands before the feature reuses
 
 ### Checkpoints
 
-- [ ] Move-core no longer pre-sets into a disarmed guard; `tab-set-active` drives hide + menu-close
+- [x] Move-core no longer pre-sets into a disarmed guard; `tab-set-active` drives hide + menu-close
       through its armed guard. Suite green.
-- [ ] `shouldArm(dx,dy)` is a `tab-drag-zone.js` export with a both-directions unit test; `renderer.js`
+- [x] `shouldArm(dx,dy)` is a `tab-drag-zone.js` export with a both-directions unit test; `renderer.js`
       calls it.
-- [ ] `session-store.js` round-trips a snapshot through disk (atomic, never-throws, corrupt→empty);
+- [x] `session-store.js` round-trips a snapshot through disk (atomic, never-throws, corrupt→empty);
       the snapshot builder drops burners (0 records) and keeps persist-jar tabs (1 record) on the
       real predicate, both directions.
 - [ ] `session-store.load()` runs after the dev-profile `setPath('userData')` redirect (correct dir).
@@ -341,15 +341,16 @@ Four legs, ordered so the risky lifecycle change lands before the feature reuses
 
 ### Legs
 
-- [ ] `f8-debt-and-move-core-fix` — move-core structural fix (DD8) + `shouldArm` extraction & unit
+- [x] `f8-debt-and-move-core-fix` — move-core structural fix (DD8) + `shouldArm` extraction & unit
       test + `CALL_RE` comment + F8 leg-tick reconciliation. **HIGH-risk.**
-- [ ] `session-persistence-layer` — `session-store.js` (DD1) + pure snapshot builder (DD2), both
+- [x] `session-persistence-layer` — `session-store.js` (DD1) + pure snapshot builder (DD2), both
       unit-tested both-directions. **HIGH-risk (privacy-sensitive).**
-- [ ] `settings-toggle-and-lifecycle` — toggle (DD7) + `session-store.load()` ordering + close-handler
+- [x] `settings-toggle-and-lifecycle` — toggle (DD7) + `session-store.load()` ordering + close-handler
       snapshot write (DD3/DD6, setting-gated) + `whenReady` fresh-create restore (DD4) + default-off
       byte-identity. **HIGH-risk (startup/lifecycle).**
-- [ ] `verification` — relaunch-harness probe (DD9) + `session-restore` spec/run (or HAT-scope) +
-      `tab-tearoff` row 8a + residual + `tab-reorder` Step 4 disposition + gates. **HIGH-risk (authors assertions).**
+- [x] `verification` — relaunch-harness probe (DD9 → **NO-GO**, E2E HAT-scoped to F10) +
+      `session-restore` spec authored + `tab-reorder` Step 4 retired + row 8a dispositioned (unit-pinned;
+      live → F10) + final-tree gates (test/lint/typecheck green; a11y not a verdict, not claimed). **HIGH-risk (authors assertions).**
 
 ---
 

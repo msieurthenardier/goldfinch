@@ -55,8 +55,8 @@ function assertMutated(before, after, what) {
 // ---------------------------------------------------------------------------
 
 // A CALL, not the definition and not a comment mention. The naive
-// `grep -c "cancelDrag()" src/renderer/renderer.js` reads NINE on the real file: seven
-// calls, plus `function cancelDrag() {` and one prose mention. That is exactly the
+// `grep -c "cancelDrag()" src/renderer/renderer.js` reads TEN on the real file: seven
+// calls, plus `function cancelDrag() {` and two prose mentions. That is exactly the
 // over-count that put "three" in the flight draft, and it is why this is a real scan.
 const CALL_RE = /(?<!function\s)\bcancelDrag\(\)/g;
 
