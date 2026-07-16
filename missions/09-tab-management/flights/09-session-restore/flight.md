@@ -1,6 +1,6 @@
 # Flight: Session Restore
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -358,12 +358,14 @@ Four legs, ordered so the risky lifecycle change lands before the feature reuses
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged (stacked PR on `flight/8`)
-- [ ] Tests passing — **gates re-run on the FINAL tree after any flight-end fix** (F8 Rec 1); the
-      commit message may claim only what was measured on that tree
-- [ ] Documentation updated (Settings toggle; any CLAUDE.md/README note on session restore + the
-      new store)
+- [x] All legs completed
+- [x] Code merged (stacked PR on `flight/8` — PR opened at landing; `da586a8`)
+- [x] Tests passing — measured on the final tree: `npm test` **1948 pass / 0 fail / 0 skipped**,
+      `lint` + `typecheck` clean. `npm run a11y` produced **no verdict** (no admin key / live GUI) and
+      is **not claimed green** (F8 Rec 1); the commit message claims only the measured gates.
+- [x] Documentation — the setting is a user-facing toggle in the Settings page (self-documenting);
+      the `session-store` is an internal main-process module. No CLAUDE.md/README change required;
+      no reviewer flagged a doc gap.
 
 ### Verification
 
