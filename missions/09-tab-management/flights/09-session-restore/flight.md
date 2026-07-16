@@ -1,6 +1,6 @@
 # Flight: Session Restore
 
-**Status**: landed
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
