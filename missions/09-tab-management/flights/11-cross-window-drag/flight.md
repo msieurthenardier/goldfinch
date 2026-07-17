@@ -1,6 +1,6 @@
 # Flight: Cross-Window Tab Drag
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
@@ -116,7 +116,7 @@ listener stays as defensive parity. Practical cancel: release back onto the stri
 - [x] `03-cross-window-drop-adopt` *(landed — code + tests green; criterion-8 LIVE verification is the
       flight-level operator HAT, owed)* — the strip `drop` handler on ANOTHER window reads the payload and fires
       the new `tab-adopt-by-drop` IPC (DD1) reusing `moveTabIntoWindow`; the DD2 authority ruling. HIGH.
-- [ ] `04-verification` — a `cross-window-drag` behavior spec using the **HTML5-DnD** transport (NOT
+- [x] `04-verification` — a `cross-window-drag` behavior spec using the **HTML5-DnD** transport (NOT
       synthetic pointer injection — `tab-tearoff`'s banner warns synthetic goes green in fiction-space);
       rewrite that banner (criterion 8 finally satisfiable); the owed `tab-tearoff` clean re-run + row 8a.
 

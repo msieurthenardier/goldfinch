@@ -611,3 +611,67 @@ app-side (B hears nothing; the stale dragend is indistinguishable from a genuine
 in flight.md: **cross-window drag on this rig is X11-only**; the Wayland daily-driver alternative is the
 F8 keyboard/menu "Move to window" path. Criterion 8 remains SATISFIED (X11 witness; packaged-native
 expectation). Operator disposition: accepted as environmental.
+
+## Leg 4 — Verification (spec re-authoring) — landed
+
+Docs/spec files only; zero `src/`/`test/` changes. The two facts propagated: criterion 8 SATISFIED
+(F11 native HTML5 DnD, operator-witnessed on X11; DD5-corrected X11-only on this rig) and the
+`dragPointer` tab-drag rows are dead instruments (native DnD is inert to synthetic pointer
+injection — recorded at Leg 2, mechanism inferred not measured, not overclaimed anywhere).
+
+**Files touched:**
+- `tests/behavior/cross-window-drag.md` — **AUTHORED (AC1).** Criterion 8's regression net,
+  HAT-apparatus: gesture Actions marked `OPERATOR:` (Orchestrator pauses; operator performs and
+  confirms; Executor observe-only, never attempts the gesture). Preconditions carry the exact keyed
+  X11 launch line (`GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run
+  dev:automation -- --ozone-platform=x11`), the DD5 citation (no Wayland gesture on this rig), the
+  X11+`--automation-dev` first-pairing caveat + M05 F8 first-click-swallow note, key-via-env-var
+  discipline, two-window + ≥2-committed-history fixture, and the disconnect-then-arm / per-record
+  `addedNodes` / calibrate recorder disciplines (tab-tearoff Erratum 1 carried). Five rows:
+  (1) cross-window drop — identity triple + announce split (target `'Tab moved to this window'`;
+  source silent, `no-tab` suppression cited at `renderer.js` `requestTearOff`); (2) same-window
+  reorder negative control; (3) tear-off to desktop — identity triple asserted at this door too,
+  chains its new window into (4) sole-tab consolidation + source close (F10 L3); (5) both refusal
+  arms (sole-tab `'Cannot move the only tab…'`, internal `'This tab cannot be moved…'`). The
+  synthetic-`DragEvent` prohibition stated IN-SPEC (banner) with the multi-window-shell precedent.
+  **Status `draft`, Last Run `never`** — first run owed to the operator's keyed gauntlet.
+- `tests/behavior/tab-tearoff.md` — **banner rewritten (AC2)**: current truth (gesture ships,
+  criterion 8 witnessed, verification in `cross-window-drag.md`); fiction-coordinate findings +
+  multi-window-shell tale preserved as explicitly HISTORICAL; synthetic-`DragEvent` trap carried as
+  the ACTIVE successor warning. **Rows 3/4/6/7 marked SUPERSEDED with successors, row 5 superseded
+  as row-4-downstream (AC3)** (reorder→row 2, tear-off+identity→row 3, sole-tab refusal→row 5a,
+  internal refusal→row 5b); rows 8/8a/9 + HIGH-1 stay live. **Owed clean re-run formally RE-SCOPED
+  to the survivors** (dated block under the header; run history + 2026-07-16 partial verdict intact
+  as provenance; re-run provisioning note added — old row 4 minted W2, a re-run mints it via a live
+  door). Stale supporting prose historically reframed: the Out of Scope cross-window bullet, the
+  `Math.hypot` ownership bullet (threshold RETIRED at F11 — no longer exists), the
+  dragPointer-pacing/`e.buttons` instrument bullets, the Observables `dragPointer` entry, the V1
+  chrome-band section (dissolved — the successor's instrument IS the real pointer), the rows-3/4
+  controlled-pair + 5px-threshold row-convention prose, Intent, and the Variants.
+- `tests/behavior/tab-reorder.md` — **Step 3 ONLY superseded (AC4)**; Steps 5–9 live, none retired.
+  Steps 7–8 mechanism notes updated (`suppressClickActivate` REMOVED — native DnD needs no
+  suppression flag; end-state assertions unchanged). Header gains a dated F11 disposition block;
+  Intent split live/historical; stale premises updated (cancel-restore now Escape→dragend and
+  Wayland-unavailable per the DD5 extension; mid-drag motion; the tear-off "later flight" bullet;
+  the two dragPointer precondition bullets marked historical).
+- `tests/behavior/tab-cycling.md` — one-line premise update on the mid-drag spot-check bullet
+  (native DnD not automatable at all, not "dragPointer is atomic"). **(AC5)**
+- `tests/behavior/foreground-to-act.md` — **UNTOUCHED, verified non-tab**: its `dragPointer`
+  mention is the raising-ops contract list (op still exists and still raises — still true). **(AC5)**
+- `tests/behavior/multi-window-automation.md` — stale "F8 owns it" Out of Scope pointer fixed to
+  `cross-window-drag.md` (drag) + `tab-tearoff.md` surviving rows (keyboard). **(AC5)**
+- `docs/mcp-automation.md` — `dragPointer` entry: example now non-tab (in-page slider/selection/
+  DnD widget) + the native-DnD sentence pointing at the HAT-apparatus spec. **(AC6)**
+- `CLAUDE.md` — the two-set-point click-suppression section (described REMOVED machinery as a live
+  invariant) replaced with the native-DnD truth (no flag, unconditional click-activate, `dragstart`
+  activation; no do-not-simplify warning for machinery that no longer exists); the automation
+  paragraph's `dragPointer` "for tab reorder" billing corrected. **(AC6)**
+
+**AC7 — no green-wash + suite:** nothing claims the new spec ran (`draft`/`never`); superseded rows
+say "would FAIL as written", never "passed under the new layer"; the synthetic-`DragEvent`
+prohibition is present in BOTH the new spec's banner and the rewritten tab-tearoff banner.
+`npm test` verified after all edits: **1973 pass / 0 fail / 0 skipped** (unchanged — docs-only leg).
+
+**Owed (carried, unchanged by this leg):** the operator's keyed gauntlet — now including
+`cross-window-drag.md`'s first run and the re-scoped `tab-tearoff` clean re-run (rows 8/8a/9 +
+HIGH-1). Leg 4 → `landed`; flight-end review + single commit next.

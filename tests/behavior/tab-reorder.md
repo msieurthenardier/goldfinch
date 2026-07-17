@@ -27,18 +27,38 @@ instrument (Win32/RAIL) proved a **cached fiction** on this rig — so re-instru
 second instrument, which is operator/HAT-tier; the coordinate reading is retired here rather than
 left as a guaranteed false green. The reorder contract itself (Steps 1–3) stands and is unaffected.
 
+**⚠ DISPOSITIONED AGAIN at M09 F11 Leg 4 — the DRAG layer was rewritten under this spec.** F11
+(DD3) replaced the whole pointer-drag machinery with **native HTML5 DnD** — one native gesture for
+reorder + tear-off + cross-window. Consequences here:
+- **Step 3 is SUPERSEDED (dead instrument):** `dragPointer` cannot drive the native drag loop
+  (recorded at the F11 Leg 2 rewrite), so the pointer-drag row would FAIL as written — the opposite
+  failure mode from a false green, and just as corrosive left looking runnable. The live in-strip
+  reorder gesture is `cross-window-drag.md` row 2 (operator-performed, HAT-apparatus). **A synthetic
+  `DragEvent` via `evaluate` is NOT an acceptable re-instrumentation** — it green-washes the native
+  transport (forbidden; see `cross-window-drag.md`'s banner).
+- **`shouldArm`/`DRAG_ARM_THRESHOLD_PX` were RETIRED with the pointer layer** (native DnD owns
+  arming) — the F9 threshold unit tests above went with them; the debt is moot, not regressed.
+- **`suppressClickActivate`/`markClickSuppressed` were REMOVED** — native DnD fires no trailing
+  `click` after a completed drag, so the click handler's activate is now unconditional; Steps 7–8's
+  end-state assertions are unchanged, their mechanism notes are updated in place.
+- **Steps 5–9 remain LIVE coverage** (keyboard reorder + DD1 close-pick + the click model — none of
+  it touched the pointer machinery).
+
 ## Intent
 
-Verify the tab strip's pointer-drag reorder (Chrome-style live sibling displacement, model-driven
-drop via `dropIndexFromPointer`), that a completed in-strip drag never moves the window, that
-`closeTab`'s next-tab pick follows DOM order (not Map/creation order) after a reorder, and that the
-DD2 activation-semantics refactor (pointerdown activates; click becomes a guarded fallback) has not
-regressed the plain-click / ✕-click / middle-click model. This needs a behavior test because pointer
-drag is *real trusted pointer-event sequencing driving a live gesture state machine in the running
-Electron chrome* (arm threshold, transform displacement, `setPointerCapture`, drop commit) — a unit
-test can exercise the pure `tab-order.js` decision functions (already covered by
-`test/unit/tab-order.test.js`) but cannot drive the DOM-bound gesture itself. (M09 Flight 2 DD2/DD4/
-DD5.)
+**Live scope (post-F11):** verify the keyboard reorder, that `closeTab`'s next-tab pick follows DOM
+order (not Map/creation order) after a reorder, and that the plain-click / ✕-click / middle-click
+activation model has not regressed (end-state checks — the internal mechanism changed at F11: no
+suppression flag, unconditional click-activate, drag activates in `dragstart`).
+
+*(HISTORICAL — the original intent, F2:)* verify the tab strip's pointer-drag reorder (Chrome-style
+live sibling displacement, model-driven drop via `dropIndexFromPointer`), that a completed in-strip
+drag never moves the window, and that the DD2 activation-semantics refactor (pointerdown activates;
+click becomes a guarded fallback) had not regressed the click model. The pointer gesture machinery
+(arm threshold, transform-follow, `setPointerCapture`) was removed at F11 — the drag gesture is now
+native HTML5 DnD, operator-verified via `cross-window-drag.md`. A unit test still cannot drive the
+DOM-bound live gesture; nothing synthetic can anymore either (see the F11 disposition note above).
+(M09 Flight 2 DD2/DD4/DD5; M09 F11 DD3.)
 
 ## Preconditions
 
@@ -57,7 +77,9 @@ DD5.)
   **admin** key: a jar key is refused `getChromeTarget` and cannot drive the chrome renderer.
 - **Drive the renderer (chrome UI), NOT a guest WebContentsView.** `getChromeTarget()` returns the
   chrome `wcId` directly. All drive and observe calls below pass this `wcId`.
-- **The apparatus act-axis gap is closed for this spec by `dragPointer` (M09 F2 Leg 2, DD4).** Prior
+- *(HISTORICAL as of F11 — this bullet served Step 3, now superseded: the tab strip's drag layer is
+  native HTML5 DnD, which `dragPointer` cannot drive. The op itself remains valid for NON-tab,
+  in-page drags; no live step here uses it.)* **The apparatus act-axis gap is closed for this spec by `dragPointer` (M09 F2 Leg 2, DD4).** Prior
   specs' "no move-only primitive" workaround (a `click` at a safe coordinate to induce a
   `mouseleave` side-effect) is unrelated to and does not substitute for pointer-drag — `dragPointer
   (wcId, from, to, { steps?, stepDelayMs? })` is the dedicated primitive: mouseDown at `from`, N
@@ -70,7 +92,8 @@ DD5.)
   step is guaranteed to equal `to` exactly, so the FINAL drop position is reliable regardless of how
   many intermediate events were coalesced away — only the *motion* (how it looks mid-drag) is
   degraded, and that is HAT-scoped (see Out of Scope).
-- **A live drag also holds `e.buttons === 0` on every `pointermove` after the down (apparatus fact,
+- *(HISTORICAL as of F11 — the pointer-drag handlers this note guarded no longer exist.)*
+  **A live drag also holds `e.buttons === 0` on every `pointermove` after the down (apparatus fact,
   spike finding) — informational, not load-bearing.** `pointerdown`/`pointerup` correctly report the
   primary button (`buttons:1` / `button:0`), and `setPointerCapture` succeeds, but Chromium does not
   propagate a "still held" buttons bitmask onto the intervening synthetic `pointermove` events. The
@@ -115,19 +138,20 @@ DD5.)
   opening the fixture tabs in Step 2, rather than assuming a fixed total. Steps 3 and 6 below are
   worded in terms of "the last tab" / "the Nth-from-left tab" (whatever the observed order says),
   never a hardcoded total, so this is robust to the extra tab.
-- **Cancel-restore is unconditionally HAT-scoped, not an automated step here (design-review ruling —
-  see Out of Scope for the full rationale).** `dragPointer` is one atomic tool call (down → moves →
-  up); the automation surface has no way to pause mid-gesture and inject an `Escape` or
-  `pointercancel` between the down and the up, so there is no cancelable intermediate state this
-  apparatus can reach. Keyboard reorder commits synchronously (no drag-in-progress state at all), so
-  it has nothing to cancel either. This spec does not attempt an automated cancel assertion.
+- **Cancel-restore is unconditionally HAT/operator-scoped, not an automated step here (design-review
+  ruling; premise updated at F11 Leg 4 — see Out of Scope).** The drag is native HTML5 DnD and not
+  automatable at all; mid-drag cancel is Escape→`dragend`, itself unavailable under the ozone-wayland
+  daily driver (DD5 extension: the native drag loop owns input). Keyboard reorder commits
+  synchronously (no drag-in-progress state at all), so it has nothing to cancel either. This spec
+  does not attempt an automated cancel assertion.
 
 ## Observables Required
 
 - mcp (admin MCP tools on the chrome `wcId`, measured via the admin MCP client connected with the
   admin Bearer header): `evaluate(chromeWcId, …)` numeric reads are the primary observable for DOM
   order, tab rects, and window geometry. `readAxTree(wcId)` for tab titles/selected-state/
-  `aria-keyshortcuts`. `dragPointer` for the pointer-drag gesture. `click`/`pressKey` for the
+  `aria-keyshortcuts`. ~~`dragPointer` for the pointer-drag gesture~~ *(superseded with Step 3 —
+  F11 native DnD)*. `click`/`pressKey` for the
   click-model and keyboard-reorder checks. `captureWindow()` for rendered-truth corroboration.
 - shell (precondition probe: `tools/list` and `getChromeTarget` — measured via the MCP client or
   Bash).
@@ -138,33 +162,36 @@ DD5.)
 |---|---------|------------------|
 | 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then call `getChromeTarget()`. | `tools/list` **includes** (presence-checked) `getChromeTarget`, `evaluate`, `dragPointer`, `pressKey`, `click`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a **numeric** `wcId`. If not, halt — preconditions not met. |
 | 2 | Open **five** tabs at distinct fixture URLs (titles distinguishable as Tab1..Tab5) — in addition to whatever default tab the app booted with. Confirm pairwise-distinct titles via `readAxTree(wcId)`. Record the ACTUAL resulting DOM order (`evaluate`, `.tab` `dataset.id` sequence — do not assume a fixed count) and the baseline window geometry (`evaluate`, `{screenX, screenY, outerWidth, outerHeight}`). | Titles are pairwise distinct — halt and fix the fixture if any two collide. Baseline DOM order (whatever its actual length) and window geometry are recorded for later comparison. (setup row) |
-| 3 | **Pointer drag end-state.** `evaluate` each `.tab`'s `getBoundingClientRect()`. Compute `from` = the 3rd-from-left tab's center and `to` = a point past the LAST tab's horizontal midpoint (e.g. 75% across the last tab's own width — "last" meaning whichever tab the current DOM order puts furthest right, NOT an assumed count). Call `dragPointer(chromeWcId, from, to)`. Then `evaluate` the DOM order again, `readAxTree(wcId)` for the tab title sequence + `selected` state, and take a `captureWindow()`. | Because `to.x` is chosen past the tab that is CURRENTLY last, every other tab's original midpoint is necessarily to its left, so `dropIndexFromPointer` counts all of them — the dragged (3rd-from-left) tab lands **last** in the new DOM order (verify this by direct computation from the recorded rects too, not just this general argument). The DOM order read, the `readAxTree` title sequence, and the screenshot's visual left-to-right order all **agree** on this new order. The dragged tab is now the **selected** tab (drag-start activation — Chrome parity: a background tab being dragged becomes active). All sibling transforms are cleared (no lingering `translateX` — confirm via a rect re-read showing each tab's rect is a plain rectangle, not offset from where the DOM order implies it should sit). |
+| 3 | **⛔ SUPERSEDED (F11 Leg 4 — dead instrument: the drag layer is native HTML5 DnD, which `dragPointer` cannot drive; this row would FAIL as written. Successor: `cross-window-drag.md` row 2, operator-performed. Do not run. Kept as historical record.)** **Pointer drag end-state.** `evaluate` each `.tab`'s `getBoundingClientRect()`. Compute `from` = the 3rd-from-left tab's center and `to` = a point past the LAST tab's horizontal midpoint (e.g. 75% across the last tab's own width — "last" meaning whichever tab the current DOM order puts furthest right, NOT an assumed count). Call `dragPointer(chromeWcId, from, to)`. Then `evaluate` the DOM order again, `readAxTree(wcId)` for the tab title sequence + `selected` state, and take a `captureWindow()`. | Because `to.x` is chosen past the tab that is CURRENTLY last, every other tab's original midpoint is necessarily to its left, so `dropIndexFromPointer` counts all of them — the dragged (3rd-from-left) tab lands **last** in the new DOM order (verify this by direct computation from the recorded rects too, not just this general argument). The DOM order read, the `readAxTree` title sequence, and the screenshot's visual left-to-right order all **agree** on this new order. The dragged tab is now the **selected** tab (drag-start activation — Chrome parity: a background tab being dragged becomes active). All sibling transforms are cleared (no lingering `translateX` — confirm via a rect re-read showing each tab's rect is a plain rectangle, not offset from where the DOM order implies it should sit). |
 | 4 | **RETIRED to HAT (M09 F9).** ~~No-window-move assertion via `evaluate` of `{screenX, screenY, …}`.~~ Do **not** run as an automated checkpoint. | **RETIRED — a guaranteed false green on this rig.** `window.screenX` is a **cached fiction** here (F8's Win32/RAIL second instrument proved a real OS move leaves it unchanged and fires no event), so a byte-identical read means nothing and its WSLg hatch keys on *zero* while the true failure is *frozen*. The property it meant to check (the in-strip drag never engages the `-webkit-app-region: drag` window-move zone) is verified by the operator at **F10** against a second instrument. The **arm-threshold** half of this row's old debt is now a **unit pin** (`shouldArm`, `test/unit/tab-drag-zone.test.js`, both directions incl. `dx=0`). |
 | 5 | **Keyboard reorder.** Establish a focus anchor (`click` into the chrome, e.g. the address bar), `pressKey(wcId, 'Tab')` into the strip until a tab is focused, record the current DOM order (`evaluate`) and which tab is focused. Call `pressKey(wcId, 'ArrowRight', ['control', 'shift'])` (or `'ArrowLeft'` if the focused tab is already last). Re-read DOM order and `readAxTree`. | The focused tab moves exactly one slot in the pressed direction (confirmed via the DOM-order re-read, matching `keyboardMove`'s one-slot rule); focus stays on the same tab; the `selected` tab (from `readAxTree`) is **unchanged** (reorder moves DOM position only, not selection) unless the focused tab happens to already be the selected one; each tab's `aria-keyshortcuts` includes the reorder chord alongside `Delete`. |
 | 6 | **Reorder-then-close neighbor (DD1 consumer regression).** Read the current DOM order (`evaluate`) and the creation order (`enumerateTabs`, which stays creation-order per the flight's own ruling — see Out of Scope). If the tab that is DOM-order-**last** is the SAME as the tab that is creation-order-**last**, perform one more keyboard reorder (Step 5's chord on the current DOM-last tab) to force them to differ. Then activate (via `click`) a tab that is neither the DOM-order-last nor the creation-order-last tab, and close it with `pressKey(wcId, 'Delete')`. | The newly-activated next tab is the one that was **DOM-order-last** immediately before the close — **not** the one that was creation-order-last (that would be the pre-DD1-fix behavior, `[...tabs.keys()].pop()`). Verify via `evaluate`/`readAxTree`: the surviving tab now `selected` matches the DOM-order-last prediction and differs from the creation-order-last one (the discriminating case this step deliberately constructs). |
-| 7 | **Click-model regression, part A — synthetic click with NO preceding pointerdown still activates (AT default-action path).** Pick a currently-background tab. `evaluate` a script that dispatches `new MouseEvent('click', { bubbles: true, cancelable: true })` directly on that tab's DOM node (no `click`/`dragPointer` tool call — no pointerdown precedes it). | The tab becomes the **selected** tab (`readAxTree`) — exactly one `selected: true` afterward, and it is this tab. This proves the click handler's activate branch still fires for a click that never had a preceding pointerdown (`suppressClickActivate` defaults false). |
-| 8 | **Click-model regression, part B — a real trusted click still activates exactly once.** Pick a different background tab; locate its body coordinates (rect read). Call `click(chromeWcId, x, y)` on it (a real trusted mouseMove→mouseDown→mouseUp sequence — this exercises BOTH the DD2 pointerdown-activation path and the click handler's now-guarded fallback in the same gesture, same as a real user click). | The clicked tab becomes the selected tab; exactly **one** tab is `selected: true` afterward (no double-activation artifact — the end-state is the same whichever internal path fired, which is why this is an end-state check; the two-set-point suppression-flag *logic* itself is verified by code review per the flight's design-review ruling, not by this spec). |
+| 7 | **Click-model regression, part A — synthetic click with NO preceding pointerdown still activates (AT default-action path).** Pick a currently-background tab. `evaluate` a script that dispatches `new MouseEvent('click', { bubbles: true, cancelable: true })` directly on that tab's DOM node (no `click`/`dragPointer` tool call — no pointerdown precedes it). | The tab becomes the **selected** tab (`readAxTree`) — exactly one `selected: true` afterward, and it is this tab. This proves the click handler's activate branch fires for a synthetic/AT-driven click. *(Mechanism note updated at F11 Leg 4: `suppressClickActivate` is REMOVED — under native HTML5 DnD no trailing `click` follows a completed drag, so the click handler's activate is unconditional; this step's end-state assertion is unchanged.)* |
+| 8 | **Click-model regression, part B — a real trusted click still activates exactly once.** Pick a different background tab; locate its body coordinates (rect read). Call `click(chromeWcId, x, y)` on it (a real trusted mouseMove→mouseDown→mouseUp sequence — a real user click). | The clicked tab becomes the selected tab; exactly **one** tab is `selected: true` afterward (no double-activation artifact — an end-state check). *(Mechanism note updated at F11 Leg 4: the DD2 two-set-point `suppressClickActivate` flag this step used to reference is REMOVED with the pointer machinery — native DnD needs no click-suppression flag; a plain click simply activates via the unconditional click handler, and a completed drag activates in `dragstart` and fires no trailing click. The no-double-activation end-state assertion is unchanged.)* |
 | 9 | **Click-model regression, part C — ✕-click and middle-click on a BACKGROUND tab close it without flash-activating it.** Note the currently-active tab. Locate a different, background tab's ✕-button coordinates (rect read) and call `click(chromeWcId, x, y)` on it. Then, with several tabs still open, locate another background tab's body (not its ✕) and call `click(chromeWcId, x, y, { button: 'middle' })` on it. | Each call removes the targeted tab (count −1 each time). After **each** close, the tab that is `selected: true` is the **same tab that was active immediately before that close** — the background close never changed the active tab, i.e. never flash-activated the closed tab en route to closing it. |
 
-**Row conventions:** one row = one checkpoint; screenshots are captured alongside numeric reads at
-Steps 3 and 4 for rendered-truth corroboration per the project's DOM-correct-≠-render-correct
-lesson.
+**Row conventions:** one row = one checkpoint; capture a screenshot alongside numeric reads
+wherever an order/selection claim is made (rendered-truth corroboration per the project's
+DOM-correct-≠-render-correct lesson). *(Historical: this line used to name Steps 3 and 4, both now
+superseded/retired; the convention itself carries to the live steps.)*
 
 ## Out of Scope
 
-- **Cancel-restore (Escape / `pointercancel` mid-drag) is unconditionally HAT-scoped, not tested by
-  this spec at all (design-review ruling).** `dragPointer` is atomic — the automation surface cannot
-  pause between the mouseDown and mouseUp to inject a cancel key, so there is no reachable
-  intermediate state to cancel from over this apparatus. Keyboard reorder commits synchronously (no
-  drag-in-progress state), so it has no cancelable intermediate state either. A human tester
-  performing a real mouse drag and pressing Escape mid-gesture is the only way to observe this
-  behavior; it is verified in the mission's later HAT flight, not here.
-- **Mid-drag motion legibility (sibling displacement animation smoothness, drop-indicator
-  legibility while dragging) is HAT-scoped (DD4, the F9 lesson).** `dragPointer` is one atomic call;
-  a concurrent `evaluate`/`captureWindow` cannot observe intermediate frames mid-gesture, and even if
-  it could, a discrete capture can land on a settled frame and miss a motion defect (F9 proved
-  this). This spec asserts only the drop's numeric/rendered END-STATE (Steps 3–4); a human eye
-  watching the drag live is what judges whether the displacement reads smoothly.
+- **Cancel-restore mid-drag is unconditionally HAT/operator-scoped, not tested by this spec at all
+  (design-review ruling; PREMISE UPDATED at F11 Leg 4).** The old rationale — "`dragPointer` is
+  atomic, so no cancelable intermediate state is reachable" — is stale: the drag is now native HTML5
+  DnD, which the automation surface cannot drive at all, and cancel is now **Escape→`dragend`**,
+  itself **unavailable under the ozone-wayland daily driver** (DD5 extension: the native drag loop
+  owns input and that backend does not abort on Escape; the practical cancel is releasing back onto
+  the strip at the original slot — and under X11 an Escape in the tear-off zone tears off, a known
+  limit of the geometric disambiguation). Same conclusion, new premise: only a human hand can
+  observe it. Keyboard reorder commits synchronously (no drag-in-progress state), so it has no
+  cancelable intermediate state either.
+- **Mid-drag motion legibility (sibling displacement animation smoothness, drag-image follow) is
+  HAT-scoped (DD4, the F9 lesson; premise updated at F11 — the gesture itself is now
+  operator-only, so mid-drag motion is doubly out of automation's reach).** A discrete capture can
+  land on a settled frame and miss a motion defect (F9 proved this). The F11 increment-A operator
+  HAT judged the rebuilt reorder/tear-off feel live; a human eye is what judges it.
 - **`enumerateTabs`/`listTabs()` stays creation-order, not DOM-order (flight-level FD ruling, Open
   Questions).** After this flight, Map/creation order permanently diverges from visual order once a
   tab is moved. `enumerateTabs` consumers address tabs by `wcId`, never by position, so this is
@@ -174,9 +201,11 @@ lesson.
 - **Drag-start while a sheet menu or find overlay is open** — a single live spot-check (not an
   automated step) per the leg's Edge Cases; recorded in the flight log, not re-verified here on every
   run.
-- **Tear-off (dragging a tab out of the strip into a new window)** — explicitly a later mission
-  flight (Edge Cases: "Chrome detaches into tear-off here — THAT is a later flight; for now the
-  gesture stays 1-D horizontal").
+- **Tear-off and cross-window drag** — shipped since this spec was written (tear-off at M09 F8,
+  the whole drag layer unified onto native HTML5 DnD with cross-window drop at F11).
+  `cross-window-drag.md` owns the drag gestures (operator-performed); `tab-tearoff.md`'s surviving
+  rows own the keyboard cross-window move. *(HISTORICAL: this bullet used to defer tear-off to "a
+  later mission flight" with the gesture "1-D horizontal" — that world is gone.)*
 - **RTL layout** — the tab-order model is LTR-only by design (`tab-order.js`'s own doc comment);
   RTL is out of scope for the whole flight, not just this spec.
 - **Sliver-width drag precision** — the gesture works at any tab count (threshold is pointer-space,

@@ -125,10 +125,12 @@ misjudge it as a failed action.
 - **Auto-repeat (a held `Ctrl+Tab`) cycling repeatedly** — the leg's Edge Cases ruling is
   intentional (no `isAutoRepeat` guard, matching Chrome), but `pressKey` issues discrete presses;
   a held-key repeat is a HAT-scoped manual check, not automatable over this apparatus.
-- **Keyboard cycle mid-pointer-drag** — the leg's Edge Cases ruling (the drag continues on its
-  captured tab; only the active tab changes) is a single live spot-check per the leg, not an
-  automated step here — `dragPointer` is one atomic call with no way to interleave a `pressKey`
-  mid-gesture (same apparatus limit `tab-reorder.md` documents for cancel-restore).
+- **Keyboard cycle mid-drag** — the leg's Edge Cases ruling (the drag continues on its
+  captured tab; only the active tab changes) is a single live spot-check, not an
+  automated step here — *(premise updated at M09 F11 Leg 4)* the tab drag is now native HTML5 DnD,
+  which the automation surface cannot drive at all (`dragPointer` cannot initiate the native drag
+  loop — same disposition `tab-reorder.md` documents), so any mid-drag interleaving is
+  operator/HAT-scoped by construction.
 - **Lightbox-open cycling** — pinned at the unit level (`keydownToAction`'s NOT-lightbox-gated
   mapping); not re-verified live here.
 - **macOS parity** — carried to the mission's later HAT flight, per the existing convention
