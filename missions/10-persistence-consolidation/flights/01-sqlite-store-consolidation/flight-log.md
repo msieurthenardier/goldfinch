@@ -272,6 +272,14 @@ confirmed by Flight Director under the mission's pre-authorization.
   token). Loopback-only credential, but per the standing carry this is a
   leak: **rotate/re-mint the automation keys during the HAT flight** and
   re-register the session MCP entry. Leg 3 → landed.
+- 2026-07-17: Flight-end review (Reviewer, 1 cycle): **[HANDOFF:confirmed]**,
+  zero blocking/non-blocking issues; suite 2017/typecheck/lint re-verified;
+  security grep of committed artifacts clean. Committed `7d1ae66`; branch
+  pushed; **PR #96 opened (draft)**. `gh pr ready`/`gh pr merge` are
+  classifier-blocked in this session's permission mode — the PR remains
+  DRAFT for the operator; **promote + merge scoped to the HAT flight**.
+  Flight 2 will stack on `flight/01-sqlite-store-consolidation` (M09 F9
+  stacked-PR precedent). Flight → landed. [COMPLETE:flight]
 
 ---
 

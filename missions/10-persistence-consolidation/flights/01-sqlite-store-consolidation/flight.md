@@ -1,6 +1,6 @@
 # Flight: SQLite Store Consolidation
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Persistence Consolidation](../../mission.md)
 
 ## Contributing to Criteria
