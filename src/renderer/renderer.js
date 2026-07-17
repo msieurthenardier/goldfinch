@@ -122,6 +122,13 @@ let tabSeq = 0;
 let activeViewWcId = null;
 // RAF pending flag for debounced geometry sends.
 let rafGeometryPending = false;
+// Tear-off pill overlay (M09 F10 Leg L4-rebuild): rAF-coalesced show/move/hide state.
+// `tearoffShown` tracks whether the pill is up (first track → show, rest → move);
+// `tearoffPos` is the latest pointer position; the rAF flag caps sends at one per frame.
+let tearoffShown = false;
+/** @type {{ x: number, y: number } | null} */
+let tearoffPos = null;
+let tearoffRafPending = false;
 
 /* ----------------------------------------------------- jars / containers */
 
@@ -1470,28 +1477,40 @@ function clearDragVisuals() {
 }
 
 /**
- * Tear-off affordance (M09 F10 Leg 4): a window-local floating hint shown while a tear-off is
- * armed. Appended to <body> — OUTSIDE `#tabs` — so it never enters the strip's flow and can
- * never perturb the arm-time `slotRects` snapshot; moved by `transform` only (never a layout
- * property), so AC2's layout-neutrality holds. Idempotent by query-and-create — a double
- * "arm" reuses the one element rather than stacking ghosts.
- * @param {number} x @param {number} y
+ * Tear-off affordance (M09 F10 Leg L4-rebuild): a "Release to open in a new window" pill
+ * shown while a tear-off is armed. It is a MAIN-OWNED overlay WebContentsView (driven via
+ * IPC), NOT a chrome-DOM element — the DOM ghost (Leg 4) was occluded by the guest's
+ * native view once the drag left the strip band. Sends are rAF-COALESCED (mirror
+ * `sendActiveBounds`): at most one IPC per frame. First track → show+position; every
+ * subsequent track while shown → move. `e.clientX/Y` map 1:1 (DIP) onto the pill bounds.
  */
-function trackTearoffGhost(x, y) {
-  let g = document.querySelector('.tearoff-ghost');
-  if (!g) {
-    g = document.createElement('div');
-    g.className = 'tearoff-ghost';
-    g.textContent = 'Release to open in a new window';
-    document.body.appendChild(g);
+function flushTearoffGhost() {
+  tearoffRafPending = false;
+  if (!tearoffPos) return; // cleared before the frame fired — nothing to show
+  if (tearoffShown) {
+    window.goldfinch.tearoffOverlayMove(tearoffPos);
+  } else {
+    tearoffShown = true;
+    window.goldfinch.tearoffOverlayShow(tearoffPos);
   }
-  /** @type {HTMLElement} */ (g).style.transform = `translate(${x + 12}px, ${y + 12}px)`;
 }
 
-/** Remove the tear-off hint. Query-and-remove, so it is idempotent and clears any stray ghost. */
+/** @param {number} x @param {number} y */
+function trackTearoffGhost(x, y) {
+  tearoffPos = { x, y };
+  if (tearoffRafPending) return;
+  tearoffRafPending = true;
+  requestAnimationFrame(flushTearoffGhost);
+}
+
+/** Hide the pill. Idempotent: a hide with nothing shown is a no-op (never a stray IPC). */
 function clearTearoffGhost() {
-  const g = document.querySelector('.tearoff-ghost');
-  if (g) g.remove();
+  tearoffPos = null;
+  tearoffRafPending = false;
+  if (tearoffShown) {
+    tearoffShown = false;
+    window.goldfinch.tearoffOverlayHide();
+  }
 }
 
 /**

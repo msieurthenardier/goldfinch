@@ -276,7 +276,19 @@ all changes. Each tagged fix / feature (fix = look-and-feel; feature/bug = scope
 - **T6 — cross-window drag via HTML5 DnD** *(feature, LARGE → design review; transport measured GO at
   Station C).* Make tabs `draggable`, `dragstart` stashes the tab identity in a custom MIME, a `drop`
   handler on the target window's strip fires the existing coordinate-free `moveTabIntoWindow`/adopt path.
-  Satisfies mission criterion 8. (Station C.)
+  Satisfies mission criterion 8. (Station C.) → **F11.**
+
+### Operator insight (L4-overlay verify) + a recorded future item
+- **The tear-off overlay VIEW is a reusable primitive, not a one-off pill** (operator): a chrome-owned
+  surface that paints **above the guest, anywhere in the window** opens future options — window/tab
+  **previews** on drag (richer than a pill), and richer drag feedback generally. Worth treating the new
+  `tearoff-overlay-manager` as the seed of a general chrome-over-guest overlay capability.
+- **T7 (recorded observation, not yet scoped) — tab context menu can only render in the content area.**
+  Operator flagged that the tab context menu (menu-overlay sheet) appears constrained to the content
+  area and can't render over/above the strip cleanly. This is the SAME chrome-over-guest layering the
+  L4-overlay work exercises, so the overlay-view primitive may be the lever to fix it. **Carry to the
+  mission debrief / a future flight** — investigate whether the sheet's bounds are content-area-clamped
+  and whether an overlay-view (or a bounds change) frees it. Not scoped into F10.
 
 _(Stations E–F may add more.)_
 
@@ -433,3 +445,70 @@ non-printing command, or let the operator run the keyed gate.
 **Downstream:** the FD will NOT re-drive the keyed a11y/behavior gauntlet by self-parsing minted output; the
 a11y run + live behavior checks go to the operator's clean rig (or F11's verification). The environment was
 also degraded (no network; GPU transient failures), independently making a self-run unreliable.
+
+### F10 leg verification (operator, by-hand) + the L4 layering bug
+- **L1 PASS** (hover highlight + active favicon kept when shrunk). **L2 PASS** (Ctrl+# re-arm from page
+  focus). **L3 PASS via menu** (sole-tab "Move to window …" moves the tab + closes the source). L3 "fail with
+  drag" = **expected**: cross-window DRAG is **F11** (unbuilt), sole-tab tear-off is refused by design — not
+  an L3 bug.
+- **L4 BUG — fundamental layering.** Operator: *"the pill only shows in the chrome of the original window,
+  goes behind the main content area, doesn't show outside."* The ghost is a **chrome-DOM element**, but the
+  guest page is a **separate native `WebContentsView` stacked above the chrome's content area** — so once the
+  pill follows the pointer below the strip band it is **occluded by the guest view**. A chrome-DOM element
+  cannot render over the guest (exactly why find/menu overlays are separate views). **L4-as-built is broken
+  for its purpose** — it's only visible over the strip band, the opposite of where a tear-off drag goes.
+  → fix options raised to operator: (a) overlay-VIEW pill (find/menu pattern, follows anywhere, bigger fix);
+  (b) strip-anchored hint (stays in the visible strip band, no cursor-follow into content, small);
+  (c) revert L4.
+
+### Leg L4-rebuild — Implementation (tearoff-overlay-view; supersedes the 589989c chrome-DOM ghost)
+Chose fix option (a): the tear-off pill is now a MAIN-OWNED overlay `WebContentsView`, so it paints
+**over the guest** and follows the cursor anywhere — the chrome-DOM ghost could only paint in the strip band.
+
+- **The manager** — `src/main/tearoff-overlay-manager.js` (65 code lines): a trimmed copy of
+  `find-overlay-manager.js`'s lifecycle — lazy singleton view, destroyed-recreate guard,
+  `render-process-gone` self-teardown, `show()` = position → `addChildView` (the re-add RAISES above the
+  guest) → `setVisible(true)`, `hide()` = visibility-gated `removeChildView` (never `setVisible(false)`-only),
+  `teardown()` destroys the wc. The find-session state machine is DROPPED; positioning is a pill-anchored
+  `setBounds({ x: x+12, y: y+12, width: 260, height: 28 })` off the pointer (constants live in the module,
+  which stays Electron-free / offline-testable). `show(x,y)` seeds the position in one call; the AC5 re-assert
+  calls `show()` with no args (keeps last position).
+- **The 3 IPC channels** — `tearoff-overlay:show` / `:move` / `:hide` (main.js), chrome-origin,
+  fire-and-forget; the sender's own window is resolved via `registry.getWindowForChrome(event.sender)` (a
+  guest page has no `tearoffOverlay` path). Coordinates are 1:1 DIP (`e.clientX/Y` → pill `setBounds`).
+  Bridged in `chrome-preload.js` (`tearoffOverlayShow/Move/Hide`, all `ipcRenderer.send`).
+- **The rAF-coalesce** — `renderer.js`: `trackTearoffGhost(x,y)` stores the latest pointer position and
+  schedules ONE `requestAnimationFrame` (mirror `sendActiveBounds`); the flush sends `:show` on the first
+  frame (then `:move`), so at most one IPC per frame no matter how fast the pointer moves. `clearTearoffGhost()`
+  sends `:hide` (idempotent — no stray IPC when nothing is shown). The existing hooks (tearOff-enter →
+  track, tearOff-leave / pointerup / pointercancel via `clearDragVisuals` → clear) stay wired through those two
+  functions unchanged. The `.tearoff-ghost` chrome-DOM element + its CSS block are REMOVED.
+- **Teardown / no-leak (F6/F7 class)** — the manager is constructed per-window in `createWindow`
+  (`record.tearoffOverlay`); `win.on('close')` calls `tearoffOverlay.teardown()` (beside `findOverlay.teardown()`)
+  and nulls `rec.tearoffOverlay` — the SOLE destruction site. The pill wc never enters `tabViews`, so
+  `enumerateTabs` is unaffected. Pinned by `test/unit/tearoff-overlay-teardown.test.js` (masked source-scan:
+  teardown-in-close-handler + created-via-manager, with synthetic mutate-away failure cases).
+- **How it layers above the guest** — `show()`'s `addChildView` re-add raises the pill last in the compositing
+  stack (the find/menu idiom); `tab-set-active` re-asserts it after the guest/find/sheet re-adds (AC5) when a
+  tear-off is live mid-activation (rare edge, now covered rather than accepted).
+- **The no-focus divergence (AC3)** — deliberately UNLIKE find/menu: the pill view has NO preload,
+  `webContents.focus()` is NEVER called on it, and its HTML `body { pointer-events: none }`. It is pure paint
+  sized to the pill only, so a tear-off drag never steals focus from the guest or the tab strip and never
+  intercepts input. Pill content is `src/renderer/tearoff-overlay.html` (accent `#f5c518`, radius, 12px, no
+  script; `default-src 'none'` CSP with `style-src 'unsafe-inline'`).
+- **Budgets (DD11):** tearoff-overlay-manager.js 65 / ≤90; main.js +28 / ≤+30; renderer.js +13 / ≤+15;
+  chrome-preload.js +3 / ≤+6. All within.
+- **Gate delta (standalone):** `npm test` 1965 pass / 0 fail (baseline 1960, +5 from the new source-scan
+  suite); `npm run lint` clean; `npm run typecheck` clean (added the 3 bridge methods to `GoldfinchBridge`
+  and a `tearoffOverlay` slot to the `WindowRecord` typedef). No a11y.
+- **The visual is the operator's re-verify:** the pill should follow the cursor OVER the page during a
+  tear-off drag and disappear on release / cancel / re-entry into the strip.
+
+**Re-verify (operator): PASS over the content area** — the L4 bug (pill occluded by the guest) is fixed;
+the overlay pill now tracks the cursor over the page. **"Disappears outside the window" = accepted platform
+boundary, not a bug.** A `WebContentsView` is composited *inside* its host window and cannot paint on the
+desktop beyond the window edge; the only out-of-window options are a cursor-tracking top-level window
+(F8 measured WSLg window positioning a **cached fiction** — dead on this rig) or an **OS-native drag image**
+(exactly what **F11's HTML5 drag** provides for free — the browser renders the ghost at OS level, crossing
+window bounds). So the out-of-window feedback is **subsumed by F11**, not abandoned. **L4-overlay accepted;
+the outside-window case carried to F11's native drag image.**

@@ -357,23 +357,9 @@ html.platform-darwin #window-controls {
   cursor: grabbing;
 }
 
-/* Tear-off affordance (M09 F10 Leg 4): a window-local floating hint shown while a tear-off is
-   armed. Appended to <body> OUTSIDE #tabs and moved by transform only, so it never enters the
-   strip's flow nor invalidates the arm-time slotRects snapshot (AC2 — layout-neutral). fixed +
-   pointer-events:none keep it purely paint; it tracks the pointer, never the OS cursor (DD16). */
-.tearoff-ghost {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 100;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #1a1a1a;
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-}
+/* The tear-off hint (M09 F10) moved to a main-owned overlay WebContentsView at Leg
+   L4-rebuild — the chrome-DOM `.tearoff-ghost` was occluded by the guest's native view
+   once the drag left the strip band. See src/renderer/tearoff-overlay.html. */
 
 /* Visible keyboard focus ring across interactive chrome (F23). */
 .icon-btn:focus-visible,

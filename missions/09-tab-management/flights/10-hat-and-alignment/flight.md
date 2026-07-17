@@ -106,6 +106,11 @@ post-F7 run** (`closed-tab-reopen`, `find-overlay-geometry`, `foreground-to-act`
 - [x] `02-keyboard-cycling-rearm` — T3 Ctrl+# stuck from page focus (conditional guest re-focus). HIGH (bug).
 - [x] `03-sole-tab-move-close-source` — T4 sole-tab move-to-window + close empty source. HIGH (feature).
 - [x] `04-tearoff-drag-feedback` — T5 in-drag ghost/hint (window-local, layout-neutral). MED.
+      **SUPERSEDED by `06-tearoff-overlay-view` (L4-rebuild):** the chrome-DOM ghost was occluded by the
+      guest's native view once the drag left the strip band — operator-verify bug.
+- [x] `06-tearoff-overlay-view` (L4-rebuild) — the tear-off pill rebuilt as a main-owned always-on-top
+      overlay `WebContentsView` (find/menu pattern) so it paints over the guest and follows the cursor
+      anywhere; no focus-steal, per-window teardown (F6/F7 leak class). HIGH.
 - [→] `05-crosswindow-drag-html5` — T6 cross-window drag via HTML5 DnD (criterion 8). **MOVED TO ITS OWN
       FLIGHT F11** (operator decision): design review found it unsatisfiable as an F10 co-leg (static
       `draggable` kills the pointer reorder; needs a spike + likely a drag-layer rewrite). Built after F10.

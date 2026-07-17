@@ -202,6 +202,15 @@ contextBridge.exposeInMainWorld('goldfinch', {
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
   rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
 
+  // --- tear-off pill overlay (M09 F10 Leg L4-rebuild) ---
+  // The "Release to open in a new window" pill is a main-owned overlay WebContentsView
+  // floating over the guest (not chrome DOM — the DOM ghost was occluded once the drag
+  // left the strip band). Fire-and-forget: show on arm, move on each pointermove (the
+  // renderer rAF-coalesces), hide on leave/drop/cancel.
+  tearoffOverlayShow: (pos) => ipcRenderer.send('tearoff-overlay:show', pos),
+  tearoffOverlayMove: (pos) => ipcRenderer.send('tearoff-overlay:move', pos),
+  tearoffOverlayHide: () => ipcRenderer.send('tearoff-overlay:hide'),
+
   // --- menu-overlay sheet (M05 Flight 8, DD4) ---
   // The chrome owns menu state/model-building/actions; the sheet is presentation-only.
   // Channel 1: open (or model-replace) a menu — {menuType, model, anchor, startIndex, token}.

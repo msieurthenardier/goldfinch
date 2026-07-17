@@ -42,6 +42,7 @@
  *   pendingChromeSends: Array<() => [string, any]>,
  *   findOverlay: any,
  *   sheet: any,
+ *   tearoffOverlay: any,
  *   restoreTabs?: Array<{ url: string, jarId: string, active: boolean }>
  * }} WindowRecord
  */
@@ -83,6 +84,7 @@ function createWindowRegistry() {
       // create() (this module is Electron-free and cannot construct them).
       findOverlay: null,
       sheet: null,
+      tearoffOverlay: null,
     };
     windows.set(win.id, record);
     lastFocusedId = win.id;

@@ -28,6 +28,7 @@ const { registerInternalHandler } = require('./internal-ipc');
 const { computeFindOverlayBounds } = require('./find-overlay-geometry');
 const { createMenuOverlayManager } = require('./menu-overlay-manager');
 const { createFindOverlayManager } = require('./find-overlay-manager');
+const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -408,6 +409,22 @@ function createOverlayView() {
   view.setBackgroundColor('#00000000');
   view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'find-overlay.html')).catch((err) => {
     console.warn('[find-overlay] loadFile rejected:', err && (err.code || err.message || err));
+  });
+  return view;
+}
+
+// Electron construction for the tear-off pill overlay (injected into the manager,
+// M09 F10 Leg L4-rebuild). Deliberately DIVERGENT from createOverlayView: NO preload and
+// never focused (AC3) — the pill is pure paint that follows the cursor over the guest.
+// Transparent bg; the tiny document (pointer-events:none body) can never intercept input.
+// Its webContents never enters `tabViews`, so enumerateTabs is unaffected by construction.
+function createTearoffOverlayView() {
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  view.setBackgroundColor('#00000000');
+  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')).catch((err) => {
+    console.warn('[tearoff-overlay] loadFile rejected:', err && (err.code || err.message || err));
   });
   return view;
 }
@@ -1226,8 +1243,17 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     focusChrome: (attWin) => chromeForAttachment(attWin)?.focus()
   });
 
+  // Tear-off pill overlay (M09 F10 Leg L4-rebuild): per-window, same lifecycle discipline
+  // as the find/menu overlays — lazy view, teardown at `close` (the F6/F7 leak class).
+  // Deps close over THIS window's contentView; no find-session/menu state.
+  const tearoffOverlay = createTearoffOverlayManager({
+    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
+    createOverlayView: createTearoffOverlayView
+  });
+
   record.findOverlay = findOverlay;
   record.sheet = sheet;
+  record.tearoffOverlay = tearoffOverlay;
 
   // Lifecycle split (DD3, step assignment pinned by review F8): per-window teardown
   // runs at `close` (pre-teardown — guests alive, navigationHistory readable, and
@@ -1245,6 +1271,7 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     // sheet — the find teardown nulls the session, so the sheet's teardown-reason
     // find-restore naturally no-ops.
     findOverlay.teardown();
+    tearoffOverlay.teardown();
     sheet.closeMenuOverlay('teardown');
     sheet.teardown();
 
@@ -1258,6 +1285,7 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     // the closure path above already tore down. Both paths, one breath.
     if (rec) {
       rec.findOverlay = null;
+      rec.tearoffOverlay = null;
       rec.sheet = null;
     }
     if (!rec) return;
@@ -3182,6 +3210,10 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
       // top-of-stack via re-add-last (the recorded attachment — never re-resolved).
       owner.sheet.show();
     }
+    // Tear-off pill z-order re-assert (AC5): a tab activation MID-drag is rare, but the
+    // guest re-add above buries the pill — re-show it (re-add RAISES) so it stays above.
+    // Gated on visibility, so no cost when no tear-off is live. Strictly last: topmost.
+    if (owner.tearoffOverlay?.isVisible()) owner.tearoffOverlay.show();
   }
   // Hide old active tab (within the owning window only)
   if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
@@ -3294,6 +3326,20 @@ ipcMain.on('find-overlay:query', (event, payload) => {
   const rec = recordForFindSender(event.sender);
   if (!rec || !rec.findOverlay) return;
   rec.findOverlay.query(payload || {});
+});
+
+// --- Tear-off pill overlay IPC (M09 F10 Leg L4-rebuild). Chrome-origin, fire-and-forget:
+// the renderer drives show/move/hide as a tear-off drag arms, follows the cursor, and
+// ends. The sender's own window is resolved (getWindowForChrome); a guest page has no
+// tearoffOverlay path to reach. Coordinates are 1:1 DIP (e.clientX/Y → pill setBounds). --
+ipcMain.on('tearoff-overlay:show', (event, { x, y } = {}) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.show(x, y);
+});
+ipcMain.on('tearoff-overlay:move', (event, { x, y } = {}) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.setPosition(x, y);
+});
+ipcMain.on('tearoff-overlay:hide', (event) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.hide();
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.

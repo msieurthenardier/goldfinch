@@ -307,6 +307,13 @@ interface GoldfinchBridge {
   /** Send rescan-media to a specific web tab view (fire-and-forget). */
   rescanMedia(payload: { wcId: number }): void;
 
+  /** Tear-off pill overlay (M09 F10 Leg L4-rebuild): show at pointer position (fire-and-forget). */
+  tearoffOverlayShow(pos: { x: number; y: number }): void;
+  /** Tear-off pill overlay: reposition to pointer (fire-and-forget; main applies while visible). */
+  tearoffOverlayMove(pos: { x: number; y: number }): void;
+  /** Tear-off pill overlay: hide (fire-and-forget). */
+  tearoffOverlayHide(): void;
+
   // FIX 1 belt-and-suspenders: main triggers an immediate bounds re-send on maximize/unmaximize/resize.
   onTriggerSendBounds(cb: () => void): void;
 
