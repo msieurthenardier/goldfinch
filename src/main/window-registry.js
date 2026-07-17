@@ -42,6 +42,8 @@
  *   pendingChromeSends: Array<() => [string, any]>,
  *   findOverlay: any,
  *   sheet: any,
+ *   tearoffOverlay: any,
+ *   dragWcId: number | null,
  *   restoreTabs?: Array<{ url: string, jarId: string, active: boolean }>
  * }} WindowRecord
  */
@@ -83,6 +85,12 @@ function createWindowRegistry() {
       // create() (this module is Electron-free and cannot construct them).
       findOverlay: null,
       sheet: null,
+      tearoffOverlay: null,
+      // DD2 provenance registration (M09 F11 Leg 3): the wcId THIS window's chrome
+      // declared at dragstart — the adopt-by-drop gate refuses a payload the source
+      // never declared. Cleared by a grace timer at dragend, or consumed by a
+      // successful adopt (main.js owns both). Dies with the record on window close.
+      dragWcId: null,
     };
     windows.set(win.id, record);
     lastFocusedId = win.id;

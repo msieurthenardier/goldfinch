@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { maskComments } = require('../helpers/source-scan');
-const { classifyDragPoint, shouldArm } = require('../../src/shared/tab-drag-zone');
+const { classifyDragPoint, isOutsideStrip } = require('../../src/shared/tab-drag-zone');
 const { dropIndexFromPointer } = require('../../src/shared/tab-order');
 
 const MODULE_PATH = path.join(__dirname, '../../src/shared/tab-drag-zone.js');
@@ -172,32 +172,33 @@ test('the MASK is what carries those two readings — unmasked, the real file re
 });
 
 // ---------------------------------------------------------------------------
-// AC4 (M09 F9 Leg 1) — shouldArm: the extracted arm-threshold predicate, BOTH
-// directions on BOTH axes. The F8 change this pins was made for the straight-DOWN case
-// (dx=0), which F2's `Math.abs(dx)` could never arm; the boundary is `>=`.
+// isOutsideStrip — a public export since M09 F11 Leg 2, pinned here as pure geometry in
+// its own right. The `releaseInsideViewport` dragend gate it was briefly promoted for is
+// GONE (the Leg 2 HAT fix removed the viewport AND-gate — it conflated a cross-window
+// release with a desktop tear-off and killed the latter): the renderer no longer imports
+// this function at all, and tab-drag-invariants.test.js pins its ABSENCE from dragend.
+// The shipped dragend gate is `!dropHandled && (tearOff || releaseZone.zone === 'tearOff')`
+// where the release zone comes from `classifyDragPoint` — which reads isOutsideStrip
+// INTERNALLY, so the renderer's only remaining dependence on it is transitive. These
+// direct pins keep the exported edge semantics honest for that transitive consumer.
 // ---------------------------------------------------------------------------
 
-test('shouldArm arms a straight-DOWN gesture past the threshold — the F8 case (dx=0)', () => {
-  // dx held at 0: the exact gesture F2's `Math.abs(dx)` gate could never arm. This is the
-  // reason the predicate is two-axis, so it is the case the test is anchored on.
-  assert.equal(shouldArm(0, 6), true);
+test('isOutsideStrip: a point inside the rect is NOT outside (release-inside → tear-off gate open)', () => {
+  assert.equal(isOutsideStrip(STRIP, 250, 22), false);
 });
 
-test('shouldArm does NOT arm a straight-down gesture below the threshold (dx=0)', () => {
-  assert.equal(shouldArm(0, 4), false);
+test('isOutsideStrip: a point past any edge IS outside — the cross-window release (probe4)', () => {
+  assert.equal(isOutsideStrip(STRIP, STRIP.right + 1, 22), true); // past the right edge — the cross-window case
+  assert.equal(isOutsideStrip(STRIP, 250, STRIP.bottom + 1), true); // below the strip
+  assert.equal(isOutsideStrip(STRIP, STRIP.left - 1, 22), true); // left of it
 });
 
-test('shouldArm arms a lateral gesture past the threshold, not below it — both directions', () => {
-  assert.equal(shouldArm(6, 0), true);
-  assert.equal(shouldArm(4, 0), false);
-});
-
-test('shouldArm arms exactly AT the threshold — the boundary is `>=`', () => {
-  assert.equal(shouldArm(0, 5), true);
-});
-
-test('shouldArm reads the hypotenuse, not either axis alone — (3,4) is distance 5', () => {
-  // Neither axis reaches 5, but their hypotenuse is exactly 5. A gate on either axis alone
-  // (`Math.abs(dx)` or `Math.abs(dy)`) would read this as below threshold; hypot arms it.
-  assert.equal(shouldArm(3, 4), true);
+test('isOutsideStrip: a degenerate / non-finite rect is NEVER outside — an unmeasurable rect never tears off', () => {
+  // The dependence is TRANSITIVE now (see the section header): classifyDragPoint's own
+  // degenerate-rect arm — an unreadable strip classifies `reorder`, never `tearOff` —
+  // rests on this never-outside reading. A rect the module could not measure must never
+  // spend the destructive outcome.
+  assert.equal(isOutsideStrip(/** @type {any} */ (null), 250, 22), false);
+  assert.equal(isOutsideStrip({ left: NaN, top: 0, right: 100, bottom: 40 }, 250, 22), false);
+  assert.equal(isOutsideStrip(STRIP, NaN, 22), false);
 });

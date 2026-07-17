@@ -271,11 +271,12 @@ test('no suspension point separates the tabViews delete from the set in the move
   assert.equal(cores.length, 1, `expected exactly ONE ${ANCHOR} definition (found ${cores.length})`);
   assert.equal(
     anchors,
-    4,
-    `expected the ${ANCHOR} token 4× in src/main/** — 1 definition + the menu, tear-off and ` +
-      `cross-window-move call sites (found ${anchors}). A NEW caller is not a defect: bump ` +
-      'this number once you have checked the new call site is a real one, and keep the ' +
-      'guard. Leg 4 bumped it 3 → 4 for the DD8 cross-window move.'
+    5,
+    `expected the ${ANCHOR} token 5× in src/main/** — 1 definition + the menu, tear-off, ` +
+      `cross-window-move and drop-adopt call sites (found ${anchors}). A NEW caller is not a ` +
+      'defect: bump this number once you have checked the new call site is a real one, and ' +
+      'keep the guard. Leg 4 bumped it 3 → 4 for the DD8 cross-window move; F11 Leg 3 ' +
+      'bumped it 4 → 5 for the tab-adopt-by-drop handler.'
   );
 
   // Vacuity guard (b) — pair presence. THIS is the guard that fired on leg 3's factoring.
@@ -347,8 +348,8 @@ test('the pin FAILS a move core that is async', () => {
   assert.deepEqual(scanSource(real, 'main.js').core.violations, [], 'real → 0 violations');
 
   const mutated = real.replace(
-    'function moveTabIntoWindow(source, p, resolveTarget) {',
-    'async function moveTabIntoWindow(source, p, resolveTarget) {'
+    'function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
+    'async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {'
   );
   assertMutated(real, mutated, 'async-core');
 
@@ -384,8 +385,8 @@ test('the pin FAILS a suspension point between the delete and the set', () => {
   // never exist.
   const mutated = real
     .replace(
-      'function moveTabIntoWindow(source, p, resolveTarget) {',
-      'async function moveTabIntoWindow(source, p, resolveTarget) {'
+      'function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
+      'async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {'
     )
     .replace(
       '  source.tabViews.delete(p.wcId);\n  target.tabViews.set(p.wcId, entry);',
@@ -402,13 +403,13 @@ test('the pin FAILS a suspension point between the delete and the set', () => {
 
 test('guard (a) FAILS a renamed core rather than passing on nothing', () => {
   const real = realSource();
-  assert.equal(scanSource(real, 'main.js').anchors, 4, 'real → the anchor token 4× (1 definition + 3 call sites)');
+  assert.equal(scanSource(real, 'main.js').anchors, 5, 'real → the anchor token 5× (1 definition + 4 call sites)');
 
   const mutated = real.replaceAll('moveTabIntoWindow', 'moveTabIntoOtherWindow');
   assertMutated(real, mutated, 'renamed-core');
 
   const res = scanSource(mutated, 'main.js');
-  assert.equal(res.anchors, 0, 'mutated → the anchor is gone, and the net asserts anchors === 4');
+  assert.equal(res.anchors, 0, 'mutated → the anchor is gone, and the net asserts anchors === 5');
   assert.equal(res.core, null, 'no definition is found — a vacuous pass is impossible');
 });
 
@@ -453,7 +454,7 @@ test('the pair guard FAILS a handler the delete has left rather than passing on 
   assertMutated(real, mutated, 'pair-removed');
 
   const res = scanSource(mutated, 'main.js');
-  assert.equal(res.anchors, 4, 'the anchor is still there — this is exactly the vacuous-pass shape');
+  assert.equal(res.anchors, 5, 'the anchor is still there — this is exactly the vacuous-pass shape');
   assert.equal(res.core.deleteFound, false);
   assert.equal(res.core.pairFound, false, 'mutated → the net FAILS on the missing pair');
   assert.deepEqual(res.core.violations, [], 'and it finds no suspension point — an unguarded pin would PASS here');
@@ -467,7 +468,7 @@ test('a core-shaped mention inside a COMMENT is not picked up as the definition'
   // and the word `async` in the same block, which is exactly a false-positive waiting for
   // an unmasked scan.
   const commented = [
-    '// async function moveTabIntoWindow(source, p, resolveTarget) {',
+    '// async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
     '//   source.tabViews.delete(p.wcId);',
     '//   await Promise.resolve();',
     '//   target.tabViews.set(p.wcId, entry);',
@@ -500,13 +501,14 @@ test('the mask is STILL not load-bearing on the real tree — re-measured at the
   // keyword, which no prose carries, and main.js names the core in prose nowhere. The claim
   // was composed rather than measured; the measurement is what is recorded.
   //
-  // ⚠ THE `3` ABOVE IS LEG-3 HISTORY, NOT THIS FILE'S ASSERTION — the count is 4 today.
-  // Leg 4 added the cross-window-move call site and bumped it 3 → 4; the assertions below
-  // read 4. The paragraph is left at 3 deliberately: it narrates a reading TAKEN AT LEG 3,
-  // and rewriting the number would silently restate a measurement as though it had been
-  // taken at a count that never existed when it was made. The equal-readings FINDING is
-  // what carries forward, not the arity it was observed at — and re-measuring it at 4 is
-  // exactly what the assertions below do.
+  // ⚠ THE `3` ABOVE IS LEG-3 HISTORY, NOT THIS FILE'S ASSERTION — the count is 5 today.
+  // Leg 4 added the cross-window-move call site (3 → 4), and F11 Leg 3 added the
+  // tab-adopt-by-drop call site (4 → 5); the assertions below read 5. The paragraph is
+  // left at 3 deliberately: it narrates a reading TAKEN AT LEG 3, and rewriting the
+  // number would silently restate a measurement as though it had been taken at a count
+  // that never existed when it was made. The equal-readings FINDING is what carries
+  // forward, not the arity it was observed at — and re-measuring it at 5 is exactly
+  // what the assertions below do.
   //
   // The mask stays on leg 1's ground: it is free, it is the house idiom, and it is
   // protective against edits that are plausible here (a commented-out core, a quoted
@@ -521,11 +523,11 @@ test('the mask is STILL not load-bearing on the real tree — re-measured at the
   assert.notEqual(maskedDef, -1, 'the masked scan finds the real definition');
   assert.equal(unmaskedDef, maskedDef, 'the JSDoc does NOT shift the definition match — measured, not assumed');
 
-  assert.equal((masked.match(ANCHOR_RE) || []).length, 4, 'masked → 1 definition + 3 call sites');
+  assert.equal((masked.match(ANCHOR_RE) || []).length, 5, 'masked → 1 definition + 4 call sites');
   assert.equal(
     (real.match(ANCHOR_RE) || []).length,
-    4,
-    'unmasked → the SAME 4. The mask changes nothing on this tree today, and saying so is ' +
+    5,
+    'unmasked → the SAME 5. The mask changes nothing on this tree today, and saying so is ' +
       'the point: an instrument whose two readings are equal is proving nothing here.'
   );
 });

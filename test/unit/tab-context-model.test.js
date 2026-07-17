@@ -161,13 +161,29 @@ test('AC3 — the item is keyed by windowId, NOT by its position in the list', (
   );
 });
 
-test('AC1 — move-to-window items ride the SAME gate as move-new-window (sole tab / internal)', () => {
+test('AC1 (M09 F10 L3) — a SOLE tab offers move-to-window (existing windows) but NOT move-new-window', () => {
   const targets = [win(7, 'GitHub'), win(9, 'Wikipedia')];
-  // Sole tab: main's core refuses `sole-tab`, so the items are omitted, not offered.
+  // Sole tab + other windows: move-window:* now PRESENT (a sole tab may
+  // consolidate into an existing window; main's core passes allowSoleTab on the
+  // tab-move-to-window path and closes the emptied source). move-new-window
+  // stays OMITTED (a sole-tab move to a NEW window is still a no-op swap).
   const sole = tabContextModel({ tabId: 't1', isLastTab: true, tabsToRight: 0, stackSize: 0, moveTargets: targets });
+  assert.deepEqual(ids(sole).filter((i) => i.startsWith('tab:move-window:')), [
+    'tab:move-window:7', 'tab:move-window:9'
+  ]);
+  assert.ok(!ids(sole).includes('tab:move-new-window'));
+});
+
+test('AC1 (M09 F10 L3) — a SOLE tab with NO other window offers no move items at all', () => {
+  // No target to consolidate into: move-window:* empty, move-new-window omitted.
+  const sole = tabContextModel({ tabId: 't1', isLastTab: true, tabsToRight: 0, stackSize: 0, moveTargets: [] });
   assert.deepEqual(ids(sole).filter((i) => i.startsWith('tab:move-window:')), []);
   assert.ok(!ids(sole).includes('tab:move-new-window'));
-  // Internal tab: main's core refuses `internal`. Same gate, same omission.
+});
+
+test('AC1 — move items are omitted for an INTERNAL tab regardless of window count', () => {
+  const targets = [win(7, 'GitHub'), win(9, 'Wikipedia')];
+  // Internal tab: main's core refuses `internal`. Both move families omitted.
   const internal = tabContextModel({
     tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, isInternal: true, moveTargets: targets
   });

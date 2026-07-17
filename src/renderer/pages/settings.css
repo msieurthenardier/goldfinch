@@ -207,6 +207,17 @@ main section p {
   padding-left: 0;
 }
 
+/* Session restore is a standalone Startup control, not a Home-page child: divider above + no indent
+   so it reads as its own setting under "On startup" rather than a sub-item of Home page. */
+.startup-toggle-group {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.shield-row.startup-toggle-row {
+  padding-left: 0;
+}
+
 /* Pill switch — mirrors .switch in src/renderer/styles.css exactly:
    34×18px track, border-radius 9px, OFF #7c7f8a + border, ON var(--accent).
    Native <input type="checkbox"> kept for accessibility/behavior; appearance:none

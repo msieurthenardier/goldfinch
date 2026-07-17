@@ -270,6 +270,20 @@ interface GoldfinchBridge {
     | { ok: true; windowId: number }
     | { ok: false; reason: 'no-source' | 'bad-payload' | 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }
   >;
+  /** Adopt a dragged tab into THIS window (M09 F11 Leg 3, DD1/DD2) — the cross-window
+   * drop. Same identity-payload shape as the three move paths above, but the AUTHORITY
+   * is inverted: the SOURCE is resolved from the payload's wcId, gated main-side on the
+   * source chrome's live tabDragStarted registration ('not-dragging' else). Sole-tab
+   * drags consolidate (the emptied source window closes). Refusals discriminated (DD5). */
+  tabAdoptByDrop(payload: {
+    wcId: number; url: string; title: string; favicon: string | null;
+    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+  }): Promise<{ ok: true; windowId: number } | { ok: false; reason: 'no-source' | 'bad-payload' | 'no-tab' | 'same-window' | 'not-dragging' | 'internal' | 'sole-tab' | 'no-target' }>;
+  /** DD2 provenance bookends (M09 F11 Leg 3): fire-and-forget dragstart/dragend
+   * declarations of the dragged wcId; main verifies sender ownership and clears the
+   * registration on a grace timer (or consumes it on a successful adopt). */
+  tabDragStarted(wcId: number): void;
+  tabDragEnded(wcId: number): void;
   /** DD8 push-cache boot seed (M09 F8 Leg 4): the OTHER open windows, each captioned
    * from its active tab's title. Sender-resolved main-side — the asking window is never
    * in its own list. Live updates arrive via onMoveTargetsChanged below. */
@@ -306,6 +320,13 @@ interface GoldfinchBridge {
   tabFind(payload: { wcId: number; text?: string; options?: any; stop?: boolean }): void;
   /** Send rescan-media to a specific web tab view (fire-and-forget). */
   rescanMedia(payload: { wcId: number }): void;
+
+  /** Tear-off pill overlay (M09 F10 Leg L4-rebuild): show at pointer position (fire-and-forget). */
+  tearoffOverlayShow(pos: { x: number; y: number }): void;
+  /** Tear-off pill overlay: reposition to pointer (fire-and-forget; main applies while visible). */
+  tearoffOverlayMove(pos: { x: number; y: number }): void;
+  /** Tear-off pill overlay: hide (fire-and-forget). */
+  tearoffOverlayHide(): void;
 
   // FIX 1 belt-and-suspenders: main triggers an immediate bounds re-send on maximize/unmaximize/resize.
   onTriggerSendBounds(cb: () => void): void;

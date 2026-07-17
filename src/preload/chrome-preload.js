@@ -183,6 +183,16 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // belongs to THIS window, so the renderer cannot name a tab it does not own nor
   // a window that has since closed. Refusals come back discriminated (DD5).
   tabMoveToWindow: (payload) => ipcRenderer.invoke('tab-move-to-window', payload),
+  // Cross-window drop adopt (M09 F11 Leg 3, DD1/DD2): the TARGET window's drop handler
+  // invokes with the dragged identity payload. Main resolves the SOURCE from the
+  // payload's wcId (the inversion of tabMoveToWindow above), gated on the source's
+  // live tab-drag-started registration — refusals come back discriminated (DD5).
+  tabAdoptByDrop: (payload) => ipcRenderer.invoke('tab-adopt-by-drop', payload),
+  // DD2 provenance bookends: chrome-only dragstart/dragend declarations. Main verifies
+  // the SENDER owns the wcId and registers it, so a guest-forged MIME payload dies at
+  // the adopt gate ('not-dragging'); dragend clears on a main-side grace timer.
+  tabDragStarted: (wcId) => ipcRenderer.send('tab-drag-started', wcId),
+  tabDragEnded: (wcId) => ipcRenderer.send('tab-drag-ended', wcId),
   // DD8 push-cache, the closed-tab-stack mirror above: main pushes { targets } —
   // one { windowId, label } per OTHER window — whenever the window set, an active
   // tab, or an active tab's title changes. The chrome caches it so the tab-context
@@ -201,6 +211,15 @@ contextBridge.exposeInMainWorld('goldfinch', {
   tabSetBounds: (wcId, bounds) => ipcRenderer.send('tab-set-bounds', { wcId, bounds }),
   tabFind: (payload) => ipcRenderer.send('tab-find', payload),
   rescanMedia: (payload) => ipcRenderer.send('rescan-media', payload),
+
+  // --- tear-off pill overlay (M09 F10 Leg L4-rebuild) ---
+  // The "Release to open in a new window" pill is a main-owned overlay WebContentsView
+  // floating over the guest (not chrome DOM — the DOM ghost was occluded once the drag
+  // left the strip band). Fire-and-forget: show on arm, move on each pointermove (the
+  // renderer rAF-coalesces), hide on leave/drop/cancel.
+  tearoffOverlayShow: (pos) => ipcRenderer.send('tearoff-overlay:show', pos),
+  tearoffOverlayMove: (pos) => ipcRenderer.send('tearoff-overlay:move', pos),
+  tearoffOverlayHide: () => ipcRenderer.send('tearoff-overlay:hide'),
 
   // --- menu-overlay sheet (M05 Flight 8, DD4) ---
   // The chrome owns menu state/model-building/actions; the sheet is presentation-only.

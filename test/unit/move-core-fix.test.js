@@ -45,7 +45,7 @@ const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
 // The move core's body — anchored on the function name (never a line; move-tab-synchrony's
 // header measured four different line numbers for one pair). `resolveTarget` in the
 // signature keeps this from matching a near-miss overload.
-const DEFINITION_RE = /function\s+moveTabIntoWindow\s*\(source, p, resolveTarget\)\s*\{/;
+const DEFINITION_RE = /function\s+moveTabIntoWindow\s*\(source, p, resolveTarget, allowSoleTab = false\)\s*\{/;
 
 // The disarming pre-set the fix removed. Receiver-qualified — bare `activeTabWcId = p.wcId`
 // could drift; `target.activeTabWcId = p.wcId` is the exact assignment F8 shipped.

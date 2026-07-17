@@ -28,6 +28,7 @@ const { registerInternalHandler } = require('./internal-ipc');
 const { computeFindOverlayBounds } = require('./find-overlay-geometry');
 const { createMenuOverlayManager } = require('./menu-overlay-manager');
 const { createFindOverlayManager } = require('./find-overlay-manager');
+const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -408,6 +409,22 @@ function createOverlayView() {
   view.setBackgroundColor('#00000000');
   view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'find-overlay.html')).catch((err) => {
     console.warn('[find-overlay] loadFile rejected:', err && (err.code || err.message || err));
+  });
+  return view;
+}
+
+// Electron construction for the tear-off pill overlay (injected into the manager,
+// M09 F10 Leg L4-rebuild). Deliberately DIVERGENT from createOverlayView: NO preload and
+// never focused (AC3) — the pill is pure paint that follows the cursor over the guest.
+// Transparent bg; the tiny document (pointer-events:none body) can never intercept input.
+// Its webContents never enters `tabViews`, so enumerateTabs is unaffected by construction.
+function createTearoffOverlayView() {
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  view.setBackgroundColor('#00000000');
+  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')).catch((err) => {
+    console.warn('[tearoff-overlay] loadFile rejected:', err && (err.code || err.message || err));
   });
   return view;
 }
@@ -1226,8 +1243,17 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     focusChrome: (attWin) => chromeForAttachment(attWin)?.focus()
   });
 
+  // Tear-off pill overlay (M09 F10 Leg L4-rebuild): per-window, same lifecycle discipline
+  // as the find/menu overlays — lazy view, teardown at `close` (the F6/F7 leak class).
+  // Deps close over THIS window's contentView; no find-session/menu state.
+  const tearoffOverlay = createTearoffOverlayManager({
+    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
+    createOverlayView: createTearoffOverlayView
+  });
+
   record.findOverlay = findOverlay;
   record.sheet = sheet;
+  record.tearoffOverlay = tearoffOverlay;
 
   // Lifecycle split (DD3, step assignment pinned by review F8): per-window teardown
   // runs at `close` (pre-teardown — guests alive, navigationHistory readable, and
@@ -1245,6 +1271,7 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     // sheet — the find teardown nulls the session, so the sheet's teardown-reason
     // find-restore naturally no-ops.
     findOverlay.teardown();
+    tearoffOverlay.teardown();
     sheet.closeMenuOverlay('teardown');
     sheet.teardown();
 
@@ -1258,6 +1285,7 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     // the closure path above already tore down. Both paths, one breath.
     if (rec) {
       rec.findOverlay = null;
+      rec.tearoffOverlay = null;
       rec.sheet = null;
     }
     if (!rec) return;
@@ -2837,19 +2865,28 @@ function newWindowForMove(source) {
  * @param {() => import('./window-registry').WindowRecord | null} resolveTarget
  *   The destination, resolved LAZILY — called only after every refusal guard has
  *   passed, and never before.
+ * @param {boolean} [allowSoleTab] M09 F10 L3. Defaults false: a sole-tab move
+ *   is refused (`sole-tab`), the F8 behavior every caller inherits. The two
+ *   EXISTING-window consolidate paths pass true — `tab-move-to-window` and
+ *   `tab-adopt-by-drop` (F11 L3, the same semantics by drag) — the source is
+ *   then left at zero tabs and CLOSED below. The two `newWindowForMove`
+ *   callers (`tab-move-to-new-window`, `tab-tear-off`) keep the default: a
+ *   sole-tab move to a NEW window is a no-op window swap.
  * @returns {{ ok: true, windowId: number } | { ok: false, reason: 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }}
  */
-function moveTabIntoWindow(source, p, resolveTarget) {
+function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
   const entry = source.tabViews.get(p.wcId);
   // The tab must belong to the SENDER's window and be a live WEB tab (internal
   // tabs are omitted from the model row — review M4 — and refused here as
-  // defense-in-depth). A sole-tab move is a no-op window swap: the model omits
-  // it at isLastTab; main refuses it too (never leave the source at zero tabs).
-  // F6 collapsed these three into ONE `return null`; F8 splits them because a
-  // drag must announce WHICH refusal it hit.
+  // defense-in-depth). A sole-tab move to a NEW window is a no-op window swap:
+  // the model omits move-new-window at isLastTab; main refuses it too by default
+  // (never leave the source at zero tabs). M09 F10 L3: the EXISTING-window
+  // consolidate path passes allowSoleTab, which lets the source empty and closes
+  // it below. F6 collapsed these three into ONE `return null`; F8 splits them
+  // because a drag must announce WHICH refusal it hit.
   if (!entry || entry.view.webContents.isDestroyed()) return { ok: false, reason: 'no-tab' };
   if (entry.trusted) return { ok: false, reason: 'internal' };
-  if (source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
+  if (!allowSoleTab && source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
   const wc = entry.view.webContents;
 
   // (M2) the live find session targets the moved tab: close it FIRST (the
@@ -2977,6 +3014,16 @@ function moveTabIntoWindow(source, p, resolveTarget) {
   // Both records' active tab just changed, so both windows' captions did (DD8).
   // Synchronous sends, and AFTER the pair — never between it.
   broadcastMoveTargetsChanged();
+  // (M09 F10 L3) EMPTY-SOURCE DISPOSAL. A sole-tab consolidate into an existing
+  // window (allowSoleTab, the ONLY path that reaches this at size 0) left the
+  // source with no tabs — close it. `size === 0` is SELF-SELECTING: only a
+  // sole-tab move can empty the source, and that is only reachable with
+  // allowSoleTab, so no path/allowSoleTab re-check is needed. LAST statement
+  // before the return, AFTER broadcastMoveTargetsChanged so the target's adopt
+  // queuing never depends on close() timing. Same shape as the window-close IPC
+  // (win.close() on the sender's own window inside an IPC dispatch); the close
+  // handler tolerates empty tabViews (its capture loop no-ops).
+  if (source.tabViews.size === 0 && !source.win.isDestroyed()) source.win.close();
   return { ok: true, windowId: target.win.id };
 }
 
@@ -3021,7 +3068,11 @@ ipcMain.handle('tab-move-to-window', (event, payload) => {
   // lookup with no side effect to defer, and refusing before the core runs is what
   // keeps a refused move from closing the source's find session on its way out.
   if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
-  return moveTabIntoWindow(source, p, () => target);
+  // (M09 F10 L3) allowSoleTab: this is the EXISTING-window consolidate path — a
+  // sole tab may move here, and the move core closes the emptied source. The two
+  // newWindowForMove callers below do NOT pass it (sole-tab → new window is a
+  // no-op swap, AC3).
+  return moveTabIntoWindow(source, p, () => target, true);
 });
 
 // The DRAG path (F8 leg 3, DD5/DD16): a tab dragged out of the strip and released.
@@ -3034,6 +3085,71 @@ ipcMain.handle('tab-tear-off', (event, payload) => {
   const p = validateMoveTabPayload(payload);
   if (!p) return { ok: false, reason: 'bad-payload' };
   return moveTabIntoWindow(source, p, () => newWindowForMove(source));
+});
+
+// DD2 PROVENANCE REGISTRATION (M09 F11 Leg 3). The drop-adopt below resolves its
+// SOURCE from a payload-supplied wcId — any guest page can setData() our MIME with
+// an arbitrary wcId, so the payload alone must not move a tab. These two chrome-only
+// sends bookend a real drag: dragstart declares the wcId (verified against the
+// SENDER's own tabViews — the payload does not get to name a tab the sender does not
+// own), dragend clears it on a GRACE TIMER rather than immediately — the target's
+// adopt invoke rides a different IPC pipe with no cross-pipe ordering guarantee, and
+// an immediate clear could race a legitimate adopt into 'not-dragging'.
+const DRAG_END_GRACE_MS = 1500;
+// Pending grace-clear timers, PER RECORD: a fresh tab-drag-started cancels only its
+// own record's pending clear. Keyed weakly so a record removed mid-drag (window
+// closed) takes its timer entry with it — a timer that still fires then mutates an
+// unreachable record, which is harmless (no cancel-on-close machinery needed).
+/** @type {WeakMap<import('./window-registry').WindowRecord, ReturnType<typeof setTimeout>>} */
+const dragEndClearTimers = new WeakMap();
+
+ipcMain.on('tab-drag-started', (event, wcId) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec || typeof wcId !== 'number' || !rec.tabViews.has(wcId)) return;
+  const pending = dragEndClearTimers.get(rec);
+  if (pending) { clearTimeout(pending); dragEndClearTimers.delete(rec); }
+  rec.dragWcId = wcId;
+});
+
+ipcMain.on('tab-drag-ended', (event, wcId) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec || rec.dragWcId !== wcId) return;
+  const pending = dragEndClearTimers.get(rec);
+  if (pending) clearTimeout(pending);
+  dragEndClearTimers.set(rec, setTimeout(() => {
+    dragEndClearTimers.delete(rec);
+    rec.dragWcId = null;
+  }, DRAG_END_GRACE_MS));
+});
+
+// The CROSS-WINDOW DROP path (M09 F11 Leg 3, DD1/DD2): a tab dragged from another
+// window's strip and released on THIS window's strip. INVERTS tab-move-to-window's
+// authority shape — source-from-payload, target-from-sender — which is exactly the
+// DD2 weakening the provenance gate above closes: the resolved source must have
+// DECLARED this wcId at dragstart, so a forged MIME payload dies at 'not-dragging'
+// (guests cannot send tab-drag-started; the bridge is chrome-only). allowSoleTab:
+// this is an existing-window consolidate (the F10 L3 ruling) — dragging a window's
+// only tab moves it and the core closes the emptied source. Result verbatim (DD5).
+ipcMain.handle('tab-adopt-by-drop', (event, payload) => {
+  const target = registry.getWindowForChrome(event.sender);
+  if (!target) return { ok: false, reason: 'no-source' };
+  const p = validateMoveTabPayload(payload);
+  if (!p) return { ok: false, reason: 'bad-payload' };
+  const source = registry.getWindowForGuest(p.wcId);
+  if (!source) return { ok: false, reason: 'no-tab' };
+  // The renderer handles a same-window drop as reorder and guards the canceled-drag
+  // corner itself; refusing here is defense-in-depth, not the primary gate.
+  if (source === target) return { ok: false, reason: 'same-window' };
+  if (source.dragWcId !== p.wcId) return { ok: false, reason: 'not-dragging' };
+  const r = moveTabIntoWindow(source, p, () => target, true);
+  if (r.ok) {
+    // A successful adopt CONSUMES the registration (DD2 refinement): one drag = one
+    // drop, shrinking the post-success forgery window to ~0.
+    const pending = dragEndClearTimers.get(source);
+    if (pending) { clearTimeout(pending); dragEndClearTimers.delete(source); }
+    source.dragWcId = null;
+  }
+  return r;
 });
 
 ipcMain.on('tab-hide', (event, wcId) => {
@@ -3085,6 +3201,14 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
   // activating a tab in window 2 must not touch window 1's active state.
   const owner = registry.getWindowForGuest(wcId);
   if (!owner) return;
+  // L2 (T3): capture whether the OUTGOING active guest holds OS focus BEFORE the
+  // visibility swap below. isFocused() on the outgoing guest is exactly the "focus was in
+  // the page" signal — a page-content chord leaves the outgoing guest focused, while strip
+  // keyboard nav / find / sheet all leave it NOT focused. We re-focus the incoming guest
+  // iff this is true (see below), so page-focused Ctrl+#/Ctrl+Tab keeps routing to a
+  // guest's before-input-event; AC5 strip nav / find / sheet are preserved untouched.
+  // getTabContents already null-guards a missing/destroyed guest.
+  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();
   // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
   const entry = owner.tabViews.get(wcId);
   if (entry) {
@@ -3103,6 +3227,13 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
     // Raise the active guest view to the top so page input works.
     if (!owner.win.isDestroyed()) {
       owner.win.contentView.addChildView(entry.view);
+    }
+    // L2 (T3): re-arm keyboard routing — focus the INCOMING guest iff the OUTGOING was
+    // page-focused (captured above), so a page-content Ctrl+#/Ctrl+Tab does not orphan OS
+    // focus. Internal/trusted incoming tabs are focused too (deliberate: cycling INTO a
+    // goldfinch:// page must not re-orphan focus).
+    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {
+      entry.view.webContents.focus();
     }
     // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
     // above, or the guest buries the overlay. Do not "optimize" this away when the
@@ -3145,6 +3276,10 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
       // top-of-stack via re-add-last (the recorded attachment — never re-resolved).
       owner.sheet.show();
     }
+    // Tear-off pill z-order re-assert (AC5): a tab activation MID-drag is rare, but the
+    // guest re-add above buries the pill — re-show it (re-add RAISES) so it stays above.
+    // Gated on visibility, so no cost when no tear-off is live. Strictly last: topmost.
+    if (owner.tearoffOverlay?.isVisible()) owner.tearoffOverlay.show();
   }
   // Hide old active tab (within the owning window only)
   if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
@@ -3257,6 +3392,20 @@ ipcMain.on('find-overlay:query', (event, payload) => {
   const rec = recordForFindSender(event.sender);
   if (!rec || !rec.findOverlay) return;
   rec.findOverlay.query(payload || {});
+});
+
+// --- Tear-off pill overlay IPC (M09 F10 Leg L4-rebuild). Chrome-origin, fire-and-forget:
+// the renderer drives show/move/hide as a tear-off drag arms, follows the cursor, and
+// ends. The sender's own window is resolved (getWindowForChrome); a guest page has no
+// tearoffOverlay path to reach. Coordinates are 1:1 DIP (e.clientX/Y → pill setBounds). --
+ipcMain.on('tearoff-overlay:show', (event, { x, y } = {}) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.show(x, y);
+});
+ipcMain.on('tearoff-overlay:move', (event, { x, y } = {}) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.setPosition(x, y);
+});
+ipcMain.on('tearoff-overlay:hide', (event) => {
+  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.hide();
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.

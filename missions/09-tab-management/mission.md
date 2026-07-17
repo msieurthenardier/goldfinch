@@ -125,9 +125,16 @@ Planning inputs adopted from prior artifacts:
       the strip) and by explicit command — and the new window is a complete
       Goldfinch window: its own strip, find, menus, shortcuts, and window
       controls all function there. *(behavior-test-backed)*
-- [ ] A tab dragged from one window's strip into another window's strip moves
+- [x] A tab dragged from one window's strip into another window's strip moves
       there, keeping its cookie-jar identity and its page state.
-      *(behavior-test-backed)* — **ATTEMPTED AT F8, TRANSPORT MEASURED DEAD, DEFERRED.
+      *(behavior-test-backed)* — **SATISFIED AT F11 (2026-07-17): the drag gesture ships on
+      native HTML5 DnD and was WITNESSED live by the operator (X11 full-parity run — tab moved
+      A→B across bare desktop to a non-overlapping window, same `wcId`, jar intact, history
+      live). Regression net: `tests/behavior/cross-window-drag.md` (HAT-apparatus, first run
+      owed to the keyed gauntlet). Rig caveat DD5: under the WSLg Wayland daily backend the
+      OS cancels any drag at the source surface — the gesture is X11-only on this rig, expected
+      full-parity on packaged native targets; the keyboard move below covers Wayland use.**
+      The history that led here (kept as provenance): ATTEMPTED AT F8, TRANSPORT MEASURED DEAD, DEFERRED.
       NOT "not yet reached".** The tab **does** move A→B keeping jar identity and page
       state **by keyboard** (F8 leg 4 — measured live: same `wcId`, jar intact,
       `history.length` held, `goBack` landed). But **the DRAG is this criterion's
@@ -135,6 +142,14 @@ Planning inputs adopted from prior artifacts:
       **second instrument** mid-flight. **UNSATISFIED, and a spike is owed before this is
       planned again — see Known Issues ("Cross-window drag transport").** Do not schedule
       this as ordinary pending work.
+      **→ UPDATE (F10 Station C, 2026-07-16): the owed spike RAN and measured GO.** A live
+      probe (two `BaseWindow`s, a `draggable` element in A, drop listeners in B) delivered a
+      cross-`BaseWindow` HTML5 `drop` carrying a custom MIME payload intact — **candidate 2 is
+      VIABLE (measured)**, refuting the investigation's own expected NO-GO. The criterion is
+      **no longer blocked — ACHIEVABLE via HTML5 DnD** (drop lands in the target strip's DOM →
+      the existing coordinate-free `moveTabIntoWindow`/adopt path). Not yet SATISFIED (no
+      implementation); scheduled as F10 follow-up legs. *(Tear-off-into-empty-space with a
+      cursor-tracking window is separate and stays platform-limited.)*
 - [ ] With several windows open, closing one leaves the others fully
       functional; closing the last window still quits the app on
       Windows/Linux; per-window surfaces (find, menus, active-tab state)
@@ -390,5 +405,19 @@ Planning inputs adopted from prior artifacts:
       (`persist-jar-gate`). Folded in the F8 debts on touched paths: move-core structural fix,
       `shouldArm` unit pin, `tab-reorder` Step 4 retired. Suite 1948. The LIVE E2E cycle +
       `tab-tearoff` row 8a + the real a11y verdict are HAT-scoped to F10 — DD9 probe NO-GO.)*
-- [ ] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
-      behavior tests with iterative fix legs until aligned.
+- [x] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
+      behavior tests with iterative fix legs until aligned. *(In flight. Surfaced
+      6 takeaways; built 5 as F10 legs (strip polish, keyboard-cycling re-arm,
+      sole-tab move+close-source, tear-off feedback) — the 6th became F11.)*
+- [x] Flight 11: Cross-window tab drag — build the drag gesture on the HTML5-DnD
+      transport F10 Station C **measured GO**, satisfying criterion 8. Spike-first
+      (draggable-at-pointerdown timing; drop delivery over the `-webkit-app-region:
+      drag` strip), then the drag-layer work. *(Scoped out of F10 at design review —
+      static `draggable` kills the pointer reorder; needs its own spike + rewrite.)*
+      *(Landed 2026-07-17, PR #93 [stacked, covers F10+F11]. The full drag layer went
+      native HTML5 DnD (DD3 unified rewrite — one gesture for reorder/tear-off/cross-window);
+      `tab-adopt-by-drop` IPC with a drag-provenance gate (DD2); criterion 8 WITNESSED on X11.
+      Big finding, DD5: the boundary-death was the WSLg WAYLAND backend, not app code — a
+      spike must replicate real launch flags. `dragPointer` is inert against tab drags; the
+      behavior net re-authored (`cross-window-drag.md` HAT-apparatus; tab-tearoff re-scoped
+      to keyboard rows). Suite 1973.)*

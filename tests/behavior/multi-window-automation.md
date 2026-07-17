@@ -161,7 +161,10 @@ a result.
   routes to the owning window and the accessor retargets — and **never** that a real compositor brought
   a window forward on screen. *(F7 leg-2 HONESTY NOTE, carried verbatim: do not let a reader infer more
   than the rig gave.)*
-- **Tear-off / cross-window drag** — F8 owns it; nothing here depends on it.
+- **Tear-off / cross-window drag** — `cross-window-drag.md` owns the native-DnD drag gestures
+  (M09 F11, operator-performed) and `tab-tearoff.md`'s surviving rows own the keyboard move
+  (F8); nothing here depends on either. *(Pointer updated at F11 Leg 4 — this line used to say
+  "F8 owns it".)*
 - **`multi-window-shell`'s lifecycle and re-parent surface** (New Window minting, move-as-re-parent,
   close-one-of-N, quit-on-last, whole-window closed-tab capture) — **that spec owns it.** This spec
   uses a move only as the cheapest way to mint a second window with a known tab in it.
