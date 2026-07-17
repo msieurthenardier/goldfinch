@@ -135,6 +135,14 @@ Planning inputs adopted from prior artifacts:
       **second instrument** mid-flight. **UNSATISFIED, and a spike is owed before this is
       planned again — see Known Issues ("Cross-window drag transport").** Do not schedule
       this as ordinary pending work.
+      **→ UPDATE (F10 Station C, 2026-07-16): the owed spike RAN and measured GO.** A live
+      probe (two `BaseWindow`s, a `draggable` element in A, drop listeners in B) delivered a
+      cross-`BaseWindow` HTML5 `drop` carrying a custom MIME payload intact — **candidate 2 is
+      VIABLE (measured)**, refuting the investigation's own expected NO-GO. The criterion is
+      **no longer blocked — ACHIEVABLE via HTML5 DnD** (drop lands in the target strip's DOM →
+      the existing coordinate-free `moveTabIntoWindow`/adopt path). Not yet SATISFIED (no
+      implementation); scheduled as F10 follow-up legs. *(Tear-off-into-empty-space with a
+      cursor-tracking window is separate and stays platform-limited.)*
 - [ ] With several windows open, closing one leaves the others fully
       functional; closing the last window still quits the app on
       Windows/Linux; per-window surfaces (find, menus, active-tab state)
@@ -391,4 +399,11 @@ Planning inputs adopted from prior artifacts:
       `shouldArm` unit pin, `tab-reorder` Step 4 retired. Suite 1948. The LIVE E2E cycle +
       `tab-tearoff` row 8a + the real a11y verdict are HAT-scoped to F10 — DD9 probe NO-GO.)*
 - [ ] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
-      behavior tests with iterative fix legs until aligned.
+      behavior tests with iterative fix legs until aligned. *(In flight. Surfaced
+      6 takeaways; built 5 as F10 legs (strip polish, keyboard-cycling re-arm,
+      sole-tab move+close-source, tear-off feedback) — the 6th became F11.)*
+- [ ] Flight 11: Cross-window tab drag — build the drag gesture on the HTML5-DnD
+      transport F10 Station C **measured GO**, satisfying criterion 8. Spike-first
+      (draggable-at-pointerdown timing; drop delivery over the `-webkit-app-region:
+      drag` strip), then the drag-layer work. *(Scoped out of F10 at design review —
+      static `draggable` kills the pointer reorder; needs its own spike + rewrite.)*

@@ -19,14 +19,18 @@
 //   - `tab:close-right` omitted when there are no tabs to this tab's right
 //     (`tabsToRight === 0`).
 //   - `tab:move-new-window` (M09 F6 DD5) omitted at `isLastTab` (moving a
-//     sole tab is a no-op window swap) AND for internal tabs (`isInternal` —
-//     app-UI pages never move between windows; F6 design review M4). Defaults
-//     false so every pre-F6 caller is unaffected.
+//     sole tab to a NEW window is a no-op window swap) AND for internal tabs
+//     (`isInternal` — app-UI pages never move between windows; F6 design review
+//     M4). Defaults false so every pre-F6 caller is unaffected.
 //   - `tab:move-window:<windowId>` (M09 F8 DD8) — one FLAT item per OTHER open
-//     window, gated on the SAME `!isLastTab && !isInternal` pair as
-//     `tab:move-new-window`, because main's move core refuses on exactly those
-//     two conditions (`sole-tab`, `internal`). One gate, so the omitted set and
-//     the refused set cannot drift apart. Absent/empty `moveTargets` (the
+//     window, gated on `!isInternal` ALONE (M09 F10 L3 relaxed the isLastTab
+//     condition it once shared with move-new-window): a sole tab may now
+//     consolidate into an EXISTING window, with main closing the emptied source
+//     (`tab-move-to-window` passes `allowSoleTab: true`). move-new-window keeps
+//     its `isLastTab` omission — a sole-tab move to a NEW window is still a
+//     no-op swap and stays refused. The two gates deliberately diverge here;
+//     each still mirrors exactly what main's core refuses. Absent/empty
+//     `moveTargets` (the
 //     single-window case) emits NOTHING — no header, no note, no empty
 //     submenu, per the OMITTED-ONLY ruling above. Defaults `[]` so every
 //     pre-F8 caller is unaffected.
@@ -77,13 +81,19 @@ export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal 
   if (!isLastTab) item('tab:close-others', 'Close other tabs');
   if (tabsToRight > 0) item('tab:close-right', 'Close tabs to the right');
 
-  // --- duplicate (always) + move-to-new-window (M09 F6 DD5; same section —
-  // Chrome adjacency). Move is omitted at isLastTab (sole-tab move = no-op
-  // window swap) and for internal tabs (design review M4). ---
+  // --- duplicate (always) + move-to-new-window (M09 F6 DD5) + move-to-window:*
+  // (M09 F8 DD8; same section — Chrome adjacency). Both are omitted for internal
+  // tabs (design review M4). move-new-window is ALSO omitted at isLastTab
+  // (sole-tab move to a new window = no-op swap); move-window:* is NOT (M09 F10
+  // L3 — a sole tab may consolidate into an existing window, source then closes). ---
   sep();
   item('tab:duplicate', 'Duplicate');
-  if (!isLastTab && !isInternal) {
-    item('tab:move-new-window', 'Move to new window');
+  if (!isInternal) {
+    // move-new-window stays omitted for a SOLE tab (no-op window swap; M09 F6
+    // DD5). move-window:* is NOT — a sole tab can now consolidate into another
+    // EXISTING window and the emptied source closes (M09 F10 L3), so its gate
+    // drops the isLastTab condition and rides `!isInternal` alone.
+    if (!isLastTab) item('tab:move-new-window', 'Move to new window');
     // One flat item per OTHER window (M09 F8 DD8) — same section as the
     // new-window move (Chrome adjacency, the F6 precedent above).
     for (const t of moveTargets || []) {

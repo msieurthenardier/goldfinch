@@ -1466,6 +1466,32 @@ function clearDragVisuals() {
     t.btn.classList.remove('dragging');
     t.btn.classList.remove('detaching');
   }
+  clearTearoffGhost();
+}
+
+/**
+ * Tear-off affordance (M09 F10 Leg 4): a window-local floating hint shown while a tear-off is
+ * armed. Appended to <body> — OUTSIDE `#tabs` — so it never enters the strip's flow and can
+ * never perturb the arm-time `slotRects` snapshot; moved by `transform` only (never a layout
+ * property), so AC2's layout-neutrality holds. Idempotent by query-and-create — a double
+ * "arm" reuses the one element rather than stacking ghosts.
+ * @param {number} x @param {number} y
+ */
+function trackTearoffGhost(x, y) {
+  let g = document.querySelector('.tearoff-ghost');
+  if (!g) {
+    g = document.createElement('div');
+    g.className = 'tearoff-ghost';
+    g.textContent = 'Release to open in a new window';
+    document.body.appendChild(g);
+  }
+  /** @type {HTMLElement} */ (g).style.transform = `translate(${x + 12}px, ${y + 12}px)`;
+}
+
+/** Remove the tear-off hint. Query-and-remove, so it is idempotent and clears any stray ghost. */
+function clearTearoffGhost() {
+  const g = document.querySelector('.tearoff-ghost');
+  if (g) g.remove();
 }
 
 /**
@@ -1573,11 +1599,13 @@ document.addEventListener('pointermove', (e) => {
       if (tab && tab.btn) tab.btn.classList.add('detaching');
       applyDetachDisplacement();
     }
+    trackTearoffGhost(e.clientX, e.clientY); // follows the pointer for as long as the tear-off is armed
     return;
   }
   if (drag.tearOff) {
     drag.tearOff = false;
     if (tab && tab.btn) tab.btn.classList.remove('detaching');
+    clearTearoffGhost(); // back inside the strip — the reorder preview takes over
   }
   if (zone.index !== drag.currentDropIndex) {
     drag.currentDropIndex = zone.index;
@@ -4005,11 +4033,13 @@ window.goldfinch.onTabMovedAway((payload) => {
   tab.btn.remove();
   tabs.delete(tab.id);
   if (activeTabId === tab.id) {
-    // DD1: DOM order is authoritative — same fallback as closeTab. The
-    // else-createTab arm is defensive only: main refuses a sole-tab move.
+    // DD1: DOM order is authoritative — same fallback as closeTab. NO
+    // else-createTab arm (M09 F10 L3): an empty-strip tab-moved-away now means
+    // main is CLOSING this window (the sole-tab consolidate path closes the
+    // emptied source), so booting a tab would race a tab-create into a closing
+    // window (orphan-guest leak). The non-empty branch is all that remains.
     const next = orderedTabIds().pop();
     if (next) activateTab(next);
-    else createTab();
   }
 });
 

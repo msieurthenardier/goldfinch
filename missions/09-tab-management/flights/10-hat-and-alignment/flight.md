@@ -100,6 +100,16 @@ post-F7 run** (`closed-tab-reopen`, `find-overlay-geometry`, `foreground-to-act`
 - [ ] `hat-station-f-artifact-hygiene`
 - [ ] `alignment` — iterative fixes until the operator is satisfied
 
+**Takeaway implementation legs** (from the HAT walk; operator: build all five on F10, then one verification pass):
+
+- [x] `01-strip-visual-polish` — T1 hover highlight + T2 active-tab favicon shrink floor (CSS). LOW-MED.
+- [x] `02-keyboard-cycling-rearm` — T3 Ctrl+# stuck from page focus (conditional guest re-focus). HIGH (bug).
+- [x] `03-sole-tab-move-close-source` — T4 sole-tab move-to-window + close empty source. HIGH (feature).
+- [x] `04-tearoff-drag-feedback` — T5 in-drag ghost/hint (window-local, layout-neutral). MED.
+- [→] `05-crosswindow-drag-html5` — T6 cross-window drag via HTML5 DnD (criterion 8). **MOVED TO ITS OWN
+      FLIGHT F11** (operator decision): design review found it unsatisfiable as an F10 co-leg (static
+      `draggable` kills the pointer reorder; needs a spike + likely a drag-layer rewrite). Built after F10.
+
 ---
 
 ## Post-Flight

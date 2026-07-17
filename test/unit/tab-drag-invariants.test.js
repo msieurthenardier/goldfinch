@@ -238,8 +238,8 @@ test('AC10: the move core NEVER returns a bare null — real → 0, mutated → 
   );
 
   const mutated = real.replace(
-    "  if (source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };",
-    '  if (source.tabViews.size <= 1) return null;'
+    "  if (!allowSoleTab && source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };",
+    '  if (!allowSoleTab && source.tabViews.size <= 1) return null;'
   );
   assertMutated(real, mutated, 'bare-null-refusal');
   assert.equal((moveCoreBody(mutated).match(BARE_NULL_RE) || []).length, 1, 'mutated → 1');

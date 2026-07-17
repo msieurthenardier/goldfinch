@@ -347,8 +347,8 @@ test('the pin FAILS a move core that is async', () => {
   assert.deepEqual(scanSource(real, 'main.js').core.violations, [], 'real → 0 violations');
 
   const mutated = real.replace(
-    'function moveTabIntoWindow(source, p, resolveTarget) {',
-    'async function moveTabIntoWindow(source, p, resolveTarget) {'
+    'function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
+    'async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {'
   );
   assertMutated(real, mutated, 'async-core');
 
@@ -384,8 +384,8 @@ test('the pin FAILS a suspension point between the delete and the set', () => {
   // never exist.
   const mutated = real
     .replace(
-      'function moveTabIntoWindow(source, p, resolveTarget) {',
-      'async function moveTabIntoWindow(source, p, resolveTarget) {'
+      'function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
+      'async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {'
     )
     .replace(
       '  source.tabViews.delete(p.wcId);\n  target.tabViews.set(p.wcId, entry);',
@@ -467,7 +467,7 @@ test('a core-shaped mention inside a COMMENT is not picked up as the definition'
   // and the word `async` in the same block, which is exactly a false-positive waiting for
   // an unmasked scan.
   const commented = [
-    '// async function moveTabIntoWindow(source, p, resolveTarget) {',
+    '// async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {',
     '//   source.tabViews.delete(p.wcId);',
     '//   await Promise.resolve();',
     '//   target.tabViews.set(p.wcId, entry);',

@@ -2837,19 +2837,27 @@ function newWindowForMove(source) {
  * @param {() => import('./window-registry').WindowRecord | null} resolveTarget
  *   The destination, resolved LAZILY — called only after every refusal guard has
  *   passed, and never before.
+ * @param {boolean} [allowSoleTab] M09 F10 L3. Defaults false: a sole-tab move
+ *   is refused (`sole-tab`), the F8 behavior every caller inherits. ONLY
+ *   `tab-move-to-window` (the existing-window consolidate path) passes true —
+ *   the source is then left at zero tabs and CLOSED below. The two
+ *   `newWindowForMove` callers (`tab-move-to-new-window`, `tab-tear-off`) keep
+ *   the default: a sole-tab move to a NEW window is a no-op window swap.
  * @returns {{ ok: true, windowId: number } | { ok: false, reason: 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }}
  */
-function moveTabIntoWindow(source, p, resolveTarget) {
+function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
   const entry = source.tabViews.get(p.wcId);
   // The tab must belong to the SENDER's window and be a live WEB tab (internal
   // tabs are omitted from the model row — review M4 — and refused here as
-  // defense-in-depth). A sole-tab move is a no-op window swap: the model omits
-  // it at isLastTab; main refuses it too (never leave the source at zero tabs).
-  // F6 collapsed these three into ONE `return null`; F8 splits them because a
-  // drag must announce WHICH refusal it hit.
+  // defense-in-depth). A sole-tab move to a NEW window is a no-op window swap:
+  // the model omits move-new-window at isLastTab; main refuses it too by default
+  // (never leave the source at zero tabs). M09 F10 L3: the EXISTING-window
+  // consolidate path passes allowSoleTab, which lets the source empty and closes
+  // it below. F6 collapsed these three into ONE `return null`; F8 splits them
+  // because a drag must announce WHICH refusal it hit.
   if (!entry || entry.view.webContents.isDestroyed()) return { ok: false, reason: 'no-tab' };
   if (entry.trusted) return { ok: false, reason: 'internal' };
-  if (source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
+  if (!allowSoleTab && source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
   const wc = entry.view.webContents;
 
   // (M2) the live find session targets the moved tab: close it FIRST (the
@@ -2977,6 +2985,16 @@ function moveTabIntoWindow(source, p, resolveTarget) {
   // Both records' active tab just changed, so both windows' captions did (DD8).
   // Synchronous sends, and AFTER the pair — never between it.
   broadcastMoveTargetsChanged();
+  // (M09 F10 L3) EMPTY-SOURCE DISPOSAL. A sole-tab consolidate into an existing
+  // window (allowSoleTab, the ONLY path that reaches this at size 0) left the
+  // source with no tabs — close it. `size === 0` is SELF-SELECTING: only a
+  // sole-tab move can empty the source, and that is only reachable with
+  // allowSoleTab, so no path/allowSoleTab re-check is needed. LAST statement
+  // before the return, AFTER broadcastMoveTargetsChanged so the target's adopt
+  // queuing never depends on close() timing. Same shape as the window-close IPC
+  // (win.close() on the sender's own window inside an IPC dispatch); the close
+  // handler tolerates empty tabViews (its capture loop no-ops).
+  if (source.tabViews.size === 0 && !source.win.isDestroyed()) source.win.close();
   return { ok: true, windowId: target.win.id };
 }
 
@@ -3021,7 +3039,11 @@ ipcMain.handle('tab-move-to-window', (event, payload) => {
   // lookup with no side effect to defer, and refusing before the core runs is what
   // keeps a refused move from closing the source's find session on its way out.
   if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
-  return moveTabIntoWindow(source, p, () => target);
+  // (M09 F10 L3) allowSoleTab: this is the EXISTING-window consolidate path — a
+  // sole tab may move here, and the move core closes the emptied source. The two
+  // newWindowForMove callers below do NOT pass it (sole-tab → new window is a
+  // no-op swap, AC3).
+  return moveTabIntoWindow(source, p, () => target, true);
 });
 
 // The DRAG path (F8 leg 3, DD5/DD16): a tab dragged out of the strip and released.
@@ -3085,6 +3107,14 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
   // activating a tab in window 2 must not touch window 1's active state.
   const owner = registry.getWindowForGuest(wcId);
   if (!owner) return;
+  // L2 (T3): capture whether the OUTGOING active guest holds OS focus BEFORE the
+  // visibility swap below. isFocused() on the outgoing guest is exactly the "focus was in
+  // the page" signal — a page-content chord leaves the outgoing guest focused, while strip
+  // keyboard nav / find / sheet all leave it NOT focused. We re-focus the incoming guest
+  // iff this is true (see below), so page-focused Ctrl+#/Ctrl+Tab keeps routing to a
+  // guest's before-input-event; AC5 strip nav / find / sheet are preserved untouched.
+  // getTabContents already null-guards a missing/destroyed guest.
+  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();
   // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
   const entry = owner.tabViews.get(wcId);
   if (entry) {
@@ -3103,6 +3133,13 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
     // Raise the active guest view to the top so page input works.
     if (!owner.win.isDestroyed()) {
       owner.win.contentView.addChildView(entry.view);
+    }
+    // L2 (T3): re-arm keyboard routing — focus the INCOMING guest iff the OUTGOING was
+    // page-focused (captured above), so a page-content Ctrl+#/Ctrl+Tab does not orphan OS
+    // focus. Internal/trusted incoming tabs are focused too (deliberate: cycling INTO a
+    // goldfinch:// page must not re-orphan focus).
+    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {
+      entry.view.webContents.focus();
     }
     // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
     // above, or the guest buries the overlay. Do not "optimize" this away when the

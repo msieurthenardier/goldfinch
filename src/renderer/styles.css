@@ -205,6 +205,7 @@ html.platform-darwin #window-controls {
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
+  transition: background 0.12s ease; /* T1 hover lift eases in/out; paint-only, never layout */
 }
 /* Inner row: carries the flex layout + padding that used to live on .tab directly. A CSS
    container query cannot restyle the element that establishes the container itself (confirmed
@@ -247,19 +248,11 @@ html.platform-darwin #window-controls {
   .tab .tab-title {
     display: none;
   }
-  /* Active-tab content reduction (DD2 amendment): sheds the favicon at the same threshold
-     title already hides at, freeing up room so the active tab's width floor (below) can stay
-     small. Scoped to `.tab.active` — a descendant-selector condition evaluated against `.tab`'s
-     own resolved width, not a bare `.tab` self-target (see the `.tab-row` comment above for why
-     that class of selector silently never matches inside its own @container block). Once the
-     active tab is clamped at its 64px floor (comfortably under this 72px threshold — an 8px
-     margin so the rule reliably re-fires despite sub-pixel layout rounding at the exact floor
-     value), this rule stays engaged permanently: title + favicon hidden, jar dot + close
-     button remain (padding 20px + dot 8px + gap 8px + close 16px = 52px, 12px of slack under
-     the 64px floor). */
-  .tab.active .tab-fav {
-    display: none;
-  }
+  /* T2 (F10 L1): the ACTIVE tab now KEEPS its favicon at every width — the prior
+     `.tab.active .tab-fav { display: none }` rule was removed here. Its width floor (below)
+     is raised to 78px to fit the favicon(14px) + its gap(8px) on top of the 52px dot/close
+     budget (see the floor comment). Only the active tab's title hides at this threshold
+     (the general `.tab .tab-title` rule above); its favicon, jar dot, and close stay. */
 }
 @container (max-width: 56px) {
   .tab:not(.active) .tab-close {
@@ -280,9 +273,18 @@ html.platform-darwin #window-controls {
   font-weight: 600;
   /* DD2 amendment width floor (see the Progressive-shrink comment above `@container
      (max-width: 72px)`): the ONLY tab-width floor in this strip, scoped to the active tab
-     alone. 64px keeps the active tab's close button fully inside its own bounds at every
-     tab count — see the content-budget math in the favicon-hide comment above. */
-  min-width: 64px;
+     alone. Raised to 78px for T2 (F10 L1) so the active tab's favicon + jar dot + close all
+     stay fully inside its own bounds at every tab count: favicon 14 + gap 8 on top of the
+     52px dot/close budget = 74, +4px slack for sub-pixel rounding at the exact floor. */
+  min-width: 78px;
+}
+/* T1 (F10 L1): hover lift on the pointed-at inactive tab — a background tint sitting between
+   `.tab` (--bg-2) and `.tab.active` (--bg-3), so the hovered tab reads as raised without
+   looking active. `:not(.active)` keeps the active tab's --bg-3 untouched; paint-only (no
+   width/margin/layout change — the drag machinery snapshots slot rects). The .tab-close:hover
+   rule sits on a descendant and does not clash. */
+.tab:not(.active):hover {
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--bg-3));
 }
 .tab .tab-title {
   overflow: hidden;
@@ -353,6 +355,24 @@ html.platform-darwin #window-controls {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
   cursor: grabbing;
+}
+
+/* Tear-off affordance (M09 F10 Leg 4): a window-local floating hint shown while a tear-off is
+   armed. Appended to <body> OUTSIDE #tabs and moved by transform only, so it never enters the
+   strip's flow nor invalidates the arm-time slotRects snapshot (AC2 — layout-neutral). fixed +
+   pointer-events:none keep it purely paint; it tracks the pointer, never the OS cursor (DD16). */
+.tearoff-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* Visible keyboard focus ring across interactive chrome (F23). */
