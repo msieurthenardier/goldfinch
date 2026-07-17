@@ -398,7 +398,7 @@ Planning inputs adopted from prior artifacts:
       (`persist-jar-gate`). Folded in the F8 debts on touched paths: move-core structural fix,
       `shouldArm` unit pin, `tab-reorder` Step 4 retired. Suite 1948. The LIVE E2E cycle +
       `tab-tearoff` row 8a + the real a11y verdict are HAT-scoped to F10 — DD9 probe NO-GO.)*
-- [ ] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
+- [x] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
       behavior tests with iterative fix legs until aligned. *(In flight. Surfaced
       6 takeaways; built 5 as F10 legs (strip polish, keyboard-cycling re-arm,
       sole-tab move+close-source, tear-off feedback) — the 6th became F11.)*

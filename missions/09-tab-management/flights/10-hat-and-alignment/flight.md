@@ -1,6 +1,6 @@
 # Flight: HAT & Alignment
 
-**Status**: in-flight
+**Status**: completed
 **Mission**: [First-Class Tab Management](../../mission.md)
 
 ## Contributing to Criteria
