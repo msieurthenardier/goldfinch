@@ -921,7 +921,14 @@ function internalJarName(url) {
   }
 }
 
-function createTab(url = currentHomePage(), container = null, { trusted = false } = {}) {
+// M09 F4 Leg 2 (DD2 step 3): `restoreHistory` and `insertAt` are the reopen-chain's
+// two additive optional fields — every existing call site (which never passes
+// them) is unaffected. `restoreHistory: {entries, index, title}` rides straight
+// through to the `tab-create` IPC payload (main branches on its presence, DD2
+// step 4); `title` is read HERE (renderer-side only, stripped of no further
+// meaning to main) to seed the initial strip title. `insertAt` lands the tab at
+// its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
+function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null } = {}) {
   // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
   // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
   if (drag) cancelDrag();
@@ -1033,11 +1040,42 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   els.tabs.appendChild(btn);
   tab.btn = btn;
 
+  // M09 F4 Leg 2 (DD2 step 4): seed the initial strip title from the captured
+  // entry instead of flashing "New tab" — mirrors onTabTitle's own four update
+  // points (tab-title text, tooltip, aria-label, close-button aria-label) so a
+  // reopened tab looks indistinguishable from one that already received its
+  // first page-title-updated event.
+  if (restoreHistory && typeof restoreHistory.title === 'string' && restoreHistory.title) {
+    tab.title = restoreHistory.title;
+    tab.btn.querySelector('.tab-title').textContent = restoreHistory.title;
+    tab.btn.title = restoreHistory.title;
+    tab.btn.setAttribute('aria-label', restoreHistory.title);
+    const restoredClose = tab.btn.querySelector('.tab-close');
+    if (restoredClose) restoredClose.setAttribute('aria-label', `Close tab: ${restoreHistory.title}`);
+  }
+
+  // M09 F4 Leg 2 (DD2 step 3): `insertAt` lands the reopened tab at its ORIGINAL
+  // strip position (Chrome parity). The tab is already appended (last slot), so
+  // this is a one-shot move via the existing commitTabMove (F2 DD1) machinery.
+  // Clamped to [0, current-max] against the top end — commitTabMove's own
+  // `|| null` append-at-end fallback already handles "past the end" gracefully.
+  // A negative insertAt (the capture-side -1 sentinel for "position unknown at
+  // capture time") is treated as "no move" — the tab stays appended at the end
+  // rather than being clamped up to position 0, which would misrepresent an
+  // unknown position as "was first".
+  if (Number.isInteger(insertAt) && insertAt >= 0) {
+    const maxIndex = orderedTabIds().length - 1;
+    commitTabMove(id, Math.min(insertAt, maxIndex));
+  }
+
   // All tabs (web and internal) use WebContentsView via IPC (Leg 3).
   // For internal tabs: trusted:true causes main to construct with internal webPreferences
   // (internal-preload.js, contextIsolation:true, sandbox:true, partition:INTERNAL_PARTITION).
   // For web tabs: trusted:false → web prefs (webview-preload.js, contextIsolation:false).
-  window.goldfinch.tabCreate({ url, partition: jar.partition, trusted }).then((wcId) => {
+  // restoreHistory (M09 F4 Leg 2, DD2 step 3/4, additive/optional) rides straight
+  // through to main — main's tab-create handler branches on its presence to skip
+  // loadURL and call navigationHistory.restore() instead.
+  window.goldfinch.tabCreate({ url, partition: jar.partition, trusted, ...(restoreHistory ? { restoreHistory } : {}) }).then((wcId) => {
     if (!tabs.has(id)) return; // tab was closed before wcId arrived
     tab.wcId = wcId;
     // If this tab is still active, refresh state now that wcId is available.
@@ -1244,10 +1282,16 @@ function closeTab(id) {
   if (drag) cancelDrag();
   const tab = tabs.get(id);
   if (!tab) return;
+  // M09 F4 Leg 1: snapshot the strip position BEFORE DOM removal below —
+  // orderedTabIds() reads live `#tabstrip` children, so capturing this AFTER
+  // `tab.btn.remove()` would always yield -1 (Architect second-pass nit).
+  // Rides the tabClose bridge so main can record it on the closed-tab-stack
+  // entry for positional reopen (DD2).
+  const stripIndex = orderedTabIds().indexOf(id);
   // All tabs are WebContentsViews (Leg 3). Internal tabs (trusted) use tabClose just like web tabs.
   if (tab.wcId != null) {
     if (tab.wcId === activeViewWcId) activeViewWcId = null;
-    window.goldfinch.tabClose(tab.wcId);
+    window.goldfinch.tabClose(tab.wcId, stripIndex);
   }
   tab.btn.remove();
   tabs.delete(id);
@@ -3157,6 +3201,30 @@ function dispatchChromeAction(action) {
       return true;
     case 'close-tab':
       if (activeTabId) closeTab(activeTabId);
+      return true;
+    // reopen-closed-tab (M09 F4 Leg 2, DD2 step 3) — retires the Ctrl+Shift+T
+    // reservation. Renderer-orchestrated two-invoke chain (design-review
+    // correction: main never constructs a view itself): tabReopen() pops the
+    // stack main-side; an empty stack resolves `null` and this is a SILENT
+    // no-op (always returns true / swallows the key regardless, matching the
+    // synchronous no-op precedent set by the 'downloads' case below). The
+    // container resolves EXACTLY like a popup's does (inheritFromPartition's
+    // existing fallback chain), so a jarFallback entry (partition omitted)
+    // falls through to the same default-jar/burner resolution with zero new
+    // code — announced via #tab-status only in that case.
+    case 'reopen-closed-tab':
+      window.goldfinch.tabReopen().then((entry) => {
+        if (!entry) return; // empty stack — no-op (AC)
+        const container = inheritContainerFromPartition(entry.partition);
+        createTab(entry.url, container, {
+          trusted: false,
+          restoreHistory: { entries: entry.navEntries, index: entry.navIndex, title: entry.title },
+          insertAt: entry.stripIndex,
+        });
+        if (entry.jarFallback) {
+          announceTabStatus('Reopened tab — its cookie jar no longer exists; reopened in the default jar');
+        }
+      });
       return true;
     case 'focus-address':
       els.address.focus();

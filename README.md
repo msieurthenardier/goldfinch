@@ -196,6 +196,7 @@ drive and observe tabs. It is exposed in no released build — see
 | Shortcut        | Action              |
 |-----------------|---------------------|
 | `Ctrl+T`        | New tab             |
+| `Ctrl+Shift+T`  | Reopen most recently closed tab — restores address, cookie jar, history, and strip position; burner tabs are never captured |
 | `Ctrl+W`        | Close tab           |
 | `Ctrl+L`        | Focus address bar   |
 | `Ctrl+M`        | Toggle media panel  |

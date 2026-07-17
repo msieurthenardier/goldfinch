@@ -52,16 +52,18 @@ test('Ctrl+t -> new-tab', () => {
   assert.equal(keydownToAction(desc({ key: 't', ctrl: true })), 'new-tab');
 });
 
-// DD8 (M06 F3 Leg 4, FD ruling): Ctrl+Shift+T is intentionally NOT 'new-tab' —
-// only lowercase 't' matches. This is the classifier fact the guest-focus
-// forwarder's parity depends on (unifying the guest capture onto this same
-// classifier intentionally drops shifted-T under guest focus, where the OLD
-// handleGuestNewTab one-off used to match BOTH cases — see
-// guest-forward-allowlist.test.js for the end-to-end pin). Ctrl+Shift+T is
-// conventionally "reopen closed tab" — reserved unassigned for that future
-// feature, not a bug.
-test('Ctrl+Shift+t (uppercase T) -> null, NOT new-tab (intentional — reserved for a future "reopen closed tab")', () => {
-  assert.equal(keydownToAction(desc({ key: 'T', ctrl: true, shift: true })), null);
+// DD8 (M06 F3 Leg 4, FD ruling) established that Ctrl+Shift+T is NOT 'new-tab' —
+// only lowercase 't' matches new-tab. M09 F4 (DD2 step 1) lands the chord's
+// intended destination: Ctrl+Shift+T now classifies to 'reopen-closed-tab',
+// matching both cases (capslock-with-shift parity, same as the Ctrl+Shift+I/P
+// chords) — see guest-forward-allowlist.test.js for the end-to-end forwarding
+// pin (now forwardable on both guest kinds).
+test('Ctrl+Shift+t (uppercase T) -> reopen-closed-tab (M09 F4 DD2 — retires the reservation)', () => {
+  assert.equal(keydownToAction(desc({ key: 'T', ctrl: true, shift: true })), 'reopen-closed-tab');
+});
+
+test('Ctrl+Shift+t (lowercase t, capslock-with-shift parity) -> reopen-closed-tab', () => {
+  assert.equal(keydownToAction(desc({ key: 't', ctrl: true, shift: true })), 'reopen-closed-tab');
 });
 
 test('Ctrl+w -> close-tab', () => {

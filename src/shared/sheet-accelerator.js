@@ -24,7 +24,8 @@
  *     Ctrl+T new-tab, Ctrl+W close-tab, Ctrl+L focus-address, Ctrl+M toggle-panel,
  *     Ctrl+R reload, Ctrl+Shift+P toggle-privacy, Ctrl+Tab/Ctrl+Shift+Tab tab-next/
  *     tab-prev, Ctrl+PageDown/Ctrl+PageUp tab-next/tab-prev, Ctrl+1..8/Ctrl+9
- *     tab-jump-1..8/tab-jump-last (M09 F3 Leg 1)
+ *     tab-jump-1..8/tab-jump-last (M09 F3 Leg 1), Ctrl+Shift+T reopen-closed-tab
+ *     (M09 F4 Leg 2, DD2 — retires the reservation)
  *
  * DOCUMENTED RISK (design review Q3, mission-debrief carry): this mapper
  * hand-mirrors keydownToAction rather than sharing it — every classifier change
@@ -36,14 +37,16 @@
  * APG menu contract wins inside the menu): every mapping below requires
  * control||meta EXCEPT F12 — APG keys are excluded by construction.
  *
- * Overlap resolution (union semantics): Shift disambiguates the two P/I chords —
- * Ctrl+Shift+P → toggle-privacy (chrome), Ctrl+Shift+I → devtools (guest);
- * unshifted Ctrl+P → print. `=` matches shift-tolerantly (US-layout Ctrl+Shift+=
- * → zoom-in), mirroring the guest branch's `'=' || '+'` match.
+ * Overlap resolution (union semantics): Shift disambiguates the P/I/T chords —
+ * Ctrl+Shift+P → toggle-privacy (chrome), Ctrl+Shift+I → devtools (guest),
+ * Ctrl+Shift+T → reopen-closed-tab (chrome, M09 F4); unshifted Ctrl+P → print,
+ * unshifted Ctrl+T → new-tab. `=` matches shift-tolerantly (US-layout
+ * Ctrl+Shift+= → zoom-in), mirroring the guest branch's `'=' || '+'` match.
  *
  * Case discipline mirrors the source handlers exactly: t/w/l/m/r match lowercase
- * only (the chrome handler never matched their shifted forms); f/F, j/J, p/P,
- * i/I match both cases where their source branches do.
+ * only (the chrome handler never matched their shifted forms) when UNSHIFTED;
+ * f/F, j/J, p/P, i/I, and (M09 F4) T/t match both cases where their source
+ * branches do.
  *
  * `alt` (M09 F3, threaded in lockstep with keydown-action.js's own i18n ruling)
  * defaults to `false` and gates ONLY the digit tab-jump branch, for the same
@@ -58,7 +61,8 @@
  *     | 'reload' | 'toggle-privacy'
  *     | 'tab-next' | 'tab-prev'
  *     | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
- *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last',
+ *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
+ *     | 'reopen-closed-tab',
  *   autoRepeatGuard?: boolean } | null}
  */
 export function sheetAcceleratorAction({ key, control, meta, shift, alt = false }) {
@@ -67,10 +71,12 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
 
   if (!(control || meta)) return null; // APG keys excluded by construction
 
-  // Shift-disambiguated chords FIRST (Ctrl+Shift+I devtools / Ctrl+Shift+P privacy),
-  // before the unshifted p/P print match can shadow Ctrl+Shift+P.
+  // Shift-disambiguated chords FIRST (Ctrl+Shift+I devtools / Ctrl+Shift+P privacy /
+  // Ctrl+Shift+T reopen-closed-tab, M09 F4 DD2), before the unshifted p/P print or
+  // t/new-tab matches below can shadow them.
   if (shift && (key === 'I' || key === 'i')) return { scope: 'guest', action: 'devtools', autoRepeatGuard: true };
   if (shift && (key === 'P' || key === 'p')) return { scope: 'chrome', action: 'toggle-privacy' };
+  if (shift && (key === 'T' || key === 't')) return { scope: 'chrome', action: 'reopen-closed-tab' };
 
   // Guest-class (mirrors the guest before-input-event branch bodies).
   if (key === '=' || key === '+') return { scope: 'guest', action: 'zoom-in' };

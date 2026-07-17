@@ -264,7 +264,7 @@ Planning inputs adopted from prior artifacts:
 - [x] Flight 3: Keyboard tab navigation parity — next/previous cycling and
       jump-to-position from all three capture points (chrome keydown, guest
       `before-input-event`, sheet accelerators).
-- [ ] Flight 4: Closed-tab stack + reopen — bounded stack, `Ctrl+Shift+T`
+- [x] Flight 4: Closed-tab stack + reopen — bounded stack, `Ctrl+Shift+T`
       (the reserved binding goes live), jar re-assignment, nav-history
       restore where feasible, burner exclusion by positive allowlist.
 - [ ] Flight 5: Tab context menu — sheet-rendered tab-scoped menu (close,

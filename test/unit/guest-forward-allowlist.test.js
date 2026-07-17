@@ -5,9 +5,9 @@
 // The truth table this pins: per-guest-kind (web vs internal), which
 // keydownToAction outputs the generalized guest-focus forwarder
 // (handleGuestChromeShortcut, main.js) is allowed to send as
-// `chrome-shortcut-action`. Also pins the Ctrl+Shift+T intentional-drop (FD
-// ruling) end-to-end through the classify -> allowlist pipeline the forwarder
-// actually runs.
+// `chrome-shortcut-action`. Also pins Ctrl+Shift+T's reopen-closed-tab
+// forwarding (M09 F4 DD2 — the reservation retirement) end-to-end through the
+// classify -> allowlist pipeline the forwarder actually runs.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,7 +19,7 @@ const { keydownToAction } = require('../../src/shared/keydown-action');
 // WEB guests: the full chrome-class set (design-review enumeration — 6 actions)
 // ---------------------------------------------------------------------------
 
-const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload'];
+const WEB_FORWARDABLE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
 
 for (const action of WEB_FORWARDABLE) {
   test(`web guest: '${action}' is forwardable (chrome-class parity set)`, () => {
@@ -50,6 +50,12 @@ test('internal guest: close-tab is forwardable (Ctrl+W closes an internal tab)',
   assert.equal(isChromeActionForwardable('close-tab', 'internal'), true);
 });
 
+// reopen-closed-tab (M09 F4 DD2): joins BOTH guest kinds like tab-cycle/jump —
+// an internal settings page must not trap the operator from reopen either.
+test('internal guest: reopen-closed-tab is forwardable (M09 F4 DD2 — navigation-neutral, like tab-cycle/jump)', () => {
+  assert.equal(isChromeActionForwardable('reopen-closed-tab', 'internal'), true);
+});
+
 const INTERNAL_NOT_FORWARDABLE = ['focus-address', 'toggle-panel', 'toggle-privacy', 'reload', ...WEB_MAIN_SIDE];
 
 for (const action of INTERNAL_NOT_FORWARDABLE) {
@@ -76,21 +82,21 @@ test('unrecognized action string never forwards', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Ctrl+Shift+T intentional drop (FD ruling, design review cycle 1) — pinned
-// END-TO-END through the SAME classify(keydownToAction) -> allowlist pipeline
-// handleGuestChromeShortcut runs, not just the allowlist in isolation. Unifying
-// on keydownToAction (which only matches lowercase 't') intentionally drops
-// shifted-T under guest focus: parity with chrome focus (the chrome DOM handler
-// never supported Ctrl+Shift+T either), and the chord is reserved unassigned
-// for a future "reopen closed tab" feature. Literal Ctrl+T (unshifted) still
-// forwards on both guest kinds — no regression on the F2 D2 fix.
+// Ctrl+Shift+T reopen-closed-tab (M09 F4 DD2 step 1) — pinned END-TO-END
+// through the SAME classify(keydownToAction) -> allowlist pipeline
+// handleGuestChromeShortcut runs, not just the allowlist in isolation. This
+// RETIRES the chord's former reserved-unassigned/intentional-drop status (FD
+// ruling, design review cycle 1, M06 F3 Leg 4): it now forwards on BOTH guest
+// kinds, the same navigation-neutral class as tab-cycle/jump. Literal Ctrl+T
+// (unshifted) still forwards as new-tab on both guest kinds — no regression
+// on the F2 D2 fix.
 // ---------------------------------------------------------------------------
 
-test('Ctrl+Shift+T classifies to null (keydownToAction only matches lowercase t) -> never forwards on either guest kind', () => {
+test('Ctrl+Shift+T classifies to reopen-closed-tab end-to-end and forwards on both guest kinds (M09 F4 DD2)', () => {
   const action = keydownToAction({ key: 'T', ctrl: true, meta: false, shift: true, lightboxOpen: false });
-  assert.equal(action, null);
-  assert.equal(isChromeActionForwardable(action, 'web'), false);
-  assert.equal(isChromeActionForwardable(action, 'internal'), false);
+  assert.equal(action, 'reopen-closed-tab');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), true);
 });
 
 test('Ctrl+T (unshifted, either case main.js before-input-event reports) still forwards as new-tab on both guest kinds — no regression', () => {
@@ -149,7 +155,7 @@ for (const action of TAB_CYCLE_JUMP) {
   });
 }
 
-const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload'];
+const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload', 'reopen-closed-tab'];
 
 for (const action of NOT_REPEAT_SAFE) {
   test(`isRepeatSafeAction('${action}') is false (held key must not stack/repeat-fire)`, () => {

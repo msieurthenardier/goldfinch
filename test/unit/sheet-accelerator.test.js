@@ -83,11 +83,19 @@ test('meta works as the modifier wherever control does (mac chords)', () => {
   assert.deepEqual(k('=', { meta: true }), { scope: 'guest', action: 'zoom-in' });
 });
 
-test('uppercase T/W/L/M/R (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
-  // keydownToAction matches these lowercase-only; the union must not widen them.
-  for (const key of ['T', 'W', 'L', 'M', 'R']) {
+// M09 F4 Leg 2 (DD2 step 1): 'T' is pulled OUT of this negative loop — Ctrl+Shift+T
+// now retires its reservation and matches (see the dedicated test below). W/L/M/R
+// stay in the loop; keydownToAction matches those lowercase-only, so the union
+// must not widen them.
+test('uppercase W/L/M/R (shifted chords) do NOT match — mirrors keydownToAction case discipline', () => {
+  for (const key of ['W', 'L', 'M', 'R']) {
     assert.equal(ctrl(key, { shift: true }), null, `Ctrl+Shift+${key} must not match`);
   }
+});
+
+test('Ctrl+Shift+T / Ctrl+Shift+t -> chrome reopen-closed-tab (M09 F4 DD2 — retires the reservation)', () => {
+  assert.deepEqual(ctrl('T', { shift: true }), { scope: 'chrome', action: 'reopen-closed-tab' });
+  assert.deepEqual(ctrl('t', { shift: true }), { scope: 'chrome', action: 'reopen-closed-tab' });
 });
 
 // ---------------------------------------------------------------------------

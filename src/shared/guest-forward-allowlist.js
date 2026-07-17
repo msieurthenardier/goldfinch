@@ -37,6 +37,16 @@ const TAB_CYCLE_JUMP_ACTIONS = [
   'tab-jump-last',
 ];
 
+// reopen-closed-tab (M09 F4 Leg 2, DD2 step 1): RETIRES the Ctrl+Shift+T
+// reservation. Same navigation-neutral tab-management class as tab-cycle/jump
+// above — the flight's Open Questions ruling ("is reopen guest-forwardable /
+// internal-forwardable? Yes, both") adds it to BOTH guest kinds for the same
+// reason (an internal settings page must not trap the operator from reopen
+// either). NOT repeat-safe: its `tab-*`-prefixed cousins are exempted from the
+// isAutoRepeat guard below by prefix match, but 'reopen-closed-tab' does not
+// start with 'tab-', so it stays guarded (single-shot semantics — holding the
+// chord must not machine-gun the stack, per the flight's ruling) with no code
+// change needed; pinned by a dedicated unit test.
 const WEB_CHROME_ACTIONS = new Set([
   'new-tab',
   'close-tab',
@@ -44,10 +54,11 @@ const WEB_CHROME_ACTIONS = new Set([
   'toggle-panel',
   'toggle-privacy',
   'reload',
+  'reopen-closed-tab',
   ...TAB_CYCLE_JUMP_ACTIONS,
 ]);
 
-const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
+const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', 'reopen-closed-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
 
 /**
  * isChromeActionForwardable(action, guestKind)
