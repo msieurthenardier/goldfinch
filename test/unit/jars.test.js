@@ -1,24 +1,31 @@
 'use strict';
 
 // Unit tests for src/main/jars.js (v2 lifecycle model + three-shape load
-// migration, M06 Flight 1 Legs 1-2).
+// migration, M06 Flight 1 Legs 1-2; SQLite app-db persistence, M10 Flight 1
+// Leg 2).
 //
 // No electron-stub needed — jars.js is Electron-free (no require('electron'));
-// the userData path is injected via load(userDataPath).
+// the userData path is injected via load(userDataPath). jars.js now persists
+// through app-db.js's document-row seam (keyed 'jars') — app-db is required
+// ONCE for the whole file (never cache-busted, the settings-store.test.js
+// require-order-hazard ruling) and reset per test via appDb.open(dir).
 //
 // The store is a MODULE-SCOPED SINGLETON, so lifecycle/persistence tests re-require
 // it fresh per test (cache-bust, the downloads-store.test.js pattern) with a real
 // temp dir. Pure validateContainers/isSafeColor cases use the shared top-level
-// require — they touch no module state.
+// require — they touch no module state (no docStore resolution), so they need no
+// appDb.open() at all.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 
 const { BURNER } = require('../../src/shared/burner');
 const { validateContainers, isSafeColor } = require('../../src/main/jars');
+const appDb = require('../../src/main/app-db');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-jars-'));
@@ -50,6 +57,22 @@ function probeDir(dir) {
 
 function readStore(dir) {
   return JSON.parse(fs.readFileSync(storeFile(dir), 'utf8'));
+}
+
+// Read the raw 'jars' document row payload directly off app.db, bypassing the
+// store — used to assert on the row (the migration target) the way pre-leg-2
+// tests asserted on containers.json directly. Returns the PARSED envelope
+// object, or null when no row exists.
+function readRow(dir) {
+  const check = new DatabaseSync(path.join(dir, 'app.db'));
+  try {
+    const row = /** @type {any} */ (
+      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('jars')
+    );
+    return row ? JSON.parse(row.payload) : null;
+  } finally {
+    check.close();
+  }
 }
 
 // A valid v2 envelope factory.
@@ -467,6 +490,7 @@ test('BURNER is frozen with the fixed identity shape', () => {
 // ===========================================================================
 test('load of a valid v2 envelope restores containers + defaultId', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([validPersonal, validWork], 'work'));
     const store = freshStore();
@@ -474,12 +498,14 @@ test('load of a valid v2 envelope restores containers + defaultId', () => {
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     assert.equal(store.getDefault().id, 'work');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load of an empty v2 envelope stays empty — no reseed; getDefault() is BURNER', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([], null));
     const store = freshStore();
@@ -487,36 +513,42 @@ test('load of an empty v2 envelope stays empty — no reseed; getDefault() is BU
     assert.deepEqual(store.list(), [], 'empty is a VALID persisted state (flight DD2)');
     assert.equal(store.getDefault(), BURNER, 'null defaultId means Burner is the default');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load repairs a dangling defaultId to the first surviving jar', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([validPersonal, validWork], 'ghost'));
     const store = freshStore();
     store.load(dir);
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load treats a non-string defaultId as dangling → repair', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([validPersonal], 42));
     const store = freshStore();
     store.load(dir);
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load repairs a defaultId whose entry was dropped by validation (repair runs AFTER validation)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // 'broken' holds the flag but has a bad partition → dropped → flag moves on.
     const broken = { id: 'broken', name: 'Broken', color: '#fff', partition: 'session:evil' };
@@ -525,12 +557,14 @@ test('load repairs a defaultId whose entry was dropped by validation (repair run
     store.load(dir);
     assert.equal(store.getDefault().id, 'personal', 'flag lands on the first SURVIVING jar');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load remaps reserved burner ids from a v2 file (data survives under the new id)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const saved = { id: 'burner', name: 'Burner', color: '#ff8c42', partition: 'persist:container:burner' };
     writeStore(dir, v2([saved], 'burner'));
@@ -542,6 +576,7 @@ test('load remaps reserved burner ids from a v2 file (data survives under the ne
     // The old id is now dangling → repaired to the (remapped) first jar.
     assert.equal(store.getDefault().id, 'jar-burner');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -552,10 +587,17 @@ test('load remaps reserved burner ids from a v2 file (data survives under the ne
 // unconditional "corrupt/missing → fresh seed" pins are folded in below with
 // both probe sides tested, because post-first-run the partition dir always
 // exists and corrupt/missing then means the LEGACY seed.
+//
+// Persistence target (flight 10-1, leg 2): every known-shape branch below
+// (v2 envelope / v1 array / seed) migrates to the 'jars' document row and
+// renames the consumed legacy file `.migrated` (best-effort, DD5); a true
+// first run (no file at all) makes that rename a silent no-op. The
+// unknown-version branch is the sole carve-out (see below).
 // ===========================================================================
 
-test('v1 migration: operator-shaped array survives whole, defaultId default, rewritten as v2 exactly once, reload idempotent', () => {
+test('v1 migration: operator-shaped array survives whole, defaultId default, migrates to the row + renames .migrated exactly once, reload idempotent', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const custom = { id: 'scratch', name: 'Scratch', color: '#123456', partition: 'persist:container:scratch' };
     writeStore(dir, [validDefault, validPersonal, validWork, validBanking, custom]);
@@ -563,39 +605,44 @@ test('v1 migration: operator-shaped array survives whole, defaultId default, rew
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking', 'scratch']);
     assert.equal(store.getDefault().id, 'default');
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2, 'the v1 file is rewritten as a v2 envelope inside load()');
-    assert.equal(onDisk.defaultId, 'default');
-    // The rewrite happens exactly ONCE: a second load parses the v2 envelope,
-    // and branch (a) never re-saves — the file BYTES must be untouched (state
-    // idempotency alone would not prove that).
-    const bytesAfterFirst = fs.readFileSync(storeFile(dir), 'utf8');
+    const row = readRow(dir);
+    assert.ok(row !== null, 'the migrated result becomes the row');
+    assert.equal(row.version, 2, 'the v1 array is migrated as a v2 envelope');
+    assert.equal(row.defaultId, 'default');
+    assert.ok(!fs.existsSync(storeFile(dir)), 'the legacy containers.json is renamed away');
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'), 'a .migrated sibling remains as the rollback artifact');
+    // The migration happens exactly ONCE: a second load reads the row (the
+    // row-present path), and must not touch the row again.
     store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking', 'scratch']);
     assert.equal(store.getDefault().id, 'default');
-    assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytesAfterFirst, 'second load must not rewrite the file');
+    assert.deepEqual(readRow(dir), row, 'second load must not rewrite the row');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('v1 migration: array without a default entry → defaultId lands on the first surviving entry', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, [validPersonal, validWork]);
     const store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     assert.equal(store.getDefault().id, 'personal', "no surviving 'default' → first surviving entry");
-    assert.equal(readStore(dir).defaultId, 'personal');
+    assert.equal(readRow(dir).defaultId, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('v1 migration: reserved burner id migrates under the remapped jar-burner id, partition intact', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const saved = { id: 'burner', name: 'Burner', color: '#ff8c42', partition: 'persist:container:burner' };
     writeStore(dir, [validDefault, saved]);
@@ -604,14 +651,16 @@ test('v1 migration: reserved burner id migrates under the remapped jar-burner id
     assert.deepEqual(store.list().map((c) => c.id), ['default', 'jar-burner']);
     const remapped = store.list().find((c) => c.id === 'jar-burner');
     assert.equal(remapped.partition, 'persist:container:burner', 'partition string preserved by the remap');
-    assert.equal(readStore(dir).containers.some((c) => c.id === 'burner'), false, 'the reserved id never reaches disk');
+    assert.equal(readRow(dir).containers.some((c) => c.id === 'burner'), false, 'the reserved id never reaches the row');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v1 array validating to zero entries + probe dir present → legacy seed (falls through to the probe)', () => {
+test('v1 array validating to zero entries + probe dir present → legacy seed (falls through to the probe); the unusable file is still consumed', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, [1, 'x', { id: 123 }]);
     probeDir(dir);
@@ -619,26 +668,35 @@ test('v1 array validating to zero entries + probe dir present → legacy seed (f
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
     assert.equal(store.getDefault().id, 'default');
+    assert.equal(readRow(dir).defaultId, 'default');
+    assert.ok(!fs.existsSync(storeFile(dir)), 'the unusable v1 file is consumed by the seed migration');
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v1 array validating to zero entries without probe dir → fresh seed', () => {
+test('v1 array validating to zero entries without probe dir → fresh seed; the unusable file is still consumed', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, [1, 'x', { id: 123 }]);
     const store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     assert.equal(store.getDefault().id, 'personal');
+    assert.ok(!fs.existsSync(storeFile(dir)));
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('no file + probe dir present → legacy seed by content; v2 file written', () => {
+test('no file + probe dir present → legacy seed by content; row seeded (nothing to rename)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     probeDir(dir);
     const store = freshStore();
@@ -650,52 +708,75 @@ test('no file + probe dir present → legacy seed by content; v2 file written', 
       ['default'],
       'persist:goldfinch on default only'
     );
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2, 'the legacy seed is persisted inside the same load() call');
-    assert.equal(onDisk.defaultId, 'default');
-    assert.equal(onDisk.containers.length, 4);
+    const row = readRow(dir);
+    assert.equal(row.version, 2, 'the legacy seed is persisted to the row inside the same load() call');
+    assert.equal(row.defaultId, 'default');
+    assert.equal(row.containers.length, 4);
+    assert.ok(!fs.existsSync(storeFile(dir) + '.migrated'), 'no legacy file existed to rename');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v2-shaped envelope with an unknown (future) version → containers preserved in memory, file left intact (F4)', () => {
+test('v2-shaped envelope with an unknown (future) version → containers preserved in memory, no row write, file left intact (DD5 carve-out)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, { version: 3, defaultId: 'x', containers: [validPersonal] });
     const store = freshStore();
     store.load(dir);
-    // F4: a readable envelope with an unknown version is still user data. Keep it
-    // in memory (validated), but never rewrite it during load, so a later
-    // compatible release can recover the original — NOT a destructive reseed.
+    // F4/DD5: a readable envelope with an unknown version is still user data.
+    // Keep it in memory (validated), but never rewrite it during load — and
+    // never write a row — so a later compatible release can recover the
+    // original untouched, and the probe re-runs every boot.
     assert.deepEqual(store.list().map((c) => c.id), ['personal'], 'unknown version = preserve, not reseed');
     assert.equal(store.getDefault().id, 'personal', 'absent defaultId "x" repairs to the first surviving jar');
     assert.equal(readStore(dir).version, 3, 'the unknown envelope is left untouched on disk');
+    assert.equal(readRow(dir), null, 'the carve-out writes NO row — the probe re-runs every boot until a compatible build handles it');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('missing file without probe dir → fresh seed (Personal default + Work); v2 file written', () => {
+test('unknown-version file + no row → no row is created (DD5 carve-out, dedicated pin)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    writeStore(dir, { version: 99, defaultId: null, containers: [] });
+    const store = freshStore();
+    store.load(dir);
+    assert.equal(readRow(dir), null, 'the unknown-version branch never writes a row');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('missing file without probe dir → fresh seed (Personal default + Work); row seeded', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     assert.equal(store.getDefault().id, 'personal', 'Personal is the fresh-seed default');
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2, 'the fresh seed is persisted inside the same load() call');
-    assert.equal(onDisk.defaultId, 'personal');
+    const row = readRow(dir);
+    assert.equal(row.version, 2, 'the fresh seed is persisted to the row inside the same load() call');
+    assert.equal(row.defaultId, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('launch-#2 pin: fresh seed persists, so a probe dir appearing later does NOT re-seed as legacy', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     let store = freshStore();
-    store.load(dir); // true first run: no file, no probe dir → fresh seed, saved
+    store.load(dir); // true first run: no file, no probe dir → fresh seed, saved to the row
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     // main.js pre-warms persist:goldfinch on every launch — simulate launch #2.
     probeDir(dir);
@@ -704,23 +785,26 @@ test('launch-#2 pin: fresh seed persists, so a probe dir appearing later does NO
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work'], 'STILL Personal+Work — the saved seed outlives the probe');
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('userData dir not yet created (true first boot) → seed still persists; launch #2 stays fresh', () => {
-  // Integration-only failure caught at M06 F1 Leg 4: on a real first run the
-  // dev-redirected userData dir does not exist yet when load() runs in whenReady
-  // (Electron creates it lazily), so the DD3c synchronous seed persist would
-  // ENOENT into save()'s fail-soft catch — and the pre-warm then makes launch #2
-  // re-probe the fresh install as legacy. save() must create the directory.
+test('userData dir not yet created (true first boot) → app-db creates it; seed persists; launch #2 stays fresh', () => {
+  // Integration-only failure caught at M06 F1 Leg 4 (pre-SQLite): on a real first
+  // run the dev-redirected userData dir does not exist yet when load() runs in
+  // whenReady (Electron creates it lazily). Post-leg-2, appDb.open() itself
+  // creates the directory (DD7: it runs first in the boot seam) — this test
+  // pins that the seed still round-trips through a relaunch even though the
+  // dir had to be created.
   const base = makeTempDir();
   const dir = path.join(base, 'goldfinch-dev'); // never mkdir'd here
+  appDb.open(dir); // creates `dir` as a side effect (app-db.js's own mkdirSync)
   try {
     let store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
-    assert.equal(readStore(dir).version, 2, 'seed persisted even though the dir had to be created');
+    assert.equal(readRow(dir).version, 2, 'seed persisted even though the dir had to be created');
     // Launch #2 with the probe dir present (pre-warm fired) must NOT flip to legacy.
     probeDir(dir);
     store = freshStore();
@@ -728,12 +812,14 @@ test('userData dir not yet created (true first boot) → seed still persists; la
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work'], 'saved seed wins over the probe');
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(base);
   }
 });
 
-test('corrupt JSON + probe dir present → legacy seed; file rewritten as v2', () => {
+test('corrupt JSON + probe dir present → legacy seed; the corrupt file is consumed (row + rename)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, '{not json!!!');
     probeDir(dir);
@@ -741,37 +827,48 @@ test('corrupt JSON + probe dir present → legacy seed; file rewritten as v2', (
     assert.doesNotThrow(() => store.load(dir));
     assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
     assert.equal(store.getDefault().id, 'default', 'post-first-run corrupt means the LEGACY seed, never fresh');
-    assert.equal(readStore(dir).version, 2);
+    assert.equal(readRow(dir).version, 2);
+    assert.ok(!fs.existsSync(storeFile(dir)));
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('corrupt JSON without probe dir → fresh seed; file rewritten as v2', () => {
+test('corrupt JSON without probe dir → fresh seed; the corrupt file is consumed (row + rename)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, '{not json!!!');
     const store = freshStore();
     assert.doesNotThrow(() => store.load(dir));
     assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
     assert.equal(store.getDefault().id, 'personal');
-    assert.equal(readStore(dir).version, 2);
+    assert.equal(readRow(dir).version, 2);
+    assert.ok(!fs.existsSync(storeFile(dir)));
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('empty v2 envelope is NOT rewritten into a seed — empty-is-valid is untouched by migration', () => {
+test('empty v2 envelope is NOT reseeded — empty-is-valid migrates to the row like any known shape', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([], null));
-    const bytes = fs.readFileSync(storeFile(dir), 'utf8');
     const store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list(), []);
     assert.equal(store.getDefault(), BURNER);
-    assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytes, 'a valid empty store is never reseeded (DD2)');
+    const row = readRow(dir);
+    assert.deepEqual(row, { version: 2, defaultId: null, containers: [] }, 'a valid empty store migrates to the row, never reseeded (DD2)');
+    assert.ok(!fs.existsSync(storeFile(dir)), 'the legacy file is renamed away like any known-shape migration');
+    assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -784,6 +881,7 @@ test('empty v2 envelope is NOT rewritten into a seed — empty-is-valid is untou
 
 test('upgrade path: a v2 file shaped exactly like the real dev-profile (three containers, no retentionDays) — every kept record gains retentionDays: 30', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // validPersonal/validWork/validDefault carry no retentionDays field, matching
     // a real pre-M08 containers.json on disk.
@@ -795,12 +893,14 @@ test('upgrade path: a v2 file shaped exactly like the real dev-profile (three co
       assert.equal(c.retentionDays, 30, `${c.id} should upgrade to the default retention`);
     }
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('seed path: a fresh install (no file, no probe dir) seeds jars carrying retentionDays: 30', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -808,16 +908,18 @@ test('seed path: a fresh install (no file, no probe dir) seeds jars carrying ret
     for (const c of store.list()) {
       assert.equal(c.retentionDays, 30);
     }
-    for (const c of readStore(dir).containers) {
+    for (const c of readRow(dir).containers) {
       assert.equal(c.retentionDays, 30, 'persisted seed carries the field too');
     }
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to v2 with retentionDays: 30 on every kept record', () => {
+test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to the row with retentionDays: 30 on every kept record', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // v1 bare array, matching a real pre-M06 containers.json — no retentionDays.
     writeStore(dir, [validDefault, validPersonal, validWork, validBanking]);
@@ -827,16 +929,18 @@ test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to v2 w
     for (const c of store.list()) {
       assert.equal(c.retentionDays, 30);
     }
-    for (const c of readStore(dir).containers) {
-      assert.equal(c.retentionDays, 30, 'the v2 rewrite persists the upgraded field');
+    for (const c of readRow(dir).containers) {
+      assert.equal(c.retentionDays, 30, 'the migrated row carries the upgraded field');
     }
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('persisted round-trip: a custom retentionDays value on disk survives load unchanged (file edited directly)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const custom = { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: 90 };
     writeStore(dir, v2([custom], 'personal'));
@@ -844,74 +948,82 @@ test('persisted round-trip: a custom retentionDays value on disk survives load u
     store.load(dir);
     assert.equal(store.list()[0].retentionDays, 90, 'a valid custom value is kept as-is, not reset to the default');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('seed clone integrity: a mutation after a legacy load never leaks into a later reseed', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     probeDir(dir);
     const store = freshStore();
     store.load(dir); // legacy seed — the third place the constants are instantiated
     store.rename('default', { name: 'X' });
-    // Drop the persisted file so the SAME module instance re-runs branch (c):
-    // if load() aliased LEGACY_DEFAULTS instead of cloning, the rename above
-    // would have mutated the constant and 'X' would resurface here.
-    fs.rmSync(storeFile(dir));
+    // Drop the ROW (persistence now lives in app.db, not a file) so the SAME
+    // module instance re-runs branch (c): if load() aliased LEGACY_DEFAULTS
+    // instead of cloning, the rename above would have mutated the constant and
+    // 'X' would resurface here.
+    appDb.createDocumentStore('jars').remove();
     store.load(dir);
     assert.equal(store.list().find((c) => c.id === 'default').name, 'Default', 'the seed constant must be pristine');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 // ---------------------------------------------------------------------------
 // Persistence on non-v2 shapes (flipped from Leg 1's interim suppression pins:
-// post-migration EVERY load shape assigns storePath, so a later mutation DOES
-// persist). Each pin asserts the post-add FILE SHAPE — a v2 envelope whose
-// containers include the new jar — because branch (b)/(c)'s load-time rewrite
-// alone would make a bare "file changed" assertion pass vacuously.
+// post-migration EVERY load shape assigns a docStore, so a later mutation DOES
+// persist). Each pin asserts the post-add ROW SHAPE — a v2 envelope whose
+// containers include the new jar — because branch (b)/(c)'s load-time
+// migration alone would make a bare "row changed" assertion pass vacuously.
 // ---------------------------------------------------------------------------
-test('persistence pin (flipped Leg 1 suppression): v1 load → add() → v2 envelope on disk includes the new jar', () => {
+test('persistence pin: v1 load (migrates to the row) → add() → row includes the new jar', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, JSON.stringify([validDefault, validPersonal]));
     const store = freshStore();
     store.load(dir);
     store.add('Scratch', '#123456');
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2);
+    const row = readRow(dir);
+    assert.equal(row.version, 2);
     assert.deepEqual(
-      onDisk.containers.map((c) => c.id),
+      row.containers.map((c) => c.id),
       ['default', 'personal', 'scratch'],
-      'the post-add write must include the new jar — not just the load-time rewrite'
+      'the post-add write must include the new jar — not just the load-time migration'
     );
-    assert.equal(onDisk.defaultId, 'default');
+    assert.equal(row.defaultId, 'default');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('persistence pin (flipped Leg 1 suppression): missing-file load → add() → v2 envelope on disk includes the new jar', () => {
+test('persistence pin: missing-file load (fresh seed) → add() → row includes the new jar', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
     store.add('Scratch');
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2);
+    const row = readRow(dir);
+    assert.equal(row.version, 2);
     assert.deepEqual(
-      onDisk.containers.map((c) => c.id),
+      row.containers.map((c) => c.id),
       ['personal', 'work', 'scratch'],
-      'the fresh seed plus the added jar reach disk'
+      'the fresh seed plus the added jar reach the row'
     );
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('add() before load() does not throw and writes nothing (no storePath yet)', () => {
+test('add() before load() does not throw and persists nothing (no docStore yet — the fail-soft swallow absorbs the TypeError)', () => {
   const store = freshStore();
   const created = store.add('Preload', '#abcdef');
   assert.equal(created.id, 'preload');
@@ -919,29 +1031,32 @@ test('add() before load() does not throw and writes nothing (no storePath yet)',
 });
 
 // ===========================================================================
-// save() — atomic tmp+rename, v2 envelope shape
+// save() — writes the v2 envelope {version, defaultId, containers} to the row
 // ===========================================================================
-test('save is atomic and writes the v2 envelope {version, defaultId, containers}', () => {
+test('save persists the v2 envelope {version, defaultId, containers} to the document row', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([], null));
     const store = freshStore();
     store.load(dir);
     store.add('Alpha', '#111111');
-    const onDisk = readStore(dir);
-    assert.equal(onDisk.version, 2);
-    assert.equal(onDisk.defaultId, 'alpha');
-    assert.deepEqual(onDisk.containers, [
+    const row = readRow(dir);
+    assert.equal(row.version, 2);
+    assert.equal(row.defaultId, 'alpha');
+    assert.deepEqual(row.containers, [
       { id: 'alpha', name: 'Alpha', color: '#111111', partition: 'persist:container:alpha', retentionDays: 30 }
     ]);
-    assert.equal(fs.existsSync(storeFile(dir) + '.tmp'), false, 'tmp file must be renamed away');
+    assert.ok(!fs.existsSync(storeFile(dir)), 'save() must not write containers.json');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('mutations round-trip through a reload', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, v2([validPersonal, validWork], 'personal'));
     let store = freshStore();
@@ -957,6 +1072,7 @@ test('mutations round-trip through a reload', () => {
     ]);
     assert.equal(store.getDefault().id, 'work');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -966,7 +1082,8 @@ test('mutations round-trip through a reload', () => {
 // ===========================================================================
 
 // Every lifecycle test below runs against a persistence-ENABLED store (a valid v2
-// file) so the DD2 invariant is exercised with save() live.
+// file) so the DD2 invariant is exercised with save() live. Callers open appDb
+// before calling this (it does not manage appDb itself).
 function loadedStore(dir, containers, defaultId) {
   writeStore(dir, v2(containers, defaultId));
   const store = freshStore();
@@ -976,42 +1093,49 @@ function loadedStore(dir, containers, defaultId) {
 
 test('add into an empty store auto-claims the default flag (DD2: no null-with-jars)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [], null);
     assert.equal(store.getDefault(), BURNER);
     const created = store.add('Alpha');
     assert.equal(store.getDefault().id, created.id, 'the first jar added becomes default');
-    assert.equal(readStore(dir).defaultId, created.id, 'auto-claim is persisted');
+    assert.equal(readRow(dir).defaultId, created.id, 'auto-claim is persisted');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('add into a non-empty store does NOT move the default flag', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     store.add('Beta');
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('add() default-pins retentionDays: 30 on the constructed record (history flight DD6)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [], null);
     const created = store.add('Alpha');
     assert.equal(created.retentionDays, 30);
-    assert.equal(readStore(dir).containers[0].retentionDays, 30, 'persisted too');
+    assert.equal(readRow(dir).containers[0].retentionDays, 30, 'persisted too');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('add cannot mint a reserved id: slug remap applies at mint time, display name untouched', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [], null);
     const created = store.add('Burner');
@@ -1023,12 +1147,14 @@ test('add cannot mint a reserved id: slug remap applies at mint time, display na
     const collide = store.add('Burner');
     assert.equal(collide.id, 'jar-burner-1', 'collision loop suffixes past the existing jar-burner');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('rename updates name and color via the add() rules; id/partition untouched; persists', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     const updated = store.rename('personal', { name: 'X'.repeat(30), color: 'not a color;' });
@@ -1036,14 +1162,16 @@ test('rename updates name and color via the add() rules; id/partition untouched;
     assert.equal(updated.partition, 'persist:container:personal', 'partition immutable (DD5)');
     assert.equal(updated.name, 'X'.repeat(24), 'name truncated to 24');
     assert.equal(updated.color, '#b06ef5', 'unsafe color falls back');
-    assert.equal(readStore(dir).containers[0].name, 'X'.repeat(24), 'rename persisted');
+    assert.equal(readRow(dir).containers[0].name, 'X'.repeat(24), 'rename persisted');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('rename with only one of {name, color} preserves the other field', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     store.rename('personal', { name: 'Mine' });
@@ -1052,22 +1180,26 @@ test('rename with only one of {name, color} preserves the other field', () => {
     assert.equal(store.list()[0].name, 'Mine', 'name untouched by a color-only rename');
     assert.equal(store.list()[0].color, '#abcdef');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('rename of an unknown id returns null (no throw)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.rename('ghost', { name: 'Nope' }), null);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('remove returns the removed container (the IPC layer needs its partition)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal, validWork], 'personal');
     const removed = store.remove('work');
@@ -1080,88 +1212,102 @@ test('remove returns the removed container (the IPC layer needs its partition)',
     });
     assert.deepEqual(store.list().map((c) => c.id), ['personal']);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('remove of the default jar moves the flag to the first remaining jar in list order', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const banking = { id: 'banking', name: 'Banking', color: '#f5c518', partition: 'persist:container:banking' };
     const store = loadedStore(dir, [validPersonal, validWork, banking], 'personal');
     store.remove('personal');
     assert.equal(store.getDefault().id, 'work', 'first REMAINING jar inherits the flag');
-    assert.equal(readStore(dir).defaultId, 'work');
+    assert.equal(readRow(dir).defaultId, 'work');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('remove of a non-default jar leaves the flag alone', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal, validWork], 'work');
     store.remove('personal');
     assert.equal(store.getDefault().id, 'work');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('remove of the sole jar empties the list; getDefault() is BURNER; next add re-claims', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     const removed = store.remove('personal');
     assert.equal(removed.id, 'personal');
     assert.deepEqual(store.list(), []);
     assert.equal(store.getDefault(), BURNER, 'Burner is the default when no jars remain');
-    assert.equal(readStore(dir).defaultId, null, 'null defaultId persisted (DD2 empty state)');
+    assert.equal(readRow(dir).defaultId, null, 'null defaultId persisted (DD2 empty state)');
     const created = store.add('Rebuilt');
     assert.equal(store.getDefault().id, created.id, 'a subsequent add auto-claims the flag');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('remove of an unknown id returns null (no throw)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.remove('ghost'), null);
     assert.equal(store.list().length, 1);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setDefault: existing id → true and persists; unknown id → false', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal, validWork], 'personal');
     assert.equal(store.setDefault('work'), true);
     assert.equal(store.getDefault().id, 'work');
-    assert.equal(readStore(dir).defaultId, 'work');
+    assert.equal(readRow(dir).defaultId, 'work');
     assert.equal(store.setDefault('ghost'), false);
     assert.equal(store.getDefault().id, 'work', 'a rejected setDefault leaves the flag alone');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setDefault(null) while jars exist → false (DD2: Burner-as-default only when empty)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.setDefault(null), false);
     assert.equal(store.getDefault().id, 'personal');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setDefault is idempotent: current holder → true; null-while-empty → true', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.setDefault('personal'), true, 'setting the current holder again succeeds');
@@ -1169,6 +1315,7 @@ test('setDefault is idempotent: current holder → true; null-while-empty → tr
     assert.equal(store.setDefault(null), true, 'setDefault(null) while already empty is a no-op success');
     assert.equal(store.getDefault(), BURNER);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -1180,30 +1327,35 @@ test('setDefault is idempotent: current holder → true; null-while-empty → tr
 
 test('setRetention: happy path mutates, persists, and returns the updated container', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     const updated = store.setRetention('personal', 90);
     assert.equal(updated.retentionDays, 90);
     assert.equal(store.list()[0].retentionDays, 90);
-    assert.equal(readStore(dir).containers[0].retentionDays, 90, 'persisted');
+    assert.equal(readRow(dir).containers[0].retentionDays, 90, 'persisted');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setRetention: unknown id returns null, no throw, nothing persisted', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.setRetention('ghost', 90), null);
     assert.equal(store.list()[0].retentionDays, 30, 'unchanged');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setRetention: rejection table — invalid days values return null and do not mutate', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     const cases = [
@@ -1218,51 +1370,74 @@ test('setRetention: rejection table — invalid days values return null and do n
       assert.equal(store.list()[0].retentionDays, 30, `${label}: value must stay unchanged`);
     }
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setRetention: boundary values 1 and 3650 are accepted', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.setRetention('personal', 1).retentionDays, 1);
     assert.equal(store.setRetention('personal', 3650).retentionDays, 3650);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('setRetention: current-value write is still ok, still persists (idempotent, no special-casing)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     const updated = store.setRetention('personal', 30);
     assert.equal(updated.retentionDays, 30);
-    assert.equal(readStore(dir).containers[0].retentionDays, 30);
+    assert.equal(readRow(dir).containers[0].retentionDays, 30);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('rename() still ignores retention — a rename patch never touches retentionDays', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     store.setRetention('personal', 90);
     store.rename('personal', { name: 'Renamed', color: '#abcdef' });
     assert.equal(store.list()[0].retentionDays, 90, 'rename must not reset or touch retentionDays');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('list() returns the live array (consumers depend on it) with no isDefault field', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = loadedStore(dir, [validPersonal], 'personal');
     assert.equal(store.list(), store.list(), 'same array identity across calls');
     assert.deepEqual(Object.keys(store.list()[0]).sort(), ['color', 'id', 'name', 'partition', 'retentionDays']);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ===========================================================================
+// app-db integration (flight 10-1, leg 2): app-db-not-open propagation.
+// ===========================================================================
+test('load() throws when app-db is not open (mis-ordered boot must propagate, not fall back to a seed)', () => {
+  const dir = makeTempDir();
+  try {
+    // Deliberately do NOT call appDb.open(dir) — app-db starts closed.
+    const store = freshStore();
+    assert.throws(() => store.load(dir), /app db not open/);
   } finally {
     removeTempDir(dir);
   }

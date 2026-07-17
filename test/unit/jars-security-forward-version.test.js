@@ -1,10 +1,16 @@
 'use strict';
 
+// Persistence note (flight 10-1, leg 2): jars.js now resolves its document
+// row through app-db.js on every load() — app-db is required ONCE for the
+// whole file (never cache-busted, the settings-store.test.js require-order-
+// hazard ruling) and reset per test via appDb.open(dir).
+
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const appDb = require('../../src/main/app-db');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-jars-fixes-'));
@@ -26,6 +32,7 @@ function writeStore(dir, payload) {
 
 test('user-minted privileged identity names are remapped by slug/add', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, { version: 2, defaultId: null, containers: [] });
     const store = freshStore();
@@ -43,12 +50,14 @@ test('user-minted privileged identity names are remapped by slug/add', () => {
     );
     assert.equal(store.list().some((jar) => jar.id === 'admin' || jar.id === 'internal'), false);
   } finally {
+    appDb.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('load remaps privileged identity claims but preserves the built-in legacy default', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     writeStore(dir, {
       version: 2,
@@ -70,12 +79,14 @@ test('load remaps privileged identity claims but preserves the built-in legacy d
       { id: 'default', name: 'Default', color: '#9aa0ac', partition: 'persist:goldfinch', retentionDays: 30 }
     );
   } finally {
+    appDb.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('unknown-version envelope survives load without being overwritten', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const envelope = {
       version: 3,
@@ -97,8 +108,9 @@ test('unknown-version envelope survives load without being overwritten', () => {
     // In-memory records gain the retentionDays default; the on-disk envelope must not.
     assert.deepEqual(store.list(), envelope.containers.map((c) => ({ ...c, retentionDays: 30 })));
     assert.equal(store.getDefault().id, 'research');
-    assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytes, 'load must leave the envelope bytes untouched');
+    assert.equal(fs.readFileSync(storeFile(dir), 'utf8'), bytes, 'load must leave the envelope bytes untouched — the DD5 carve-out');
   } finally {
+    appDb.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

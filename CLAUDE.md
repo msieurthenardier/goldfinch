@@ -18,7 +18,7 @@ Goldfinch — an Electron desktop browser with a media panel (scan/play/download
 
 Three processes; understand the boundary before editing.
 
-- **Main** (`src/main/`): `main.js` owns the window shell — since M09 F6 a **window registry** (`src/main/window-registry.js`, pure/Electron-free, unit-tested) of per-window records `{win, chromeView, tabViews, activeTabWcId}` keyed by `BaseWindow.id`; each window is a `BaseWindow` hosting its own chrome `WebContentsView` running `renderer.js` (per-document renderer state is per-window by construction), and guest tabs are `WebContentsView`s constructed in main via the `tab-create` IPC handler (Mission 05 Flight 3), owned by their window's record. Main↔chrome routing has **three classes** (M09 F6 DD2 — classify any new send/handler site before writing it): **(1) inbound sender-resolved** — chrome-sender IPC resolves its window via `registry.getWindowForChrome(event.sender)`, guest-sender IPC via `getWindowForGuest(event.sender.id)`; window-lifecycle events (`resize`/`maximize`/…) route to their OWN chrome via the per-window create closure (class 1b); **(2) broadcast fan-out** — `broadcastToChromeAndInternal` sends to ALL registered chromes + internal-session contents once globally; **(3) per-tab owner-routed pushes** — every main→chrome send tied to a specific tab (the `wireTabViewEvents` fan, `zoom-changed`, `devtools-state-changed`, `page-context-menu`, privacy delivery, guest-keystroke forwarders, find-overlay per-tab syncs) resolves the tab's OWNING window's chrome **at event time** via `getChromeForTab(wcId)` — never fanned out, never left on a focused-window accessor (event-time resolution is what makes move-to-new-window's re-bind automatic). `getChromeContents()` survives as the **last-focused accessor** (F6 interim, DD8): registry-tracked last-focused window, seeded at window create AND at programmatic `win.focus()` (WSLg-safe — compositor focus events may never arrive), membership-validated at read with a first-record fallback; **F7 owns true multi-window automation/capture semantics** — don't build new code against the accessor when a routing class fits. **Lifecycle split (DD3)**: per-window teardown runs at `close` (whole-window closed-tab capture → roaming-overlay detach, find before sheet → per-tab side-effect suite + **explicit guest destroy** — Electron never auto-destroys an attached view's webContents on window close) and `closed` (record removal + the chrome wc's deferred destroy via `setImmediate`); app-level teardown (MCP stop, stores, overlay DESTRUCTION with the find-before-sheet ordering pin) stays at the quit hooks (`window-all-closed`/`before-quit`/`will-quit`); closing one of N windows never quits, the last close rides `window-all-closed` (non-darwin). **⚠️ Never read `win.*` inside `closed`-or-later handlers** — capture teardown inputs (e.g. `const winId = win.id`) at create time: a destroyed-`BaseWindow` property access throws, and an uncaught throw inside the native `closed` emission aborts the listener chain AND permanently wedges the Wayland close path with zero error output (the F6 fix-cycle root cause). `main.js` also owns downloads, the combined `webRequest` pipeline, the privacy aggregate, and all IPC. `shields.js` = persisted Shields config + tracking-param stripping; `jars.js` = container definitions; `trackers.js` = registrable-domain (eTLD+1) + tracker classification. `settings-store.js` = durable, schema-versioned app preferences (see Settings store below). `internal-ipc.js` = origin-checked IPC bridge helpers for trusted `goldfinch://` internal pages (see Internal-bridge security model below).
+- **Main** (`src/main/`): `main.js` owns the window shell — since M09 F6 a **window registry** (`src/main/window-registry.js`, pure/Electron-free, unit-tested) of per-window records `{win, chromeView, tabViews, activeTabWcId}` keyed by `BaseWindow.id`; each window is a `BaseWindow` hosting its own chrome `WebContentsView` running `renderer.js` (per-document renderer state is per-window by construction), and guest tabs are `WebContentsView`s constructed in main via the `tab-create` IPC handler (Mission 05 Flight 3), owned by their window's record. Main↔chrome routing has **three classes** (M09 F6 DD2 — classify any new send/handler site before writing it): **(1) inbound sender-resolved** — chrome-sender IPC resolves its window via `registry.getWindowForChrome(event.sender)`, guest-sender IPC via `getWindowForGuest(event.sender.id)`; window-lifecycle events (`resize`/`maximize`/…) route to their OWN chrome via the per-window create closure (class 1b); **(2) broadcast fan-out** — `broadcastToChromeAndInternal` sends to ALL registered chromes + internal-session contents once globally; **(3) per-tab owner-routed pushes** — every main→chrome send tied to a specific tab (the `wireTabViewEvents` fan, `zoom-changed`, `devtools-state-changed`, `page-context-menu`, privacy delivery, guest-keystroke forwarders, find-overlay per-tab syncs) resolves the tab's OWNING window's chrome **at event time** via `getChromeForTab(wcId)` — never fanned out, never left on a focused-window accessor (event-time resolution is what makes move-to-new-window's re-bind automatic). `getChromeContents()` survives as the **last-focused accessor** (F6 interim, DD8): registry-tracked last-focused window, seeded at window create AND at programmatic `win.focus()` (WSLg-safe — compositor focus events may never arrive), membership-validated at read with a first-record fallback; **F7 owns true multi-window automation/capture semantics** — don't build new code against the accessor when a routing class fits. **Lifecycle split (DD3)**: per-window teardown runs at `close` (whole-window closed-tab capture → roaming-overlay detach, find before sheet → per-tab side-effect suite + **explicit guest destroy** — Electron never auto-destroys an attached view's webContents on window close) and `closed` (record removal + the chrome wc's deferred destroy via `setImmediate`); app-level teardown (MCP stop, stores, overlay DESTRUCTION with the find-before-sheet ordering pin) stays at the quit hooks (`window-all-closed`/`before-quit`/`will-quit`); closing one of N windows never quits, the last close rides `window-all-closed` (non-darwin). **⚠️ Never read `win.*` inside `closed`-or-later handlers** — capture teardown inputs (e.g. `const winId = win.id`) at create time: a destroyed-`BaseWindow` property access throws, and an uncaught throw inside the native `closed` emission aborts the listener chain AND permanently wedges the Wayland close path with zero error output (the F6 fix-cycle root cause). `main.js` also owns downloads, the combined `webRequest` pipeline, the privacy aggregate, and all IPC. `shields.js` = persisted Shields config + tracking-param stripping; `jars.js` = container definitions (both app-db-backed since M10 Flight 1, see App database below); `trackers.js` = registrable-domain (eTLD+1) + tracker classification. `settings-store.js` = durable, schema-versioned app preferences (see Settings store below). `internal-ipc.js` = origin-checked IPC bridge helpers for trusted `goldfinch://` internal pages (see Internal-bridge security model below).
 - **Preloads** (`src/preload/`): `chrome-preload.js` exposes `window.goldfinch.*` (contextBridge) to the UI. `webview-preload.js` is injected into every web page via the web-branch `WebContentsView`'s `webPreferences.preload` at construction time, and runs in the page's **main world** (media scanner + fingerprint detect/farble). `internal-preload.js` is a third, distinct preload for trusted `goldfinch://` internal pages — it runs **context-isolated** (opposite of `webview-preload.js`) and exposes `window.goldfinchInternal` (`settingsGet`/`settingsSet`, `shieldsGet`/`shieldsSet`, `onSettingsChanged`/`onShieldsChanged`, the Flight-5 `downloadsList`/`downloadsAction`/`downloadsClear`/`onDownloadsChanged`, plus the M06 Flight 3 `jarsList`/`jarsAdd`/`jarsRename`/`jarsRemove`/`jarsSetDefault`/`jarsGetDefault`/`onJarsChanged`/`offJarsChanged`) guarded by an internal-origin **allowlist** check (`INTERNAL_ORIGINS.has(location.origin)` — `goldfinch://settings` + `goldfinch://downloads` + `goldfinch://jars`; defense-in-depth; the main-side `registerInternalHandler` is the authoritative boundary — see Internal-bridge security model below). Keep it separate from both `webview-preload.js` and the chrome `window.goldfinch`.
 - **Renderer** (`src/renderer/`): `index.html` / `renderer.js` / `styles.css` — the browser chrome. Each tab is a `WebContentsView` constructed in main and addressed by `wcId` in the renderer. Holds the media panel, docked music player, privacy panel, Shields toggles, the jar/container picker (the `▾` menu, whose "Manage jars…" sentinel row also opens the jars page), and the **⋮ overflow (kebab) menu** at the right of the toolbar (New window, Settings, Downloads, Cookie jars, Print…, Exit; **New window** is FIRST (M09 F6 — Chrome adjacency: window/tab creation ahead of app pages) and opens a fresh window via the `window-create` IPC, also reachable via `Ctrl+N`/`Cmd+N` through the one-classifier path; **Settings** opens the internal `goldfinch://settings` page via `createTab(..., { trusted: true })`, see the internal-page security model below; **Downloads** opens the app-level downloads surface `goldfinch://downloads` via the same trusted `createTab(..., { trusted: true })` path — also reachable via `Ctrl+J`; **Cookie jars** opens the jar-management page `goldfinch://jars` (M06 Flight 3) via the same trusted path, from the shared `openJarsPage()` opener — see the three-trusted-internal-origins note below; **Print…** prints the active web tab; Exit fires the `app-quit` IPC → `app.quit()`, the only all-platform quit path — distinct from `window-close`, whose `window-all-closed` darwin guard does not quit on macOS). The tab strip is an ARIA `tablist`/`tab` roving-tabindex widget (ArrowLeft/Right + Home/End navigate and activate; Delete/Backspace closes the focused tab); its keyboard/screen-reader contract is pinned by the `tab-keyboard-operability` behavior test (`/behavior-test tab-keyboard-operability`), and accessibility across all chrome states is regression-gated by `npm run a11y` (see Commands). All popup menus (the `▾` container picker, the ⋮ kebab, the 🔒 site-info popup, the page context menu incl. toolbar-Unpin mode) and the new-container dialog render from the **menu-overlay sheet** — a main-owned transparent full-guest `WebContentsView` — NOT from chrome DOM (M05 Flight 8). The chrome owns the **triggers, menu models, and action dispatch** (it builds each menu's model and executes activated items via `window.goldfinch`); the sheet owns **presentation + the APG keyboard contract** (`role="menu"`/`menuitem` roving tabindex, Arrow/Home/End/Escape/Tab via the shared `menu-controller.js` + `focusItem` — the module is loaded ONLY by the sheet document post-cutover). Mutual exclusion falls out of the single sheet (open-while-open is a model-replace). See the "Menu-overlay sheet" section below + `docs/renderer-menu.md`.
 
@@ -28,7 +28,7 @@ Key cross-cutting facts:
 - **`asar:false`** in the build config so `src/**/*` files (including `webview-preload.js`) are kept as unpacked disk files in packaged builds; this is required for the internal-page `path.join(__dirname, …)` resolver in `main.js` to locate assets correctly.
 - **Find-in-page is a floating overlay `WebContentsView` (M05 Flight 7)** — NOT chrome DOM. The bar (`src/renderer/find-overlay.{html,js,css}` + `src/preload/find-overlay-preload.js`, chrome-class trust domain) is a **PER-WINDOW lazy-singleton view** stacked above the active guest via `addChildView`-after-guest; main owns its lifecycle, positioning (the guest-bounds path), focus, and the find session, and fans `found-in-page` counts directly to it (path B). Since **M09 F7 (DD5)** the cluster is managed by the **Electron-free** `src/main/find-overlay-manager.js` (`createFindOverlayManager` — injected deps, offline-unit-tested, mirroring `menu-overlay-manager.js`) and instantiated **once per window** into the window registry record's `findOverlay` slot. The F6 roaming singleton and its attachment tracking (the `overlayView` / `findOverlayAttachedWin` / `findOverlayTabWcId` main.js module vars) are **DELETED** — a per-window instance *is* its own scope, so there is nothing to attach, re-resolve, or condition on, and `lastGuestBounds` is per-instance state rather than a shared slot. Destruction is per-window `close` (the sole site; `before-quit` retains no overlay role). The guest is **never inset for find** — the bar floats over full guest bounds. Per-tab `findText`/`findOpen` stay in the chrome renderer (DD9), which drives `find-overlay:open`/`close` (openFind, per-tab restore in `activateTab` — restore is sent AFTER `tabSetActive`, same-sender IPC ordering) and syncs back via `find-overlay-text` (every overlay query, empty included) and `find-overlay-closed` (overlay-side user Esc/✕ ONLY). Close refocus is resolved by SENDER: overlay-side close refocuses the guest; chrome-side (programmatic nav-close) moves no OS focus. The overlay is hidden (`removeChildView`) on internal tabs and while a sheet menu is open (M05 F8 DD5: hide on sheet-show; restore is `closeMenuOverlay`'s explicit owned step, with tab-lifecycle reasons deferring to the `tab-set-active` re-add); it is never in `tabViews`, so it is invisible to `enumerateTabs` and resolves only at the admin tier (probe-addressable — see the enumerable-vs-addressable rule under Overlay-view patterns).
 - Per-tab privacy/shield data flows: main aggregates → `privacy-net` IPC → renderer; preload fingerprint counts → `sendToHost` → renderer. Farble config is fetched **synchronously at page load** (`shields-farble`), so toggling farble needs a reload.
-- Persisted state lives in `userData`: `shields.json`, `containers.json` (not in the repo). `containers.json` is a v2 envelope since M06 F1 — `{ version: 2, defaultId, containers }`; v1 bare-array files migrate in place on first load (`jars.js` DD3).
+- Persisted state lives in `userData/app.db` (the `documents` table, one row per store — see App database below); the `shields` and `jars` rows hold what `shields.json`/`containers.json` held before M10 Flight 1's migration. Those two files are no longer live — a pre-upgrade profile's copies are imported once on first boot after the upgrade and renamed `.migrated` (not in the repo either way). The jars row is a v2 envelope — `{ version: 2, defaultId, containers }`; a legacy v1 bare-array file migrates into that shape on import (`jars.js` DD3).
 - **Frameless window** (`main.js`, a `BaseWindow` hosting a chrome `WebContentsView`; the window is `frame`-less only), branched on `process.platform`: `frame:false` on win/linux (custom window controls), `titleBarStyle:'hidden'` + `trafficLightPosition` on macOS (native traffic lights); `minWidth:900`/`minHeight:600` preserved. Custom minimize/maximize-restore/close controls live in the tab strip's reserved `#window-controls` zone, wired via `window.goldfinch` → `ipcMain` (`window-minimize` / `window-toggle-maximize` / `window-close`; `window-is-maximized`). The maximize button's `aria-label` + `data-state` stay in sync by forwarding main's `maximize`/`unmaximize` events over IPC (`window-maximized-change`) — per-window since M09 F6 (routing class 1b: each window's lifecycle events reach its OWN chrome). The window-control IPCs resolve the SENDER's window (class 1); Close calls the sender-resolved record's `win.close()` (**not** `app.quit()`) — with N windows open this closes ONE window (per-window teardown, DD3); the LAST close rides the existing `closed → window-all-closed → app.quit()` chain (non-darwin).
 - **Chrome drag regions** (`-webkit-app-region`): `#tabstrip` is `drag`; the pill, tabs, and window-control buttons are `no-drag`; a `#tabstrip-drag` spacer guarantees a grab area. The strip lays out as tabs → golden `#newtab-pill` (`+`/`▾`, hugging the tabs) → `#tabstrip-drag` → `#window-controls`. `chrome-preload.js` also exposes `platform`; the renderer tags `<html>` with a `platform-{platform}` class for platform-specific CSS (macOS-only inset; non-darwin frameless border).
 - **⚠️ `WebContentsView` native-surface gotcha — "DOM correct ≠ render correct."** A `WebContentsView` (and its predecessor `<webview>`) is an out-of-process **native compositing surface**, not a normal DOM box. Changing the bounds or visibility of guest views (resizing `#webviews`, opening/closing adjacent panels, etc.) can **mis-position or mis-render the guest surface even when `getComputedStyle`/`getBoundingClientRect` report every box correct** — the failure is invisible to DOM/a11y/`evaluate`-based checks and only shows in the *composited pixels*. This is a recurring failure mode in this stack: see Mission 04 Known Issues — the find-in-page `{0,0}` cold-start and **#27 side-panel animation** (`missions/04-browser-conveniences/flights/06-polish-and-mcp-hygiene/` — three CSS mechanisms all failed identically). **#27/SC10 is now RESOLVED (M05 Flight 9)** and its root cause is the load-bearing lesson: **a guest view's bounds change is a discrete `setBounds` STEP, not an animatable quantity — the guest cannot animate in lockstep.** So any chrome-side layout that *animates geometry around the guest region* (a sliding side panel that resizes `#webviews`, a split-view drag, etc.) produces a chrome-ramps-while-guest-steps mismatch, and sustaining that mismatched repaint over the live guest **mis-renders the composited frame on EVERY platform** — this was operator-confirmed on the native Windows build, NOT a WSLg quirk (that attribution was a red herring). F9 resolved #27 not by making the slide smooth (impossible — the guest steps) but by **retiring the animation** (panels open instantly). **INVARIANT: never animate chrome layout that resizes/repositions the guest slot; animate only things that float OVER the guest (the F7 find bar, F8 menu sheet — view stacking that changes no layout around the guest), or make the layout change instant.** The **menu-overlay sheet** (M05 Flight 8) is the current live example of working WITH this constraint: menus render from a transparent full-guest `WebContentsView` stacked above the live guest — compositor-level view stacking that changes no layout around the guest, pixel-proven per surface at the F8 checkpoints. (Its predecessor, the **freeze-frame pattern** — capture a still, hide the live guest, paint chrome DOM above it — coped by taking the native surface out of the frame entirely; it was retired at the F8 cutover.) **Rules:** (1) prefer compositor-only properties that do **not** change layout around the guest (and never *animate* geometry around it — see the invariant above); (2) treat "DOM geometry reads correct" as necessary-but-insufficient — the acceptance signal is the *rendered* surface, observed by a human in motion (visual HAT / operator screenshots); note that even `captureWindow` is insufficient for *inter-frame* motion defects (discrete grabs land on settled frames — F9 proved this: an automated capture read "stable" for a defect only mid-slide screenshots caught); (3) **gate any mechanism that touches the guest view region on a cheap on-platform spike** before building it. **Don't attribute a render defect to the rig (WSLg) without a cross-platform control** — F9's glitch was mislabeled WSLg until the operator reproduced it on the native Windows build; "the last one was WSLg" is not evidence the next one is.
@@ -85,7 +85,7 @@ Two module shapes are the default choice for new logic, recurring across flights
 
 **Two real-boot defect classes these shapes don't catch by construction** — both invisible to `npm test`, only found by booting the real app:
 
-1. **`mkdirSync`-before-synchronous-persist.** A store that must synchronously persist on first boot (before Electron has lazily created `userData`) needs its own `fs.mkdirSync(path.dirname(storePath), { recursive: true })` ahead of the write — see `jars.js:218`. `settings-store.js` needs no such call: it only ever saves after a user action, by which point the directory already exists. Unit fixtures built on `mkdtempSync` always pre-create their temp dir, so this class never surfaces in the suite.
+1. **`mkdirSync`-before-synchronous-persist.** A store that must synchronously persist on first boot (before Electron has lazily created `userData`) needs an `fs.mkdirSync(dir, { recursive: true })` ahead of the write. Pre-M10-Flight-1, `jars.js` owned this call itself (its synchronous seed-path `save()`); since the app-db consolidation every store's write runs through `app-db.js`'s document-row seam, so `app-db.js`'s own `open(userDataPath)` does the `mkdirSync` once for the whole substrate (`src/main/app-db.js`) and no individual store needs its own call anymore. `settings-store.js` never needed one: it only ever saves after a user action, by which point the directory already exists. Unit fixtures built on `mkdtempSync` always pre-create their temp dir, so this class never surfaces in the suite.
 2. **Classic-`<script>` shared top-level lexical-scope collision — retired for `src/shared/`.** Module scripts get their own scope, so two `src/shared/` files can no longer collide by independently declaring the same top-level `const`/`let`/`class` — the class is structurally gone, not merely guarded. The surviving residue is `menu-controller.js`, the product's one remaining classic script (DD6 carve-out): it and any future classic script still share one document-level scope with each other. The former `vm`-replay collision nets (`chrome-shared-scripts.test.js`, `jars-page-shared-scripts.test.js`) are retargeted as **script-tag contract tests** (F2 leg 6) — not collision nets: a tag-count guard (a parse regression that silently matched zero `<script>` tags would make every other pin vacuously green), the DD3 defer/module pin (above), and a module pin (every `src/shared/*.js` script tag is `type="module"` — a classic tag on an ESM file is a parse-time `SyntaxError` only a live boot would otherwise catch).
 
 **Grep-AC convention.** Some acceptance criteria are negative/invariant assertions ("this function's body must not change") that a unit test can't cheaply encode. A leg's Verification Steps may instead specify a literal, reproducible `grep`/diff and treat every hit as requiring individual exempt-or-real judgment rather than automatic pass/fail — e.g. confirming a function's body is byte-unchanged after a refactor (grep + diff), or that a retired literal no longer appears under `src/` (grep → 0 hits, with any hit inspected and marked exempt or real).
@@ -127,12 +127,12 @@ When adding an internal page (Flight 5+): add a `host → pathname → file` ent
 
 The **canonical home for app preferences** going forward. Do not scatter new preferences into ad-hoc constants or into `shields.js`.
 
-- **Electron-free.** `settings-store.js` does not `require('electron')` and does not call `app.getPath` at module scope. The `userData` directory is **injected** at `load(userDataPath, opts?)` (called from `main.js`'s `whenReady`, alongside `shields.load()`). This makes the pure core unit-testable with a synthetic temp dir and no Electron stub.
-- **Durable and atomic.** `save()` writes to a temp file beside the target in `dir` (not `os.tmpdir()`) and then calls `renameSync` — the same-filesystem rename is atomic on POSIX and near-atomic on Windows. On error, the call propagates (callers, including the bridge, learn the write failed).
-- **Schema-versioned with safe-default repair.** The schema is the `DEFAULTS` constant (`{ version: 1, homePage: '...' }`). `load()` merges the stored file onto a fresh copy of `DEFAULTS` using per-key validation: a corrupt field is silently repaired to its default while valid siblings are kept. `load()` **never throws** — the app must still boot on a corrupt file.
-- **Per-key validation.** `VALIDATORS` (`settings-store.js`) maps each settable key to a predicate. `homePage` requires `isSafeTabUrl(v) && v !== 'about:blank'` — `about:blank` is excluded because `isSafeTabUrl` admits it but it is not a meaningful home page. `set(key, value)` validates **before** mutating so the prior value is kept on rejection; it throws `TypeError` for unknown keys or invalid values. Unknown keys in the file are silently dropped on load.
-- **Pluggable serialization seam (DD6).** `load` and `save` use a `{ serialize, deserialize }` codec that defaults to `JSON.stringify`/`JSON.parse`. When a secrets manager is built, a `safeStorage`-backed codec replaces only that pair — the atomic write path, schema, and validation are unaffected. **Do not add encryption now** — the seam is built in so it can be layered in later.
-- **Persisted location.** `userData/settings.json` (the `userData` directory Electron provides via `app.getPath('userData')`).
+- **Electron-free.** `settings-store.js` does not `require('electron')` and does not call `app.getPath` at module scope. The `userData` directory is **injected** at `load(userDataPath, opts?)` (called from `init-profile.js`'s `initProfileAndStores`, alongside `shields`/`jars`/`downloads.load()` — after `appDb.open(userDataPath)`, which every store's row read/write depends on; see App database below). This makes the pure core unit-testable with a synthetic temp dir and no Electron stub.
+- **Durable through the app-db document-row seam (M10 Flight 1).** `save()` writes the serialized config as a transactional UPSERT into `app.db`'s `documents` row keyed `'settings'` (`app-db.js`'s `createDocumentStore('settings').write(...)`) — no tmp-file/rename dance; `node:sqlite`'s synchronous write is the durability primitive. On error, the call propagates (callers, including the bridge, learn the write failed). See "App database" below for the substrate.
+- **Schema-versioned with safe-default repair.** The schema is the `DEFAULTS` constant (`{ version: 1, homePage: '...' }`). `load()` merges the stored row (or, on a row-absent profile with a legacy `settings.json` still present, that file's migrated contents — see "App database" below) onto a fresh copy of `DEFAULTS` using per-key validation: a corrupt field is silently repaired to its default while valid siblings are kept. `load()` **never throws** — the app must still boot on a corrupt row or file.
+- **Per-key validation.** `VALIDATORS` (`settings-store.js`) maps each settable key to a predicate. `homePage` requires `isSafeTabUrl(v) && v !== 'about:blank'` — `about:blank` is excluded because `isSafeTabUrl` admits it but it is not a meaningful home page. `set(key, value)` validates **before** mutating so the prior value is kept on rejection; it throws `TypeError` for unknown keys or invalid values. Unknown keys in the stored row are silently dropped on load.
+- **Pluggable serialization seam (DD6).** `load` and `save` use a `{ serialize, deserialize }` codec that defaults to `JSON.stringify`/`JSON.parse`; the codec's output is exactly what lands in the row's `payload` TEXT column. When a secrets manager is built, a `safeStorage`-backed codec replaces only that pair — the row-write path, schema, and validation are unaffected. **Do not add encryption now** — the seam is built in so it can be layered in later.
+- **Persisted location.** `userData/app.db`'s `documents` row keyed `'settings'` (the `userData` directory Electron provides via `app.getPath('userData')`). A pre-M10-Flight-1 profile's `userData/settings.json` is imported once, on the first boot after the upgrade, and renamed `settings.json.migrated` — see "App database" below.
 
 **Home-page setting.** `homePage` is the first live key. It is promoted from a compile-time constant in `renderer.js` to a store value loaded at startup and kept live by a `settings-changed` broadcast. The renderer holds a `homePageCache` filled from `window.goldfinch.settingsGet('homePage')` at startup (the initial `createTab` awaits this to avoid a startup race); every `no-arg createTab()` reads `currentHomePage()` from the cache. The `settings-changed` broadcast arrives via `window.goldfinch.onSettingsChanged(cb)` (chrome trust domain) and via `window.goldfinchInternal.onSettingsChanged(cb)` (internal guest).
 
@@ -181,26 +181,148 @@ The Unpin dispatch body also calls `els.address.focus()` **after** the send (a d
 
 **Settings read channel for the chrome (`settings-get`).** `ipcMain.handle('settings-get', ...)` in `main.js` is intentionally **not** behind `registerInternalHandler` — its trust domain is the `file://` chrome (the `window.goldfinch` surface in `chrome-preload.js`), the same as `shields-get`. Web webviews have no `ipcRenderer.invoke`, so only the chrome and the internal guest can reach IPC at all.
 
+### App database (`src/main/app-db.js`)
+
+Durable, schema-versioned substrate for the five small config/state stores —
+settings, downloads, session, jars, shields (M10 Flight 1, consolidating the
+BACKLOG "JSON stores → SQLite" seed onto the same live-SQLite pattern
+`history-store.js` proved first). It is a **clone of `history-store.js`'s
+seams, not a shared import**: `app.db` is a **separate, independent
+database** from `history.db`, with its own `user_version` ladder — a corrupt
+`app.db` quarantines config alone, a corrupt `history.db` quarantines
+history alone, and the write-hot, high-cardinality visits table never shares
+a file with small config rows (flight DD2).
+
+- **Substrate ruling — DD1 re-affirmed and widened.** M08 F1's DD1 ruling
+  (built-in `node:sqlite`, no vendored native module, preserving Goldfinch's
+  zero-runtime-dependency identity) is **re-affirmed by M10 Flight 1 DD1**
+  and widened from history alone to the **whole persistence layer**: every
+  one of the five stores below now runs on the same experimental API. The
+  standing tax widens with it — **every future Electron major bump re-runs
+  the full store suite (`history-store` + `app-db` + all five converted
+  stores) and treats a `node:sqlite` API break as a first-class migration
+  cost**, now blocking the whole persistence layer, not just history. This
+  also corrects the BACKLOG seed's stale "Node ≥ 22.12" note: Electron
+  42.6.1 bundles Node **24.18**, and `node:sqlite` loads unflagged there.
+  Full decision record:
+  `missions/10-persistence-consolidation/flights/01-sqlite-store-consolidation/flight.md`
+  DD1 (history's own record: `missions/08-history/flights/01-history-store/flight.md` DD1).
+- **One `documents` table, one row per store (DD3).** Schema v1:
+  `documents(store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at
+  INTEGER NOT NULL)`. `createDocumentStore(name)` returns the shared
+  `{ read(), write(payload, now?), remove() }` seam that every converted
+  store resolves once at `load()` and reuses for every persist; every store
+  write is a transactional whole-document UPSERT of its serialized payload,
+  every load reads one row. This is a doc-per-row design, not per-field
+  columns, because all five stores are low-cardinality wholesale-replace
+  workloads — exactly the workload JSON already served fine; what the
+  substrate buys is one corruption/quarantine discipline and transactional
+  writes, not indexing. Each store's public API,
+  `DEFAULTS`/validators/normalizers, legacy-shape handling, and
+  `{ serialize, deserialize }` codec seam survive **verbatim** — the codec
+  output simply lands in the row's `payload` TEXT column instead of a file,
+  keeping a future `safeStorage`-encrypted codec swap codec-only.
+- **`app.db` WAL file family + lifecycle placement (DD7).** `app-db.js`
+  opens `userData/app.db` in `journal_mode=WAL` + `synchronous=NORMAL`
+  (mirroring `history-store.js`), so the live database is a three-file
+  family on disk: `app.db`, `app.db-wal`, `app.db-shm`.
+  `appDb.open(userDataPath)` runs inside `init-profile.js`'s
+  `initProfileAndStores`, **before** the four in-seam store loads (shields,
+  settings, jars, downloads — they all resolve their row through it) and
+  **after** the dev-profile `setPath('userData', …)` redirect.
+  `session-store.load()` stays a `main.js` sibling call (a deliberate M09
+  choice preserved by design review) — under the module-singleton design it
+  simply reads the already-open `app-db.js` singleton, no signature
+  threading needed. `appDb.close()` joins `historyStore.close()` at
+  **`will-quit`** — deliberately after `before-quit`'s writers (the session
+  terminal snapshot, the downloads interrupted-flush, any settings/jars/
+  shields saves) have already run, preserving the existing
+  write-before-close ordering; the order between the two DBs' closes is
+  itself immaterial. `close()` checkpoints the WAL file, same as history's.
+- **Migration semantics — import once, then rename `.migrated` (DD5).** At
+  each store's `load()`, row-absent + legacy JSON present → the JSON is
+  parsed through that store's **existing** load/repair/legacy-shape logic
+  (settings merge-repair, jars' three-shape load, downloads record
+  validation, session snapshot validation, shields merge-over-DEFAULTS) →
+  the repaired result is written as the row → the legacy file is
+  best-effort renamed `<name>.json.migrated` (never fatal — a rename
+  failure doesn't undo the completed row write). A fresh profile (no JSON,
+  no row) seeds in-memory defaults with no row write. A corrupt legacy JSON
+  file still migrates — the repaired-to-defaults/empty result is what
+  migrates, and the file is renamed regardless. Once a row exists, the
+  legacy file (bare, non-`.migrated`) is ignored outright and never
+  re-imported.
+  - **Carve-out: jars' unknown-version envelope never migrates.** `jars.js`
+    deliberately keeps a readable-but-unknown-schema-version
+    `containers.json` in memory without ever writing a row or renaming the
+    file (pinned by `jars-security-forward-version.test.js`), so a future
+    version-compatible build can still recover the original envelope
+    unchanged — migrating that branch would lossily re-validate through v2
+    rules AND rename the original away, defeating the guarantee. The probe
+    re-runs every boot until a compatible build handles it. Only
+    known-shape jars files (the v2 envelope, a v1 bare array, or the
+    no-file/seed case) migrate.
+- **Quarantine → fresh defaults; `.migrated` files are never re-imported
+  (DD6).** A corrupt `app.db` (and its `-wal`/`-shm` siblings) is
+  quarantined to a `.corrupt-<ms-epoch>` sibling and recreated fresh on the
+  next `open()` — the app must boot. Every store then seeds its in-memory
+  defaults; the `.migrated` JSON siblings from an earlier migration are
+  **NOT** re-imported — they are arbitrarily stale by then, and silently
+  resurrecting month-old settings/jars would be worse than clean defaults.
+  This is parity with the `history-store.js` quarantine precedent.
+  - **Jars' post-quarantine reseed is deliberately branch-dependent.**
+    Jars' no-row seed path probes `userData/Partitions/goldfinch`
+    (existence only, never contents) and seeds either the fresh two-jar set
+    or the four-jar legacy set. After an `app.db` quarantine, a profile
+    that ever had the legacy `default` jar reseeds the legacy set — this
+    mirrors today's behavior on a corrupt `containers.json` exactly
+    (keeping a legacy partition's data reachable rather than orphaning it),
+    and is accepted as intentional parity rather than forced to one
+    deterministic seed.
+- **Shields brought up to house discipline; write errors now propagate
+  (DD8/DD10).** `shields.js` dropped `require('electron')`, takes the
+  injected `userDataPath` like every other store, gained the codec seam,
+  and writes transactionally through the shared document seam. `save()`'s
+  not-loaded state (no prior `load()`) stays a **silent no-op** — the
+  existing semantics its pre-load mutation call sites depend on — but once
+  loaded, a row-write failure now **propagates uncaught** instead of being
+  silently swallowed (the pre-flight behavior ate write errors, weakening
+  the no-data-loss story). This matches the existing
+  `internal-settings-set` precedent (`settings.set` already throws uncaught
+  into an `ipcMain.handle` rejection): `shields.set()`/`setPaused()` can now
+  reject through their IPC handlers, a new named failure mode.
+- **Never throws on a corrupt existing file; `close()` is idempotent** — the
+  same two seams `history-store.js` established: `open()` quarantines
+  rather than propagating a corrupt-file error (and its `-wal`/`-shm`
+  siblings), and `close()` tracks its own open/closed flag because
+  `DatabaseSync.close()` throws on a second call.
+
 ### History store (`src/main/history-store.js`)
 
 Durable, per-jar browsing-history persistence (M08 Flight 1). Unlike the
-JSON-file codec pattern (`settings-store.js` / `downloads-store.js`), the
-history store needs indexed range queries (recent paging) and full-text
-search at scale, so it is the **first house store built on a live SQLite
-handle** rather than a whole-file rewrite.
+document-row stores above (settings/downloads/session/jars/shields, each a
+single wholesale-replaced row), the history store needs indexed range
+queries (recent paging) and full-text search at scale, so it predates them
+as the **first house store built on a live SQLite handle** with real
+schema/indexes, rather than a single serialized row.
 
 - **Substrate ruling (DD1).** The store runs on Node's built-in `node:sqlite`
   (`DatabaseSync`) — an operator ruling at mission design, not a vendored
   native module — preserving Goldfinch's zero-runtime-dependency identity
   (the M03 MCP-SDK precedent set the bar for what earns a dependency; a
   storage engine the runtime already ships does not). Full decision record:
-  `missions/08-history/flights/01-history-store/flight.md` DD1.
-- **The accepted ongoing cost.** `node:sqlite` is an **experimental** Node
-  API: it emits `ExperimentalWarning` at require time (in the app console and
-  in `npm test` output — cosmetic, accepted) and its surface may shift across
-  Electron/Node upgrades. **Every future Electron major bump must re-run the
-  store's unit suite and treat a `node:sqlite` API break as a first-class
-  migration cost** — this is a standing tax, not a one-time risk.
+  `missions/08-history/flights/01-history-store/flight.md` DD1 — **re-affirmed
+  and widened to the whole persistence layer by M10 Flight 1 DD1**, see
+  "App database" above.
+- **The accepted ongoing cost — widened by M10 Flight 1.** `node:sqlite` is
+  an **experimental** Node API: it emits `ExperimentalWarning` at require
+  time (in the app console and in `npm test` output — cosmetic, accepted)
+  and its surface may shift across Electron/Node upgrades. **Every future
+  Electron major bump must re-run the full store suite —
+  `history-store` + `app-db` + all five app-db-backed stores — and treat a
+  `node:sqlite` API break as a first-class migration cost** — this is a
+  standing tax, not a one-time risk, and as of M10 Flight 1 it blocks the
+  whole persistence layer, not just history (see "App database" above).
 - **Recording pipeline.** `src/main/history-recorder.js` (`createHistoryRecorder`
   — Electron-free, injected-deps factory, not a module singleton; one instance
   built in `main.js` at boot) is the recording GATE, called from the existing

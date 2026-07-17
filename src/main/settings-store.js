@@ -6,19 +6,23 @@
 // Design:
 // - ELECTRON-FREE: does NOT require('electron'), does NOT call app.getPath at
 //   module scope. The userData path is INJECTED at load(userDataPath).
-// - Atomic persistence: writes to a temp file then renames (same filesystem
-//   as the target, so rename is atomic on POSIX and near-atomic on Windows).
-// - Safe-default repair: corrupt/unreadable file → defaults (load never throws);
+// - Persists through app-db.js's `documents` row seam (flight 10-1 DD2-DD4):
+//   one row keyed 'settings', written wholesale on every save(). A one-time
+//   legacy migration reads `settings.json` when no row exists yet, repairs it
+//   through the SAME merge-with-repair logic below, writes the row, then
+//   renames the file `.migrated` (best-effort — DD5).
+// - Safe-default repair: corrupt/unreadable data → defaults (load never throws);
 //   a bad single field is repaired to default while valid siblings are kept.
 // - Pluggable serialization seam (DD6): load/save use a { serialize, deserialize }
 //   pair defaulting to JSON.stringify/JSON.parse so a future safeStorage backend
-//   replaces only the pair, not the schema or atomic write path.
+//   replaces only the pair, not the schema or the document-row write path.
 // - Validated writes: every set() is checked before mutating; unknown keys and
 //   invalid values throw TypeError; save() errors propagate so the caller knows.
 
 const fs = require('fs');
 const path = require('path');
 const { isSafeTabUrl } = require('../shared/url-safety');
+const appDb = require('./app-db');
 
 // ---------------------------------------------------------------------------
 // Schema defaults
@@ -169,6 +173,9 @@ const NORMALIZERS = {
 /** @type {string | null} */
 let dir = null;
 
+/** @type {{ read(): string | null, write(payload: string, now?: number): void, remove(): void } | null} */
+let docStore = null;
+
 /** @type {Settings} */
 let config = freshDefaults();
 
@@ -179,12 +186,66 @@ const defaultDeserialize = (/** @type {string} */ s) => JSON.parse(s);
 let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 
 // ---------------------------------------------------------------------------
+// Merge-with-repair: start from a fresh copy of DEFAULTS, then for each known
+// key, take the stored value only if it passes validation (or, for keys
+// without a validator, only if the typeof matches the default). Shared by the
+// row-read path and the legacy-JSON migration path — same repair semantics
+// either way.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {any} stored
+ * @returns {Settings}
+ */
+function repairConfig(stored) {
+  const merged = /** @type {any} */ (freshDefaults());
+  for (const key of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
+    if (Object.prototype.hasOwnProperty.call(stored, key)) {
+      const val = stored[key];
+      const validator = Object.hasOwn(VALIDATORS, key) ? VALIDATORS[key] : null;
+      const normalizer = Object.hasOwn(NORMALIZERS, key) ? NORMALIZERS[key] : null;
+      if (validator) {
+        if (validator(val)) {
+          // Apply normalizer to the validated value (e.g. deep-merge toolbarPins
+          // onto defaults for forward-compat — a future 3rd item fills in here).
+          merged[key] = normalizer ? normalizer(val) : val;
+        }
+        // else: keep the default (repair)
+      } else {
+        // No validator: accept if type-compatible with the default.
+        // NOTE: typeof null === 'object' — object-typed keys must have an explicit
+        // validator (see VALIDATORS above) to avoid accepting null/arrays here.
+        if (typeof val === typeof DEFAULTS[key]) {
+          merged[key] = normalizer ? normalizer(val) : val;
+        }
+      }
+    }
+  }
+  return merged;
+}
+
+/**
+ * Deserialize + repair raw bytes (a document row payload or legacy JSON file
+ * contents). NEVER throws — a deserialize failure (corrupt bytes) repairs to
+ * fresh defaults, same as today's corrupt-file handling.
+ * @param {string} raw
+ * @returns {Settings}
+ */
+function parseAndRepair(raw) {
+  try {
+    return repairConfig(codec.deserialize(raw));
+  } catch {
+    return freshDefaults();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // load(userDataPath, opts?)
 // ---------------------------------------------------------------------------
 
 /**
  * Initialise the store. Must be called before get/set.
- * Safe to call again (re-reads the file; merges onto fresh DEFAULTS).
+ * Safe to call again (re-reads the row; merges onto fresh DEFAULTS).
  *
  * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
  * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
@@ -197,44 +258,38 @@ function load(userDataPath, opts = {}) {
     deserialize: opts.deserialize ?? defaultDeserialize
   };
 
+  // Resolve the document store and read the row OUTSIDE the catch-all below:
+  // an app-db-not-open error is a programmer error (mis-ordered boot) and
+  // must propagate — never dissolve into "fall back to defaults" (design
+  // review). The never-throw contract below still covers everything else
+  // (JSON parse, repair, migration rename).
+  docStore = appDb.createDocumentStore('settings');
+  const row = docStore.read();
+
+  if (row !== null) {
+    config = parseAndRepair(row);
+    return config;
+  }
+
   try {
     const file = path.join(dir, 'settings.json');
     if (fs.existsSync(file)) {
       const raw = fs.readFileSync(file, 'utf8');
-      const stored = codec.deserialize(raw);
-
-      // Merge-with-repair: start from a fresh copy of DEFAULTS, then for each
-      // known key, take the stored value only if it passes validation (or, for
-      // keys without a validator, only if the typeof matches the default).
-      const merged = /** @type {any} */ (freshDefaults());
-      for (const key of /** @type {(keyof typeof DEFAULTS)[]} */ (Object.keys(DEFAULTS))) {
-        if (Object.prototype.hasOwnProperty.call(stored, key)) {
-          const val = stored[key];
-          const validator = Object.hasOwn(VALIDATORS, key) ? VALIDATORS[key] : null;
-          const normalizer = Object.hasOwn(NORMALIZERS, key) ? NORMALIZERS[key] : null;
-          if (validator) {
-            if (validator(val)) {
-              // Apply normalizer to the validated value (e.g. deep-merge toolbarPins
-              // onto defaults for forward-compat — a future 3rd item fills in here).
-              merged[key] = normalizer ? normalizer(val) : val;
-            }
-            // else: keep the default (repair)
-          } else {
-            // No validator: accept if type-compatible with the default.
-            // NOTE: typeof null === 'object' — object-typed keys must have an explicit
-            // validator (see VALIDATORS above) to avoid accepting null/arrays here.
-            if (typeof val === typeof DEFAULTS[key]) {
-              merged[key] = normalizer ? normalizer(val) : val;
-            }
-          }
-        }
+      config = parseAndRepair(raw);
+      // One-time migration: the repaired result becomes the row (even a
+      // corrupt legacy file migrates its repaired-to-defaults result — DD5),
+      // then the legacy file is renamed to mark it superseded.
+      save(config);
+      try {
+        fs.renameSync(file, file + '.migrated');
+      } catch {
+        // best-effort — migration already completed via the row write (DD5).
       }
-      config = merged;
     } else {
       config = freshDefaults();
     }
   } catch {
-    // Any error (corrupt JSON, read error, etc.) → fall back to defaults.
+    // Any error (read failure, etc.) → fall back to defaults.
     // load() MUST NEVER THROW — the app must still boot.
     config = freshDefaults();
   }
@@ -247,16 +302,11 @@ function load(userDataPath, opts = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Atomically persist the current config to settings.json.
- * The temp file lives BESIDE the target in dir (not os.tmpdir) so that the
- * rename is atomic on the same filesystem.
+ * Persist the current config to its document row.
  * Errors PROPAGATE — do not swallow (callers / the bridge learn the set failed).
  */
 function save(nextConfig = config) {
-  const file = path.join(/** @type {string} */ (dir), 'settings.json');
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, codec.serialize(nextConfig));
-  fs.renameSync(tmp, file);
+  /** @type {any} */ (docStore).write(codec.serialize(nextConfig));
 }
 
 // ---------------------------------------------------------------------------

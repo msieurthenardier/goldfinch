@@ -34,9 +34,22 @@
 //
 // This module is ELECTRON-FREE: the userData path is injected at load(userDataPath),
 // like settings-store/downloads-store, so the unit suite needs no electron stub.
+//
+// Persistence (flight 10-1 DD2-DD5, leg 2): jars.js persists through app-db.js's
+// `documents` row seam (keyed 'jars'), like settings/downloads/session before it.
+// A one-time migration reads `containers.json` when no row exists yet, runs it
+// through the SAME three-shape load logic below (v2 envelope / v1 array / seed),
+// writes the repaired result as the row, then renames the legacy file `.migrated`
+// (best-effort — DD5). **Carve-out**: the unknown-version envelope branch is
+// EXCLUDED from migration — it is kept in memory only, with NO row write and NO
+// rename, so a future compatible build can still recover the original file
+// untouched (pinned by jars-security-forward-version.test.js). A pluggable
+// { serialize, deserialize } codec seam (defaulting to JSON.stringify/JSON.parse,
+// like settings-store) is injectable via load(userDataPath, opts?).
 
 const fs = require('fs');
 const path = require('path');
+const appDb = require('./app-db');
 
 // Injection-safe color validator — extracted to src/shared/safe-color.js (M05
 // Flight 8, Leg 3) so the menu-overlay sheet validates dot colors against the SAME
@@ -75,7 +88,15 @@ const LEGACY_DEFAULTS = [
 
 let containers = FRESH_SEED.map((c) => ({ ...c }));
 let defaultId = FRESH_SEED[0].id;
-let storePath = null;
+
+/** @type {{ read(): string | null, write(payload: string, now?: number): void, remove(): void } | null} */
+let docStore = null;
+
+const defaultSerialize = (/** @type {object} */ c) => JSON.stringify(c, null, 2);
+const defaultDeserialize = (/** @type {string} */ s) => JSON.parse(s);
+
+/** @type {{ serialize: (c: object) => string, deserialize: (s: string) => any }} */
+let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 
 // Reserved identities (DD4): burner-tab ids are minted as `burner-<n>`, while
 // admin/internal/default have privileged or built-in meanings outside user jars.
@@ -172,20 +193,52 @@ function repairDefaultId(list, candidate) {
   return list.length ? list[0].id : null;
 }
 
-function load(userDataPath) {
+/**
+ * Initialise the store. Must be called before list/add/rename/remove/etc.
+ * Safe to call again (re-reads the row).
+ *
+ * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
+ * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
+ * @returns {Array<object>}
+ */
+function load(userDataPath, opts = {}) {
+  codec = {
+    serialize: opts.serialize ?? defaultSerialize,
+    deserialize: opts.deserialize ?? defaultDeserialize
+  };
+
+  // Resolve the document store and read the row OUTSIDE the catch-all below:
+  // an app-db-not-open error is a programmer error (mis-ordered boot) and must
+  // propagate — never dissolve into "fall back to a seed" (design review, same
+  // discipline as settings/downloads/session). The never-throw contract below
+  // still covers everything else (JSON parse, repair, migration rename).
+  docStore = appDb.createDocumentStore('jars');
+  const row = docStore.read();
+
+  if (row !== null) {
+    try {
+      const saved = codec.deserialize(row);
+      containers = validateContainers(saved && saved.containers);
+      defaultId = repairDefaultId(containers, saved && saved.defaultId);
+    } catch {
+      // Corrupt row bytes (e.g. an injected codec that throws) — never throw;
+      // fall back to an empty, valid (DD2) state rather than reseeding over it.
+      containers = [];
+      defaultId = null;
+    }
+    return containers;
+  }
+
   try {
     const file = path.join(userDataPath, FILE_NAME);
-    // Persistence is unconditional post-migration: every shape below either keeps
-    // the file as-is (v2 / unknown envelope) or rewrites it (v1 / seed), so
-    // storePath is assigned once, before the dispatch.
-    storePath = file;
     let saved;
     try {
       saved = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch {
       /* missing file or unparseable JSON — `saved` stays undefined → seed path (c) */
     }
-    // (a) v2 envelope: validate + repair, never rewritten by load.
+    // (a) v2 envelope (known version): validate + repair, migrate to the row,
+    // then rename the legacy file `.migrated` (DD5).
     if (
       saved !== null &&
       typeof saved === 'object' &&
@@ -196,41 +249,52 @@ function load(userDataPath) {
       containers = validateContainers(saved.containers);
       // Repair runs AFTER validation, so a defaultId pointing at a dropped entry
       // lands on the first surviving jar. Empty list → null (Burner is default) —
-      // empty is a VALID persisted state, never reseeded (DD2).
+      // empty is a VALID persisted state, never reseeded (DD2), but it still
+      // migrates to the row like any other known shape.
       defaultId = repairDefaultId(containers, saved.defaultId);
+      save();
+      migrateLegacyFile(file);
       return containers;
     }
     // (b) v1 bare array: validate under the v2 rules (reserved-namespace remap
-    // included) and rewrite as a v2 envelope — once; the rewritten file parses
-    // as (a) on every later load. Zero survivors mean there is nothing to
-    // preserve → fall through to (c).
+    // included) and migrate to the row as a v2 envelope — once; the row parses
+    // as (a)'s row-present path on every later load. Zero survivors mean there
+    // is nothing to preserve → fall through to (c) (the unusable file is still
+    // consumed by the seed migration below).
     if (Array.isArray(saved)) {
       const validated = validateContainers(saved);
       if (validated.length) {
         containers = validated;
         defaultId = repairDefaultId(validated, 'default');
         save();
+        migrateLegacyFile(file);
         return containers;
       }
     }
-    // A readable envelope with an unknown version is still user data. Keep a
-    // best-effort in-memory view, but never rewrite it during load — a future
-    // compatible release can then recover the original envelope unchanged.
+    // DD5 carve-out: a readable envelope with an UNKNOWN version is still user
+    // data. Keep a best-effort in-memory view, but NEVER write a row and NEVER
+    // rename the file during load — a future compatible release can then
+    // recover the original envelope unchanged. The probe re-runs every boot
+    // until that happens (pinned by jars-security-forward-version.test.js).
     if (saved !== null && typeof saved === 'object' && !Array.isArray(saved) && Array.isArray(saved.containers)) {
       containers = validateContainers(saved.containers);
       defaultId = repairDefaultId(containers, saved.defaultId);
       return containers;
     }
-    // (c) no readable store (missing file, corrupt JSON, unknown shape):
-    // probe the legacy base partition — existence only, never contents (DD3).
-    // Present → the app has run before → legacy four-jar seed; absent → true
-    // first run → fresh seed. Persist synchronously: main.js pre-warms
-    // persist:goldfinch on every launch, so an unsaved fresh seed would re-probe
-    // as legacy on launch #2 (DD3, load-bearing).
+    // (c) no readable store (missing file, corrupt JSON, or a v1 array that
+    // validated to zero survivors): probe the legacy base partition — existence
+    // only, never contents (DD3). Present → the app has run before → legacy
+    // four-jar seed; absent → true first run → fresh seed. Persist
+    // synchronously: main.js pre-warms persist:goldfinch on every launch, so an
+    // unsaved fresh seed would re-probe as legacy on launch #2 (DD3,
+    // load-bearing). Any file that led here (corrupt/unusable) is consumed by
+    // the same best-effort migrateLegacyFile rename as (a)/(b); a true first
+    // run (no file at all) makes that rename a silent no-op.
     const legacy = fs.existsSync(path.join(userDataPath, 'Partitions', 'goldfinch'));
     containers = (legacy ? LEGACY_DEFAULTS : FRESH_SEED).map((c) => ({ ...c }));
     defaultId = legacy ? 'default' : 'personal';
     save();
+    migrateLegacyFile(file);
     return containers;
   } catch {
     /* fall through — load never throws */
@@ -242,23 +306,27 @@ function load(userDataPath) {
   return containers;
 }
 
-// Atomic write — temp file beside the target (same fs → atomic rename). Fail-soft:
-// jar mutations must not crash the app on a bad disk. The !storePath guard is
-// load-bearing: add() before load() is an exercised path — an unguarded
-// `storePath + '.tmp'` would write a literal `null.tmp` in cwd.
+// Best-effort rename of a consumed legacy file to `<name>.migrated` (DD5) — a
+// rollback artifact, never re-imported (DD6). A no-op (silently caught) when
+// no file exists at `file` (a true first run with nothing to rename).
+/** @param {string} file */
+function migrateLegacyFile(file) {
+  try {
+    fs.renameSync(file, file + '.migrated');
+  } catch {
+    /* best-effort — migration already completed via the row write (DD5) */
+  }
+}
+
+// Fail-soft: jar mutations must not crash the app on a write failure. The
+// ENTIRE body (including the docStore call) stays inside this swallow —
+// add() before load() is an exercised path (container-menu.test.js) where
+// docStore is still null and `docStore.write` throws a TypeError, absorbed
+// here exactly like the old unset-storePath no-op (design review — do not
+// hoist the docStore call out of the try).
 function save() {
   try {
-    if (!storePath) return;
-    // Unlike settings/downloads (which first save on user action, long after the
-    // profile dir exists), jars persists synchronously INSIDE load() (DD3c) — and
-    // on a true first run the dev-redirected userData dir may not exist yet
-    // (Electron creates it lazily). Without this, the seed write ENOENTs into the
-    // fail-soft catch, nothing persists, and the pre-warm makes launch #2 re-probe
-    // the fresh install as legacy (the exact DD3 bug the sync persist prevents).
-    fs.mkdirSync(path.dirname(storePath), { recursive: true });
-    const tmp = storePath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ version: SCHEMA_VERSION, defaultId, containers }, null, 2));
-    fs.renameSync(tmp, storePath);
+    /** @type {any} */ (docStore).write(codec.serialize({ version: SCHEMA_VERSION, defaultId, containers }));
   } catch {
     /* ignore */
   }

@@ -5,6 +5,12 @@
 // No Electron stub needed — the module is Electron-free (no require('electron'),
 // no app.getPath at module scope). The userData path is injected via load().
 //
+// Each test creates a real temp dir and cleans up after itself. settings-store
+// now persists through app-db.js's document-row seam (flight 10-1 DD2-DD4):
+// app-db is required ONCE for the whole file (never cache-busted — cache-busting
+// both singletons creates a require-order hazard, design review) and reset per
+// test via appDb.open(dir) (safe close-then-reopen, DD4).
+//
 // Each test (or setup) creates a real temp dir and cleans up after itself.
 
 const { test } = require('node:test');
@@ -12,6 +18,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
+const appDb = require('../../src/main/app-db');
 
 // ---------------------------------------------------------------------------
 // Helper: create a fresh temp dir and return it, plus a cleanup function.
@@ -24,12 +32,31 @@ function removeTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// Read the raw 'settings' document row payload directly off app.db, bypassing
+// the store — used to assert on the row (the migration target) the way older
+// tests asserted on settings.json directly.
+function readRow(dir) {
+  const check = new DatabaseSync(path.join(dir, 'app.db'));
+  try {
+    const row = /** @type {any} */ (
+      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('settings')
+    );
+    return row ? row.payload : null;
+  } finally {
+    check.close();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Re-require settings-store fresh per test group so module-scoped state
 // (dir, config, codec) doesn't leak across tests.
 //
 // Node's module cache means a plain require() after the first will return the
-// same instance. We reload by deleting from the cache each time.
+// same instance. We reload by deleting from the cache each time. app-db is
+// NOT cache-busted here — settings-store's own `require('./app-db')` resolves
+// against the SAME live singleton every time (design review: re-requiring
+// both would create a require-order hazard where a re-required store
+// captures a stale app-db instance).
 // ---------------------------------------------------------------------------
 function freshStore() {
   // Delete from cache so the next require() re-evaluates the module.
@@ -43,6 +70,7 @@ function freshStore() {
 // ---------------------------------------------------------------------------
 test('defaults on first load — no settings.json present', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
@@ -51,6 +79,7 @@ test('defaults on first load — no settings.json present', () => {
     assert.equal(store.get('homePage'), 'https://www.google.com');
     assert.equal(store.get('version'), 1);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -60,6 +89,7 @@ test('defaults on first load — no settings.json present', () => {
 // ---------------------------------------------------------------------------
 test('set → persist → reload round-trip', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -70,27 +100,31 @@ test('set → persist → reload round-trip', () => {
     assert.equal(result.homePage, 'https://example.com/');
     assert.equal(store.get('homePage'), 'https://example.com/');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 // ---------------------------------------------------------------------------
-// Test: atomic write produces valid JSON on disk
+// Test: set() writes a valid JSON row (was: "atomic write produces valid
+// JSON on disk" — settings.json is no longer the write target; the document
+// row is, per the flight 10-1 migration).
 // ---------------------------------------------------------------------------
-test('atomic write produces valid JSON on disk', () => {
+test('set() persists a valid JSON row', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
     store.set('homePage', 'https://test.example.com/');
 
-    const filePath = path.join(dir, 'settings.json');
-    assert.ok(fs.existsSync(filePath), 'settings.json should exist after set');
-
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw); // throws if invalid JSON
+    const raw = readRow(dir);
+    assert.ok(raw !== null, 'settings row should exist after set');
+    const parsed = JSON.parse(/** @type {string} */ (raw)); // throws if invalid JSON
     assert.equal(parsed.homePage, 'https://test.example.com/');
+    assert.ok(!fs.existsSync(path.join(dir, 'settings.json')), 'set() must not write settings.json');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -100,6 +134,7 @@ test('atomic write produces valid JSON on disk', () => {
 // ---------------------------------------------------------------------------
 test('corrupt file repair → defaults, no throw', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Write garbage to settings.json
     fs.writeFileSync(path.join(dir, 'settings.json'), '{{not valid json!!', 'utf8');
@@ -112,6 +147,7 @@ test('corrupt file repair → defaults, no throw', () => {
     assert.equal(result.homePage, 'https://www.google.com');
     assert.equal(result.version, 1);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -121,6 +157,7 @@ test('corrupt file repair → defaults, no throw', () => {
 // ---------------------------------------------------------------------------
 test('bad-field repair keeps valid siblings', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Write a settings.json with an invalid homePage but correct version
     const badSettings = JSON.stringify({ homePage: 'javascript:bad', version: 1 });
@@ -134,6 +171,7 @@ test('bad-field repair keeps valid siblings', () => {
     // version is type-compatible and has no validator → should be kept
     assert.equal(result.version, 1);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -143,6 +181,7 @@ test('bad-field repair keeps valid siblings', () => {
 // ---------------------------------------------------------------------------
 test('set throws on javascript: URL, prior value kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -155,6 +194,7 @@ test('set throws on javascript: URL, prior value kept', () => {
     // Prior value must be kept
     assert.equal(store.get('homePage'), priorValue);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -164,6 +204,7 @@ test('set throws on javascript: URL, prior value kept', () => {
 // ---------------------------------------------------------------------------
 test('set throws on goldfinch:// URL', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -175,6 +216,7 @@ test('set throws on goldfinch:// URL', () => {
     );
     assert.equal(store.get('homePage'), priorValue);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -184,6 +226,7 @@ test('set throws on goldfinch:// URL', () => {
 // ---------------------------------------------------------------------------
 test('set throws on about:blank (excluded from homePage)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -195,6 +238,7 @@ test('set throws on about:blank (excluded from homePage)', () => {
     );
     assert.equal(store.get('homePage'), priorValue);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -204,6 +248,7 @@ test('set throws on about:blank (excluded from homePage)', () => {
 // ---------------------------------------------------------------------------
 test('set accepts valid https:// URL', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -211,6 +256,7 @@ test('set accepts valid https:// URL', () => {
     assert.equal(updated.homePage, 'https://valid.example.com/path?q=1');
     assert.equal(store.get('homePage'), 'https://valid.example.com/path?q=1');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -220,6 +266,7 @@ test('set accepts valid https:// URL', () => {
 // ---------------------------------------------------------------------------
 test('set unknown key throws TypeError', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -229,6 +276,7 @@ test('set unknown key throws TypeError', () => {
       (err) => err instanceof TypeError && err.message.includes('unknown settings key')
     );
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -251,6 +299,7 @@ test('set before load throws a clear error', () => {
 // ---------------------------------------------------------------------------
 test('getAll returns a copy — mutating it does not affect store', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -265,6 +314,7 @@ test('getAll returns a copy — mutating it does not affect store', () => {
     assert.equal(store.get('homePage'), originalValue);
     assert.equal(store.getAll().homePage, originalValue);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -274,12 +324,14 @@ test('getAll returns a copy — mutating it does not affect store', () => {
 // ---------------------------------------------------------------------------
 test('version field is present after load', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
     assert.ok('version' in result, 'version key should be present');
     assert.equal(typeof result.version, 'number');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -289,6 +341,7 @@ test('version field is present after load', () => {
 // ---------------------------------------------------------------------------
 test('custom serializer round-trip', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // A custom codec that wraps the JSON in a simple envelope string
     // to confirm the seam is actually used.
@@ -318,6 +371,7 @@ test('custom serializer round-trip', () => {
     assert.ok(deserializeLog.length > 0, 'custom deserialize should have been called');
     assert.equal(result.homePage, 'https://custom-serializer.example.com/');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -329,12 +383,14 @@ test('custom serializer round-trip', () => {
 // Test: toolbarPins default on first load
 test('toolbarPins — default on first load (no settings.json)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
     assert.deepEqual(result.toolbarPins, { media: true, shields: true, devtools: false });
     assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -342,6 +398,7 @@ test('toolbarPins — default on first load (no settings.json)', () => {
 // Test: set full toolbarPins → persist → reload
 test('toolbarPins — set full map persists and reloads', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -351,6 +408,7 @@ test('toolbarPins — set full map persists and reloads', () => {
     assert.deepEqual(result.toolbarPins, { media: false, shields: true, devtools: false });
     assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -358,6 +416,7 @@ test('toolbarPins — set full map persists and reloads', () => {
 // Test: set partial {media:false} → normalized to full map (missing keys → defaults)
 test('toolbarPins — set partial map normalizes to full map', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -371,6 +430,7 @@ test('toolbarPins — set partial map normalizes to full map', () => {
     const result = store.load(dir);
     assert.deepEqual(result.toolbarPins, { media: false, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -381,6 +441,7 @@ test('toolbarPins — set partial map normalizes to full map', () => {
 // persists across a reload (the pin-state-persists-across-restart contract).
 test('toolbarPins — devtools default false + persistence round-trip', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Simulate a pre-leg settings file lacking the devtools key.
     const store = freshStore();
@@ -397,6 +458,7 @@ test('toolbarPins — devtools default false + persistence round-trip', () => {
     assert.equal(result.toolbarPins.devtools, true);
     assert.deepEqual(store.get('toolbarPins'), { media: true, shields: false, devtools: true });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -404,6 +466,7 @@ test('toolbarPins — devtools default false + persistence round-trip', () => {
 // Test: set throws on invalid toolbarPins values, prior value kept
 test('toolbarPins — set throws on null, prior value kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -415,12 +478,14 @@ test('toolbarPins — set throws on null, prior value kept', () => {
     );
     assert.deepEqual(store.get('toolbarPins'), prior);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('toolbarPins — set throws on array, prior value kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -432,12 +497,14 @@ test('toolbarPins — set throws on array, prior value kept', () => {
     );
     assert.deepEqual(store.get('toolbarPins'), prior);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('toolbarPins — set throws on string, prior value kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -449,12 +516,14 @@ test('toolbarPins — set throws on string, prior value kept', () => {
     );
     assert.deepEqual(store.get('toolbarPins'), prior);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('toolbarPins — set throws on non-boolean value, prior value kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -466,6 +535,7 @@ test('toolbarPins — set throws on non-boolean value, prior value kept', () => 
     );
     assert.deepEqual(store.get('toolbarPins'), prior);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -473,6 +543,7 @@ test('toolbarPins — set throws on non-boolean value, prior value kept', () => 
 // Test: load stored partial {media:false} → {media:false, shields:true} (forward-compat)
 test('toolbarPins — load stored partial map merges with defaults (forward-compat)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Write a settings.json with only media:false (shields missing — simulates a future file
     // read by an older build, or a file written before shields was added)
@@ -488,6 +559,7 @@ test('toolbarPins — load stored partial map merges with defaults (forward-comp
     assert.deepEqual(store.get('toolbarPins'), { media: false, shields: true, devtools: false });
     assert.deepEqual(store.getAll().toolbarPins, { media: false, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -495,6 +567,7 @@ test('toolbarPins — load stored partial map merges with defaults (forward-comp
 // Test: load malformed toolbarPins (string) → default {media:true, shields:true}
 test('toolbarPins — load malformed toolbarPins falls back to default', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const bad = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: 'x' });
     fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
@@ -505,6 +578,7 @@ test('toolbarPins — load malformed toolbarPins falls back to default', () => {
     assert.deepEqual(result.toolbarPins, { media: true, shields: true, devtools: false });
     assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -512,6 +586,7 @@ test('toolbarPins — load malformed toolbarPins falls back to default', () => {
 // Test: getAll().toolbarPins is a fresh object (mutating snapshot doesn't corrupt store)
 test('toolbarPins — getAll returns a fresh nested object', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -525,6 +600,7 @@ test('toolbarPins — getAll returns a fresh nested object', () => {
     assert.deepEqual(store.get('toolbarPins'), { media: true, shields: true, devtools: false });
     assert.deepEqual(store.getAll().toolbarPins, { media: true, shields: true, devtools: false });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -540,6 +616,7 @@ const HEX_B = '0123456789abcdef'.repeat(4); // 64 chars
 
 test('automation keys — defaults on first load (off, empty map, empty admin hash)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
@@ -550,17 +627,20 @@ test('automation keys — defaults on first load (off, empty map, empty admin ha
     assert.deepEqual(store.get('automationKeyHashes'), {});
     assert.equal(store.get('automationAdminKeyHash'), '');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automation keys — additive load with NO version bump (version stays 1)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
     assert.equal(result.version, 1, 'schema version must NOT be bumped for additive keys');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -568,6 +648,7 @@ test('automation keys — additive load with NO version bump (version stays 1)',
 // --- automationEnabled validator ---
 test('automationEnabled — set true persists and reloads', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -575,12 +656,14 @@ test('automationEnabled — set true persists and reloads', () => {
     const result = store.load(dir);
     assert.equal(result.automationEnabled, true);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationEnabled — set throws on non-boolean (truthy not coerced), prior kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -592,6 +675,7 @@ test('automationEnabled — set throws on non-boolean (truthy not coerced), prio
     }
     assert.equal(store.get('automationEnabled'), false);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -599,6 +683,7 @@ test('automationEnabled — set throws on non-boolean (truthy not coerced), prio
 // --- automationKeyHashes validator ---
 test('automationKeyHashes — set a valid hex map persists and reloads', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -606,12 +691,14 @@ test('automationKeyHashes — set a valid hex map persists and reloads', () => {
     const result = store.load(dir);
     assert.deepEqual(result.automationKeyHashes, { work: HEX_A, personal: HEX_B });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationKeyHashes — set throws on null/array, prior kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -623,12 +710,14 @@ test('automationKeyHashes — set throws on null/array, prior kept', () => {
     }
     assert.deepEqual(store.get('automationKeyHashes'), {});
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationKeyHashes — set throws on non-hex / wrong-length / non-string values', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -648,12 +737,14 @@ test('automationKeyHashes — set throws on non-hex / wrong-length / non-string 
     }
     assert.deepEqual(store.get('automationKeyHashes'), {});
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationKeyHashes — load malformed map falls back to default {}', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const bad = JSON.stringify({ version: 1, automationKeyHashes: { work: 'nope' } });
     fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
@@ -661,12 +752,14 @@ test('automationKeyHashes — load malformed map falls back to default {}', () =
     const result = store.load(dir);
     assert.deepEqual(result.automationKeyHashes, {});
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationKeyHashes — getAll returns a fresh nested map (no live-ref leak)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -680,6 +773,7 @@ test('automationKeyHashes — getAll returns a fresh nested map (no live-ref lea
     assert.deepEqual(store.get('automationKeyHashes'), { work: HEX_A });
     assert.deepEqual(store.getAll().automationKeyHashes, { work: HEX_A });
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -689,13 +783,18 @@ test('automationKeyHashes — freshDefaults does not share the DEFAULTS map acro
   const dirB = makeTempDir();
   try {
     const store = freshStore();
+    appDb.open(dirA);
     store.load(dirA);
     store.set('automationKeyHashes', { work: HEX_A });
 
     // A fresh load over a clean dir must yield an EMPTY map — not the one mutated above.
+    // appDb.open(dirB) resets the singleton onto the new dir (DD4) before the store
+    // re-resolves its document store against it.
+    appDb.open(dirB);
     const result = store.load(dirB);
     assert.deepEqual(result.automationKeyHashes, {});
   } finally {
+    appDb.close();
     removeTempDir(dirA);
     removeTempDir(dirB);
   }
@@ -704,6 +803,7 @@ test('automationKeyHashes — freshDefaults does not share the DEFAULTS map acro
 // --- automationAdminKeyHash validator ---
 test('automationAdminKeyHash — accepts empty string and a 64-hex digest', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -712,12 +812,14 @@ test('automationAdminKeyHash — accepts empty string and a 64-hex digest', () =
     store.set('automationAdminKeyHash', '');
     assert.equal(store.get('automationAdminKeyHash'), '');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationAdminKeyHash — set throws on non-hex / wrong-length / non-string', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -729,6 +831,7 @@ test('automationAdminKeyHash — set throws on non-hex / wrong-length / non-stri
     }
     assert.equal(store.get('automationAdminKeyHash'), '');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -736,18 +839,21 @@ test('automationAdminKeyHash — set throws on non-hex / wrong-length / non-stri
 // --- automationPort validator (Flight 5 / DD1) ---
 test('automationPort — default on first load is 49707', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
     assert.equal(result.automationPort, 49707);
     assert.equal(store.get('automationPort'), 49707);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationPort — accepts in-range integers (boundaries + middle), persists and reloads', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -758,12 +864,14 @@ test('automationPort — accepts in-range integers (boundaries + middle), persis
       assert.equal(result.automationPort, good);
     }
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationPort — set throws on out-of-range / non-integer / non-number, prior kept', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -776,12 +884,14 @@ test('automationPort — set throws on out-of-range / non-integer / non-number, 
     }
     assert.equal(store.get('automationPort'), prior);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('automationPort — load malformed/out-of-range value is repaired to default', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const bad = JSON.stringify({ version: 1, automationPort: 70000 });
     fs.writeFileSync(path.join(dir, 'settings.json'), bad, 'utf8');
@@ -790,6 +900,7 @@ test('automationPort — load malformed/out-of-range value is repaired to defaul
     assert.equal(result.automationPort, 49707, 'out-of-range stored port should repair to default');
     assert.equal(store.get('automationPort'), 49707);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -801,6 +912,7 @@ test('automationPort — load malformed/out-of-range value is repaired to defaul
 
 test('spellcheck — default on first load is false (no settings.json)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
@@ -809,12 +921,14 @@ test('spellcheck — default on first load is false (no settings.json)', () => {
     // Additive key must NOT bump the schema version.
     assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive spellcheck key');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('spellcheck — set true persists and reloads (round-trip)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -828,12 +942,14 @@ test('spellcheck — set true persists and reloads (round-trip)', () => {
     const result2 = store.load(dir);
     assert.equal(result2.spellcheck, false);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('spellcheck — config written before this leg (no spellcheck key) loads with false (forward-compat)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Simulate a pre-leg settings file that predates the spellcheck key entirely.
     const preLeg = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: { media: true, shields: true, devtools: false } });
@@ -848,6 +964,7 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
     // Sibling keys from the pre-leg file are preserved.
     assert.equal(result.homePage, 'https://www.google.com');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -860,6 +977,7 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
 
 test('restoreSession — default on first load is false (no settings.json)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
@@ -868,12 +986,14 @@ test('restoreSession — default on first load is false (no settings.json)', () 
     // Additive key must NOT bump the schema version.
     assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive restoreSession key');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('restoreSession — set true persists and reloads (round-trip)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -882,12 +1002,14 @@ test('restoreSession — set true persists and reloads (round-trip)', () => {
     assert.equal(result.restoreSession, true);
     assert.equal(store.get('restoreSession'), true);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('restoreSession — set throws on a truthy non-boolean, prior value unchanged', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -899,6 +1021,7 @@ test('restoreSession — set throws on a truthy non-boolean, prior value unchang
     );
     assert.equal(store.get('restoreSession'), false);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -909,6 +1032,7 @@ test('restoreSession — set throws on a truthy non-boolean, prior value unchang
 
 test('spellcheck — set throws on a string via the typeof fallback', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -918,12 +1042,14 @@ test('spellcheck — set throws on a string via the typeof fallback', () => {
     );
     assert.equal(store.get('spellcheck'), false);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('set rejects inherited Object.prototype keys as unknown settings keys', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -932,12 +1058,14 @@ test('set rejects inherited Object.prototype keys as unknown settings keys', () 
       (err) => err instanceof TypeError && err.message.includes('unknown settings key')
     );
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('failed serialization leaves the prior config live', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir, {
@@ -949,6 +1077,138 @@ test('failed serialization leaves the prior config live', () => {
     assert.throws(() => store.set('homePage', 'https://rejected.example.com/'), /serialize failed/);
     assert.equal(store.get('homePage'), prior);
   } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// app-db integration (flight 10-1, leg 1): app-db-not-open propagation +
+// legacy-JSON migration semantics (DD5).
+// ---------------------------------------------------------------------------
+
+test('load() throws when app-db is not open (mis-ordered boot must propagate, not fall back to defaults)', () => {
+  const dir = makeTempDir();
+  try {
+    // Deliberately do NOT call appDb.open(dir) — app-db starts closed.
+    const store = freshStore();
+    assert.throws(() => store.load(dir), /app db not open/);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('migration: legacy settings.json is imported once, values intact, then renamed .migrated', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const legacy = JSON.stringify({ version: 1, homePage: 'https://legacy.example.com/', spellcheck: true });
+    fs.writeFileSync(path.join(dir, 'settings.json'), legacy, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.homePage, 'https://legacy.example.com/');
+    assert.equal(result.spellcheck, true);
+    assert.equal(store.get('homePage'), 'https://legacy.example.com/');
+
+    // The row now holds the migrated value.
+    const row = readRow(dir);
+    assert.ok(row !== null);
+    assert.equal(JSON.parse(/** @type {string} */ (row)).homePage, 'https://legacy.example.com/');
+
+    // The legacy file is gone; a .migrated sibling remains as the rollback artifact.
+    assert.ok(!fs.existsSync(path.join(dir, 'settings.json')), 'settings.json should be renamed away');
+    assert.ok(fs.existsSync(path.join(dir, 'settings.json.migrated')), 'settings.json.migrated should exist');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: corrupt legacy settings.json still migrates (repaired-to-defaults row + rename)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    fs.writeFileSync(path.join(dir, 'settings.json'), '{{not valid json!!', 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.homePage, 'https://www.google.com', 'corrupt legacy JSON repairs to defaults');
+
+    const row = readRow(dir);
+    assert.ok(row !== null, 'the repaired-to-defaults result still migrates as the row');
+    assert.equal(JSON.parse(/** @type {string} */ (row)).homePage, 'https://www.google.com');
+
+    assert.ok(!fs.existsSync(path.join(dir, 'settings.json')));
+    assert.ok(fs.existsSync(path.join(dir, 'settings.json.migrated')), 'the corrupt original still renames .migrated');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: a present row wins over a stray legacy settings.json (no re-import)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Seed the row directly (simulating an already-migrated profile).
+    const store = freshStore();
+    store.load(dir);
+    store.set('homePage', 'https://row-wins.example.com/');
+
+    // Now drop a stray legacy file with a DIFFERENT value — this must be ignored.
+    fs.writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({ version: 1, homePage: 'https://should-be-ignored.example.com/' }),
+      'utf8'
+    );
+
+    const store2 = freshStore();
+    const result = store2.load(dir);
+    assert.equal(result.homePage, 'https://row-wins.example.com/', 'row wins; stray JSON is not re-imported');
+
+    // The stray file is untouched (no rename — no migration happened).
+    assert.ok(fs.existsSync(path.join(dir, 'settings.json')));
+    assert.ok(!fs.existsSync(path.join(dir, 'settings.json.migrated')));
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: no row, no legacy file → defaults, no migration side effects', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.homePage, 'https://www.google.com');
+    assert.equal(readRow(dir), null, 'a fresh profile seeds defaults in memory only, no row write');
+    assert.ok(!fs.existsSync(path.join(dir, 'settings.json.migrated')));
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('write-during-load synchrony: settings.load() can run mid-boot with app-db already receiving writes', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Simulate another store already having written to app-db before settings
+    // loads (jars' leg-2 save-inside-load concern, DD7) — the write must be
+    // durable and visible synchronously, with no interference between rows.
+    const jarsDoc = appDb.createDocumentStore('jars');
+    jarsDoc.write('{"seeded":true}', 1000);
+
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.homePage, 'https://www.google.com');
+    assert.equal(jarsDoc.read(), '{"seeded":true}', 'concurrent-store row is untouched by settings load');
+  } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
