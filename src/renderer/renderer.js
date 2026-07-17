@@ -14,6 +14,7 @@ import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-
 import { keydownToAction } from '../shared/keydown-action.js';
 import { deriveSiteInfo } from '../shared/site-info.js';
 import { pageContextModel } from '../shared/page-context-model.js';
+import { tabContextModel } from '../shared/tab-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
@@ -337,6 +338,23 @@ const overlayMenus = {
       else els.address.focus();
     }
   },
+  // Tab context menu (M09 Flight 5 Leg 1, DD2): page-context shape verbatim —
+  // transient trigger (no aria-expanded target), escape-only refocus to the
+  // captured tabCtx.returnFocus (the invoking tab, or the focused element at a
+  // keyboard invocation).
+  'tab-context': {
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus(reason) {
+      const ret = tabCtx.returnFocus;
+      tabCtx.returnFocus = null; // cleared after use — never leaks across opens
+      if (reason !== 'escape') return;
+      if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
+      else els.address.focus();
+    }
+  },
   // Omnibox suggestions (M08 Flight 4 Leg 3 / flight DD5): the "trigger" is
   // #address itself, which already holds focus in every keyboard path (the
   // sheet's noFocus open never steals it) — aria-expanded rides this generic
@@ -619,6 +637,60 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       }
       break;
     }
+    case 'tab-context': {
+      // TOCTOU discipline (design review, same pattern as page-context above):
+      // the tab id is captured at OPEN (tabCtx.tabId), never re-resolved via
+      // activeTab(); every body re-validates the tab still exists via tabs.get
+      // and no-ops (never throws) on a vanished id.
+      const tabId = tabCtx.tabId;
+      const target = tabId ? tabs.get(tabId) : null;
+      if (id === 'tab:close') {
+        if (target) closeTab(tabId);
+      } else if (id === 'tab:close-others' || id === 'tab:close-right') {
+        if (!target) break;
+        // Ordered-sweep batch close (flight DD2 ruling — the onJarWiped/
+        // refreshOpenTabJars activation-flicker idiom): snapshot the targets
+        // BEFORE any close mutates the strip, activate the ANCHOR (the invoking
+        // tab) FIRST when the active tab is among the targets (Chrome parity —
+        // the anchor becomes active), THEN close each target. Activating first
+        // means none of the targets is still the active tab by the time
+        // closeTab runs on it, so closeTab's own next-tab fallback never fires
+        // mid-sweep — never let it cascade.
+        const ids = orderedTabIds();
+        const anchorIndex = ids.indexOf(tabId);
+        if (anchorIndex === -1) break; // vanished — no-op
+        const targetIds = id === 'tab:close-others'
+          ? ids.filter((i) => i !== tabId)
+          : ids.slice(anchorIndex + 1);
+        if (!targetIds.length) break;
+        if (targetIds.includes(activeTabId)) activateTab(tabId);
+        for (const t of targetIds) closeTab(t);
+      } else if (id === 'tab:duplicate') {
+        // Address + jar + nav history (DD1's resolved open question): the
+        // history-snapshot invoke + createTab with restoreHistory + insertAt
+        // sourceIndex+1 (Chrome parity — lands beside the source). Title is
+        // seeded from the renderer's OWN tab.title — no round-trip through main.
+        if (!target || target.wcId == null) break;
+        const sourceIndex = orderedTabIds().indexOf(tabId);
+        const sourceContainer = target.container;
+        const sourceTitle = target.title;
+        const sourceUrl = target.url;
+        window.goldfinch.tabHistorySnapshot({ webContentsId: target.wcId }).then((snap) => {
+          if (!snap) return; // internal/dead source by the time the invoke resolved — no-op
+          createTab(sourceUrl, sourceContainer, {
+            restoreHistory: { entries: snap.entries, index: snap.index, title: sourceTitle },
+            insertAt: sourceIndex === -1 ? null : sourceIndex + 1
+          });
+        });
+      } else if (id === 'tab:reopen-closed') {
+        // The EXISTING dispatchChromeAction('reopen-closed-tab') case (dispatch
+        // reuse, DD2) — its jar-fallback/positional-reopen decisions ride along
+        // free. Deliberately NOT gated on `target`: reopen acts on the closed-tab
+        // stack, not the invoking tab, which may itself have vanished by now.
+        dispatchChromeAction('reopen-closed-tab');
+      }
+      break;
+    }
     case 'suggestions': {
       // INDEX dispatch (the spell:<i> idiom): the id carries only the row
       // index; the URL resolves from `suggest.items`, which channel 7 (just
@@ -848,6 +920,12 @@ document.addEventListener('keydown', (e) => {
   // Gate: toolbar pin buttons fire both contextmenu AND this keydown — the contextmenu
   // listener already opens the toolbar Unpin menu; return early here to avoid double-firing.
   if (target === els.toggleMedia || target === els.togglePrivacy || target === els.toggleDevtools) return;
+  // Gate (M09 F5 Leg 1, DD2 integration point): a focused tab fires both a native
+  // `contextmenu` event (handled by the tab's own listener, wired at creation —
+  // opens the TAB menu) AND this generic keydown — same double-fire shape as the
+  // toolbar pins above. Return early so a focused tab never ALSO opens the
+  // generic Inspect-only menu; no parallel keydown listener is added for tabs.
+  if (target.closest('.tab')) return;
   e.preventDefault();
   const r = target.getBoundingClientRect();
   pageCtx.wcId = (activeTab() && activeTab().wcId) || null;
@@ -900,6 +978,68 @@ function openPageContextMenuForAudit() {
   // The synthetic 80,80 CHROME coords are translated chrome→sheet like the other
   // keyboard-mode anchors — immaterial to the audit's purpose, pinned for determinism.
   openPageContextOverlaySheet(chromePointToSheet(80, 80));
+}
+
+/* ------------------------------------------------ tab context menu (M09 F5 Leg 1) */
+// Tab-scoped context menu, rendered from the sheet (menuType 'tab-context',
+// element-anchored like the toolbar Unpin menu — DD2). ONE trigger listener
+// covers BOTH invocation paths: a real right-click AND the Context-Menu-key /
+// Shift+F10 on a focused tab both fire the native DOM `contextmenu` event at the
+// focused/targeted element (the same fact the toolbar pin buttons already rely
+// on — see their own `contextmenu` listeners + the keydown catch-all's exclusion
+// gate below, extended here for `.tab`). No parallel keydown listener is added
+// (DD2 integration-point ruling).
+
+/** @type {{ tabId: string | null, returnFocus: HTMLElement | null }} */
+const tabCtx = { tabId: null, returnFocus: null };
+
+/**
+ * Open the tab context menu for `id`, anchored at `anchorEl` (chrome→sheet
+ * translated element rect — the toolbar-Unpin anchor pattern). The model needs
+ * the closed-tab stack's live size, an async invoke; `tabCtx.tabId` is
+ * re-checked when it resolves so a superseding open (a second invocation before
+ * the first's invoke returns) safely wins — the stale resolve is a no-op rather
+ * than opening the wrong tab's menu after a newer one already took over.
+ * @param {string} id @param {HTMLElement} anchorEl
+ */
+function openTabContextMenu(id, anchorEl) {
+  const ids = orderedTabIds();
+  const idx = ids.indexOf(id);
+  if (idx === -1) return; // vanished between event dispatch and open — no-op
+  tabCtx.tabId = id;
+  tabCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
+  const r = anchorEl.getBoundingClientRect();
+  const anchor = chromePointToSheet(r.left, r.bottom);
+  window.goldfinch.closedTabStackSize().then((stackSize) => {
+    if (tabCtx.tabId !== id) return; // superseded by a newer open — its resolve wins instead
+    const model = tabContextModel({
+      tabId: id,
+      isLastTab: ids.length <= 1,
+      tabsToRight: ids.length - 1 - idx,
+      stackSize: typeof stackSize === 'number' ? stackSize : 0
+    });
+    openOverlayMenu('tab-context', model, anchor, 0);
+  });
+}
+
+/**
+ * Test/audit hook: open the tab context menu with a REPRESENTATIVE synthetic
+ * model (bypassing the live orderedTabIds()/closedTabStackSize() round trip that
+ * openTabContextMenu needs, exactly the way openPageContextMenuForAudit
+ * bypasses the live guest params) — items-to-right and a non-empty stack so all
+ * five items render, per the a11y checkpoint. Anchored at the first tab if one
+ * exists, else the tab strip itself. Reachable via the MCP evaluate tool
+ * (closed-set seam at the bottom of this file — FD-ruled addition, flight DD).
+ */
+function openTabContextMenuForAudit() {
+  const ids = orderedTabIds();
+  const id = ids[0] || null;
+  const anchorEl = (id && tabs.get(id) && tabs.get(id).btn) || els.tabs;
+  tabCtx.tabId = id;
+  tabCtx.returnFocus = els.address;
+  const r = anchorEl.getBoundingClientRect();
+  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1 });
+  openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
 /* ------------------------------------------------------------------ tabs */
@@ -1014,6 +1154,16 @@ function createTab(url = currentHomePage(), container = null, { trusted = false,
     e.preventDefault();
     if (tabs.size > 1) freezeTabWidths();
     closeTab(id);
+  });
+  // Tab context menu (M09 F5 Leg 1, DD2): a real right-click AND the Context-Menu
+  // key / Shift+F10 on a FOCUSED tab both deliver here (the single native
+  // `contextmenu` event Chromium dispatches for both — the toolbar-pin-button
+  // precedent). Menu open ≠ activation: this listener never calls activateTab, so
+  // right-clicking (or Menu-keying) a BACKGROUND tab opens ITS menu without
+  // switching to it.
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openTabContextMenu(id, btn);
   });
   // Pointer drag (M09 F2 Leg 2 DD2): pointerdown on a non-✕ target, button 0, activates
   // immediately (Chrome parity) and records a POTENTIAL drag (armed only once the pointer
@@ -3584,12 +3734,14 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 18-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 19-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 18 is
-// a design change, not a seam addition.
+// do not grow it without an FD ruling — an evaluate caller outside these 19 is
+// a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
+// openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
+// the flight's Checkpoints.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -3611,5 +3763,6 @@ Object.assign(/** @type {any} */ (globalThis), {
   openKebabOverlay,
   openSiteInfoOverlay,
   openNewContainerOverlay,
-  openPageContextMenuForAudit
+  openPageContextMenuForAudit,
+  openTabContextMenuForAudit // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
 });

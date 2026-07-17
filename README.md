@@ -135,6 +135,15 @@ or download **v0.9.1** directly:
   Navigable by arrow keys / Home / End / Esc, and openable from the keyboard with
   Shift+F10 or the Context-Menu key. It is a **no-op on `goldfinch://` internal
   pages**, and the toolbar right-click **Unpin** uses the same menu.
+- **Tab context menu** — right-click a tab (or focus it and press Shift+F10 /
+  the Context-Menu key) for a tab-scoped context menu: **Close**, **Close other
+  tabs**, **Close tabs to the right**, **Duplicate** (copies the address, jar,
+  and navigation history), and **Reopen closed tab** (reuses the same
+  closed-tab stack `Ctrl+Shift+T` pops — see Keyboard shortcuts below; the
+  item is omitted when the stack is empty). "Close
+  other tabs" / "Close tabs to the right" are omitted when there is nothing to
+  close (a single tab, or nothing to its right). Right-clicking (or
+  Menu-keying) a background tab opens its menu without switching to it.
 - **Opt-in spellcheck** — **off by default**; enable it in **Settings →
   Appearance**. Once on, misspelled words in editable fields are flagged and
   spelling suggestions appear in the right-click context menu; choosing one
@@ -219,6 +228,7 @@ drive and observe tabs. It is exposed in no released build — see
 | `Ctrl+Shift+←` / `Ctrl+Shift+→` | Move the focused tab left / right |
 | `Home` / `End`  | First / last tab    |
 | `Delete` / `Backspace` | Close the focused tab |
+| `Shift+F10` / Context-Menu key | Open the tab context menu for a focused tab (or the page context menu elsewhere) |
 | `Esc`           | Close an open menu / panel / find bar |
 
 Zoom shows a chip in the toolbar when the level is not 100%, and applies to web

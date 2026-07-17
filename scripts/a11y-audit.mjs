@@ -137,6 +137,7 @@ const ACCEPTED = [
   { id: 'region', selector: '#sheet-menu', state: 'sheet:kebab', reason: 'transient role="menu" sheet overlay (kebab); floating menu needs no landmark — chrome #page-context-menu precedent. Menuitem roles/names/keyboard nav raise no violations.' },
   { id: 'region', selector: '#sheet-menu', state: 'sheet:container', reason: 'transient role="menu" sheet overlay (container picker); floating menu needs no landmark — chrome #page-context-menu precedent.' },
   { id: 'region', selector: '#sheet-menu', state: 'sheet:page-context', reason: 'transient role="menu" sheet overlay (page context); floating menu needs no landmark — direct successor of the retired chrome #page-context-menu entry.' },
+  { id: 'region', selector: '#sheet-menu', state: 'sheet:tab-context', reason: 'transient role="menu" sheet overlay (tab context menu, M09 Flight 5 Leg 1); same accepted-chrome-exception class as the other menu-template sheet states.' },
   // The two `html` entries below are deliberately STATE-UNSCOPED: they match the
   // chrome document in every chrome state AND the sheet document in the sheet
   // states (the sheet is a transient popup layer, not a document with main/h1).
@@ -398,7 +399,11 @@ async function main() {
         { label: 'sheet:new-container', open: 'openNewContainerOverlay()' },
         // The audit hook builds a representative full-section synthetic params
         // payload (link + selection + editable + spelling-suggestions + Inspect).
-        { label: 'sheet:page-context', open: 'openPageContextMenuForAudit()' }
+        { label: 'sheet:page-context', open: 'openPageContextMenuForAudit()' },
+        // M09 Flight 5 Leg 1: the tab context menu. The audit hook builds a
+        // representative synthetic model (items-to-right + non-empty stack) so
+        // all five items render, mirroring the page-context hook's synthetic params.
+        { label: 'sheet:tab-context', open: 'openTabContextMenuForAudit()' }
       ];
       let sheetWcId = null;
       for (const state of SHEET_STATES) {

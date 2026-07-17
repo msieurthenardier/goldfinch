@@ -201,6 +201,13 @@ interface GoldfinchBridge {
     navIndex: number;
     jarFallback: boolean;
   } | null>;
+  /** Tab context menu (M09 F5 Leg 1, DD3): snapshot a live web tab's navigation
+   * history for Duplicate. Web tabs only — a dead/missing/internal target
+   * (TOCTOU-guarded on the passed webContentsId) resolves `null`. */
+  tabHistorySnapshot(payload: { webContentsId: number }): Promise<{ entries: unknown[]; index: number } | null>;
+  /** Tab context menu (M09 F5 Leg 1, DD3): the closed-tab stack's current size,
+   * feeding the model's reopen-closed omission rule (empty stack → omitted). */
+  closedTabStackSize(): Promise<number>;
   /** Hide a web tab view without closing (fire-and-forget). */
   tabHide(wcId: number): void;
   /** Navigate, reload, stop, goBack, goForward on a web tab view (fire-and-forget). */

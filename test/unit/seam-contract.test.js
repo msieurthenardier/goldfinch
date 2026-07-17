@@ -7,7 +7,9 @@
 // (sheet state-drivers) — both paths only work if the named function is
 // republished on globalThis by the seam block at the tail of
 // src/renderer/renderer.js (see CLAUDE.md "Renderer evaluate-seam closed-set
-// rule"). The seam is a CLOSED SET of exactly 18 FD-approved entries.
+// rule"). The seam is a CLOSED SET of exactly 19 FD-approved entries (M09
+// Flight 5 Leg 1 added openTabContextMenuForAudit for the sheet:tab-context
+// a11y state — see the flight's Checkpoints).
 //
 // This test statically parses BOTH files as text — no boot, no vm execution
 // — and asserts every audit-driven identifier is present in the seam, so a
@@ -33,7 +35,7 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
 // closed-set rule"). Growing the seam requires an FD ruling AND this
 // constant's update — enforcement by design (AC4).
-const SEAM_COUNT = 18;
+const SEAM_COUNT = 19;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

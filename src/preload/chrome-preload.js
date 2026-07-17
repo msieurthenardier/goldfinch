@@ -148,6 +148,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // `partition` is present iff the entry's original jar still exists; otherwise
   // omitted with `jarFallback: true` so the renderer knows to announce the fallback.
   tabReopen: () => ipcRenderer.invoke('tab-reopen'),
+  // Tab context menu (M09 F5 Leg 1, DD3): snapshot a web tab's live navigation
+  // history for Duplicate ({entries, index}, or null for internal/dead targets),
+  // and read the closed-tab stack's size for the reopen-closed omission rule.
+  tabHistorySnapshot: ({ webContentsId }) => ipcRenderer.invoke('tab-history-snapshot', { webContentsId }),
+  closedTabStackSize: () => ipcRenderer.invoke('closed-tab-stack-size'),
   tabHide: (wcId) => ipcRenderer.send('tab-hide', wcId),
   tabNavigate: (payload) => ipcRenderer.send('tab-navigate', payload),
   tabSetActive: (wcId, bounds) => ipcRenderer.send('tab-set-active', { wcId, bounds }),
