@@ -117,6 +117,12 @@ function deriveAuditDetail(op, args) {
       const len = String(args.text ?? '').length;
       return 'text(' + len + ' chars)';
     }
+    case 'dragPointer': {
+      const from = args.from;
+      const to = args.to;
+      if (!from || to == null || from.x == null || from.y == null || to.x == null || to.y == null) return null;
+      return '(' + from.x + ',' + from.y + ')->(' + to.x + ',' + to.y + ')';
+    }
     default:
       return null;
   }
@@ -347,7 +353,7 @@ function createMcpServer(opts = {}) {
   let pendingSessions = 0;
 
   /**
-   * Build a fresh MCP Server with the 28 tools wired over a per-session,
+   * Build a fresh MCP Server with the 29 tools wired over a per-session,
    * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
    *   - wrapped by scopeEngine(engine, identity, ctx) — admin → unchanged; jar →

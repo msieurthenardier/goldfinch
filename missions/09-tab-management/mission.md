@@ -257,7 +257,7 @@ Planning inputs adopted from prior artifacts:
 - [x] Flight 1: Shrink-to-fit tab strip — progressive shrink to a compact
       floor, no scrollbar at any count, active tab keeps close, middle-click
       close; evolve `responsive-tab-strip` spec. (BACKLOG entry executes here.)
-- [ ] Flight 2: Tab order model + reorder — explicit order model
+- [x] Flight 2: Tab order model + reorder — explicit order model
       (pure `src/shared/` module), pointer drag with live drop indicator,
       keyboard reorder, drag-region coexistence; extend
       `tab-keyboard-operability`.

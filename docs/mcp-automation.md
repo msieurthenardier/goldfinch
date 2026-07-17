@@ -16,7 +16,7 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **28 tools** — 17 drive tools, 4
+binds to **loopback only** (`127.0.0.1`), and advertises **29 tools** — 18 drive tools, 4
 observe tools, 2 eval tools, 2 devtools tools, 2 admin chrome/app-level tools (`getChromeTarget`
 + `downloadsList`), and 1 history tool (`getHistory`, jar-confined — not admin-only). Tools are a
 thin adapter over Goldfinch's
@@ -298,7 +298,7 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
     *says* another jar but whose session is in-jar **is** included; a tab labelled in-jar but whose
     session is elsewhere is **excluded**.
   - Every tab-targeting op (`closeTab`, `activateTab`, `navigate`, `goBack`, `goForward`, `reload`,
-    `click`, `typeText`, `scroll`, `pressKey`, `getZoom`, `setZoom`, `printToPDF`,
+    `click`, `typeText`, `scroll`, `pressKey`, `dragPointer`, `getZoom`, `setZoom`, `printToPDF`,
     `findInPage`, `stopFindInPage`,
     `captureScreenshot`, `readDom`, `readAxTree`) refuses
     an out-of-jar `wcId` with an `automation: out-of-jar` error.
@@ -355,12 +355,12 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 
 ## Tool reference
 
-All 28 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
+All 29 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level tools
 (`getChromeTarget`, `downloadsList`) take no `wcId`.
 
-### Drive tools (17)
+### Drive tools (18)
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
@@ -381,6 +381,7 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 | `printToPDF` | `{ wcId: integer }` *(required)* | JSON text: a base64-encoded PDF string. Foreground-first (a backgrounded tab is activated before rendering). Decode the base64 and verify it begins with `%PDF-` |
 | `findInPage` | `{ wcId: integer, text: string, forward?: boolean, findNext?: boolean, matchCase?: boolean }` *(`wcId` and `text` required)* | JSON text: `{"activeMatchOrdinal":n,"matches":m}` — the current match index (1-based) and total match count. Foreground-first. Refuses the internal `goldfinch://settings` session. |
 | `stopFindInPage` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (void op). Clears the active find session and removes any match highlights on the page content. Does not affect the find-overlay UI (the floating find bar is a separate main-owned `WebContentsView`, not chrome DOM). Refuses the internal `goldfinch://settings` session. |
+| `dragPointer` | `{ wcId: integer, from: {x,y}, to: {x,y}, steps?: integer, stepDelayMs?: integer }` *(`wcId`, `from`, `to` required)* | JSON text `{"ok":true}` — synthetic pointer drag: mouseDown at `from`, `steps` (default 12) interpolated mouseMove events with the button held, then mouseUp at `to`. Each event is paced `stepDelayMs` (default 4) apart — an unpaced synchronous burst gets coalesced by Chromium down to essentially the first + last move (confirmed at the M09 F2 Leg 2 premise spike). Use for drag-and-drop gestures a plain click cannot express (e.g. tab reorder). |
 
 > **Security invariant — internal session always excluded.** `getZoom`, `setZoom`, `printToPDF`, `findInPage`, and `stopFindInPage`
 > refuse the internal `goldfinch://settings` session with an op-local
@@ -513,7 +514,7 @@ from *genuine errors*:
   verbatim — never JSON-wrapped.
 - **JSON text** — every other tool returns one text block whose `text` is JSON. Void ops
   (`navigate`, `goBack`, `goForward`, `reload`, `click`, `typeText`, `scroll`, `pressKey`,
-  `stopFindInPage`)
+  `dragPointer`, `stopFindInPage`)
   serialize to the single consistent shape `{"ok":true}`. Ops with a real return value
   (`enumerateTabs`, `openTab`, `closeTab`, `activateTab`, `getZoom`, `setZoom`, `printToPDF`,
   `findInPage`,
@@ -575,7 +576,8 @@ the live indicator + log viewer against this contract. The shape below is the de
   `automation: <code> — …` message (e.g. `out-of-jar`, `admin-only`, `internal-session`,
   `bad-handle`) — or `"error"` for a bare/unexpected throw, and `null` on success. `detail` is a
   short per-op context string for operator auditability — e.g. `url=https://…` for `navigate`/
-  `openTab`, `(x,y)` for `click`/`scroll`, `key=Enter` for `pressKey` (chords append the
+  `openTab`, `(x,y)` for `click`/`scroll`, `(fx,fy)->(tx,ty)` for `dragPointer`, `key=Enter` for
+  `pressKey` (chords append the
   modifiers, e.g. `key=M+control`), `text(N chars)` for
   `typeText` (**length only — content is never logged**); `null` for ops where `targetWcId`
   already names the tab sufficiently (`enumerateTabs`, `captureWindow`, `getChromeTarget`,

@@ -17,6 +17,7 @@ import { pageContextModel } from '../shared/page-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
+import { keyboardMove, dropIndexFromPointer } from '../shared/tab-order.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -41,6 +42,7 @@ const els = {
   mediaList: /** @type {HTMLElement} */ (document.getElementById('media-list')),
   mediaEmpty: /** @type {HTMLElement} */ (document.getElementById('media-empty')),
   mediaStatus: /** @type {HTMLElement} */ (document.getElementById('media-status')),
+  tabStatus: /** @type {HTMLElement} */ (document.getElementById('tab-status')),
   mediaClose: /** @type {HTMLButtonElement} */ (document.getElementById('media-close')),
   mediaRescan: /** @type {HTMLButtonElement} */ (document.getElementById('media-rescan')),
   mediaDownloadSelected: /** @type {HTMLButtonElement} */ (document.getElementById('media-download-selected')),
@@ -920,6 +922,9 @@ function internalJarName(url) {
 }
 
 function createTab(url = currentHomePage(), container = null, { trusted = false } = {}) {
+  // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
+  // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
+  if (drag) cancelDrag();
   // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
   // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
   // so web content reaching here via onOpenTab can never select the internal branch.
@@ -964,7 +969,9 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   // per-tab DOM node); Leg 3 migrates internal tabs the same way — #webviews is the one
   // element common to both, and the only non-dangling IDREF target.
   btn.setAttribute('aria-controls', 'webviews');
-  btn.setAttribute('aria-keyshortcuts', 'Delete');
+  // M09 F2 DD3: the reorder chord joins the existing close shortcut (space-separated
+  // alternatives per the ARIA aria-keyshortcuts syntax).
+  btn.setAttribute('aria-keyshortcuts', 'Delete Control+Shift+ArrowLeft Control+Shift+ArrowRight');
   btn.setAttribute('aria-label', 'New tab');
   // Colored dot for every jar; the internal (Settings) pseudo-jar is chrome, not a
   // user container — no dot.
@@ -983,7 +990,13 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
       closeTab(id);
       return;
     }
-    activateTab(id);
+    // DD2 activation ruling: the click handler's activate branch is now a GUARDED
+    // fallback — pointerdown (below) already activated for a real pointer gesture
+    // (plain click or drag). suppressClickActivate is set at BOTH set-points (see
+    // markClickSuppressed's doc comment) so a click that follows one of those never
+    // double-activates, while a click with NO preceding pointerdown (AT default
+    // action / synthetic clicks) still activates.
+    if (!suppressClickActivate) activateTab(id);
   });
   // Middle-click close (M09 F1 DD3): rides the identical deferred-reflow pointer-close path as
   // the ✕ button. Filter to button 1 (middle) — auxclick also fires for buttons 3/4 (back/
@@ -994,6 +1007,28 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
     e.preventDefault();
     if (tabs.size > 1) freezeTabWidths();
     closeTab(id);
+  });
+  // Pointer drag (M09 F2 Leg 2 DD2): pointerdown on a non-✕ target, button 0, activates
+  // immediately (Chrome parity) and records a POTENTIAL drag (armed only once the pointer
+  // crosses DRAG_ARM_THRESHOLD_PX — see the document-level pointermove listener below).
+  // Middle/right-button pointerdowns (button !== 0) are left alone entirely: middle-close
+  // rides the existing auxclick path above, and right-click has no wired behavior yet.
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) return; // ✕ owns its own click path — never activates, never arms a drag
+    activateTab(id);
+    markClickSuppressed(); // set-point (a): pointerdown-activation
+    drag = {
+      pointerId: e.pointerId,
+      tabId: id,
+      startX: e.clientX,
+      startedAt: Date.now(),
+      armed: false,
+      startOrder: /** @type {string[]|null} */ (null),
+      draggedIndex: -1,
+      slotRects: /** @type {{left:number,width:number}[]|null} */ (null),
+      currentDropIndex: /** @type {number|null} */ (null),
+    };
   });
   els.tabs.appendChild(btn);
   tab.btn = btn;
@@ -1026,7 +1061,187 @@ function createTab(url = currentHomePage(), container = null, { trusted = false 
   return tab;
 }
 
+// orderedTabIds() (M09 F2 DD1): the single accessor for DOM-order tab ids — the
+// pure `tabs` Map is id→tab lookup only; its insertion order is NOT load-bearing
+// after this flight (a tab can move without ever leaving/re-entering the Map).
+// Reads `els.tabs` children rather than trusting the Map, and filters to `.tab`
+// elements so any future non-tab child of the strip can't corrupt the order.
+function orderedTabIds() {
+  return [...els.tabs.children]
+    .filter((el) => el.classList.contains('tab'))
+    .map((el) => /** @type {HTMLElement} */ (el).dataset.id);
+}
+
+// commitTabMove(id, targetIndex) (M09 F2 DD1): DOM move commit helper, shared with
+// next leg's pointer-drop. `targetIndex` is the tab's index in the FINAL DOM order
+// (as produced by the pure tab-order model). insertBefore-based: an instant step,
+// no animation (matches the DD5 commit-step idiom used elsewhere in the strip).
+function commitTabMove(id, targetIndex) {
+  const tab = tabs.get(id);
+  if (!tab || !tab.btn) return;
+  const tabEls = [...els.tabs.children].filter((el) => el.classList.contains('tab'));
+  const withoutMoving = tabEls.filter((el) => el !== tab.btn);
+  // The element that should immediately FOLLOW the moved tab in the final order is
+  // withoutMoving[targetIndex] (see tab-order.js's dropIndexFromPointer semantics —
+  // targetIndex counts positions among the OTHER slots). null (past the end) appends.
+  const referenceEl = withoutMoving[targetIndex] || null;
+  els.tabs.insertBefore(tab.btn, referenceEl);
+}
+
+// ------------------------------------------------------------ pointer drag (M09 F2 Leg 2)
+//
+// DD2: pointer events + transform-only live displacement; drop commits instantly. Module-
+// scoped `drag` session state (null when idle). `armed` flips true once the pointer crosses
+// DRAG_ARM_THRESHOLD_PX from the pointerdown origin — a plain click never arms (pointerup
+// below is then a silent no-op beyond clearing `drag`), so the click handler's activate
+// fallback is never in tension with an unarmed potential-drag.
+const DRAG_ARM_THRESHOLD_PX = 5;
+/** @type {{ pointerId: number, tabId: string, startX: number, startedAt: number, armed: boolean, startOrder: string[]|null, draggedIndex: number, slotRects: {left:number,width:number}[]|null, currentDropIndex: number|null }|null} */
+let drag = null;
+
+// Click-suppression flag (DD2 activation ruling — design review: TWO set-points, both
+// required). (a) pointerdown-activation: a plain click's `click` event fires in the same
+// synchronous dispatch chain as its preceding pointerdown, before any scheduled clear
+// reaches the macrotask queue. (b) drag-commit/pointerup: a real drag spans many ticks, so
+// set-point (a)'s clear has long since fired by the time `click` follows a completed drag's
+// pointerup — a single pointerdown-time-only set would silently reintroduce double-
+// activation on every completed drag. Cleared on the NEXT tick after each set so a click
+// with NO preceding pointerdown/drag (AT default-action / synthetic clicks) still activates.
+let suppressClickActivate = false;
+function markClickSuppressed() {
+  suppressClickActivate = true;
+  setTimeout(() => { suppressClickActivate = false; }, 0);
+}
+
+/** The `.tab` elements in current DOM order (element form of orderedTabIds()). */
+function orderedTabEls() {
+  return /** @type {HTMLElement[]} */ ([...els.tabs.children].filter((el) => el.classList.contains('tab')));
+}
+
+/** Clear every tab's drag-visual state (inline transform + `.dragging` class). */
+function clearDragVisuals() {
+  for (const t of tabs.values()) {
+    if (!t.btn) continue;
+    t.btn.style.transform = '';
+    t.btn.classList.remove('dragging');
+  }
+}
+
+/**
+ * Recompute and apply sibling transforms for the current drop index (DD2 Chrome
+ * idiom — the opening gap IS the live drop indication; transforms only, no layout
+ * change). Rebuilds the hypothetical final order (the dragged tab inserted at
+ * `targetIndex` among the remaining slots — the SAME semantics commitTabMove's own
+ * `targetIndex` parameter uses, so this previews exactly what the eventual commit
+ * will produce) and, for every OTHER tab, translates it by the delta between its
+ * ORIGINAL slot rect (snapshotted at arm time — transforms never reflow layout, so
+ * the snapshot stays valid for the whole drag) and the slot rect it now visually
+ * occupies. Exact for non-uniform tab widths (sliver counts) — not an approximation
+ * via a single shared slot width.
+ * @param {number} targetIndex
+ */
+function applyDragDisplacement(targetIndex) {
+  if (!drag || !drag.startOrder || !drag.slotRects) return;
+  const remainingIds = drag.startOrder.filter((_, i) => i !== drag.draggedIndex);
+  const refId = remainingIds[targetIndex];
+  const finalOrder = refId != null
+    ? [...remainingIds.slice(0, targetIndex), drag.tabId, ...remainingIds.slice(targetIndex)]
+    : [...remainingIds, drag.tabId];
+  finalOrder.forEach((tid, finalIdx) => {
+    if (tid === drag.tabId) return; // the dragged tab tracks the pointer directly (see pointermove below)
+    const t = tabs.get(tid);
+    if (!t || !t.btn) return;
+    const origIdx = /** @type {string[]} */ (drag.startOrder).indexOf(tid);
+    const delta = /** @type {{left:number,width:number}[]} */ (drag.slotRects)[finalIdx].left -
+      /** @type {{left:number,width:number}[]} */ (drag.slotRects)[origIdx].left;
+    t.btn.style.transform = delta ? `translateX(${delta}px)` : '';
+  });
+}
+
+/** Arm the in-progress drag: snapshot slot rects, enter drag-mode styling, capture the pointer. */
+function armDrag() {
+  if (!drag) return;
+  const tab = tabs.get(drag.tabId);
+  if (!tab || !tab.btn) { drag = null; return; }
+  drag.armed = true;
+  releaseTabWidths(); // AC: releaseTabWidths() at drag start — the drag's own transforms own the geometry
+  const tabEls = orderedTabEls();
+  drag.startOrder = tabEls.map((el) => /** @type {HTMLElement} */ (el).dataset.id || '');
+  drag.draggedIndex = drag.startOrder.indexOf(drag.tabId);
+  drag.slotRects = tabEls.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, width: r.width };
+  });
+  drag.currentDropIndex = null; // force the very next displacement recompute
+  tab.btn.classList.add('dragging');
+  tab.btn.setPointerCapture(drag.pointerId);
+}
+
+/** Abort the live drag: clear transforms (nothing else was ever touched — restore is free) and announce. */
+function cancelDrag() {
+  if (!drag) return;
+  const wasArmed = drag.armed;
+  clearDragVisuals();
+  drag = null;
+  if (wasArmed) announceTabStatus('Move canceled');
+}
+
+// Document-level pointermove/pointerup/pointercancel (NOT per-tab-button): pointer capture
+// (set in armDrag) retargets subsequent events to the dragged tab's own element regardless of
+// where the cursor visually sits, but capture only engages AFTER arming — before that, the
+// pointer could leave a narrow (sliver-width) tab's bounds within the 5px threshold, so these
+// listen at the document to track the gesture robustly regardless of tab width.
+document.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  const dx = e.clientX - drag.startX;
+  if (!drag.armed) {
+    if (Math.abs(dx) < DRAG_ARM_THRESHOLD_PX) return;
+    armDrag();
+  }
+  const tab = tabs.get(drag.tabId);
+  if (tab && tab.btn) tab.btn.style.transform = `translateX(${dx}px)`;
+  const targetIndex = dropIndexFromPointer(/** @type {{left:number,width:number}[]} */ (drag.slotRects), e.clientX, drag.draggedIndex);
+  if (targetIndex !== drag.currentDropIndex) {
+    drag.currentDropIndex = targetIndex;
+    applyDragDisplacement(targetIndex);
+  }
+});
+document.addEventListener('pointerup', (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  if (!drag.armed) { drag = null; return; } // plain click — the click handler's own branches own this
+  const tabId = drag.tabId;
+  const targetIndex = drag.currentDropIndex ?? drag.draggedIndex;
+  const before = orderedTabIds();
+  clearDragVisuals();
+  commitTabMove(tabId, targetIndex);
+  markClickSuppressed(); // set-point (b): a completed drag's trailing `click` must not re-activate
+  drag = null;
+  const after = orderedTabIds();
+  if (after.join(' ') !== before.join(' ')) {
+    announceTabStatus(`Tab moved to position ${after.indexOf(tabId) + 1} of ${after.length}`);
+  }
+});
+document.addEventListener('pointercancel', (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  cancelDrag();
+});
+// Escape mid-drag restores (Implementation Guidance): gated on `drag` truthy (not `armed`) so
+// an Escape pressed in the brief unarmed window after pointerdown also cleanly discards the
+// potential drag; cancelDrag() itself only announces when a drag had actually armed.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && drag) {
+    e.preventDefault();
+    cancelDrag();
+  }
+});
+// A window resize mid-drag invalidates the arm-time slotRects snapshot (cheap defense per
+// the leg's Edge Cases — rare in practice, but the snapshot would otherwise silently go stale).
+window.addEventListener('resize', () => { if (drag) cancelDrag(); });
+
 function closeTab(id) {
+  // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): a tab-list mutation during a live drag
+  // invalidates its slotRects snapshot regardless of which tab this close targets.
+  if (drag) cancelDrag();
   const tab = tabs.get(id);
   if (!tab) return;
   // All tabs are WebContentsViews (Leg 3). Internal tabs (trusted) use tabClose just like web tabs.
@@ -1038,7 +1253,10 @@ function closeTab(id) {
   tabs.delete(id);
 
   if (activeTabId === id) {
-    const next = [...tabs.keys()].pop();
+    // DD1: DOM order is authoritative — orderedTabIds() reads the current strip,
+    // NOT Map insertion order (which no longer necessarily matches visual order
+    // once a tab has been reordered).
+    const next = orderedTabIds().pop();
     if (next) activateTab(next);
     else createTab(); // never leave the window with zero tabs
   }
@@ -1509,12 +1727,41 @@ function focusTab(id) {
   const t = tabs.get(id);
   if (t && t.btn) /** @type {HTMLElement} */ (t.btn).focus();
 }
+// announceTabStatus (M09 F2 DD3): transient sr-only status announcement for tab-strip
+// actions, mirroring the existing #media-status idiom on its own dedicated region so
+// tab announcements never race media-panel ones.
+function announceTabStatus(text) {
+  els.tabStatus.textContent = text;
+}
 els.tabs.addEventListener('keydown', (e) => {
-  const ids = [...tabs.keys()];
+  // DD1: DOM order is authoritative for the strip's keyboard contract.
+  const ids = orderedTabIds();
   if (!ids.length) return;
   // Cast the closest() RESULT (Element|null) to HTMLElement so `.dataset` typechecks —
   // `.closest()` returns Element regardless of receiver, and `.dataset` is HTMLElement-only.
   const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || activeTabId;
+
+  // Reorder (M09 F2 DD3): Ctrl+Shift+ArrowLeft/Right moves the FOCUSED tab one slot.
+  // Checked BEFORE the plain-arrow branch below so a modified arrow never falls
+  // through to select-and-focus navigation; same no-hijack scoping as the rest of
+  // this handler (it only runs when focus is inside the strip). Selection
+  // (aria-selected) is untouched — only the focused tab's DOM position moves, and it
+  // may not be the active tab (Edge Cases: focused tab ≠ active tab).
+  if (e.ctrlKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    releaseTabWidths(); // keyboard reorder always reflows immediately (DD5 parity with Delete)
+    const direction = e.key === 'ArrowRight' ? 'right' : 'left';
+    const moved = keyboardMove(ids, cur, direction);
+    if (moved !== ids) {
+      const targetIndex = moved.indexOf(cur);
+      commitTabMove(cur, targetIndex);
+      focusTab(cur);
+      announceTabStatus(`Tab moved to position ${targetIndex + 1} of ${moved.length}`);
+    }
+    // At an end (or a single tab), keyboardMove no-ops silently — no announcement.
+    return;
+  }
+
   const idx = Math.max(0, ids.indexOf(cur));
   if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
     e.preventDefault();

@@ -100,6 +100,8 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     scroll: (/** @type {number} */ wcId, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ dx, /** @type {number} */ dy) =>
       input.scroll(wcId, x, y, dx, dy, deps()),
     pressKey: (/** @type {number} */ wcId, /** @type {string} */ name, /** @type {string[]|undefined} */ modifiers) => input.pressKey(wcId, name, modifiers, deps()),
+    dragPointer: (/** @type {number} */ wcId, /** @type {{x:number,y:number}} */ from, /** @type {{x:number,y:number}} */ to, /** @type {any} */ opts) =>
+      input.dragPointer(wcId, from, to, deps(), opts),
     getZoom: (/** @type {number} */ wcId) => zoom.getZoom(wcId, deps()),
     setZoom: (/** @type {number} */ wcId, /** @type {number} */ factor) => zoom.setZoom(wcId, factor, deps()),
     captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),

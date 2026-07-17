@@ -320,6 +320,24 @@ html.platform-darwin #window-controls {
   outline-offset: -2px;
 }
 
+/* Pointer drag (M09 F2 Leg 2 DD2): design-review low note — `.tab` is statically
+   positioned (a flex item), so a bare `z-index` on the dragged tab would have no effect
+   without `position: relative` to establish a stacking context. Transform-only displacement
+   (never layout properties): the dragged tab tracks the pointer with NO transition (instant,
+   1:1 with the pointer); siblings ease into their displaced slot via a short transform
+   transition. The existing global `prefers-reduced-motion` rule (`transition-duration:
+   0.01ms !important`, further below in this file) neutralizes the sibling transition to effectively-instant
+   without a second media query here — displacement still occurs, just without the ease. */
+.tab.dragging {
+  position: relative;
+  z-index: 10;
+  transition: none;
+  cursor: grabbing;
+}
+.tab:not(.dragging) {
+  transition: transform 80ms ease;
+}
+
 /* Visible keyboard focus ring across interactive chrome (F23). */
 .icon-btn:focus-visible,
 .text-btn:focus-visible,
