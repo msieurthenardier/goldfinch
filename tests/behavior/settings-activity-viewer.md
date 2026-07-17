@@ -91,4 +91,3 @@ the rendered control, never hardcoded.
 ## Variants (optional)
 - Could parametrize `{pageSize}` boundary conditions (exactly one full page → no pager; one-over →
   two pages) once the implementation's page size is pinned.
-</content>

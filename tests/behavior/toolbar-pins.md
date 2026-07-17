@@ -3,6 +3,7 @@
 **Slug**: `toolbar-pins`
 **Status**: draft
 **Created**: 2026-06-08
+**Last Run**: 2026-07-08-23-26-43 (pass — see `toolbar-pins/runs/2026-07-08-23-26-43.md`)
 
 ## Intent
 Verify the **pin/unpin** system for toolbar items: a pinned item shows in the toolbar as an **icon + count

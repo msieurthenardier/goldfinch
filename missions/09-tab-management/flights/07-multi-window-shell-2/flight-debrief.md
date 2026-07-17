@@ -293,17 +293,58 @@ legs behind them, still failing. And "four grep-ACs failed" is asserted twice an
 - [ ] **F8 owns AC27**: the five re-pointed specs (`kebab-menu`,
       `internal-tab-menus`, `page-context-menu`, `tab-context-menu`,
       `tab-surface-geometry`) — **3 have never run at all.**
+  > **ERRATUM (M09 F8 leg 5, 2026-07-15) — both halves of this item are measured
+  > wrong. The body above is left as written: an inspection record is a snapshot,
+  > and this record's error is its most useful product.**
+  >
+  > **1. "3 have never run at all" is FALSE. All five have genuine run logs on
+  > disk** — `kebab-menu` (4 runs, latest `2026-07-08-19-54-44`),
+  > `internal-tab-menus` (1, `2026-07-08-18-34-54`, pass), `page-context-menu`
+  > (1 genuine + 1 skeleton, `2026-07-08-20-03-11`, partial), `tab-context-menu`
+  > (3, latest `2026-07-15-06-05-04`, pass 10/10), `tab-surface-geometry`
+  > (1, `2026-07-08-18-30-51`, pass). The "3" is exactly the three then carrying a
+  > **`Last Run: never` header** — so the claim read the **header (a proxy)**
+  > instead of the **`runs/` directory (the artifact)**. That is the same
+  > label-over-artifact substitution this debrief names as the FD's error three
+  > times, committed *in the item recording it*. (Headers corrected at this leg —
+  > AC9.)
+  >
+  > **2. The set of five is itself a proxy** — it is this flight's own **leg-1
+  > deferral subset**, not the re-point footprint. Measured: `b2d3afc` touched
+  > **14** top-level specs, of which **12** have no post-F7 run (only
+  > `multi-window-automation` and `multi-window-shell` do). `tab-surface-geometry`
+  > is **not among the 14** — it was never re-pointed and was never in the set.
+  > → re-scoped and re-distributed by **F8 DD12**: F8 runs `multi-window-shell`,
+  > `tab-context-menu`, `tab-reorder`, `tab-tearoff`; the remaining **11** are
+  > **F10's** by construction.
 - [ ] **F8 owns** the clean re-run of the folded `multi-window-shell`.
 - [ ] **F8**: check whether cross-window drag makes the **DD7 blur gap
       rig-reachable** (it's the first flight with a real two-window open handoff) —
       don't inherit the accepted-gap ruling blind.
-- [ ] **F8/maintenance**: `renderer.js:250-251` says the kebab has "four items";
+- [x] **F8/maintenance**: `renderer.js:250-251` says the kebab has "four items";
       `kebabModel` at `:385-392` has **six**. The count pattern's only instance in
       **product source**.
+  > **Discharged (M09 F8 leg 5, AC11).** Verified before editing: `kebabModel` has
+  > **6** ids — `new-window`, `settings`, `downloads`, `jars`, `print`, `exit`; the
+  > comment named **4** (Settings, Downloads, Print…, Exit), missing `new-window`
+  > and `jars`. Comment corrected to six, now naming all six and pointing at
+  > `kebabModel` as the source of truth. *(Both citations above had drifted by one
+  > line — the comment was at `:251-252`, `kebabModel` at `:386-393`. A line number
+  > is a proxy too.)*
 - [ ] **F9**: must NOT `preventDefault` on `close` without re-homing overlay
       destruction (DD5's named residual). Poll `enumerateWindows().booted` at
       restore — it was designed for exactly this.
 - [ ] **Maintenance**: the `getAttachedWindow`/`crossWindow` retirement (sized,
       owner named); main.js at 3517 with a per-leg budget.
-- [ ] Leg 2's artifact ends with a **leaked tool-call wrapper** (`</content>`
+- [x] Leg 2's artifact ends with a **leaked tool-call wrapper** (`</content>`
       `</invoke>`), committed. Cosmetic; scrub.
+  > **Discharged (M09 F8 leg 5, AC8) — and the scope here was wrong twice over.**
+  > "Delete 2 lines" in one file would have left **7 more live**. Measured
+  > repo-wide: **9 leaked lines across 6 files** — this file (2), M03
+  > `08-production-gating-and-isolation/flight.md` (2) and its `flight-log.md` (1),
+  > and — **outside `missions/**` entirely** — `tests/behavior/settings-automation.md`
+  > (2), `automation-key-gating.md` (1), `settings-activity-viewer.md` (1). All
+  > scrubbed; repo-wide re-scan clean. **Not a slip but a failure mode of the
+  > writing apparatus** (the F8 FD reproduced it in F8's own log minutes after
+  > reading this item), so it recurs wherever a file is written — spec files
+  > included, which is why a `missions/**` scan was still too narrow.

@@ -170,6 +170,25 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // favicon exist only renderer-side; main shape-validates, re-parents the live
   // guest, and relays into adopt-tab (target) + tab-moved-away (source).
   tabMoveToNewWindow: (payload) => ipcRenderer.invoke('tab-move-to-new-window', payload),
+  // Tear-off (M09 F8 Leg 3, DD5/DD16): the same move, requested by DRAG rather than by
+  // menu, over the same payload — and NO coordinate rides it, because the renderer already
+  // answered "did the pointer leave the strip?" against its own viewport. It differs from
+  // tabMoveToNewWindow only in the RETURN: the menu ITEM can be omitted at build time when
+  // a move is impossible, but a drag cannot be, so refusals come back DISCRIMINATED for the
+  // renderer to announce instead of as the bare null the menu path ignores.
+  tabTearOff: (payload) => ipcRenderer.invoke('tab-tear-off', payload),
+  // Move to an EXISTING window (M09 F8 Leg 4, DD8) — the same payload as the two
+  // paths above plus the destination's `windowId`. That id is a REQUEST, not a
+  // claim: main re-resolves it through the registry and re-validates that the tab
+  // belongs to THIS window, so the renderer cannot name a tab it does not own nor
+  // a window that has since closed. Refusals come back discriminated (DD5).
+  tabMoveToWindow: (payload) => ipcRenderer.invoke('tab-move-to-window', payload),
+  // DD8 push-cache, the closed-tab-stack mirror above: main pushes { targets } —
+  // one { windowId, label } per OTHER window — whenever the window set, an active
+  // tab, or an active tab's title changes. The chrome caches it so the tab-context
+  // opener stays synchronous. moveTargets() is the cache's boot seed only.
+  moveTargets: () => ipcRenderer.invoke('move-targets'),
+  onMoveTargetsChanged: (cb) => ipcRenderer.on('move-targets-changed', (_e, d) => cb(d)),
   // adopt-tab (main → target chrome, queued behind the window-boot-config
   // barrier): strip insertion WITHOUT createTab — the webContents already lives.
   onAdoptTab: (cb) => ipcRenderer.on('adopt-tab', (_e, d) => cb(d)),

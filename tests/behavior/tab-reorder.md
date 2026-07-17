@@ -3,7 +3,20 @@
 **Slug**: `tab-reorder`
 **Status**: active
 **Created**: 2026-07-14
-**Last Run**: 2026-07-14-18-12-24
+**Last Run**: 2026-07-16-06-33-26 — **partial** (M09 F8 leg 5; **8/9 PASS**, Step 4 **INCONCLUSIVE**
+— instrument limit) — [run log](tab-reorder/runs/2026-07-16-06-33-26.md).
+**The F2 reorder contract SURVIVES F8's zone model**: leg 3 interposed `classifyDragPoint` on every
+`pointermove` and changed the arm threshold `Math.abs(dx)` → `Math.hypot(dx, dy)`; Step 3 proves
+in-strip reorder intact (independently recomputed drop index; drag provably armed, 5 moves delivered,
+`detachingSeen:false`).
+**Step 4 cannot fail and is filed INCONCLUSIVE, not PASS.** It reads `window.screenX` → **564** — the
+exact value F8's spike proved a **cached fiction** against a Win32/RAIL witness (a *real* OS move
+leaves it unchanged and fires **no event**). Its WSLg hatch fires only on *"a constant placeholder
+(e.g. always 0)"* — **calibrated to the wrong tell: the failure is FROZEN, not ZERO.**
+**⚠ OWNERSHIP GAP — this spec does NOT own the `Math.hypot` threshold, though `tab-tearoff.md` used to
+say it did (now corrected).** Its only drag holds y constant ⇒ `dy=0` ⇒ `hypot(dx,0) ≡ abs(dx)`.
+**No spec and no unit test falsifies the straight-down case (`dx=0, dy>5`) the change was made for.**
+**OWED**: re-instrument or delete Step 4; add a **unit** test over the threshold predicate. **Owner: F9.**
 
 ## Intent
 

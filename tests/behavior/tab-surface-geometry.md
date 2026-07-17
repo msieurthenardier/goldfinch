@@ -3,7 +3,7 @@
 **Slug**: `tab-surface-geometry`
 **Status**: active
 **Created**: 2026-06-26
-**Last Run**: never
+**Last Run**: 2026-07-08-18-30-51 (pass — see `tab-surface-geometry/runs/2026-07-08-18-30-51.md`)
 
 > **Re-authored 2026-07-02 (F8 Leg 5b).** The freeze-frame rows this spec originally carried (still
 > painted into `#webviews backgroundImage`, live guest hidden while a menu is open) were retired at

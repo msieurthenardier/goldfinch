@@ -3,10 +3,23 @@
 **Slug**: `multi-window-shell`
 **Status**: active
 **Created**: 2026-07-15
-**Last Run**: 2026-07-15-22-21-56 — **partial** (post-rewrite re-run; **product green on every row**, but
-**two spec-instrument errata survived the rewrite** and were folded after — see the run log). **A clean
-re-run of the FOLDED spec is OWED at this spec's next touch (F8 exercises this shell and inherits the
-carry).** — [run log](multi-window-shell/runs/2026-07-15-22-21-56.md).
+**Last Run**: 2026-07-16-05-30-50 — **partial** (M09 F8 leg 5; **9/9 steps + both variants PASS, and steps
+1–9 ran AS WRITTEN with NO repairs**) — [run log](multi-window-shell/runs/2026-07-16-05-30-50.md).
+**F7's history-gate debt (erratum 1) is PAID**: both gates are pure `evaluate(wcId,"history.length")`,
+they ran unrepaired, and the run produced a genuine **positive-and-negative instrument control** the
+prior run lacked (`history.length` reads **1** on three 1-entry tabs and **2** on the 2-entry reopen,
+with the retired `getHistory()` still refusing `bad-args — jarId required`).
+**Filed `partial` for a DIFFERENT and NEWLY-MEASURED defect**: **erratum 2 was folded by NAMING and
+never by MEASURING** — V1's pixel corollary is **vacuous** (byte-identical captures across two sheet
+wcIds; a **hidden** sheet captures fine), so it **could not fail**. Now folded properly.
+**OWED — SCOPED, not a blanket re-run: V1/V2 only** (steps 1→4 + variants), because the fold changes
+V1's action sequence and the new sequence must be exercised. **Steps 1–9 are PROVEN and owe nothing —
+do not re-run them.** **Owner: F9** (or F10 if it walks this spec first).
+
+> **Prior run**: 2026-07-15-22-21-56 — **partial** (post-rewrite re-run; product green on every row, but
+> **two spec-instrument errata survived the rewrite** and were folded after) —
+> [run log](multi-window-shell/runs/2026-07-15-22-21-56.md). That run's owed clean re-run **was
+> collected by F8 leg 5**, which is what surfaced the erratum-2 residue above.
 Every F7 decision this spec exists to verify held live: DD5's inversion (window 2's `sheetWcId` **absent
 → 7** while window 1's row carried none; V1 read **two simultaneously-visible, distinctly-identified
 sheets**; V2 dismissal scoped to the owner), DD2's walk-free discovery, DD1's all-windows census,
@@ -250,7 +263,7 @@ observable**: F7's DD2 added `sheetVisible` **precisely so this variant has one*
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| V1 | With both windows live, open the kebab in **window 1**: `evaluate(C1, "openKebabOverlay(0)")`. Then open the kebab in **window 2**: `evaluate(C2, "openKebabOverlay(0)")` — **open window 2's LAST and read immediately** (any action that dismisses one collapses the observable; see the note below). `enumerateWindows()`. | **BOTH rows report `sheetVisible: true`, with TWO DISTINCT `sheetWcId`s** (window 1's ≠ window 2's). ⇒ **The roaming singleton is retired.** Under F6 this was impossible *by construction*: ONE sheet attached to the requesting window at show time, so opening window 2's menu **tore down window 1's** — one sheet cannot be visible in two windows. Two simultaneously-visible, distinctly-identified sheets is the property only per-window instances can have. Corroborate on pixels: `captureScreenshot(<window 1's sheetWcId>)` and `captureScreenshot(<window 2's sheetWcId>)` each render **their own** open menu. *(**Erratum folded 2026-07-15-22-21-56**: this named `captureScreenshot(C1)`/`(C2)` — the **chrome** wcIds — which cannot show the menu. That follows necessarily from what this very row asserts: a per-window sheet is **its own `WebContentsView` with its own wcId**, so the chrome's per-wcId capture cannot contain it. Measured: `captureScreenshot(C1)` renders window 1's chrome with **no menu**. Still per-wcId, so the DD9 no-`captureWindow` constraint holds.)* |
+| V1 | With both windows live, open the kebab in **window 1**: `evaluate(C1, "openKebabOverlay(0)")`. Then open the kebab in **window 2**: `evaluate(C2, "openKebabOverlay(0)")` — **open window 2's LAST and read immediately** (any action that dismisses one collapses the observable; see the note below). `enumerateWindows()`. | **BOTH rows report `sheetVisible: true`, with TWO DISTINCT `sheetWcId`s** (window 1's ≠ window 2's). ⇒ **The roaming singleton is retired.** Under F6 this was impossible *by construction*: ONE sheet attached to the requesting window at show time, so opening window 2's menu **tore down window 1's** — one sheet cannot be visible in two windows. Two simultaneously-visible, distinctly-identified sheets is the property only per-window instances can have. **⚠ NO PIXEL COROLLARY — THE DISTINCTNESS PROOF IS THE `sheetWcId`s, AND PIXELS CANNOT SUPPLY ONE.** *(**Erratum 2, folded a SECOND time at 2026-07-16-05-30-50 — the first fold was by NAMING and never by MEASURING.**)* This clause has now been wrong **twice**, and the second way is subtler: the 2026-07-15 fold moved it from the **chrome** wcIds (which cannot contain the menu — **vacuity-by-ABSENCE**) to the **sheet** wcIds, and landed on **vacuity-by-INDISTINGUISHABILITY**. **Measured this run**: `captureScreenshot(<W1 sheetWcId>)` and `captureScreenshot(<W2 sheetWcId>)` returned **BYTE-IDENTICAL** PNGs (`md5 d9e34c95…`, 15610 bytes each) — **necessarily**, since both windows' kebabs render the **same six items at the same geometry** — so **the pixels cannot attribute a capture to a window**, which is exactly the property this row exists to prove. **And worse: a HIDDEN sheet captures fine** (`capture_S2_when_hidden` → `hasImage: true`), so the clause **returns an image even with no menu open**. **It could not fail.** ⇒ **The load-bearing proof is `enumerateWindows()`'s two DISTINCT `sheetWcId`s with both `sheetVisible: true`** — an MCP-frame observable that genuinely discriminates. **Do NOT re-add a pixel corroboration here**: it measures nothing this row needs, and `captureScreenshot` **raises and activates**, perturbing the very state **V2 depends on** — the spec's own documented hazard, ordered by the spec against itself. *(**The meta-lesson, and this spec's THIRD instance**: an instrument's **TARGET** was repaired while its **DISCRIMINATION** was never examined — the same shape as erratum 1, an assertion added to make a failure **loud** that named an op which **could not fail**.)* |
 | V2 | **Per-window dismissal scoping.** With both menus open, dismiss **window 1's only**: `pressKey(<window 1 sheetWcId>, 'Escape')`. `enumerateWindows()`. | Window 1: `sheetVisible: false`. **Window 2: `sheetVisible: true` — UNAFFECTED.** ⇒ dismissal is scoped to the window that owns the sheet. A roaming singleton could not express this: there was only one sheet to dismiss. |
 
 > **Fragility (read before running).** Both sheets must **stay** open for V1 to be readable — a stray

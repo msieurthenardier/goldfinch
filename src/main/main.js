@@ -27,6 +27,9 @@ const { createFindOverlayManager } = require('./find-overlay-manager');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
+// F8 DD8: the pure, Electron-free "Move to window …" target list. Same zero-state
+// contract as the census above — derived from the live records at call time.
+const { buildMoveTargets } = require('./move-targets');
 // F7 DD4: pure, Electron-free identity pick for desktopCapturer sources. Replaces
 // a best-size-match heuristic that could grab an unrelated same-sized window.
 const { pickSourceByMediaSourceId } = require('./capture-source-picker');
@@ -340,6 +343,31 @@ function broadcastClosedTabStackChanged() {
   for (const rec of registry.records()) {
     const cc = rec.chromeView.webContents;
     if (cc && !cc.isDestroyed()) cc.send('closed-tab-stack-changed', payload);
+  }
+}
+
+// F8 DD8 push-cache — the SAME shape as the closed-tab-stack push above, and for
+// the same reason: openTabContextMenu builds its model SYNCHRONOUSLY (F6 DD6
+// deleted the async opener and its stale-resolve guard), so the "Move to window …"
+// target list has to already be renderer-side when the menu opens.
+//
+// PER-RECORD payloads, unlike the stack push's one shared object: every chrome
+// gets the list with ITS OWN window excluded, so no window is ever offered a move
+// to itself.
+//
+// WHAT IS CACHED IS ONLY THE LABEL, and that is what makes this cache cheap to
+// reason about. The `windowId` a renderer echoes back is re-resolved through
+// registry.get() and re-validated against the SENDER's own record at dispatch
+// (DD8's AUTHORITY rule), so a MISSED push here degrades to a stale caption on a
+// menu item — visible, cosmetic, self-healing on the next push — and can never
+// mis-target a move. That is DD8's windowId-over-ordinal reversal paying out: an
+// ordinal-keyed list with a missed invalidation would silently move the tab into
+// the WRONG window.
+function broadcastMoveTargetsChanged() {
+  const recs = registry.records();
+  for (const rec of recs) {
+    const cc = rec.chromeView.webContents;
+    if (cc && !cc.isDestroyed()) cc.send('move-targets-changed', { targets: buildMoveTargets(recs, rec) });
   }
 }
 
@@ -1080,6 +1108,10 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
   // real focus events keep the tracker current, latest-event-wins. noBootTab
   // rides the record (DD5 create-chain) and is served via window-boot-config.
   const record = registry.create({ win, chromeView, noBootTab });
+  // F8 DD8: the window set grew — every OTHER chrome gains a move target. This
+  // window's own chrome is still pre-boot (a send would be silently dropped, the
+  // H1 hazard), so it seeds itself via the `move-targets` invoke instead.
+  broadcastMoveTargetsChanged();
   // Capture the id while the window is alive: BaseWindow property access THROWS
   // "Object has been destroyed" once the native window is gone, and the `closed`
   // handler below runs exactly then. An uncaught throw inside the `closed`
@@ -1260,6 +1292,11 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
     // The id is a PRIMITIVE captured at registration by onWindowClosed — NEVER a
     // win.* read here (destroyed-window access throws; see the capture above).
     registry.remove(closedWinId);
+    // F8 DD8: the window set shrank — the surviving chromes must drop this window
+    // from their menus. A menu built BEFORE this push still refuses correctly at
+    // dispatch (registry.get → null), which is the AC4 refusal; this just keeps
+    // the stale item from being offered in the first place.
+    broadcastMoveTargetsChanged();
     // Chrome-webContents leak fix (M09 F6 Leg 4 / review M4 — the leg-2 deferral
     // lands here): with N windows a closed window's chrome renderer would linger
     // until quit. DEFERRED destroy via setImmediate — outside the sender's own
@@ -1666,6 +1703,10 @@ function wireTabViewEvents(view, wcId, partition) {
   wc.on('page-title-updated', guard((_e, title) => {
     sendToChrome('tab-title', { wcId, title });
     historyRecorder?.handleTitleUpdated(wcId, title);
+    // F8 DD8: a window's caption IS its active tab's title, so this retitles a
+    // move target. Gated on being the ACTIVE tab — a background tab's title
+    // appears in no caption, and re-broadcasting for one would be pure chatter.
+    if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
   }));
   wc.on('page-favicon-updated', guard((_e, favicons) => {
     sendToChrome('tab-favicon', { wcId, favicons });
@@ -2702,24 +2743,80 @@ ipcMain.handle('tab-history-snapshot', (_e, { webContentsId }) => {
 // closedTabStack.size() the tab-reopen handler already shares.
 ipcMain.handle('closed-tab-stack-size', () => closedTabStack.size());
 
+// The move-target cache's BOOT SEED (F8 DD8) — the closed-tab-stack-size mirror.
+// A chrome that boots into an already-multi-window app sees no push until the
+// next window/title change, so without this seed its menu would offer no move
+// targets at all. Sender-resolved: the list excludes the ASKING window, and an
+// unregistered sender (a pre-registration or torn-down chrome) gets [] rather
+// than a list it has no business seeing.
+ipcMain.handle('move-targets', (event) => {
+  const source = registry.getWindowForChrome(event.sender);
+  return source ? buildMoveTargets(registry.records(), source) : [];
+});
+
 // Move to new window (M09 F6 Leg 4 — DD5 steps 1–4, renderer-initiated,
 // main-executed; spike verdict GO → LIVE re-parent, same webContents).
 // (H2) the payload is the SOURCE renderer's strip snapshot ({wcId, url, title,
 // favicon, container}) — chrome→chrome trust domain; main shape-validates and
 // relays into `adopt-tab`, re-deriving url/title off the live wc at SEND time
 // (a burner's synthesized container and the favicon exist ONLY renderer-side).
-ipcMain.handle('tab-move-to-new-window', (event, payload) => {
-  const source = registry.getWindowForChrome(event.sender);
-  if (!source) return null;
-  const p = validateMoveTabPayload(payload);
-  if (!p) return null;
+
+/**
+ * A NEW window sized to `source`'s content box, for the two move paths that make
+ * their own target (F8 leg 4: extracted from the core when the core gained a
+ * third caller that does NOT create one). Identical chrome layout is what makes
+ * the re-applied guest seed exact — spike answer (b).
+ * @param {import('./window-registry').WindowRecord} source
+ * @returns {import('./window-registry').WindowRecord}
+ */
+function newWindowForMove(source) {
+  const srcContent = source.win.getContentBounds();
+  return createWindow({
+    noBootTab: true,
+    contentSize: { width: srcContent.width, height: srcContent.height },
+  });
+}
+
+/**
+ * The tab-move core (F8 leg 3; generalized over its target at leg 4): re-parent
+ * `p.wcId` out of `source` and into the window `resolveTarget` hands back.
+ * Factored out of the handler below so the menu path, drag tear-off, and the
+ * cross-window keyboard move share ONE move, not three transcriptions of it.
+ * SYNCHRONOUS BY CONTRACT — see the invariant at the delete/set pair; do not
+ * make it `async`.
+ *
+ * WHY THE TARGET ARRIVES AS A THUNK rather than a record. Two of the three
+ * callers CREATE their target, and creating one before the refusal guards below
+ * have run would leave an orphaned empty window behind every refused move.
+ * `resolveTarget` is therefore invoked only once the move is committed to. The
+ * cross-window caller passes `() => target` for a record it has ALREADY resolved
+ * and validated — a pure lookup has no side effect to defer, and doing it in the
+ * handler is what keeps a refused cross-window move from closing the source's
+ * find session on its way out.
+ *
+ * DISCRIMINATED RESULT, never a bare null (DD5): the menu ITEM can be omitted at
+ * build time (tab-context-model.js omits at !isLastTab && !isInternal); a DRAG
+ * cannot be — the user performs it and is owed an outcome. The menu handler
+ * narrows this back to F6's bare `null`.
+ *
+ * @param {import('./window-registry').WindowRecord} source
+ * @param {import('./move-tab-payload').MoveTabPayload} p
+ * @param {() => import('./window-registry').WindowRecord | null} resolveTarget
+ *   The destination, resolved LAZILY — called only after every refusal guard has
+ *   passed, and never before.
+ * @returns {{ ok: true, windowId: number } | { ok: false, reason: 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }}
+ */
+function moveTabIntoWindow(source, p, resolveTarget) {
   const entry = source.tabViews.get(p.wcId);
   // The tab must belong to the SENDER's window and be a live WEB tab (internal
   // tabs are omitted from the model row — review M4 — and refused here as
   // defense-in-depth). A sole-tab move is a no-op window swap: the model omits
   // it at isLastTab; main refuses it too (never leave the source at zero tabs).
-  if (!entry || entry.trusted || entry.view.webContents.isDestroyed()) return null;
-  if (source.tabViews.size <= 1) return null;
+  // F6 collapsed these three into ONE `return null`; F8 splits them because a
+  // drag must announce WHICH refusal it hit.
+  if (!entry || entry.view.webContents.isDestroyed()) return { ok: false, reason: 'no-tab' };
+  if (entry.trusted) return { ok: false, reason: 'internal' };
+  if (source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
   const wc = entry.view.webContents;
 
   // (M2) the live find session targets the moved tab: close it FIRST (the
@@ -2729,23 +2826,30 @@ ipcMain.handle('tab-move-to-new-window', (event, payload) => {
   if (source.findOverlay?.isSessionActive(p.wcId)) source.findOverlay.closeSession({ refocusGuest: false });
 
   // (H3) geometry: capture the guest's current window-local content-DIP bounds
-  // BEFORE detach, and create the target with the SOURCE's content size —
-  // identical chrome layout makes the re-applied seed exact (spike answer (b)).
-  // ACCEPTED interim visual (documented): the live guest renders over the
-  // target's still-booting chrome until adopt completes — a static seed, never
-  // an animation (the native-surface invariant: guest bounds are a discrete
-  // setBounds STEP).
+  // BEFORE detach. A window-LOCAL view rect, never a window origin — the DD16
+  // ban is on `win.getBounds()`, the screen-space fiction, not on this (leg 3's
+  // narrowing, upheld by the FD).
+  // ACCEPTED interim visual (documented): for a move-CREATED target the live
+  // guest renders over the target's still-booting chrome until adopt completes —
+  // a static seed, never an animation (the native-surface invariant: guest
+  // bounds are a discrete setBounds STEP).
   const guestBounds = entry.view.getBounds();
-  const srcContent = source.win.getContentBounds();
-  const target = createWindow({
-    noBootTab: true,
-    contentSize: { width: srcContent.width, height: srcContent.height },
-  });
+  const target = resolveTarget();
+  // Defense-in-depth (F8 leg 4). The two creating callers cannot land here —
+  // createWindow always returns a record — and the cross-window caller has
+  // already refused a dead/absent/self target against the registry. A bare
+  // `return` would be a silent death; DD5 forbids one, so this is an announced
+  // refusal like any other.
+  if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
 
   // Re-parent (DD1 spike primitive: destroy-free removeChildView → addChildView
   // across windows; webContents survives, wcId stable, live state intact).
   source.win.contentView.removeChildView(entry.view);
   target.win.contentView.addChildView(entry.view);
+  // The seed is EXACT only for a move-created target (same content size by
+  // construction). Moving into an EXISTING window of a different size seeds a
+  // stale rect for one frame; the target's adopt-tab → activateTab → tab-set-active
+  // re-sends the real bounds, which is the same correction every activation makes.
   entry.view.setBounds(guestBounds);
   entry.view.setVisible(true);
 
@@ -2753,15 +2857,68 @@ ipcMain.handle('tab-move-to-new-window', (event, payload) => {
   // Event-time class-3 routing (DD2) makes the per-tab main→chrome fan re-bind
   // to the target window automatically from this point on (verified per channel
   // by the leg's live sweep).
+  // DD1 SYNCHRONY INVARIANT — NO SUSPENSION POINT may separate this delete from
+  // the set below. Synchronous code between them is fine (it cannot yield); an
+  // `await` is not. Across a yield the tab is in NEITHER record, and DD1's
+  // "duplicate tabs are structurally impossible" degrades from a LOUD duplicate
+  // to a SILENT MISSING TAB — quieter than the bug DD1 replaced. Adjacency is
+  // NOT the invariant and is not pinned; this function staying synchronous is.
+  // Pinned by test/unit/move-tab-synchrony.test.js — anchored on THIS function's
+  // name, never a line number (F7 logged 4 different ones). Leg 1 anchored it on
+  // the `'tab-move-to-new-window'` callback; F8 leg 3's factoring moved the pair
+  // out, its vacuity guard failed loudly as designed, and forced this re-anchor.
   source.tabViews.delete(p.wcId);
   target.tabViews.set(p.wcId, entry);
   entry.active = true;
   if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
+  // THE TARGET'S OUTGOING TAB IS HIDDEN HERE, AND IT MUST BE — the adopt round-trip
+  // CANNOT do it, and the reason is this very assignment. `tab-set-active` is the only
+  // other place that hides an outgoing guest, and its hide-old branch is gated on
+  // `owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`. Pre-setting
+  // target.activeTabWcId below makes that guard FALSE by the time
+  // adopt-tab → onAdoptTab → activateTab → tab-set-active arrives: the branch is
+  // skipped, and the target's PREVIOUS active tab keeps `active: true` and
+  // setVisible(true) BEHIND the moved one. enumerateTabs then reports TWO
+  // `active: true` rows for the target window (automation/tabs.js maps `active: !!t.active`).
+  //
+  // TEAR-OFF NEVER SAW THIS, which is why it survived to the flight-end review: a
+  // move-CREATED target is a `noBootTab` window whose activeTabWcId is null, so there
+  // is no outgoing tab to hide. It is exclusive to the move-into-an-EXISTING-window
+  // path (F8 leg 4), and at equal window sizes the moved tab visually COVERS the stale
+  // guest — a silent wrong state, the S1 class this flight exists to prevent.
+  //
+  // Read BEFORE the overwrite — after it, the outgoing entry is unrecoverable. And
+  // SYNCHRONOUSLY: no `await` may enter this function at all (the DD1 pin above), so
+  // this cannot be deferred to the round-trip it is compensating for.
+  const prevActive = target.activeTabWcId !== null ? target.tabViews.get(target.activeTabWcId) : null;
+  if (prevActive && prevActive !== entry) {
+    // Never read through a destroyed webContents — an uncaught throw in this area
+    // wedges the Wayland close path permanently with zero error output (the F6 leg-4
+    // root cause). The `active` flag is corrected either way: it is main-side state and
+    // survives its view's destruction.
+    if (!prevActive.view.webContents.isDestroyed()) prevActive.view.setVisible(false);
+    prevActive.active = false;
+    // AND CLOSE THE TARGET'S OPEN MENU HERE, FOR THE SAME REASON THE HIDE IS HERE.
+    // The pre-set below disarms `tab-set-active`'s guard
+    // (`owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`), and that ONE
+    // guard gates TWO effects: the outgoing-tab hide (mirrored just above) AND
+    // `owner.sheet?.closeMenuOverlay('tab-switch')`. Disarmed, the adopt round-trip's
+    // `tab-set-active` takes the `else if (owner.sheet?.isMenuOpen()) owner.sheet.show()`
+    // branch instead — RE-SHOWING the target's stale menu (its active guest changed
+    // underneath it) at the moved tab's freshly-synced bounds. So the move core must
+    // close it ITSELF, synchronously, before the pre-set — same as the hide, and for
+    // the same round-trip-can't-do-it reason. Idempotent when no menu is open, and
+    // `target.sheet` is null-tolerant on a live record. The STRUCTURAL fix (stop
+    // pre-setting `target.activeTabWcId` and let the round-trip's guard fire) is F9's.
+    target.sheet?.closeMenuOverlay('tab-switch');
+  }
   target.activeTabWcId = p.wcId;
 
-  // Focus rules (Chrome parity): the move-created window is focused, moved tab
-  // active. Programmatic win.focus() fires NO focus event under WSLg (spike
-  // verdict 4) — noteFocus seeds the DD8 accessor deterministically.
+  // Focus rules (Chrome parity): the target window is raised and the moved tab is
+  // active — true for a created window and for an existing one the tab is sent
+  // into (Chrome raises the destination either way). Programmatic win.focus()
+  // fires NO focus event under WSLg (spike verdict 4) — noteFocus seeds the DD8
+  // accessor deterministically.
   target.win.focus();
   registry.noteFocus(target.win.id);
 
@@ -2779,7 +2936,66 @@ ipcMain.handle('tab-move-to-new-window', (event, payload) => {
     canGoBack: !wc.isDestroyed() && wc.canGoBack(),
     canGoForward: !wc.isDestroyed() && wc.canGoForward(),
   }]);
+  // Both records' active tab just changed, so both windows' captions did (DD8).
+  // Synchronous sends, and AFTER the pair — never between it.
+  broadcastMoveTargetsChanged();
   return { ok: true, windowId: target.win.id };
+}
+
+// The MENU path (F6's, unchanged): narrows the core's result back to the bare
+// `null` its renderer ignores and `renderer-globals.d.ts` declares.
+ipcMain.handle('tab-move-to-new-window', (event, payload) => {
+  const source = registry.getWindowForChrome(event.sender);
+  if (!source) return null;
+  const p = validateMoveTabPayload(payload);
+  if (!p) return null;
+  const r = moveTabIntoWindow(source, p, () => newWindowForMove(source));
+  return r.ok ? r : null;
+});
+
+// The KEYBOARD CROSS-WINDOW path (F8 leg 4, DD8) — "Move to window …". The ONLY
+// way a tab crosses windows in F8: the cross-window DRAG was deferred at leg 2
+// (the transport is a cached fiction), and this path needs NO coordinate at all.
+// Menu → windowId → main.
+//
+// THE AUTHORITY RULE, HONORED ON ITS OWN TERMS (DD8; main.js:270's rule restated).
+// `payload.windowId` is a DESTINATION REQUEST and nothing more — never a claim of
+// ownership, and never trusted as one:
+//   - the SOURCE is resolved from `event.sender` through the registry, exactly as
+//     the two paths above do it. The payload does not get to name it.
+//   - the tab must be in THAT record's tabViews — the core's own `no-tab` guard.
+//     A payload naming a tab the sender does not own is refused there, and the
+//     registry is what refuses it.
+//   - the TARGET is re-resolved through registry.get(). A window that closed
+//     between menu build and this dispatch resolves to null and REFUSES (DD5) —
+//     it never re-points at whichever window now sits where that one was. That
+//     refusal is only reachable because DD8 keys the item on `windowId`; the
+//     reversed ordinal scheme had to rebuild or cache the list to resolve one,
+//     and both of those re-point silently.
+ipcMain.handle('tab-move-to-window', (event, payload) => {
+  const source = registry.getWindowForChrome(event.sender);
+  if (!source) return { ok: false, reason: 'no-source' };
+  const p = validateMoveTabPayload(payload);
+  if (!p) return { ok: false, reason: 'bad-payload' };
+  const wantedId = payload && typeof payload.windowId === 'number' ? payload.windowId : null;
+  const target = wantedId === null ? null : registry.get(wantedId);
+  // Resolved and refused HERE rather than inside the core: registry.get is a pure
+  // lookup with no side effect to defer, and refusing before the core runs is what
+  // keeps a refused move from closing the source's find session on its way out.
+  if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
+  return moveTabIntoWindow(source, p, () => target);
+});
+
+// The DRAG path (F8 leg 3, DD5/DD16): a tab dragged out of the strip and released.
+// The renderer decided "the pointer left the strip" against the strip's own rect in
+// its OWN viewport and sends NO coordinate — this flight has no global coordinate.
+// Returns the result verbatim; silence is not an outcome for a physical gesture.
+ipcMain.handle('tab-tear-off', (event, payload) => {
+  const source = registry.getWindowForChrome(event.sender);
+  if (!source) return { ok: false, reason: 'no-source' };
+  const p = validateMoveTabPayload(payload);
+  if (!p) return { ok: false, reason: 'bad-payload' };
+  return moveTabIntoWindow(source, p, () => newWindowForMove(source));
 });
 
 ipcMain.on('tab-hide', (event, wcId) => {
@@ -2900,7 +3116,13 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
     }
     if (oldEntry) oldEntry.active = false;
   }
+  const captionChanged = owner.activeTabWcId !== wcId;
   owner.activeTabWcId = wcId;
+  // F8 DD8: this window's caption is its ACTIVE tab's title, so an activation
+  // retitles it for every OTHER window's menu. Gated on the active tab actually
+  // changing — a re-activation of the same tab (the menu/find re-assert path
+  // above) changes no caption.
+  if (captionChanged) broadcastMoveTargetsChanged();
 });
 
 ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {

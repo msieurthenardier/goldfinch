@@ -3,7 +3,7 @@
 **Slug**: `kebab-menu`
 **Status**: active
 **Created**: 2026-06-06
-**Last Run**: 2026-06-07-10-42-52
+**Last Run**: 2026-07-08-19-54-44 (partial — see `kebab-menu/runs/2026-07-08-19-54-44.md`)
 
 > **Updated 2026-07-02 (F8 Leg 5b).** Since the Flight-8 cutover the kebab menu renders from the
 > **menu-overlay sheet** (a separate transparent `WebContentsView`), not the chrome DOM — menu

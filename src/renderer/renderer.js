@@ -18,7 +18,8 @@ import { tabContextModel } from '../shared/tab-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
-import { keyboardMove, dropIndexFromPointer } from '../shared/tab-order.js';
+import { keyboardMove } from '../shared/tab-order.js';
+import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // delegates to dropIndexFromPointer
 import { createPushCache } from '../shared/push-cache.js';
 
 const HOMEPAGE = 'https://www.google.com';
@@ -247,8 +248,10 @@ function refreshOpenTabJars() {
 }
 
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with four static role="menuitem" items
-// (Settings, Downloads, Print…, Exit) + roving tabindex + arrow-nav.
+// APG menu-button: role="menu" popup with six static role="menuitem" items
+// (New window, Settings, Downloads, Cookie jars, Print…, Exit) + roving tabindex
+// + arrow-nav. Count and order track `kebabModel` below — the single source of
+// truth; if you add an item there, this line is stale until you edit it too.
 //
 // All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
 // chrome keeps the trigger, open stimuli, model building, and action execution;
@@ -712,6 +715,33 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
           favicon: target.favicon,
           container: target.container
         });
+      } else if (id.startsWith('tab:move-window:')) {
+        // Move to an EXISTING window (M09 F8 Leg 4, DD8) — the tab's only way
+        // across windows in F8. Same strip snapshot as the new-window path above,
+        // plus the destination.
+        //
+        // The windowId is ECHOED from the item id main built it into — never a
+        // position in the current list, which is exactly what the reversed ordinal
+        // scheme would have sent. Re-reading it here rather than re-deriving it
+        // from moveTargetsCache is the point: the cache may have been re-pushed
+        // since the menu opened, and this move means the window the USER picked.
+        // Main re-resolves the id through the registry and REFUSES if that window
+        // has closed (DD5) rather than re-pointing at a survivor.
+        if (!target || target.wcId == null) break;
+        const windowId = Number(id.slice('tab:move-window:'.length));
+        if (!Number.isInteger(windowId)) break;
+        window.goldfinch.tabMoveToWindow({
+          wcId: target.wcId,
+          url: target.url,
+          title: target.title,
+          favicon: target.favicon,
+          container: target.container,
+          windowId
+        }).then((result) => {
+          // DD5: every outcome is announced. On success `tab-moved-away` has
+          // already removed the strip entry, so this is all that is left either way.
+          announceTabStatus(moveOutcomeMessage(result, 'another window'));
+        });
       } else if (id === 'tab:reopen-closed') {
         // The EXISTING dispatchChromeAction('reopen-closed-tab') case (dispatch
         // reuse, DD2) — its jar-fallback/positional-reopen decisions ride along
@@ -1038,6 +1068,21 @@ window.goldfinch.closedTabStackSize().then((size) => {
   closedTabStackSizeCache.seed(typeof size === 'number' ? size : 0);
 });
 
+// DD8 push-cache (M09 F8 Leg 4): the OTHER open windows, each captioned main-side
+// from its active tab's title. Same seed/push race as the stack size above, and
+// cached for the same reason — openTabContextMenu is SYNCHRONOUS and F6 DD6
+// deleted the async opener (and its stale-resolve guard) it would otherwise need.
+// Only the LABEL is cached. The windowId rides the item id and main re-resolves it
+// through the registry at dispatch, so a stale caption degrades to a wrong menu
+// word, never a move into the wrong window — DD8's windowId-over-ordinal reversal.
+const moveTargetsCache = createPushCache(/** @type {{ windowId: number, label: string }[]} */ ([]));
+window.goldfinch.onMoveTargetsChanged((d) => {
+  moveTargetsCache.push(Array.isArray(d?.targets) ? d.targets : []);
+});
+window.goldfinch.moveTargets().then((targets) => {
+  moveTargetsCache.seed(Array.isArray(targets) ? targets : []);
+});
+
 /**
  * Open the tab context menu for `id`, anchored at `anchorEl` (chrome→sheet
  * translated element rect — the toolbar-Unpin anchor pattern). Synchronous
@@ -1060,7 +1105,10 @@ function openTabContextMenu(id, anchorEl) {
     stackSize: closedTabStackSizeCache.get(),
     // M09 F6 (review M4): tab:move-new-window is omitted for internal tabs —
     // app-UI pages never move between windows.
-    isInternal: isInternalTab(tabs.get(id) || null)
+    isInternal: isInternalTab(tabs.get(id) || null),
+    // M09 F8 DD8: one flat "Move to window …" item per OTHER window. Push-cached
+    // above, so this read stays synchronous.
+    moveTargets: moveTargetsCache.get()
   });
   openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
@@ -1073,6 +1121,11 @@ function openTabContextMenu(id, anchorEl) {
  * five items render, per the a11y checkpoint. Anchored at the first tab if one
  * exists, else the tab strip itself. Reachable via the MCP evaluate tool
  * (closed-set seam at the bottom of this file — FD-ruled addition, flight DD).
+ *
+ * The synthetic moveTargets (M09 F8 Leg 4) is the point of the word REPRESENTATIVE:
+ * the live cache is empty in a one-window app, so an audit that read it would render
+ * no "Move to window …" item and report clean on a menu MISSING the item type leg 4
+ * added. The audit must exercise the shape it is auditing.
  */
 function openTabContextMenuForAudit() {
   const ids = orderedTabIds();
@@ -1082,8 +1135,10 @@ function openTabContextMenuForAudit() {
   tabCtx.returnFocus = els.address;
   const r = anchorEl.getBoundingClientRect();
   // isInternal:false — representative synthetic model with EVERY item rendered
-  // (now six, incl. tab:move-new-window — M09 F6), per the a11y checkpoint.
-  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: false });
+  // (seven since M09 F8: tab:move-new-window — F6 — plus one tab:move-window:<id>),
+  // per the a11y checkpoint.
+  const moveTargets = [{ windowId: 0, label: 'Another window' }];
+  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: false, moveTargets });
   openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
@@ -1211,12 +1266,15 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
       pointerId: e.pointerId,
       tabId: id,
       startX: e.clientX,
+      startY: e.clientY,
       startedAt: Date.now(),
       armed: false,
       startOrder: /** @type {string[]|null} */ (null),
       draggedIndex: -1,
       slotRects: /** @type {{left:number,width:number}[]|null} */ (null),
+      stripRect: /** @type {{left:number,top:number,right:number,bottom:number}|null} */ (null),
       currentDropIndex: /** @type {number|null} */ (null),
+      tearOff: false,
     };
   });
   els.tabs.appendChild(btn);
@@ -1356,9 +1414,29 @@ function commitTabMove(id, targetIndex) {
 // DRAG_ARM_THRESHOLD_PX from the pointerdown origin — a plain click never arms (pointerup
 // below is then a silent no-op beyond clearing `drag`), so the click handler's activate
 // fallback is never in tension with an unarmed potential-drag.
+//
+// M09 F8 Leg 3 gives the gesture a SECOND AXIS and a zone (DD16): inside the strip it
+// reorders exactly as F2 left it; released outside, the tab tears off. The zone decision is
+// pure (tab-drag-zone.js). Every coordinate is WINDOW-LOCAL — `e.clientX/Y` against this
+// window's own rects, never `screenX`/`getBounds`/`screen`, which the spike measured to be
+// a cached fiction on this rig.
 const DRAG_ARM_THRESHOLD_PX = 5;
-/** @type {{ pointerId: number, tabId: string, startX: number, startedAt: number, armed: boolean, startOrder: string[]|null, draggedIndex: number, slotRects: {left:number,width:number}[]|null, currentDropIndex: number|null }|null} */
+/** @type {{ pointerId: number, tabId: string, startX: number, startY: number, startedAt: number, armed: boolean, startOrder: string[]|null, draggedIndex: number, slotRects: {left:number,width:number}[]|null, stripRect: {left:number,top:number,right:number,bottom:number}|null, currentDropIndex: number|null, tearOff: boolean }|null} */
 let drag = null;
+
+// The tear-off round-trip's state (DD6) — SEPARATE from `drag` and carrying NO visual state,
+// so all seven `cancelDrag()` sites stay no-ops across it and none can fire a false 'Move
+// canceled' on a SUCCESSFUL move. It is the freshness test: a reply whose `dropSeq` is not
+// the current record's is discarded, leaving main the sole authority on what happened.
+//
+// DD6's "any strip mutation clears it" is NARROWED to mutations of a DIFFERENT tab: a
+// tear-off's own success arrives as `tab-moved-away` for the pending tab BEFORE its reply
+// lands, and clearing there would make our own success read as stale and silence the
+// announcement DD5 requires. The leak DD6 guarded against cannot happen — `invoke` always
+// settles and the `.then` always clears.
+let dropSeq = 0;
+/** @type {{ dropSeq: number, tabId: string }|null} */
+let pendingDrop = null;
 
 // Click-suppression flag (DD2 activation ruling — design review: TWO set-points, both
 // required). (a) pointerdown-activation: a plain click's `click` event fires in the same
@@ -1379,12 +1457,13 @@ function orderedTabEls() {
   return /** @type {HTMLElement[]} */ ([...els.tabs.children].filter((el) => el.classList.contains('tab')));
 }
 
-/** Clear every tab's drag-visual state (inline transform + `.dragging` class). */
+/** Clear every tab's drag-visual state (inline transform + `.dragging`/`.detaching` classes). */
 function clearDragVisuals() {
   for (const t of tabs.values()) {
     if (!t.btn) continue;
     t.btn.style.transform = '';
     t.btn.classList.remove('dragging');
+    t.btn.classList.remove('detaching');
   }
 }
 
@@ -1419,6 +1498,16 @@ function applyDragDisplacement(targetIndex) {
   });
 }
 
+/**
+ * Detach-pending displacement (DD6): the pointer left the strip, so the siblings close ranks
+ * as though the tab were already gone — the SAME slot assignment as a drop past the last
+ * slot (above, `refId == null` puts the dragged tab last and the loop skips it either way),
+ * so the reorder path is reused rather than its delta loop transcribed.
+ */
+function applyDetachDisplacement() {
+  if (drag && drag.startOrder) applyDragDisplacement(drag.startOrder.length - 1);
+}
+
 /** Arm the in-progress drag: snapshot slot rects, enter drag-mode styling, capture the pointer. */
 function armDrag() {
   if (!drag) return;
@@ -1433,6 +1522,11 @@ function armDrag() {
     const r = el.getBoundingClientRect();
     return { left: r.left, width: r.width };
   });
+  // The strip's own rect (DD16), snapshotted with the slots and valid exactly as long — a
+  // resize invalidates both and cancels the drag. #tabstrip, not #tabs: a pointer over the
+  // drag spacer or the window controls has NOT left the strip.
+  const sr = els.tabstrip.getBoundingClientRect();
+  drag.stripRect = { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom };
   drag.currentDropIndex = null; // force the very next displacement recompute
   tab.btn.classList.add('dragging');
   tab.btn.setPointerCapture(drag.pointerId);
@@ -1447,41 +1541,70 @@ function cancelDrag() {
   if (wasArmed) announceTabStatus('Move canceled');
 }
 
-// Document-level pointermove/pointerup/pointercancel (NOT per-tab-button): pointer capture
-// (set in armDrag) retargets subsequent events to the dragged tab's own element regardless of
-// where the cursor visually sits, but capture only engages AFTER arming — before that, the
-// pointer could leave a narrow (sliver-width) tab's bounds within the 5px threshold, so these
-// listen at the document to track the gesture robustly regardless of tab width.
+// Document-level pointermove/pointerup/pointercancel (NOT per-tab-button), and that IS the
+// mechanism (corrected at F8 leg 3, against the spike). MEASURED: `hasPointerCapture()` is
+// FALSE throughout a live drag and `e.target` is the document root — armDrag's
+// `setPointerCapture` retargets NOTHING, and F2's drag works ONLY because these listeners
+// sit at the document. The comment replaced here claimed the opposite. The capture call
+// stays (harmless; removing it is a separate change) but nothing depends on it.
 document.addEventListener('pointermove', (e) => {
   if (!drag || e.pointerId !== drag.pointerId) return;
   const dx = e.clientX - drag.startX;
+  const dy = e.clientY - drag.startY;
   if (!drag.armed) {
-    if (Math.abs(dx) < DRAG_ARM_THRESHOLD_PX) return;
+    // TWO-AXIS threshold: F2's `Math.abs(dx)` was complete while the only outcome was a
+    // horizontal reorder, but a straight-down tear-off holds dx at 0 and would never arm.
+    // Strictly more permissive — every gesture that armed before still arms.
+    if (Math.hypot(dx, dy) < DRAG_ARM_THRESHOLD_PX) return;
     armDrag();
   }
   const tab = tabs.get(drag.tabId);
-  if (tab && tab.btn) tab.btn.style.transform = `translateX(${dx}px)`;
-  const targetIndex = dropIndexFromPointer(/** @type {{left:number,width:number}[]} */ (drag.slotRects), e.clientX, drag.draggedIndex);
-  if (targetIndex !== drag.currentDropIndex) {
-    drag.currentDropIndex = targetIndex;
-    applyDragDisplacement(targetIndex);
+  // Both axes: a tab dragged out must follow the cursor out, not slide along the strip.
+  if (tab && tab.btn) tab.btn.style.transform = `translate(${dx}px, ${dy}px)`;
+  const zone = classifyDragPoint(
+    /** @type {{left:number,top:number,right:number,bottom:number}} */ (drag.stripRect),
+    /** @type {{left:number,width:number}[]} */ (drag.slotRects),
+    e.clientX, e.clientY, drag.draggedIndex);
+  if (zone.zone === 'tearOff') {
+    if (!drag.tearOff) {
+      drag.tearOff = true;
+      drag.currentDropIndex = null; // force a recompute on the way back into the strip
+      if (tab && tab.btn) tab.btn.classList.add('detaching');
+      applyDetachDisplacement();
+    }
+    return;
+  }
+  if (drag.tearOff) {
+    drag.tearOff = false;
+    if (tab && tab.btn) tab.btn.classList.remove('detaching');
+  }
+  if (zone.index !== drag.currentDropIndex) {
+    drag.currentDropIndex = zone.index;
+    applyDragDisplacement(zone.index);
   }
 });
 document.addEventListener('pointerup', (e) => {
   if (!drag || e.pointerId !== drag.pointerId) return;
   if (!drag.armed) { drag = null; return; } // plain click — the click handler's own branches own this
   const tabId = drag.tabId;
+  const tearOff = drag.tearOff;
   const targetIndex = drag.currentDropIndex ?? drag.draggedIndex;
   const before = orderedTabIds();
   clearDragVisuals();
-  commitTabMove(tabId, targetIndex);
+  // Drop-commit (DD6): the window is created at drop, never mid-drag. `commitTabMove` is
+  // deliberately NOT called for a tear-off — the tab is already at its origin index, so a
+  // refusal is ANNOUNCED, NOT ANIMATED (DD5); a success arrives as `tab-moved-away`.
+  if (tearOff) requestTearOff(tabId);
+  else commitTabMove(tabId, targetIndex);
   markClickSuppressed(); // set-point (b): a completed drag's trailing `click` must not re-activate
-  drag = null;
+  drag = null; // SYNCHRONOUS, exactly as F2 left it — see the pendingDrop note above
+  if (tearOff) return; // the outcome rides main's reply, not this handler
   const after = orderedTabIds();
   if (after.join(' ') !== before.join(' ')) {
     announceTabStatus(`Tab moved to position ${after.indexOf(tabId) + 1} of ${after.length}`);
   }
 });
+
 document.addEventListener('pointercancel', (e) => {
   if (!drag || e.pointerId !== drag.pointerId) return;
   cancelDrag();
@@ -1499,10 +1622,70 @@ document.addEventListener('keydown', (e) => {
 // the leg's Edge Cases — rare in practice, but the snapshot would otherwise silently go stale).
 window.addEventListener('resize', () => { if (drag) cancelDrag(); });
 
+/**
+ * Dispatch a tear-off drop (DD5/DD6). Takes only a tabId, so it cannot come to depend on the
+ * drag session it outlives. Payload is this renderer's strip snapshot (the menu path's —
+ * burner container and favicon exist only here); NO coordinate rides it.
+ * @param {string} tabId
+ */
+function requestTearOff(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.wcId == null) return; // nothing to move — the strip mutated under the drag
+  const seq = ++dropSeq;
+  pendingDrop = { dropSeq: seq, tabId };
+  window.goldfinch.tabTearOff({
+    wcId: tab.wcId, url: tab.url, title: tab.title, favicon: tab.favicon, container: tab.container
+  }).then((result) => {
+    // Still ours? A newer drop, or a strip mutation under us, invalidated this reply.
+    if (!pendingDrop || pendingDrop.dropSeq !== seq) return;
+    pendingDrop = null;
+    // DD5: EVERY outcome is announced. On success `tab-moved-away` has already removed the
+    // tab, so this announcement is all that is left to do either way.
+    announceTabStatus(moveOutcomeMessage(result, 'a new window'));
+  });
+}
+
+/**
+ * The screen-reader announcement for a tab move — tear-off or cross-window (DD5: silence is
+ * not an outcome). ONE map over the move core's ONE result union, parameterized by the
+ * destination phrase.
+ *
+ * IT IS SHARED BECAUSE THE JUSTIFICATION FOR NOT SHARING IT DID NOT SURVIVE BEING CHECKED.
+ * Leg 4 first wrote a second, near-duplicate map on the stated grounds that "the reason
+ * vocabulary overlaps but every message differs". Held up against the two drafts, they are
+ * the SAME sentences over a different destination. Sharing them is the argument the move
+ * core itself makes one screen up — share ONE move, not two transcriptions of it — and it
+ * applies to the thing that DESCRIBES the move as much as to the move.
+ *
+ * TOTAL by construction: a default arm plus a final fallthrough, so no input reaches an
+ * implicit `undefined` return. That totality, not the wording, is what makes silence
+ * unreachable, and it is what the invariants suite pins.
+ *
+ * `no-target` is reachable only on the cross-window path — tear-off always creates its own
+ * destination, so it cannot hit it. The map is total over the CORE'S union rather than over
+ * any one caller's reachable subset, which is why that arm is here and harmless.
+ * @param {{ ok: true, windowId: number }|{ ok: false, reason: string }|null|undefined} result
+ * @param {string} dest  the destination as the sentence needs it ('a new window' / 'another window')
+ * @returns {string}
+ */
+function moveOutcomeMessage(result, dest) {
+  if (result && result.ok === false) {
+    switch (result.reason) {
+      case 'no-target': return 'That window is no longer open — the tab was not moved';
+      case 'sole-tab': return `Cannot move the only tab to ${dest}`;
+      case 'internal': return `This tab cannot be moved to ${dest}`;
+      default: return `Move to ${dest} failed`;
+    }
+  }
+  if (result && result.ok) return `Tab moved to ${dest}`;
+  return `Move to ${dest} failed`; // no reply at all — still an outcome, never silence
+}
+
 function closeTab(id) {
   // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): a tab-list mutation during a live drag
   // invalidates its slotRects snapshot regardless of which tab this close targets.
   if (drag) cancelDrag();
+  if (pendingDrop && pendingDrop.tabId !== id) pendingDrop = null; // DD6 narrowed — see the pendingDrop note
   const tab = tabs.get(id);
   if (!tab) return;
   // M09 F4 Leg 1: snapshot the strip position BEFORE DOM removal below —
@@ -3779,6 +3962,7 @@ window.goldfinch.onAdoptTab((payload) => {
   if (!payload.container || typeof payload.container !== 'object') return;
   if (findTabByWcId(payload.wcId)) return; // already adopted — defensive no-op
   if (drag) cancelDrag(); // tab-list mutation invalidates a live drag's snapshot
+  pendingDrop = null; // DD6: an adopt is never the pending tab's own success — always invalidates
   const id = `tab-${++tabSeq}`;
   const tab = buildStripRecord({
     id,
@@ -3813,6 +3997,9 @@ window.goldfinch.onTabMovedAway((payload) => {
   const tab = findTabByWcId(payload.wcId);
   if (!tab) return;
   if (drag) cancelDrag();
+  // DD6 narrowed (see the pendingDrop note): this fires on the tear-off SUCCESS path, for the
+  // pending tab, BEFORE its reply lands — clearing here would silence our own success.
+  if (pendingDrop && pendingDrop.tabId !== tab.id) pendingDrop = null;
   if (tab.wcId === activeViewWcId) activeViewWcId = null;
   tab.btn.remove();
   tabs.delete(tab.id);

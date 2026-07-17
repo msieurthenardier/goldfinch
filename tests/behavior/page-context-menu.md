@@ -3,7 +3,7 @@
 **Slug**: `page-context-menu`
 **Status**: draft
 **Created**: 2026-06-19
-**Last Run**: never
+**Last Run**: 2026-07-08-20-03-11 (partial — see `page-context-menu/runs/2026-07-08-20-03-11.md`)
 
 > **Updated 2026-07-02 (F8 Leg 5b).** Since the Flight-8 cutover the menu renders from the
 > **menu-overlay sheet** (a separate transparent `WebContentsView`), not the chrome's

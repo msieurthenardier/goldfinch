@@ -338,6 +338,23 @@ html.platform-darwin #window-controls {
   transition: transform 80ms ease;
 }
 
+/* Detach-pending (M09 F8 Leg 3, DD6): the pointer has left the strip, so releasing here
+   tears the tab into its own new window. EVERY DECLARATION MUST BE LAYOUT-NEUTRAL — the
+   drag's slotRects snapshot is taken once at arm and stays valid only because nothing in
+   the gesture reflows the strip. opacity/outline/cursor paint without touching layout;
+   `width`, `display`, `margin`, `padding`, `border`, `flex` and `position` do NOT, and a
+   width-collapse "close ranks" here would leave dropIndexFromPointer computing against
+   stale rects on drag-back — silently wrong indices, no cancel, no error. `outline`, not
+   `border`, for exactly that reason. Pinned by test/unit/tab-drag-invariants.test.js,
+   which scans this rule against a layout-neutral allowlist. Siblings close ranks by
+   transform only — see applyDetachDisplacement. */
+.tab.detaching {
+  opacity: 0.6;
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  cursor: grabbing;
+}
+
 /* Visible keyboard focus ring across interactive chrome (F23). */
 .icon-btn:focus-visible,
 .text-btn:focus-visible,

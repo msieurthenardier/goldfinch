@@ -12,22 +12,29 @@
 // invoke's resolve.
 
 /**
- * @param {number} initial value before either the seed or a push arrives
+ * GENERIC over the cached value since M09 F8 Leg 4 (DD8), which caches the
+ * `{ windowId, label }[]` move-target list through this same seed/push race. The
+ * BEHAVIOR is unchanged — arrival-monotonic, push-always-wins — and stays pinned
+ * by push-cache.test.js; only the JSDoc widened, because a `number`-typed cache
+ * cannot hold an array and the typecheck gate says so.
+ *
+ * @template T
+ * @param {T} initial value before either the seed or a push arrives
  */
 function createPushCache(initial) {
   let value = initial;
   let pushSeen = false;
   return {
-    /** A main push: always wins, marks the seed stale. @param {number} v */
+    /** A main push: always wins, marks the seed stale. @param {T} v */
     push(v) {
       pushSeen = true;
       value = v;
     },
-    /** The boot-seed invoke's resolve: applies only if no push arrived first. @param {number} v */
+    /** The boot-seed invoke's resolve: applies only if no push arrived first. @param {T} v */
     seed(v) {
       if (!pushSeen) value = v;
     },
-    /** @returns {number} the cached value */
+    /** @returns {T} the cached value */
     get() {
       return value;
     },

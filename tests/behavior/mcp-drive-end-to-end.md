@@ -3,7 +3,7 @@
 **Slug**: `mcp-drive-end-to-end`
 **Status**: active
 **Created**: 2026-06-13
-**Last Run**: never
+**Last Run**: 2026-07-08-18-50-45 (pass — see `mcp-drive-end-to-end/runs/2026-07-08-18-50-45.md`)
 
 ## Intent
 

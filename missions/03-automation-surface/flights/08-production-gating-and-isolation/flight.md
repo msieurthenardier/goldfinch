@@ -178,5 +178,3 @@ Re-architect the automation surface's gating so the **production (packaged) bina
 - **Behavior test (authored):** `tests/behavior/settings-activity-viewer.md` exists (status `draft`); run it via `/behavior-test settings-activity-viewer` in the HAT or carry to F9.
 - **Regression:** full `npm test` + typecheck + lint green.
 - **Docs:** CLAUDE.md + `docs/mcp-automation.md` describe toggle-binds; no residual references to "binds under `--automation-dev`" as the production model.
-</content>
-</invoke>

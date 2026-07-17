@@ -3,7 +3,7 @@
 **Slug**: `internal-session-exclusion`
 **Status**: draft
 **Created**: 2026-06-13
-**Last Run**: never
+**Last Run**: 2026-07-08-18-17-19 (pass — see `internal-session-exclusion/runs/2026-07-08-18-17-19.md`)
 
 > **AUTHORED-ONLY (Flight 3 / leg `behavior-test-specs`).** The surface this spec drives is fully built (Flight 3), so it *could* run — but it is **deferred to Flight 6** (behavior-spec migration) by operator sequencing, and is **not part of Flight 3's acceptance**. Authored now so the Witnessed backing exists; **do not** treat a `/behavior-test internal-session-exclusion` invocation before Flight 6 as a flight-acceptance run.
 
