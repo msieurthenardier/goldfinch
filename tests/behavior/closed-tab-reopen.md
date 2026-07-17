@@ -40,13 +40,17 @@ deleted between close and reopen falls back to the resolved default jar with an 
 - **Admin MCP client** (SDK `StreamableHTTPClientTransport`, `Authorization: Bearer <adminKey>`)
   on `127.0.0.1:$GOLDFINCH_MCP_PORT/mcp`. Admin is required: a jar key cannot `getChromeTarget`
   (drive the chrome renderer) or open a `goldfinch://` internal tab.
-- **Fixture pages** — reuse the `fixtures-tabstrip` set (`Fixture Page 1 — tabstrip` ..
-  `Fixture Page N — tabstrip`, distinct titles), served locally via
-  `python3 -m http.server 8000` from the fixture directory, reachable at
-  `http://127.0.0.1:8000/pageN.html` (the same fixture set + port convention
-  `downloads-surface.md`/`omnibox-suggestions.md` use). Only 3 pages are needed (history-fidelity
-  needs 2 navigations); confirm pairwise-distinct titles via `readAxTree` before relying on tab
-  identity.
+- **Fixture pages — the committed `tabstrip` set**, `tests/behavior/fixtures/tabstrip/`
+  (`page1.html` .. `page6.html`, titled `Fixture Page 1 — tabstrip` .. `Fixture Page 6 — tabstrip`;
+  that directory's README pins the content and the serve command). Serve it **from that directory**
+  via `python3 -m http.server 8000`, reachable at `http://127.0.0.1:8000/pageN.html`. Port `8000` is
+  the convention `downloads-surface.md`/`omnibox-suggestions.md` also use — the **port**, not the
+  set: `downloads-surface` serves the separate `fixtures/downloads/` set and `omnibox-suggestions`
+  serves its own ad-hoc pages. **This spec uses pages 1–5** — read off the steps: page 4 at the
+  burner-exclusion step and page 5 at the jar-deleted-fallback step. *(Corrected at the M09 F7
+  leg-4 errata fold: this line previously read "Only 3 pages are needed (history-fidelity needs 2
+  navigations)" — true of the Step-3 setup alone, false for the spec, which addresses five.)*
+  Confirm pairwise-distinct titles via `readAxTree` before relying on tab identity.
 - **Input delivered as trusted events** via the MCP tools (`pressKey(wcId, name, modifiers)`,
   `click`), and tab lifecycle via `openTab`/`closeTab`/`navigate`/`goBack`/`goForward` (admin
   tier) — `closeTab` drives the SAME `closeTabByWcId` → renderer `closeTab()` → `tabClose` IPC
@@ -78,10 +82,18 @@ deleted between close and reopen falls back to the resolved default jar with an 
 
 ## Observables Required
 
-- mcp (admin MCP tools on the chrome `wcId`, guest `wcId`s, and the probed sheet `wcId`, measured
-  via the admin MCP client): `evaluate` for DOM order/tab-title-by-index numeric reads and the
-  `createTab`/`makeBurner` dogfooding-seam calls. `readAxTree` for tab titles/selected-state.
+- mcp (admin MCP tools on the chrome `wcId`, guest `wcId`s, and the `enumerateWindows`-resolved sheet
+  `wcId`, measured via the admin MCP client): `evaluate` for DOM order/tab-title-by-index numeric reads
+  and the `createTab`/`makeBurner` dogfooding-seam calls. `readAxTree` for tab titles/selected-state.
   `enumerateTabs` for guest wcIds, urls, and `jarId`s (admin listings include the internal tab).
+  `enumerateWindows` for the per-window sheet wcId (M09 F7 DD2).
+  > **Census scope (M09 F7 DD1).** `enumerateTabs` is an **all-windows** census; every row carries a
+  > `windowId`. **This spec's premise is a single-window run** — it opens no second window, so the
+  > census and this window's tabs are the same set. That is what makes Step 2's *byte-identical*
+  > equality and Steps 7/8's full-URL **"NOWHERE"** assertions exact as written: they mean *"nowhere in
+  > the app"*, which is what they always **meant** and now what they **measure**. A run that opens a
+  > second window must filter rows by `windowId` first — otherwise the other window's tabs break the
+  > equality and weaken the NOWHERE checks into a different (broader) claim than the step intends.
   `pressKey` for every accelerator (`['control', 'shift']`). `openTab`/`closeTab`/`navigate`/
   `goBack`/`goForward` for tab lifecycle and history setup/fidelity. `click` for guest-focus setup
   and the kebab-menu trigger. `captureWindow` for the sheet-open/closed corroboration.
@@ -96,7 +108,7 @@ deleted between close and reopen falls back to the resolved default jar with an 
 | 3 | **Setup.** Confirm the fresh-profile jar seed (`evaluate(C, "window.goldfinch.jarsList()")` → Personal + Work only). Open a Work-jar tab at fixture page 1 (`openTab(page1Url, 'work')` → wcId **W**). `navigate(W, page2Url)`; `navigate(W, page3Url)` (2 navigations → 3 history entries, index 2, `canGoBack` true). Record **W**'s DOM tab-title index (`evaluate(C, …)`, call it **P**) and confirm via `enumerateTabs()` that **W**'s `jarId` is `work` and `url` is page 3. | Jar seed confirmed. **W** is a 3-entry-history Work-jar tab at page 3, DOM position **P** recorded, ready to close. |
 | 4 | **Chrome-focus reopen — full fidelity (url + jar + history + position).** `closeTab(W)`. Confirm via `enumerateTabs()` that **W** is gone. From chrome focus, `pressKey(C, 'T', ['control', 'shift'])`. Poll `enumerateTabs()` for a new wcId (**W2**) at page 3's URL. | **W2** appears with `url` = page 3, `jarId` = `work` (jar preserved), at DOM tab-title index **P** (original position preserved — `insertAt`/`commitTabMove`, DD2 step 3). `goBack(W2)` then re-`enumerateTabs()`: `url` is now page 2 (history restored — `canGoBack` was true, the LIVE-fidelity check). `goForward(W2)` returns to page 3. |
 | 5 | **Guest-delivered reopen — the strongest capture-point case.** Open a second Work-jar tab at page 1 (wcId **G-src**), `navigate(G-src, page2Url)`. `closeTab(G-src)`. `click` into a **different**, currently-foreground-after-close tab's body so its guest wcId (**G**) holds OS focus (confirm via `readAxTree(G)` or `evaluate(G, "document.hasFocus()")`). `pressKey(G, 't', ['control', 'shift'])` — delivered INTO the guest, not the chrome. Poll `enumerateTabs()`. | A new tab appears at page 2's URL (the entry **G-src** captured), `jarId` `work` — proving the guest `before-input-event` capture point forwards `reopen-closed-tab` via the generalized chrome-class forwarder (guest never handles it natively; classifies via the SAME `keydownToAction`/allowlist path as chrome focus). |
-| 6 | **Sheet-open reopen (menu-overlay capture point).** Open a third Work-jar tab at page 1 (wcId **S-src**). `closeTab(S-src)`. Open the kebab menu (`click` its trigger). Probe the sheet's wcId per the established technique (`readDom`, skipping every `enumerateTabs` wcId and **C**). Confirm the menu is open (`captureWindow()`). `pressKey(sheetWcId, 'T', ['control', 'shift'])`. Poll `enumerateTabs()` for the new tab AND poll `captureWindow()`/`readAxTree(sheetWcId)` for menu-closed. | A new tab appears at page 1's URL (the **S-src** entry), `jarId` `work`. The menu **closes** (asynchronously — see Preconditions; `captureWindow()` eventually shows no menu, driven by the `tab-set-active` close-family hook once the reopened tab's wcId arrives) — a single keypress both dismisses the menu and reopens the tab. |
+| 6 | **Sheet-open reopen (menu-overlay capture point).** Open a third Work-jar tab at page 1 (wcId **S-src**). `closeTab(S-src)`. Open the kebab menu (`click` its trigger). Resolve the sheet's wcId from `enumerateWindows()` — this window's row carries `sheetWcId` once the sheet exists (M09 F7 DD2; admin-only, and this run is admin). Confirm the menu is open (`captureWindow()`, or the same row's `sheetVisible: true`). `pressKey(sheetWcId, 'T', ['control', 'shift'])`. Poll `enumerateTabs()` for the new tab AND poll `captureWindow()`/`readAxTree(sheetWcId)` for menu-closed. | A new tab appears at page 1's URL (the **S-src** entry), `jarId` `work`. The menu **closes** (asynchronously — see Preconditions; `captureWindow()` eventually shows no menu, driven by the `tab-set-active` close-family hook once the reopened tab's wcId arrives) — a single keypress both dismisses the menu and reopens the tab. |
 | 7 | **Burner exclusion.** `evaluate(C, "createTab('http://127.0.0.1:8000/page4.html', makeBurner())")` (the FD-approved dogfooding seam — `openTab` cannot mint a burner). Confirm via `enumerateTabs()` a new tab with `jarId` matching `burner-<n>` and `url` page 4 (wcId **B**). `closeTab(B)`. From chrome focus, `pressKey(C, 'T', ['control', 'shift'])`. Poll `enumerateTabs()`. | The reopened tab (if any — depends on what else is on the stack at this point) is **NOT** page 4: `enumerateTabs()`'s full url list contains page 4's URL **NOWHERE** after this step (burner never pushed onto the stack in the first place — the positive persist-jar allowlist at capture, DD2 — so it can never be popped). If the stack was otherwise empty, this row is a repeat of Step 2's no-op (also valid: still proves the burner was never captured). |
 | 8 | **Internal exclusion.** Open `goldfinch://settings` via the trusted chrome route (kebab → Settings) — **NOT** `openTab`, which refuses non-http(s) — then `enumerateTabs()` (admin) to record its wcId **I**. `closeTab(I)` (admin `closeTab` resolves internal contents when `allowInternal` is forwarded — confirmed at Leg 1's live check). From chrome focus, `pressKey(C, 'T', ['control', 'shift'])`. Poll `enumerateTabs()`. | The reopened tab (if any) is **NOT** `goldfinch://settings`: no tab in the post-reopen `enumerateTabs()` list has that URL, and no tab reports `jarId: 'internal'` beyond whatever internal tab may still be independently open. The internal tab was never captured (positive persist-jar allowlist — the internal partition structurally fails it). |
 | 9 | **Jar-deleted fallback.** Open a Work-jar tab at page 5 (wcId **F**). `closeTab(F)`. Confirm via `enumerateTabs()` that **F** is gone. Via the chrome apparatus, `evaluate(C, "window.goldfinch.jarsRemove({id:'work'})")` — deleting the Work jar (any OTHER Work tabs left open close too, per `jar-delete-closes-tabs.md`'s existing contract; irrelevant here since **F** is already closed and only the stack ENTRY, not a live tab, is at stake). From chrome focus, `pressKey(C, 'T', ['control', 'shift'])`. Poll `enumerateTabs()` and read `#tab-status` (`readAxTree(C)` or `evaluate(C, "document.getElementById('tab-status').textContent")`). | A new tab appears at page 5's URL, but its `jarId` is **NOT** `work` (the jar no longer exists) — it resolves to whatever `jarsGetDefault()` now reports (Personal, or Burner if Personal was also removed — not the case here). The `#tab-status` region's text is non-empty and mentions the fallback (the `jarFallback` announcement, DD2 step 3) — confirming the reopen never silently drops the tab and never resurrects a dead jar id. |

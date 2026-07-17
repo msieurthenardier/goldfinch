@@ -7,6 +7,14 @@
 //
 //   { win, chromeView, tabViews: Map<wcId, entry>, activeTabWcId }
 //
+// Per-window OVERLAY MANAGER slots (M09 F7 Leg 1, DD5): `findOverlay` / `sheet` carry
+// THIS window's own find-overlay and menu-sheet manager instances, retiring the roaming
+// module-scope singletons. They are seeded null here and ASSIGNED BY MAIN.JS right after
+// create() — this module is Electron-free and cannot construct managers (nor import their
+// types; hence `any`). main.js's per-window `close` handler tears both managers down and
+// NULLS both slots in the same breath, so the record path fails safe across the
+// close→closed gap — every owner-resolved read must be null-tolerant.
+//
 // Deliberately ELECTRON-FREE (the resolve.js / menu-overlay-manager precedent): the
 // win / chromeView handles are INJECTED at create() and only ever compared by identity
 // or read for `.id` / `.webContents`, so the module unit-tests offline with fakes.
@@ -31,7 +39,9 @@
  *   activeTabWcId: number | null,
  *   noBootTab: boolean,
  *   bootConfigServed: boolean,
- *   pendingChromeSends: Array<() => [string, any]>
+ *   pendingChromeSends: Array<() => [string, any]>,
+ *   findOverlay: any,
+ *   sheet: any
  * }} WindowRecord
  */
 
@@ -68,6 +78,10 @@ function createWindowRegistry() {
       noBootTab,
       bootConfigServed: false,
       pendingChromeSends: [],
+      // F7 DD5 per-window overlay managers — main.js assigns both immediately after
+      // create() (this module is Electron-free and cannot construct them).
+      findOverlay: null,
+      sheet: null,
     };
     windows.set(win.id, record);
     lastFocusedId = win.id;

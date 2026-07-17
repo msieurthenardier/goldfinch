@@ -16,9 +16,10 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **29 tools** — 18 drive tools, 4
-observe tools, 2 eval tools, 2 devtools tools, 2 admin chrome/app-level tools (`getChromeTarget`
-+ `downloadsList`), and 1 history tool (`getHistory`, jar-confined — not admin-only). Tools are a
+binds to **loopback only** (`127.0.0.1`), and advertises **30 tools** — 18 drive tools, 4
+observe tools, 2 eval tools, 2 devtools tools, 3 admin chrome/app-level tools (`getChromeTarget`
++ `enumerateWindows` + `downloadsList`), and 1 history tool (`getHistory`, jar-confined — not
+admin-only). Tools are a
 thin adapter over Goldfinch's
 internal automation engine; the same
 security guards that protect the engine (URL safety, handle resolution) apply unchanged.
@@ -342,10 +343,13 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   Apparatus that needs them (the a11y audit's five `sheet:*` menu states, behavior tests)
   discovers the wcId with an id-space **probe walk around the known ids** — `readDom(id)`
   succeeding with the overlay's markup identifies it; a failed probe on a non-existent id is a
-  normal refused result. **Skip every `enumerateTabs` wcId and the chrome wcId in the walk**: the
-  eval/read ops are foreground-first, so probing a background *tab* activates it (a real
-  tab-switch that disturbs the state under test — e.g. it closes an open sheet menu); the
-  overlays are never in `enumerateTabs`, so skipping tabs loses nothing.
+  normal refused result. **Since M09 F7 (DD6), `readDom` and `evaluate` no longer activate their
+  target**, so probing a background *tab* no longer switches to it — the walk's foreground-first
+  hazard (a tab-switch closing the open sheet menu under audit) is **gone**. Skipping every
+  `enumerateTabs` wcId and the chrome wcId is still the recommended shape — it is cheaper, and
+  the overlays are never in `enumerateTabs`, so skipping tabs loses nothing — but it is no longer
+  load-bearing for correctness. `activateTab` on a non-tab wcId (an overlay) returns `false`
+  harmlessly; see its row below.
 
 > **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
 > It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging
@@ -353,34 +357,80 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
 > packaged binary** too: it is gated purely on the `GOLDFINCH_AUTOMATION_ADMIN` env presence (plus a
 > minted admin key) — env-only, with no dev/`isPackaged` coupling.
 
-## Multi-window semantics (interim — M09 Flight 6; F7 redefines)
+## Multi-window semantics
 
-Goldfinch supports multiple windows (M09 F6). The automation surface's multi-window semantics are
-an **explicit interim contract** — first-class multi-window automation (window enumeration,
-per-window capture) is Flight 7's work. What holds today:
+Goldfinch supports multiple windows (M09 F6). Since **M09 Flight 7** the automation surface's
+multi-window semantics are a **deliberate, final contract** — the F6 interim (window-scoped
+enumeration, no window discriminator, no window discovery, a probe-walk for overlays) is retired.
 
-- **The window-level ops follow the `last-focused` window.** `getChromeTarget`, `enumerateTabs`,
-  and `openTab` resolve **the main-tracked last-focused window** — tracked in the window registry,
-  **seeded at window create and at programmatic focus** (so creating a window or moving a tab to a
-  new window deterministically retargets the surface, even on compositors that never deliver real
-  focus events — WSLg), membership-validated at read with a first-record fallback when the
-  last-focused window has been closed. This is deliberately **not** OS focus: a driver should
-  treat "which window am I bound to?" as answered by `getChromeTarget`, never by focus probes.
-- **`enumerateTabs` is window-scoped, not an app census.** It lists the last-focused window's
-  tabs only. With N windows, another window's tabs are simply absent — address them by their
-  recorded `wcId`s instead (below). Tab-count bookkeeping must be per-window.
+- **`enumerateWindows()` is the single discovery primitive — admin-only.** It lists every open
+  window: `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible,
+  findWcId?, findVisible }`. It answers "what windows exist", "which one am I bound to", "where is
+  this window's menu sheet / find bar", and "is this window's tab list complete yet". Every field
+  is read from the live window registry at call time — there is no cache to go stale.
+  - **Admin-only**, because window topology is an app-level cross-jar view: the census names
+    windows a jar identity may hold no tabs in at all. Jar keys are refused with
+    `automation: admin-only` — the same doctrine as `downloadsList` / `getChromeTarget`.
+  - **`lastFocused` is NOT an OS-focus claim.** It reports main's own tracker — seeded at window
+    create and at programmatic focus, membership-validated at read with a first-record fallback.
+    Goldfinch deliberately refuses to assert OS focus: on some compositors (WSLg) programmatic
+    `focus()` fires no focus event and `getFocusedWindow()` goes stale indefinitely. Treat "which
+    window am I bound to?" as answered here, never by a focus probe.
+  - **An ABSENT `sheetWcId` / `findWcId` means that overlay has NEVER been created** in that
+    window — both are lazy, created on first show, so a window that never opens a menu never
+    instantiates a sheet. This is distinct from a *present* id with `sheetVisible: false`, which
+    means "instantiated but currently hidden". The visibility flags are separate fields precisely
+    so those two states cannot be conflated.
+  - It **retires the id-space probe walk.** Previously nothing could *enumerate* non-tab contents
+    — the admin relaxation made overlay views addressable but never listable — so drivers guessed
+    ids in a range and asked each one what document it held. `enumerateWindows` is an exact, O(1)
+    read; the walk was an O(64) guess.
+
+- **`enumerateTabs` is an ALL-WINDOWS census, and every row carries `windowId`.** It returns
+  `{ wcId, url, title, jarId, active, windowId }` for every drivable tab in every window, ordered
+  by window creation order, then each window's own tab creation order. The return is a **plain
+  array** — no wrapper, no marker, no properties beyond the elements.
+  - **The window registry is the ownership authority**; the renderer is authoritative only for
+    `url` / `title` / `jarId`. A window's chrome reporting a tab is not evidence that it owns it:
+    each window's rows are filtered to that window's registry-recorded membership, and `windowId`
+    is stamped from the registry. This makes a duplicate **structurally impossible** — a tab
+    caught mid-move between two windows can be *reported* by both chromes, but only the window
+    that owns it stamps a row.
+  - **Jar keys still see only their own jar's tabs** — the confinement is by resolved session and
+    is unchanged. A jar key now sees its jar's tabs across *all* windows, but never the window
+    topology (that is `enumerateWindows`, admin-only).
+
+- **A mid-boot window contributes ZERO tab rows — and `booted` is how you know.** A window whose
+  chrome has not finished booting (`booted: false`) is skipped by the census entirely.
+  **A window created by moving a tab out of another window holds that adopted tab before its own
+  chrome boots, so the tab is invisible for that interval.** That is exactly what `booted` exists
+  to disclose, and it is honest rather than lossy: an un-booted window's renderer genuinely has no
+  tabs yet. **A caller needing a guaranteed-total census polls `enumerateWindows()` until every
+  row's `booted` is true**, then calls `enumerateTabs()`. The census deliberately carries no
+  completeness marker of its own — topology belongs at the admin discovery op, and bolting a field
+  onto an array return silently breaks callers that filter it.
+
+- **`getChromeTarget({ windowId? })` — omitted = last-focused.** Supplied and resolvable → that
+  window's chrome. Supplied and unknown → `automation: no-such-window` (a named refusal, never a
+  silent fall-back to another window). Its return gains `windowId`:
+  `{ wcId, kind: 'chrome', url, windowId }`.
+
+- **`captureWindow({ windowId? })` — omitted = last-focused.** Supplied and unknown →
+  `automation: no-such-window`. **Its image content is unchanged**: the op returns pixels, not
+  topology. To learn which window a capture came from, pass a `windowId` you chose, or read
+  `enumerateWindows()`'s `lastFocused` row when you omitted it.
+
+- **`captureWindow` binds by window IDENTITY.** It composites the resolved window and no other.
+  The F6-era two-window mis-pick caveat is **retired**: capture no longer selects a
+  `desktopCapturer` source by size similarity (which could grab an unrelated same-sized window),
+  but by the window's own media-source identity.
+
 - **Raw-`wcId` ops work cross-window.** Every wcId-first op (`navigate`, `evaluate`, `readDom`,
   `readAxTree`, `click`, `pressKey`, `captureScreenshot`, …) resolves tabs in **any** window at
-  its existing tier: tab membership is all-windows, and **every window's chrome** is a chrome-class
-  wcId — admin-addressable like the first window's (jar keys are refused on any registered chrome,
-  same as before). Discover a new window's chrome via `getChromeTarget` right after the window is
-  created (the accessor has just retargeted to it), then pin your work to the returned `wcId`.
-- **`captureWindow` two-window caveat.** `captureWindow` composites ONE window — the
-  accessor-resolved record — and its `desktopCapturer` best-size-match heuristic can grab the
-  **wrong** window when two similar-sized windows exist (a pre-F6 heuristic, unchanged by design;
-  its WSLg fallback path likewise composites only the accessor's record). **With more than one
-  window open, prefer per-`wcId` `captureScreenshot`**; treat `captureWindow` as single-window
-  tooling until F7 gives it a window discriminator.
+  its existing tier: tab membership is all-windows, and **every window's chrome** is a
+  chrome-class wcId — admin-addressable (jar keys are refused on any registered chrome).
+  `enumerateWindows` reports every window's `chromeWcId` directly, so a new window's chrome no
+  longer has to be caught via `getChromeTarget` at the moment it is created.
 
 The per-spec impact of these semantics on the behavior-test corpus is catalogued in
 [`docs/behavior-specs-single-window-audit.md`](behavior-specs-single-window-audit.md) — the F7
@@ -388,7 +438,7 @@ input artifact.
 
 ## Tool reference
 
-All 29 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
+All 30 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level tools
 (`getChromeTarget`, `downloadsList`) take no `wcId`.
@@ -397,10 +447,10 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active }` for all drivable (dom-ready) tabs **of the last-focused window** (window-scoped since M09 F6 — see *Multi-window semantics*). Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
-| `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
+| `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal. `true` — the tab was activated **and its owning window raised** (M09 F7 DD6: the dispatch goes to the tab's OWNING window's chrome, so this works across windows). `false` — the wcId is **not a registry-owned tab** (e.g. an overlay view probed by id): no activation, no raise, no error. A third outcome is a **refusal**, not a boolean: if the registry says a window owns the tab but that window's chrome cannot activate it (a registry/renderer desync), the op errors with `automation: activate-refused — …` (isError) rather than silently returning `false`. |
 | `navigate` | `{ wcId: integer, url: string }` *(required)* | JSON text `{"ok":true}` (void op; http(s) only — unsafe URLs are refused) |
 | `goBack` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (no-op when there is no back history) |
 | `goForward` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (no-op when there is no forward history) |
@@ -427,8 +477,8 @@ or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level t
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `captureScreenshot` | `{ wcId: integer, delayMs?: integer }` *(`wcId` required)* | **Image content** (PNG, `image/png`). The tab is brought to front first; `delayMs` optionally tunes the paint-settle wait after foregrounding |
-| `captureWindow` | *(none)* | **Image content** (PNG, `image/png`) of the whole browser window (chrome + composited guests) — the **last-focused window**; with two or more windows open prefer per-`wcId` `captureScreenshot` (see the two-window caveat under *Multi-window semantics*) |
-| `readDom` | `{ wcId: integer }` *(required)* | JSON text: `{ url, title, html }` — the full live `document.documentElement` outerHTML (no trimming), foreground-first |
+| `captureWindow` | `windowId` *(optional, integer)* | **Image content** (PNG, `image/png`) of a whole browser window (chrome + composited guests). `windowId` omitted → the **last-focused** window; supplied → that window, bound by window identity; unknown → `automation: no-such-window`. The image content is the same either way — this op returns pixels, not topology; read `enumerateWindows()` to learn window ids (see *Multi-window semantics*) |
+| `readDom` | `{ wcId: integer }` *(required)* | JSON text: `{ url, title, html }` — the full live `document.documentElement` outerHTML (no trimming). **Does NOT foreground its target** (M09 F7 DD6): a background tab — including one in another, unfocused window — is read where it sits, without activating it or raising its window. |
 | `readAxTree` | `{ wcId: integer }` *(required)* | JSON text: the accessibility-tree `AXNode` array — **or** a `{ automation: "debugger-unavailable", reason, wcId }` refusal (a **normal** result, see below). Foreground-first; uses the in-process debugger |
 
 ### Eval tools (2)
@@ -442,7 +492,7 @@ natively awaited.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). Foreground-first (the tab is brought to front before evaluation). |
+| `evaluate` | `{ wcId: integer, expression: string }` *(required)* | JSON text: the evaluated value. A returned Promise is awaited; the resolved value **must be JSON-serializable** — a non-serializable return (function, DOM node, circular object) is refused with `automation: evaluate — return value is not JSON-serializable` (isError). An in-page throw surfaces as an error result (isError). **Does NOT foreground its target** (M09 F7 DD6): the tab is evaluated where it sits — a background tab is not brought to front and its window is not raised. |
 | `injectScript` | `{ wcId: integer, script: string }` *(required)* | JSON text `{"ok":true}` (void). Defines globals / patches prototypes (e.g. the axe-core source, a farbling hook). **Skips foreground-to-act** (defining a global needs no paint). Makes **no persistence guarantee** — globals it defines are not promised to survive across a later `evaluate` gap (a navigation clears them); pair `injectScript` immediately with one `evaluate`. An in-page throw surfaces as an error result (isError). |
 
 > **Security invariant — internal session always excluded, even for admin.** Both eval tools refuse the
@@ -480,15 +530,16 @@ the tab to the foreground.
 > `goldfinchInternal` bridge. (Jar-scoped guests / admin chrome are allowed; DevTools on a jar's own guest is
 > within the jar key's authority.)
 
-### Admin chrome / app-level (2)
+### Admin chrome / app-level (3)
 
-Both tools are **admin-only** and **app-level** — they take **no `wcId`** (no per-tab target).
-A jar key calling either is refused with `automation: admin-only` (the distinct admin-tier refusal,
-mirroring `captureWindow`).
+All three tools are **admin-only** and **app-level** — they take **no `wcId`** (no per-tab target).
+A jar key calling any of the three is refused with `automation: admin-only` (the distinct admin-tier
+refusal, mirroring `captureWindow`).
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `getChromeTarget` | *(none)* | JSON text: `{ wcId, kind: "chrome", url }` — the **last-focused window's** chrome renderer (M09 F6 interim — see *Multi-window semantics*). Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). |
+| `getChromeTarget` | `windowId` *(optional, integer)* | JSON text: `{ wcId, kind: "chrome", url, windowId }` — a window's chrome renderer. `windowId` omitted → the **last-focused** window; supplied → that window; unknown → `automation: no-such-window` (never a silent fall-back). Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). See *Multi-window semantics*. |
+| `enumerateWindows` | *(none)* | **ADMIN ONLY.** JSON text: array of `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }` — one row per open window, in window creation order. The single window-topology discovery primitive: it resolves each window's chrome and overlay wcIds **exactly** (no id-space probing), and `booted` is `enumerateTabs`'s completeness signal. `sheetWcId`/`findWcId` are **absent** when that overlay has never been created (both are lazy); `sheetVisible`/`findVisible` are separate so "instantiated but hidden" is distinguishable from "never shown". `lastFocused` is main-side tracked — **not** an OS-focus claim. Jar keys get `automation: admin-only`. See *Multi-window semantics*. |
 | `downloadsList` | *(none)* | JSON text: the app-level downloads records — an array of `{ id, url, filename, savePath, state, received, total, … }` (in-progress + completed history, persisted across restart). `filename` is the sanitized save name; `savePath` is the real on-disk path (`null` until known); `state` is the download lifecycle (`progressing` / `completed` / `interrupted` / …); `received`/`total` are byte counts. The internal `goldfinch://downloads` **page** that renders this model lives in the internal session and is **not** readable via the eval/observe tools — `downloadsList` is the automation-surface view of the same model. |
 
 > **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring
@@ -564,6 +615,23 @@ from *genuine errors*:
   internal `wcId`, a window-closed null-deref, a post-attach CDP failure) produces a result with
   `isError: true`; its text carries the `automation: …` error message. Consumers should branch on
   `isError` and surface the message, while treating the two refusals above as ordinary data.
+
+  Two named refusals landed in **M09 F7** (both `isError`):
+  - **`automation: activate-refused — …`** (DD6) — `activateTab` on a tab the registry says a
+    window owns, whose chrome could not activate it (a registry/renderer desync). Distinct from
+    the plain `false` returned for a wcId that is **not a registry-owned tab** (an overlay probed
+    by id), which stays a normal boolean result. Pre-F7 the desync case *also* returned a `false`
+    that every caller discarded — so a cross-window act proceeded against an unraised background
+    guest and reported success. It is now loud.
+  - **`automation: capture-timeout — {target} did not settle within {ms}ms (the view may be
+    detached)`** (DD7) — a `capturePage()` that did not settle within the 3000ms bound, on
+    `captureScreenshot` or on `captureWindow`'s chrome/guest capture. A **detached-but-live** view
+    passes every liveness guard and its `capturePage()` never settles, which pre-F7 wedged the
+    request forever with no server-side recovery. The refusal **names its target** (`chrome`,
+    `active guest`, `wcId 42`, …) so a composite capture says which layer hung. Note
+    `captureWindow`'s *overlay* layers (find bar, menu sheet) do **not** hard-refuse on timeout —
+    that layer is dropped and logged, so a slow menu cannot fail an otherwise-good window capture.
+    A merely-slow capture can trip the bound; the refusal is the signal to retry.
 
 ## Accessibility-tree caveat (stale handles)
 

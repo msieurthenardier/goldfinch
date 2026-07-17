@@ -40,15 +40,16 @@ presence/exclusivity/selection/latency, not order.
 - Apparatus: admin `getChromeTarget` + `click`/`typeText`/`pressKey` on
   the CHROME wcId (drives the address bar); the suggestions render on the
   sheet — observe via `captureWindow` pixels AND the sheet's DOM (the
-  sheet is probe-addressable admin-only via the background-tab-safe wcId
-  walk, and is NOT internal-session-excluded from `evaluate` —
-  recon-verified). `chrome-devtools` MCP disqualified as always.
+  sheet's wcId is resolved exactly from `enumerateWindows()`'s per-window
+  `sheetWcId` — admin-only, M09 F7 DD2 — and is NOT
+  internal-session-excluded from `evaluate` — recon-verified).
+  `chrome-devtools` MCP disqualified as always.
 
 ## Observables Required
 
 - browser (chrome drive: click/type/press on the address bar; sheet DOM
-  reads via probed wcId evaluate; rendered pixels via captureWindow —
-  goldfinch MCP admin apparatus)
+  reads via the `enumerateWindows`-resolved sheet wcId; rendered pixels via
+  captureWindow — goldfinch MCP admin apparatus)
 - shell (launch, seed script, key capture, timing — Bash)
 - filesystem (seed verification counts via readOnly node:sqlite — Bash)
 
@@ -56,7 +57,7 @@ presence/exclusivity/selection/latency, not order.
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
-| 1 | Setup: run the seed script (app NOT running); verify counts via readOnly query (~50k default-jar rows, 20 `work` marker rows); launch; connect admin client; probe the sheet's wcId (background-tab-safe walk). | Seed counts confirmed; initialize ok; sheet wcId identified (or identified lazily after step 2's first open). If the sheet can't be probed, pixels alone carry observation (note in the run log). |
+| 1 | Setup: run the seed script (app NOT running); verify counts via readOnly query (~50k default-jar rows, 20 `work` marker rows); launch; connect admin client; resolve the sheet's wcId from `enumerateWindows()` (this window's row → `sheetWcId`). | Seed counts confirmed; initialize ok. `sheetWcId` is **absent** on a fresh launch — the sheet is lazy and has never been created — so it resolves after step 2's first open, at which point the row carries it exactly. *(M09 F7 DD2 makes this nuance first-class: an absent id **means** "never created"; it is not a failed lookup.)* |
 | 2 | **Suggestions appear, felt-instant.** Click into the address bar (chrome wcId; coordinates from a screenshot); type a 3+ char prefix known to match many seeded default-jar rows. Record wall-clock between last keystroke and the sheet's rows being observable (poll the sheet DOM at ~50 ms cadence, or successive screenshots). | Suggestion rows render on the sheet under the address bar, drawn from the default jar's seeded history; observed latency from keystroke to rendered rows is subjectively instant (≤ ~300 ms wall including apparatus overhead — the store query itself is ~2 ms; the Validator judges "no visible lag," not a hard SLA). |
 | 3 | **Jar exclusivity.** Clear the input (Ctrl+A + Delete or select-all + type); type `zebraf` (the work-jar marker prefix). | ZERO suggestion rows for the marker (empty state / "No matches" note) — the work jar's history never leaks into a default-jar tab's suggestions. *(the mission's exclusivity clause at the omnibox surface)* |
 | 4 | **Keyboard selection navigates.** First stage RESOLVABLE suggestions (first-run finding: fictional seed hosts can't DNS-resolve, so arrival is unmeetable on them): serve 3 titled static pages on `http://127.0.0.1:8000` and VISIT them in the default jar via admin navigate (the real recording pipeline adds them to history). Clear; type a prefix matching those local pages' titles; ArrowDown (selection highlight moves — observe aria-selected/.selected on the sheet); Enter. | The active tab navigates to the selected suggestion's URL — a resolvable local page (enumerateTabs shows the tab at that URL; the dropdown is gone). |

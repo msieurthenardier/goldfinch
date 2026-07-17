@@ -23,7 +23,8 @@ const { hashKey, validateKey } = require('../../src/main/automation/automation-a
 
 const TEST_PORT = 7790;
 const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
-const EXPECTED_TOOL_COUNT = 29;
+// M09 F7 DD2: 29 → 30 (enumerateWindows, the window-topology discovery primitive).
+const EXPECTED_TOOL_COUNT = 30;
 
 // The valid key the test harness mints. The injected settings stub stores its
 // hash and reports the surface enabled, so a Bearer with this key passes the gate.
@@ -248,7 +249,7 @@ function initBody() {
   };
 }
 
-test('first client initializes and tools/list returns 29 tools', async () => {
+test('first client initializes and tools/list returns EXPECTED_TOOL_COUNT tools', async () => {
   const server = await startServer();
   try {
     const client = await connectClient();

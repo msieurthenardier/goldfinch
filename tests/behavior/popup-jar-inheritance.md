@@ -31,6 +31,13 @@ renderer's inheritance decision — no unit seam covers the cross-process path.
 
 - app tab/jar state (per-tab `jarId` + `wcId` — via the goldfinch MCP
   `enumerateTabs` tool)
+  > **Census scope (M09 F7 DD1).** `enumerateTabs` is an **all-windows** census; every row carries a
+  > `windowId`. **This spec's premise is a single-window run** — no step opens a second window, and
+  > `window.open` produces a **tab, not a native window** (step 2 asserts exactly that). So the census
+  > equals this window's tabs and step 5's total is exact as written: under DD1 it is now **correct by
+  > construction**, because "total tab count" means *all tabs in the app*, which is what the step
+  > always **meant**. State the premise rather than rely on it: if a future run ever opens a second
+  > window, step 5 must filter by `windowId` first — an unfiltered total would over-count.
 - in-page script execution inside specific tabs (via the goldfinch MCP `evaluate`
   tool with the admin key, targeting a tab's `wcId`)
 - chrome-renderer jar registry state (via `getChromeTarget` + `evaluate` on the
@@ -44,7 +51,7 @@ renderer's inheritance decision — no unit seam covers the cross-process path.
 | 2 | Via `evaluate` targeted at that tab, run `window.open('<fixture-url>')` (no-await form). Then enumerate tabs. | Exactly one NEW tab appeared, and its `jarId` is `work` — the popup inherited the opener's jar, not the default (`personal`). No new native window (the popup is a tab in the enumeration). |
 | 3 | Open a burner tab via the chrome apparatus: evaluate `window.createTab('<fixture-url>', window.makeBurner())` on the chrome target (renderer.js is an ES module — its top-level declarations are NOT page globals; `createTab`/`makeBurner` are reachable because the evaluate-reachable seam at the bottom of renderer.js publishes them on the chrome's global scope). Enumerate; record the burner tab's `wcId` and `jarId` (`burner-<n>`). | A tab with `jarId` matching `^burner-\d+$` exists. |
 | 4 | Via `evaluate` targeted at the burner tab, run `window.open('<fixture-url>')`. Then enumerate tabs. | Exactly one new tab appeared; its `jarId` matches `^burner-\d+$` AND is DIFFERENT from the opener's recorded `jarId` — a fresh burner, not the opener's partition (burner tabs never share state). |
-| 5 | Enumerate tabs and cross-check the full set. | Tabs from steps 1-4 all retain their original `jarId`s (no reassignment side-effects); total tab count equals boot tab + 4 opened. |
+| 5 | Enumerate tabs and cross-check the full set. | Tabs from steps 1-4 all retain their original `jarId`s (no reassignment side-effects); the **all-windows** total tab count equals boot tab + 4 opened — and **every row carries `windowId` = this window's**, confirming the single-window premise the count rests on (see Observables). |
 
 ## Out of Scope
 
