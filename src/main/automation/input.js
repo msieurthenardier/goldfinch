@@ -223,15 +223,15 @@ function sendInput(wcId, event, deps) {
  *
  * @param {number} wcId
  * @param {object[]} events
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
  */
 async function actOn(wcId, events, deps) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   // BOTH resolveContents calls (pre- and post-activate) forward the FULL deps so
   // allowInternal flows on each — otherwise admin's internal drive would re-throw
   // on the second resolve (DD6 / Leg 2).
   let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                      // DD3 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale by now,
     // and re-resolving re-applies the DD5 guard post-activation. Always resolve immediately
@@ -255,13 +255,13 @@ async function actOn(wcId, events, deps) {
  *
  * @param {number} wcId
  * @param {object[]} events
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void>, allowInternal?: boolean }} deps
  * @param {number} stepDelayMs
  */
 async function actOnPaced(wcId, events, deps, stepDelayMs) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);
     wc = resolveContents(wcId, deps);
   }
@@ -278,7 +278,7 @@ async function actOnPaced(wcId, events, deps, stepDelayMs) {
  * @param {number} wcId
  * @param {number} x
  * @param {number} y
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void> }} deps
  * @param {{ button?: string, clickCount?: number }} [opts]
  */
 const click = (wcId, x, y, deps, opts) => actOn(wcId, mouseClickEvents(x, y, opts), deps);
@@ -289,7 +289,7 @@ const click = (wcId, x, y, deps, opts) => actOn(wcId, mouseClickEvents(x, y, opt
  *
  * @param {number} wcId
  * @param {string} text
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void> }} deps
  */
 const typeText = (wcId, text, deps) => actOn(wcId, charEvents(text), deps);
 
@@ -310,7 +310,7 @@ const DRAG_STEP_DELAY_MS = 4;
  * @param {number} wcId
  * @param {{x:number,y:number}} from
  * @param {{x:number,y:number}} to
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void> }} deps
  * @param {{ steps?: number, stepDelayMs?: number }} [opts]
  */
 const dragPointer = (wcId, from, to, deps, opts) =>
@@ -355,15 +355,16 @@ const dragPointer = (wcId, from, to, deps, opts) =>
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  * @returns {Promise<void | { automation: 'debugger-unavailable', reason: string, wcId: number }>}
  */
 async function scroll(wcId, x, y, dx, dy, deps) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);  // throws bad/dead/internal (DD6); allowInternal forwarded
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
@@ -390,7 +391,7 @@ async function scroll(wcId, x, y, dx, dy, deps) {
  * @param {number} wcId
  * @param {string} name  friendly key name (Tab, Enter, ArrowRight, ShiftTab, …) or a single letter/digit for chords
  * @param {string[]|undefined} modifiers  optional modifier keys held during the press (e.g. ['control'] for Ctrl+M); undefined → none
- * @param {{ fromId: (id: number) => any, chromeContents: any, activate?: (id: number) => Promise<void> }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents: any, isChromeContents?: (wc: any) => boolean, activate?: (id: number) => Promise<void> }} deps
  */
 const pressKey = (wcId, name, modifiers, deps) => actOn(wcId, keyEvents(name, modifiers), deps);
 

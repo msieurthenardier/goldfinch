@@ -103,11 +103,12 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
- *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
+ *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before capture (DD5 foreground-to-act); absent for
  *              chrome-only callers
  *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
@@ -118,10 +119,10 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  * @returns {Promise<string>} base64-encoded PNG
  */
 async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPaint, delayMs } = {}) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   // BOTH resolves forward the full deps so allowInternal flows on each (DD6 / Leg 2).
   let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
@@ -175,11 +176,12 @@ const READ_DOM_SNIPPET = '(() => ({' +
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
- *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
+ *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers, in which case a guest is read without foregrounding
  *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
@@ -187,9 +189,9 @@ const READ_DOM_SNIPPET = '(() => ({' +
  *   snapshot: location.href, document.title, and the full documentElement outerHTML.
  */
 async function readDom(wcId, deps) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
@@ -260,11 +262,12 @@ async function captureWindow({ grabWindow }) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
- *   chromeContents — mainWindow.webContents (injected; passed through to classify the result)
+ *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
  *   activate — brings a guest to front before the read (DD5 foreground-to-act); absent for
  *              chrome-only callers
  *   allowInternal — admin's DD6 relaxation, forwarded to BOTH resolveContents calls
@@ -273,9 +276,9 @@ async function captureWindow({ grabWindow }) {
  */
 async function readAxTree(wcId, deps, { depth, properties } = {}) {
   void depth; void properties;                  // DD4 Flight-9 stub — accepted, unimplemented in v1
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);   // throws bad/dead/internal (DD6); allowInternal forwarded
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                        // DD5 foreground-to-act (await BEFORE the lock)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and re-resolving
     // re-applies the DD6 guard post-activation (the Flight-1 discipline).
@@ -326,15 +329,16 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
  * }} deps
  * @returns {Promise<any>} the JSON-serializable evaluated value
  */
 async function evaluate(wcId, expression, deps) {
-  const { chromeContents, activate } = deps;
+  const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);
-  if (classifyContents(wc, chromeContents) === 'guest' && typeof activate === 'function') {
+  if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale.
     wc = resolveContents(wcId, deps);
@@ -383,6 +387,7 @@ async function evaluate(wcId, expression, deps) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
  * }} deps
  * @returns {Promise<void>}
@@ -428,6 +433,7 @@ async function injectScript(wcId, script, deps) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
  * }} deps
  * @returns {Promise<void>}
@@ -458,6 +464,7 @@ async function openDevTools(wcId, deps) {
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
  * }} deps
  * @returns {Promise<void>}

@@ -12,6 +12,15 @@
 > (Settings, Downloads, Print…, Exit — the original "exactly two" pin was stale), and Settings/
 > Downloads now open real trusted internal tabs (the "Settings is inert placeholder" step inverted).
 
+> ⚠️ **STALE ENUMERATION — annotated 2026-07-15 (M09 F6 leg 5, FD ruling; NOT yet folded into the
+> steps).** The kebab model today is **six items, order pinned: New window** (M09 F6 DD5),
+> **Settings, Downloads, Cookie jars, Print…, Exit** — this spec's "exactly four" pins (title,
+> Intent, steps 3/5) are stale by two designed additions ("Cookie jars" predates F6 and post-dates
+> this spec's last run; "New window" is F6's). The next run of this spec MUST fold the current
+> composition into the Expected Results first (arrow-nav order included) — flagged in
+> `docs/behavior-specs-single-window-audit.md` and the M09 F6 flight log; a full-body refresh was
+> out of F6's wording-only spec budget.
+
 ## Intent
 
 Verify that Goldfinch's kebab (⋮) overflow menu — a `<button>` in the **toolbar row, immediately to

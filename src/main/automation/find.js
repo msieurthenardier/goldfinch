@@ -80,6 +80,7 @@ const { resolveContents, classifyContents, isInternalContents } = require('./res
  * @param {{
  *   fromId: (id: number) => any,
  *   chromeContents?: any,
+ *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
  *   activate?: (wcId: number) => Promise<void>,
  *   findTimeoutMs?: number,
@@ -97,7 +98,7 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
   // Post-activate re-resolve is ASSIGNED to wc so the find is issued on the
   // live, re-resolved handle (the pre-activate handle may be stale after the
   // async hop).
-  if (classifyContents(wc, deps.chromeContents) === 'guest' && typeof deps.activate === 'function') {
+  if (classifyContents(wc, deps.chromeContents, deps.isChromeContents) === 'guest' && typeof deps.activate === 'function') {
     await deps.activate(wcId);
     wc = resolveContents(wcId, deps); // post-activate stale-handle re-resolve (bad-handle / dead check)
   }

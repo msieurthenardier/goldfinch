@@ -19,6 +19,7 @@ import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
 import { keyboardMove, dropIndexFromPointer } from '../shared/tab-order.js';
+import { createPushCache } from '../shared/push-cache.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
@@ -254,9 +255,15 @@ function refreshOpenTabJars() {
 // the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
 // freeze-frame apparatus were retired at the Leg-5 cutover.
 
-// The five kebab item actions, extracted into NAMED functions consumed by the
+// The kebab item actions, extracted into NAMED functions consumed by the
 // sheet's channel-6 activation — one source of truth (Exit is verified by this
 // shared body, never activated live).
+// New Window (M09 F6 Leg 4, DD5): the same body Ctrl/Cmd+N dispatches through
+// dispatchChromeAction('new-window') — main creates the window; its chrome
+// document boots a home tab normally (window-boot-config bootTab:true).
+function kebabActionNewWindow() {
+  window.goldfinch.windowCreate();
+}
 function kebabActionSettings() {
   createTab('goldfinch://settings', null, { trusted: true });
 }
@@ -275,6 +282,7 @@ function kebabActionExit() {
 }
 /** @type {{ [id: string]: () => void }} */
 const KEBAB_ACTIONS = {
+  'new-window': kebabActionNewWindow,
   settings: kebabActionSettings,
   downloads: kebabActionDownloads,
   jars: kebabActionJars,
@@ -373,7 +381,9 @@ const overlayMenus = {
 const BLUR_REOPEN_SUPPRESS_MS = 300;
 
 // Static kebab model — labels rendered via textContent in the sheet (DD8).
+// New window first (Chrome adjacency: window/tab creation ahead of app pages).
 const kebabModel = () => [
+  { id: 'new-window', label: 'New window' },
   { id: 'settings', label: 'Settings' },
   { id: 'downloads', label: 'Downloads' },
   { id: 'jars', label: 'Cookie jars' },
@@ -671,16 +681,36 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
         // sourceIndex+1 (Chrome parity — lands beside the source). Title is
         // seeded from the renderer's OWN tab.title — no round-trip through main.
         if (!target || target.wcId == null) break;
-        const sourceIndex = orderedTabIds().indexOf(tabId);
         const sourceContainer = target.container;
         const sourceTitle = target.title;
         const sourceUrl = target.url;
         window.goldfinch.tabHistorySnapshot({ webContentsId: target.wcId }).then((snap) => {
           if (!snap) return; // internal/dead source by the time the invoke resolved — no-op
+          // sourceIndex is computed AND used here, synchronously at resolve time
+          // (M09 F6 Leg 3, DD6 — the F5 staleness sibling: capturing it BEFORE
+          // the invoke could misplace the duplicate if the strip mutated during
+          // the round-trip). A source that vanished mid-invoke (-1) appends.
+          const sourceIndex = orderedTabIds().indexOf(tabId);
           createTab(sourceUrl, sourceContainer, {
             restoreHistory: { entries: snap.entries, index: snap.index, title: sourceTitle },
             insertAt: sourceIndex === -1 ? null : sourceIndex + 1
           });
+        });
+      } else if (id === 'tab:move-new-window') {
+        // Move to new window (M09 F6 Leg 4, DD5 / review H2): the invoke
+        // carries THIS renderer's strip snapshot — a burner's synthesized
+        // container and the favicon exist ONLY renderer-side; main cannot
+        // rebuild either from the wcId (it re-derives url/title itself at
+        // adopt-send time). Validated no-op on a vanished/wcId-less target;
+        // the strip removal arrives via the tab-moved-away push, never done
+        // locally (main is the executor).
+        if (!target || target.wcId == null) break;
+        window.goldfinch.tabMoveToNewWindow({
+          wcId: target.wcId,
+          url: target.url,
+          title: target.title,
+          favicon: target.favicon,
+          container: target.container
         });
       } else if (id === 'tab:reopen-closed') {
         // The EXISTING dispatchChromeAction('reopen-closed-tab') case (dispatch
@@ -993,13 +1023,27 @@ function openPageContextMenuForAudit() {
 /** @type {{ tabId: string | null, returnFocus: HTMLElement | null }} */
 const tabCtx = { tabId: null, returnFocus: null };
 
+// DD6 push-cache (M09 F6 Leg 3): the closed-tab stack's size, cached from main's
+// closed-tab-stack-changed pushes so openTabContextMenu builds its model
+// SYNCHRONOUSLY like every other sheet-menu opener — the F5 async opener, its
+// cross-type stale-resolve edge, and the tabCtx.tabId re-check guard are all
+// deleted with the await. Seed/push race: a received push always wins; the
+// boot-seed invoke applies only if no push arrived first (createPushCache owns
+// the rule — the push is the fresher fact even when the numbers disagree).
+const closedTabStackSizeCache = createPushCache(0);
+window.goldfinch.onClosedTabStackChanged((d) => {
+  closedTabStackSizeCache.push(d && typeof d.size === 'number' ? d.size : 0);
+});
+window.goldfinch.closedTabStackSize().then((size) => {
+  closedTabStackSizeCache.seed(typeof size === 'number' ? size : 0);
+});
+
 /**
  * Open the tab context menu for `id`, anchored at `anchorEl` (chrome→sheet
- * translated element rect — the toolbar-Unpin anchor pattern). The model needs
- * the closed-tab stack's live size, an async invoke; `tabCtx.tabId` is
- * re-checked when it resolves so a superseding open (a second invocation before
- * the first's invoke returns) safely wins — the stale resolve is a no-op rather
- * than opening the wrong tab's menu after a newer one already took over.
+ * translated element rect — the toolbar-Unpin anchor pattern). Synchronous
+ * (M09 F6 Leg 3, DD6): the model reads the push-cached closed-tab stack size,
+ * so a superseding open simply runs after this one — no in-flight resolve to
+ * guard against.
  * @param {string} id @param {HTMLElement} anchorEl
  */
 function openTabContextMenu(id, anchorEl) {
@@ -1009,23 +1053,22 @@ function openTabContextMenu(id, anchorEl) {
   tabCtx.tabId = id;
   tabCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
   const r = anchorEl.getBoundingClientRect();
-  const anchor = chromePointToSheet(r.left, r.bottom);
-  window.goldfinch.closedTabStackSize().then((stackSize) => {
-    if (tabCtx.tabId !== id) return; // superseded by a newer open — its resolve wins instead
-    const model = tabContextModel({
-      tabId: id,
-      isLastTab: ids.length <= 1,
-      tabsToRight: ids.length - 1 - idx,
-      stackSize: typeof stackSize === 'number' ? stackSize : 0
-    });
-    openOverlayMenu('tab-context', model, anchor, 0);
+  const model = tabContextModel({
+    tabId: id,
+    isLastTab: ids.length <= 1,
+    tabsToRight: ids.length - 1 - idx,
+    stackSize: closedTabStackSizeCache.get(),
+    // M09 F6 (review M4): tab:move-new-window is omitted for internal tabs —
+    // app-UI pages never move between windows.
+    isInternal: isInternalTab(tabs.get(id) || null)
   });
+  openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
 /**
  * Test/audit hook: open the tab context menu with a REPRESENTATIVE synthetic
- * model (bypassing the live orderedTabIds()/closedTabStackSize() round trip that
- * openTabContextMenu needs, exactly the way openPageContextMenuForAudit
+ * model (bypassing the live orderedTabIds()/stack-size-cache reads that
+ * openTabContextMenu makes, exactly the way openPageContextMenuForAudit
  * bypasses the live guest params) — items-to-right and a non-empty stack so all
  * five items render, per the a11y checkpoint. Anchored at the first tab if one
  * exists, else the tab strip itself. Reachable via the MCP evaluate tool
@@ -1038,7 +1081,9 @@ function openTabContextMenuForAudit() {
   tabCtx.tabId = id;
   tabCtx.returnFocus = els.address;
   const r = anchorEl.getBoundingClientRect();
-  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1 });
+  // isInternal:false — representative synthetic model with EVERY item rendered
+  // (now six, incl. tab:move-new-window — M09 F6), per the a11y checkpoint.
+  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: false });
   openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
@@ -1061,33 +1106,20 @@ function internalJarName(url) {
   }
 }
 
-// M09 F4 Leg 2 (DD2 step 3): `restoreHistory` and `insertAt` are the reopen-chain's
-// two additive optional fields — every existing call site (which never passes
-// them) is unaffected. `restoreHistory: {entries, index, title}` rides straight
-// through to the `tab-create` IPC payload (main branches on its presence, DD2
-// step 4); `title` is read HERE (renderer-side only, stripped of no further
-// meaning to main) to seed the initial strip title. `insertAt` lands the tab at
-// its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
-function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null } = {}) {
-  // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
-  // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
-  if (drag) cancelDrag();
-  // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
-  // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
-  // so web content reaching here via onOpenTab can never select the internal branch.
-  const ok = trusted ? isInternalPageUrl(url) : isSafeTabUrl(url);
-  if (!ok) return null;
-  const id = `tab-${++tabSeq}`;
-  // ⚠️ DATA-LOSS TRAP: the synthetic internal jar is set as the `jar` ITSELF — one object
-  // that the webview `partition` attribute, `tab.container`, AND the dot logic all derive
-  // from. If the partition were set to the internal string while tab.container stayed the
-  // resolved default, a New Identity click on the Settings tab would wipe the user's real
-  // `persist:goldfinch` jar (identity-new reads tab.container.partition).
-  const jar = trusted
-    ? { id: 'internal', name: internalJarName(url), color: '#9aa0ac', partition: window.goldfinch.internalPartition }
-    : container || resolveNewTabContainer(containers, defaultId) || makeBurner();
-
-  // Both trusted (internal) and untrusted (web) tabs now use WebContentsView via IPC (Leg 3).
+/**
+ * Strip-record construction (M09 F6 Leg 4 — the review-M3 factoring), shared by
+ * BOTH createTab and the adopt-tab branch: the tab object + tabs.set + the tab
+ * button DOM + its listener set (click/auxclick/contextmenu/pointerdown) +
+ * strip append + the four title update points (tab-title text, tooltip,
+ * aria-label, close-button aria-label) when an initial `title` is known.
+ * Callers own everything else — URL gates, jar resolution, wcId provisioning
+ * (createTab's tabCreate invoke vs adopt's direct assignment), insertAt,
+ * activation.
+ * @param {{ id: string, url: string, jar: Tab['container'], trusted: boolean, title?: string | null }} parts
+ * @returns {Tab}
+ */
+function buildStripRecord({ id, url, jar, trusted, title = null }) {
+  // Both trusted (internal) and untrusted (web) tabs use WebContentsView via IPC (Leg 3).
   // tab.webview is null for all tabs; internal tabs use tab.wcId exactly like web tabs.
   const tab = {
     id,
@@ -1190,19 +1222,60 @@ function createTab(url = currentHomePage(), container = null, { trusted = false,
   els.tabs.appendChild(btn);
   tab.btn = btn;
 
-  // M09 F4 Leg 2 (DD2 step 4): seed the initial strip title from the captured
-  // entry instead of flashing "New tab" — mirrors onTabTitle's own four update
-  // points (tab-title text, tooltip, aria-label, close-button aria-label) so a
-  // reopened tab looks indistinguishable from one that already received its
-  // first page-title-updated event.
-  if (restoreHistory && typeof restoreHistory.title === 'string' && restoreHistory.title) {
-    tab.title = restoreHistory.title;
-    tab.btn.querySelector('.tab-title').textContent = restoreHistory.title;
-    tab.btn.title = restoreHistory.title;
-    tab.btn.setAttribute('aria-label', restoreHistory.title);
-    const restoredClose = tab.btn.querySelector('.tab-close');
-    if (restoredClose) restoredClose.setAttribute('aria-label', `Close tab: ${restoreHistory.title}`);
+  // Initial title seed (M09 F4 Leg 2, DD2 step 4 — reopen/duplicate; M09 F6 adopt):
+  // apply the four title update points instead of flashing "New tab" — mirrors
+  // onTabTitle's own update set so a restored/adopted tab looks indistinguishable
+  // from one that already received its first page-title-updated event.
+  if (typeof title === 'string' && title) {
+    tab.title = title;
+    tab.btn.querySelector('.tab-title').textContent = title;
+    tab.btn.title = title;
+    tab.btn.setAttribute('aria-label', title);
+    const closeBtn = tab.btn.querySelector('.tab-close');
+    if (closeBtn) closeBtn.setAttribute('aria-label', `Close tab: ${title}`);
   }
+
+  return tab;
+}
+
+// M09 F4 Leg 2 (DD2 step 3): `restoreHistory` and `insertAt` are the reopen-chain's
+// two additive optional fields — every existing call site (which never passes
+// them) is unaffected. `restoreHistory: {entries, index, title}` rides straight
+// through to the `tab-create` IPC payload (main branches on its presence, DD2
+// step 4); `title` is read HERE (renderer-side only, stripped of no further
+// meaning to main) to seed the initial strip title. `insertAt` lands the tab at
+// its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
+function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null } = {}) {
+  // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
+  // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
+  if (drag) cancelDrag();
+  // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
+  // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
+  // so web content reaching here via onOpenTab can never select the internal branch.
+  const ok = trusted ? isInternalPageUrl(url) : isSafeTabUrl(url);
+  if (!ok) return null;
+  const id = `tab-${++tabSeq}`;
+  // ⚠️ DATA-LOSS TRAP: the synthetic internal jar is set as the `jar` ITSELF — one object
+  // that the webview `partition` attribute, `tab.container`, AND the dot logic all derive
+  // from. If the partition were set to the internal string while tab.container stayed the
+  // resolved default, a New Identity click on the Settings tab would wipe the user's real
+  // `persist:goldfinch` jar (identity-new reads tab.container.partition).
+  const jar = trusted
+    ? { id: 'internal', name: internalJarName(url), color: '#9aa0ac', partition: window.goldfinch.internalPartition }
+    : container || resolveNewTabContainer(containers, defaultId) || makeBurner();
+
+  // Strip-record construction extracted (M09 F6 Leg 4, review M3): shared with
+  // the adopt-tab branch. The initial-title seed covers the reopen/duplicate
+  // restoreHistory case (M09 F4 DD2 step 4 — the same condition as before).
+  const tab = buildStripRecord({
+    id,
+    url,
+    jar,
+    trusted,
+    title: restoreHistory && typeof restoreHistory.title === 'string' && restoreHistory.title
+      ? restoreHistory.title
+      : null
+  });
 
   // M09 F4 Leg 2 (DD2 step 3): `insertAt` lands the reopened tab at its ORIGINAL
   // strip position (Chrome parity). The tab is already appended (last slot), so
@@ -3352,6 +3425,12 @@ function dispatchChromeAction(action) {
     case 'close-tab':
       if (activeTabId) closeTab(activeTabId);
       return true;
+    // New Window (M09 F6 Leg 4, DD5): Ctrl/Cmd+N through the one-classifier
+    // path — the same body the kebab item runs. Main creates the window; the
+    // new chrome document boots its home tab normally (window-boot-config).
+    case 'new-window':
+      window.goldfinch.windowCreate();
+      return true;
     // reopen-closed-tab (M09 F4 Leg 2, DD2 step 3) — retires the Ctrl+Shift+T
     // reservation. Renderer-orchestrated two-invoke chain (design-review
     // correction: main never constructs a view itself): tabReopen() pops the
@@ -3679,6 +3758,73 @@ window.goldfinch.onTabNavState(({ wcId, canGoBack, canGoForward }) => {
   els.forward.disabled = !canGoForward;
 });
 
+// ---------------------------------------------------------------------------
+// Move-to-new-window branches (M09 F6 Leg 4, DD5 step 3). BOTH registrations
+// sit at module top level, ABOVE the boot gate (review H1): the
+// window-boot-config invoke that releases main's queued adopt-tab can only be
+// issued after this module finishes evaluating, so these subscriptions provably
+// exist before any adopt-tab/tab-moved-away arrives.
+// ---------------------------------------------------------------------------
+
+// adopt-tab (TARGET chrome): strip insertion WITHOUT createTab — the
+// webContents already lives (true re-parenting; construction is not an option).
+// The payload is everything the strip needs (H2/M4: main-authoritative
+// url/title; renderer-only favicon + FULL container object, so burner tabs are
+// adoptable) — no follow-up round-trip. Deliberately re-derived/lost on move
+// (documented): media list (repopulates on the next tab-media-list push), find
+// state (the session closed with the source binding), privacy aggregate
+// (repopulates on the next privacy-net).
+window.goldfinch.onAdoptTab((payload) => {
+  if (!payload || typeof payload.wcId !== 'number') return;
+  if (!payload.container || typeof payload.container !== 'object') return;
+  if (findTabByWcId(payload.wcId)) return; // already adopted — defensive no-op
+  if (drag) cancelDrag(); // tab-list mutation invalidates a live drag's snapshot
+  const id = `tab-${++tabSeq}`;
+  const tab = buildStripRecord({
+    id,
+    url: typeof payload.url === 'string' ? payload.url : '',
+    jar: payload.container,
+    trusted: false, // internal tabs never move (model omission + main refusal, M4)
+    title: typeof payload.title === 'string' && payload.title ? payload.title : null
+  });
+  // Direct wcId assignment (review M3): no tabCreate invoke, no provisioning
+  // .then — the guest view was re-parented main-side before this send.
+  tab.wcId = payload.wcId;
+  if (typeof payload.favicon === 'string' && payload.favicon) {
+    tab.favicon = payload.favicon;
+    const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
+    if (img) { img.src = payload.favicon; img.classList.remove('hidden'); }
+  }
+  // Focus rules: the moved tab is this window's active tab (Chrome parity).
+  // activateTab sends tab-set-active with THIS window's measured slot bounds —
+  // correcting the main-side H3 seed against any chrome-layout delta.
+  activateTab(id);
+});
+
+// tab-moved-away (SOURCE chrome): strip removal WITHOUT destroy — mirrors
+// closeTab FIELD BY FIELD minus the stack/IPC pieces: cancelDrag, button
+// remove, tabs.delete, the activeViewWcId clear, the next-activation fallback.
+// NO stripIndex snapshot, NO tabClose IPC, NO closed-tab capture (the tab is
+// alive in another window). The activeViewWcId clear is load-bearing (review
+// M3's named cross-window bug): a stale activeViewWcId here would tabHide the
+// moved guest IN THE TARGET WINDOW on this window's next activation.
+window.goldfinch.onTabMovedAway((payload) => {
+  if (!payload || typeof payload.wcId !== 'number') return;
+  const tab = findTabByWcId(payload.wcId);
+  if (!tab) return;
+  if (drag) cancelDrag();
+  if (tab.wcId === activeViewWcId) activeViewWcId = null;
+  tab.btn.remove();
+  tabs.delete(tab.id);
+  if (activeTabId === tab.id) {
+    // DD1: DOM order is authoritative — same fallback as closeTab. The
+    // else-createTab arm is defensive only: main refuses a sole-tab move.
+    const next = orderedTabIds().pop();
+    if (next) activateTab(next);
+    else createTab();
+  }
+});
+
 // ResizeObserver: send updated bounds to the active web tab when the webviews slot resizes.
 const webviewsSlotObserver = new ResizeObserver(() => sendActiveBounds());
 webviewsSlotObserver.observe(els.webviews);
@@ -3719,14 +3865,23 @@ async function createContainerAndOpenTab(rawName) {
   }
 }
 
-// Gated on BOTH the home-page setting read and the jars boot snapshot (DD3) — with
-// no hardcoded fallback container left in the renderer, the boot tab must not race
-// the jars snapshot. jarsBoot already swallows its own failure (defaultId stays
-// undefined → burner routing), so this can never be blocked by a jars IPC error.
+// Gated on the home-page setting read, the jars boot snapshot (DD3), AND the
+// window-boot-config invoke (M09 F6 Leg 4, DD5/L4): a move-created window must
+// NOT boot a home tab — it receives the moved tab via adopt-tab instead. The
+// suppression is main's create-chain flag served through the invoke (never a
+// renderer guess); bootTab defaults true, so an invoke failure boots normally.
+// Issuing the invoke is ALSO the H1 readiness signal: main releases the queued
+// adopt-tab/tab-nav-state pair when it serves this invoke (the registrations
+// above are module-top-level, so they provably exist by then). jarsBoot already
+// swallows its own failure (defaultId stays undefined → burner routing), so
+// this can never be blocked by a jars IPC error.
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
-  jarsBoot
-]).then(([url]) => createTab(url || HOMEPAGE));
+  jarsBoot,
+  window.goldfinch.windowBootConfig().catch(() => ({ bootTab: true }))
+]).then(([url, , bootConfig]) => {
+  if (!bootConfig || bootConfig.bootTab !== false) createTab(url || HOMEPAGE);
+});
 
 // ---------------------------------------------------------------------------
 // Evaluate-reachable automation/dogfooding seam (M07 Flight 2 leg 5, FD-approved).

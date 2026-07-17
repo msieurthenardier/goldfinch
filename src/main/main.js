@@ -54,6 +54,25 @@ const { isChromeActionForwardable, isRepeatSafeAction } = require('../shared/gue
 // M09 F4 Leg 1 (DD1): pure, bounded closed-tab stack — main owns the singleton
 // instance (created below, near tabViews); the capture/reopen wiring lives here.
 const { createClosedTabStack } = require('../shared/closed-tab-stack.js');
+// M09 F6 Leg 3 (DD4): the pure capture/pop rules shared by the two capture sites
+// (tab-close, window `close`) and the reopen handler — windowId tagging, the
+// whole-window insertion-order/append-sentinel capture, the origin-window
+// stripIndex pop rule. The stack module above stays entry-shape-agnostic.
+const {
+  APPEND_SENTINEL,
+  captureClosedTabEntry,
+  captureWindowCloseEntries,
+  reopenStripIndex,
+} = require('./closed-tab-capture');
+// M09 F6 Leg 2 (DD2/DD3/DD8): the window registry — per-window records replace the
+// former mainWindow/chromeView/tabViews/activeTabWcId singletons. Pure module;
+// Electron wiring stays here.
+const { createWindowRegistry } = require('./window-registry');
+// M09 F6 Leg 4 (DD5 / review H2): pure move-to-new-window payload rules — the
+// source renderer's strip-snapshot shape validation + the adopt-tab payload
+// builder (main-authoritative url/title at send time; favicon/container are
+// renderer-only facts). Unit-pinned offline.
+const { validateMoveTabPayload, buildAdoptPayload } = require('./move-tab-payload');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -204,25 +223,70 @@ async function handleInternal(request) {
   }
 }
 
-let mainWindow = null;
-// The chrome WebContentsView hosted inside the BaseWindow (DD2). mainWindow is now a
-// BaseWindow with no `.webContents`; ALL chrome-renderer access routes through chromeView's
-// webContents via getChromeContents() below. Null until createWindow() runs / after close.
-/** @type {Electron.WebContentsView | null} */
-let chromeView = null;
-// The single canonical chrome-contents accessor (DD2). Returns the chrome view's webContents
-// or null when the view is absent (startup/teardown). EVERY former chrome-renderer webContents
-// site routes through this; the engine + scope-ctx seams point at this same accessor.
-const getChromeContents = () => (chromeView ? chromeView.webContents : null);
+// The window registry (M09 F6, DD2): one record per BaseWindow —
+// { win, chromeView, tabViews: Map<wcId, { view, partition, trusted, active }>,
+//   activeTabWcId } — created in createWindow(), removed at the window's `closed`.
+// App-globals (closedTabStack, stores, MCP, downloads, privacy maps, farbleSeeds)
+// stay module-scope; everything per-window-in-nature lives in the record.
+const registry = createWindowRegistry();
 
-// Tab-view registry: keyed by guest webContents.id → { view, partition, trusted, active }
-const tabViews = new Map();
-// Active tab's wcId (null when no web tab is active)
-let activeTabWcId = null;
+// DD8 accessor interim: the LAST-FOCUSED record's chrome webContents (membership-
+// validated in the registry, first-record fallback), or null when no window exists.
+// This is the one rule for every ownerless chrome pick (automation engine, sheet
+// accelerator, internal-page opens) — per-tab pushes NEVER use it (class 3 below).
+const getChromeContents = () => {
+  const rec = registry.getLastFocused();
+  return rec ? rec.chromeView.webContents : null;
+};
+
+// Class-3 owner routing (DD2): the chrome webContents of the window OWNING a tab,
+// resolved AT EVENT TIME (never captured at wiring time — that event-time resolution
+// is what makes DD5's adopt re-bind automatic). Null when unowned or destroyed.
+function chromeForTab(wcId) {
+  const cc = registry.getChromeForTab(wcId);
+  return cc && !cc.isDestroyed() ? cc : null;
+}
+
+// H1 readiness barrier (M09 F6 Leg 4, DD5 / review H1): a send to a pre-boot
+// chrome DOCUMENT is silently dropped — no error, no retry. The adopt protocol's
+// two sends (adopt-tab + the follow-up tab-nav-state) therefore queue on the
+// registry record as THUNKS until the target chrome's `window-boot-config`
+// invoke has been served (the invoke arriving proves module evaluation
+// completed, and the renderer's onAdoptTab/onTabMovedAway registrations sit at
+// module top level ABOVE the boot gate). Thunks — not payloads — so the
+// main-authoritative fields (url/title/nav-state off the live wc) are computed
+// at DELIVERY time, not queue time.
+/** @param {any} rec @param {() => [string, any]} buildMsg */
+function queueChromeSend(rec, buildMsg) {
+  if (rec.bootConfigServed) {
+    const cc = rec.chromeView.webContents;
+    if (cc && !cc.isDestroyed()) {
+      const [channel, payload] = buildMsg();
+      cc.send(channel, payload);
+    }
+  } else {
+    rec.pendingChromeSends.push(buildMsg);
+  }
+}
 
 // M09 F4 Leg 1 (DD1): the closed-tab stack singleton — pure data structure,
 // main owns capture (tab-close, below) and reopen (Leg 2) wiring around it.
 const closedTabStack = createClosedTabStack();
+
+// DD6 push-cache (F6 leg 3): push the stack's size to EVERY registered chrome on
+// every stack mutation — both capture sites' pushes and the reopen handler's pop
+// (no clear path exists today; any future one must call this too). Chromes ONLY,
+// deliberately NOT broadcastToChromeAndInternal: no internal-session consumer
+// exists (flight design review L1). The chrome caches the size so the tab-context
+// opener builds its model synchronously; the `closed-tab-stack-size` invoke
+// (below) remains solely as the cache's boot seed.
+function broadcastClosedTabStackChanged() {
+  const payload = { size: closedTabStack.size() };
+  for (const rec of registry.records()) {
+    const cc = rec.chromeView.webContents;
+    if (cc && !cc.isDestroyed()) cc.send('closed-tab-stack-changed', payload);
+  }
+}
 
 // --- Find-overlay view state (M05 Flight 7, DD1/DD2) ---------------------------------
 // The floating find bar is a dedicated chrome-class WebContentsView stacked above the
@@ -235,6 +299,12 @@ const closedTabStack = createClosedTabStack();
 let overlayView = null;
 // Tracks stack presence (removeChildView of a non-child is undefined behavior — gate on this).
 let overlayVisible = false;
+// The BaseWindow the overlay view is currently attached to (F6 Leg 2): hide/teardown
+// remove from THIS recorded attachment, never a hide-time re-resolve (the F4 review
+// finding — removing from a non-parent is documented-undefined). Full DD7 roaming
+// (per-window bounds, blur conditioning) lands in leg 4.
+/** @type {Electron.BaseWindow | null} */
+let findOverlayAttachedWin = null;
 // Latest active-guest DIP bounds, for (re)positioning the overlay on show.
 let lastGuestBounds = null;
 // Overlay find session: wcId of the tab the overlay currently targets (null = closed).
@@ -263,8 +333,8 @@ let pendingOverlayInit = null;
 // queued init AND the find session — the next open recreates cleanly.
 function teardownFindOverlayView() {
   if (overlayView) {
-    if (overlayVisible && mainWindow) {
-      mainWindow.contentView.removeChildView(overlayView);
+    if (overlayVisible && findOverlayAttachedWin && !findOverlayAttachedWin.isDestroyed()) {
+      findOverlayAttachedWin.contentView.removeChildView(overlayView);
     }
     if (!overlayView.webContents.isDestroyed()) {
       // destroy() is real but absent from the public WebContents type — any-cast
@@ -274,6 +344,7 @@ function teardownFindOverlayView() {
   }
   overlayView = null;
   overlayVisible = false;
+  findOverlayAttachedWin = null;
   overlayReady = false;
   pendingOverlayInit = null;
   findOverlayTabWcId = null;
@@ -335,13 +406,34 @@ function ensureFindOverlayView() {
 // AFTER the guest addChildView, or the guest buries the overlay.
 function showFindOverlay() {
   const view = ensureFindOverlayView();
-  if (!mainWindow) return;
-  if (lastGuestBounds) {
+  // Owner-routed attach: the overlay belongs over the window that owns the find
+  // session's target tab (every caller sets findOverlayTabWcId before showing);
+  // the accessor rule is the defensive fallback for a session-less call.
+  const rec = registry.getWindowForGuest(findOverlayTabWcId) || registry.getLastFocused();
+  if (!rec) return;
+  // DD7 per-window bounds at show (M09 F6 Leg 4 / review M1): fetch the OWNER
+  // record's active-guest bounds live (entry.view.getBounds() — no new state
+  // slot). The module-level lastGuestBounds single slot is any-window-polluted
+  // (window B's tab-set-bounds overwrites it) and survives only as the
+  // last-resort fallback for a record with no active guest.
+  const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
+  const showBounds = activeEntry && !activeEntry.view.webContents.isDestroyed()
+    ? activeEntry.view.getBounds()
+    : lastGuestBounds;
+  if (showBounds) {
     // Guard required: computeFindOverlayBounds does not tolerate null. If no guest
     // bounds have ever been seen, skip — the next tab-set-bounds corrects it.
-    view.setBounds(computeFindOverlayBounds(lastGuestBounds));
+    view.setBounds(computeFindOverlayBounds(showBounds));
   }
-  mainWindow.contentView.addChildView(view);
+  // If the singleton is still attached elsewhere, detach first (re-adding a child
+  // of window A to window B without the remove is untested territory; the remove
+  // is the spike-proven detach primitive).
+  if (overlayVisible && findOverlayAttachedWin && findOverlayAttachedWin !== rec.win && !findOverlayAttachedWin.isDestroyed()) {
+    findOverlayAttachedWin.contentView.removeChildView(view);
+  }
+  rec.win.contentView.addChildView(view);
+  // Registry records carry the injected BaseWindow (typed structurally in the pure module).
+  findOverlayAttachedWin = /** @type {Electron.BaseWindow} */ (rec.win);
   view.setVisible(true);
   overlayVisible = true;
 }
@@ -350,9 +442,11 @@ function showFindOverlay() {
 // sibling still occupies the compositing stack). The view is kept for reuse.
 function hideFindOverlay() {
   if (!overlayVisible) return;
-  if (mainWindow && overlayView) {
-    mainWindow.contentView.removeChildView(overlayView);
+  // Remove from the RECORDED attachment window (never a hide-time re-resolve).
+  if (findOverlayAttachedWin && !findOverlayAttachedWin.isDestroyed() && overlayView) {
+    findOverlayAttachedWin.contentView.removeChildView(overlayView);
   }
+  findOverlayAttachedWin = null;
   overlayVisible = false;
 }
 
@@ -368,7 +462,8 @@ function deliverOverlayInit(findText) {
 // Open the overlay find session for a web tab (DD4). Shared entry for the
 // `find-overlay:open` IPC handler and the dev-gated Ctrl+F stimulus.
 function openFindOverlaySession(wcId, findText) {
-  const entry = tabViews.get(wcId);
+  const owner = registry.getWindowForGuest(wcId);
+  const entry = owner ? owner.tabViews.get(wcId) : null;
   // Find is web-tab-only (DD4): refuse absent, internal (trusted), or destroyed targets.
   if (!entry || entry.trusted || entry.view.webContents.isDestroyed()) return;
   if (isFindOverlayActive(wcId)) {
@@ -455,19 +550,31 @@ function createSheetView() {
     // downloads guarded; zoom/print/find deliberately not — parity).
     event.preventDefault();
     if (hit.autoRepeatGuard && input.isAutoRepeat) return;
+    // DD7 accelerator scope (M09 F6 Leg 4 / review M1): while a menu is open the
+    // sheet serves its ATTACHMENT window — chrome-scope sends, the guest-scope
+    // active-tab resolution, and the find/downloads sends must all resolve THAT
+    // window, never the global accessor (window B's open menu must not dispatch
+    // into window A's chrome or act on A's active tab).
+    const attWin = menuOverlay.getAttachedWindow();
+    const attRec = attWin && !attWin.isDestroyed() ? registry.get(attWin.id) : null;
+    const accelRec = attRec || registry.getLastFocused();
+    const accelChrome = accelRec && !accelRec.chromeView.webContents.isDestroyed()
+      ? accelRec.chromeView.webContents
+      : null;
     if (hit.scope === 'chrome') {
       // Chrome-class actions ride the main→chrome channel; the renderer's extracted
       // dispatchChromeAction runs the same switch bodies as its keydown handler.
-      getChromeContents()?.send('chrome-shortcut-action', { action: hit.action });
+      accelChrome?.send('chrome-shortcut-action', { action: hit.action });
       return;
     }
     // Guest-class: replicate the guest before-input-event branch bodies against the
-    // ACTIVE guest — guarded by isInternalContents (the original capture sat inside
-    // the !__goldfinchInternal guard, so F12/zoom/print/Ctrl+Shift+I are inert on
-    // internal tabs today and must stay so; Ctrl+J is tab-independent and exempt —
-    // see isGuestActionAllowed). Ctrl+F over an internal active tab is a FULL no-op
-    // (menu stays open, keystroke swallowed — symmetric with the guard).
-    const wc = getActiveTabContents();
+    // ATTACHMENT window's active guest — guarded by isInternalContents (the original
+    // capture sat inside the !__goldfinchInternal guard, so F12/zoom/print/
+    // Ctrl+Shift+I are inert on internal tabs today and must stay so; Ctrl+J is
+    // tab-independent and exempt — see isGuestActionAllowed). Ctrl+F over an
+    // internal active tab is a FULL no-op (menu stays open, keystroke swallowed —
+    // symmetric with the guard).
+    const wc = accelRec && accelRec.activeTabWcId != null ? getTabContents(accelRec.activeTabWcId) : null;
     const activeIsInternal = !wc || isInternalContents(wc);
     if (!isGuestActionAllowed(hit.action, activeIsInternal)) return;
     switch (hit.action) {
@@ -494,12 +601,13 @@ function createSheetView() {
       case 'find':
         // DD5 conflict resolution: the menu closes BEFORE find opens (the find bar
         // and an open menu never co-exist), then chrome's openFind drives
-        // find-overlay:open exactly as the guest-captured Ctrl+F does.
+        // find-overlay:open exactly as the guest-captured Ctrl+F does. DD7: the
+        // open-find lands in the ATTACHMENT window's chrome.
         menuOverlay.closeMenuOverlay('superseded');
-        getChromeContents()?.send('open-find');
+        accelChrome?.send('open-find');
         break;
       case 'downloads':
-        getChromeContents()?.send('open-downloads');
+        accelChrome?.send('open-downloads');
         break;
     }
   });
@@ -511,12 +619,32 @@ function createSheetView() {
   return view;
 }
 
+// Resolve a chrome webContents for the sheet's DD7 attachment window (leg 4):
+// a live registered window → ITS chrome; a provided-but-gone window → null
+// (drop — its chrome is being torn down, and another window's token space must
+// never receive its channel 7); no window recorded → the accessor fallback.
+function chromeForAttachment(win) {
+  if (win) {
+    const rec = !win.isDestroyed() ? registry.get(win.id) : null;
+    const cc = rec ? rec.chromeView.webContents : null;
+    return cc && !cc.isDestroyed() ? cc : null;
+  }
+  return getChromeContents();
+}
+
 const menuOverlay = createMenuOverlayManager({
-  getContentView: () => (mainWindow ? mainWindow.contentView : null),
+  // FALLBACK contentView resolve only (DD7, leg 4): every real open records an
+  // attachment from the open-sender's record; this last-focused resolve serves
+  // attachment-less defensive paths (and the offline unit fakes).
+  getContentView: () => {
+    const rec = registry.getLastFocused();
+    return rec ? rec.win.contentView : null;
+  },
   createSheetView,
-  // Channel-7 emitter (menu-overlay-closed → chrome).
-  sendToChrome: (channel, payload) => {
-    const cc = getChromeContents();
+  // Channel-7 emitter (menu-overlay-closed → chrome) — DD7: delivered to the
+  // ATTACHMENT window's chrome (wrong-window delivery = stuck aria-expanded).
+  sendToChrome: (channel, payload, win) => {
+    const cc = chromeForAttachment(win);
     if (cc && !cc.isDestroyed()) cc.send(channel, payload);
   },
   // DD5 sheet-show hook: find bar hidden while a menu is open (parity).
@@ -534,12 +662,16 @@ const menuOverlay = createMenuOverlayManager({
   // while a sheet-crash teardown (find session still live) restores as desired.
   restoreFindOverlay: (reason) => {
     if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
-    if (isFindOverlayActive(activeTabWcId)) showFindOverlay();
+    // Owner-routed: restore iff the find session's tab is the ACTIVE tab of its
+    // OWNING window (formerly the singleton activeTabWcId compare).
+    const rec = registry.getWindowForGuest(findOverlayTabWcId);
+    if (rec && rec.activeTabWcId === findOverlayTabWcId) showFindOverlay();
   },
   // Reason-resolved refocus, main-side half (escape/activated): webContents-level
   // focus — chrome-side els.kebab.focus() alone cannot move keyboard focus off the
   // sheet in a multi-view BaseWindow (F7 closeFindOverlaySession precedent).
-  focusChrome: () => getChromeContents()?.focus()
+  // DD7: focuses the ATTACHMENT window's chrome.
+  focusChrome: (win) => chromeForAttachment(win)?.focus()
 });
 
 // --- Menu-overlay DD4 IPC (channels 1/2/4/5). Chrome-class trust domain, but every
@@ -554,9 +686,20 @@ function isSheetSender(event) {
 }
 
 // Channel 1 — chrome → main: open (or model-replace) a menu on the sheet.
+// Sender identity check widened to registry membership (F6 Leg 2): ANY registered
+// window's chrome may open — with one window this is the same identity compare.
+// DD7 attachment (leg 4 / review M1): the attachment is resolved from the
+// OPEN-SENDER's record and recorded by the manager at show — contentView +
+// window + the REQUESTING window's current active-guest bounds (per-window
+// bounds fetch; the single syncBounds slot is any-window-polluted).
 ipcMain.on('menu-overlay:open', (event, payload) => {
-  if (event.sender !== getChromeContents()) return;
-  menuOverlay.openMenu(payload);
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec) return;
+  const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
+  const bounds = activeEntry && !activeEntry.view.webContents.isDestroyed()
+    ? activeEntry.view.getBounds()
+    : null;
+  menuOverlay.openMenu(payload, { contentView: rec.win.contentView, win: rec.win, bounds });
 });
 
 // Channel 2 — chrome → main: programmatic close. `reason` is allowlisted
@@ -569,7 +712,7 @@ const MENU_CLOSE_REASONS = new Set([
   'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
 ]);
 ipcMain.on('menu-overlay:close', (event, payload) => {
-  if (event.sender !== getChromeContents()) return;
+  if (!registry.getWindowForChrome(event.sender)) return;
   const r = payload && payload.reason;
   menuOverlay.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
 });
@@ -586,12 +729,16 @@ ipcMain.on('menu-overlay:activated', (event, payload) => {
   if (typeof id !== 'string' || typeof token !== 'number') return;
   const cur = menuOverlay.getCurrentMenu();
   if (!cur || token !== cur.token) return; // stale sheet report
+  // DD7: capture the attachment window BEFORE the close clears it — channel 6
+  // must reach the ATTACHMENT window's chrome (the menu's owner), never the
+  // accessor's (window B's activation dispatching into window A's chrome).
+  const attWin = menuOverlay.getAttachedWindow();
   menuOverlay.closeMenuOverlay('activated', token);
   /** @type {{ menuType: string, id: string, value?: string }} */
   const out = { menuType: cur.menuType, id };
   const v = sanitizeActivatedValue(value);
   if (v !== undefined) out.value = v;
-  getChromeContents()?.send('menu-overlay-activated', out);
+  chromeForAttachment(attWin)?.send('menu-overlay-activated', out);
 });
 
 // Channel 5 — sheet → main: dismissed. `reason` allowlisted to the page-attributable
@@ -606,18 +753,20 @@ ipcMain.on('menu-overlay:dismissed', (event, payload) => {
 });
 
 
-// Returns the guest webContents for a tab view by its wcId (or null if not found/destroyed).
+// Returns the guest webContents for a tab view by its wcId (or null if not
+// found/destroyed). Resolves across ALL windows' records.
 function getTabContents(wcId) {
-  const entry = tabViews.get(wcId);
+  const owner = registry.getWindowForGuest(wcId);
+  const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!entry) return null;
   const wc = entry.view.webContents;
   return (wc && !wc.isDestroyed()) ? wc : null;
 }
 
-// Returns the active web tab's webContents (or null).
-function getActiveTabContents() {
-  return activeTabWcId != null ? getTabContents(activeTabWcId) : null;
-}
+// (getActiveTabContents — the last-focused active-tab accessor — was deleted in
+// F6 Leg 4: its only consumer was the sheet accelerator, which now resolves the
+// ATTACHMENT window's active tab per DD7. Re-derive from registry.getLastFocused()
+// if an ownerless active-tab pick is ever needed again.)
 
 // The loopback MCP automation server (Flight 3). Module-scoped so the shutdown
 // hooks (before-quit / window-all-closed) can reach it. Stays null until the
@@ -651,7 +800,12 @@ let historyRecorder = null;
 // chrome+guest canvas composite on WSLg (dep-free, via executeJavaScript).
 // Injected into the engine via deps.grabWindow so observe.js stays Electron-free.
 async function grabWindow() {
-  if (!mainWindow) return null;
+  // F6 Leg 2 interim disposition (review F2): bind to the LAST-FOCUSED record —
+  // resolved ONCE so window bounds, chrome, and active tab all come from the SAME
+  // record. Capture semantics (multi-window correctness) remain F7's.
+  const grabRec = registry.getLastFocused();
+  if (!grabRec) return null;
+  const grabWin = grabRec.win;
   // Under the Wayland ozone backend (Leg-6 HAT fix — the dev launcher passes
   // --ozone-platform=wayland when a compositor socket is reachable), the app's
   // own surface is NOT in desktopCapturer's window-source list (X-window based;
@@ -660,10 +814,10 @@ async function grabWindow() {
   const onWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
   if (!onWayland) {
     try {
-    const bounds = mainWindow.getBounds();
+    const bounds = grabWin.getBounds();
     // FIX 2(a): request thumbnail at the actual window content size so we get a
     // full-resolution capture, not the 150px-wide default thumbnail.
-    const { width: cw, height: ch } = mainWindow.getContentBounds();
+    const { width: cw, height: ch } = grabWin.getContentBounds();
     const sources = await desktopCapturer.getSources({
       types: ['window'],
       fetchWindowIcons: false,
@@ -693,8 +847,9 @@ async function grabWindow() {
   //      return the composite as a data URL.
   // This is dep-free and avoids shipping a broken chrome-only screenshot.
   try {
-    const cc = getChromeContents();
-    const atc = getActiveTabContents();
+    // Same record as the window bounds above (F2: never mix records mid-capture).
+    const cc = grabRec.chromeView.webContents;
+    const atc = grabRec.activeTabWcId != null ? getTabContents(grabRec.activeTabWcId) : null;
     if (!cc || cc.isDestroyed()) return null;
 
     // Capture both views in parallel.
@@ -727,12 +882,15 @@ async function grabWindow() {
     if (tabB64 && guestBounds) {
       layers.push({ b64: tabB64, x: guestBounds.x, y: guestBounds.y, w: guestBounds.width, h: guestBounds.height });
     }
-    if (overlayVisible && overlayView && !overlayView.webContents.isDestroyed()) {
+    // DD7 attachment gates (leg 4): composite an overlay layer only when it is
+    // attached to THE CAPTURED window — with two windows, window A's open menu
+    // must not be painted into a capture of window B.
+    if (overlayVisible && overlayView && findOverlayAttachedWin === grabWin && !overlayView.webContents.isDestroyed()) {
       const img = await overlayView.webContents.capturePage();
       const b = overlayView.getBounds();
       if (img && b.width && b.height) layers.push({ b64: img.toPNG().toString('base64'), x: b.x, y: b.y, w: b.width, h: b.height });
     }
-    const sheetView = menuOverlay.isVisible() ? menuOverlay.getView() : null;
+    const sheetView = menuOverlay.isVisible() && menuOverlay.getAttachedWindow() === grabWin ? menuOverlay.getView() : null;
     if (sheetView && !sheetView.webContents.isDestroyed()) {
       const img = await /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage();
       const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (sheetView)).getBounds();
@@ -796,7 +954,11 @@ async function startMcpServerInstance() {
       ...engineOpts,
       getDownloads: () => downloadsManager.listAll(),
       grabWindow,
-      isTabViewWcId: (id) => tabViews.has(id),
+      // DD8 widening (F6 Leg 2): ALL-WINDOWS tab membership + the any-registered-
+      // chrome predicate (classify/jar-guard widening — a second window's chrome
+      // must classify 'chrome', not 'guest').
+      isTabViewWcId: (id) => registry.isTabViewWcId(id),
+      isChromeContents: (wc) => registry.isChromeContents(wc),
       // History read accessors (Mission 08 Flight 5): threaded the same way as
       // getDownloads above, backing the getHistory op (jar-confined via scope.js).
       getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
@@ -810,6 +972,9 @@ async function startMcpServerInstance() {
       fromId: (id) => webContents.fromId(id),
       fromPartition: (partition) => session.fromPartition(partition),
       getChromeContents,
+      // Jar-tier chrome-exclusion widening (DD8 / review L5): any registered
+      // chrome is refused for jar identities, not just the accessor's chrome.
+      isChromeContents: (wc) => registry.isChromeContents(wc),
     },
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
@@ -894,7 +1059,14 @@ function currentAutomationStatus() {
   };
 }
 
-function createWindow() {
+// `opts` (M09 F6 Leg 4, DD5):
+//   - noBootTab: boot-tab suppression for move-created windows — part of the
+//     CREATE CHAIN (the registry record flag served via window-boot-config),
+//     never a renderer guess.
+//   - contentSize: create the window with the SOURCE window's content size
+//     (review H3 — identical chrome layout makes the guest-bounds seed exact;
+//     bounds are window-local content DIPs).
+function createWindow({ noBootTab = false, contentSize = null } = {}) {
   const isMac = process.platform === 'darwin';
   /** @type {Electron.BaseWindowConstructorOptions} */
   const frameOpts = isMac
@@ -904,9 +1076,9 @@ function createWindow() {
   // The chrome (index.html + renderer.js) is hosted in a child WebContentsView; ALL
   // renderer access goes through getChromeContents(). backgroundColor/min size/icon/title
   // and the per-platform frameOpts carry over unchanged (DD4/DD6).
-  const initialWidth = 1400;
-  const initialHeight = 900;
-  mainWindow = new BaseWindow({
+  const initialWidth = contentSize ? contentSize.width : 1400;
+  const initialHeight = contentSize ? contentSize.height : 900;
+  const win = new BaseWindow({
     width: initialWidth,
     height: initialHeight,
     minWidth: 900,
@@ -916,11 +1088,16 @@ function createWindow() {
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     ...frameOpts,
   });
+  // H3 exactness: constructor width/height are WINDOW size; on a framed platform
+  // (mac hidden-titlebar) that under-sizes the content area. setContentSize makes
+  // the content size exactly the source's, so the re-applied guest bounds seed
+  // lands 1:1 (frameless win/linux: a no-op-sized call).
+  if (contentSize) win.setContentSize(contentSize.width, contentSize.height);
 
   // The chrome WebContentsView carries the webPreferences that used to live on the
   // BrowserWindow (DD1/DD2). Guest tabs are per-tab WebContentsViews wired explicitly
   // in tab-create (Flight 3 — all <webview> machinery removed in Leg 4).
-  chromeView = new WebContentsView({
+  const chromeView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       contextIsolation: true,
@@ -938,7 +1115,7 @@ function createWindow() {
 
   // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
   // the window itself (DD3).
-  mainWindow.contentView.addChildView(chromeView);
+  win.contentView.addChildView(chromeView);
   // Opaque dark background matching the shell (Flight-2 DD6): prevents a white flash
   // before the chrome renderer paints its first frame on slow/WSLg starts.
   chromeView.setBackgroundColor('#1e1f25');
@@ -949,23 +1126,98 @@ function createWindow() {
 
   chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
+  // Register the per-window record (F6 DD2). create() SEEDS last-focused (DD8 —
+  // under WSLg programmatic focus fires no event, so creation counts as focus);
+  // real focus events keep the tracker current, latest-event-wins. noBootTab
+  // rides the record (DD5 create-chain) and is served via window-boot-config.
+  const record = registry.create({ win, chromeView, noBootTab });
+  // Capture the id while the window is alive: BaseWindow property access THROWS
+  // "Object has been destroyed" once the native window is gone, and the `closed`
+  // handler below runs exactly then. An uncaught throw inside the `closed`
+  // emission aborts the listener chain AND wedges Electron's native close
+  // sequence on Wayland — the main-process event loop starves permanently
+  // (the F6 leg-4 window-close hang; see the flight log's Anomalies resolution).
+  const winId = win.id;
+  win.on('focus', () => registry.noteFocus(winId));
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    chromeView = null;
-    // Find-overlay teardown (DD1): destroys the lazy singleton and clears the find
-    // session + ready flag + queued init (AC6f — no refocus concern, everything is
-    // tearing down; teardownFindOverlayView never refocuses).
-    // ORDERING PIN (F8 DD5): this runs BEFORE closeMenuOverlay('teardown') — it nulls
-    // findOverlayTabWcId, so the teardown-reason find-restore naturally no-ops
-    // mid-window-teardown (the sheet-crash render-process-gone teardown, where the
-    // find session is still live, restores as desired).
-    teardownFindOverlayView();
-    // Menu-overlay close family (F8 DD4): emit the 'teardown' close (channel 7 is a
-    // no-op here — chrome contents already nulled — but the menu state is reset so a
-    // relaunch starts clean), then destroy the lazy singleton (DD9).
-    menuOverlay.closeMenuOverlay('teardown');
-    menuOverlay.teardown();
+  // Class 1b — window-lifecycle events route to THIS window's OWN chrome via the
+  // create closure (pass-2 L-a: neither per-tab, broadcast, nor sender-resolved).
+  const sendToOwnChrome = (channel, payload) => {
+    const cc = chromeView.webContents;
+    if (!cc.isDestroyed()) cc.send(channel, payload);
+  };
+
+  // Lifecycle split (DD3, step assignment pinned by review F8): per-window teardown
+  // runs at `close` (pre-teardown — guests alive, navigationHistory readable; spike
+  // item (d)); `closed` only removes the record. Overlay DESTRUCTION moved to the
+  // quit hooks (before-quit) with the F8 DD5 ordering pin traveling along.
+  win.on('close', () => {
+    const rec = registry.get(win.id);
+    if (!rec) return;
+    // (1) Whole-window closed-tab capture (DD4, leg 3): every persist-jar tab as
+    // an ordinary entry — same allowlist/exclusions as the tab-close site — in
+    // tabViews insertion order, each with the append sentinel and this window's
+    // id. Runs at `close` because the guests are still alive and their
+    // navigationHistory readable here (spike item (d)); the destroy loop below
+    // is what kills them. `win.destroy()` fires NO `close` event, so a
+    // destroyed-not-closed window is never captured — accepted, documented edge
+    // (DD3). Whole block try/catch — capture must never break close.
+    try {
+      const captured = captureWindowCloseEntries({
+        tabViews: rec.tabViews,
+        jarsList: jars.list(),
+        windowId: win.id,
+      });
+      for (const entry of captured) closedTabStack.push(entry);
+      if (captured.length > 0) broadcastClosedTabStackChanged();
+    } catch (err) {
+      console.error('[closed-tab-stack] window-close capture failed:', err);
+    }
+    // (2) Roaming-overlay detach guard (review M5), find BEFORE sheet (the F8 DD5
+    // ordering pin): close the find session when it targets one of this window's
+    // tabs (state reset + detach — DESTRUCTION is quit-time now), detach the
+    // overlay if it is attached here, then close any open sheet menu.
+    if (findOverlayTabWcId != null && rec.tabViews.has(findOverlayTabWcId)) {
+      closeFindOverlaySession({ refocusGuest: false });
+    }
+    if (findOverlayAttachedWin === win) hideFindOverlay();
+    // DD7 conditioning (leg 4 / review M1): close the sheet menu only when it is
+    // attached to THE DYING WINDOW — closing window B must not kill window A's
+    // open menu.
+    if (menuOverlay.getAttachedWindow() === win) menuOverlay.closeMenuOverlay('teardown');
+    // (3) Per-tab side-effect suite + guest destroy (DD3/M5): Electron never
+    // auto-destroys an attached WebContentsView's webContents on window close
+    // (spike verdict 3) — the explicit destroy is mandatory, per dying guest,
+    // mirroring the tab-close path's forgetTab + removeChildView + destroy.
+    for (const [wcId, entry] of rec.tabViews) {
+      historyRecorder?.forgetTab(wcId);
+      if (!win.isDestroyed()) win.contentView.removeChildView(entry.view);
+      if (!entry.view.webContents.isDestroyed()) entry.view.webContents.destroy();
+    }
+    rec.tabViews.clear();
+    rec.activeTabWcId = null;
+    // The chrome is NOT destroyed here (DD3: "null the chrome" — the reference
+    // drops with the record at `closed`). Destroying the sender's own webContents
+    // synchronously inside its window-close IPC dispatch is a crash-risk pattern,
+    // and today's single-window behavior (chrome wc outlives the window until
+    // quit) is the byte-identical baseline.
+  });
+
+  win.on('closed', () => {
+    // Record removal (DD3): singleton null-outs are gone; the DD8 accessor's
+    // membership validation makes a stale last-focused id fall back safely.
+    registry.remove(winId); // NEVER win.id here — destroyed-window access throws (see capture above)
+    // Chrome-webContents leak fix (M09 F6 Leg 4 / review M4 — the leg-2 deferral
+    // lands here): with N windows a closed window's chrome renderer would linger
+    // until quit. DEFERRED destroy via setImmediate — outside the sender's own
+    // window-close IPC dispatch (destroying the sender's webContents
+    // synchronously inside its own dispatch is the leg-2 crash-risk rationale).
+    // The record is already removed, so no send path can resolve this chrome
+    // between here and the destroy.
+    const chromeWc = chromeView.webContents;
+    setImmediate(() => {
+      if (!chromeWc.isDestroyed()) /** @type {any} */ (chromeWc).destroy();
+    });
   });
 
   // Menu-overlay close family (F8 DD4): BaseWindow blur — app switch closes any open
@@ -976,7 +1228,12 @@ function createWindow() {
   // NOT in the close family: where the platform fires blur on minimize the menu
   // closes via this path; where it doesn't (WSLg uncertainty), a menu surviving
   // minimize-restore is an accepted variation (leg AC3) — HAT observes.
-  mainWindow.on('blur', () => menuOverlay.closeMenuOverlay('blur'));
+  // DD7 blur conditioning (M09 F6 Leg 4): fires ONLY when the blurred window IS
+  // the sheet's current attachment window — else opening a menu in window B is
+  // killed by A's in-flight blur (the two-window open handoff).
+  win.on('blur', () => {
+    if (menuOverlay.getAttachedWindow() === win) menuOverlay.closeMenuOverlay('blur');
+  });
 
   // DD3: keep the chrome view sized to the window. No-op if the view is already gone
   // (resize can fire during teardown).
@@ -984,26 +1241,26 @@ function createWindow() {
   // 'trigger-send-bounds' to the renderer so it immediately re-measures #webviews
   // and resends the active guest's bounds. Belt-and-suspenders alongside the
   // renderer-side ResizeObserver (which fires per CSS layout frame during transitions).
-  mainWindow.on('resize', () => {
-    if (!chromeView) return;
-    const { width, height } = mainWindow.getContentBounds();
+  win.on('resize', () => {
+    if (chromeView.webContents.isDestroyed()) return;
+    const { width, height } = win.getContentBounds();
     chromeView.setBounds({ x: 0, y: 0, width, height });
-    getChromeContents()?.send('trigger-send-bounds');
+    sendToOwnChrome('trigger-send-bounds');
   });
 
   // Forward maximize state to the renderer so the custom window controls can
-  // sync their label/icon/data-state (DD7 read path).
-  // Leg 1 re-points only the .send payload through the chrome contents (required for AC7's
-  // zero-match grep). The maximize/unmaximize event REGISTRATION stays on mainWindow — a
-  // BaseWindow still emits these — and is Leg 2's concern (DD4 window-control re-point).
-  mainWindow.on('maximize', () => {
-    getChromeContents()?.send('window-maximized-change', true);
-    getChromeContents()?.send('trigger-send-bounds');
+  // sync their label/icon/data-state (DD7 read path). Class 1b: THIS window's
+  // maximize state goes to THIS window's chrome, never the accessor's.
+  win.on('maximize', () => {
+    sendToOwnChrome('window-maximized-change', true);
+    sendToOwnChrome('trigger-send-bounds');
   });
-  mainWindow.on('unmaximize', () => {
-    getChromeContents()?.send('window-maximized-change', false);
-    getChromeContents()?.send('trigger-send-bounds');
+  win.on('unmaximize', () => {
+    sendToOwnChrome('window-maximized-change', false);
+    sendToOwnChrome('trigger-send-bounds');
   });
+
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,7 +1295,8 @@ function applyZoom(wc, action) {
   const current = wc.getZoomFactor();
   const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoomFactor(current, action)));
   wc.setZoomFactor(next);
-  getChromeContents()?.send('zoom-changed', { wcId: wc.id, factor: next });
+  // Class 3 (DD2): the zoomed tab's OWNING window's chrome, resolved at event time.
+  chromeForTab(wc.id)?.send('zoom-changed', { wcId: wc.id, factor: next });
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,7 +1319,7 @@ function applyZoom(wc, action) {
 // minimal internal-guest one. The pure decision (which key, if any) lives in the
 // unit-tested crossViewNavAction; here we run the side effects. Returns true iff it
 // handled (swallowed) the key so callers can early-return.
-function handleGuestCrossViewNav(event, input) {
+function handleGuestCrossViewNav(event, input, contents) {
   if (input.type !== 'keyDown') return false;
   const nav = crossViewNavAction({
     key: input.key,
@@ -1080,11 +1338,13 @@ function handleGuestCrossViewNav(event, input) {
   // Focus-then-send (F4 rule): OS-focus the chrome VIEW before the focus-address IPC.
   // dispatchChromeAction('focus-address') only DOM-focuses els.address; for the input
   // to actually accept typing the chrome view must hold OS keyboard focus (which, on a
-  // focused guest, it does not). Reuse getChromeContents()?.focus() (the focusChrome
-  // primitive). Both cross-view keys resolve to the pinned address bar, so both ride
-  // the existing chrome-shortcut-action:focus-address channel.
-  getChromeContents()?.focus();
-  getChromeContents()?.send('chrome-shortcut-action', { action: 'focus-address' });
+  // focused guest, it does not). Class 3 (F6 DD2): the guest's OWNING window's chrome,
+  // resolved at event time — a window-2 guest keystroke must never dispatch into
+  // window 1's chrome. Both cross-view keys resolve to the pinned address bar, so
+  // both ride the existing chrome-shortcut-action:focus-address channel.
+  const cc = chromeForTab(contents.id);
+  cc?.focus();
+  cc?.send('chrome-shortcut-action', { action: 'focus-address' });
   return true;
 }
 
@@ -1120,8 +1380,9 @@ function handleGuestCrossViewNav(event, input) {
 // @param {Electron.Event} event
 // @param {Electron.Input} input
 // @param {'web' | 'internal'} guestKind
+// @param {Electron.WebContents} contents  the guest — resolves its OWNING window's chrome (class 3)
 // @returns {boolean} whether it handled (swallowed) the key
-function handleGuestChromeShortcut(event, input, guestKind) {
+function handleGuestChromeShortcut(event, input, guestKind, contents) {
   if (input.type !== 'keyDown') return false;
   const action = keydownToAction({
     key: input.key,
@@ -1145,7 +1406,8 @@ function handleGuestChromeShortcut(event, input, guestKind) {
   // guard must not swallow repeats for those. isRepeatSafeAction is the pure,
   // unit-tested predicate for that carve-out (src/shared/guest-forward-allowlist.js).
   if (isRepeatSafeAction(action) || !input.isAutoRepeat) {
-    getChromeContents()?.send('chrome-shortcut-action', { action });
+    // Class 3 (F6 DD2): the guest's OWNING window's chrome at event time.
+    chromeForTab(contents.id)?.send('chrome-shortcut-action', { action });
   }
   return true;
 }
@@ -1164,8 +1426,10 @@ function wireGuestContents(contents) {
   // the opener closed before this IPC lands) yields `openerPartition: undefined`,
   // which inheritFromPartition resolves to default routing — never a throw.
   contents.setWindowOpenHandler(({ url }) => {
-    const openerPartition = tabViews.get(contents.id)?.partition;
-    getChromeContents()?.send('open-tab', { url, openerPartition });
+    const owner = registry.getWindowForGuest(contents.id);
+    const openerPartition = owner ? owner.tabViews.get(contents.id)?.partition : undefined;
+    // Class 3 (F6 DD2): the popup opens in the OPENER's window's chrome.
+    chromeForTab(contents.id)?.send('open-tab', { url, openerPartition });
     return { action: 'deny' };
   });
   // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
@@ -1193,7 +1457,7 @@ function wireGuestContents(contents) {
       // the existing accelerator branches, which stay UNTOUCHED (no regression surface
       // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
       // for every one of those keys, so it never shadows them.
-      if (handleGuestCrossViewNav(event, input)) return;
+      if (handleGuestCrossViewNav(event, input, contents)) return;
       // Generalized chrome-class accelerator forwarder (DD8, M06 F3 Leg 4) — same
       // contained-call pattern as the cross-view bridge just above, and MUST stay
       // second (after cross-view nav, before everything below — see the ordering
@@ -1202,7 +1466,7 @@ function wireGuestContents(contents) {
       // overlaps the keys handled by the branches below (devtools/zoom/print/find/
       // downloads are excluded from the allowlist itself), so this never shadows an
       // existing accelerator.
-      if (handleGuestChromeShortcut(event, input, 'web')) return;
+      if (handleGuestChromeShortcut(event, input, 'web', contents)) return;
       // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
       // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
       // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
@@ -1239,8 +1503,9 @@ function wireGuestContents(contents) {
         event.preventDefault();
         // No chrome focus here (DD6): main focuses the overlay webContents in
         // openFindOverlaySession when the renderer drives find-overlay:open —
-        // a chrome-view focus would actively fight that.
-        getChromeContents()?.send('open-find');
+        // a chrome-view focus would actively fight that. Class 3: the guest's
+        // owning window's chrome.
+        chromeForTab(contents.id)?.send('open-find');
         return;
       }
       // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
@@ -1249,7 +1514,7 @@ function wireGuestContents(contents) {
       // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
       if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
         event.preventDefault();
-        getChromeContents()?.send('open-downloads');
+        chromeForTab(contents.id)?.send('open-downloads');
         return;
       }
       // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
@@ -1271,7 +1536,8 @@ function wireGuestContents(contents) {
     // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
     // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
     const sendDevtoolsState = (open) => {
-      getChromeContents()?.send('devtools-state-changed', { wcId: contents.id, open });
+      // Class 3 (F6 DD2): resolved at event time, not captured at wiring time.
+      chromeForTab(contents.id)?.send('devtools-state-changed', { wcId: contents.id, open });
     };
     contents.on('devtools-opened', () => sendDevtoolsState(true));
     contents.on('devtools-closed', () => sendDevtoolsState(false));
@@ -1282,9 +1548,10 @@ function wireGuestContents(contents) {
     // guests are excluded by the !__goldfinchInternal guard (DD6).
     contents.on('context-menu', (event, params) => {
       event.preventDefault();
-      if (!mainWindow) return;
       if (isInternalContents(contents)) return;
-      getChromeContents()?.send('page-context-menu', { wcId: contents.id, params });
+      // Class 3 (F6 DD2): the tab's owning window's chrome at event time — the
+      // owner-resolve null also covers the former window-gone guard.
+      chromeForTab(contents.id)?.send('page-context-menu', { wcId: contents.id, params });
     });
   } else {
     // Internal goldfinch:// guests get NO before-input-event from the block above
@@ -1307,8 +1574,8 @@ function wireGuestContents(contents) {
     // Cross-view nav MUST run first (early return) — see the ordering comment on
     // handleGuestChromeShortcut (Ctrl+L double-dispatch otherwise).
     contents.on('before-input-event', (event, input) => {
-      if (handleGuestCrossViewNav(event, input)) return;
-      handleGuestChromeShortcut(event, input, 'internal');
+      if (handleGuestCrossViewNav(event, input, contents)) return;
+      handleGuestChromeShortcut(event, input, 'internal', contents);
     });
   }
 }
@@ -1322,9 +1589,11 @@ function wireGuestContents(contents) {
 // its own, so there is no divergence to keep in sync.
 function wireTabViewEvents(view, wcId, partition) {
   const wc = view.webContents;
+  // Class 3 (F6 DD2): the OWNING window's chrome, resolved INSIDE the closure at
+  // event time — never captured at wiring time. Event-time resolution is what
+  // makes DD5's adopt re-bind automatic when a tab moves between windows.
   const sendToChrome = (channel, payload) => {
-    const cc = getChromeContents();
-    if (cc && !cc.isDestroyed()) cc.send(channel, payload);
+    chromeForTab(wcId)?.send(channel, payload);
   };
   // guard: wraps a handler so it no-ops if the webContents is already destroyed.
   // Uses rest args to forward all event arguments through unchanged.
@@ -1399,9 +1668,13 @@ let downloadsManager = null;
 /** @type {Map<number, Electron.DownloadItem>} */
 const liveDownloadItems = new Map();
 
-ipcMain.handle('download-media', async (_event, { webContentsId, url, suggestedName, saveDir }) => {
+ipcMain.handle('download-media', async (event, { webContentsId, url, suggestedName, saveDir }) => {
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  const downloader = wc || getActiveTabContents() || getChromeContents();
+  // Class 1 (F6 DD2): the fallback chain resolves the SENDER's window record —
+  // its active tab, then its chrome (accessor-rule fallback for a non-chrome sender).
+  const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
+  const senderActiveTab = rec && rec.activeTabWcId != null ? getTabContents(rec.activeTabWcId) : null;
+  const downloader = wc || senderActiveTab || (rec ? rec.chromeView.webContents : null);
   if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
 
   if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
@@ -1436,11 +1709,17 @@ function uniquePath(dir, filename) {
   return candidate;
 }
 
-ipcMain.handle('choose-download-dir', async () => {
-  const res = await dialog.showOpenDialog(mainWindow, {
+ipcMain.handle('choose-download-dir', async (event) => {
+  // Class 1 (F6 DD2): parent the dialog to the SENDER's window (accessor-rule
+  // fallback keeps a parent when the sender is somehow recordless).
+  const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
+  const dialogOpts = /** @type {Electron.OpenDialogOptions} */ ({
     title: 'Choose a folder to download all media into',
     properties: ['openDirectory', 'createDirectory']
   });
+  const res = rec
+    ? await dialog.showOpenDialog(/** @type {Electron.BaseWindow} */ (rec.win), dialogOpts)
+    : await dialog.showOpenDialog(dialogOpts);
   if (res.canceled || !res.filePaths.length) return null;
   const chosen = res.filePaths[0];
   approvedDownloadDirs.add(path.resolve(chosen));
@@ -1587,8 +1866,10 @@ function schedulePrivacySend(id) {
     setTimeout(() => {
       privacySendTimers.delete(id);
       const agg = privacyByTab.get(id);
-      const cc = getChromeContents();
-      if (agg && cc && !cc.isDestroyed()) {
+      // Class 3 (F6 DD2): the tab's OWNING window's chrome, resolved when the
+      // timer FIRES (send time), not when it was scheduled.
+      const cc = chromeForTab(id);
+      if (agg && cc) {
         cc.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
       }
     }, 350)
@@ -1731,8 +2012,9 @@ function applyShields(ses) {
   ses.setPermissionRequestHandler((wc, permission, callback) => {
     const granted = !SENSITIVE_PERMISSIONS.has(permission);
     const id = wc ? wc.id : null;
-    const cc = getChromeContents();
-    if (cc && id != null && !cc.isDestroyed()) {
+    // Class 3 (F6 DD2): the requesting tab's owning window's chrome at event time.
+    const cc = id != null ? chromeForTab(id) : null;
+    if (cc) {
       cc.send('privacy-permission', { webContentsId: id, permission, granted });
     }
     callback(granted);
@@ -1747,19 +2029,22 @@ ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.g
 
 /**
  * Broadcast a channel+payload to both audiences that need settings/shields change events:
- *  1. The chrome renderer (`getChromeContents()`, the file:// chrome WebContentsView) — sent separately
- *     because the __goldfinchInternal filter below intentionally excludes it (it is not an
+ *  1. EVERY registered window's chrome renderer (class 2, F6 DD2 — the fan-out goes to
+ *     ALL chromes, never just the accessor's) — sent separately because the
+ *     __goldfinchInternal filter below intentionally excludes them (a chrome is not an
  *     internal-session webContents).
  *  2. Every webContents whose session carries __goldfinchInternal === true (the settings guest
- *     and any other future goldfinch:// internal pages).
+ *     and any other future goldfinch:// internal pages) — ONCE GLOBALLY, never per-window.
  * Leg 4 reuses this helper for the shields-changed broadcast to the settings guest.
  * @param {string} channel
  * @param {unknown} payload
  */
 function broadcastToChromeAndInternal(channel, payload) {
-  const cc = getChromeContents();
-  if (cc && !cc.isDestroyed()) {
-    cc.send(channel, payload);
+  for (const rec of registry.records()) {
+    const cc = rec.chromeView.webContents;
+    if (cc && !cc.isDestroyed()) {
+      cc.send(channel, payload);
+    }
   }
   for (const wc of webContents.getAllWebContents()) {
     if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
@@ -2056,15 +2341,59 @@ ipcMain.on('shields-farble', (event, url) => {
 });
 
 // --- window controls (custom frameless min/max/close, win+linux) ---
-ipcMain.on('window-minimize', () => mainWindow && mainWindow.minimize());
-ipcMain.on('window-toggle-maximize', () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMaximized()) mainWindow.unmaximize();
-  else mainWindow.maximize();
+// Class 1 (F6 DD2/DD3): each control resolves the SENDER's window — window 2's
+// controls must never minimize/close window 1.
+ipcMain.on('window-minimize', (event) => {
+  registry.getWindowForChrome(event.sender)?.win.minimize();
+});
+ipcMain.on('window-toggle-maximize', (event) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec) return;
+  if (rec.win.isMaximized()) rec.win.unmaximize();
+  else rec.win.maximize();
 });
 // DD6: close() → 'closed' → 'window-all-closed' → app.quit() (non-darwin); NOT app.quit() directly.
-ipcMain.on('window-close', () => mainWindow && mainWindow.close());
-ipcMain.handle('window-is-maximized', () => !!(mainWindow && mainWindow.isMaximized()));
+ipcMain.on('window-close', (event) => {
+  registry.getWindowForChrome(event.sender)?.win.close();
+});
+ipcMain.handle('window-is-maximized', (event) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  return !!(rec && rec.win.isMaximized());
+});
+
+// New Window command (M09 F6 Leg 4, DD5): kebab item + Ctrl/Cmd+N, both through
+// the one-classifier path → dispatchChromeAction('new-window') → this invoke.
+// Chrome-trust domain, sender-gated by registry membership (the tab-create
+// discipline). The window boots its home tab exactly like first launch (no
+// noBootTab), and registry.create seeds last-focused — so the DD8 automation
+// accessor deterministically retargets to the new window (WSLg-safe).
+ipcMain.handle('window-create', (event) => {
+  if (!registry.getWindowForChrome(event.sender)) return null;
+  const rec = createWindow();
+  return rec.win.id;
+});
+
+// Boot-config invoke (DD5 / review L4 transport + review H1 barrier). Joins the
+// chrome renderer's boot-gating Promise.all: returns { bootTab } (false only for
+// move-created windows — the registry record's create-chain flag). Serving this
+// invoke IS the H1 readiness proof: the chrome document's module evaluation has
+// completed (the invoke is issued from module tail code, and the
+// onAdoptTab/onTabMovedAway registrations sit ABOVE the boot gate), so the
+// queued adopt-protocol sends flush here — a send any earlier would hit a
+// pre-boot document and be silently dropped with no retry.
+ipcMain.handle('window-boot-config', (event) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec) return { bootTab: true };
+  rec.bootConfigServed = true;
+  const queued = rec.pendingChromeSends.splice(0);
+  const cc = rec.chromeView.webContents;
+  for (const buildMsg of queued) {
+    if (cc.isDestroyed()) break;
+    const [channel, payload] = buildMsg();
+    cc.send(channel, payload);
+  }
+  return { bootTab: !rec.noBootTab };
+});
 
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
@@ -2096,7 +2425,7 @@ ipcMain.handle('new-container-create', async (_event, { name }) => {
 // Tab view IPC handlers (Flight 3, Leg 1 — web tab lifecycle via WebContentsView)
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('tab-create', (_event, { url, partition, trusted, restoreHistory }) => {
+ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }) => {
   // -----------------------------------------------------------------------
   // Pick webPreferences by trust level (Leg 3).
   //
@@ -2133,18 +2462,23 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted, restoreHistory 
       // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
     };
   }
+  // Class 1 (F6 DD2): the tab is created in the SENDER's window. The former
+  // unguarded mainWindow deref is now a guarded early return (a tab-create racing
+  // window teardown returns null instead of crashing main).
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec) return null;
   const view = new WebContentsView({ webPreferences: webPreferencesObj });
-  mainWindow.contentView.addChildView(view);
+  rec.win.contentView.addChildView(view);
 
   // Seed initial bounds
-  if (mainWindow) {
-    const { width, height } = mainWindow.getContentBounds();
+  {
+    const { width, height } = rec.win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
   }
   view.setVisible(false);
 
   const wcId = view.webContents.id;
-  tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
+  rec.tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
 
   // Explicit construction-time wiring: web-contents-created fires synchronously
   // during new WebContentsView(), so the global handler cannot identify the view yet.
@@ -2178,43 +2512,46 @@ ipcMain.handle('tab-create', (_event, { url, partition, trusted, restoreHistory 
   return wcId;
 });
 
-ipcMain.on('tab-close', (_event, wcId, stripIndex) => {
-  const entry = tabViews.get(wcId);
-  if (!entry) return;
+ipcMain.on('tab-close', (event, wcId, stripIndex) => {
+  // Class 1 (F6 DD2): resolve the OWNING window's record (guest reverse lookup) —
+  // also the guard that replaces the former unguarded mainWindow deref below.
+  const owner = registry.getWindowForGuest(wcId);
+  const entry = owner ? owner.tabViews.get(wcId) : null;
+  if (!owner || !entry) return;
   // Captured BEFORE the null-out below — one line lower and this is always false.
-  const wasActive = activeTabWcId === wcId;
+  const wasActive = owner.activeTabWcId === wcId;
   // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
   // tabViews.delete below (the webContents and its navigationHistory must still be
-  // alive to read). Positive persist-jar allowlist (the history-recorder idiom):
-  // resolve the tab's partition against jars.list() — burner (`burner:<n>`) and
-  // internal (INTERNAL_PARTITION) partitions structurally match nothing here, so
-  // they are never captured, with NO "is not a burner" negative check anywhere.
-  // `!entry.trusted` is belt-and-suspenders (the internal partition already fails
-  // the allowlist on its own). Whole block try/catch — capture must never break close.
+  // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry
+  // (F6 leg 3 — shared with the whole-window `close` capture site): positive
+  // persist-jar allowlist, burner/internal structurally excluded, `!trusted`
+  // belt-and-suspenders. The entry is tagged with the OWNING window's id (DD4 —
+  // `owner` is the guest's reverse-resolved record above), which the pop rule
+  // compares against the reopen invoker. Whole block try/catch — capture must
+  // never break close.
   try {
-    const jar = !entry.trusted && jars.list().find((j) => j.partition === entry.partition);
-    if (jar && !entry.view.webContents.isDestroyed()) {
-      const wc = entry.view.webContents;
-      closedTabStack.push({
-        url: wc.getURL(),
-        title: wc.getTitle(),
-        jarId: jar.id,
-        stripIndex: Number.isInteger(stripIndex) ? stripIndex : -1,
-        navEntries: wc.navigationHistory.getAllEntries(),
-        navIndex: wc.navigationHistory.getActiveIndex(),
-        closedAt: Date.now(),
-      });
+    const captured = captureClosedTabEntry({
+      tabEntry: entry,
+      jarsList: jars.list(),
+      stripIndex: Number.isInteger(stripIndex) ? stripIndex : APPEND_SENTINEL,
+      windowId: owner.win.id,
+    });
+    if (captured) {
+      closedTabStack.push(captured);
+      broadcastClosedTabStackChanged();
     }
   } catch (err) {
     console.error('[closed-tab-stack] capture failed:', err);
   }
-  mainWindow.contentView.removeChildView(entry.view);
+  if (!owner.win.isDestroyed()) {
+    owner.win.contentView.removeChildView(entry.view);
+  }
   if (!entry.view.webContents.isDestroyed()) {
     entry.view.webContents.destroy();
   }
-  tabViews.delete(wcId);
+  owner.tabViews.delete(wcId);
   historyRecorder?.forgetTab(wcId);
-  if (activeTabWcId === wcId) activeTabWcId = null;
+  if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
   // Find-overlay session teardown (AC6d): the session target is being destroyed —
   // close the session with NO refocus (nothing sensible to focus; the stopFind inside
   // close tolerates the mid-destruction guest via getTabContents' guards, and the
@@ -2228,12 +2565,16 @@ ipcMain.on('tab-close', (_event, wcId, stripIndex) => {
   // left to the activeTabWcId null-out accident). Deliberately NO "no web tabs left"
   // mirror — the sheet serves internal tabs as well (DD7); active-tab lifecycle
   // covers it.
+  // DD7 conditioning (leg 4 / review M1): both belt-and-suspenders hides and the
+  // menu close fire only when THIS owner window holds the respective overlay's
+  // attachment — closing a tab in window B must not hide window A's find bar or
+  // close A's open menu.
   if (wasActive) {
-    hideFindOverlay();
-    menuOverlay.closeMenuOverlay('tab-close');
+    if (findOverlayAttachedWin === owner.win) hideFindOverlay();
+    if (menuOverlay.getAttachedWindow() === owner.win) menuOverlay.closeMenuOverlay('tab-close');
   }
-  const anyWebTabLeft = [...tabViews.values()].some((e) => e.trusted === false);
-  if (!anyWebTabLeft) hideFindOverlay();
+  const anyWebTabLeft = [...owner.tabViews.values()].some((e) => e.trusted === false);
+  if (!anyWebTabLeft && findOverlayAttachedWin === owner.win) hideFindOverlay();
 });
 
 // M09 F4 Leg 2 (DD2 step 2) — reopen-chain invoke #1. Pops the closed-tab stack
@@ -2241,9 +2582,12 @@ ipcMain.on('tab-close', (_event, wcId, stripIndex) => {
 // orchestrated: this handler never constructs a view itself — see DD2's
 // design-review correction). Returns `null` on an empty stack (renderer no-ops
 // silently, no error surface).
-ipcMain.handle('tab-reopen', () => {
+ipcMain.handle('tab-reopen', (event) => {
   const entry = closedTabStack.pop();
   if (!entry) return null;
+  // DD6: the pop is a stack MUTATION — the size push fires even when the safety
+  // re-check below drops the entry (the stack shrank either way).
+  broadcastClosedTabStackChanged();
   // Defense-in-depth re-validation (two-point-boundary parity — DD2 ruling): the
   // URL was already safety-checked at capture-adjacent points, but main re-checks
   // before handing it back to the renderer, same discipline as internal-open-tab-
@@ -2257,11 +2601,17 @@ ipcMain.handle('tab-reopen', () => {
   // (inheritFromPartition -> resolveNewTabContainer -> makeBurner) picks the
   // resolved default, and announces the fallback explicitly.
   const jar = jars.list().find((j) => j.id === entry.jarId);
+  // DD4 pop rule (F6 leg 3): the entry's stripIndex is honored only when it was
+  // captured in the INVOKING window (sender-resolved) — a reopen invoked from any
+  // other window appends instead of landing at a position that belonged to a
+  // different strip. Whole-window entries always append by construction (their
+  // origin window is gone, so the ids can never match).
+  const invoker = registry.getWindowForChrome(event.sender);
   return {
     url: entry.url,
     title: entry.title,
     ...(jar ? { partition: jar.partition } : {}),
-    stripIndex: entry.stripIndex,
+    stripIndex: reopenStripIndex(entry, invoker ? invoker.win.id : null),
     navEntries: entry.navEntries,
     navIndex: entry.navIndex,
     jarFallback: !jar,
@@ -2288,13 +2638,97 @@ ipcMain.handle('tab-history-snapshot', (_e, { webContentsId }) => {
   };
 });
 
-// Read-only closed-tab-stack size for the tab-context model's reopen-closed
-// omission rule (empty stack → item omitted, per the sheet's omitted-only
-// discipline — no disabled-item shape exists). Trivial wrapper over the existing
+// Read-only closed-tab-stack size — since F6 leg 3 (DD6) this is the push-cache's
+// BOOT SEED only: the renderer invokes it once at chrome load, and every later
+// update arrives via the closed-tab-stack-changed push (which always wins the
+// seed/push race renderer-side). Trivial wrapper over the existing
 // closedTabStack.size() the tab-reopen handler already shares.
 ipcMain.handle('closed-tab-stack-size', () => closedTabStack.size());
 
-ipcMain.on('tab-hide', (_event, wcId) => {
+// Move to new window (M09 F6 Leg 4 — DD5 steps 1–4, renderer-initiated,
+// main-executed; spike verdict GO → LIVE re-parent, same webContents).
+// (H2) the payload is the SOURCE renderer's strip snapshot ({wcId, url, title,
+// favicon, container}) — chrome→chrome trust domain; main shape-validates and
+// relays into `adopt-tab`, re-deriving url/title off the live wc at SEND time
+// (a burner's synthesized container and the favicon exist ONLY renderer-side).
+ipcMain.handle('tab-move-to-new-window', (event, payload) => {
+  const source = registry.getWindowForChrome(event.sender);
+  if (!source) return null;
+  const p = validateMoveTabPayload(payload);
+  if (!p) return null;
+  const entry = source.tabViews.get(p.wcId);
+  // The tab must belong to the SENDER's window and be a live WEB tab (internal
+  // tabs are omitted from the model row — review M4 — and refused here as
+  // defense-in-depth). A sole-tab move is a no-op window swap: the model omits
+  // it at isLastTab; main refuses it too (never leave the source at zero tabs).
+  if (!entry || entry.trusted || entry.view.webContents.isDestroyed()) return null;
+  if (source.tabViews.size <= 1) return null;
+  const wc = entry.view.webContents;
+
+  // (M2) the live find session targets the moved tab: close it FIRST (the
+  // tab-close precedent — refocusGuest:false; the session is bound to the
+  // source window and does not survive the move; findText/findOpen reset is
+  // the documented renderer-side lost state).
+  if (p.wcId === findOverlayTabWcId) closeFindOverlaySession({ refocusGuest: false });
+
+  // (H3) geometry: capture the guest's current window-local content-DIP bounds
+  // BEFORE detach, and create the target with the SOURCE's content size —
+  // identical chrome layout makes the re-applied seed exact (spike answer (b)).
+  // ACCEPTED interim visual (documented): the live guest renders over the
+  // target's still-booting chrome until adopt completes — a static seed, never
+  // an animation (the native-surface invariant: guest bounds are a discrete
+  // setBounds STEP).
+  const guestBounds = entry.view.getBounds();
+  const srcContent = source.win.getContentBounds();
+  const target = createWindow({
+    noBootTab: true,
+    contentSize: { width: srcContent.width, height: srcContent.height },
+  });
+
+  // Re-parent (DD1 spike primitive: destroy-free removeChildView → addChildView
+  // across windows; webContents survives, wcId stable, live state intact).
+  source.win.contentView.removeChildView(entry.view);
+  target.win.contentView.addChildView(entry.view);
+  entry.view.setBounds(guestBounds);
+  entry.view.setVisible(true);
+
+  // Move the tabViews entry between records + update activeTabWcId both sides.
+  // Event-time class-3 routing (DD2) makes the per-tab main→chrome fan re-bind
+  // to the target window automatically from this point on (verified per channel
+  // by the leg's live sweep).
+  source.tabViews.delete(p.wcId);
+  target.tabViews.set(p.wcId, entry);
+  entry.active = true;
+  if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
+  target.activeTabWcId = p.wcId;
+
+  // Focus rules (Chrome parity): the move-created window is focused, moved tab
+  // active. Programmatic win.focus() fires NO focus event under WSLg (spike
+  // verdict 4) — noteFocus seeds the DD8 accessor deterministically.
+  target.win.focus();
+  registry.noteFocus(target.win.id);
+
+  // Source strip closes ranks NOW (the source chrome is booted — no barrier).
+  const sourceCc = source.chromeView.webContents;
+  if (!sourceCc.isDestroyed()) sourceCc.send('tab-moved-away', { wcId: p.wcId });
+
+  // (H1) queue the target pair on the registry record — delivered only after
+  // the target chrome's window-boot-config invoke is served. Thunks: the adopt
+  // payload's main-authoritative url/title and the nav-state read off the live
+  // wc at DELIVERY time.
+  queueChromeSend(target, () => ['adopt-tab', buildAdoptPayload(p, wc)]);
+  queueChromeSend(target, () => ['tab-nav-state', {
+    wcId: p.wcId,
+    canGoBack: !wc.isDestroyed() && wc.canGoBack(),
+    canGoForward: !wc.isDestroyed() && wc.canGoForward(),
+  }]);
+  return { ok: true, windowId: target.win.id };
+});
+
+ipcMain.on('tab-hide', (event, wcId) => {
+  // Class 1 (F6 DD2): owner-record resolve replaces the singleton activeTabWcId.
+  const owner = registry.getWindowForGuest(wcId);
+  if (!owner) return;
   // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
   // takes the overlay out of the stack too. Restore needs no code here —
   // late-activation lands in tab-set-active's re-add.
@@ -2302,17 +2736,19 @@ ipcMain.on('tab-hide', (_event, wcId) => {
   // is open CLOSES the menu ('tab-hide'). The DD5 hook skips the find-restore for
   // this reason (the close runs BEFORE activeTabWcId is nulled below — a restore
   // here would paint the bar over a hidden guest).
-  if (wcId === activeTabWcId) {
-    hideFindOverlay();
-    menuOverlay.closeMenuOverlay('tab-hide');
+  // DD7 conditioning (leg 4 / review M1): owner-window === attachment-window —
+  // hiding window B's active guest must not disturb window A's open overlays.
+  if (wcId === owner.activeTabWcId) {
+    if (findOverlayAttachedWin === owner.win) hideFindOverlay();
+    if (menuOverlay.getAttachedWindow() === owner.win) menuOverlay.closeMenuOverlay('tab-hide');
   }
-  const entry = tabViews.get(wcId);
+  const entry = owner.tabViews.get(wcId);
   if (!entry) return;
   if (!entry.view.webContents.isDestroyed()) {
     entry.view.setVisible(false);
   }
   entry.active = false;
-  if (activeTabWcId === wcId) activeTabWcId = null;
+  if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
 });
 
 ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
@@ -2333,9 +2769,13 @@ ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
   }
 });
 
-ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
+ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
+  // Class 1 (F6 DD2): activation is scoped to the tab's OWNING window's record —
+  // activating a tab in window 2 must not touch window 1's active state.
+  const owner = registry.getWindowForGuest(wcId);
+  if (!owner) return;
   // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
-  const entry = tabViews.get(wcId);
+  const entry = owner.tabViews.get(wcId);
   if (entry) {
     // Hoisted rounded bounds so the guest setBounds and lastGuestBounds share one object.
     const rounded = bounds
@@ -2349,13 +2789,16 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
     }
     entry.active = true;
     // Raise the active guest view to the top so page input works.
-    if (mainWindow) {
-      mainWindow.contentView.addChildView(entry.view);
+    if (!owner.win.isDestroyed()) {
+      owner.win.contentView.addChildView(entry.view);
     }
     // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
     // above, or the guest buries the overlay. Do not "optimize" this away when the
     // overlay is already visible — every guest re-add raises the guest.
-    if (findOverlayTabWcId != null && wcId !== findOverlayTabWcId) {
+    // DD7 conditioning (leg 4): the switch-away close fires only when the find
+    // session's tab lives in THIS owner window (owner.tabViews.has) — activating
+    // a tab in window B must not close window A's live find session.
+    if (findOverlayTabWcId != null && wcId !== findOverlayTabWcId && owner.tabViews.has(findOverlayTabWcId)) {
       // AC6a: activating a DIFFERENT tab (internal or web alike — also covers DD7)
       // CLOSES the session: stopFind clearSelection on the old guest, hide, clear
       // state. NO refocus — the new guest was already added/raised above; refocusing
@@ -2372,47 +2815,57 @@ ipcMain.on('tab-set-active', (_event, { wcId, bounds }) => {
     // Menu-overlay sheet (F8 DD4/DD9/DD7): strictly AFTER the guest re-add AND the
     // find-overlay re-assert above, so the sheet sits top-of-stack. No entry.trusted
     // gate — the sheet serves internal tabs too (DD7).
-    if (rounded) menuOverlay.syncBounds(rounded);
-    if (activeTabWcId !== null && activeTabWcId !== wcId) {
+    // DD7 conditioning (leg 4 / review M1): ALL three sheet touches below fire
+    // only when THIS owner window is the sheet's attachment window — else window
+    // B's tab activity moves/closes/re-raises window A's open menu.
+    const sheetAttachedHere = menuOverlay.getAttachedWindow() === owner.win;
+    if (rounded && sheetAttachedHere) menuOverlay.syncBounds(rounded);
+    if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
       // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
       // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
       // skips the find-restore for 'tab-switch' — this handler's own per-tab
       // find-restore logic above governs.
-      menuOverlay.closeMenuOverlay('tab-switch');
-    } else if (menuOverlay.isMenuOpen()) {
+      if (sheetAttachedHere) menuOverlay.closeMenuOverlay('tab-switch');
+    } else if (menuOverlay.isMenuOpen() && sheetAttachedHere) {
       // Same-tab re-activation with a menu open: the re-add keeps the sheet
-      // top-of-stack via re-add-last.
+      // top-of-stack via re-add-last (the recorded attachment — never re-resolved).
       menuOverlay.show();
     }
   }
-  // Hide old active tab
-  if (activeTabWcId !== null && activeTabWcId !== wcId) {
-    const oldEntry = tabViews.get(activeTabWcId);
+  // Hide old active tab (within the owning window only)
+  if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
+    const oldEntry = owner.tabViews.get(owner.activeTabWcId);
     if (oldEntry && !oldEntry.view.webContents.isDestroyed()) {
       oldEntry.view.setVisible(false);
     }
     if (oldEntry) oldEntry.active = false;
   }
-  activeTabWcId = wcId;
+  owner.activeTabWcId = wcId;
 });
 
-ipcMain.on('tab-set-bounds', (_event, { wcId, bounds }) => {
-  const entry = tabViews.get(wcId);
+ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
+  // Class 1 (F6 DD2): owner-record resolve for the active-tab compare below.
+  const owner = registry.getWindowForGuest(wcId);
+  const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!entry || entry.view.webContents.isDestroyed()) return;
   const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
   entry.view.setBounds(rounded);
   // Find-overlay position-sync (DD2): the overlay tracks the ACTIVE guest's bounds —
   // resize/maximize/panel toggles all funnel here via sendActiveBounds/ResizeObserver/
-  // trigger-send-bounds.
-  if (wcId === activeTabWcId) {
+  // trigger-send-bounds. DD7 conditioning (leg 4 / review M1): the live follows fire
+  // only when THIS owner window holds the respective overlay's attachment — window
+  // B's bounds churn must not re-position window A's open find bar / menu. The
+  // lastGuestBounds single slot survives as a last-resort show fallback only (the
+  // show paths fetch per-window bounds now).
+  if (wcId === owner.activeTabWcId) {
     lastGuestBounds = rounded;
-    if (overlayVisible && overlayView) {
+    if (overlayVisible && overlayView && findOverlayAttachedWin === owner.win) {
       overlayView.setBounds(computeFindOverlayBounds(rounded));
     }
     // Menu-overlay geometry-follow (F8 DD12): identity mapping — the sheet's bounds
     // ARE the active guest's rounded bounds. The manager stores always, applies only
     // while visible.
-    menuOverlay.syncBounds(rounded);
+    if (menuOverlay.getAttachedWindow() === owner.win) menuOverlay.syncBounds(rounded);
   }
 });
 
@@ -2430,9 +2883,10 @@ ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
 // handler still validates event.sender — a guest page must never be able to open or
 // drive the overlay. Open/close route through the shared session functions above. ------
 
-// Sender: the chrome webContents ONLY (the renderer's openFind / activateTab restore).
+// Sender: a chrome webContents ONLY (the renderer's openFind / activateTab restore).
+// Identity check widened to registry membership (F6 Leg 2) — any window's chrome.
 ipcMain.on('find-overlay:open', (event, payload) => {
-  if (event.sender !== getChromeContents()) return;
+  if (!registry.getWindowForChrome(event.sender)) return;
   const { wcId, findText } = payload || {};
   openFindOverlaySession(wcId, typeof findText === 'string' ? findText : '');
 });
@@ -2448,10 +2902,11 @@ ipcMain.on('find-overlay:open', (event, payload) => {
 ipcMain.on('find-overlay:close', (event) => {
   const overlayWc = overlayView && !overlayView.webContents.isDestroyed() ? overlayView.webContents : null;
   const fromOverlay = overlayWc != null && event.sender === overlayWc;
-  if (!fromOverlay && event.sender !== getChromeContents()) return;
+  if (!fromOverlay && !registry.getWindowForChrome(event.sender)) return;
   // Notify BEFORE closing — closeFindOverlaySession nulls findOverlayTabWcId.
+  // Class 3 (F6 DD2): the session tab's OWNING window's chrome gets the close.
   if (fromOverlay && findOverlayTabWcId != null) {
-    getChromeContents()?.send('find-overlay-closed', { wcId: findOverlayTabWcId });
+    chromeForTab(findOverlayTabWcId)?.send('find-overlay-closed', { wcId: findOverlayTabWcId });
   }
   closeFindOverlaySession({ refocusGuest: fromOverlay });
 });
@@ -2478,7 +2933,8 @@ ipcMain.on('find-overlay:query', (event, payload) => {
   if (!wc) return;
   const { text, findNext, forward, matchCase } = payload || {};
   if (typeof text !== 'string') return;
-  getChromeContents()?.send('find-overlay-text', { wcId: findOverlayTabWcId, text });
+  // Class 3 (F6 DD2): per-tab state sync goes to the session tab's owning chrome.
+  chromeForTab(findOverlayTabWcId)?.send('find-overlay-text', { wcId: findOverlayTabWcId, text });
   if (!text) {
     // Deleted-to-empty: no engine call (highlight persists), but the session text is
     // gone — the next non-empty query must begin a new engine session.
@@ -2492,20 +2948,17 @@ ipcMain.on('find-overlay:query', (event, payload) => {
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
 // Web <WebContentsView> tabs send via ipcRenderer.send (not sendToHost).
+// Class 3 (F6 DD2 / review F1): the SENDER guest's OWNING window's chrome, resolved
+// at event time — leg 4's adopt lost-state ruling (media list + privacy aggregate
+// repopulate in the TARGET window after a move) depends on this owner routing.
 ipcMain.on('guest-media-list', (event, mediaList) => {
   const wcId = event.sender.id;
-  const cc = getChromeContents();
-  if (cc && !cc.isDestroyed()) {
-    cc.send('tab-media-list', { wcId, mediaList });
-  }
+  chromeForTab(wcId)?.send('tab-media-list', { wcId, mediaList });
 });
 
 ipcMain.on('guest-privacy-fp', (event, fpCounts) => {
   const wcId = event.sender.id;
-  const cc = getChromeContents();
-  if (cc && !cc.isDestroyed()) {
-    cc.send('tab-privacy-fp', { wcId, fpCounts });
-  }
+  chromeForTab(wcId)?.send('tab-privacy-fp', { wcId, fpCounts });
 });
 
 // rescan-media for WebContentsView tabs (push from chrome → tab wc).
@@ -2863,10 +3316,10 @@ app.whenReady().then(() => {
   devEnableOverride = !app.isPackaged && isMcpAutomationEnabled(process.argv);
 
   // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
-  // Registered ONCE at startup, after createWindow() so mainWindow exists.
+  // Registered ONCE at startup, after createWindow() so a window record exists.
   // Never registered in production: gated on the dev flag AND !app.isPackaged (DD4).
-  // The identity check (event.sender === getChromeContents()) isolates the seam to the
-  // chrome renderer — a guest webview has its own webContents and cannot pass this check.
+  // The sender check (registry chrome membership) isolates the seam to the chrome
+  // renderers — a guest webview has its own webContents and cannot pass this check.
   // No webContents.debugger anywhere (DD8).
   if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
     // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
@@ -2874,7 +3327,10 @@ app.whenReady().then(() => {
     const engine = createEngine(getChromeContents, {
       getDownloads: () => downloadsManager.listAll(),
       grabWindow,
-      isTabViewWcId: (id) => tabViews.has(id),
+      // DD8 widening (review F3 — the SECOND injection site, kept in parity with
+      // the MCP engine accessor above): all-windows membership + any-chrome.
+      isTabViewWcId: (id) => registry.isTabViewWcId(id),
+      isChromeContents: (wc) => registry.isChromeContents(wc),
       // History read accessors (Mission 08 Flight 5): same injection as the MCP
       // getEngine accessor above, kept in parity for this dev-only seam.
       getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
@@ -2882,9 +3338,10 @@ app.whenReady().then(() => {
     });
     ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
       // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
-      // check): this handler is NEVER registered in production (dev-gated), and a guest webview
-      // has a different webContents than mainWindow's, so the identity check fully isolates it.
-      if (event.sender !== getChromeContents()) {
+      // check): this handler is NEVER registered in production (dev-gated), and a guest
+      // webview is never a registered chrome, so the membership check fully isolates it.
+      // Widened to registry membership (F6 Leg 2 / review F3): any window's chrome.
+      if (!registry.getWindowForChrome(event.sender)) {
         throw new Error('automation: dev-seam is chrome-renderer-only');
       }
       if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
@@ -2962,6 +3419,16 @@ app.whenReady().then(() => {
 // including macOS (where window-all-closed does NOT quit). stop() is idempotent,
 // so both this and the window-all-closed secondary firing is safe.
 app.on('before-quit', () => {
+  // Overlay DESTRUCTION (F6 DD3): moved here from the window `closed` handler —
+  // per-window close only DETACHES the roaming singletons; destroying them is
+  // app-level teardown. The F8 DD5 ORDERING PIN travels with the move: find-overlay
+  // teardown runs BEFORE closeMenuOverlay('teardown') — it nulls findOverlayTabWcId,
+  // so the teardown-reason find-restore naturally no-ops mid-quit (the sheet-crash
+  // render-process-gone teardown, where the find session is still live, restores as
+  // desired).
+  teardownFindOverlayView();
+  menuOverlay.closeMenuOverlay('teardown');
+  menuOverlay.teardown();
   // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
   // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
   // guaranteed — a sync handler racing an I/O write — and the contract remains

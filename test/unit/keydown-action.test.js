@@ -70,6 +70,30 @@ test('Ctrl+w -> close-tab', () => {
   assert.equal(keydownToAction(desc({ key: 'w', ctrl: true })), 'close-tab');
 });
 
+// New Window (M09 F6 DD5). Lowercase-only match — the t/w/l/m/r case
+// discipline; Ctrl+Shift+N (Chrome's incognito chord) deliberately stays
+// unassigned. LOCKSTEP with sheet-accelerator.test.js's own Ctrl+N pin (the
+// hand-mirror rule).
+test('Ctrl+n -> new-window (M09 F6 DD5)', () => {
+  assert.equal(keydownToAction(desc({ key: 'n', ctrl: true })), 'new-window');
+});
+
+test('Cmd+n (meta) -> new-window (meta is equivalent to ctrl)', () => {
+  assert.equal(keydownToAction(desc({ key: 'n', meta: true })), 'new-window');
+});
+
+test('Ctrl+Shift+N -> null (uppercase/shifted: incognito chord stays unassigned)', () => {
+  assert.equal(keydownToAction(desc({ key: 'N', ctrl: true, shift: true })), null);
+});
+
+test('n without modifier -> null', () => {
+  assert.equal(keydownToAction(desc({ key: 'n' })), null);
+});
+
+test('Ctrl+n with lightbox open -> new-window (NOT lightbox-gated, app-level like new-tab)', () => {
+  assert.equal(keydownToAction(desc({ key: 'n', ctrl: true, lightboxOpen: true })), 'new-window');
+});
+
 test('Ctrl+l -> focus-address', () => {
   assert.equal(keydownToAction(desc({ key: 'l', ctrl: true })), 'focus-address');
 });

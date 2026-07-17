@@ -3,15 +3,15 @@
 **Slug**: `tab-context-menu`
 **Status**: active
 **Created**: 2026-07-14
-**Last Run**: 2026-07-14-23-13-46 — pass (10/10) — [run log](tab-context-menu/runs/2026-07-14-23-13-46.md)
+**Last Run**: 2026-07-15-06-05-04 — pass (10/10, F6 flight-end regression incl. the Move-to-new-window row deltas) — [run log](tab-context-menu/runs/2026-07-15-06-05-04.md)
 
 ## Intent
 
 Verify the M09 Flight 5 tab context menu (flight DD1/DD2/DD4) as real, cross-view behavior —
 invisible to the pure unit suite, which pins only `tabContextModel`'s omission rules in isolation,
 not the LIVE path: a trusted right-click on a tab button (chrome DOM) firing the `contextmenu`
-handler, the async model build (the `closed-tab-stack-size` invoke resolves BEFORE the channel-1
-open), the sheet render (`#sheet-menu[data-menu-type="tab-context"]`, aria-label "Tab menu"), and
+handler, the synchronous model build (from the push-fed stack-size cache since M09 F6 — the
+`closed-tab-stack-size` invoke is the boot seed only), the sheet render (`#sheet-menu[data-menu-type="tab-context"]`, aria-label "Tab menu"), and
 the channel-6 dispatch bodies acting on the tab id CAPTURED at open. Specifically: right-click (the
 pointer half of the trigger contract) opens the menu for a **background** tab **without activating
 it** (menu open ≠ activation); `tab:close` closes the captured tab, not the active one; the batch
@@ -63,10 +63,14 @@ close-others/close-right); and Escape returns focus to the **invoking tab** (the
   identifies it), **skipping every `enumerateTabs` wcId and C** (the eval ops are
   foreground-first — probing a background tab activates it, closing the menu under test). The
   sheet materializes lazily on first menu open; discover once per run, after Step 3's first open.
-- **Menu open is asynchronous (unique to this menu type).** `openTabContextMenu` awaits the
-  `closedTabStackSize()` invoke before sending channel-1 — the only sheet-menu opener with an
-  async model build. Poll the sheet briefly (short interval, ~1 s budget) after each right-click
-  before reading `#sheet-menu`; never assert on an immediate read.
+- **Menu open is synchronous (M09 F6 DD6 — wording updated; the pre-F6 opener was async).**
+  `openTabContextMenu` builds its model from the push-fed stack-size cache
+  (`closed-tab-stack-changed` broadcasts; the `closedTabStackSize()` invoke survives as the boot
+  seed only), so channel-1 fires in the same tick as the right-click — the first sheet read after
+  a right-click may already show the menu. The Steps' short poll (short interval, ~1 s budget)
+  after each right-click is retained as **cross-view robustness only** (the right-click → main →
+  sheet round-trip is still asynchronous IPC), not as an async-model-build wait; never judge menu
+  ABSENCE from a single immediate read.
 - **Sheet DOM persists after close** (lazy singleton — the established sheet fact): "menu closed"
   is judged by `#sheet-menu` carrying the `hidden` class (or pixels via `captureWindow()`), never
   by DOM absence.
@@ -113,7 +117,7 @@ close-others/close-right); and Escape returns focus to the **invoking tab** (the
 |---|---------|------------------|
 | 1 | **Active-precondition probe.** Connect the admin MCP client; call `tools/list`; then `getChromeTarget()`. | `tools/list` **includes** (presence-checked) `getChromeTarget`, `evaluate`, `click`, `pressKey`, `enumerateTabs`, `readAxTree`, `openTab`, `closeTab`, `navigate`, `goBack`, `captureWindow`. `getChromeTarget()` returns `{ wcId, kind: 'chrome', url }` with a numeric `wcId` (record as **C**). If not, halt. |
 | 2 | **Setup.** Confirm the fresh-profile jar seed (`evaluate(C, "window.goldfinch.jarsList()")` → Personal + Work only) and that NO tab has been closed yet this launch (nothing has — fresh boot, Step 3 depends on it). Open four Work-jar fixture tabs: `openTab(page1Url, 'work')` → **T1**, then **T2** (page 2), **T3** (page 3), **T4** (page 4). Read the strip's tab rects + ids via `evaluate(C, …)`; record the DOM order (boot default tab **D** first, then T1–T4) and each tab's rect. | Five tabs in the strip (D, T1, T2, T3, T4 in DOM order); `enumerateTabs()` shows the four fixture tabs with `jarId: 'work'`, **T4 active** (last opened). Rects recorded for coordinate right-clicks. |
-| 3 | **Right-click opens on a BACKGROUND tab — items per model rules; menu open ≠ activation.** `click(C, x, y, { button: 'right' })` at **T2**'s rect center (T2 is background — T4 is active). Poll for the sheet (probe its wcId now — first open this run), then read `#sheet-menu` (`evaluate(sheetWcId, …)` + `readAxTree(sheetWcId)`). Re-read `enumerateTabs()`. | The sheet shows `#sheet-menu` un-hidden with `data-menu-type="tab-context"`, aria-label **"Tab menu"**, and `role="menuitem"` items EXACTLY (order pinned): **Close**, **Close other tabs**, **Close tabs to the right**, **Duplicate** — and **NO "Reopen closed tab"** (the stack is empty — first omission check, rule-driven not blanket). `readAxTree` shows `role="menu"` with focus on the first item. `enumerateTabs()` still reports **T4 active** — right-clicking a background tab opened ITS menu **without activating it**. Dismiss via `pressKey(sheetWcId, 'Escape')` (refocus assertion deferred to Step 10); confirm `#sheet-menu` re-hidden. |
+| 3 | **Right-click opens on a BACKGROUND tab — items per model rules; menu open ≠ activation.** `click(C, x, y, { button: 'right' })` at **T2**'s rect center (T2 is background — T4 is active). Poll for the sheet (probe its wcId now — first open this run), then read `#sheet-menu` (`evaluate(sheetWcId, …)` + `readAxTree(sheetWcId)`). Re-read `enumerateTabs()`. | The sheet shows `#sheet-menu` un-hidden with `data-menu-type="tab-context"`, aria-label **"Tab menu"**, and `role="menuitem"` items EXACTLY (order pinned): **Close**, **Close other tabs**, **Close tabs to the right**, **Duplicate**, **Move to new window** *(row added M09 F6 DD5 — enumeration updated by FD ruling at the F6 leg-5 re-run; separator sits between the close section and Duplicate)* — and **NO "Reopen closed tab"** (the stack is empty — first omission check, rule-driven not blanket). `readAxTree` shows `role="menu"` with focus on the first item. `enumerateTabs()` still reports **T4 active** — right-clicking a background tab opened ITS menu **without activating it**. Dismiss via `pressKey(sheetWcId, 'Escape')` (refocus assertion deferred to Step 10); confirm `#sheet-menu` re-hidden. |
 | 4 | **`tab:close` acts on the CAPTURED tab.** Right-click background **T2** again (re-read rects first). Poll the menu open, read the menu-item rects on the sheet, and `click(sheetWcId, x, y)` on **Close**. Poll `enumerateTabs()`. | **T2** is gone (its URL absent from `enumerateTabs()`); every other tab survives; **T4 is STILL active** — the dispatch acted on the tab id captured at open, never `activeTab()`. (The stack now holds T2 — Work is a persist jar, so menu closes capture, deliberately: Chrome parity, flight open-question ruling.) Strip order now D, T1, T3, T4. |
 | 5 | **Ordered-sweep `tab:close-others` — anchor activated first.** Re-read rects. Right-click background **T3** (active is T4). Activate **Close other tabs** (coordinate click on the sheet item). Poll `enumerateTabs()` and the chrome DOM order. | End state EXACT: `enumerateTabs()` lists **only T3** among the fixture tabs (D, T1, T4 all closed — each captured to the stack), with **T3 `active: true`** — the anchor became the active tab (Chrome parity; the sweep activated the anchor FIRST because the active tab was among the targets, so `closeTab`'s own next-tab fallback never fired mid-sweep — no other tab was ever left activated, which the end-state pins: any mid-sweep fallback cascade would have left a NON-anchor tab active or created a spurious new tab; assert `enumerateTabs()` has exactly one entry and the DOM strip exactly one `.tab`). |
 | 6 | **Ordered-sweep `tab:close-right` — survivors exact.** Rebuild: `openTab(page1Url, 'work')` → **N1**, `openTab(page2Url, 'work')` → **N2** (strip: T3, N1, N2; N2 active). Re-read rects. Right-click **T3** (leftmost, background). Activate **Close tabs to the right**. Poll `enumerateTabs()`. | Survivors EXACT: only **T3** remains (`enumerateTabs()` single entry, DOM strip single `.tab`); N1 and N2 both closed (both captured); **T3 `active: true`** (the active tab N2 was among the targets → anchor activated first). |
@@ -137,8 +141,9 @@ close-others/close-right); and Escape returns focus to the **invoking tab** (the
 - **Model omission-rule combinatorics** — fully pinned by `tab-context-model.test.js`; this spec
   exercises each rule once live (empty stack, single tab, none-to-right via Step 6's anchor being
   rightmost-after-sweep is implicit) rather than re-enumerating the truth table.
-- **"Move to new window"** — deliberately absent from the model until the multi-window flights
-  add it (flight Contributing-to-Criteria note).
+- **"Move to new window"'s ACTION semantics** — the row's PRESENCE/omission is asserted in
+  Steps 3/9 (added M09 F6 DD5; enumeration updated by FD ruling), but activating it — the
+  re-parent move itself — is `multi-window-shell.md`'s subject, not this spec's.
 - **Middle-click close** — landed F1, pinned by `responsive-tab-strip.md`/F1 checks; untouched by
   this flight.
 - **macOS parity** — carried to the mission's later HAT flight, per the existing convention.

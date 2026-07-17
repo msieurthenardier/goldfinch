@@ -3,8 +3,10 @@
 **Slug**: `find-overlay-geometry`
 **Status**: active
 **Created**: 2026-07-01
-**Last Run**: 2026-07-02-18-12-25 (PASS 6/6 — see `find-overlay-geometry/runs/2026-07-02-18-12-25.md`;
-spec errata candidates recorded in that run log's Validator closing)
+**Last Run**: 2026-07-15-02-09-30 (PASS — regression re-run post-M09-F6 registry conversion, see
+`find-overlay-geometry/runs/2026-07-15-02-09-30.md`; NEW apparatus caveat recorded there: WSLg
+Wayland maximize lag-by-one — judge geometry on resizes that land; step-8 "fresh/reset" wording
+errata: observed = query re-seeded with full select-all, the designed chrome-held findText behavior)
 
 > **Updated 2026-07-02 (F8 Leg 5b).** The four F7 errata + the absence-authoritativeness rule + the
 > optional reopen-check from the 2026-07-02 run log's Validator closing are folded in (F7 debrief
@@ -105,7 +107,7 @@ render-correct" class), asserted via `captureWindow` pixels.
 | 5 | **Internal-tab hidden (DD7):** with find open on the web tab, open kebab → **Settings** (`goldfinch://settings`). Take `captureWindow()`. | On the internal tab the overlay find bar is **absent** — no floating bar over the Settings page (the overlay is hidden, not merely empty, on internal tabs). [render-correct] |
 | 6 | **Menu-hide/restore (DD5):** switch back to the web tab (find still open); open the **kebab (⋮)** menu (rendered from the menu-overlay sheet over the live guest). Bracket each grab with the kebab's `aria-expanded` (menu DOM-bracketing — see apparatus notes). `captureWindow()`. Dismiss (`Escape`). `captureWindow()`. | While the menu is open the find overlay is **hidden** (the DD5 hide rides the sheet-show); on dismiss it is **restored** over the live guest at correct bounds, query intact (the restore is `closeMenuOverlay`'s explicit DD5 hook). (On the WSLg fallback, overlay-presence is best-effort — see caveat; defer to the HAT if the fallback is active.) [render-correct] |
 | 7 | **Close:** `pressKey Escape` (find). `captureWindow()`. | The overlay is gone; the guest occupies the full region with no residual strip/inset. |
-| 8 | **(Optional) Reopen-check — reset-on-next-open:** reopen find (`pressKey Control+f`). `captureWindow()`; read the overlay's input state via `readDom(overlayWcId)`. Close again. | The bar reappears at the correct top-strip position in a **fresh/reset** state (the lazy-singleton's DOM persists across close by design — this asserts the reset-on-next-open contract the F7 debrief flagged as unasserted). |
+| 8 | **(Optional) Reopen-check — re-seed-on-next-open:** reopen find (`pressKey Control+f`). `captureWindow()`; read the overlay's input state via `readDom(overlayWcId)`. Close again. | The bar reappears at the correct top-strip position with its **query re-seeded and fully selected** — the chrome-held per-tab `findText` is pushed back into the input with a select-all, ready to type over (the lazy-singleton's DOM persists across close by design; this asserts the reopen contract the F7 debrief flagged as unasserted). *(Wording erratum fixed 2026-07-15: the earlier "fresh/reset" phrasing misdescribed the DESIGNED chrome-held-findText behavior the 2026-07-15 run observed — same contract, corrected description.)* |
 
 **Row conventions:** Row 1 is setup + the apparatus litmus. Rows 2–8 each assert one rendered-state
 checkpoint (row 8 optional). `[render-correct]` flags the SC2 rendered-vs-DOM checks.

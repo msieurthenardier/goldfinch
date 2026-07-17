@@ -21,9 +21,11 @@
  *     Ctrl+F             → find
  *     Ctrl+J             → downloads       (autoRepeatGuard — held chord must not stack tabs)
  *   chrome-class (the chrome keydownToAction set, src/shared/keydown-action.js):
- *     Ctrl+T new-tab, Ctrl+W close-tab, Ctrl+L focus-address, Ctrl+M toggle-panel,
- *     Ctrl+R reload, Ctrl+Shift+P toggle-privacy, Ctrl+Tab/Ctrl+Shift+Tab tab-next/
- *     tab-prev, Ctrl+PageDown/Ctrl+PageUp tab-next/tab-prev, Ctrl+1..8/Ctrl+9
+ *     Ctrl+T new-tab, Ctrl+W close-tab, Ctrl+N new-window (M09 F6 DD5 —
+ *     autoRepeatGuard: windows are heavier than tabs, review L1), Ctrl+L
+ *     focus-address, Ctrl+M toggle-panel, Ctrl+R reload, Ctrl+Shift+P
+ *     toggle-privacy, Ctrl+Tab/Ctrl+Shift+Tab tab-next/tab-prev,
+ *     Ctrl+PageDown/Ctrl+PageUp tab-next/tab-prev, Ctrl+1..8/Ctrl+9
  *     tab-jump-1..8/tab-jump-last (M09 F3 Leg 1), Ctrl+Shift+T reopen-closed-tab
  *     (M09 F4 Leg 2, DD2 — retires the reservation)
  *
@@ -57,8 +59,8 @@
  * @param {{ key: string, control: boolean, meta: boolean, shift: boolean, alt?: boolean }} input
  * @returns {{ scope: 'guest' | 'chrome',
  *   action: 'devtools' | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'find'
- *     | 'downloads' | 'new-tab' | 'close-tab' | 'focus-address' | 'toggle-panel'
- *     | 'reload' | 'toggle-privacy'
+ *     | 'downloads' | 'new-tab' | 'close-tab' | 'new-window' | 'focus-address'
+ *     | 'toggle-panel' | 'reload' | 'toggle-privacy'
  *     | 'tab-next' | 'tab-prev'
  *     | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
@@ -101,6 +103,11 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
   // Chrome-class (mirrors keydownToAction's lowercase-only matches).
   if (key === 't') return { scope: 'chrome', action: 'new-tab' };
   if (key === 'w') return { scope: 'chrome', action: 'close-tab' };
+  // Ctrl+N new-window (M09 F6 DD5 — LOCKSTEP with keydown-action.js's own
+  // addition, the hand-mirror rule). autoRepeatGuard here even though new-tab
+  // carries none: windows are far heavier than tabs, and a held chord must not
+  // machine-gun BaseWindows (flight design review L1 — the Ctrl+J precedent).
+  if (key === 'n') return { scope: 'chrome', action: 'new-window', autoRepeatGuard: true };
   if (key === 'l') return { scope: 'chrome', action: 'focus-address' };
   if (key === 'm') return { scope: 'chrome', action: 'toggle-panel' };
   if (key === 'r') return { scope: 'chrome', action: 'reload' };

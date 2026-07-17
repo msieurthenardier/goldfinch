@@ -47,9 +47,17 @@ const TAB_CYCLE_JUMP_ACTIONS = [
 // start with 'tab-', so it stays guarded (single-shot semantics — holding the
 // chord must not machine-gun the stack, per the flight's ruling) with no code
 // change needed; pinned by a dedicated unit test.
+// new-window (M09 F6 DD5): the New Window command joins BOTH guest kinds — the
+// same app-level navigation-neutral class as new-tab (which is in both), so an
+// internal settings page must not trap the operator from opening a window
+// either. Like reopen-closed-tab above it is NOT `tab-`-prefixed, so the
+// forwarder's blanket `!isAutoRepeat` guard covers it with no code change
+// (windows are heavier than tabs — a held Ctrl+N must not machine-gun
+// BaseWindows; flight design review L1); pinned by a dedicated unit test.
 const WEB_CHROME_ACTIONS = new Set([
   'new-tab',
   'close-tab',
+  'new-window',
   'focus-address',
   'toggle-panel',
   'toggle-privacy',
@@ -58,7 +66,7 @@ const WEB_CHROME_ACTIONS = new Set([
   ...TAB_CYCLE_JUMP_ACTIONS,
 ]);
 
-const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', 'reopen-closed-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
+const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', 'new-window', 'reopen-closed-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
 
 /**
  * isChromeActionForwardable(action, guestKind)
