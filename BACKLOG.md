@@ -63,77 +63,6 @@ caution in mission 02).
 
 ---
 
-## Migrate tab rendering: `<webview>` → `WebContentsView`
-
-**Status:** strategic future-mission seed — **likely the next mission** (operator, 2026-06-18).
-**Captured:** 2026-06-18, during Mission 04 (browser conveniences) planning.
-
-### The thesis
-Goldfinch renders every tab as a `<webview>` guest embedded in the **renderer DOM**. Electron has
-discouraged `<webview>` for years in favor of **`WebContentsView` + `BaseWindow`**, where each tab
-is a **native view the main process positions** in the window — the same model Chrome uses with its
-Views tree. Migrating aligns Goldfinch with the supported architecture and unlocks capabilities
-`<webview>` structurally cannot provide.
-
-### Why (the evidence — it has bitten three times)
-1. **Extensions (M03 planning).** Chrome-extension support in Electron is weakest for `<webview>`
-   guests — content-script injection and several `chrome.*` APIs have gaps with the tag. (Tier 3
-   future mission.)
-2. **Docked DevTools (M04 planning).** DevTools **cannot be docked into Goldfinch's own window**
-   with `<webview>`: the guest lives in the renderer DOM, not a native view, so there is no host
-   region for the DevTools front-end. M04 ships DevTools as a **native detached/docked window** as a
-   result (see M04 `SC5`); integrated, in-window docked DevTools would come essentially "for free"
-   post-migration via `setDevToolsWebContents` into a composed view.
-3. **Find-in-page event delivery (M04 Flight 2 — Deviation D1).** Chromium delivers the
-   `found-in-page` event **only to the renderer-side `<webview>` DOM element, never to the
-   corresponding main-process `webContents`** for guests. The automation `findInPage` op therefore
-   could not observe its own find result main-side and had to be rebuilt to route through the chrome
-   renderer via `chromeContents.executeJavaScript` on the tag — a working but indirect path, plus a
-   WSLg cold-start retry workaround (see M04 Flight-2 debrief / Known Issue). With `WebContentsView`,
-   each tab is a real main-process `webContents` the embedder owns, so `webContents.on('found-in-page')`
-   would fire directly — no renderer round-trip, and the cold-start workaround likely disappears. Same
-   class of constraint as docked DevTools: the renderer-DOM guest hides behavior the main process
-   should own. (Generalize: any `<webview>`-guest DOM event the automation surface needs to observe —
-   selection, paint-timing, future media events — hits this same wall today.)
-
-The difference is exactly Chrome's mechanism: the embedder that **owns the native view tree** can
-lay out the page contents and the DevTools front-end side-by-side in one window. `<webview>` puts the
-page in the DOM (great for CSS-driven chrome) but gives up that native-view control.
-
-### What it unlocks
-- **Docked, in-window DevTools** (`contents.setDevToolsWebContents(...)` into a composed view).
-- **Stronger extension support** (the M03 backlog seed depends on this).
-- **Native-view layering** — the likely clean fix for the "native context menus feel clumsy" cousin
-  problem (M02 Known Issue) and for side-panel composition (#27's class of animation/layout issues
-  become view geometry the main process owns, not CSS `width`/reflow).
-- Better performance and per-tab isolation; the supported, non-legacy path.
-
-### The cost (why it's a mission, not a flight)
-A cross-cutting rewrite of the renderer/main boundary: each tab becomes a main-process-positioned
-native rectangle, not a DOM element; the chrome (toolbar/tabs) becomes its own view; the
-**Media/Shields slide-out panels** that overlay the webview via CSS must be re-architected as view
-geometry (z-order, rounded corners, the #27 animations — all main-process layout). Touches tab
-lifecycle, frameless window geometry, the privacy/media panels, and preload injection. The
-**automation engine mostly survives** — it addresses `webContents` by id, which `WebContentsView`
-also has.
-
-### Relationship to other planned work
-- **Independent of the jars-lifecycle mission** (jars are *sessions*, not *rendering*) — either can
-  go first.
-- Doing this **before** more chrome/panel features avoids building twice on the legacy substrate.
-
-### Scope notes for when this becomes a mission
-- **Spike first**: stand up the `WebContentsView` + `BaseWindow` tab model on Electron `^42` and
-  validate the frameless window + draggable region + panel-overlay story is achievable as native
-  views before committing.
-- Preserve the automation surface's `webContents`-by-id addressing; verify the M03 engine + the
-  behavior-test apparatus survive.
-- Re-home the Media / Shields / (new DevTools) panels as composed views; revisit #27 there.
-- Confirm preload injection (`webview-preload`, the media scanner via `sendToHost`) ports to the
-  view model.
-
----
-
 ## Persistent storage substrate: JSON stores → SQLite
 
 **Status:** landed in M10 (Persistence Consolidation) Flight 1
@@ -144,14 +73,6 @@ proven seams), with one-time automatic migration from the legacy JSON files.
 See `CLAUDE.md`'s "App database" section for the shipped shape and DD1's
 re-affirmation of the zero-dependency `node:sqlite` call for the widened
 persistence layer.
-
----
-
-## Tab strip: Chrome-style shrink, no scrollbar (small fix — not a mission)
-
-**Status:** landed in M09 (First-Class Tab Management) Flight 1, Leg 1
-(`progressive-shrink-and-middle-click`) — container-query staged shrink, no hard floor,
-`overflow: hidden`, and the `responsive-tab-strip` spec evolution all shipped there.
 
 ---
 

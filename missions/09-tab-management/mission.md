@@ -1,6 +1,6 @@
 # Mission: First-Class Tab Management
 
-**Status**: active
+**Status**: completed
 
 > Source feature request: [goldfinch#82](https://github.com/msieurthenardier/goldfinch/issues/82).
 > Operator pre-authorized autonomous execution at mission design (2026-07-14): the Flight
