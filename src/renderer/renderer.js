@@ -19,7 +19,7 @@ import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
 import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
 import { keyboardMove } from '../shared/tab-order.js';
-import { classifyDragPoint, shouldArm } from '../shared/tab-drag-zone.js'; // delegates to dropIndexFromPointer
+import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 
@@ -122,13 +122,6 @@ let tabSeq = 0;
 let activeViewWcId = null;
 // RAF pending flag for debounced geometry sends.
 let rafGeometryPending = false;
-// Tear-off pill overlay (M09 F10 Leg L4-rebuild): rAF-coalesced show/move/hide state.
-// `tearoffShown` tracks whether the pill is up (first track → show, rest → move);
-// `tearoffPos` is the latest pointer position; the rAF flag caps sends at one per frame.
-let tearoffShown = false;
-/** @type {{ x: number, y: number } | null} */
-let tearoffPos = null;
-let tearoffRafPending = false;
 
 /* ----------------------------------------------------- jars / containers */
 
@@ -1172,7 +1165,7 @@ function internalJarName(url) {
 /**
  * Strip-record construction (M09 F6 Leg 4 — the review-M3 factoring), shared by
  * BOTH createTab and the adopt-tab branch: the tab object + tabs.set + the tab
- * button DOM + its listener set (click/auxclick/contextmenu/pointerdown) +
+ * button DOM + its listener set (click/auxclick/contextmenu/dragstart/dragend) +
  * strip append + the four title update points (tab-title text, tooltip,
  * aria-label, close-button aria-label) when an initial `title` is known.
  * Callers own everything else — URL gates, jar resolution, wcId provisioning
@@ -1225,20 +1218,23 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
   // restyle the element that establishes the container itself, so the padding-compress
   // disclosure stage (styles.css) needs a descendant of `.tab` (the query container) to
   // target — see the styles.css comment above `.tab-row`.
-  btn.innerHTML = `<span class="tab-row">${dot}<img class="tab-fav hidden" alt="" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button></span>`;
+  // favicon <img draggable="false"> (M09 F11 Leg 2): the native tab drag owns the
+  // gesture — grabbing the favicon must drag the TAB, never start an image drag
+  // (mirrors the lightbox img.draggable=false idiom).
+  btn.innerHTML = `<span class="tab-row">${dot}<img class="tab-fav hidden" alt="" draggable="false" /><span class="tab-title">New tab</span><button class="tab-close" tabindex="-1" aria-label="Close tab: New tab">✕</button></span>`;
+  // Native HTML5 DnD source (M09 F11 Leg 2): every tab is draggable at rest; the
+  // dragstart/dragend handlers below own reorder + tear-off + the Leg 3 cross-window seam.
+  btn.draggable = true;
   btn.addEventListener('click', (e) => {
     if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
       if (tabs.size > 1) freezeTabWidths(); // DD5: defer reflow on pointer-close (not last tab)
       closeTab(id);
       return;
     }
-    // DD2 activation ruling: the click handler's activate branch is now a GUARDED
-    // fallback — pointerdown (below) already activated for a real pointer gesture
-    // (plain click or drag). suppressClickActivate is set at BOTH set-points (see
-    // markClickSuppressed's doc comment) so a click that follows one of those never
-    // double-activates, while a click with NO preceding pointerdown (AT default
-    // action / synthetic clicks) still activates.
-    if (!suppressClickActivate) activateTab(id);
+    // Activation ruling (M09 F11 Leg 2): native HTML5 DnD does NOT fire a `click`
+    // after a completed drag, so a plain click is the only thing that reaches here —
+    // no click-suppression flag is needed (the drag path activates in `dragstart`).
+    activateTab(id);
   });
   // Middle-click close (M09 F1 DD3): rides the identical deferred-reflow pointer-close path as
   // the ✕ button. Filter to button 1 (middle) — auxclick also fires for buttons 3/4 (back/
@@ -1260,31 +1256,86 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
     e.preventDefault();
     openTabContextMenu(id, btn);
   });
-  // Pointer drag (M09 F2 Leg 2 DD2): pointerdown on a non-✕ target, button 0, activates
-  // immediately (Chrome parity) and records a POTENTIAL drag (armed only once the pointer
-  // crosses tab-drag-zone.js's DRAG_ARM_THRESHOLD_PX via shouldArm — see the document-level
-  // pointermove listener below).
-  // Middle/right-button pointerdowns (button !== 0) are left alone entirely: middle-close
-  // rides the existing auxclick path above, and right-click has no wired behavior yet.
-  btn.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) return; // ✕ owns its own click path — never activates, never arms a drag
-    activateTab(id);
-    markClickSuppressed(); // set-point (a): pointerdown-activation
-    drag = {
-      pointerId: e.pointerId,
+  // Native drag SOURCE (M09 F11 Leg 2, DD3 unified rewrite): `dragstart`/`dragend`
+  // on the tab own the whole gesture — reorder, tear-off, and the Leg 3 cross-window
+  // seam. The old pointerdown drag-record + document pointermove/up/cancel state
+  // machine is gone; native HTML5 DnD owns arming (no threshold), and the OS-native
+  // drag image crosses window bounds (DD4).
+  btn.addEventListener('dragstart', (e) => {
+    const dt = e.dataTransfer;
+    // wcId gate: a tab whose guest view has not been provisioned yet cannot be
+    // identified across the IPC — refuse the drag rather than ship a null wcId.
+    if (tab.wcId == null || !dt) { e.preventDefault(); return; }
+    activateTab(id); // Chrome parity: dragging a background tab activates it
+    // DD2 provenance (Leg 3): declare the drag main-side — the cross-window adopt
+    // refuses a payload the source never declared. Bookended by tabDragEnded below.
+    window.goldfinch.tabDragStarted(tab.wcId);
+    // Identity payload — the EXACT shape validateMoveTabPayload + requestTearOff use
+    // ({ wcId, url, title, favicon, container }); burner container + favicon are
+    // renderer-only facts, so main cannot rebuild them from the wcId.
+    dt.setData(TAB_DND_MIME, JSON.stringify({
+      wcId: tab.wcId, url: tab.url, title: tab.title, favicon: tab.favicon, container: tab.container
+    }));
+    dt.effectAllowed = 'move';
+    // Cursor-follow (DD3/DD4): the tab ITSELF is the drag image, offset to the grab point —
+    // the OS-native image is the out-of-window feedback, so it must be snapshotted NOW,
+    // while the tab is still opaque (the `.dragging` hole is deferred a frame, below).
+    const r = btn.getBoundingClientRect();
+    dt.setDragImage(btn, e.clientX - r.left, e.clientY - r.top);
+    releaseTabWidths(); // the drag's own transforms own the geometry from here (clears any DD5 freeze)
+    // Session snapshot: slot geometry is read ONCE here and stays valid for the whole
+    // drag — displacement is transform-only, and transforms never reflow layout. Every
+    // coordinate is WINDOW-LOCAL (DD16). stripRect is #tabstrip, not #tabs: a pointer
+    // over the drag spacer or the window controls has NOT left the strip.
+    const tabEls = orderedTabEls();
+    const startOrder = tabEls.map((el) => el.dataset.id || '');
+    const sr = els.tabstrip.getBoundingClientRect();
+    dnd = {
       tabId: id,
-      startX: e.clientX,
-      startY: e.clientY,
-      startedAt: Date.now(),
-      armed: false,
-      startOrder: /** @type {string[]|null} */ (null),
-      draggedIndex: -1,
-      slotRects: /** @type {{left:number,width:number}[]|null} */ (null),
-      stripRect: /** @type {{left:number,top:number,right:number,bottom:number}|null} */ (null),
-      currentDropIndex: /** @type {number|null} */ (null),
+      wcId: tab.wcId,
+      startOrder,
+      draggedIndex: startOrder.indexOf(id),
+      slotRects: tabEls.map((el) => {
+        const b = el.getBoundingClientRect();
+        return { left: b.left, width: b.width };
+      }),
+      stripRect: { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom },
+      currentDropIndex: null,
       tearOff: false,
+      dropHandled: false,
     };
+    // The opacity hole goes on the NEXT frame: setDragImage snapshots the element at the
+    // end of the dragstart dispatch, so adding `.dragging` synchronously would capture an
+    // invisible tab as the drag image.
+    requestAnimationFrame(() => {
+      if (dnd && dnd.tabId === id) btn.classList.add('dragging');
+    });
+  });
+  // dragend: release-point tear-off disambiguation. A release that no strip `drop` handled
+  // tears off when EITHER the dragover-latched `tearOff` flag is set OR the release point
+  // itself classifies outside the strip — the flag alone misses fast boundary exits (the
+  // last dragover can land back in the reorder zone a frame before the cursor leaves).
+  // Escape mid-drag folds in here: the browser aborts the drag into dragend with no drop,
+  // and the unhandled in-strip release announces the cancel. Coordinates are WINDOW-LOCAL
+  // e.clientX/clientY (DD16-clean — NEVER screenX).
+  btn.addEventListener('dragend', (e) => {
+    // DD2 provenance bookend — BEFORE the null-`dnd` early return, so a drag whose
+    // session was defensively canceled mid-gesture still ends its registration (main
+    // clears on a grace timer; a just-dispatched adopt cannot race into 'not-dragging',
+    // and a consumed registration makes this a no-op).
+    if (tab.wcId != null) window.goldfinch.tabDragEnded(tab.wcId);
+    if (!dnd) return;
+    const tabId = dnd.tabId;
+    const wasCommitted = dnd.dropHandled;
+    const releaseZone = classifyDragPoint(
+      /** @type {{left:number,top:number,right:number,bottom:number}} */ (dnd.stripRect),
+      /** @type {{left:number,width:number}[]} */ (dnd.slotRects),
+      e.clientX, e.clientY, dnd.draggedIndex);
+    const doTearOff = !dnd.dropHandled && (dnd.tearOff || releaseZone.zone === 'tearOff');
+    clearDragVisuals();
+    dnd = null; // SYNCHRONOUS — the tear-off request the session outlives must never read a live `dnd`
+    if (doTearOff) requestTearOff(tabId);
+    else if (!wasCommitted) announceTabStatus('Move canceled');
   });
   els.tabs.appendChild(btn);
   tab.btn = btn;
@@ -1315,7 +1366,7 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
 function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null } = {}) {
   // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
   // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
-  if (drag) cancelDrag();
+  if (dnd) cancelDnd();
   // Provenance is the CALL SITE, never the URL: trusted is an explicit caller arg.
   // The untrusted branch validates with isSafeTabUrl (which rejects `goldfinch://`),
   // so web content reaching here via onOpenTab can never select the internal branch.
@@ -1416,26 +1467,38 @@ function commitTabMove(id, targetIndex) {
   els.tabs.insertBefore(tab.btn, referenceEl);
 }
 
-// ------------------------------------------------------------ pointer drag (M09 F2 Leg 2)
+// ------------------------------------------------------------ native tab drag (M09 F11 Leg 2)
 //
-// DD2: pointer events + transform-only live displacement; drop commits instantly. Module-
-// scoped `drag` session state (null when idle). `armed` flips true once the pointer crosses
-// tab-drag-zone.js's DRAG_ARM_THRESHOLD_PX (via shouldArm) from the pointerdown origin — a
-// plain click never arms (pointerup below is then a silent no-op beyond clearing `drag`), so
-// the click handler's activate fallback is never in tension with an unarmed potential-drag.
+// DD3 (unified rewrite): all tab drags are native HTML5 DnD — ONE gesture for reorder,
+// tear-off, and cross-window drop, no modifier. `dragstart` snapshots the session (per-tab,
+// above); `dragover` recomputes the reorder/tearoff preview; `drop` ships a same-window
+// reorder; `dragend` runs the tear-off disambiguation gate. Native DnD owns arming (no
+// pointer threshold, no `shouldArm`), and the OS-native drag image crosses window bounds
+// (DD4) — replacing the old pointer state machine (pointerdown record + document
+// pointermove/up/cancel) wholesale. Transport + disambiguation are spike-validated (Leg 1
+// probes 2–4). Module-scoped `dnd` session (null when idle).
 //
-// M09 F8 Leg 3 gives the gesture a SECOND AXIS and a zone (DD16): inside the strip it
-// reorders exactly as F2 left it; released outside, the tab tears off. The zone decision is
-// pure (tab-drag-zone.js). Every coordinate is WINDOW-LOCAL — `e.clientX/Y` against this
-// window's own rects, never `screenX`/`getBounds`/`screen`, which the spike measured to be
-// a cached fiction on this rig.
-/** @type {{ pointerId: number, tabId: string, startX: number, startY: number, startedAt: number, armed: boolean, startOrder: string[]|null, draggedIndex: number, slotRects: {left:number,width:number}[]|null, stripRect: {left:number,top:number,right:number,bottom:number}|null, currentDropIndex: number|null, tearOff: boolean }|null} */
-let drag = null;
+// M09 F8's SECOND AXIS + zone survives (DD16): inside #tabstrip it reorders, released
+// outside it tears off — the zone decision stays pure (tab-drag-zone.js). Every coordinate
+// is WINDOW-LOCAL — `e.clientX/Y` against this window's own rects, never
+// `screenX`/`getBounds`/`screen`, which the spike measured to be a cached fiction on this rig.
+/**
+ * The live drag session, snapshotted at dragstart (null when idle). `startOrder`/`slotRects`/
+ * `draggedIndex` are the arm-time slot geometry the displacement preview and the drop commit
+ * both read; `currentDropIndex` is the last dragover's reorder index (null until the first
+ * displacement, and re-nulled while the tear-off zone is latched); `tearOff` is the dragover-
+ * latched zone flag dragend disambiguates on; `dropHandled` is set synchronously by the strip
+ * `drop` handler so dragend does not tear off a committed move.
+ * @type {{ tabId: string, wcId: number, startOrder: string[], draggedIndex: number,
+ *   slotRects: {left:number,width:number}[],
+ *   stripRect: {left:number,top:number,right:number,bottom:number},
+ *   currentDropIndex: number|null, tearOff: boolean, dropHandled: boolean }|null} */
+let dnd = null;
 
-// The tear-off round-trip's state (DD6) — SEPARATE from `drag` and carrying NO visual state,
-// so all seven `cancelDrag()` sites stay no-ops across it and none can fire a false 'Move
-// canceled' on a SUCCESSFUL move. It is the freshness test: a reply whose `dropSeq` is not
-// the current record's is discarded, leaving main the sole authority on what happened.
+// The tear-off round-trip's state (DD6) — SEPARATE from `dnd` and carrying NO visual state,
+// so all `cancelDnd()` sites stay no-ops across it and none can fire a false 'Move canceled'
+// on a SUCCESSFUL move. It is the freshness test: a reply whose `dropSeq` is not the current
+// record's is discarded, leaving main the sole authority on what happened.
 //
 // DD6's "any strip mutation clears it" is NARROWED to mutations of a DIFFERENT tab: a
 // tear-off's own success arrives as `tab-moved-away` for the pending tab BEFORE its reply
@@ -1445,20 +1508,6 @@ let drag = null;
 let dropSeq = 0;
 /** @type {{ dropSeq: number, tabId: string }|null} */
 let pendingDrop = null;
-
-// Click-suppression flag (DD2 activation ruling — design review: TWO set-points, both
-// required). (a) pointerdown-activation: a plain click's `click` event fires in the same
-// synchronous dispatch chain as its preceding pointerdown, before any scheduled clear
-// reaches the macrotask queue. (b) drag-commit/pointerup: a real drag spans many ticks, so
-// set-point (a)'s clear has long since fired by the time `click` follows a completed drag's
-// pointerup — a single pointerdown-time-only set would silently reintroduce double-
-// activation on every completed drag. Cleared on the NEXT tick after each set so a click
-// with NO preceding pointerdown/drag (AT default-action / synthetic clicks) still activates.
-let suppressClickActivate = false;
-function markClickSuppressed() {
-  suppressClickActivate = true;
-  setTimeout(() => { suppressClickActivate = false; }, 0);
-}
 
 /** The `.tab` elements in current DOM order (element form of orderedTabIds()). */
 function orderedTabEls() {
@@ -1473,202 +1522,152 @@ function clearDragVisuals() {
     t.btn.classList.remove('dragging');
     t.btn.classList.remove('detaching');
   }
-  clearTearoffGhost();
 }
 
 /**
- * Tear-off affordance (M09 F10 Leg L4-rebuild): a "Release to open in a new window" pill
- * shown while a tear-off is armed. It is a MAIN-OWNED overlay WebContentsView (driven via
- * IPC), NOT a chrome-DOM element — the DOM ghost (Leg 4) was occluded by the guest's
- * native view once the drag left the strip band. Sends are rAF-COALESCED (mirror
- * `sendActiveBounds`): at most one IPC per frame. First track → show+position; every
- * subsequent track while shown → move. `e.clientX/Y` map 1:1 (DIP) onto the pill bounds.
- */
-function flushTearoffGhost() {
-  tearoffRafPending = false;
-  if (!tearoffPos) return; // cleared before the frame fired — nothing to show
-  if (tearoffShown) {
-    window.goldfinch.tearoffOverlayMove(tearoffPos);
-  } else {
-    tearoffShown = true;
-    window.goldfinch.tearoffOverlayShow(tearoffPos);
-  }
-}
-
-/** @param {number} x @param {number} y */
-function trackTearoffGhost(x, y) {
-  tearoffPos = { x, y };
-  if (tearoffRafPending) return;
-  tearoffRafPending = true;
-  requestAnimationFrame(flushTearoffGhost);
-}
-
-/** Hide the pill. Idempotent: a hide with nothing shown is a no-op (never a stray IPC). */
-function clearTearoffGhost() {
-  tearoffPos = null;
-  tearoffRafPending = false;
-  if (tearoffShown) {
-    tearoffShown = false;
-    window.goldfinch.tearoffOverlayHide();
-  }
-}
-
-/**
- * Recompute and apply sibling transforms for the current drop index (DD2 Chrome
- * idiom — the opening gap IS the live drop indication; transforms only, no layout
- * change). Rebuilds the hypothetical final order (the dragged tab inserted at
- * `targetIndex` among the remaining slots — the SAME semantics commitTabMove's own
- * `targetIndex` parameter uses, so this previews exactly what the eventual commit
- * will produce) and, for every OTHER tab, translates it by the delta between its
- * ORIGINAL slot rect (snapshotted at arm time — transforms never reflow layout, so
- * the snapshot stays valid for the whole drag) and the slot rect it now visually
- * occupies. Exact for non-uniform tab widths (sliver counts) — not an approximation
- * via a single shared slot width.
+ * Recompute and apply sibling transforms for the current drop index (DD2 Chrome idiom —
+ * the opening gap IS the live drop indication; transforms only, never layout). Rebuilds
+ * the hypothetical final order (the dragged tab inserted at `targetIndex` among the
+ * remaining slots — the SAME semantics commitTabMove's own `targetIndex` parameter uses,
+ * so this previews exactly what the eventual commit will produce) and, for every OTHER
+ * tab, translates it by the delta between its ORIGINAL slot rect (snapshotted at
+ * dragstart — transforms never reflow layout, so the snapshot stays valid for the whole
+ * drag) and the slot rect it now visually occupies. Exact for non-uniform tab widths
+ * (sliver counts) — not an approximation via a single shared slot width.
  * @param {number} targetIndex
  */
 function applyDragDisplacement(targetIndex) {
-  if (!drag || !drag.startOrder || !drag.slotRects) return;
-  const remainingIds = drag.startOrder.filter((_, i) => i !== drag.draggedIndex);
+  if (!dnd) return;
+  const { tabId, startOrder, slotRects, draggedIndex } = dnd;
+  const remainingIds = startOrder.filter((_, i) => i !== draggedIndex);
   const refId = remainingIds[targetIndex];
   const finalOrder = refId != null
-    ? [...remainingIds.slice(0, targetIndex), drag.tabId, ...remainingIds.slice(targetIndex)]
-    : [...remainingIds, drag.tabId];
+    ? [...remainingIds.slice(0, targetIndex), tabId, ...remainingIds.slice(targetIndex)]
+    : [...remainingIds, tabId];
   finalOrder.forEach((tid, finalIdx) => {
-    if (tid === drag.tabId) return; // the dragged tab tracks the pointer directly (see pointermove below)
+    if (tid === tabId) return; // the dragged tab is the native drag image; its slot is the `.dragging` opacity hole
     const t = tabs.get(tid);
     if (!t || !t.btn) return;
-    const origIdx = /** @type {string[]} */ (drag.startOrder).indexOf(tid);
-    const delta = /** @type {{left:number,width:number}[]} */ (drag.slotRects)[finalIdx].left -
-      /** @type {{left:number,width:number}[]} */ (drag.slotRects)[origIdx].left;
+    const origIdx = startOrder.indexOf(tid);
+    const delta = slotRects[finalIdx].left - slotRects[origIdx].left;
     t.btn.style.transform = delta ? `translateX(${delta}px)` : '';
   });
 }
 
 /**
- * Detach-pending displacement (DD6): the pointer left the strip, so the siblings close ranks
- * as though the tab were already gone — the SAME slot assignment as a drop past the last
- * slot (above, `refId == null` puts the dragged tab last and the loop skips it either way),
- * so the reorder path is reused rather than its delta loop transcribed.
+ * Detach-pending displacement: the pointer left the strip, so the siblings close ranks as
+ * though the tab were already gone — the SAME slot assignment as a drop past the last slot
+ * (above, `refId == null` puts the dragged tab last and the loop skips it either way), so
+ * the reorder path is reused rather than its delta loop transcribed.
  */
 function applyDetachDisplacement() {
-  if (drag && drag.startOrder) applyDragDisplacement(drag.startOrder.length - 1);
+  if (dnd) applyDragDisplacement(dnd.startOrder.length - 1);
 }
 
-/** Arm the in-progress drag: snapshot slot rects, enter drag-mode styling, capture the pointer. */
-function armDrag() {
-  if (!drag) return;
-  const tab = tabs.get(drag.tabId);
-  if (!tab || !tab.btn) { drag = null; return; }
-  drag.armed = true;
-  releaseTabWidths(); // AC: releaseTabWidths() at drag start — the drag's own transforms own the geometry
-  const tabEls = orderedTabEls();
-  drag.startOrder = tabEls.map((el) => /** @type {HTMLElement} */ (el).dataset.id || '');
-  drag.draggedIndex = drag.startOrder.indexOf(drag.tabId);
-  drag.slotRects = tabEls.map((el) => {
-    const r = el.getBoundingClientRect();
-    return { left: r.left, width: r.width };
-  });
-  // The strip's own rect (DD16), snapshotted with the slots and valid exactly as long — a
-  // resize invalidates both and cancels the drag. #tabstrip, not #tabs: a pointer over the
-  // drag spacer or the window controls has NOT left the strip.
-  const sr = els.tabstrip.getBoundingClientRect();
-  drag.stripRect = { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom };
-  drag.currentDropIndex = null; // force the very next displacement recompute
-  tab.btn.classList.add('dragging');
-  tab.btn.setPointerCapture(drag.pointerId);
-}
-
-/** Abort the live drag: clear transforms (nothing else was ever touched — restore is free) and announce. */
-function cancelDrag() {
-  if (!drag) return;
-  const wasArmed = drag.armed;
+/** Abort the live drag: clear the drag visuals (transforms + classes — nothing else was
+ * ever touched, so restore is free), drop the session, and announce. */
+function cancelDnd() {
+  if (!dnd) return;
   clearDragVisuals();
-  drag = null;
-  if (wasArmed) announceTabStatus('Move canceled');
+  dnd = null;
+  announceTabStatus('Move canceled');
 }
 
-// Document-level pointermove/pointerup/pointercancel (NOT per-tab-button), and that IS the
-// mechanism (corrected at F8 leg 3, against the spike). MEASURED: `hasPointerCapture()` is
-// FALSE throughout a live drag and `e.target` is the document root — armDrag's
-// `setPointerCapture` retargets NOTHING, and F2's drag works ONLY because these listeners
-// sit at the document. The comment replaced here claimed the opposite. The capture call
-// stays (harmless; removing it is a separate change) but nothing depends on it.
-document.addEventListener('pointermove', (e) => {
-  if (!drag || e.pointerId !== drag.pointerId) return;
-  const dx = e.clientX - drag.startX;
-  const dy = e.clientY - drag.startY;
-  if (!drag.armed) {
-    // TWO-AXIS threshold: F2's `Math.abs(dx)` was complete while the only outcome was a
-    // horizontal reorder, but a straight-down tear-off holds dx at 0 and would never arm.
-    // Strictly more permissive — every gesture that armed before still arms.
-    if (!shouldArm(dx, dy)) return;
-    armDrag();
-  }
-  const tab = tabs.get(drag.tabId);
-  // Both axes: a tab dragged out must follow the cursor out, not slide along the strip.
-  if (tab && tab.btn) tab.btn.style.transform = `translate(${dx}px, ${dy}px)`;
+const TAB_DND_MIME = 'application/x-goldfinch-tab';
+// Document-level `dragover` (NOT #tabs, and that is the mechanism, not a shortcut): accept
+// this window's own tab drag so the OS keeps the drag alive, and recompute the reorder/
+// tear-off preview. Tear-off detection needs pointer points OUTSIDE #tabstrip, and #tabs ⊂
+// #tabstrip — a #tabs-scoped listener would feed classifyDragPoint only in-strip points and
+// could never classify tearOff. NO ghost pill (retired — DD4 amend: the native drag image is
+// the out-of-window feedback). Coordinates stay WINDOW-LOCAL (DD16).
+document.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer || !e.dataTransfer.types.includes(TAB_DND_MIME)) return;
+  // Accepted UNCONDITIONALLY for the MIME (Leg 3): a FOREIGN window's drag must be
+  // accepted here or its `drop` never fires — the OS delivers a drop only to a window
+  // whose dragover preventDefault()ed. The zone/displacement body below stays gated on
+  // this window's OWN `dnd` (source-window-only preview).
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move'; // MANDATORY (spike probe3) — else the drop is silently rejected
+  if (!dnd) return; // not this window's own drag — no zone work for a foreign one
   const zone = classifyDragPoint(
-    /** @type {{left:number,top:number,right:number,bottom:number}} */ (drag.stripRect),
-    /** @type {{left:number,width:number}[]} */ (drag.slotRects),
-    e.clientX, e.clientY, drag.draggedIndex);
+    dnd.stripRect, dnd.slotRects,
+    e.clientX, e.clientY, dnd.draggedIndex);
+  const tab = tabs.get(dnd.tabId);
   if (zone.zone === 'tearOff') {
-    if (!drag.tearOff) {
-      drag.tearOff = true;
-      drag.currentDropIndex = null; // force a recompute on the way back into the strip
+    if (!dnd.tearOff) { // latch once per zone entry — the class add + close-ranks are idempotent per entry
+      dnd.tearOff = true;
+      dnd.currentDropIndex = null; // force a displacement recompute on the way back into the strip
       if (tab && tab.btn) tab.btn.classList.add('detaching');
       applyDetachDisplacement();
     }
-    trackTearoffGhost(e.clientX, e.clientY); // follows the pointer for as long as the tear-off is armed
     return;
   }
-  if (drag.tearOff) {
-    drag.tearOff = false;
+  if (dnd.tearOff) {
+    dnd.tearOff = false; // back inside the strip — the reorder preview takes over
     if (tab && tab.btn) tab.btn.classList.remove('detaching');
-    clearTearoffGhost(); // back inside the strip — the reorder preview takes over
   }
-  if (zone.index !== drag.currentDropIndex) {
-    drag.currentDropIndex = zone.index;
+  if (zone.index !== dnd.currentDropIndex) {
+    dnd.currentDropIndex = zone.index;
     applyDragDisplacement(zone.index);
   }
 });
-document.addEventListener('pointerup', (e) => {
-  if (!drag || e.pointerId !== drag.pointerId) return;
-  if (!drag.armed) { drag = null; return; } // plain click — the click handler's own branches own this
-  const tabId = drag.tabId;
-  const tearOff = drag.tearOff;
-  const targetIndex = drag.currentDropIndex ?? drag.draggedIndex;
-  const before = orderedTabIds();
-  clearDragVisuals();
-  // Drop-commit (DD6): the window is created at drop, never mid-drag. `commitTabMove` is
-  // deliberately NOT called for a tear-off — the tab is already at its origin index, so a
-  // refusal is ANNOUNCED, NOT ANIMATED (DD5); a success arrives as `tab-moved-away`.
-  if (tearOff) requestTearOff(tabId);
-  else commitTabMove(tabId, targetIndex);
-  markClickSuppressed(); // set-point (b): a completed drag's trailing `click` must not re-activate
-  drag = null; // SYNCHRONOUS, exactly as F2 left it — see the pendingDrop note above
-  if (tearOff) return; // the outcome rides main's reply, not this handler
-  const after = orderedTabIds();
-  if (after.join(' ') !== before.join(' ')) {
-    announceTabStatus(`Tab moved to position ${after.indexOf(tabId) + 1} of ${after.length}`);
+// `drop` on #tabs (the no-drag drop target — #tabstrip's app-region:drag background cannot
+// receive it): `dropHandled` is set SYNCHRONOUSLY (drop fires before dragend) so `dragend`
+// does not tear off a committed move. A same-window payload commits the reorder at the last
+// dragover's drop index; the announce fires only when the order actually changed (a drop
+// back into the original slot is not a move).
+els.tabs.addEventListener('drop', (e) => {
+  if (!e.dataTransfer || !e.dataTransfer.types.includes(TAB_DND_MIME)) return;
+  e.preventDefault();
+  if (dnd) dnd.dropHandled = true;
+  // The full identity-payload shape rides through to tabAdoptByDrop on the foreign
+  // branch; the same-window branch reads only wcId.
+  /** @type {{ wcId: number, url: string, title: string, favicon: string | null,
+   *   container: { id: string, name: string, color: string, partition: string, burner?: boolean } }|null} */
+  let payload;
+  try {
+    payload = JSON.parse(e.dataTransfer.getData(TAB_DND_MIME));
+  } catch {
+    payload = null; // malformed payload — treat as not-ours
   }
+  if (!payload || typeof payload.wcId !== 'number') return;
+  if (dnd && payload.wcId === dnd.wcId) {
+    const tabId = dnd.tabId;
+    const targetIndex = dnd.currentDropIndex ?? dnd.draggedIndex;
+    const before = orderedTabIds();
+    clearDragVisuals(); // the committed DOM order replaces the transform preview of it
+    commitTabMove(tabId, targetIndex);
+    const after = orderedTabIds();
+    if (after.join(' ') !== before.join(' ')) {
+      announceTabStatus(`Tab moved to position ${after.indexOf(tabId) + 1} of ${after.length}`);
+    }
+    return;
+  }
+  // Cross-window adopt (Leg 3, DD1): a foreign drag's payload — adopt it into THIS
+  // window via the new IPC and announce the result HERE (leg DD4: the target owns the
+  // authoritative reply; the source suppresses its own tear-off's no-tab echo).
+  // Null-`dnd`-own-tab guard first: the payload naming one of THIS window's own tabs
+  // with no live session is a mid-drag-canceled same-window release (a popup createTab
+  // or tab-close ran cancelDnd under the native drag) — silent no-op, main's
+  // 'same-window' refusal stays as defense-in-depth, never invoked spuriously.
+  if (!dnd && findTabByWcId(payload.wcId)) return;
+  window.goldfinch.tabAdoptByDrop(payload).then((result) => {
+    announceTabStatus(moveOutcomeMessage(result, 'this window'));
+  });
 });
-
-document.addEventListener('pointercancel', (e) => {
-  if (!drag || e.pointerId !== drag.pointerId) return;
-  cancelDrag();
-});
-// Escape mid-drag restores (Implementation Guidance): gated on `drag` truthy (not `armed`) so
-// an Escape pressed in the brief unarmed window after pointerdown also cleanly discards the
-// potential drag; cancelDrag() itself only announces when a drag had actually armed.
+// Escape mid-drag: the PRIMARY path is native — the browser aborts the drag and fires
+// `dragend` (no drop) → `Move canceled` (keydown is not dispatched to the page during a native
+// drag loop). This listener is the defensive parity site: it cancels cleanly if an Escape ever
+// reaches the page with a live `dnd`.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && drag) {
+  if (e.key === 'Escape' && dnd) {
     e.preventDefault();
-    cancelDrag();
+    cancelDnd();
   }
 });
-// A window resize mid-drag invalidates the arm-time slotRects snapshot (cheap defense per
-// the leg's Edge Cases — rare in practice, but the snapshot would otherwise silently go stale).
-window.addEventListener('resize', () => { if (drag) cancelDrag(); });
+// (F11 Leg 2) No resize→cancelDnd under native DnD: a native drag captures the pointer, so a
+// manual mid-drag resize is impossible; the WSLg spurious resize on cursor-exit was racing
+// dragend and canceling tear-offs.
 
 /**
  * Dispatch a tear-off drop (DD5/DD6). Takes only a tabId, so it cannot come to depend on the
@@ -1687,6 +1686,13 @@ function requestTearOff(tabId) {
     // Still ours? A newer drop, or a strip mutation under us, invalidated this reply.
     if (!pendingDrop || pendingDrop.dropSeq !== seq) return;
     pendingDrop = null;
+    // Adopted-elsewhere signature (Leg 3, leg DD4): a successful cross-window drop
+    // reads `no-tab` here — the target's adopt moved the tab before this tear-off
+    // dispatched, and `tab-moved-away` (sent during the adopt, earlier on this same
+    // ordered pipe) has already emptied the local map. The TARGET announced the
+    // outcome, so this is suppressed — a `no-tab` with the tab STILL PRESENT is a
+    // true anomaly and stays announced.
+    if (result && result.ok === false && result.reason === 'no-tab' && !tabs.has(tabId)) return;
     // DD5: EVERY outcome is announced. On success `tab-moved-away` has already removed the
     // tab, so this announcement is all that is left to do either way.
     announceTabStatus(moveOutcomeMessage(result, 'a new window'));
@@ -1732,7 +1738,7 @@ function moveOutcomeMessage(result, dest) {
 function closeTab(id) {
   // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): a tab-list mutation during a live drag
   // invalidates its slotRects snapshot regardless of which tab this close targets.
-  if (drag) cancelDrag();
+  if (dnd) cancelDnd();
   if (pendingDrop && pendingDrop.tabId !== id) pendingDrop = null; // DD6 narrowed — see the pendingDrop note
   const tab = tabs.get(id);
   if (!tab) return;
@@ -4009,7 +4015,7 @@ window.goldfinch.onAdoptTab((payload) => {
   if (!payload || typeof payload.wcId !== 'number') return;
   if (!payload.container || typeof payload.container !== 'object') return;
   if (findTabByWcId(payload.wcId)) return; // already adopted — defensive no-op
-  if (drag) cancelDrag(); // tab-list mutation invalidates a live drag's snapshot
+  if (dnd) cancelDnd(); // tab-list mutation invalidates a live drag's snapshot
   pendingDrop = null; // DD6: an adopt is never the pending tab's own success — always invalidates
   const id = `tab-${++tabSeq}`;
   const tab = buildStripRecord({
@@ -4034,7 +4040,7 @@ window.goldfinch.onAdoptTab((payload) => {
 });
 
 // tab-moved-away (SOURCE chrome): strip removal WITHOUT destroy — mirrors
-// closeTab FIELD BY FIELD minus the stack/IPC pieces: cancelDrag, button
+// closeTab FIELD BY FIELD minus the stack/IPC pieces: cancelDnd, button
 // remove, tabs.delete, the activeViewWcId clear, the next-activation fallback.
 // NO stripIndex snapshot, NO tabClose IPC, NO closed-tab capture (the tab is
 // alive in another window). The activeViewWcId clear is load-bearing (review
@@ -4044,7 +4050,13 @@ window.goldfinch.onTabMovedAway((payload) => {
   if (!payload || typeof payload.wcId !== 'number') return;
   const tab = findTabByWcId(payload.wcId);
   if (!tab) return;
-  if (drag) cancelDrag();
+  // Leg 3 silent-clear (leg DD4): the departing tab IS the live drag session tab — a
+  // successful cross-window adopt beat our own dragend, and the TARGET announces that
+  // outcome. Clear WITHOUT the Move-canceled announce (the defensive cancel below then
+  // no-ops on the null session). NOTE this region sits past the maskComments regex
+  // blind spot (see sole-tab-move-close-source.test.js) — keep this comment quote-free.
+  if (dnd && dnd.wcId === payload.wcId) { clearDragVisuals(); dnd = null; }
+  if (dnd) cancelDnd();
   // DD6 narrowed (see the pendingDrop note): this fires on the tear-off SUCCESS path, for the
   // pending tab, BEFORE its reply lands — clearing here would silence our own success.
   if (pendingDrop && pendingDrop.tabId !== tab.id) pendingDrop = null;

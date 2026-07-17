@@ -2866,11 +2866,12 @@ function newWindowForMove(source) {
  *   The destination, resolved LAZILY — called only after every refusal guard has
  *   passed, and never before.
  * @param {boolean} [allowSoleTab] M09 F10 L3. Defaults false: a sole-tab move
- *   is refused (`sole-tab`), the F8 behavior every caller inherits. ONLY
- *   `tab-move-to-window` (the existing-window consolidate path) passes true —
- *   the source is then left at zero tabs and CLOSED below. The two
- *   `newWindowForMove` callers (`tab-move-to-new-window`, `tab-tear-off`) keep
- *   the default: a sole-tab move to a NEW window is a no-op window swap.
+ *   is refused (`sole-tab`), the F8 behavior every caller inherits. The two
+ *   EXISTING-window consolidate paths pass true — `tab-move-to-window` and
+ *   `tab-adopt-by-drop` (F11 L3, the same semantics by drag) — the source is
+ *   then left at zero tabs and CLOSED below. The two `newWindowForMove`
+ *   callers (`tab-move-to-new-window`, `tab-tear-off`) keep the default: a
+ *   sole-tab move to a NEW window is a no-op window swap.
  * @returns {{ ok: true, windowId: number } | { ok: false, reason: 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }}
  */
 function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
@@ -3084,6 +3085,71 @@ ipcMain.handle('tab-tear-off', (event, payload) => {
   const p = validateMoveTabPayload(payload);
   if (!p) return { ok: false, reason: 'bad-payload' };
   return moveTabIntoWindow(source, p, () => newWindowForMove(source));
+});
+
+// DD2 PROVENANCE REGISTRATION (M09 F11 Leg 3). The drop-adopt below resolves its
+// SOURCE from a payload-supplied wcId — any guest page can setData() our MIME with
+// an arbitrary wcId, so the payload alone must not move a tab. These two chrome-only
+// sends bookend a real drag: dragstart declares the wcId (verified against the
+// SENDER's own tabViews — the payload does not get to name a tab the sender does not
+// own), dragend clears it on a GRACE TIMER rather than immediately — the target's
+// adopt invoke rides a different IPC pipe with no cross-pipe ordering guarantee, and
+// an immediate clear could race a legitimate adopt into 'not-dragging'.
+const DRAG_END_GRACE_MS = 1500;
+// Pending grace-clear timers, PER RECORD: a fresh tab-drag-started cancels only its
+// own record's pending clear. Keyed weakly so a record removed mid-drag (window
+// closed) takes its timer entry with it — a timer that still fires then mutates an
+// unreachable record, which is harmless (no cancel-on-close machinery needed).
+/** @type {WeakMap<import('./window-registry').WindowRecord, ReturnType<typeof setTimeout>>} */
+const dragEndClearTimers = new WeakMap();
+
+ipcMain.on('tab-drag-started', (event, wcId) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec || typeof wcId !== 'number' || !rec.tabViews.has(wcId)) return;
+  const pending = dragEndClearTimers.get(rec);
+  if (pending) { clearTimeout(pending); dragEndClearTimers.delete(rec); }
+  rec.dragWcId = wcId;
+});
+
+ipcMain.on('tab-drag-ended', (event, wcId) => {
+  const rec = registry.getWindowForChrome(event.sender);
+  if (!rec || rec.dragWcId !== wcId) return;
+  const pending = dragEndClearTimers.get(rec);
+  if (pending) clearTimeout(pending);
+  dragEndClearTimers.set(rec, setTimeout(() => {
+    dragEndClearTimers.delete(rec);
+    rec.dragWcId = null;
+  }, DRAG_END_GRACE_MS));
+});
+
+// The CROSS-WINDOW DROP path (M09 F11 Leg 3, DD1/DD2): a tab dragged from another
+// window's strip and released on THIS window's strip. INVERTS tab-move-to-window's
+// authority shape — source-from-payload, target-from-sender — which is exactly the
+// DD2 weakening the provenance gate above closes: the resolved source must have
+// DECLARED this wcId at dragstart, so a forged MIME payload dies at 'not-dragging'
+// (guests cannot send tab-drag-started; the bridge is chrome-only). allowSoleTab:
+// this is an existing-window consolidate (the F10 L3 ruling) — dragging a window's
+// only tab moves it and the core closes the emptied source. Result verbatim (DD5).
+ipcMain.handle('tab-adopt-by-drop', (event, payload) => {
+  const target = registry.getWindowForChrome(event.sender);
+  if (!target) return { ok: false, reason: 'no-source' };
+  const p = validateMoveTabPayload(payload);
+  if (!p) return { ok: false, reason: 'bad-payload' };
+  const source = registry.getWindowForGuest(p.wcId);
+  if (!source) return { ok: false, reason: 'no-tab' };
+  // The renderer handles a same-window drop as reorder and guards the canceled-drag
+  // corner itself; refusing here is defense-in-depth, not the primary gate.
+  if (source === target) return { ok: false, reason: 'same-window' };
+  if (source.dragWcId !== p.wcId) return { ok: false, reason: 'not-dragging' };
+  const r = moveTabIntoWindow(source, p, () => target, true);
+  if (r.ok) {
+    // A successful adopt CONSUMES the registration (DD2 refinement): one drag = one
+    // drop, shrinking the post-success forgery window to ~0.
+    const pending = dragEndClearTimers.get(source);
+    if (pending) { clearTimeout(pending); dragEndClearTimers.delete(source); }
+    source.dragWcId = null;
+  }
+  return r;
 });
 
 ipcMain.on('tab-hide', (event, wcId) => {

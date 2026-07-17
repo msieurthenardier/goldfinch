@@ -6,10 +6,12 @@
 //
 //   AC2 — the move core's sole-tab guard is GATED by `allowSoleTab`
 //         (`if (!allowSoleTab && source.tabViews.size <= 1) ...`), and ONLY the
-//         existing-window consolidate path (`tab-move-to-window`) passes it true
-//         (`() => target, true`). The two `newWindowForMove` callers
-//         (`tab-move-to-new-window`, `tab-tear-off`) do NOT pass it — a sole-tab move to
-//         a NEW window stays refused (AC3).
+//         existing-window consolidate paths pass it true (`() => target, true`) —
+//         `tab-move-to-window` alone at L3; `tab-adopt-by-drop` joined at M09 F11 Leg 3
+//         (the same consolidate semantics by drag, its leg DD5), bumping the pinned
+//         count 1 → 2. The two `newWindowForMove` callers (`tab-move-to-new-window`,
+//         `tab-tear-off`) do NOT pass it — a sole-tab move to a NEW window stays
+//         refused (AC3).
 //   AC2 — the empty-source close (`if (source.tabViews.size === 0 &&
 //         !source.win.isDestroyed()) source.win.close();`) is present in the core, as the
 //         LAST statement before its `return { ok: true }`.
@@ -46,7 +48,8 @@ const MOVED_AWAY_RE = /onTabMovedAway\(\(payload\)\s*=>\s*\{/;
 const GATED_GUARD = '!allowSoleTab && source.tabViews.size <= 1';
 // AC2 — the empty-source close, guarded by size === 0.
 const EMPTY_CLOSE = 'source.tabViews.size === 0 && !source.win.isDestroyed()';
-// AC2/AC3 — the ONLY caller that passes allowSoleTab true (existing-window path).
+// AC2/AC3 — the ONLY callers that pass allowSoleTab true (existing-window paths:
+// tab-move-to-window, and tab-adopt-by-drop since M09 F11 Leg 3).
 const CONSOLIDATE_CALL = '() => target, true)';
 // AC3 — the new-window callers must NOT pass true. Its presence would be a leak.
 const NEWWINDOW_TRUE = 'newWindowForMove(source), true)';
@@ -116,10 +119,10 @@ test('AC2: the core closes an emptied source (size === 0 → win.close()) — ma
 // AC2/AC3 — allowSoleTab flows to the existing-window path ONLY.
 // ---------------------------------------------------------------------------
 
-test('AC3: ONLY tab-move-to-window passes allowSoleTab true — masked, consolidate call present, new-window calls not', () => {
+test('AC3: ONLY the existing-window consolidate paths pass allowSoleTab true — masked, consolidate calls present, new-window calls not', () => {
   const real = realMain();
   const masked = maskComments(real);
-  assert.equal(count(masked, CONSOLIDATE_CALL), 1, 'real → exactly one () => target, true call (the consolidate path)');
+  assert.equal(count(masked, CONSOLIDATE_CALL), 2, 'real → exactly two () => target, true calls (tab-move-to-window + tab-adopt-by-drop; was 1 before F11 Leg 3)');
   assert.equal(count(masked, NEWWINDOW_TRUE), 0, 'real → no newWindowForMove caller passes true (sole-tab → new window stays refused)');
 
   // Leak allowSoleTab into a new-window caller. This would make a sole-tab tear-off /

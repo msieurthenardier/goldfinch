@@ -156,6 +156,7 @@ html.platform-darwin #window-controls {
   overflow: hidden;
   flex: 0 1 auto; /* size to tabs' content; shrinks its tabs instead of scrolling (progressive @container disclosure on .tab) */
   min-width: 0;
+  -webkit-app-region: no-drag; /* M09 F11 Leg 2: the native-DnD drop target must be a no-drag element — #tabstrip's app-region:drag background swallows the drop otherwise */
 }
 /* Flexible drag spacer: absorbs the slack between the pill and the window controls,
    and inherits the #tabstrip drag region so it becomes the window-move area. */
@@ -322,39 +323,25 @@ html.platform-darwin #window-controls {
   outline-offset: -2px;
 }
 
-/* Pointer drag (M09 F2 Leg 2 DD2): design-review low note — `.tab` is statically
-   positioned (a flex item), so a bare `z-index` on the dragged tab would have no effect
-   without `position: relative` to establish a stacking context. Transform-only displacement
-   (never layout properties): the dragged tab tracks the pointer with NO transition (instant,
-   1:1 with the pointer); siblings ease into their displaced slot via a short transform
-   transition. The existing global `prefers-reduced-motion` rule (`transition-duration:
-   0.01ms !important`, further below in this file) neutralizes the sibling transition to effectively-instant
-   without a second media query here — displacement still occurs, just without the ease. */
+/* Native drag (M09 F11 Leg 2, DD3/DD4): the dragged tab IS the native drag image
+   (setDragImage cursor-follow — the OS ghost is the only feedback that crosses window
+   bounds), so its strip slot becomes an opacity hole. EVERY DECLARATION HERE MUST BE
+   LAYOUT-NEUTRAL: the dragstart slotRects snapshot is taken once and stays valid only
+   because nothing in the gesture reflows the strip — opacity paints without touching
+   layout; a width/display collapse would leave dropIndexFromPointer computing against
+   stale rects (silently wrong indices, no cancel, no error). Pinned by
+   test/unit/tab-drag-invariants.test.js. Siblings ease into their displaced slot via a
+   short transform transition (the global prefers-reduced-motion rule further below
+   neutralizes it to effectively-instant — displacement still occurs, just without the
+   ease); the dragged tab itself is exempt — its transform is never set. The `.detaching`
+   state carries NO rule of its own: it marks the dragged tab, which is already the
+   invisible hole — the visible tear-off affordance is the siblings closing ranks
+   (applyDetachDisplacement) plus the native image. */
 .tab.dragging {
-  position: relative;
-  z-index: 10;
-  transition: none;
-  cursor: grabbing;
+  opacity: 0;
 }
 .tab:not(.dragging) {
   transition: transform 80ms ease;
-}
-
-/* Detach-pending (M09 F8 Leg 3, DD6): the pointer has left the strip, so releasing here
-   tears the tab into its own new window. EVERY DECLARATION MUST BE LAYOUT-NEUTRAL — the
-   drag's slotRects snapshot is taken once at arm and stays valid only because nothing in
-   the gesture reflows the strip. opacity/outline/cursor paint without touching layout;
-   `width`, `display`, `margin`, `padding`, `border`, `flex` and `position` do NOT, and a
-   width-collapse "close ranks" here would leave dropIndexFromPointer computing against
-   stale rects on drag-back — silently wrong indices, no cancel, no error. `outline`, not
-   `border`, for exactly that reason. Pinned by test/unit/tab-drag-invariants.test.js,
-   which scans this rule against a layout-neutral allowlist. Siblings close ranks by
-   transform only — see applyDetachDisplacement. */
-.tab.detaching {
-  opacity: 0.6;
-  outline: 2px dashed var(--accent);
-  outline-offset: -2px;
-  cursor: grabbing;
 }
 
 /* The tear-off hint (M09 F10) moved to a main-owned overlay WebContentsView at Leg

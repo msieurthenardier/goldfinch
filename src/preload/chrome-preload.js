@@ -183,6 +183,16 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // belongs to THIS window, so the renderer cannot name a tab it does not own nor
   // a window that has since closed. Refusals come back discriminated (DD5).
   tabMoveToWindow: (payload) => ipcRenderer.invoke('tab-move-to-window', payload),
+  // Cross-window drop adopt (M09 F11 Leg 3, DD1/DD2): the TARGET window's drop handler
+  // invokes with the dragged identity payload. Main resolves the SOURCE from the
+  // payload's wcId (the inversion of tabMoveToWindow above), gated on the source's
+  // live tab-drag-started registration — refusals come back discriminated (DD5).
+  tabAdoptByDrop: (payload) => ipcRenderer.invoke('tab-adopt-by-drop', payload),
+  // DD2 provenance bookends: chrome-only dragstart/dragend declarations. Main verifies
+  // the SENDER owns the wcId and registers it, so a guest-forged MIME payload dies at
+  // the adopt gate ('not-dragging'); dragend clears on a main-side grace timer.
+  tabDragStarted: (wcId) => ipcRenderer.send('tab-drag-started', wcId),
+  tabDragEnded: (wcId) => ipcRenderer.send('tab-drag-ended', wcId),
   // DD8 push-cache, the closed-tab-stack mirror above: main pushes { targets } —
   // one { windowId, label } per OTHER window — whenever the window set, an active
   // tab, or an active tab's title changes. The chrome caches it so the tab-context
