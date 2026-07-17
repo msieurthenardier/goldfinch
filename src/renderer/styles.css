@@ -153,16 +153,15 @@ html.platform-darwin #window-controls {
 #tabs {
   display: flex;
   gap: 4px;
-  overflow-x: auto;
-  flex: 0 1 auto; /* size to tabs' content; can shrink below content so its own scroll engages */
+  overflow: hidden;
+  flex: 0 1 auto; /* size to tabs' content; shrinks its tabs instead of scrolling (progressive @container disclosure on .tab) */
   min-width: 0;
-  scrollbar-width: thin;
 }
 /* Flexible drag spacer: absorbs the slack between the pill and the window controls,
    and inherits the #tabstrip drag region so it becomes the window-move area. */
 #tabstrip-drag {
   flex: 1;
-  min-width: 56px; /* always-present grab area: #tabs (flex:0 1, min-width:0, overflow-x:auto) yields and scrolls so this drag handle is never collapsed by many tabs */
+  min-width: 56px; /* always-present grab area: #tabs (flex:0 1, min-width:0, overflow:hidden) yields (auto min-size resolves to 0) so this drag handle is never collapsed by many tabs */
 }
 /* Leading golden pill grouping the two new-tab buttons (+ / ▾). */
 #newtab-pill {
@@ -196,20 +195,82 @@ html.platform-darwin #window-controls {
   outline-offset: -2px;
 }
 .tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 1 240px; /* Chrome-matched preferred width, no grow (so the pill hugs the tabs), shrinks to the floor */
+  flex: 0 1 240px; /* Chrome-matched preferred width, no grow (so the pill hugs the tabs), shrinks with no floor */
   width: 240px; /* drive the flex base size: overflow:hidden makes the content-size the text width, so #tabs would auto-size narrow without an explicit width */
-  min-width: 88px; /* floor — favicon + jar dot + ellipsized title + close stay visible (tune at HAT) */
   max-width: 240px; /* cap so a handful of tabs don't stretch absurdly wide */
-  overflow: hidden; /* hard guarantee: content never spills past the tab slot at the floor */
-  padding: 7px 10px;
+  overflow: hidden; /* hard guarantee: content never spills past the tab slot; also what keeps the automatic min-size at 0 (no floor) */
+  container-type: inline-size; /* DD1: staged content disclosure below is driven by this tab's own resolved width, zero JS */
   background: var(--bg-2);
   border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
+}
+/* Inner row: carries the flex layout + padding that used to live on .tab directly. A CSS
+   container query cannot restyle the element that establishes the container itself (confirmed
+   live: a trivially-true @container rule targeting `.tab` never took effect, while the same
+   rule targeting a `.tab` descendant did) — so the one disclosure stage that needs to shrink
+   the tab's own padding has to target a child instead. `.tab` stays the sizing/query-container
+   box (flex-basis, overflow, container-type); `.tab-row` is the descendant the padding-compress
+   stage below can legally reach. */
+.tab-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 7px 10px;
+}
+/* Progressive shrink (DD1/DD2): as the tab narrows past comfortable width, disclosure sheds
+   content in stages — title first (already ellipsizes above this), then the close button on
+   INACTIVE tabs only (the `:not(.active)` scoping below means the active tab's close button
+   never gets `display: none` at any width), then padding compresses at the sliver stage. No
+   hard min-width ON TABS IN GENERAL: a floor plus overflow:hidden would clip tabs invisibly
+   out of the strip at extreme counts; slivers stay visible/clickable/keyboard-reachable
+   instead (Chrome-like, no scrollbar ever). Thresholds below are literal rendered
+   (border-box) px — `.tab` carries no padding of its own (see `.tab-row` above), so its
+   container-query size equals `getBoundingClientRect().width` directly.
+   DD2 amendment (FD ruling, M09 F1 Leg 2 fix cycle — the active tab is the one narrow
+   exception): at the sliver stage the active tab's 16px `.tab-close` button no longer fits
+   inside a tab whose rendered width has shrunk below the button's own box — `display:block`
+   in the DOM does not mean the button is painted; a 16px box inside a <16px overflow:hidden
+   parent is clipped invisibly (caught live by the `responsive-tab-strip` behavior test,
+   Step 5). `.tab.active` alone (see the `min-width` rule below `.tab-close`) gets a width
+   floor so its close button is always fully inside its own bounds, paired with hiding its
+   favicon once narrow (immediately below) to keep the floor small. This does NOT reintroduce
+   the barred "global floor" — every other tab keeps shrinking with no floor at all, and the
+   no-scrollbar/no-clip invariant is unchanged (verified live at 60+ tabs: the other tabs
+   absorb the ~50px difference across dozens of tabs, a sub-pixel-per-tab effect since the
+   window's 900px minimum width keeps this one floored tab from ever forcing overflow — the
+   gap-derived physical bound, ~4px/tab, dominates long before). */
+@container (max-width: 72px) {
+  .tab .tab-title {
+    display: none;
+  }
+  /* Active-tab content reduction (DD2 amendment): sheds the favicon at the same threshold
+     title already hides at, freeing up room so the active tab's width floor (below) can stay
+     small. Scoped to `.tab.active` — a descendant-selector condition evaluated against `.tab`'s
+     own resolved width, not a bare `.tab` self-target (see the `.tab-row` comment above for why
+     that class of selector silently never matches inside its own @container block). Once the
+     active tab is clamped at its 64px floor (comfortably under this 72px threshold — an 8px
+     margin so the rule reliably re-fires despite sub-pixel layout rounding at the exact floor
+     value), this rule stays engaged permanently: title + favicon hidden, jar dot + close
+     button remain (padding 20px + dot 8px + gap 8px + close 16px = 52px, 12px of slack under
+     the 64px floor). */
+  .tab.active .tab-fav {
+    display: none;
+  }
+}
+@container (max-width: 56px) {
+  .tab:not(.active) .tab-close {
+    display: none;
+  }
+}
+@container (max-width: 40px) {
+  .tab .tab-row {
+    padding: 7px 4px;
+    gap: 4px;
+  }
 }
 .tab.active {
   background: var(--bg-3);
@@ -217,6 +278,11 @@ html.platform-darwin #window-controls {
      active tab is distinguishable without relying on the background tint alone. */
   box-shadow: inset 0 2px 0 var(--accent);
   font-weight: 600;
+  /* DD2 amendment width floor (see the Progressive-shrink comment above `@container
+     (max-width: 72px)`): the ONLY tab-width floor in this strip, scoped to the active tab
+     alone. 64px keeps the active tab's close button fully inside its own bounds at every
+     tab count — see the content-budget math in the favicon-hide comment above. */
+  min-width: 64px;
 }
 .tab .tab-title {
   overflow: hidden;
