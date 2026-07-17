@@ -48,8 +48,10 @@ interface GoldfinchBridge {
   windowCreate(): Promise<number | null>;
   /** Boot-config invoke (M09 F6 Leg 4, DD5/L4 + review H1): joins the renderer's
    * boot-gating Promise.all. bootTab defaults true; false for move-created
-   * windows. Serving it main-side releases the queued adopt-protocol sends. */
-  windowBootConfig(): Promise<{ bootTab: boolean }>;
+   * windows. Serving it main-side releases the queued adopt-protocol sends.
+   * M09 F9 / DD4: a restored window also carries its ordered saved tab list
+   * (restoreTabs), served with bootTab:false — the renderer creates those fresh. */
+  windowBootConfig(): Promise<{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }>;
 
   // --- downloads ---
   downloadMedia(payload: any): Promise<any>;

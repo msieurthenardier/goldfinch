@@ -143,7 +143,12 @@ Planning inputs adopted from prior artifacts:
       relaunching brings back the previous session's windows and tabs
       (addresses + jar assignments); burner tabs are excluded by
       construction; with the setting off (the default), startup behavior is
-      unchanged. *(behavior-test-backed)*
+      unchanged. *(behavior-test-backed)* — **IMPLEMENTED at F9 (landed 2026-07-16).
+      Structural proof green (session-store/snapshot both-directions unit tests, burner
+      excluded by the single-sourced positive allowlist, default-off byte-identity pinned).
+      The LIVE quit→relaunch→restore verification is HAT-scoped to F10** — the DD9
+      relaunch-harness probe returned NO-GO (no automation MCP/key/instance this session);
+      the `session-restore` behavior spec is authored and ready to run.**
 - [ ] Privacy and isolation hold everywhere tabs now move: a tab keeps its
       jar identity through reorder, reopen, tear-off, cross-window drag, and
       restore; nothing about a burner tab is ever persisted; jar isolation on
@@ -310,6 +315,21 @@ Planning inputs adopted from prior artifacts:
       DD10: an instrument that cannot discriminate between two states is not
       measuring them. **Not run ≠ green**, and a gate that cannot say which is
       not a gate.)*
+- [ ] **F9's live verification is carried to F10 (DD9 relaunch-harness NO-GO)** *(surfaced F9 leg 4:
+      no automation MCP/key/instance in the execution session)*. Session restore is **implemented and
+      structurally proven** (unit + source-scan layer green), but the observable-across-a-restart
+      behavior needs the live rig. **F10 must run, with the operator's rig:**
+      - `session-restore` (authored at F9) — enable → open tabs across ≥2 jars + a burner → clean quit
+        → **relaunch (out-of-band)** → assert the exact restored set with correct jarIds, the **burner
+        POSITIVELY ABSENT**, the 2-window menu-Exit guard (both windows back), default-off (nothing
+        restored), and the deleted-jar-drop variant.
+      - `tab-tearoff` **row 8a** + the displaced-menu residual (the unrun HIGH-1 net; F9 added the
+        move-core fix's unit-layer pin but not its live reading) — plus the clean re-run `tab-tearoff`
+        already owes.
+      - The **real `npm run a11y` verdict** (F9's settings toggle is a labeled checkbox, statically
+        reviewed a11y-clean, but the gate never ran for lack of the key).
+      - `tab-reorder` **Step 4** no-window-move check against a **second instrument** (retired to HAT
+        at F9; the arm-threshold half of its debt is discharged by the `shouldArm` unit pin).
 
 ## Flights
 
@@ -361,8 +381,14 @@ Planning inputs adopted from prior artifacts:
       fiction on this rig; deferred to an HTML5-drag spike (candidate 2, never measured).
       DD2 proven live for the first time. The DD7 blur gap is reachable and F7's
       accepted-gap ruling was refuted.)*
-- [ ] Flight 9: Session restore — setting-gated startup restore of windows +
-      tabs (addresses + jars), persistence layer shared with the closed-tab
-      stack, burner exclusion, unchanged default-off behavior.
+- [x] Flight 9: Session restore — setting-gated startup restore of windows +
+      tabs (addresses + jars), burner exclusion, unchanged default-off behavior.
+      *(Landed 2026-07-16, PR stacked on F8. A NEW Electron-free `session-store` (not the
+      closed-tab stack's own hooks — that reopen-stack persistence is explicitly deferred,
+      DD-Scope); tabs restored by fresh-create in the saved jar (never adopt); two-writer
+      close/before-quit capture; history + geometry scoped out. Burner boundary single-sourced
+      (`persist-jar-gate`). Folded in the F8 debts on touched paths: move-core structural fix,
+      `shouldArm` unit pin, `tab-reorder` Step 4 retired. Suite 1948. The LIVE E2E cycle +
+      `tab-tearoff` row 8a + the real a11y verdict are HAT-scoped to F10 — DD9 probe NO-GO.)*
 - [ ] Flight 10: HAT & alignment — operator-guided walkthrough of all mission
       behavior tests with iterative fix legs until aligned.

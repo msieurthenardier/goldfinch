@@ -34,6 +34,32 @@
 import { dropIndexFromPointer } from './tab-order.js';
 
 /**
+ * The pointer-travel a potential drag must cross before it ARMS, in window-local DIP.
+ * Single source of truth — the renderer imports this rather than re-declaring it, so the
+ * threshold and its predicate `shouldArm` can never drift apart. Owned here (not in the
+ * renderer) because the arm decision is the same pure, DOM-free number arithmetic as the
+ * zone decision, and the WINDOW-LOCAL coordinate discipline this module's header states
+ * governs both.
+ */
+export const DRAG_ARM_THRESHOLD_PX = 5;
+
+/**
+ * Has the pointer travelled far enough from the pointerdown origin to ARM a drag?
+ *
+ * Both axes: `Math.hypot(dx, dy)` — F2's `Math.abs(dx)` was complete only while the sole
+ * outcome was a horizontal reorder, but a straight-DOWN tear-off holds `dx` at 0 and would
+ * never have armed. `>=` so the boundary itself arms; strictly more permissive than the
+ * old `Math.abs(dx)` gate — every gesture that armed before still arms.
+ *
+ * @param {number} dx pointer x-travel from the pointerdown origin (window-local)
+ * @param {number} dy pointer y-travel from the pointerdown origin (window-local)
+ * @returns {boolean}
+ */
+export function shouldArm(dx, dy) {
+  return Math.hypot(dx, dy) >= DRAG_ARM_THRESHOLD_PX;
+}
+
+/**
  * classifyDragPoint(stripRect, slotRects, pointerX, pointerY, draggedIndex)
  *
  * Classify one window-local pointer point into the drag's two zones:

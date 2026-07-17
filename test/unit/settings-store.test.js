@@ -853,6 +853,57 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
 });
 
 // ---------------------------------------------------------------------------
+// restoreSession (M09 Flight 9 / DD7) — additive boolean, default OFF, no version
+// bump, EXPLICIT strict-boolean validator (the automationEnabled template — a truthy
+// non-boolean is rejected, NOT coerced, so it can never silently enable restore).
+// ---------------------------------------------------------------------------
+
+test('restoreSession — default on first load is false (no settings.json)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.restoreSession, false);
+    assert.equal(store.get('restoreSession'), false);
+    // Additive key must NOT bump the schema version.
+    assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive restoreSession key');
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('restoreSession — set true persists and reloads (round-trip)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('restoreSession', true);
+    const result = store.load(dir);
+    assert.equal(result.restoreSession, true);
+    assert.equal(store.get('restoreSession'), true);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('restoreSession — set throws on a truthy non-boolean, prior value unchanged', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.load(dir);
+    // A truthy string must NOT coerce to true — the strict validator throws BEFORE
+    // mutating (set() validates-before-mutate), so the value stays at its default.
+    assert.throws(
+      () => store.set('restoreSession', 'yes'),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('restoreSession'), false);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // F9 / F14 / F17 — set() fallback validation, own-key guard, failed-save state
 // ---------------------------------------------------------------------------
 

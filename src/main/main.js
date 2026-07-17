@@ -18,6 +18,10 @@ const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
+// M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
+// (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
+const sessionStore = require('./session-store');
+const { buildSessionSnapshot } = require('./session-snapshot');
 const { createManager } = require('./downloads-manager');
 const { buildRegisterRecord, buildProgressPayload, buildDonePayload } = require('./downloads-payload');
 const { registerInternalHandler } = require('./internal-ipc');
@@ -242,6 +246,14 @@ async function handleInternal(request) {
 // App-globals (closedTabStack, stores, MCP, downloads, privacy maps, farbleSeeds)
 // stay module-scope; everything per-window-in-nature lives in the record.
 const registry = createWindowRegistry();
+
+// M09 Flight 9 / DD3 two-writer coordination: flipped true by `before-quit` (which
+// fires FIRST on menu-Exit / Cmd+Q, full registry alive) so the per-window `close`
+// writes are SUPPRESSED and never shrink the terminal snapshot window-by-window. On
+// the close-last-window path it stays false, so `close` writes the {thisWindow} set.
+// Invariant: the terminal on-disk snapshot = the windows alive at the FIRST
+// quit-initiating event.
+let sessionQuitting = false;
 
 // DD8 accessor interim: the LAST-FOCUSED record's chrome webContents (membership-
 // validated in the registry, first-record fallback), or null when no window exists.
@@ -1267,6 +1279,24 @@ function createWindow({ noBootTab = false, contentSize = null } = {}) {
       if (captured.length > 0) broadcastClosedTabStackChanged();
     } catch (err) {
       console.error('[closed-tab-stack] window-close capture failed:', err);
+    }
+    // (1b) Session-restore snapshot write (M09 Flight 9 / DD3), a SIBLING to the
+    // closed-tab capture above — guests still alive here, and BEFORE the destroy loop
+    // (which nulls tabViews/activeTabWcId). Setting-gated AND suppressed while quitting
+    // (before-quit already captured the authoritative full set — this is what stops the
+    // menu-Exit path from shrinking the snapshot window-by-window). When !sessionQuitting
+    // this serves the close-last-window path (before-quit would otherwise fire on an
+    // empty registry) and mid-session dismissal. registry.records() momentarily
+    // over-includes the closing window (removed only at `closed`); always overwritten by
+    // the next close/quit — surfaces only on a crash between events, which DD6 scopes out.
+    // Whole block try/catch: session-store.write() propagates fs errors by design, and an
+    // uncaught throw here would wedge close (the F6 window-close-hang class).
+    try {
+      if (settings.get('restoreSession') === true && !sessionQuitting) {
+        sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
+      }
+    } catch (err) {
+      console.error('[session-store] window-close snapshot write failed:', err);
     }
     // (2) Per-tab side-effect suite + guest destroy (DD3/M5): Electron never
     // auto-destroys an attached WebContentsView's webContents on window close
@@ -2491,7 +2521,10 @@ ipcMain.handle('window-boot-config', (event) => {
     const [channel, payload] = buildMsg();
     cc.send(channel, payload);
   }
-  return { bootTab: !rec.noBootTab };
+  // M09 Flight 9 / DD4 / AC4: a restored window carries its ordered saved tab list on
+  // the record — serve it so the renderer boot loop creates each tab fresh (suppressing
+  // the home boot tab). Otherwise the unchanged bootTab decision (default-off byte-identity).
+  return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
 });
 
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
@@ -2871,25 +2904,34 @@ function moveTabIntoWindow(source, p, resolveTarget) {
   target.tabViews.set(p.wcId, entry);
   entry.active = true;
   if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
-  // THE TARGET'S OUTGOING TAB IS HIDDEN HERE, AND IT MUST BE — the adopt round-trip
-  // CANNOT do it, and the reason is this very assignment. `tab-set-active` is the only
-  // other place that hides an outgoing guest, and its hide-old branch is gated on
-  // `owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`. Pre-setting
-  // target.activeTabWcId below makes that guard FALSE by the time
-  // adopt-tab → onAdoptTab → activateTab → tab-set-active arrives: the branch is
-  // skipped, and the target's PREVIOUS active tab keeps `active: true` and
-  // setVisible(true) BEHIND the moved one. enumerateTabs then reports TWO
-  // `active: true` rows for the target window (automation/tabs.js maps `active: !!t.active`).
+  // THE TARGET'S OUTGOING TAB IS HIDDEN HERE, AND THE MENU IS CLOSED HERE, because the
+  // adopt round-trip that would otherwise do them is ASYNC:
+  // adopt-tab → onAdoptTab → activateTab → tab-set-active arrives on a LATER turn. Until
+  // it does, the target must never render two guests, so the core mirrors both effects
+  // SYNCHRONOUSLY here, holding the interim to exactly one active / one visible guest —
+  // the property leg 4's `tab-tearoff` row 8a asserts.
   //
-  // TEAR-OFF NEVER SAW THIS, which is why it survived to the flight-end review: a
-  // move-CREATED target is a `noBootTab` window whose activeTabWcId is null, so there
-  // is no outgoing tab to hide. It is exclusive to the move-into-an-EXISTING-window
-  // path (F8 leg 4), and at equal window sizes the moved tab visually COVERS the stale
-  // guest — a silent wrong state, the S1 class this flight exists to prevent.
+  // The round-trip's `tab-set-active` guard (`owner.activeTabWcId !== null &&
+  // owner.activeTabWcId !== wcId`) is now ARMED and RE-DOES both idempotently: we no
+  // longer pre-set `target.activeTabWcId = p.wcId`, so `activeTabWcId` still holds the
+  // OLD active tab when the round-trip lands, the guard is true, and its hide-old branch
+  // and `closeMenuOverlay('tab-switch')` branch both fire (re-hiding an already-hidden
+  // guest and re-closing an already-closed menu — no-ops). F8 DID pre-set it here, which
+  // made that guard FALSE by round-trip time and forced the core to be the SOLE doer; that
+  // pattern — disarm a guard, then hand-compensate for what it guarded — produced HIGH-1's
+  // double-active and the re-shown stale menu, so F9 leg 1 removes the pre-set (F8 Rec 5).
+  // The only thing the pre-set bought was a transient move-target caption (broadcastMove-
+  // TargetsChanged reads each window's activeTabWcId); that stale label is doctrine-
+  // sanctioned cosmetic ("can never mis-target") and self-heals on the round-trip's caption
+  // broadcast (`tab-set-active` at the `broadcastMoveTargetsChanged()` call below it).
   //
-  // Read BEFORE the overwrite — after it, the outgoing entry is unrecoverable. And
-  // SYNCHRONOUSLY: no `await` may enter this function at all (the DD1 pin above), so
-  // this cannot be deferred to the round-trip it is compensating for.
+  // TEAR-OFF NEVER SAW THE OLD DEFECT: a move-CREATED target is a `noBootTab` window whose
+  // activeTabWcId is null, so there is no outgoing tab to hide. It is exclusive to the
+  // move-into-an-EXISTING-window path (F8 leg 4), and at equal window sizes the moved tab
+  // visually COVERS the stale guest — the silent wrong state this synchronous hide prevents.
+  //
+  // Read BEFORE any overwrite, and SYNCHRONOUSLY: no `await` may enter this function at all
+  // (the DD1 pin above).
   const prevActive = target.activeTabWcId !== null ? target.tabViews.get(target.activeTabWcId) : null;
   if (prevActive && prevActive !== entry) {
     // Never read through a destroyed webContents — an uncaught throw in this area
@@ -2898,21 +2940,17 @@ function moveTabIntoWindow(source, p, resolveTarget) {
     // survives its view's destruction.
     if (!prevActive.view.webContents.isDestroyed()) prevActive.view.setVisible(false);
     prevActive.active = false;
-    // AND CLOSE THE TARGET'S OPEN MENU HERE, FOR THE SAME REASON THE HIDE IS HERE.
-    // The pre-set below disarms `tab-set-active`'s guard
-    // (`owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`), and that ONE
-    // guard gates TWO effects: the outgoing-tab hide (mirrored just above) AND
-    // `owner.sheet?.closeMenuOverlay('tab-switch')`. Disarmed, the adopt round-trip's
-    // `tab-set-active` takes the `else if (owner.sheet?.isMenuOpen()) owner.sheet.show()`
-    // branch instead — RE-SHOWING the target's stale menu (its active guest changed
-    // underneath it) at the moved tab's freshly-synced bounds. So the move core must
-    // close it ITSELF, synchronously, before the pre-set — same as the hide, and for
-    // the same round-trip-can't-do-it reason. Idempotent when no menu is open, and
-    // `target.sheet` is null-tolerant on a live record. The STRUCTURAL fix (stop
-    // pre-setting `target.activeTabWcId` and let the round-trip's guard fire) is F9's.
+    // AND CLOSE THE TARGET'S OPEN MENU HERE, FOR THE SAME REASON THE HIDE IS HERE: the
+    // async round-trip cannot close it on THIS turn. `tab-set-active`'s guard
+    // (`owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`) gates TWO effects —
+    // the outgoing-tab hide (mirrored just above) AND
+    // `owner.sheet?.closeMenuOverlay('tab-switch')` — and, now that the guard is armed
+    // (the pre-set is gone), re-closes the menu idempotently when the round-trip lands. The
+    // core still closes it ITSELF, synchronously, so the target's stale menu (its active
+    // guest changed underneath it) is never re-shown in the interim window. Idempotent when
+    // no menu is open, and `target.sheet` is null-tolerant on a live record.
     target.sheet?.closeMenuOverlay('tab-switch');
   }
-  target.activeTabWcId = p.wcId;
 
   // Focus rules (Chrome parity): the target window is raised and the moved tab is
   // active — true for a created window and for an existing one the tab is sent
@@ -3548,6 +3586,15 @@ app.whenReady().then(() => {
   // Technical Approach). historyRecorder is module-scoped so wireTabViewEvents'
   // closure (built per tab-create) can see it.
   historyStore.open(app.getPath('userData'));
+  // Session store load (M09 Flight 9 / AC2), a SIBLING to historyStore.open above —
+  // UNCONDITIONAL, deliberately NOT gated on the restoreSession setting. session-store
+  // .write() throws without a load()-set dir, so a user who ENABLES restore mid-session
+  // must have dir set to write at the next quit (an uncaught throw in before-quit wedges
+  // the quit — the F6 hang class). When restore is off the loaded snapshot sits INERT
+  // (never read()); for a user who never enabled, session.json never exists so load()'s
+  // existsSync is false → genuinely zero read. The dev-profile setPath('userData')
+  // redirect has already run, so userData is correct here (same discipline as history).
+  sessionStore.load(app.getPath('userData'));
   historyRecorder = createHistoryRecorder({
     store: historyStore,
     listJars: () => jars.list(),
@@ -3581,7 +3628,22 @@ app.whenReady().then(() => {
   /** @type {any} */ (internalSession).__goldfinchInternal = true; // belt-and-suspenders for any later applyShields call
   internalSession.protocol.handle('goldfinch', handleInternal);
 
-  createWindow();
+  // Session restore (M09 Flight 9 / DD4 / AC4), gated on the setting. read() returns
+  // null unless restore is ON and a non-empty usable snapshot exists (leg 2 guarantees
+  // it can never yield zero windows), so OFF falls through to today's EXACT single
+  // createWindow() — the byte-identical default-off path. On restore, rebuild each saved
+  // window with noBootTab (no home tab) and stash its ordered saved tab list on the
+  // record (createWindow returns it); window-boot-config serves that list to the renderer,
+  // which CREATES each tab FRESH (never adopt — there is no live source view at cold start).
+  const restoreSnap = settings.get('restoreSession') === true ? sessionStore.read() : null;
+  if (restoreSnap) {
+    for (const w of restoreSnap.windows) {
+      const rec = createWindow({ noBootTab: true });
+      rec.restoreTabs = w.tabs;
+    }
+  } else {
+    createWindow();
+  }
 
   // In-memory dev-enable override (DD3/DD4). Computed ONCE here (after app.whenReady,
   // so app.isPackaged is settled), alongside the launch logic. It writes NOTHING to the
@@ -3707,6 +3769,22 @@ app.on('before-quit', () => {
   // every window, so every window destroys its own; a registry-iterating teardown here
   // would run FIRST and double-destroy. The F8 DD5 find-before-sheet ordering pin
   // traveled to that `close` handler with the code.
+  // Session-restore snapshot write (M09 Flight 9 / DD3), the FIRST-quit-event capture on
+  // the menu-Exit / Cmd+Q path (before-quit fires first, full registry alive). Set the
+  // coordination flag FIRST so every subsequent per-window `close` write is suppressed and
+  // cannot shrink this authoritative full-set snapshot. Setting-gated AND non-empty-guarded
+  // (an empty registry writes nothing — the close-last-window path leaves this a no-op and
+  // lets `close` own that write). Whole block try/catch: session-store.write() propagates
+  // fs errors by design, and an UNCAUGHT throw in before-quit wedges the quit (the F6 hang
+  // class) — log-and-continue instead.
+  sessionQuitting = true;
+  try {
+    if (settings.get('restoreSession') === true && registry.records().length) {
+      sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
+    }
+  } catch (err) {
+    console.error('[session-store] before-quit snapshot write failed:', err);
+  }
   // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
   // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
   // guaranteed — a sync handler racing an I/O write — and the contract remains

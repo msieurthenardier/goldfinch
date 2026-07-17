@@ -273,6 +273,33 @@ async function copyText(text, messageEl) {
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
 
+/* ---- session-restore controller (M09 Flight 9 / DD7) ---- */
+
+(function () {
+  // Guard: only run when the internal bridge is present (goldfinch://settings origin).
+  if (!window.goldfinchInternal) return;
+
+  const el = /** @type {HTMLInputElement|null} */ (document.getElementById('restore-session-enabled'));
+  if (!el) return;
+
+  // Populate from the persisted setting on load. Assign .checked directly — never
+  // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet.
+  // No live side-effect: the flag is read by main only at the next whenReady (startup-only).
+  window.goldfinchInternal.settingsGet('restoreSession').then((v) => { el.checked = v === true; }).catch(() => {});
+
+  // Write a clean boolean on change (the strict validator rejects a non-boolean anyway).
+  el.addEventListener('change', () => {
+    window.goldfinchInternal.settingsSet('restoreSession', !!el.checked).catch(() => {});
+  });
+
+  // Re-sync when another surface changes the setting. Capture the handle so we can remove
+  // this listener on pagehide (DD5: prevents accumulation across reloads).
+  const h = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && typeof all.restoreSession === 'boolean') el.checked = all.restoreSession;
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
+})();
+
 /* ---- automation controller ---- */
 
 (function () {
