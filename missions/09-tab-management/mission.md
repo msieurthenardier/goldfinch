@@ -261,7 +261,7 @@ Planning inputs adopted from prior artifacts:
       (pure `src/shared/` module), pointer drag with live drop indicator,
       keyboard reorder, drag-region coexistence; extend
       `tab-keyboard-operability`.
-- [ ] Flight 3: Keyboard tab navigation parity — next/previous cycling and
+- [x] Flight 3: Keyboard tab navigation parity — next/previous cycling and
       jump-to-position from all three capture points (chrome keydown, guest
       `before-input-event`, sheet accelerators).
 - [ ] Flight 4: Closed-tab stack + reopen — bounded stack, `Ctrl+Shift+T`

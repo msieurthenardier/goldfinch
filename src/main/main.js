@@ -50,7 +50,7 @@ const { crossViewNavAction } = require('../shared/cross-view-nav');
 // consulted against a per-guest-kind allowlist (web vs internal) — see
 // handleGuestChromeShortcut below.
 const { keydownToAction } = require('../shared/keydown-action');
-const { isChromeActionForwardable } = require('../shared/guest-forward-allowlist');
+const { isChromeActionForwardable, isRepeatSafeAction } = require('../shared/guest-forward-allowlist');
 
 // A closed stdout/stderr reader (e.g. the launcher of `npm run dev:automation` detaching, or a
 // truncating pipe under --enable-logging) makes Electron's console forwarding + the AUTOMATION_DEV_MINT
@@ -441,7 +441,7 @@ function createSheetView() {
   // (Arrow/Home/End/Enter/Space/Escape/Tab) return null and stay with the sheet page.
   view.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
-    const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift });
+    const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift, alt: input.alt });
     if (!hit) return;
     // Always swallow a matched accelerator (the sheet page must not see it), and
     // respect the isAutoRepeat guards exactly as the guest branches do (devtools +
@@ -1125,12 +1125,21 @@ function handleGuestChromeShortcut(event, input, guestKind) {
     // actions either allowlist admits are lightbox-gated in keydownToAction
     // (devtools/zoom/find are excluded by the allowlist itself), so this is safe.
     lightboxOpen: false,
+    // Real input.alt threaded through (M09 F3, i18n ruling): AltGr digits report
+    // ctrl+alt on European layouts and must not be misread as a tab-jump.
+    alt: input.alt,
   });
   if (!isChromeActionForwardable(action, guestKind)) return false;
   event.preventDefault();
   // Swallow but don't stack/repeat-fire on a held key (mirrors the former
-  // handleGuestNewTab / Ctrl+J downloads guard below).
-  if (!input.isAutoRepeat) getChromeContents()?.send('chrome-shortcut-action', { action });
+  // handleGuestNewTab / Ctrl+J downloads guard below) — EXCEPT the tab-cycle/
+  // jump actions (M09 F3 fix-cycle, FD ruling): the leg's Edge Cases ruling is
+  // "allow repeat cycling" (Chrome allows held-Ctrl+Tab to cycle), so this
+  // guard must not swallow repeats for those. isRepeatSafeAction is the pure,
+  // unit-tested predicate for that carve-out (src/shared/guest-forward-allowlist.js).
+  if (isRepeatSafeAction(action) || !input.isAutoRepeat) {
+    getChromeContents()?.send('chrome-shortcut-action', { action });
+  }
   return true;
 }
 
@@ -1279,11 +1288,15 @@ function wireGuestContents(contents) {
     // before-input-event on the internal guest's webContents (a chrome renderer-keydown
     // fallback never fires while the internal view holds focus). Register a SEPARATE,
     // MINIMAL handler that calls ONLY handleGuestCrossViewNav and the generalized
-    // forwarder with the INTERNAL allowlist (new-tab + close-tab only — DD8 FD
-    // ruling, deliberately thin; extend one action at a time at future leg
-    // design) — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT
-    // D2 fix, absorbed — dispatchChromeAction('new-tab') has no isInternalTab
-    // gate, so it must work here too) plus Ctrl+W, but no other accelerator.
+    // forwarder with the INTERNAL allowlist (DD8 FD ruling, deliberately thin —
+    // extend one action at a time at future leg design for anything PRIVILEGED)
+    // — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT D2 fix,
+    // absorbed — dispatchChromeAction('new-tab') has no isInternalTab gate, so
+    // it must work here too) plus Ctrl+W. The allowlist also forwards the M09 F3
+    // tab-cycle/jump set (tab-next/tab-prev/tab-jump-1..8/tab-jump-last —
+    // navigation-neutral chrome actions; an internal settings page must not trap
+    // the operator), added to BOTH guest kinds per that flight's explicit
+    // ruling — the deliberately-thin principle still governs everything else.
     // Cross-view nav MUST run first (early return) — see the ordering comment on
     // handleGuestChromeShortcut (Ctrl+L double-dispatch otherwise).
     contents.on('before-input-event', (event, input) => {

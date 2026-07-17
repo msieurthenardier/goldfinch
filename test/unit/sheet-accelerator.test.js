@@ -13,8 +13,8 @@ const assert = require('node:assert/strict');
 
 const { sheetAcceleratorAction, isGuestActionAllowed } = require('../../src/shared/sheet-accelerator');
 
-const k = (key, { control = false, meta = false, shift = false } = {}) =>
-  sheetAcceleratorAction({ key, control, meta, shift });
+const k = (key, { control = false, meta = false, shift = false, alt = false } = {}) =>
+  sheetAcceleratorAction({ key, control, meta, shift, alt });
 const ctrl = (key, mods = {}) => k(key, { control: true, ...mods });
 
 // ---------------------------------------------------------------------------
@@ -106,10 +106,44 @@ test('unmodified letters/symbols are null (no accidental forwarding)', () => {
   }
 });
 
+// NOTE (M09 F3 Leg 1, design review): 'Tab' was REMOVED from this loop the same
+// change the chrome-class Ctrl+Tab entry landed (see the tab-cycle tests below) —
+// it is no longer a non-union key, and leaving it in this loop would be a
+// permanent red test, not a regression catch.
 test('modified NON-union keys are null (e.g. Ctrl+A, Ctrl+S, Ctrl+ArrowDown)', () => {
-  for (const key of ['a', 's', 'd', 'q', 'ArrowDown', 'Escape', 'Enter', 'Tab']) {
+  for (const key of ['a', 's', 'd', 'q', 'ArrowDown', 'Escape', 'Enter']) {
     assert.equal(ctrl(key), null, `Ctrl+${key} must not match`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Chrome-class tab-cycle / tab-jump (M09 F3 Leg 1) — the union gains the same
+// mappings keydownToAction does, lockstep alt handling included.
+// ---------------------------------------------------------------------------
+
+test('Ctrl+Tab -> chrome tab-next; Ctrl+Shift+Tab -> chrome tab-prev', () => {
+  assert.deepEqual(ctrl('Tab'), { scope: 'chrome', action: 'tab-next' });
+  assert.deepEqual(ctrl('Tab', { shift: true }), { scope: 'chrome', action: 'tab-prev' });
+});
+
+test('Ctrl+PageDown -> chrome tab-next; Ctrl+PageUp -> chrome tab-prev', () => {
+  assert.deepEqual(ctrl('PageDown'), { scope: 'chrome', action: 'tab-next' });
+  assert.deepEqual(ctrl('PageUp'), { scope: 'chrome', action: 'tab-prev' });
+});
+
+test('Ctrl+1..8 -> chrome tab-jump-1..8; Ctrl+9 -> chrome tab-jump-last', () => {
+  for (let n = 1; n <= 8; n++) {
+    assert.deepEqual(ctrl(String(n)), { scope: 'chrome', action: `tab-jump-${n}` });
+  }
+  assert.deepEqual(ctrl('9'), { scope: 'chrome', action: 'tab-jump-last' });
+});
+
+test('Ctrl+Alt+7 -> null (AltGr guard, lockstep with keydownToAction)', () => {
+  assert.equal(ctrl('7', { alt: true }), null);
+});
+
+test('Ctrl+Shift+7 -> chrome tab-jump-7 (digit match is shift-tolerant, AZERTY parity)', () => {
+  assert.deepEqual(ctrl('7', { shift: true }), { scope: 'chrome', action: 'tab-jump-7' });
 });
 
 test('shift alone is NOT a modifier (Shift+F is typing, not find)', () => {

@@ -12,7 +12,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isChromeActionForwardable } = require('../../src/shared/guest-forward-allowlist');
+const { isChromeActionForwardable, isRepeatSafeAction } = require('../../src/shared/guest-forward-allowlist');
 const { keydownToAction } = require('../../src/shared/keydown-action');
 
 // ---------------------------------------------------------------------------
@@ -98,4 +98,70 @@ test('Ctrl+T (unshifted, either case main.js before-input-event reports) still f
   assert.equal(action, 'new-tab');
   assert.equal(isChromeActionForwardable(action, 'web'), true);
   assert.equal(isChromeActionForwardable(action, 'internal'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Tab-cycle/jump (M09 F3 Leg 1, DD1/DD2): unlike the rest of the WEB-only set,
+// these forward on BOTH guest kinds — tab switching is navigation-neutral
+// chrome behavior, and an internal settings page must not trap the operator.
+// ---------------------------------------------------------------------------
+
+const TAB_CYCLE_JUMP = [
+  'tab-next', 'tab-prev',
+  'tab-jump-1', 'tab-jump-2', 'tab-jump-3', 'tab-jump-4',
+  'tab-jump-5', 'tab-jump-6', 'tab-jump-7', 'tab-jump-8',
+  'tab-jump-last',
+];
+
+for (const action of TAB_CYCLE_JUMP) {
+  test(`web guest: '${action}' is forwardable (tab-cycle/jump, M09 F3)`, () => {
+    assert.equal(isChromeActionForwardable(action, 'web'), true);
+  });
+  test(`internal guest: '${action}' is forwardable (tab-cycle/jump — internal tabs must not trap the operator)`, () => {
+    assert.equal(isChromeActionForwardable(action, 'internal'), true);
+  });
+}
+
+test('Ctrl+Tab classifies to tab-next end-to-end and forwards on both guest kinds', () => {
+  const action = keydownToAction({ key: 'Tab', ctrl: true, meta: false, shift: false, lightboxOpen: false });
+  assert.equal(action, 'tab-next');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), true);
+});
+
+test('Ctrl+Alt+7 classifies to null end-to-end (AltGr guard) and never forwards', () => {
+  const action = keydownToAction({ key: '7', ctrl: true, meta: false, shift: false, lightboxOpen: false, alt: true });
+  assert.equal(action, null);
+  assert.equal(isChromeActionForwardable(action, 'web'), false);
+  assert.equal(isChromeActionForwardable(action, 'internal'), false);
+});
+
+// ---------------------------------------------------------------------------
+// isRepeatSafeAction (M09 F3 fix-cycle, FD ruling): the pure carve-out predicate
+// consulted by handleGuestChromeShortcut's (main.js) isAutoRepeat guard so that
+// held-key repeat cycling isn't swallowed under guest focus — mirrors Chrome's
+// own held-Ctrl+Tab repeat-cycle behavior (the leg's Edge Cases ruling).
+// ---------------------------------------------------------------------------
+
+for (const action of TAB_CYCLE_JUMP) {
+  test(`isRepeatSafeAction('${action}') is true (tab-* family exempted from the repeat guard)`, () => {
+    assert.equal(isRepeatSafeAction(action), true);
+  });
+}
+
+const NOT_REPEAT_SAFE = ['new-tab', 'close-tab', 'focus-address', 'toggle-panel', 'toggle-privacy', 'reload'];
+
+for (const action of NOT_REPEAT_SAFE) {
+  test(`isRepeatSafeAction('${action}') is false (held key must not stack/repeat-fire)`, () => {
+    assert.equal(isRepeatSafeAction(action), false);
+  });
+}
+
+test('isRepeatSafeAction never throws on null/undefined/empty/non-string', () => {
+  assert.doesNotThrow(() => {
+    assert.equal(isRepeatSafeAction(null), false);
+    assert.equal(isRepeatSafeAction(undefined), false);
+    assert.equal(isRepeatSafeAction(''), false);
+    assert.equal(isRepeatSafeAction(42), false);
+  });
 });
