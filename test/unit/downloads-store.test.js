@@ -7,13 +7,18 @@
 //
 // The store is a MODULE-SCOPED SINGLETON (like settings-store), so we re-require it
 // fresh per test (cache-bust) to stop dir/nextId/records leaking across tests, and
-// use a real temp dir.
+// use a real temp dir. downloads-store now persists through app-db.js's document-row
+// seam (flight 10-1 DD2-DD4): app-db is required ONCE for the whole file (never
+// cache-busted — see settings-store.test.js header for the require-order-hazard
+// rationale) and reset per test via appDb.open(dir).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
+const appDb = require('../../src/main/app-db');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-downloads-'));
@@ -21,6 +26,20 @@ function makeTempDir() {
 
 function removeTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// Read the raw 'downloads' document row payload directly off app.db, bypassing
+// the store.
+function readRow(dir) {
+  const check = new DatabaseSync(path.join(dir, 'app.db'));
+  try {
+    const row = /** @type {any} */ (
+      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('downloads')
+    );
+    return row ? row.payload : null;
+  } finally {
+    check.close();
+  }
 }
 
 function freshStore() {
@@ -57,6 +76,7 @@ test('exposes exactly the repo interface', () => {
 
 test('first load (no downloads.json) → empty list, nextId starts at 1', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -64,6 +84,7 @@ test('first load (no downloads.json) → empty list, nextId starts at 1', () => 
     assert.equal(store.getNextId(), 1);
     assert.equal(store.getNextId(), 2);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -73,6 +94,7 @@ test('first load (no downloads.json) → empty list, nextId starts at 1', () => 
 // ---------------------------------------------------------------------------
 test('append persists and reloads', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     let store = freshStore();
     store.load(dir);
@@ -87,6 +109,7 @@ test('append persists and reloads', () => {
     assert.equal(all[1].id, 2);
     assert.equal(all[1].state, 'cancelled');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -94,22 +117,25 @@ test('append persists and reloads', () => {
 // ---------------------------------------------------------------------------
 // Atomic write produces valid JSON of the object shape { version, nextId, records }
 // ---------------------------------------------------------------------------
-test('atomic write produces valid object-shaped JSON on disk', () => {
+test('writes produce a valid object-shaped JSON row (was: "...on disk" — downloads.json is no longer the write target)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
     store.getNextId(); // bumps nextId → persists
     store.append(rec(1));
 
-    const file = path.join(dir, 'downloads.json');
-    assert.ok(fs.existsSync(file), 'downloads.json should exist');
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const raw = readRow(dir);
+    assert.ok(raw !== null, 'downloads row should exist');
+    const parsed = JSON.parse(/** @type {string} */ (raw));
     assert.equal(parsed.version, 1);
     assert.equal(typeof parsed.nextId, 'number');
     assert.ok(Array.isArray(parsed.records), 'records should be an array');
     assert.equal(parsed.records.length, 1);
+    assert.ok(!fs.existsSync(path.join(dir, 'downloads.json')), 'append()/getNextId() must not write downloads.json');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -119,6 +145,7 @@ test('atomic write produces valid object-shaped JSON on disk', () => {
 // ---------------------------------------------------------------------------
 test('getNextId is monotonic and never lowered by prune or remove', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -148,12 +175,14 @@ test('getNextId is monotonic and never lowered by prune or remove', () => {
     assert.ok(next > 600, `next (${next}) must exceed every id ever issued (600)`);
     assert.equal(next, 602, 'nextId continued from the last bump (602), not derived from records');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('nextId survives a reload (persisted independently of records)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     let store = freshStore();
     store.load(dir);
@@ -167,6 +196,7 @@ test('nextId survives a reload (persisted independently of records)', () => {
     // Persisted nextId is the authority — not max(records)+1 (records is empty).
     assert.equal(store.getNextId(), 4);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -176,6 +206,7 @@ test('nextId survives a reload (persisted independently of records)', () => {
 // ---------------------------------------------------------------------------
 test('append clamps to the newest 500 by id (drop-oldest)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -187,12 +218,14 @@ test('append clamps to the newest 500 by id (drop-oldest)', () => {
     assert.equal(all.find((r) => r.id === 1), undefined, 'oldest (id 1) dropped');
     assert.ok(all.find((r) => r.id === 501), 'newest (id 501) kept');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load applies the same 500-cap clamp', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // Hand-write a file with 600 records.
     const records = [];
@@ -209,6 +242,7 @@ test('load applies the same 500-cap clamp', () => {
     assert.equal(all[0].id, 101, 'kept the newest 500 (101..600)');
     assert.equal(all[all.length - 1].id, 600);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -218,6 +252,7 @@ test('load applies the same 500-cap clamp', () => {
 // ---------------------------------------------------------------------------
 test('per-record validator drops malformed entries on load', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const records = [
       rec(1), // valid
@@ -239,6 +274,7 @@ test('per-record validator drops malformed entries on load', () => {
     const ids = store.list().map((r) => r.id).sort((a, b) => a - b);
     assert.deepEqual(ids, [1, 6], 'only valid terminal records survive');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -248,6 +284,7 @@ test('per-record validator drops malformed entries on load', () => {
 // ---------------------------------------------------------------------------
 test('corrupt JSON → empty list, no throw', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     fs.writeFileSync(path.join(dir, 'downloads.json'), '{{not valid json!!', 'utf8');
     const store = freshStore();
@@ -255,24 +292,28 @@ test('corrupt JSON → empty list, no throw', () => {
     assert.deepEqual(store.list(), []);
     assert.equal(store.getNextId(), 1, 'nextId reset to 1 on corrupt file');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('bare-array top-level shape → empty list (object shape required)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     fs.writeFileSync(path.join(dir, 'downloads.json'), JSON.stringify([rec(1)]), 'utf8');
     const store = freshStore();
     store.load(dir);
     assert.deepEqual(store.list(), []);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('load repairs missing nextId from maxRecordId+1 (file predating the field)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     // A file with records but NO nextId field.
     fs.writeFileSync(
@@ -285,6 +326,7 @@ test('load repairs missing nextId from maxRecordId+1 (file predating the field)'
     // nextId repaired to max(records)+1 = 43, never re-issuing a live id.
     assert.equal(store.getNextId(), 43);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -294,6 +336,7 @@ test('load repairs missing nextId from maxRecordId+1 (file predating the field)'
 // ---------------------------------------------------------------------------
 test('remove filters out the record and persists; nextId untouched', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     let store = freshStore();
     store.load(dir);
@@ -308,12 +351,14 @@ test('remove filters out the record and persists; nextId untouched', () => {
     assert.deepEqual(store.list().map((r) => r.id), [b]);
     assert.ok(store.getNextId() > b, 'nextId never lowered by remove');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
 
 test('clear empties records but keeps nextId', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     let store = freshStore();
     store.load(dir);
@@ -330,6 +375,7 @@ test('clear empties records but keeps nextId', () => {
     assert.deepEqual(store.list(), []);
     assert.equal(store.getNextId(), 4, 'clear keeps nextId');
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -339,6 +385,7 @@ test('clear empties records but keeps nextId', () => {
 // ---------------------------------------------------------------------------
 test('custom codec round-trip (serialize/deserialize seam)', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const serializeLog = [];
     const deserializeLog = [];
@@ -363,6 +410,7 @@ test('custom codec round-trip (serialize/deserialize seam)', () => {
     assert.ok(deserializeLog.length > 0, 'custom deserialize used');
     assert.equal(store.list().length, 1);
   } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });
@@ -372,6 +420,7 @@ test('custom codec round-trip (serialize/deserialize seam)', () => {
 // ---------------------------------------------------------------------------
 test('list returns a copy of the records array', () => {
   const dir = makeTempDir();
+  appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
@@ -380,6 +429,111 @@ test('list returns a copy of the records array', () => {
     snapshot.push(rec(999));
     assert.equal(store.list().length, 1, 'pushing onto the snapshot does not affect the store');
   } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// app-db integration (flight 10-1, leg 1): app-db-not-open propagation +
+// legacy-JSON migration semantics (DD5).
+// ---------------------------------------------------------------------------
+
+test('load() throws when app-db is not open (mis-ordered boot must propagate, not fall back to empty)', () => {
+  const dir = makeTempDir();
+  try {
+    // Deliberately do NOT call appDb.open(dir) — app-db starts closed.
+    const store = freshStore();
+    assert.throws(() => store.load(dir), /app db not open/);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('migration: legacy downloads.json is imported once, records intact, then renamed .migrated', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const legacy = { version: 1, nextId: 3, records: [rec(1), rec(2)] };
+    fs.writeFileSync(path.join(dir, 'downloads.json'), JSON.stringify(legacy), 'utf8');
+
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list().map((r) => r.id), [1, 2]);
+    assert.equal(store.getNextId(), 3);
+
+    const row = readRow(dir);
+    assert.ok(row !== null);
+    assert.equal(JSON.parse(/** @type {string} */ (row)).records.length, 2);
+
+    assert.ok(!fs.existsSync(path.join(dir, 'downloads.json')), 'downloads.json should be renamed away');
+    assert.ok(fs.existsSync(path.join(dir, 'downloads.json.migrated')), 'downloads.json.migrated should exist');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: corrupt legacy downloads.json still migrates (repaired-to-empty row + rename)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    fs.writeFileSync(path.join(dir, 'downloads.json'), '{{not valid json!!', 'utf8');
+
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list(), []);
+
+    const row = readRow(dir);
+    assert.ok(row !== null, 'the repaired-to-empty result still migrates as the row');
+    assert.deepEqual(JSON.parse(/** @type {string} */ (row)).records, []);
+
+    assert.ok(!fs.existsSync(path.join(dir, 'downloads.json')));
+    assert.ok(fs.existsSync(path.join(dir, 'downloads.json.migrated')), 'the corrupt original still renames .migrated');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: a present row wins over a stray legacy downloads.json (no re-import)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.append(rec(1));
+
+    // Now drop a stray legacy file with DIFFERENT records — this must be ignored.
+    fs.writeFileSync(
+      path.join(dir, 'downloads.json'),
+      JSON.stringify({ version: 1, nextId: 99, records: [rec(2), rec(3)] }),
+      'utf8'
+    );
+
+    const store2 = freshStore();
+    store2.load(dir);
+    assert.deepEqual(store2.list().map((r) => r.id), [1], 'row wins; stray JSON is not re-imported');
+
+    assert.ok(fs.existsSync(path.join(dir, 'downloads.json')));
+    assert.ok(!fs.existsSync(path.join(dir, 'downloads.json.migrated')));
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('migration: no row, no legacy file → empty defaults, no migration side effects', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.deepEqual(store.list(), []);
+    assert.equal(readRow(dir), null, 'a fresh profile seeds defaults in memory only, no row write');
+    assert.ok(!fs.existsSync(path.join(dir, 'downloads.json.migrated')));
+  } finally {
+    appDb.close();
     removeTempDir(dir);
   }
 });

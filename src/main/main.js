@@ -9,6 +9,9 @@ const shields = require('./shields');
 const jars = require('./jars');
 const { registerJarIpc } = require('./jar-ipc');
 const historyStore = require('./history-store');
+// App database (M10 Flight 1, Leg 1 / DD2-DD4): the Electron-free node:sqlite
+// substrate backing settings/downloads/session (jars/shields fold in leg 2).
+const appDb = require('./app-db');
 const { createHistoryRecorder } = require('./history-recorder');
 const { registerHistoryIpc } = require('./history-ipc');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
@@ -3726,7 +3729,14 @@ function pruneAllJars() {
 }
 
 app.whenReady().then(() => {
-  initProfileAndStores(app, { shields, settings, jars, downloads });
+  // App database open (M10 Flight 1, Leg 2 / DD4, DD7, DD9): folded into the
+  // reshaped initProfileAndStores below, immediately after its dev-profile
+  // setPath redirect and before every store load (shields/settings/jars/
+  // downloads all read/write through this handle). This replaces leg 1's
+  // interim sibling call, which ran ahead of the redirect and so opened a dev
+  // (unpackaged) launch's app.db in the pre-redirect userData dir — see
+  // flight-log.md's Decisions section for the leg-1 nuance this resolves.
+  initProfileAndStores(app, { appDb, shields, settings, jars, downloads });
   // History store: opened as a SIBLING call right after initProfileAndStores
   // returns — deliberately NOT by widening that function's unit-pinned 4-store
   // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
@@ -3737,12 +3747,14 @@ app.whenReady().then(() => {
   historyStore.open(app.getPath('userData'));
   // Session store load (M09 Flight 9 / AC2), a SIBLING to historyStore.open above —
   // UNCONDITIONAL, deliberately NOT gated on the restoreSession setting. session-store
-  // .write() throws without a load()-set dir, so a user who ENABLES restore mid-session
-  // must have dir set to write at the next quit (an uncaught throw in before-quit wedges
-  // the quit — the F6 hang class). When restore is off the loaded snapshot sits INERT
-  // (never read()); for a user who never enabled, session.json never exists so load()'s
-  // existsSync is false → genuinely zero read. The dev-profile setPath('userData')
-  // redirect has already run, so userData is correct here (same discipline as history).
+  // .write() now resolves its row through the already-open app-db singleton (M10 Flight 1
+  // / DD4/DD7) rather than a load()-set dir — the failure mode if load() were skipped
+  // shifts from "throws without a dir" to "doc store unresolved", same uncaught-throw-
+  // wedges-quit hazard (the F6 hang class), so load() here remains load-bearing. When
+  // restore is off the loaded snapshot sits INERT (never read()); for a user who never
+  // enabled it, no session row/file exists so load()'s row read is genuinely empty. The
+  // dev-profile setPath('userData') redirect has already run, so userData is correct
+  // here (same discipline as history).
   sessionStore.load(app.getPath('userData'));
   historyRecorder = createHistoryRecorder({
     store: historyStore,
@@ -3960,6 +3972,14 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   try {
     historyStore.close();
+  } catch {
+    // best-effort — quit must not hang or crash on a close failure
+  }
+  // App database close (M10 Flight 1, Leg 1 / DD2, DD7) — a sibling to
+  // historyStore.close() above; order between the two DBs is immaterial,
+  // both run after before-quit's writers. close() checkpoints the WAL file.
+  try {
+    appDb.close();
   } catch {
     // best-effort — quit must not hang or crash on a close failure
   }

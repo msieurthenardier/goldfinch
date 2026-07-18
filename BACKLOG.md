@@ -65,48 +65,14 @@ caution in mission 02).
 
 ## Persistent storage substrate: JSON stores → SQLite
 
-**Status:** strategic future-mission seed (operator, 2026-06-20).
-**Captured:** 2026-06-20, during Mission 04 Flight 5 (downloads surface) planning.
-
-### The thesis
-Goldfinch persists structured state as **schema-versioned JSON files** under `userData`
-(`settings-store.js`, and — added in M04 Flight 5 — `downloads-store.js`). JSON is fine for
-**low-cardinality** state (settings; download history, which M04 Flight 5 caps at 500 entries), but
-the **browsing-history** capability the operator wants next is **high-cardinality** (thousands to tens
-of thousands of rows) with **prefix search** for the address bar — a workload JSON cannot serve
-(whole-file parse on load, no index, linear scan). Move Goldfinch's persistent storage to a single
-**SQLite** substrate (e.g. `better-sqlite3` or Node's built-in `node:sqlite` on a current runtime),
-shared by downloads, browsing history, and any future history-class store.
-
-### Why (the evidence)
-1. **Browsing history needs an index (the trigger).** The deferred browsing-history / jars-lifecycle
-   mission needs fast prefix lookup and bounded memory — the canonical SQLite use case. Building it on
-   JSON would be a known dead end.
-2. **Downloads is already shaped for the swap (M04 Flight 5).** Flight 5 deliberately put the JSON
-   downloads store **behind a narrow repository interface** (`list`/`append`/`remove`/`clear`, DD3/DD9)
-   so the SQLite migration is a one-module change, not a `main.js` excavation. That interface is the
-   template for re-homing `settings-store.js` too.
-3. **Crash-survivable in-progress downloads.** M04 Flight 5's JSON model persists **terminal records
-   only** (in-progress is memory-only, lost on a crash). SQLite with transactional writes can persist
-   in-progress safely and reconcile dead `progressing` rows on load — the "proper" version of the gap
-   Flight 5 accepted.
-
-### The zero-dep tension
-Goldfinch holds a **zero-runtime-dependency identity** (weighed in M03's MCP-SDK decision). SQLite is
-the most defensible exception to date — but the mission must make the call explicitly: **Node's
-built-in `node:sqlite`** vs. a vendored native module (`better-sqlite3`). A go/no-go like M03's, not an
-assumed yes. **The zero-dep path is open today**: Electron `^42` bundles Node ≥ 22.12, where
-`node:sqlite` is available — so the decision is not gated on a runtime upgrade.
-
-### Scope notes for when this becomes a mission
-- **Likely sequenced with / just before the browsing-history mission** — history is the workload that
-  justifies SQLite; doing storage first avoids building history twice.
-- Re-home both `settings-store.js` and `downloads-store.js` onto the SQLite-backed repository
-  interface; keep the interface stable so callers don't change.
-- Add a one-time **JSON → SQLite migration** on first launch (read the existing JSON, import, retire
-  the file) so existing users keep their settings + download history.
-- Decide the dependency posture (`node:sqlite` vs vendored) up front (the zero-dep go/no-go).
-- Add crash-survivable in-progress downloads once on SQLite (closes the M04 Flight 5 accepted gap).
+**Status:** landed in M10 (Persistence Consolidation) Flight 1
+(`sqlite-store-consolidation`) — all five config/state stores (settings,
+downloads, session, jars, shields) now persist through `app.db`'s
+`documents` row seam (`src/main/app-db.js`, cloned from `history-store.js`'s
+proven seams), with one-time automatic migration from the legacy JSON files.
+See `CLAUDE.md`'s "App database" section for the shipped shape and DD1's
+re-affirmation of the zero-dependency `node:sqlite` call for the widened
+persistence layer.
 
 ---
 

@@ -7,9 +7,12 @@
 // Design — mirrors settings-store.js's DURABILITY DISCIPLINE, not its schema shape:
 // - ELECTRON-FREE: does NOT require('electron'), does NOT call app.getPath at
 //   module scope. The userData path is INJECTED at load(userDataPath).
-// - Atomic persistence: writes to a temp file then renames (same filesystem as the
-//   target, so rename is atomic on POSIX and near-atomic on Windows).
-// - Corrupt→empty: a corrupt/unreadable file or a bad top-level shape → an empty
+// - Persists through app-db.js's `documents` row seam (flight 10-1 DD2-DD4):
+//   one row keyed 'downloads', written wholesale on every save(). A one-time
+//   legacy migration reads `downloads.json` when no row exists yet, repairs it
+//   through the SAME validate/prune logic below, writes the row, then renames
+//   the file `.migrated` (best-effort — DD5).
+// - Corrupt→empty: corrupt/unreadable data or a bad top-level shape → an empty
 //   record set with nextId reset to 1 (load never throws). History loss on a corrupt
 //   file is accepted, same posture as settings.
 // - Pluggable serialization seam (DD9): load/save use a { serialize, deserialize }
@@ -30,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const appDb = require('./app-db');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -48,6 +52,9 @@ const TERMINAL_STATES = new Set(['completed', 'cancelled', 'interrupted']);
 
 /** @type {string | null} */
 let dir = null;
+
+/** @type {{ read(): string | null, write(payload: string, now?: number): void, remove(): void } | null} */
+let docStore = null;
 
 /** @type {number} */
 let nextId = 1;
@@ -112,16 +119,67 @@ function pruneOldest(recs) {
 }
 
 // ---------------------------------------------------------------------------
-// Atomic write — temp file beside the target (same fs → atomic rename).
-// Errors PROPAGATE to the caller (manager tolerates them on best-effort paths).
+// Persist the current { version, nextId, records } envelope to the document
+// row. Errors PROPAGATE to the caller (manager tolerates them on best-effort
+// paths).
 // ---------------------------------------------------------------------------
 
 function save() {
-  const file = path.join(/** @type {string} */ (dir), FILE_NAME);
-  const tmp = file + '.tmp';
   const payload = { version: SCHEMA_VERSION, nextId, records };
-  fs.writeFileSync(tmp, codec.serialize(payload));
-  fs.renameSync(tmp, file);
+  /** @type {any} */ (docStore).write(codec.serialize(payload));
+}
+
+// ---------------------------------------------------------------------------
+// applyStored(stored) — the existing shape-check/validate/prune/nextId repair
+// logic, extracted so it's shared by the row-read path and the legacy-JSON
+// migration path.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {any} stored
+ */
+function applyStored(stored) {
+  // Bad top-level shape (not an object, or a bare array) → empty.
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+    nextId = 1;
+    records = [];
+    return;
+  }
+
+  const rawRecords = Array.isArray(stored.records) ? stored.records : [];
+  // Per-record validator drops malformed entries; survivors are normalized.
+  const valid = [];
+  for (const r of rawRecords) {
+    const v = validateRecord(r);
+    if (v) valid.push(v);
+  }
+  records = pruneOldest(valid);
+
+  // nextId authority: the persisted nextId. The maxRecordId+1 term only repairs a
+  // file that predates the field (or was hand-edited) — it never LOWERS a sane
+  // persisted nextId. max(persistedNextId, maxRecordId+1, 1).
+  const persistedNextId =
+    Number.isInteger(stored.nextId) && stored.nextId >= 1 ? stored.nextId : 1;
+  const maxRecordId = records.reduce(
+    (m, r) => Math.max(m, /** @type {any} */ (r).id),
+    0
+  );
+  nextId = Math.max(persistedNextId, maxRecordId + 1, 1);
+}
+
+/**
+ * Deserialize + apply raw bytes (a document row payload or legacy JSON file
+ * contents). NEVER throws — a deserialize failure (corrupt bytes) resets to
+ * the empty envelope, same as today's corrupt-file handling.
+ * @param {string} raw
+ */
+function parseAndApply(raw) {
+  try {
+    applyStored(codec.deserialize(raw));
+  } catch {
+    nextId = 1;
+    records = [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +188,7 @@ function save() {
 
 /**
  * Initialise the store. Must be called before list/append/remove/clear/getNextId.
- * Safe to call again (re-reads the file). NEVER throws.
+ * Safe to call again (re-reads the row). NEVER throws.
  *
  * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
  * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
@@ -142,44 +200,39 @@ function load(userDataPath, opts = {}) {
     deserialize: opts.deserialize ?? defaultDeserialize
   };
 
+  // Resolve the document store and read the row OUTSIDE the catch-all below:
+  // an app-db-not-open error is a programmer error (mis-ordered boot) and
+  // must propagate — never dissolve into "fall back to empty" (design
+  // review). The never-throw contract below still covers everything else
+  // (JSON parse, repair, migration rename).
+  docStore = appDb.createDocumentStore('downloads');
+  const row = docStore.read();
+
+  if (row !== null) {
+    parseAndApply(row);
+    return;
+  }
+
   try {
     const file = path.join(dir, FILE_NAME);
-    if (!fs.existsSync(file)) {
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf8');
+      parseAndApply(raw);
+      // One-time migration: the repaired envelope becomes the row (even a
+      // corrupt legacy file migrates its repaired-to-empty result — DD5),
+      // then the legacy file is renamed to mark it superseded.
+      save();
+      try {
+        fs.renameSync(file, file + '.migrated');
+      } catch {
+        // best-effort — migration already completed via the row write (DD5).
+      }
+    } else {
       nextId = 1;
       records = [];
-      return;
     }
-    const raw = fs.readFileSync(file, 'utf8');
-    const stored = codec.deserialize(raw);
-
-    // Bad top-level shape (not an object, or a bare array) → empty.
-    if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-      nextId = 1;
-      records = [];
-      return;
-    }
-
-    const rawRecords = Array.isArray(stored.records) ? stored.records : [];
-    // Per-record validator drops malformed entries; survivors are normalized.
-    const valid = [];
-    for (const r of rawRecords) {
-      const v = validateRecord(r);
-      if (v) valid.push(v);
-    }
-    records = pruneOldest(valid);
-
-    // nextId authority: the persisted nextId. The maxRecordId+1 term only repairs a
-    // file that predates the field (or was hand-edited) — it never LOWERS a sane
-    // persisted nextId. max(persistedNextId, maxRecordId+1, 1).
-    const persistedNextId =
-      Number.isInteger(stored.nextId) && stored.nextId >= 1 ? stored.nextId : 1;
-    const maxRecordId = records.reduce(
-      (m, r) => Math.max(m, /** @type {any} */ (r).id),
-      0
-    );
-    nextId = Math.max(persistedNextId, maxRecordId + 1, 1);
   } catch {
-    // Any error (corrupt JSON, read error, bad shape) → empty list, nextId reset.
+    // Any error (read error, etc.) → empty list, nextId reset.
     // load() MUST NEVER THROW — the app must still boot.
     nextId = 1;
     records = [];

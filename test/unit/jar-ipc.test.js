@@ -22,6 +22,11 @@ const path = require('path');
 
 const { BURNER } = require('../../src/shared/burner');
 const { registerJarIpc } = require('../../src/main/jar-ipc');
+// jars.js now resolves its document row through app-db.js on every load()
+// (flight 10-1, leg 2). app-db is required ONCE for the whole file (never
+// cache-busted, the settings-store.test.js require-order-hazard ruling) and
+// reset per test via appDb.open(dir) inside makeHarness (the leg-1 pattern).
+const appDb = require('../../src/main/app-db');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-jar-ipc-'));
@@ -99,7 +104,11 @@ function makeHarness(
   { containers = [personal, work], defaultId = 'personal', storageThrows = false, historyThrows = {} } = {}
 ) {
   const dir = makeTempDir();
-  t.after(() => removeTempDir(dir));
+  appDb.open(dir);
+  t.after(() => {
+    appDb.close();
+    removeTempDir(dir);
+  });
   fs.writeFileSync(path.join(dir, 'containers.json'), JSON.stringify({ version: 2, defaultId, containers }));
   const jars = freshStore();
   jars.load(dir);

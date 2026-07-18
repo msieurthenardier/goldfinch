@@ -8,10 +8,13 @@
 // OBJECT schema (one document replaced wholesale, not an append log):
 // - ELECTRON-FREE: does NOT require the electron module, does NOT call app.getPath at
 //   module scope. The userData dir is INJECTED at load(userDataPath).
-// - Atomic persistence: writes a temp file beside the target then renames (same
-//   filesystem → atomic on POSIX, near-atomic on Windows).
-// - Never-throws load: a missing / corrupt / bad-shape file → no usable session
-//   (read() → null). The app must still boot.
+// - Persists through app-db.js's `documents` row seam (flight 10-1 DD2-DD4):
+//   one row keyed 'session', written wholesale by write(). A one-time legacy
+//   migration reads `session.json` when no row exists yet, validates it
+//   through the SAME validateSnapshot below, writes the row via write(), then
+//   renames the file `.migrated` (best-effort — DD5).
+// - Never-throws load: a missing / corrupt / bad-shape row or file → no usable
+//   session (read() → null). The app must still boot.
 // - Codec seam: load/write use a { serialize, deserialize } pair defaulting to
 //   JSON.stringify/parse so a future backend swaps only the pair.
 //
@@ -27,6 +30,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const appDb = require('./app-db');
 
 const FILE_NAME = 'session.json';
 const SCHEMA_VERSION = 1;
@@ -39,6 +43,9 @@ const SCHEMA_VERSION = 1;
 
 /** @type {string | null} */
 let dir = null;
+
+/** @type {{ read(): string | null, write(payload: string, now?: number): void, remove(): void } | null} */
+let docStore = null;
 
 /** @type {SessionSnapshot | null} */
 let snapshot = null;
@@ -85,7 +92,7 @@ function validateSnapshot(x) {
 // ---------------------------------------------------------------------------
 
 /**
- * Initialise the store from disk. Safe to call again (re-reads). NEVER throws.
+ * Initialise the store. Safe to call again (re-reads the row). NEVER throws.
  * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
  * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
  */
@@ -95,16 +102,49 @@ function load(userDataPath, opts = {}) {
     serialize: opts.serialize ?? defaultSerialize,
     deserialize: opts.deserialize ?? defaultDeserialize,
   };
+
+  // Resolve the document store and read the row OUTSIDE the catch-all below:
+  // an app-db-not-open error is a programmer error (mis-ordered boot) and
+  // must propagate — never dissolve into "no usable session" (design
+  // review). The never-throw contract below still covers everything else
+  // (JSON parse, validation, migration rename).
+  docStore = appDb.createDocumentStore('session');
+  const row = docStore.read();
+
+  if (row !== null) {
+    try {
+      snapshot = validateSnapshot(codec.deserialize(row));
+    } catch {
+      snapshot = null;
+    }
+    return;
+  }
+
   try {
     const file = path.join(dir, FILE_NAME);
-    if (!fs.existsSync(file)) {
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf8');
+      let parsed = null;
+      try {
+        parsed = codec.deserialize(raw);
+      } catch {
+        parsed = null;
+      }
+      // One-time migration: write() validates the parsed payload, persists
+      // the row (even a corrupt legacy file migrates its repaired-to-empty
+      // result — DD5), and updates the in-memory snapshot; the legacy file
+      // is then renamed to mark it superseded.
+      write(parsed);
+      try {
+        fs.renameSync(file, file + '.migrated');
+      } catch {
+        // best-effort — migration already completed via the row write (DD5).
+      }
+    } else {
       snapshot = null;
-      return;
     }
-    const raw = fs.readFileSync(file, 'utf8');
-    snapshot = validateSnapshot(codec.deserialize(raw));
   } catch {
-    // Any error (corrupt JSON, read error, bad shape) → no usable session.
+    // Any error (read error, etc.) → no usable session.
     // load() MUST NEVER THROW — the app must still boot.
     snapshot = null;
   }
@@ -120,27 +160,33 @@ function read() {
 }
 
 /**
- * Validate then atomically persist a snapshot (temp-beside + rename). Errors
- * PROPAGATE (callers write best-effort). Updates the in-memory snapshot.
+ * Validate then persist a snapshot to its document row. Errors PROPAGATE
+ * (callers write best-effort). Updates the in-memory snapshot.
  * @param {any} nextSnapshot
  */
 function write(nextSnapshot) {
   const v = validateSnapshot(nextSnapshot) || { version: SCHEMA_VERSION, windows: [] };
-  const file = path.join(/** @type {string} */ (dir), FILE_NAME);
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, codec.serialize(v));
-  fs.renameSync(tmp, file);
+  /** @type {any} */ (docStore).write(codec.serialize(v));
   snapshot = v;
 }
 
 /**
- * Remove the persisted session and clear the in-memory snapshot. NEVER throws.
+ * Remove the persisted session (row + any lingering legacy file) and clear
+ * the in-memory snapshot. NEVER throws. A `.migrated` sibling is deliberate
+ * history (DD5/DD6) — this only ever removes the BARE session.json.
  */
 function clear() {
   snapshot = null;
   try {
-    const file = path.join(/** @type {string} */ (dir), FILE_NAME);
-    if (fs.existsSync(file)) fs.rmSync(file);
+    if (docStore) docStore.remove();
+  } catch {
+    // best-effort — row removal must not throw (M09 semantics preserved).
+  }
+  try {
+    if (dir !== null) {
+      const file = path.join(dir, FILE_NAME);
+      if (fs.existsSync(file)) fs.rmSync(file);
+    }
   } catch {
     // best-effort: a failed unlink must not throw.
   }

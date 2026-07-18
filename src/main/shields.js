@@ -3,10 +3,29 @@
 // Shields: active privacy protection config + URL/cookie policy helpers.
 // Enforcement (webRequest wiring) lives in main.js, which reads this live
 // config so toggles take effect immediately across every session/jar.
+//
+// Design (flight 10-1 DD8, leg 2 — brought up to house discipline):
+// - ELECTRON-FREE: does NOT require('electron'). The userData path is
+//   INJECTED at load(userDataPath), like settings-store/downloads-store/jars.
+// - Persists through app-db.js's `documents` row seam: one row keyed
+//   'shields', written wholesale on every save(). A one-time legacy migration
+//   reads `shields.json` when no row exists yet, repairs it through the SAME
+//   merge-over-DEFAULTS logic below, writes the row, then renames the file
+//   `.migrated` (best-effort — DD5).
+// - Pluggable serialization seam: load/save use a { serialize, deserialize }
+//   pair defaulting to JSON.stringify/JSON.parse, injectable via load(userDataPath, opts?).
+// - save() (DD10, refined by design review): the not-loaded state (no prior
+//   load()) stays a silent no-op — today's semantics, depended on by ~9
+//   pre-load mutation call sites. Once loaded, a write failure PROPAGATES
+//   (uncaught) — the old swallow-everything catch is gone. This matches the
+//   existing internal-settings-set precedent (settings.set already throws
+//   uncaught into ipcMain.handle rejection).
 
-const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const appDb = require('./app-db');
+
+const FILE_NAME = 'shields.json';
 
 const DEFAULTS = {
   enabled: true, // master switch
@@ -18,7 +37,15 @@ const DEFAULTS = {
 };
 
 let config = { ...DEFAULTS };
-let configPath = null;
+
+/** @type {{ read(): string | null, write(payload: string, now?: number): void, remove(): void } | null} */
+let docStore = null;
+
+const defaultSerialize = (/** @type {object} */ c) => JSON.stringify(c, null, 2);
+const defaultDeserialize = (/** @type {string} */ s) => JSON.parse(s);
+
+/** @type {{ serialize: (c: object) => string, deserialize: (s: string) => any }} */
+let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 
 // pausedSites must always be an array. A null/string from disk or a bad set()
 // patch would make isPaused throw (or use string .includes substring semantics)
@@ -28,25 +55,83 @@ function normalizePausedSites(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function load() {
+// Merge-over-DEFAULTS repair (the existing semantics, unchanged by the DD8
+// rework): a shallow spread of the stored object onto DEFAULTS, with
+// pausedSites shape-normalized. Shared by the row-read path and the legacy-
+// JSON migration path. NEVER throws — a deserialize failure repairs to
+// fresh defaults.
+/** @param {string} raw */
+function parseAndRepair(raw) {
   try {
-    configPath = path.join(app.getPath('userData'), 'shields.json');
-    if (fs.existsSync(configPath)) {
-      config = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) };
-      config.pausedSites = normalizePausedSites(config.pausedSites);
+    const merged = { ...DEFAULTS, ...codec.deserialize(raw) };
+    merged.pausedSites = normalizePausedSites(merged.pausedSites);
+    return merged;
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+/**
+ * Initialise the store. Safe to call again (re-reads the row).
+ *
+ * @param {string} userDataPath — the Electron userData directory (injected from whenReady).
+ * @param {{ serialize?: (c: object) => string, deserialize?: (s: string) => any }} [opts]
+ * @returns {typeof DEFAULTS}
+ */
+function load(userDataPath, opts = {}) {
+  codec = {
+    serialize: opts.serialize ?? defaultSerialize,
+    deserialize: opts.deserialize ?? defaultDeserialize
+  };
+
+  // Resolve the document store and read the row OUTSIDE the minimal catch-all
+  // below: an app-db-not-open error is a programmer error (mis-ordered boot)
+  // and must propagate — never dissolve into "fall back to defaults" (design
+  // review, same discipline as settings/downloads/session/jars). The
+  // catch-all still preserves "boot on corrupt state" for everything else.
+  docStore = appDb.createDocumentStore('shields');
+  const row = docStore.read();
+
+  if (row !== null) {
+    config = parseAndRepair(row);
+    return config;
+  }
+
+  try {
+    const file = path.join(userDataPath, FILE_NAME);
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf8');
+      config = parseAndRepair(raw);
+      // One-time migration: the repaired result becomes the row (even a
+      // corrupt legacy file migrates its repaired-to-defaults result — DD5),
+      // then the legacy file is renamed to mark it superseded.
+      save();
+      try {
+        fs.renameSync(file, file + '.migrated');
+      } catch {
+        // best-effort — migration already completed via the row write (DD5).
+      }
+    } else {
+      config = { ...DEFAULTS };
     }
   } catch {
-    /* defaults */
+    // Any error (read failure, etc.) → fall back to defaults.
+    // load() MUST NEVER THROW — the app must still boot.
+    config = { ...DEFAULTS };
   }
+
   return config;
 }
 
+// DD10 (refined by design review): the not-loaded state (no prior load())
+// stays a silent no-op — today's semantics, depended on by ~9 pre-load
+// mutation call sites in shields.test.js (lines 65-191, none throw-wrapped).
+// Once loaded, the row write is UNGUARDED: a write failure propagates
+// (uncaught) rather than being swallowed, so a caller (and its IPC handler)
+// learns the set failed.
 function save() {
-  try {
-    if (configPath) fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  } catch {
-    /* ignore */
-  }
+  if (!docStore) return;
+  docStore.write(codec.serialize(config));
 }
 
 function get() {
