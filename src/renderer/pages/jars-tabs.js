@@ -49,7 +49,7 @@
  *   tab click, this module's own roving keydown handler, AND jars.js's hash
  *   deep-link (design review, HIGH: a second inline implementation anywhere
  *   would bypass the never-strand-focus rule below). It reads `refs`
- *   duck-typed (`activeTab`, `tabRefs`, `row`, `historyPanel` — the same
+ *   duck-typed (`activeTab`, `tabRefs`, `activationHooks` — the same
  *   fields jars.js's `SectionRefs` already carries) so this module stays
  *   decoupled from jars.js's full type. No content rebuild on switch (the
  *   F2 toggle discipline, carried to tabs) — only `aria-selected`/
@@ -66,15 +66,23 @@
  * already focused the clicked tab button before its handler runs, so
  * neither condition fires and the extra `.focus()` call is simply skipped.
  *
- * Lazy history fetch (design review): `selectTab` fires
- * `refs.historyPanel?.onExpanded()` whenever the History tab becomes
- * selected — a direct switch (click/keyboard/hash) reaching History before
- * the section has ever intersected the viewport must still trigger the
- * fetch. `onExpanded`'s own `if (initialFetchStarted) return;` guard (in
- * `jars-history-panel.js`) is source-agnostic, so this stays idempotent
- * alongside jars.js's OTHER trigger — the scroll-into-view
- * `IntersectionObserver` (`observeSectionsIfChanged`), which fires the same
- * hook independently for a section that's on-screen at build time.
+ * Activation hooks (M10 Flight 2, Leg 2 — design review, HIGH: generalized
+ * from a hardcoded History-only branch). `selectTab` fires
+ * `refs.activationHooks?.get(panelId)?.()` whenever a panel becomes
+ * selected — a data-driven dispatch keyed by panel id, so jars-tabs.js
+ * itself carries no per-panel knowledge (unlike the retired
+ * `if (panelId === 'history') refs.historyPanel?.onExpanded()` branch this
+ * replaces). jars.js populates `refs.activationHooks` with one entry per
+ * panel: History's hook still calls `historyPanel.onExpanded()` (idempotent
+ * — its own `initialFetchStarted` guard is source-agnostic, so this stays
+ * safe alongside the scroll-into-view `IntersectionObserver`
+ * (`observeSectionsIfChanged`), which fires the SAME hook independently for
+ * a section on-screen at build time); Cookies/Other-site-data's hooks call
+ * their own panel's `onActivated()` (DD2's "query trigger gates on
+ * TAB-SELECTION" ruling — those two panels have no section-visibility
+ * trigger at all, and re-fetch on EVERY activation, not just the first,
+ * since neither has a live update subscription — see those modules' own
+ * doc comments).
  */
 
 /**
@@ -82,7 +90,7 @@
  *   panels: ReadonlyArray<{ id: string, label: string }>
  * }} deps
  * @returns {{
- *   build: (row: { id: string }, opts: { getRefs: () => any, buildPanelContent: (panelId: string, panelEl: HTMLElement) => void }) => { tabsWrap: HTMLElement, tabRefs: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }> },
+ *   build: (row: { id: string }, opts: { getRefs: () => any, buildPanelContent: (panelId: string, panelEl: HTMLElement) => void }) => { tabsWrap: HTMLElement, tabRefs: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan: HTMLElement }> },
  *   selectTab: (refs: any, panelId: string) => void
  * }}
  */
@@ -109,7 +117,9 @@ export function createJarTabs({ panels }) {
       refs.tabRefs.get(panelId)?.tab.focus();
     }
 
-    if (panelId === 'history') refs.historyPanel?.onExpanded();
+    // Data-driven activation dispatch (design review, HIGH — generalized
+    // from the retired History-only branch; see module doc comment).
+    refs.activationHooks?.get(panelId)?.();
   }
 
   /**
@@ -126,7 +136,7 @@ export function createJarTabs({ panels }) {
     tablist.setAttribute('aria-label', 'Jar data');
     tabsWrap.appendChild(tablist);
 
-    /** @type {Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }>} */
+    /** @type {Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan: HTMLElement }>} */
     const tabRefs = new Map();
 
     // ⚠ DOUBLE-HYPHEN separator on the tabpanel id is load-bearing (design
@@ -153,19 +163,21 @@ export function createJarTabs({ panels }) {
       tabBtn.tabIndex = isDefaultTab ? 0 : -1;
       tabBtn.appendChild(document.createTextNode(panel.label));
 
-      // History's count badge (DD6, repointed from the old disclosure-button
-      // label) lives in its own <span> inside the tab button so label
-      // patching stays targeted — see jars.js's fetchHistoryCount. Every
-      // other tab's label is the static panel.label alone; jars.js's
-      // render()/updateJarSection never touch this span (module doc
-      // INVARIANT, jars.js).
-      /** @type {HTMLElement|undefined} */
-      let countSpan;
-      if (panel.id === 'history') {
-        countSpan = document.createElement('span');
-        countSpan.className = 'jar-tab-count';
-        tabBtn.appendChild(countSpan);
-      }
+      // Count badge (DD6, repointed from the old disclosure-button label;
+      // GENERALIZED from History-only to ALL THREE panels — M10 Flight 3
+      // HAT fix-rider A, design review cycle 1 + FD revision rulings). Every
+      // panel's badge lives in its own <span> inside its tab button, right
+      // after the static panel.label text node, so the rendered name reads
+      // "<Label> (N)" (unified copy — replaces History's old "— N visits"/
+      // "— no visits" wording) with zero writes to the label text itself —
+      // see jars.js's fetchHistoryCount/fetchCookiesCount/fetchSiteDataCount
+      // and the Cookies/Other-site-data panels' onCountChanged hook. jars.js's
+      // render()/updateJarSection never touch these spans (module doc
+      // INVARIANT, jars.js) — they are written ONLY by jars.js's count-fetch
+      // call sites and the onCountChanged routing.
+      const countSpan = document.createElement('span');
+      countSpan.className = 'jar-tab-count';
+      tabBtn.appendChild(countSpan);
       tabBtn.addEventListener('click', () => selectTab(getRefs(), panel.id));
       tablist.appendChild(tabBtn);
 

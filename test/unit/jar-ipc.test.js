@@ -22,6 +22,10 @@ const path = require('path');
 
 const { BURNER } = require('../../src/shared/burner');
 const { registerJarIpc } = require('../../src/main/jar-ipc');
+// The SAME pure origin() helper production code uses — the fake historyStore's
+// originsForJar below mirrors the real one's normalization exactly, rather
+// than reimplementing ad hoc string surgery.
+const { origin } = require('../../src/main/jar-data-helpers');
 // jars.js now resolves its document row through app-db.js on every load()
 // (flight 10-1, leg 2). app-db is required ONCE for the whole file (never
 // cache-busted, the settings-store.test.js require-order-hazard ruling) and
@@ -34,6 +38,19 @@ function makeTempDir() {
 
 function removeTempDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// M10 Flight 2, Leg 3 — handleSetRetention's immediate sweep (and
+// pruneAllJars' cadence sweep in main.js) is DELIBERATELY fire-and-forget
+// (DD6): the handler returns before the async sweep settles. Tests that
+// need to observe the sweep's effects (session calls, the completion
+// broadcast) await this after invoking, to let the promise chain's
+// microtasks (and any macrotask-scheduled continuation) drain. The fake
+// session's cookies/storage calls are all already-resolved promises with no
+// real I/O or timers, so one macrotask tick is enough to observe the whole
+// chain settled.
+function flush() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 // The jars store is a module-scoped singleton — re-require it fresh per test.
@@ -57,8 +74,14 @@ const work = { id: 'work', name: 'Work', color: '#2196f3', partition: 'persist:c
  * makeFakeStore convention (per-method throws.<method> toggles).
  */
 function makeFakeHistoryStore({ throws = {} } = {}) {
-  /** @type {Map<string, Array<{ visitedAt: number }>>} */
+  /** @type {Map<string, Array<{ url?: string, visitedAt: number }>>} */
   const data = new Map();
+  // M10 Flight 2, Leg 3 — records invocation order of the SEQUENCING-
+  // relevant methods (expiredOriginsForJar / pruneOneJar / pruneExpired) so
+  // handler-level tests can pin "snapshot BEFORE prune" against real call
+  // history, not a mocked assumption.
+  /** @type {string[]} */
+  const calls = [];
 
   function rows(jarId) {
     if (!data.has(jarId)) data.set(jarId, []);
@@ -66,9 +89,15 @@ function makeFakeHistoryStore({ throws = {} } = {}) {
   }
 
   return {
+    calls,
     // Test-only helpers — not part of the real history-store API.
     seed(jarId, visitedAt = 1) {
       rows(jarId).push({ visitedAt });
+    },
+    // originsForJar needs a url per row (seed() above doesn't carry one) — a
+    // separate test-only helper rather than overloading seed's signature.
+    seedVisit(jarId, url, visitedAt = 1) {
+      rows(jarId).push({ url, visitedAt });
     },
     count(jarId) {
       return rows(jarId).length;
@@ -80,6 +109,7 @@ function makeFakeHistoryStore({ throws = {} } = {}) {
       return n;
     },
     pruneOneJar(jarId, days, now) {
+      calls.push('pruneOneJar');
       if (throws.pruneOneJar) throw new Error('history store blew up');
       const cutoff = now - days * 86_400_000;
       const before = rows(jarId);
@@ -87,6 +117,47 @@ function makeFakeHistoryStore({ throws = {} } = {}) {
       const deleted = before.length - kept.length;
       data.set(jarId, kept);
       return deleted;
+    },
+    // M10 Flight 2, Leg 2: the site-data panel's history-derived union side.
+    // Mirrors the real history-store.js's normalize-then-collapse shape
+    // (same `origin()` helper), operating on this fake's own row set.
+    originsForJar(jarId) {
+      if (throws.originsForJar) throw new Error('history store blew up');
+      /** @type {Map<string, number>} */
+      const byOrigin = new Map();
+      for (const row of rows(jarId)) {
+        if (!row.url) continue;
+        const o = origin(row.url);
+        if (o === null) continue;
+        const prev = byOrigin.get(o);
+        if (prev === undefined || row.visitedAt > prev) byOrigin.set(o, row.visitedAt);
+      }
+      return Array.from(byOrigin, ([originStr, lastVisitedAt]) => ({ origin: originStr, lastVisitedAt }));
+    },
+    // M10 Flight 2, Leg 3 / DD4b — the storage sweep's pre-prune snapshot
+    // read. Mirrors the real history-store.js's pure post-filter over
+    // originsForJar. CRITICALLY, this operates on the SAME `rows(jarId)`
+    // array pruneOneJar mutates (removes rows below cutoff) — so a
+    // SEQUENCING regression (calling this AFTER pruneOneJar instead of
+    // before) is directly observable here exactly like production: the
+    // aged-out origin's rows would already be gone, and this would
+    // wrongly return [] instead of the real answer. `calls` records
+    // invocation order for the explicit ordering pins below.
+    expiredOriginsForJar(jarId, cutoffMs) {
+      calls.push('expiredOriginsForJar');
+      if (throws.expiredOriginsForJar) throw new Error('history store blew up');
+      /** @type {Map<string, number>} */
+      const byOrigin = new Map();
+      for (const row of rows(jarId)) {
+        if (!row.url) continue;
+        const o = origin(row.url);
+        if (o === null) continue;
+        const prev = byOrigin.get(o);
+        if (prev === undefined || row.visitedAt > prev) byOrigin.set(o, row.visitedAt);
+      }
+      return Array.from(byOrigin.entries())
+        .filter(([, lastVisitedAt]) => lastVisitedAt < cutoffMs)
+        .map(([originStr]) => originStr);
     }
   };
 }
@@ -101,7 +172,22 @@ function makeFakeHistoryStore({ throws = {} } = {}) {
  */
 function makeHarness(
   t,
-  { containers = [personal, work], defaultId = 'personal', storageThrows = false, historyThrows = {} } = {}
+  {
+    containers = [personal, work],
+    defaultId = 'personal',
+    storageThrows = false,
+    historyThrows = {},
+    // M10 Flight 2, Leg 2 additions: cookiesByPartition seeds ses.cookies.get's
+    // response per partition; cookiesGetThrows/cookiesRemoveThrows simulate a
+    // session-layer hiccup on the cookies twins specifically (storageThrows
+    // above already covers clearStorageData, which sitedata-remove-origin
+    // reuses); storagePaths seeds ses.storagePath per partition (absent/undefined
+    // by default, mirroring "no storage path" — an empty stored tier).
+    cookiesByPartition = {},
+    cookiesGetThrows = false,
+    cookiesRemoveThrows = false,
+    storagePaths = {}
+  } = {}
 ) {
   const dir = makeTempDir();
   appDb.open(dir);
@@ -135,12 +221,28 @@ function makeHarness(
     fromPartition(partition) {
       const ses = {
         partition,
+        // M10 Flight 2, Leg 2: storagePath is a PROPERTY (verified against
+        // electron.d.ts at leg design), never a method — undefined by
+        // default (no storagePaths entry for this partition), matching "no
+        // storage path" -> empty stored tier, never an error.
+        storagePath: Object.prototype.hasOwnProperty.call(storagePaths, partition) ? storagePaths[partition] : null,
         async clearStorageData(options) {
           if (storageThrows) throw new Error('wipe failed');
           events.push({ fn: 'clearStorageData', partition, args: options });
         },
         async clearCache(options) {
           events.push({ fn: 'clearCache', partition, args: options });
+        },
+        cookies: {
+          async get(filter) {
+            if (cookiesGetThrows) throw new Error('cookies.get failed');
+            events.push({ fn: 'cookiesGet', partition, args: filter });
+            return cookiesByPartition[partition] || [];
+          },
+          async remove(url, name) {
+            if (cookiesRemoveThrows) throw new Error('cookies.remove failed');
+            events.push({ fn: 'cookiesRemove', partition, args: { url, name } });
+          }
         }
       };
       sessions.push(ses);
@@ -208,28 +310,38 @@ function makeHarness(
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the nine chrome + nine internal jar channels, no others', (t) => {
+test('registers exactly the fourteen chrome + fourteen internal jar channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
     [
       'internal-jars-add',
       'internal-jars-clear-data',
+      'internal-jars-cookies-list',
+      'internal-jars-cookies-remove',
+      'internal-jars-cookies-value',
       'internal-jars-get-default',
       'internal-jars-list',
       'internal-jars-remove',
       'internal-jars-rename',
       'internal-jars-set-default',
       'internal-jars-set-retention',
+      'internal-jars-sitedata-list',
+      'internal-jars-sitedata-remove-origin',
       'internal-jars-wipe',
       'jars-add',
       'jars-clear-data',
+      'jars-cookies-list',
+      'jars-cookies-remove',
+      'jars-cookies-value',
       'jars-get-default',
       'jars-list',
       'jars-remove',
       'jars-rename',
       'jars-set-default',
       'jars-set-retention',
+      'jars-sitedata-list',
+      'jars-sitedata-remove-origin',
       'jars-wipe'
     ]
   );
@@ -303,7 +415,12 @@ test('an untrusted event (wrong origin) is rejected on every internal-jars-* cha
     'internal-jars-remove',
     'internal-jars-clear-data',
     'internal-jars-wipe',
-    'internal-jars-set-retention'
+    'internal-jars-set-retention',
+    'internal-jars-cookies-list',
+    'internal-jars-cookies-remove',
+    'internal-jars-cookies-value',
+    'internal-jars-sitedata-list',
+    'internal-jars-sitedata-remove-origin'
   ]) {
     assert.throws(
       () => h.handlers.get(channel)(untrusted, { id: 'personal' }),
@@ -532,6 +649,30 @@ test('jars-remove session-throw-with-history-rows pin: fail-soft continues, but 
   assert.equal(h.historyStore.count('personal'), 1, 'purge never ran — the row survives');
 });
 
+// M10 Flight 2, Leg 3 / DD7 — bookkeeping dies with its jar on every
+// destructive path. jars-remove routes through wipeJarData, same as
+// jars-wipe (its own DD7 pin lives with the wipe tests below).
+test('jars-remove clears the jar\'s cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)', async (t) => {
+  const h = makeHarness(t);
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  cookieSeen.insertIfAbsent('work', 'sid', 'x.test', '/', 1000); // a DIFFERENT jar — must survive
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 0, 'personal bookkeeping purged');
+  assert.equal(cookieSeen.selectExpired('work', Number.MAX_SAFE_INTEGER).length, 1, 'work bookkeeping untouched');
+});
+
+test('jars-remove session-throw pin: bookkeeping cleanup is SKIPPED too (it runs inside wipeJarData, after the throwing session calls)', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.wiped, false);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'bookkeeping survives — cleanup never ran');
+});
+
 // ---------------------------------------------------------------------------
 // jars-clear-data (Flight 4, Leg 1 / DD2, DD3) — granular per-class clears.
 // Partition lookup is jars.list().find(...); Burner is never a store entry, so
@@ -541,13 +682,41 @@ test('jars-clear-data applies each requested class in order, passing the exact s
   const h = makeHarness(t);
   const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies', 'storage'] });
   assert.deepEqual(result, { ok: true, cleared: ['cookies', 'storage'] });
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearStorageData']);
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearStorageData', 'broadcast']);
   assert.deepEqual(h.events[0].args, { storages: ['cookies'] });
   assert.deepEqual(h.events[1].args, {
     storages: ['filesystem', 'indexdb', 'localstorage', 'websql', 'serviceworkers', 'cachestorage']
   });
   assert.equal(h.events[0].partition, 'persist:container:personal');
-  assert.equal(h.broadcasts().length, 0); // clear-data never broadcasts (DD3 scope note: no settings/jars mutation)
+  // DD10: cookies + storage were both requested/cleared, so jar-data-changed
+  // fires once carrying both — but clear-data still never touches
+  // jars-changed/settings-changed (DD3 scope note unchanged).
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'jar-data-changed');
+  assert.deepEqual(b[0].payload, { jarId: 'personal', classes: ['cookies', 'storage'] });
+});
+
+// M10 Flight 2, Leg 3 / DD7 — a cookies-class clear wipes the jar's
+// cookie_seen bookkeeping too (not just the session's cookies).
+test('jars-clear-data with classes:["cookies"] clears the jar\'s cookie_seen bookkeeping (DD7 lifecycle)', async (t) => {
+  const h = makeHarness(t);
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  cookieSeen.insertIfAbsent('work', 'sid', 'x.test', '/', 1000); // a DIFFERENT jar — must survive
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cookies'] });
+  assert.equal(result.ok, true);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 0);
+  assert.equal(cookieSeen.selectExpired('work', Number.MAX_SAFE_INTEGER).length, 1, 'work bookkeeping untouched');
+});
+
+test('jars-clear-data with classes:["storage"] (no cookies requested) leaves cookie_seen bookkeeping untouched', async (t) => {
+  const h = makeHarness(t);
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['storage'] });
+  assert.equal(result.ok, true);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'a storage-only clear must not touch cookie bookkeeping');
 });
 
 test('jars-clear-data with the cache class calls clearCache AND clearStorageData({ storages: [shadercache] })', async (t) => {
@@ -648,9 +817,14 @@ test('jars-clear-data with mixed ["history","cookies"] clears BOTH, in request o
   const sessionCalls = h.events.filter((e) => e.fn !== 'broadcast');
   assert.deepEqual(sessionCalls.map((e) => e.fn), ['clearStorageData']);
   assert.deepEqual(sessionCalls[0].args, { storages: ['cookies'] });
+  // Two broadcasts now: history-changed (n>0 gate) THEN jar-data-changed
+  // (DD10 — 'cookies' ∩ {cookies, storage} is non-empty; 'history' is
+  // excluded from the jar-data-changed classes list).
   const b = h.broadcasts();
-  assert.equal(b.length, 1);
+  assert.equal(b.length, 2);
   assert.equal(b[0].channel, 'history-changed');
+  assert.equal(b[1].channel, 'jar-data-changed');
+  assert.deepEqual(b[1].payload, { jarId: 'personal', classes: ['cookies'] });
 });
 
 test('jars-clear-data with classes:["cookies","history"] on a history-store throw returns the static history-failure string; the already-applied session class is unaffected', async (t) => {
@@ -678,11 +852,17 @@ test('internal-jars-clear-data with classes:["history"] shares behavior with jar
 // composition as identity-new plus the jar-wiped broadcast, minus registry
 // removal/key revoke (the jar persists).
 // ---------------------------------------------------------------------------
-test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> resolve', async (t) => {
+test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> broadcast(jar-data-changed) -> resolve', async (t) => {
   const h = makeHarness(t);
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.deepEqual(result, { ok: true });
-  assert.deepEqual(h.events.map((e) => e.fn), ['clearStorageData', 'clearCache', 'rerollSeed', 'broadcast']);
+  assert.deepEqual(h.events.map((e) => e.fn), [
+    'clearStorageData',
+    'clearCache',
+    'rerollSeed',
+    'broadcast',
+    'broadcast'
+  ]);
   assert.equal(h.events[0].partition, 'persist:container:personal');
   assert.equal(h.events[0].args, undefined); // no filter — full wipe, matching identity-new
   assert.equal(h.events[1].partition, 'persist:container:personal');
@@ -690,6 +870,24 @@ test('jars-wipe composes storage -> cache -> reroll -> broadcast(jar-wiped) -> r
   assert.equal(h.events[2].ses, h.sessions[0]); // reroll got the SAME session object
   assert.equal(h.events[3].channel, 'jar-wiped');
   assert.deepEqual(h.events[3].payload, { id: 'personal' });
+  // DD10: a wipe always clears cookies + storage, so jar-data-changed fires
+  // unconditionally on success (no history rows here, so no history-changed
+  // in between — see the n>0-gated test below for that ordering).
+  assert.equal(h.events[4].channel, 'jar-data-changed');
+  assert.deepEqual(h.events[4].payload, { jarId: 'personal', classes: ['cookies', 'storage'] });
+});
+
+// M10 Flight 2, Leg 3 / DD7 — wipe routes through the SAME wipeJarData as
+// jars-remove, so bookkeeping dies with it too.
+test('jars-wipe clears the jar\'s cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)', async (t) => {
+  const h = makeHarness(t);
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  cookieSeen.insertIfAbsent('work', 'sid', 'x.test', '/', 1000); // a DIFFERENT jar — must survive
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 0);
+  assert.equal(cookieSeen.selectExpired('work', Number.MAX_SAFE_INTEGER).length, 1, 'work bookkeeping untouched');
 });
 
 test('jars-wipe rejects burner and unknown/malformed ids with { ok: false, error }, no session call', async (t) => {
@@ -722,29 +920,36 @@ test('jars-wipe purges history and broadcasts history-changed AFTER jar-wiped (o
   assert.deepEqual(result, { ok: true });
   assert.equal(h.historyStore.count('personal'), 0);
   const b = h.broadcasts();
-  assert.equal(b.length, 2);
+  assert.equal(b.length, 3);
   assert.equal(b[0].channel, 'jar-wiped', 'jar-wiped keeps its shipped ordering — it drives tab reloads');
   assert.equal(b[1].channel, 'history-changed');
   assert.deepEqual(b[1].payload, { jarId: 'personal' });
+  // DD10: jar-data-changed fires LAST, unconditionally (after the n>0-gated
+  // history-changed).
+  assert.equal(b[2].channel, 'jar-data-changed');
+  assert.deepEqual(b[2].payload, { jarId: 'personal', classes: ['cookies', 'storage'] });
 });
 
-test('jars-wipe on a jar with no history broadcasts ONLY jar-wiped (n>0 gate, no history-changed)', async (t) => {
+test('jars-wipe on a jar with no history broadcasts jar-wiped + jar-data-changed, no history-changed (n>0 gate)', async (t) => {
   const h = makeHarness(t);
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.deepEqual(result, { ok: true });
   const b = h.broadcasts();
-  assert.equal(b.length, 1);
+  assert.equal(b.length, 2);
   assert.equal(b[0].channel, 'jar-wiped');
+  assert.equal(b[1].channel, 'jar-data-changed');
+  assert.deepEqual(b[1].payload, { jarId: 'personal', classes: ['cookies', 'storage'] });
 });
 
-test('jars-wipe stays ok:true when the history purge throws — logged, no history-changed, jar-wiped still fires', async (t) => {
+test('jars-wipe stays ok:true when the history purge throws — logged, no history-changed, jar-wiped + jar-data-changed still fire', async (t) => {
   const h = makeHarness(t, { historyThrows: { clearJar: true } });
   h.historyStore.seed('personal', 1000);
   const result = await h.invoke('jars-wipe', { id: 'personal' });
   assert.deepEqual(result, { ok: true });
   const b = h.broadcasts();
-  assert.equal(b.length, 1);
+  assert.equal(b.length, 2);
   assert.equal(b[0].channel, 'jar-wiped');
+  assert.equal(b[1].channel, 'jar-data-changed');
 });
 
 test('jars-wipe session-throw-with-history-rows pin: fail-hard returns, the purge is SKIPPED (it runs after the throwing session calls, inside wipeJarData)', async (t) => {
@@ -761,9 +966,10 @@ test('internal-jars-wipe shares behavior with jars-wipe', async (t) => {
   const result = await h.invokeInternal('internal-jars-wipe', { id: 'work' });
   assert.deepEqual(result, { ok: true });
   const b = h.broadcasts();
-  assert.equal(b.length, 1);
+  assert.equal(b.length, 2);
   assert.equal(b[0].channel, 'jar-wiped');
   assert.deepEqual(b[0].payload, { id: 'work' });
+  assert.equal(b[1].channel, 'jar-data-changed');
 });
 
 // ---------------------------------------------------------------------------
@@ -852,6 +1058,556 @@ test('internal-jars-set-retention shares behavior with jars-set-retention', (t) 
   const result = h.invokeInternal('internal-jars-set-retention', { id: 'work', days: 60 });
   assert.equal(result.ok, true);
   assert.equal(result.container.retentionDays, 60);
+});
+
+// ---------------------------------------------------------------------------
+// M10 Flight 2, Leg 3 / DD4b, DD6, DD10 — the immediate one-jar retention
+// sweep handleSetRetention gains: the SEQUENCING invariant (snapshot the
+// aged-out origins BEFORE pruneOneJar runs) and the fire-and-forget sweep's
+// DD10 completion broadcast.
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+
+test('jars-set-retention SEQUENCING: expiredOriginsForJar snapshot runs BEFORE pruneOneJar (Context SEQUENCING / leg-3 design review HIGH)', (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seedVisit('personal', 'https://old.example/', Date.now() - 100 * DAY_MS);
+  h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  const snapIdx = h.historyStore.calls.indexOf('expiredOriginsForJar');
+  const pruneIdx = h.historyStore.calls.indexOf('pruneOneJar');
+  assert.notEqual(snapIdx, -1, 'expiredOriginsForJar was called');
+  assert.notEqual(pruneIdx, -1, 'pruneOneJar was called');
+  assert.ok(snapIdx < pruneIdx, 'the snapshot must be taken before the prune deletes the rows it reads');
+});
+
+test('jars-set-retention SEQUENCING regression guard: the immediate sweep clears the aged-out origin — would be silently inert if the snapshot ran post-prune', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seedVisit('personal', 'https://old.example/', Date.now() - 100 * DAY_MS);
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  assert.equal(result.ok, true);
+  await flush();
+  const clears = h.events.filter(
+    (e) => e.fn === 'clearStorageData' && e.partition === 'persist:container:personal' && e.args && e.args.origin
+  );
+  assert.ok(
+    clears.some((c) => c.args.origin === 'https://old.example'),
+    'the storage sweep must see and clear the aged-out origin from the PRE-prune snapshot'
+  );
+});
+
+test('jars-set-retention: no aged-out origins and no aged-out cookies sweeps to a no-op — no jar-data-changed broadcast', async (t) => {
+  const h = makeHarness(t);
+  const result = h.invoke('jars-set-retention', { id: 'personal', days: 90 });
+  assert.equal(result.ok, true);
+  await flush();
+  assert.ok(!h.broadcasts().some((b) => b.channel === 'jar-data-changed'), 'nothing was swept, so no completion broadcast');
+});
+
+test('jars-set-retention: the sweep\'s jar-data-changed broadcast fires on COMPLETION (async, never on the invoke itself — DD10)', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seedVisit('personal', 'https://old.example/', Date.now() - 100 * DAY_MS);
+  h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  // Synchronously right after invoke, the async sweep has not settled yet.
+  assert.ok(
+    !h.broadcasts().some((b) => b.channel === 'jar-data-changed'),
+    'jar-data-changed must not fire before the sweep completes (the invoke resolves first)'
+  );
+  await flush();
+  const swept = h.broadcasts().find((b) => b.channel === 'jar-data-changed');
+  assert.ok(swept, 'jar-data-changed fires once the sweep settles');
+  assert.deepEqual(swept.payload, { jarId: 'personal', classes: ['storage'] });
+});
+
+test('jars-set-retention: the immediate sweep also removes cookies whose bookkeeping age exceeds the NEW window, clears their row, and reports "cookies" in the completion classes', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [{ name: 'sid', domain: 'x.test', path: '/', secure: true }] }
+  });
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', Date.now() - 100 * DAY_MS);
+
+  h.invoke('jars-set-retention', { id: 'personal', days: 7 });
+  await flush();
+
+  const removeCalls = h.events.filter((e) => e.fn === 'cookiesRemove' && e.partition === 'persist:container:personal');
+  assert.equal(removeCalls.length, 1);
+  assert.equal(removeCalls[0].args.name, 'sid');
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 0, 'the expired row was deleted');
+
+  const swept = h.broadcasts().find((b) => b.channel === 'jar-data-changed');
+  assert.ok(swept);
+  assert.ok(swept.payload.classes.includes('cookies'));
+});
+
+test('jars-set-retention: a rejected payload never triggers a sweep (no session calls, no snapshot)', (t) => {
+  const h = makeHarness(t);
+  h.invoke('jars-set-retention', { id: 'nope', days: 7 });
+  assert.deepEqual(h.historyStore.calls, [], 'neither expiredOriginsForJar nor pruneOneJar ran for a rejected payload');
+  assert.deepEqual(h.sessions, [], 'no session was ever resolved');
+});
+
+// ---------------------------------------------------------------------------
+// jars-cookies-list / jars-cookies-remove (M10 Flight 2, Leg 2 / flight DD2,
+// DD7). NO `value` field crosses the payload (least-privilege). Neither twin
+// broadcasts jar-data-changed — that's handleClearData/handleWipe's job
+// (DD10); per-item deletes rely on the calling panel re-querying itself.
+// ---------------------------------------------------------------------------
+
+const COOKIE_HOST_ONLY = {
+  name: 'sid',
+  domain: 'host-only.test',
+  path: '/',
+  secure: true,
+  hostOnly: true,
+  session: false,
+  expirationDate: 1893456000,
+  value: 'super-secret-value'
+};
+const COOKIE_DOMAIN_ATTR = {
+  name: 'pref',
+  domain: '.domain-cookie.test',
+  path: '/app',
+  secure: false,
+  hostOnly: false,
+  session: true,
+  value: 'also-secret'
+  // no expirationDate — session cookie
+};
+const COOKIE_EMPTY_NAME = {
+  name: '',
+  domain: 'x.test',
+  path: '/',
+  secure: false,
+  hostOnly: true,
+  session: true,
+  value: 'v'
+};
+
+test('jars-cookies-list maps fields and strips `value` entirely (DD7 least-privilege)', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_DOMAIN_ATTR] }
+  });
+  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.cookies, [
+    {
+      name: 'sid',
+      domain: 'host-only.test',
+      path: '/',
+      expirationDate: 1893456000,
+      secure: true,
+      hostOnly: true,
+      session: false
+    },
+    {
+      name: 'pref',
+      domain: '.domain-cookie.test',
+      path: '/app',
+      expirationDate: null,
+      secure: false,
+      hostOnly: false,
+      session: true
+    }
+  ]);
+  for (const c of result.cookies) assert.ok(!('value' in c), 'no value field ever crosses the payload');
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('jars-cookies-list: empty-name cookies list too (typeof check, not truthiness)', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_EMPTY_NAME] } });
+  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.cookies.length, 1);
+  assert.equal(result.cookies[0].name, '');
+});
+
+test('jars-cookies-list rejection matrix + session-failure, no session call on rejection', async (t) => {
+  const h = makeHarness(t);
+  assert.deepEqual(await h.invoke('jars-cookies-list', 'nope'), {
+    ok: false,
+    error: 'jars: cookies-list — malformed-payload'
+  });
+  assert.deepEqual(await h.invoke('jars-cookies-list', { id: 'nope' }), {
+    ok: false,
+    error: 'jars: cookies-list — unknown-jar'
+  });
+  assert.deepEqual(await h.invoke('jars-cookies-list', { id: 'burner' }), {
+    ok: false,
+    error: 'jars: cookies-list — unknown-jar'
+  });
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-cookies-list: a throwing session call returns { ok: false, error }', async (t) => {
+  const h = makeHarness(t, { cookiesGetThrows: true });
+  const result = await h.invoke('jars-cookies-list', { id: 'personal' });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-list — session-failure: cookies.get failed' });
+});
+
+test('internal-jars-cookies-list shares behavior with jars-cookies-list', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY] } });
+  const result = await h.invokeInternal('internal-jars-cookies-list', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.cookies.length, 1);
+});
+
+test('jars-cookies-remove: host-only cookie reconstructs a dot-free URL (DD2, spike-verified)', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-cookies-remove', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/',
+    secure: true
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(h.events, [
+    { fn: 'cookiesRemove', partition: 'persist:container:personal', args: { url: 'https://host-only.test/', name: 'sid' } }
+  ]);
+  assert.equal(h.broadcasts().length, 0, 'per-item delete never broadcasts jar-data-changed (DD10)');
+});
+
+test('jars-cookies-remove: domain-attribute cookie strips the leading dot (DD2, spike-verified)', async (t) => {
+  const h = makeHarness(t);
+  await h.invoke('jars-cookies-remove', {
+    id: 'personal',
+    name: 'pref',
+    domain: '.domain-cookie.test',
+    path: '/app',
+    secure: false
+  });
+  assert.deepEqual(h.events[0].args, { url: 'http://domain-cookie.test/app', name: 'pref' });
+});
+
+test('jars-cookies-remove: empty-name cookie is a valid removal target', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: '', domain: 'x.test' });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(h.events[0].args, { url: 'http://x.test/', name: '' });
+});
+
+// M10 Flight 2, Leg 3 / DD7 — a per-cookie delete clears its bookkeeping row
+// too (matching `path` defaulted to '/' the same way cookieUrl defaults it).
+test('jars-cookies-remove clears the cookie\'s cookie_seen bookkeeping row (DD7 lifecycle)', async (t) => {
+  const h = makeHarness(t);
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  cookieSeen.insertIfAbsent('personal', 'other', 'x.test', '/', 1000); // a DIFFERENT identity — must survive
+  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  assert.equal(result.ok, true);
+  const remaining = cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER);
+  assert.deepEqual(remaining.map((r) => r.name), ['other']);
+});
+
+test('jars-cookies-remove: a session-throw never touches bookkeeping (fails before the cleanup step)', async (t) => {
+  const h = makeHarness(t, { cookiesRemoveThrows: true });
+  const cookieSeen = appDb.createCookieSeenStore();
+  cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
+  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  assert.equal(result.ok, false);
+  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'bookkeeping survives a failed session removal');
+});
+
+test('jars-cookies-remove rejection matrix returns { ok: false, error }, no session call', async (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope', 'jars: cookies-remove — malformed-payload'],
+    ['unknown id', { id: 'nope', name: 'x', domain: 'y' }, 'jars: cookies-remove — unknown-jar'],
+    ['burner', { id: 'burner', name: 'x', domain: 'y' }, 'jars: cookies-remove — unknown-jar'],
+    ['missing name', { id: 'personal', domain: 'y' }, 'jars: cookies-remove — malformed-payload'],
+    ['missing domain', { id: 'personal', name: 'x' }, 'jars: cookies-remove — malformed-payload'],
+    ['non-string name', { id: 'personal', name: 42, domain: 'y' }, 'jars: cookies-remove — malformed-payload']
+  ];
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(await h.invoke('jars-cookies-remove', payload), { ok: false, error }, label);
+  }
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-cookies-remove: a throwing session call returns { ok: false, error }', async (t) => {
+  const h = makeHarness(t, { cookiesRemoveThrows: true });
+  const result = await h.invoke('jars-cookies-remove', { id: 'personal', name: 'sid', domain: 'x.test' });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-remove — session-failure: cookies.remove failed' });
+});
+
+test('internal-jars-cookies-remove shares behavior with jars-cookies-remove', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invokeInternal('internal-jars-cookies-remove', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'x.test'
+  });
+  assert.deepEqual(result, { ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// jars-cookies-value (F3 HAT walkthrough fix-rider, operator-requested). Same
+// three-phase validation as jars-cookies-remove (object-shape -> unknown-jar
+// -> per-field `typeof` checks on name/domain/path — including `path`, which
+// jars-cookies-remove leaves optional but this handler requires). Matches
+// client-side to the EXACT {name, domain, path} identity — never Electron's
+// subdomain-matching CookiesGetFilter.domain form.
+// ---------------------------------------------------------------------------
+
+// A second 'sid'-named cookie on a DIFFERENT domain — the exact-identity
+// match must never cross-match this against COOKIE_HOST_ONLY's 'sid'.
+const COOKIE_SID_OTHER_DOMAIN = {
+  name: 'sid',
+  domain: 'other.test',
+  path: '/',
+  secure: false,
+  hostOnly: true,
+  session: true,
+  value: 'other-domain-secret'
+};
+
+test('jars-cookies-value: exact-identity match returns { ok: true, value }', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_DOMAIN_ATTR] }
+  });
+  const result = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(result, { ok: true, value: 'super-secret-value' });
+});
+
+test('jars-cookies-value: two cookies sharing a name on different domains resolve to the correct one', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_SID_OTHER_DOMAIN] }
+  });
+  const first = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(first, { ok: true, value: 'super-secret-value' });
+  const second = await h.invoke('jars-cookies-value', { id: 'personal', name: 'sid', domain: 'other.test', path: '/' });
+  assert.deepEqual(second, { ok: true, value: 'other-domain-secret' });
+});
+
+test('jars-cookies-value: empty-name cookie is a valid reveal target (typeof check, not truthiness)', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_EMPTY_NAME] } });
+  const result = await h.invoke('jars-cookies-value', { id: 'personal', name: '', domain: 'x.test', path: '/' });
+  assert.deepEqual(result, { ok: true, value: 'v' });
+});
+
+test('jars-cookies-value: no matching cookie returns a static not-found error', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY] } });
+  const result = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/gone' // path mismatch — same name/domain, different path
+  });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-value — not-found' });
+});
+
+test('jars-cookies-value rejection matrix returns { ok: false, error }, no session call', async (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope', 'jars: cookies-value — malformed-payload'],
+    ['unknown id', { id: 'nope', name: 'x', domain: 'y', path: '/' }, 'jars: cookies-value — unknown-jar'],
+    ['burner', { id: 'burner', name: 'x', domain: 'y', path: '/' }, 'jars: cookies-value — unknown-jar'],
+    ['missing name', { id: 'personal', domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['missing domain', { id: 'personal', name: 'x', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['missing path', { id: 'personal', name: 'x', domain: 'y' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string name', { id: 'personal', name: 42, domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string domain', { id: 'personal', name: 'x', domain: 42, path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string path', { id: 'personal', name: 'x', domain: 'y', path: 42 }, 'jars: cookies-value — malformed-payload']
+  ];
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(await h.invoke('jars-cookies-value', payload), { ok: false, error }, label);
+  }
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-cookies-value: a throwing session call returns { ok: false, error }', async (t) => {
+  const h = makeHarness(t, { cookiesGetThrows: true });
+  const result = await h.invoke('jars-cookies-value', { id: 'personal', name: 'sid', domain: 'x.test', path: '/' });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-value — session-failure: cookies.get failed' });
+});
+
+test('internal-jars-cookies-value shares behavior with jars-cookies-value', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY] } });
+  const result = await h.invokeInternal('internal-jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(result, { ok: true, value: 'super-secret-value' });
+});
+
+// ---------------------------------------------------------------------------
+// jars-sitedata-list / jars-sitedata-remove-origin (M10 Flight 2, Leg 2 /
+// flight DD3 VERDICT). Composite union: IndexedDB-dir scrape (ses.storagePath
+// — a PROPERTY) ∪ historyStore.originsForJar, two-tier badges, stored wins on
+// overlap. Both sides degrade to empty rather than erroring.
+// ---------------------------------------------------------------------------
+
+/**
+ * Real temp dir with a real `IndexedDB/` subdirectory containing the given
+ * leveldb dirnames (empty dirs — only the NAME is read by the parser) — the
+ * on-disk-scrape half is exercised against real fs.readdir, not a mocked fs,
+ * matching this repo's temp-dir convention for filesystem-touching code.
+ * @param {string[]} dirnames
+ * @returns {string} the storagePath root (the parent of IndexedDB/)
+ */
+function makeStoragePathWithIndexedDbDirs(dirnames) {
+  const root = makeTempDir();
+  const idbDir = path.join(root, 'IndexedDB');
+  fs.mkdirSync(idbDir, { recursive: true });
+  for (const name of dirnames) fs.mkdirSync(path.join(idbDir, name));
+  return root;
+}
+
+test('jars-sitedata-list: composite union — IndexedDB-confirmed origins tier "stored", history-only origins tier "visited"', async (t) => {
+  const storagePath = makeStoragePathWithIndexedDbDirs(['http_127.0.0.1_54321.indexeddb.leveldb']);
+  t.after(() => removeTempDir(storagePath));
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
+  h.historyStore.seedVisit('personal', 'https://visited-only.example/page', 1000);
+
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.origins, [
+    { origin: 'http://127.0.0.1:54321', tier: 'stored' },
+    { origin: 'https://visited-only.example', tier: 'visited' }
+  ]);
+});
+
+test('jars-sitedata-list: an origin with BOTH IndexedDB data and history activity is tiered "stored" (stored wins)', async (t) => {
+  // Portless dirname (no default-port segment) — matches `new URL().origin`'s
+  // OWN default-port omission, so this is the unambiguous merge case. A
+  // dirname carrying an EXPLICIT default port (e.g. "..._443...") would NOT
+  // merge under the current parser (it round-trips to "https://example.com:443",
+  // distinct from origin()'s "https://example.com") — exactly the open
+  // question this leg's smoke check live-probes against a real default-port
+  // origin (leg AC); not asserted here since the on-disk format for that case
+  // is unconfirmed pre-smoke.
+  const storagePath = makeStoragePathWithIndexedDbDirs(['https_example.com.indexeddb.leveldb']);
+  t.after(() => removeTempDir(storagePath));
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
+  h.historyStore.seedVisit('personal', 'https://example.com/', 1000);
+
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.deepEqual(result.origins, [{ origin: 'https://example.com', tier: 'stored' }]);
+});
+
+test('jars-sitedata-list: no storagePath yields an empty stored tier, not an error', async (t) => {
+  const h = makeHarness(t); // no storagePaths entry -> ses.storagePath is null
+  h.historyStore.seedVisit('personal', 'https://visited-only.example/', 1000);
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.origins, [{ origin: 'https://visited-only.example', tier: 'visited' }]);
+});
+
+test('jars-sitedata-list: a storagePath with no IndexedDB/ dir yields an empty stored tier, not an error (ENOENT)', async (t) => {
+  const root = makeTempDir(); // no IndexedDB/ subdir created at all
+  t.after(() => removeTempDir(root));
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': root } });
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.deepEqual(result, { ok: true, origins: [] });
+});
+
+test('jars-sitedata-list: unparseable IndexedDB dir entries are skipped, never thrown', async (t) => {
+  const storagePath = makeStoragePathWithIndexedDbDirs([
+    'Local Storage', // unrelated leveldb dir, wrong suffix entirely
+    'garbage',
+    'http_127.0.0.1_1.indexeddb.leveldb' // one valid entry survives alongside the junk
+  ]);
+  t.after(() => removeTempDir(storagePath));
+  const h = makeHarness(t, { storagePaths: { 'persist:container:personal': storagePath } });
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.deepEqual(result, { ok: true, origins: [{ origin: 'http://127.0.0.1:1', tier: 'stored' }] });
+});
+
+test('jars-sitedata-list: a jar with no storage path and no history yields an empty (not error) list', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.deepEqual(result, { ok: true, origins: [] });
+});
+
+test('jars-sitedata-list: a history-store throw is logged and fail-soft (treated as zero visited origins, still ok:true)', async (t) => {
+  const h = makeHarness(t, { historyThrows: { originsForJar: true } });
+  const result = await h.invoke('jars-sitedata-list', { id: 'personal' });
+  assert.deepEqual(result, { ok: true, origins: [] });
+});
+
+test('jars-sitedata-list rejection matrix', async (t) => {
+  const h = makeHarness(t);
+  assert.deepEqual(await h.invoke('jars-sitedata-list', 'nope'), {
+    ok: false,
+    error: 'jars: sitedata-list — malformed-payload'
+  });
+  assert.deepEqual(await h.invoke('jars-sitedata-list', { id: 'nope' }), {
+    ok: false,
+    error: 'jars: sitedata-list — unknown-jar'
+  });
+  assert.deepEqual(await h.invoke('jars-sitedata-list', { id: 'burner' }), {
+    ok: false,
+    error: 'jars: sitedata-list — unknown-jar'
+  });
+});
+
+test('internal-jars-sitedata-list shares behavior with jars-sitedata-list', async (t) => {
+  const h = makeHarness(t);
+  h.historyStore.seedVisit('work', 'https://example.org/', 1000);
+  const result = await h.invokeInternal('internal-jars-sitedata-list', { id: 'work' });
+  assert.deepEqual(result, { ok: true, origins: [{ origin: 'https://example.org', tier: 'visited' }] });
+});
+
+test('jars-sitedata-remove-origin: clears storage classes MINUS cookies, for the exact origin', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invoke('jars-sitedata-remove-origin', { id: 'personal', origin: 'https://example.com' });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(h.events, [
+    {
+      fn: 'clearStorageData',
+      partition: 'persist:container:personal',
+      args: {
+        origin: 'https://example.com',
+        storages: ['filesystem', 'indexdb', 'localstorage', 'websql', 'serviceworkers', 'cachestorage']
+      }
+    }
+  ]);
+  assert.ok(!h.events[0].args.storages.includes('cookies'), 'cookies excluded from the site-data storage set');
+  assert.equal(h.broadcasts().length, 0, 'per-item delete never broadcasts jar-data-changed (DD10)');
+});
+
+test('jars-sitedata-remove-origin rejection matrix, no session call', async (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope', 'jars: sitedata-remove-origin — malformed-payload'],
+    ['missing origin', { id: 'personal' }, 'jars: sitedata-remove-origin — malformed-payload'],
+    ['empty-string origin', { id: 'personal', origin: '' }, 'jars: sitedata-remove-origin — malformed-payload'],
+    ['unknown id', { id: 'nope', origin: 'https://x.test' }, 'jars: sitedata-remove-origin — unknown-jar'],
+    ['burner', { id: 'burner', origin: 'https://x.test' }, 'jars: sitedata-remove-origin — unknown-jar']
+  ];
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(await h.invoke('jars-sitedata-remove-origin', payload), { ok: false, error }, label);
+  }
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-sitedata-remove-origin: a throwing session call returns { ok: false, error }', async (t) => {
+  const h = makeHarness(t, { storageThrows: true });
+  const result = await h.invoke('jars-sitedata-remove-origin', { id: 'personal', origin: 'https://x.test' });
+  assert.deepEqual(result, {
+    ok: false,
+    error: 'jars: sitedata-remove-origin — session-failure: wipe failed'
+  });
+});
+
+test('internal-jars-sitedata-remove-origin shares behavior with jars-sitedata-remove-origin', async (t) => {
+  const h = makeHarness(t);
+  const result = await h.invokeInternal('internal-jars-sitedata-remove-origin', {
+    id: 'personal',
+    origin: 'https://x.test'
+  });
+  assert.deepEqual(result, { ok: true });
 });
 
 // ---------------------------------------------------------------------------

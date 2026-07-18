@@ -374,6 +374,84 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      */
     offJarsChanged: (h) => off(h),
 
+    // Cookies + Other-site-data panel surface (M10 Flight 2, Leg 2 / flight
+    // DD2, DD3 VERDICT). Same internal-origin-gated internal-jars-* trust
+    // domain as every other jars wrapper above.
+
+    /**
+     * List a jar's live session cookies (name/domain/path/expiry/flags — NO
+     * `value` field, DD7 least-privilege). Rejects the same way as
+     * jarsClearData for a malformed payload or unknown jar id.
+     * @param {{id:string}} payload
+     * @returns {Promise<{ok:boolean, cookies?:Array<{name:string,domain:string,path:string,expirationDate:(number|null),secure:boolean,hostOnly:boolean,session:boolean}>, error?:string}>}
+     */
+    jarsCookiesList: (payload) => ipcRenderer.invoke('internal-jars-cookies-list', payload),
+
+    /**
+     * Remove a single cookie by its listed identity (name/domain/path/secure
+     * — the same fields jarsCookiesList returns, never a value). Resolves
+     * { ok: true } on success (idempotent — removing an already-gone cookie
+     * still resolves ok); { ok: false, error } for a malformed payload,
+     * unknown jar, or a session-layer failure.
+     * @param {{id:string, name:string, domain:string, path?:string, secure?:boolean}} payload
+     * @returns {Promise<{ok:boolean, error?:string}>}
+     */
+    jarsCookiesRemove: (payload) => ipcRenderer.invoke('internal-jars-cookies-remove', payload),
+
+    /**
+     * Reveal a single cookie's value on demand (F3 HAT walkthrough
+     * fix-rider, operator-requested). Payload carries the listed cookie's
+     * exact identity (name/domain/path — the same fields jarsCookiesList
+     * returns), matched client-side to that EXACT triple (never a
+     * subdomain-matching lookup). Resolves { ok: true, value } on a match;
+     * { ok: false, error } for a malformed payload, unknown jar, a
+     * no-longer-present cookie ('not-found'), or a session-layer failure.
+     * @param {{id:string, name:string, domain:string, path:string}} payload
+     * @returns {Promise<{ok:boolean, value?:string, error?:string}>}
+     */
+    jarsCookiesValue: (payload) => ipcRenderer.invoke('internal-jars-cookies-value', payload),
+
+    /**
+     * List a jar's storage-bearing origins: the composite union (DD3
+     * VERDICT) of IndexedDB-confirmed origins (tier 'stored') and
+     * history-derived origins (tier 'visited') — NO usage/quota figure
+     * (verified unavailable). A jar with no storage path or no history
+     * yields an empty (not error) list.
+     * @param {{id:string}} payload
+     * @returns {Promise<{ok:boolean, origins?:Array<{origin:string, tier:('stored'|'visited')}>, error?:string}>}
+     */
+    jarsSiteDataList: (payload) => ipcRenderer.invoke('internal-jars-sitedata-list', payload),
+
+    /**
+     * Clear one origin's storage (the site-data storage-class set, cookies
+     * excluded — see src/shared/jar-data-classes.js's 'storage' descriptor).
+     * A `visited`-tier origin with no actual storage is a silent no-op
+     * success (the delete acts on storage, not history — known-gap note in
+     * the panel). Rejects the same way as jarsCookiesRemove otherwise.
+     * @param {{id:string, origin:string}} payload
+     * @returns {Promise<{ok:boolean, error?:string}>}
+     */
+    jarsSiteDataRemoveOrigin: (payload) => ipcRenderer.invoke('internal-jars-sitedata-remove-origin', payload),
+
+    /**
+     * Subscribe to jar-data-changed broadcasts (DD10) — fired by
+     * jars-clear-data (cookies/storage classes) and jars-wipe. cb receives
+     * { jarId, classes }; per the invalidation-signal convention every other
+     * *-changed subscription in this file follows, treat this as a
+     * re-query trigger, never a source of truth for the payload's own data.
+     * Returns a numeric handle for use with offJarDataChanged.
+     * @param {(payload:{jarId:string, classes:string[]}) => void} cb
+     * @returns {number}
+     */
+    onJarDataChanged: (cb) => on('jar-data-changed', cb),
+
+    /**
+     * Unsubscribe the jar-data-changed listener registered under handle h.
+     * Call from a pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offJarDataChanged: (h) => off(h),
+
     // Per-jar history surface (M08 Flight 1 Leg 3 / DD9). The history UI has no
     // page of its own — it renders inside goldfinch://jars — so these wrappers
     // are thin ipcRenderer.invoke calls onto the internal-origin-gated

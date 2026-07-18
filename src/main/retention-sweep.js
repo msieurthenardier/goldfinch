@@ -1,0 +1,251 @@
+// @ts-check
+'use strict';
+
+// Retention sweep engine (M10 Flight 2, Leg 3 / DD4 VERDICT, DD4b, DD6,
+// DD7, DD10). Generalizes per-jar `retentionDays` from history-only pruning
+// to cookies + site data. ELECTRON-FREE: every live handle (the cookie
+// bookkeeping store, the history-derived-origins reader, the session
+// resolver, the clock) is injected via createRetentionSweep(deps), so the
+// whole engine is unit-testable with fakes — no Electron, no real sqlite,
+// no real session (the jars.js / jar-ipc.js / history-store.js precedent).
+//
+// Two independently-aged classes, per DD4b:
+//  - COOKIES age by FIRST-SEEN (DD4 VERDICT candidate 1): a bookkeeping row
+//    per (jar, cookie identity) in app-db.js's `cookie_seen` table, kept
+//    current by main.js's `session-created` cookies listener. This module
+//    ALSO stamps any live cookie that has no row yet ("cold start" — a
+//    cookie set before the listener attached this boot, or before this
+//    feature shipped) with `firstSeenMs = now`, via the SAME
+//    `insertIfAbsent` primitive the listener's insert half uses.
+//  - STORAGE ages by SINCE-LAST-ACTIVITY, from history (DD4b): the eligible
+//    origin set is a SNAPSHOT the CALLER computes BEFORE running the same
+//    pass's history prune (the SEQUENCING invariant — see
+//    history-store.js's `expiredOriginsForJar` doc comment). This module
+//    NEVER computes that snapshot internally inside sweepJar/sweepAll — it
+//    only consumes what the caller already captured, so the ordering is
+//    structural, not a race this module could accidentally reintroduce.
+//    `snapshotAgedOutOrigins` below IS the snapshot step the caller (main.js
+//    pruneAllJars, jar-ipc.js handleSetRetention) calls FIRST, before the
+//    history prune — it does no session work at all, only synchronous
+//    history reads, so it is always safe to run ahead of any async work.
+//
+// Per-jar isolation (DD6): one jar's cookie/storage sweep failure never
+// blocks another's — sweepJar itself isolates its two halves (a cookie
+// failure doesn't skip the storage half or vice versa), and sweepAll
+// isolates each jar's sweepJar call.
+//
+// "Jar deleted mid-sweep" (leg Edge Cases): no explicit registry re-check is
+// threaded through here. The operations this module performs are already
+// idempotent/safe against a concurrently-deleted jar by construction: a
+// session call against a cold/removed partition just recreates an empty
+// session (the same "harmless" property jar-ipc.js's wipeJarData already
+// relies on for `session.fromPartition` on an already-wiped jar), and a
+// bookkeeping DELETE against an already-gone row is a normal zero-row
+// no-op. A jar's own destructive paths (remove/wipe) already clear its
+// `cookie_seen` rows synchronously (DD7 lifecycle, jar-ipc.js), so a sweep
+// racing a delete finds nothing left to act on rather than acting unsafely.
+
+const { jarDataClassById } = require('../shared/jar-data-classes');
+
+// The site-data panel's own 'storage' class descriptor (cookies excluded) —
+// reused rather than re-listed, the same precedent jar-ipc.js's
+// handleSiteDataRemoveOrigin follows, so a future storage-class
+// addition/removal is picked up here with no separate edit.
+const STORAGE_CLASS = /** @type {{ storages: readonly string[] }} */ (jarDataClassById('storage')).storages;
+
+/**
+ * A stable identity key for a cookie row/live-cookie pairing (jar-scoped —
+ * two jars can independently hold the same name/domain/path identity).
+ * Segments are joined with the NUL character via the `\0` ESCAPE SEQUENCE,
+ * never a literal NUL byte pasted into source — a literal NUL byte makes
+ * git classify the whole file as binary (no line diffs/blame/PR review
+ * rendering). `\0` in a template literal produces the same runtime
+ * character, so this is purely a source-encoding concern, not a behavior
+ * change.
+ * @param {string} jarId
+ * @param {string} name
+ * @param {string} domain
+ * @param {string} path
+ * @returns {string}
+ */
+function identityKey(jarId, name, domain, path) {
+  return `${jarId}\0${name}\0${domain}\0${path}`;
+}
+
+/**
+ * @param {{
+ *   cookieSeen: {
+ *     insertIfAbsent(jarId: string, name: string, domain: string, path: string, firstSeenMs: number): boolean,
+ *     deleteByIdentity(jarId: string, name: string, domain: string, path: string): boolean,
+ *     deleteByJar(jarId: string): number,
+ *     selectExpired(jarId: string, cutoffMs: number): Array<{ name: string, domain: string, path: string, firstSeenMs: number }>
+ *   },
+ *   historyOrigins: (jarId: string, cutoffMs: number) => string[],
+ *   sessionFor: (jar: { id: string, partition: string, retentionDays: number }) => any,
+ *   cookieUrl: (cookie: { domain?: (string|null), path?: (string|null), secure?: boolean }) => string,
+ *   now: () => number
+ * }} deps
+ */
+function createRetentionSweep({ cookieSeen, historyOrigins, sessionFor, cookieUrl, now }) {
+  /**
+   * Snapshot every jar's aged-out origin set BEFORE the caller runs the
+   * history prune (SEQUENCING — see history-store.js's
+   * `expiredOriginsForJar`). Synchronous history reads only, no session
+   * calls — always safe ahead of async work.
+   * @param {ReadonlyArray<{ id: string, retentionDays: number }>} jars
+   * @returns {Record<string, string[]>}
+   */
+  function snapshotAgedOutOrigins(jars) {
+    const nowMs = now();
+    /** @type {Record<string, string[]>} */
+    const byJarId = {};
+    for (const jar of jars) {
+      const cutoff = nowMs - jar.retentionDays * 86_400_000;
+      byJarId[jar.id] = historyOrigins(jar.id, cutoff);
+    }
+    return byJarId;
+  }
+
+  /**
+   * Cookie sweep for one jar, first-seen aging (DD4 VERDICT). Order is
+   * PINNED (leg AC): stamp pass FIRST (every live cookie with no
+   * bookkeeping row gets one stamped `now` — the cold-start ruling), THEN
+   * the expiry pass over bookkeeping rows whose age exceeds the window.
+   * Safe today regardless of order (the window floor is 1 day, so a
+   * just-stamped row's age is always 0 — never expired in the same pass),
+   * but the order is pinned so a future floor change can't reintroduce
+   * delete-what-you-just-stamped.
+   * @param {{ id: string, partition: string, retentionDays: number }} jar
+   * @returns {Promise<{ removed: number }>}
+   */
+  async function sweepCookies(jar) {
+    const ses = sessionFor(jar);
+    const nowMs = now();
+    const cutoff = nowMs - jar.retentionDays * 86_400_000;
+
+    const liveCookies = await ses.cookies.get({});
+
+    // Stamp pass. Cross-reference map built alongside it (identity -> live
+    // cookie) so the expiry pass below can recover `secure` for URL
+    // reconstruction — the bookkeeping row itself never carries it (DD7:
+    // metadata is (jarId, name, domain, path, firstSeenMs) only).
+    /** @type {Map<string, any>} */
+    const liveByIdentity = new Map();
+    for (const c of liveCookies) {
+      const domain = c.domain || '';
+      const path = c.path || '/';
+      liveByIdentity.set(identityKey(jar.id, c.name, domain, path), c);
+      cookieSeen.insertIfAbsent(jar.id, c.name, domain, path, nowMs);
+    }
+
+    // Expiry pass, over bookkeeping rows (pre-existing ones — the ones just
+    // stamped carry firstSeenMs = nowMs, never < cutoff for any positive
+    // window).
+    const expired = cookieSeen.selectExpired(jar.id, cutoff);
+    let removed = 0;
+    for (const row of expired) {
+      const live = liveByIdentity.get(identityKey(jar.id, row.name, row.domain, row.path));
+      const url = cookieUrl({ domain: row.domain, path: row.path, secure: !!(live && live.secure) });
+      try {
+        await ses.cookies.remove(url, row.name);
+      } catch {
+        // best-effort — leave the bookkeeping row in place so the NEXT
+        // sweep retries this identity; never abort the pass over one bad
+        // removal (Edge Case: "Sweep-vs-page TOCTOU", named-accepted).
+        continue;
+      }
+      cookieSeen.deleteByIdentity(jar.id, row.name, row.domain, row.path);
+      removed++;
+    }
+    return { removed };
+  }
+
+  /**
+   * Storage sweep for one jar, acting ONLY on the caller-supplied
+   * pre-prune origin snapshot (DD4b / SEQUENCING — never computed here).
+   * No-signal origins (absent from the snapshot entirely — they never had
+   * a history row to age) are untouched by construction: this loop only
+   * ever sees what's IN the snapshot.
+   * @param {{ id: string, partition: string, retentionDays: number }} jar
+   * @param {readonly string[]} agedOutOrigins
+   * @returns {Promise<{ cleared: number }>}
+   */
+  async function sweepStorage(jar, agedOutOrigins) {
+    const ses = sessionFor(jar);
+    let cleared = 0;
+    for (const origin of agedOutOrigins || []) {
+      try {
+        await ses.clearStorageData({ origin, storages: STORAGE_CLASS });
+        cleared++;
+      } catch {
+        // per-origin isolation within the jar — one bad origin never blocks
+        // its siblings (same discipline as the cookie removal loop above).
+      }
+    }
+    return { cleared };
+  }
+
+  /**
+   * Sweep one jar: cookies + storage, each half isolated from the other's
+   * failure. Returns a per-class result shape so the caller can broadcast
+   * `jar-data-changed` on COMPLETION (DD10) carrying only the classes
+   * actually swept.
+   * @param {{ id: string, partition: string, retentionDays: number }} jar
+   * @param {readonly string[]} [agedOutOrigins]
+   * @returns {Promise<{ cookiesRemoved: number, originsCleared: number, classes: string[], error?: string }>}
+   */
+  async function sweepJar(jar, agedOutOrigins = []) {
+    /** @type {{ cookiesRemoved: number, originsCleared: number, classes: string[], error?: string }} */
+    const result = { cookiesRemoved: 0, originsCleared: 0, classes: [] };
+    try {
+      const { removed } = await sweepCookies(jar);
+      result.cookiesRemoved = removed;
+    } catch (e) {
+      result.error = `cookies: ${String(e && e.message ? e.message : e)}`;
+    }
+    try {
+      const { cleared } = await sweepStorage(jar, agedOutOrigins);
+      result.originsCleared = cleared;
+    } catch (e) {
+      result.error = (result.error ? result.error + '; ' : '') + `storage: ${String(e && e.message ? e.message : e)}`;
+    }
+    if (result.cookiesRemoved > 0) result.classes.push('cookies');
+    if (result.originsCleared > 0) result.classes.push('storage');
+    return result;
+  }
+
+  /**
+   * Sweep every jar, per-jar isolation (DD6): one jar's failure never
+   * blocks another's. `agedOutOriginsByJarId` is the caller's pre-prune
+   * snapshot (`snapshotAgedOutOrigins`, or an equivalent
+   * `expiredOriginsForJar` read) — required, never recomputed here
+   * (SEQUENCING).
+   * @param {ReadonlyArray<{ id: string, partition: string, retentionDays: number }>} jars
+   * @param {Record<string, string[]>} [agedOutOriginsByJarId]
+   * @returns {Promise<Record<string, { cookiesRemoved: number, originsCleared: number, classes: string[], error?: string }>>}
+   */
+  async function sweepAll(jars, agedOutOriginsByJarId = {}) {
+    /** @type {Record<string, { cookiesRemoved: number, originsCleared: number, classes: string[], error?: string }>} */
+    const results = {};
+    for (const jar of jars) {
+      try {
+        results[jar.id] = await sweepJar(jar, agedOutOriginsByJarId[jar.id] || []);
+      } catch (e) {
+        // Belt-and-suspenders: sweepJar already isolates its own two
+        // halves internally, but a truly unexpected throw (e.g. sessionFor
+        // itself throwing) must still never abort a sibling jar's sweep.
+        results[jar.id] = {
+          cookiesRemoved: 0,
+          originsCleared: 0,
+          classes: [],
+          error: String(e && e.message ? e.message : e)
+        };
+      }
+    }
+    return results;
+  }
+
+  return { snapshotAgedOutOrigins, sweepJar, sweepAll };
+}
+
+module.exports = { createRetentionSweep };

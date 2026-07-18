@@ -51,7 +51,9 @@ test('exposes exactly the repo interface', () => {
     'clearJar',
     'countByJar',
     'pruneExpired',
-    'pruneOneJar'
+    'pruneOneJar',
+    'originsForJar',
+    'expiredOriginsForJar'
   ]) {
     assert.equal(typeof store[m], 'function', `${m} should be a function`);
   }
@@ -73,6 +75,8 @@ test('every method throws "history store not open" before open(), except close()
   assert.throws(() => store.countByJar('a'), /history store not open/);
   assert.throws(() => store.pruneExpired({}, 1), /history store not open/);
   assert.throws(() => store.pruneOneJar('a', 30, 1), /history store not open/);
+  assert.throws(() => store.originsForJar('a'), /history store not open/);
+  assert.throws(() => store.expiredOriginsForJar('a', 1), /history store not open/);
   assert.doesNotThrow(() => store.close(), 'close() before open() must be a no-op, not throw');
 });
 
@@ -1004,6 +1008,180 @@ test('null title is accepted; FTS treats it as empty until setTitle backfills', 
     assert.equal(store.listRecent('a')[0].title, null);
     store.setTitle(id, 'Filled In');
     assert.deepEqual(store.search('a', 'Filled').map((r) => r.id), [id]);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// originsForJar (M10 Flight 2, Leg 2 / flight DD3 VERDICT candidate 3) — the
+// Other-site-data panel's history-derived union side.
+// ---------------------------------------------------------------------------
+
+test('originsForJar: multiple URLs on one origin collapse to one row with the MAX lastVisitedAt', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://example.com/page1', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'a', url: 'https://example.com/page2', visitedAt: 3000 });
+    store.recordVisit({ jarId: 'a', url: 'https://example.com/page3', visitedAt: 2000 });
+
+    const origins = store.originsForJar('a');
+    assert.deepEqual(origins, [{ origin: 'https://example.com', lastVisitedAt: 3000 }]);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('originsForJar: distinct origins (scheme/host/port) stay distinct rows', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://example.com/', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'a', url: 'http://example.com/', visitedAt: 1100 }); // distinct scheme
+    store.recordVisit({ jarId: 'a', url: 'https://example.com:8443/', visitedAt: 1200 }); // distinct port
+    store.recordVisit({ jarId: 'a', url: 'https://other.example/', visitedAt: 1300 }); // distinct host
+
+    const origins = store.originsForJar('a').map((r) => r.origin).sort();
+    assert.deepEqual(origins, [
+      'http://example.com',
+      'https://example.com',
+      'https://example.com:8443',
+      'https://other.example'
+    ]);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('originsForJar: per-jar isolation — never crosses jars', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://a.example/', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'b', url: 'https://b.example/', visitedAt: 1000 });
+
+    assert.deepEqual(store.originsForJar('a').map((r) => r.origin), ['https://a.example']);
+    assert.deepEqual(store.originsForJar('b').map((r) => r.origin), ['https://b.example']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('originsForJar: a jar with no history yields an empty array, not an error', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.deepEqual(store.originsForJar('never-visited'), []);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('originsForJar validates jarId and throws TypeError', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.throws(() => store.originsForJar(''), TypeError);
+    assert.throws(() => store.originsForJar(/** @type {any} */ (42)), TypeError);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// expiredOriginsForJar (M10 Flight 2, Leg 3 / flight DD4b) — the storage
+// sweep's "since last activity" aging signal. SEQUENCING (leg-3 design
+// review, HIGH) is pinned by the CALLERS (jar-ipc.test.js, and structurally
+// by retention-sweep.js never computing this internally) — this file pins
+// only the pure filtering behavior.
+// ---------------------------------------------------------------------------
+
+test('expiredOriginsForJar: returns only origins whose MAX lastVisitedAt is strictly before cutoffMs', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://old.example/', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'a', url: 'https://new.example/', visitedAt: 9000 });
+
+    assert.deepEqual(store.expiredOriginsForJar('a', 5000), ['https://old.example']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('expiredOriginsForJar: an origin with ANY recent activity (a later visit on the SAME origin) is not aged out', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    // Same origin, one old page and one recent page — the origin's MAX
+    // lastVisitedAt (9000) wins, so it must NOT appear as expired even
+    // though one of its pages is old (origin-grain aging, not page-grain).
+    store.recordVisit({ jarId: 'a', url: 'https://mixed.example/old-page', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'a', url: 'https://mixed.example/new-page', visitedAt: 9000 });
+
+    assert.deepEqual(store.expiredOriginsForJar('a', 5000), []);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('expiredOriginsForJar: cutoff boundary is exclusive (lastVisitedAt === cutoffMs is NOT expired)', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://boundary.example/', visitedAt: 5000 });
+
+    assert.deepEqual(store.expiredOriginsForJar('a', 5000), [], 'strictly-before, not before-or-equal');
+    assert.deepEqual(store.expiredOriginsForJar('a', 5001), ['https://boundary.example']);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('expiredOriginsForJar: per-jar isolation — never crosses jars', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    store.recordVisit({ jarId: 'a', url: 'https://a.example/', visitedAt: 1000 });
+    store.recordVisit({ jarId: 'b', url: 'https://b.example/', visitedAt: 1000 });
+
+    assert.deepEqual(store.expiredOriginsForJar('a', 5000), ['https://a.example']);
+    assert.deepEqual(store.expiredOriginsForJar('b', 500), []); // b's own cutoff is before its visit
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('expiredOriginsForJar: a jar with no history yields an empty array, not an error', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.deepEqual(store.expiredOriginsForJar('never-visited', 5000), []);
+  } finally {
+    removeTempDir(dir);
+  }
+});
+
+test('expiredOriginsForJar validates jarId/cutoffMs and throws TypeError', () => {
+  const dir = makeTempDir();
+  try {
+    const store = freshStore();
+    store.open(dir);
+    assert.throws(() => store.expiredOriginsForJar('', 1), TypeError);
+    assert.throws(() => store.expiredOriginsForJar(/** @type {any} */ (42), 1), TypeError);
+    assert.throws(() => store.expiredOriginsForJar('a', /** @type {any} */ ('nope')), TypeError);
+    assert.throws(() => store.expiredOriginsForJar('a', NaN), TypeError);
   } finally {
     removeTempDir(dir);
   }

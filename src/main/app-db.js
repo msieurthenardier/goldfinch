@@ -22,6 +22,10 @@
 //   a whole serialized payload — the wholesale-replace workload every
 //   converted store already has (settings/downloads/session are all
 //   low-cardinality "rewrite the whole thing" stores, not indexed data).
+// - Schema v2 (M10 Flight 2, Leg 3 / DD4 VERDICT): adds `cookie_seen`, the
+//   retention sweep's cookie first-seen bookkeeping table (metadata only —
+//   DD7). This is the first REAL `user_version` ladder step this module has
+//   exercised — `attemptOpen` previously branched only on version 0.
 // - Never throws on a corrupt existing file: open() quarantines a bad app.db
 //   (and its -wal/-shm siblings) to a `.corrupt-<ms-epoch>` sibling and
 //   recreates fresh — the app must boot.
@@ -33,16 +37,42 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 // ---------------------------------------------------------------------------
-// Schema v1 (flight DD3 — implement exactly)
+// Schema v1 (flight 10-1 DD3 — implement exactly)
 // ---------------------------------------------------------------------------
 
-const SCHEMA_SQL = `
+const SCHEMA_V1_SQL = `
 CREATE TABLE documents (
   store      TEXT    PRIMARY KEY,
   payload    TEXT    NOT NULL,
   updated_at INTEGER NOT NULL
 );
 `;
+
+// ---------------------------------------------------------------------------
+// Schema v2 step (M10 Flight 2, Leg 3 / DD4 VERDICT, DD7) — the first real
+// `user_version` ladder step this module has ever needed (DD4 review
+// annotation (c): pre-leg-3, `attemptOpen` branched only on version 0).
+// `cookie_seen` is the retention sweep's cookie first-seen bookkeeping
+// table: metadata ONLY (DD7 — jar id, cookie identity tuple, timestamp;
+// NEVER a cookie value), one row per (jar, cookie identity), upserted via
+// `INSERT OR IGNORE` (DD4 VERDICT: a same-identity value-refresh event pair
+// must never reset `first_seen_ms`) and deleted with its jar/cookie on every
+// destructive path (DD7 lifecycle — see jar-ipc.js's wipeJarData /
+// handleClearData / handleCookiesRemove).
+// ---------------------------------------------------------------------------
+
+const SCHEMA_V2_SQL = `
+CREATE TABLE cookie_seen (
+  jar_id        TEXT    NOT NULL,
+  name          TEXT    NOT NULL,
+  domain        TEXT    NOT NULL,
+  path          TEXT    NOT NULL,
+  first_seen_ms INTEGER NOT NULL,
+  PRIMARY KEY (jar_id, name, domain, path)
+);
+`;
+
+const CURRENT_VERSION = 2;
 
 const FILE_NAME = 'app.db';
 
@@ -90,9 +120,22 @@ function quarantineCorruptFile(dbPath) {
 }
 
 /**
- * Open (or create) the database at dbPath, apply pragmas, and bootstrap the
- * schema when user_version is 0. Throws on any failure (corrupt file,
- * mid-bootstrap error) — the caller decides whether to quarantine and retry.
+ * Open (or create) the database at dbPath, apply pragmas, and step the
+ * schema up to `CURRENT_VERSION` via the `user_version` ladder (M10 Flight
+ * 2, Leg 3 — the first real ladder step this module has needed; previously
+ * `attemptOpen` branched only on version 0). Steps are CUMULATIVE and
+ * strictly additive per version, applied in order from whatever version the
+ * file is already at:
+ *   - 0 → creates schema v1 (`documents`) THEN steps straight through to v2
+ *     (`cookie_seen`) in the same open — a fresh profile lands on
+ *     `CURRENT_VERSION` directly, never pausing at an intermediate version.
+ *   - 1 → applies ONLY the v2 step (`cookie_seen`) — the hypothetical
+ *     upgrade path for a real F1-only-shipped v1 file (none exists in the
+ *     wild yet; F1 is unreleased — this step protects that scenario
+ *     regardless).
+ *   - 2 (== CURRENT_VERSION) → no-op; the file is already current.
+ * Throws on any failure (corrupt file, mid-bootstrap error) — the caller
+ * decides whether to quarantine and retry.
  * @param {string} dbPath
  * @returns {import('node:sqlite').DatabaseSync}
  */
@@ -102,9 +145,17 @@ function attemptOpen(dbPath) {
     handle.exec('PRAGMA journal_mode = WAL');
     handle.exec('PRAGMA synchronous = NORMAL');
     const versionRow = /** @type {any} */ (handle.prepare('PRAGMA user_version').get());
-    if (versionRow.user_version === 0) {
-      handle.exec(SCHEMA_SQL);
-      handle.exec('PRAGMA user_version = 1');
+    let version = versionRow.user_version;
+    if (version === 0) {
+      handle.exec(SCHEMA_V1_SQL);
+      version = 1;
+    }
+    if (version === 1) {
+      handle.exec(SCHEMA_V2_SQL);
+      version = 2;
+    }
+    if (version !== versionRow.user_version) {
+      handle.exec(`PRAGMA user_version = ${CURRENT_VERSION}`);
     }
     return handle;
   } catch (err) {
@@ -132,7 +183,22 @@ function prepareStatements() {
       'INSERT INTO documents (store, payload, updated_at) VALUES (?1, ?2, ?3) ' +
         'ON CONFLICT(store) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at'
     ),
-    deleteDoc: d.prepare('DELETE FROM documents WHERE store = ?1')
+    deleteDoc: d.prepare('DELETE FROM documents WHERE store = ?1'),
+    // cookie_seen (M10 Flight 2, Leg 3 / DD4 VERDICT, DD7) — every
+    // placeholder DISTINCT (history-store's live-probed gotcha, cloned
+    // discipline). insertCookieSeen is INSERT OR IGNORE (DD4 VERDICT: an
+    // existing row's first_seen_ms must survive a same-identity
+    // overwrite-then-reinsert event pair).
+    insertCookieSeen: d.prepare(
+      'INSERT OR IGNORE INTO cookie_seen (jar_id, name, domain, path, first_seen_ms) VALUES (?1, ?2, ?3, ?4, ?5)'
+    ),
+    deleteCookieSeenByIdentity: d.prepare(
+      'DELETE FROM cookie_seen WHERE jar_id = ?1 AND name = ?2 AND domain = ?3 AND path = ?4'
+    ),
+    deleteCookieSeenByJar: d.prepare('DELETE FROM cookie_seen WHERE jar_id = ?1'),
+    selectExpiredCookieSeen: d.prepare(
+      'SELECT name, domain, path, first_seen_ms FROM cookie_seen WHERE jar_id = ?1 AND first_seen_ms < ?2'
+    )
   };
 }
 
@@ -233,6 +299,87 @@ function createDocumentStore(name) {
 }
 
 // ---------------------------------------------------------------------------
+// createCookieSeenStore() — the retention sweep's cookie first-seen
+// bookkeeping seam (M10 Flight 2, Leg 3 / DD4 VERDICT, DD7). ONE shared
+// instance backs BOTH the `session-created` cookies listener (main.js) and
+// the retention-sweep engine's cold-start stamp pass — both write through
+// the SAME table via the SAME statements. Metadata only (DD7): no method
+// here ever takes or returns a cookie VALUE.
+// ---------------------------------------------------------------------------
+
+/**
+ * @returns {{
+ *   insertIfAbsent(jarId: string, name: string, domain: string, path: string, firstSeenMs: number): boolean,
+ *   deleteByIdentity(jarId: string, name: string, domain: string, path: string): boolean,
+ *   deleteByJar(jarId: string): number,
+ *   selectExpired(jarId: string, cutoffMs: number): Array<{ name: string, domain: string, path: string, firstSeenMs: number }>
+ * }}
+ */
+function createCookieSeenStore() {
+  return {
+    /**
+     * INSERT OR IGNORE (DD4 VERDICT): a no-op against an existing row, so a
+     * same-identity value-refresh (the measured `overwrite`/`removed:true`
+     * + `inserted`/`removed:false` event pair) never resets `first_seen_ms`
+     * for a real row. Also the retention sweep's cold-start stamp primitive
+     * (a live session cookie with no bookkeeping row yet gets one stamped
+     * `firstSeenMs` — the SAME statement, not a separate code path).
+     * @param {string} jarId
+     * @param {string} name
+     * @param {string} domain
+     * @param {string} path
+     * @param {number} firstSeenMs
+     * @returns {boolean} whether a new row was actually inserted (false when
+     *   a row already existed — INSERT OR IGNORE's changes === 0)
+     */
+    insertIfAbsent(jarId, name, domain, path, firstSeenMs) {
+      assertOpen();
+      const result = /** @type {any} */ (
+        statements.insertCookieSeen.run(jarId, name, domain, path, firstSeenMs)
+      );
+      return result.changes > 0;
+    },
+    /**
+     * @param {string} jarId
+     * @param {string} name
+     * @param {string} domain
+     * @param {string} path
+     * @returns {boolean} whether a row existed and was deleted
+     */
+    deleteByIdentity(jarId, name, domain, path) {
+      assertOpen();
+      const result = /** @type {any} */ (
+        statements.deleteCookieSeenByIdentity.run(jarId, name, domain, path)
+      );
+      return result.changes > 0;
+    },
+    /**
+     * DD7 lifecycle: bookkeeping dies with its jar — every destructive jar
+     * path (wipe, remove, clear-data cookies class) calls this.
+     * @param {string} jarId
+     * @returns {number} rows deleted
+     */
+    deleteByJar(jarId) {
+      assertOpen();
+      const result = /** @type {any} */ (statements.deleteCookieSeenByJar.run(jarId));
+      return result.changes;
+    },
+    /**
+     * Rows whose bookkeeping age exceeds a cutoff — the retention sweep's
+     * expiry-pass read.
+     * @param {string} jarId
+     * @param {number} cutoffMs
+     * @returns {Array<{ name: string, domain: string, path: string, firstSeenMs: number }>}
+     */
+    selectExpired(jarId, cutoffMs) {
+      assertOpen();
+      const rows = /** @type {any[]} */ (statements.selectExpiredCookieSeen.all(jarId, cutoffMs));
+      return rows.map((r) => ({ name: r.name, domain: r.domain, path: r.path, firstSeenMs: r.first_seen_ms }));
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -240,5 +387,6 @@ module.exports = {
   open,
   close,
   isOpen,
-  createDocumentStore
+  createDocumentStore,
+  createCookieSeenStore
 };

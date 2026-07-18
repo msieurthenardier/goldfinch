@@ -116,10 +116,10 @@ When adding an internal page (Flight 5+): add a `host → pathname → file` ent
 
 **There are now THREE trusted internal origins (Flight 5 added `goldfinch://downloads`; M06 Flight 3 added `goldfinch://jars`): `goldfinch://settings`, `goldfinch://downloads`, and `goldfinch://jars`.** The trust boundary is **"internal page vs web," NOT "settings vs downloads vs jars"** — every internal origin is equally privileged, so the SAME `goldfinchInternal` bridge is exposed to each page and any internal page can call any `registerInternalHandler` channel. `isTrustedInternalSender` and `isInternalPageUrl` are **allowlist-based** (`INTERNAL_ORIGINS` / `INTERNAL_HOSTS` sets), not single-string matches. The `goldfinch://downloads` page (`downloads.{html,css,js}`) is the app-level downloads surface; its `internal-downloads-*` channels resolve the actionable `savePath` MAIN-SIDE by id (never trusting a renderer-supplied path) for open/show. The `goldfinch://jars` page (`jars.{html,css,js}`) is the cookie-jar management surface (M06 Flight 3); its `internal-jars-*` channels share their handler bodies with the chrome-trusted `jars-*` channels (see `src/main/jar-ipc.js`) rather than forking logic per trust domain. Flight 4 added two per-jar data-control pairs sharing the same twin-registration pattern: `jars-clear-data`/`internal-jars-clear-data` clears one or more requested data classes (cookies, site storage, or cache — see `src/shared/jar-data-classes.js`) from a jar's session partition, strict fail-closed on any unknown class/jar id; `jars-wipe`/`internal-jars-wipe` performs the full identity wipe (all storage + cache, plus a fingerprint-seed reroll) and broadcasts `jar-wiped { id }` on success so the chrome renderer can reload the jar's open tabs.
 
-**`goldfinch://jars` panel structure (M08 Flight 2).** Each persistent jar's section renders three independent WAI-ARIA disclosure panels — History / Cookies / Other site data (`src/shared/jar-panel-model.js`'s `JAR_PANELS`, default collapsed) — plus a footer (Wipe + Delete, jar-level identity actions, outside every panel). Panel toggle/region DOM ids use a **double-hyphen** separator, `jar-<jarId>--<panelId>` (e.g. `jar-work--history`), never single-hyphen — `slug()` collapses non-alnum runs to one `-` and never emits `--`, so a jar id that itself ends in a panel token (`jar-personal` vs a jar literally named "Personal Cookies") can't collide with the region id. The hash deep-link (`goldfinch://jars/#jar-<id>--<panel>`) and the scroll-spy nav both key off these same ids. The History panel's live visit count renders **only** inside its disclosure-button label (`<span class="jar-panel-count">`); `render()`/`updateJarSection` never write that span — its only two writers are the section's build-time fetch and the module-level `onHistoryChanged` handler, both re-querying via `historyCount` rather than trusting broadcast payloads. Burner has no panels (structurally driven by `row.isBurner`, never an id check).
+**`goldfinch://jars` panel structure (M08 Flight 2; tab strip since M08 Flight 6; counts generalized M10 Flight 3 HAT fix-rider A).** Each persistent jar's section renders a WAI-ARIA **tab strip** — History / Cookies / Other site data (`src/shared/jar-panel-model.js`'s `JAR_PANELS`, History default-selected; `src/renderer/pages/jars-tabs.js` owns the tablist/tab/tabpanel build) — plus a footer (Wipe + Delete, jar-level identity actions, outside every tab). Tab/tabpanel DOM ids use a **double-hyphen** separator, `jar-<jarId>--<panelId>` (e.g. `jar-work--history`), never single-hyphen — `slug()` collapses non-alnum runs to one `-` and never emits `--`, so a jar id that itself ends in a panel token (`jar-personal` vs a jar literally named "Personal Cookies") can't collide with the region id. The hash deep-link (`goldfinch://jars/#jar-<id>--<panel>`) and the scroll-spy nav both key off these same ids. Every tab renders a live count badge inside its own tab-button label (`<span class="jar-tab-count">`), unified as "<Label> (N)"; `render()`/`updateJarSection` never write these spans — each panel's own build-time fetch seeds it, and it is kept fresh by that panel's own invalidation-broadcast handler (`onHistoryChanged` for History; a classes-scoped, active-tab-de-duped `onJarDataChanged` re-fetch for Cookies/Other-site-data) plus, for Cookies/Other-site-data, an `onCountChanged` hook fired by that panel's own `refresh()`. Burner has no tabs (structurally driven by `row.isBurner`, never an id check).
 
-**History joins the data-class control as a fourth class; its panel gets its own content module (M08 Flight 3).** `JAR_DATA_CLASSES` (`src/shared/jar-data-classes.js`) gains a fourth descriptor, `{ id: 'history', label: 'History', storages: null, custom: 'history' }` — `storages: null` is already the `cache` sentinel, so `history` is distinguished via the `custom` discriminator, and `jar-ipc.js`'s `handleClearData` dispatches on `d.custom === 'history'` **first**, ahead of the storages-null cache fallback (a naive fallthrough would clear the session cache while reporting history cleared). `'history'` was added to `CONFIRM_REGIONS` and the History region now calls the shared `buildRegionControls()` like every other panel, so its "Clear history" button + confirm (copy: `"Clears this jar's browsing history."`) are auto-generated, not bespoke. The panel's actual content — retention select, search, the visit list, paging, per-row delete — lives in a **new page module**, `src/renderer/pages/jars-history-panel.js` (`createHistoryPanel({ bridge, jarId, mountEl, onError, getRetentionDays })`), one instance per persistent jar, mounted as the History region's second child (`div.jar-history-mount`) beside jars.js's own `.jar-data-controls` block — the DOM contract is exactly two children, and jars.js never writes inside the mount. This is Flight 2's DD2 growth-trigger firing proactively: jars.js grew only ~55 lines integrating the module instead of the ~400 direct implementation would have cost.
-- **Retention control.** A `<select>` at the top of the mount (presets 7/14/30/90/180/365 days plus the jar's current value as an extra option if it isn't a preset) applies instantly on `change` via `bridge.jarsSetRetention({ id, days })` (internal-bridge only — no chrome-preload parity, since the jars page is the only consumer); a failed call reverts the select and surfaces the section's error line.
+**History joins the data-class control as a fourth class; its panel gets its own content module (M08 Flight 3).** `JAR_DATA_CLASSES` (`src/shared/jar-data-classes.js`) gains a fourth descriptor, `{ id: 'history', label: 'History', storages: null, custom: 'history' }` — `storages: null` is already the `cache` sentinel, so `history` is distinguished via the `custom` discriminator, and `jar-ipc.js`'s `handleClearData` dispatches on `d.custom === 'history'` **first**, ahead of the storages-null cache fallback (a naive fallthrough would clear the session cache while reporting history cleared). `'history'` was added to `CONFIRM_REGIONS` and the History region now calls the shared `buildRegionControls()` like every other panel, so its "Clear history" button + confirm (copy: `"Clears this jar's browsing history."`) are auto-generated, not bespoke. The panel's actual content — search, the visit list, paging, per-row delete — lives in a **new page module**, `src/renderer/pages/jars-history-panel.js` (`createHistoryPanel({ bridge, jarId, mountEl, onError })`), one instance per persistent jar, mounted as the History region's second child (`div.jar-history-mount`) beside jars.js's own `.jar-data-controls` block — the DOM contract is exactly two children, and jars.js never writes inside the mount. This is Flight 2's DD2 growth-trigger firing proactively: jars.js grew only ~55 lines integrating the module instead of the ~400 direct implementation would have cost. (The retention select originally lived here too — see the next bullet for its M10 Flight 3 relocation.)
+- **Retention control (relocated to the jar-section header — M10 Flight 3 HAT inline fix-rider).** A `<select>` (presets 7/14/30/90/180/365 days plus the jar's current value as an extra option if it isn't a preset) applies instantly on `change` via `bridge.jarsSetRetention({ id, days })` (internal-bridge only — no chrome-preload parity, since the jars page is the only consumer); a failed call reverts the select and surfaces the section's error line. It used to live at the top of the History panel's mount (a M08 fossil from when retention was history-only) but was moved into `jars.js`'s own jar-section header, right-aligned above the tab strip, since the window has governed history + cookies + site data together since M10 Flight 2's generalized retention sweep — see "Jars page data panels" below.
 - **`setRetention` + `pruneOneJar`.** `jars.js` (the main-process store) gains `setRetention(id, days)`, which **rejects** (never coerces) an out-of-range/non-integer `days`. The `jars-set-retention`/`internal-jars-set-retention` IPC twins (`src/main/jar-ipc.js`) persist the new value, broadcast `jars-changed`, then immediately run `historyStore.pruneOneJar(jarId, days, Date.now())` — a **new single-jar store method** (`src/main/history-store.js`) added specifically so a retention edit can't reuse `pruneExpired`'s multi-jar map contract, which treats every absent jar id as orphaned and would otherwise delete every *other* jar's entire history on a single jar's retention edit. `pruneOneJar` runs only that jar's cutoff delete, no orphan sweep, and broadcasts `history-changed { jarId }` when it deletes rows — so shortening retention takes effect at once.
 - **History purges on wipe and on jar delete.** `handleWipe` and `handleRemove` (`src/main/jar-ipc.js`) both call a shared `wipeJarData(ses, jarId)` helper — the storage+cache+seed-reroll composition that already appeared three times pre-flight (`handleRemove`, `handleWipe`, and `main.js`'s `identity-new`); this flight's new history-purge concern is what tips the extraction per M06 F4 DD3's "revisit at the next copy" clause, not a literal fourth call site. `wipeJarData` now also purges that jar's history rows — in its own try/catch, fail-soft, after the session-data calls, so a purge failure never blocks the identity wipe or the `jar-wiped` broadcast. `handleWipe` broadcasts `history-changed { jarId }` when the purge actually deleted rows. `main.js`'s `identity-new` copy stays separate per flight DD3 (cross-module coupling for three lines was rejected in M06 F4 DD3's rationale and stands) and deliberately does **not** purge history — it is an anti-tracking identity break, not a data-visibility control; only the data-class control, jar wipe, and jar delete clear history.
 
@@ -296,6 +296,23 @@ a file with small config rows (flight DD2).
   rather than propagating a corrupt-file error (and its `-wal`/`-shm`
   siblings), and `close()` tracks its own open/closed flag because
   `DatabaseSync.close()` throws on a second call.
+- **`user_version` ladder — schema v2 (M10 Flight 2, Leg 3).** `attemptOpen`
+  is a real, cumulative version STEP ladder, not a single version-0 branch:
+  v0 → creates `documents` (v1) then steps straight through to v2 in the
+  same open (a fresh profile never pauses at an intermediate version); v1 →
+  applies only the v2 step; v2 → no-op. The v2 step adds `cookie_seen
+  (jar_id, name, domain, path, first_seen_ms, PRIMARY KEY (jar_id, name,
+  domain, path))` — the retention sweep's cookie first-seen bookkeeping
+  (metadata only, DD7 — see "Retention sweep" below). This is the first
+  ladder step this module has actually exercised; no real v1-only `app.db`
+  exists in the wild (F1 shipped v1+v2 together), so the ladder protects a
+  hypothetical future F1-ships-alone scenario, unit-pinned against a
+  hand-crafted v1 fixture. `createCookieSeenStore()` is the shared
+  `{ insertIfAbsent, deleteByIdentity, deleteByJar, selectExpired }` seam —
+  the SAME house pattern as `createDocumentStore`, a module-singleton
+  reachable from anywhere via `appDb.createCookieSeenStore()` (both
+  `main.js`'s cookies listener and `jar-ipc.js`'s sweep build their own
+  instance; both resolve against the one live table).
 
 ### History store (`src/main/history-store.js`)
 
@@ -383,6 +400,142 @@ schema/indexes, rather than a single serialized row.
   statement (SQLite collapses them onto one bound slot), and keep the FTS5
   index on the **default `unicode61` tokenizer** — a `tokenchars` override
   turns a whole URL into one token and silently breaks prefix search.
+
+### Jars page data panels (`goldfinch://jars`, M10 Flight 2)
+
+The jars management page's per-jar section is a WAI-ARIA tab strip (History
+/ Cookies / Other site data — `src/shared/jar-panel-model.js`'s
+`JAR_PANELS`, tab dispatch in `src/renderer/pages/jars-tabs.js`), each panel a self-contained module sharing the same
+constructor-deps shape (`{ bridge, jarId, mountEl, onError, onActivated? }`)
+so a fourth panel is a drop-in, not a rethink.
+
+- **Cookies panel (`src/renderer/pages/jars-cookies-panel.js`).** Lists a
+  jar's LIVE session cookies (name, domain, expiry) via `jars-cookies-list`
+  — never a `value` field, at any layer (DD7 least-privilege: the IPC
+  handler strips it before it ever crosses the payload). Per-cookie delete
+  reconstructs the removal URL from the listed identity fields via
+  `jar-data-helpers.js`'s `cookieUrl` (scheme from `secure`, leading dot
+  unconditionally stripped from `domain` — safe for both host-only and
+  domain-attribute cookies, spike-verified). No confirm step (a single
+  cookie is low-stakes, matching the panel's manual-refresh convention).
+- **Other-site-data panel (`src/renderer/pages/jars-sitedata-panel.js`).**
+  Lists storage-bearing origins via `jars-sitedata-list` — a **composite
+  union, two-tier honest labeling** (flight DD3 VERDICT, mission-Architect
+  premise: `Session` exposes no origin-enumeration or usage/quota API):
+  - **"Has stored data"** — origins with an on-disk IndexedDB leveldb
+    directory (`ses.storagePath/IndexedDB/<scheme>_<host>_<port>.indexeddb.leveldb`,
+    parsed by `originFromIndexedDbDirname`; a literal `_0` port segment is
+    Chromium's default-port sentinel, normalized to portless so it merges
+    with `origin()`'s own default-port omission — live-measured, not a
+    documented format). **Known gap**: `Local Storage` is a single
+    consolidated, non-origin-keyed leveldb store — its origins are NOT
+    recoverable and are invisible to this tier, named in the panel.
+  - **"Visited — storage unconfirmed"** — origins with history activity in
+    the jar (`historyStore.originsForJar`, the `suggest` query's `GROUP BY`
+    idiom at origin grain) that have NO IndexedDB confirmation. Both a
+    never-visited third-party-only origin AND a localStorage-only origin
+    are invisible to BOTH tiers — an accepted, documented gap, not silently
+    presented as a complete list.
+  - **No usage/quota figure anywhere** — confirmed absent from Electron's
+    public API; raw on-disk file sizes exist but would mislabel leveldb
+    implementation overhead as user-meaningful storage.
+  - Per-origin delete calls `clearStorageData({ origin, storages })` with
+    the SAME storage-class set (cookies excluded) the retention sweep uses
+    (`src/shared/jar-data-classes.js`'s `'storage'` descriptor) — a history
+    row for a cleared origin survives (storage and history are independent
+    data; the origin downgrades from "stored" to "visited" on next paint,
+    it does not disappear).
+- **Freshness (DD2/DD10).** Both panels query on tab-SELECTION (not
+  section-visibility — a live session/CDP-adjacent read is not cheap enough
+  for the history panel's "queries whenever scrolled into view" trigger) and
+  re-query on their own mutations directly. No live `cookies.on('changed')`
+  UI subscription (page activity would spam every open jars page). Cross-path
+  staleness (another jar tab's Clear/Wipe, or the retention sweep) is closed
+  by the `jar-data-changed { jarId, classes }` broadcast (DD10) — fired by
+  `handleClearData` (cookies/storage classes actually cleared),
+  `handleWipe` (unconditional), and the retention sweep's own COMPLETION
+  (never the `setRetention` invoke, which resolves before the async sweep
+  finishes and would paint pre-sweep state).
+
+### Retention sweep — cookies + site data (`src/main/retention-sweep.js`, M10 Flight 2, Leg 3)
+
+Generalizes the per-jar `retentionDays` dial (one window, all classes — DD5)
+from history-only pruning to cookies and site data, riding the SAME prune
+cadence (boot + hourly, plus an immediate one-jar sweep on a retention
+edit). The engine is **Electron-free, injected-deps** (`createRetentionSweep`
+— the `jars.js`/`jar-ipc.js`/`history-store.js` precedent): no live session,
+no real sqlite, no Electron import; every dependency (`cookieSeen`,
+`historyOrigins`, `sessionFor`, `cookieUrl`, `now`) is a fake in the unit
+suite.
+
+- **Two independently-aged classes — different signals, both documented
+  user-facing (DD4b).** Cookies age by **first-seen** (creation-age);
+  storage ages by **since-last-activity**. This is a deliberate, named
+  asymmetry, not an oversight — cookie creation time isn't exposed by
+  Electron's API at all (the reason the bookkeeping table exists), while
+  history already carries a last-activity signal for free.
+  - **Cookies (DD4 VERDICT, candidate 1).** `main.js`'s `session-created`
+    hook attaches a `cookies.on('changed')` listener for every session
+    whose partition (recovered from `ses.storagePath`'s `Partitions/<name>`
+    on-disk segment — the hook receives only the `Session` object, no
+    partition field; `jar-data-helpers.js`'s `partitionFromStoragePath`)
+    positive-matches a registered jar (never an eager `fromPartition` warm
+    — `session-created` fires synchronously on a partition's FIRST
+    `fromPartition` call only, measured). Each event upserts/deletes a
+    `cookie_seen` row (jar id, cookie identity, `first_seen_ms` — DD7, no
+    value ever). **The overwrite-cause ruling** (measured): a same-identity
+    value refresh fires an `overwrite`/`removed:true` + `inserted`/
+    `removed:false` PAIR — the removal handler SKIPS deletion on
+    `cause === 'overwrite'` (the row survives with its original
+    `first_seen_ms`) and deletes on `explicit`/`expired`/
+    `expired-overwrite`/`evicted`; inserts are `INSERT OR IGNORE` (never
+    clobbers a surviving row). **Cold start**: a live cookie with no
+    bookkeeping row (predates the listener, or predates this feature) gets
+    stamped `first_seen_ms = now` at the next sweep — honest, not backdated.
+  - **Storage (DD4b, candidate 2's storage half).** Ages by ORIGIN
+    last-activity from `historyStore.expiredOriginsForJar(jarId, cutoffMs)`
+    — origins with NO history signal are never auto-swept (no honest age
+    signal exists for them; operator-deletable from the Other-site-data
+    panel, gap named there too). This is a desk ruling (not rig-probed),
+    honest because both empirical halves (`originsForJar`,
+    `clearStorageData({origin})`) were independently measured.
+- **SEQUENCING invariant — the load-bearing fix (leg-3 design review,
+  HIGH).** The aged-out-origin snapshot MUST be taken BEFORE the same
+  pass's history prune runs, in BOTH `main.js`'s `pruneAllJars` and
+  `jar-ipc.js`'s `handleSetRetention`: `pruneExpired`/`pruneOneJar` delete
+  every visit row older than the SAME cutoff, which is exactly the evidence
+  `expiredOriginsForJar` reads — a post-prune read sees nothing for exactly
+  the target case. Order, pinned and unit-tested: (1) snapshot, (2) history
+  prune (sync, unchanged), (3) the async cookie/storage sweep from the
+  snapshot.
+- **Cadence + isolation (DD6).** Boot + hourly sweeps ride `pruneAllJars`;
+  `jars-set-retention` triggers the same immediate one-jar sweep discipline
+  `pruneOneJar` already had. Sweeps are async, fire-and-forget, per-jar
+  isolated (one jar's failure — or one cookie's, or one origin's — never
+  blocks a sibling); every promise chain ends in a terminal catch (log-and-
+  drop — quit-during-sweep is named-accepted). `jar-data-changed` (DD10)
+  fires on sweep COMPLETION carrying only the classes actually swept that
+  pass, per jar.
+- **Will-quit quiesce guard (the F6-hang class).** The cookies listener
+  outlives `will-quit`'s `appDb.close()` (Electron doesn't tear down session
+  listeners on quit) — every write checks `appDb.isOpen()` FIRST and is
+  wrapped in try/catch, so a write-after-close can never throw uncaught into
+  Electron's event dispatch and wedge the quit path.
+- **DD7 lifecycle — bookkeeping dies with its data.** Every destructive jar
+  path clears `cookie_seen` rows: a per-cookie delete
+  (`handleCookiesRemove`) deletes-by-identity; a cookies-class clear
+  (`handleClearData`) and a full wipe/remove (`wipeJarData`, shared by
+  `handleWipe`/`handleRemove`) delete-by-jar. All fail-soft (logged, never
+  flips an otherwise-successful session-level result) — a cleanup miss just
+  means the next sweep's stamp pass re-treats a survivor as "new", a
+  harmless staleness, never a correctness bug.
+- **Honest gaps, documented, not silently absent:** no-history-signal
+  origins are never auto-swept for storage; storage ages by last-activity,
+  not creation (the panel and this section both say so); up to ~1 h of
+  over-retention between cadence ticks (existing history-prune acceptance,
+  now shared by cookies/storage too); a page can refresh a cookie between
+  the sweep's read and its `cookies.remove` call (TOCTOU, named-accepted,
+  bounded by the 1-day window floor).
 
 ### Address-bar suggestions (`src/shared/omnibox-suggest-model.js`)
 

@@ -118,6 +118,11 @@ interface GoldfinchBridge {
   jarsAdd(payload: any): Promise<any>;
   /** Structured-cloned container object, or the frozen BURNER sentinel — detect by id (DD3). */
   jarsGetDefault(): Promise<any>;
+  /** Retention-edit (M08 Flight 3, Leg 1 / DD4; chrome-bridge wrapper added M10 Flight 2, Leg 3
+   * for the behavior-test act path — internal-session evaluate is uniformly refused, so a
+   * chrome-target evaluate call against this wrapper is the mechanism, not the internal page's
+   * own `<select>`). */
+  jarsSetRetention(payload: { id: string; days: number }): Promise<{ ok: boolean; container?: object; error?: string }>;
   identityNew(payload: any): Promise<any>;
 
   // --- main -> renderer events ---
@@ -390,6 +395,41 @@ interface GoldfinchInternalBridge {
   jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
   // --- per-jar retention edit (M08 Flight 3, Leg 1 / DD4) ---
   jarsSetRetention(payload: { id: string; days: number }): Promise<{ ok: boolean; container?: object; error?: string }>;
+  // --- Cookies + Other-site-data panel surface (M10 Flight 2, Leg 2 / flight DD2, DD3 VERDICT) ---
+  jarsCookiesList(payload: { id: string }): Promise<{
+    ok: boolean;
+    cookies?: Array<{
+      name: string;
+      domain: string;
+      path: string;
+      expirationDate: number | null;
+      secure: boolean;
+      hostOnly: boolean;
+      session: boolean;
+    }>;
+    error?: string;
+  }>;
+  jarsCookiesRemove(payload: {
+    id: string;
+    name: string;
+    domain: string;
+    path?: string;
+    secure?: boolean;
+  }): Promise<{ ok: boolean; error?: string }>;
+  // F3 HAT walkthrough fix-rider (operator-requested): reveal a single cookie's
+  // value on demand, matched client-side to the exact {name, domain, path} identity.
+  jarsCookiesValue(payload: {
+    id: string;
+    name: string;
+    domain: string;
+    path: string;
+  }): Promise<{ ok: boolean; value?: string; error?: string }>;
+  jarsSiteDataList(
+    payload: { id: string }
+  ): Promise<{ ok: boolean; origins?: Array<{ origin: string; tier: 'stored' | 'visited' }>; error?: string }>;
+  jarsSiteDataRemoveOrigin(payload: { id: string; origin: string }): Promise<{ ok: boolean; error?: string }>;
+  onJarDataChanged(cb: (payload: { jarId: string; classes: string[] }) => void): number;
+  offJarDataChanged(h: number): void;
   // --- per-jar history surface (M08 Flight 1, Leg 3; historyCount added M08
   //     Flight 2, Leg 1; historyList -> historyPage + openTabInJar added M08
   //     Flight 6, Leg 4 / H1-H2 design review) ---
