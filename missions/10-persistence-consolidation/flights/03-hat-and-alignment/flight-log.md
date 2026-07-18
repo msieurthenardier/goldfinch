@@ -355,6 +355,8 @@ flight design:
 - **Station B**: keys ROTATED by the operator (Settings → Automation
   revoke + re-mint; new key placed in .mcp.json by the operator directly —
   never transited this session). `.mcp.json` confirmed git-ignored.
+  **Old-key-refuses verified**: the prior registration now returns HTTP
+  401 (operator's /mcp reconnect attempt) — revocation confirmed live.
 - **Station C**: NUL-delimiter fix landed (committed with the riders);
   jar-ipc.test.js fixture conversion DEFERRED to routine maintenance
   (operator did not elect it during HAT).
@@ -363,9 +365,14 @@ flight design:
   at HAT ("not worried about retention in the dev env") — coverage stands
   on the F2 Witnessed gate (storage/history live-PASS) + unit layer.
   TC6 corrupt-DB: skipped (twice machine-witnessed). TC8
-  cookie-removal-by-age: **carry closed on unit + gate coverage** per the
-  operator's retention disposition; remains passively observable in
-  normal use whenever a low retention window meets day-old bookkeeping.
+  cookie-removal-by-age: closed **procedurally** by operator election
+  (flight.md option (b), anticipated in the plan). **Debrief correction
+  (Architect): substantively still unwitnessed** — the F2 gate covered
+  storage/history removal-by-age, NOT cookies (that clause was the gate's
+  honest FAIL); "unit + analogy to the sibling sweep" is the true
+  coverage. A cheap live spot-check (set one jar to 1 day, return next
+  day, watch a cookie vanish) is recorded as a standing follow-up in the
+  mission debrief, not a discharged item.
   Orphan self-heal: passive watch, unit-covered. UX read: discharged
   continuously through the session (four operator findings, all
   addressed as riders).

@@ -257,7 +257,8 @@ Planning inputs adopted from prior artifacts and mission-design research:
 - [x] **HAT-scoped carries (accumulated F1-F2)** — ALL DISCHARGED at F3
       (2026-07-18): PRs #96/#98 merged (+ dependabot #73/#95; 0.10.1, no
       tag; issue #94 closed); keys rotated by the operator; cookie-age
-      witness carry closed on unit+gate coverage per operator disposition.
+      witness closed procedurally (operator election); substantively
+      unwitnessed — live spot-check carried as a mission-debrief follow-up.
       Original items:: (1) promote + merge PR
       #96 (F1, draft) and F2's stacked PR — `gh pr ready`/`merge` are
       classifier-blocked for the FD this session; (2) **rotate/re-mint

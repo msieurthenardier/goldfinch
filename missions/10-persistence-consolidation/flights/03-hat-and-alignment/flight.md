@@ -1,6 +1,6 @@
 # Flight: HAT & Alignment
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Persistence Consolidation](../../mission.md)
 
 ## Contributing to Criteria
