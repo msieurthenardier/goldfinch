@@ -1,6 +1,6 @@
 # Leg: hat-walkthrough
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [HAT & Alignment](../flight.md)
 
 ## Objective
@@ -19,6 +19,6 @@ Progress and dispositions recorded in the flight log as they happen.
 
 ## Acceptance Criteria
 
-- [ ] Every station item discharged or explicitly dispositioned by the
+- [x] Every station item discharged or explicitly dispositioned by the
       operator (recorded in the flight log)
-- [ ] Suite/typecheck/lint green on merged main at close
+- [x] Suite/typecheck/lint green on merged main at close (2123 pass, 0.10.1)

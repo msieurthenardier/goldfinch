@@ -109,38 +109,38 @@ Planning inputs adopted from prior artifacts and mission-design research:
 
 ## Success Criteria
 
-- [ ] All five config/state surfaces (app preferences, shields config, jar
+- [x] All five config/state surfaces (app preferences, shields config, jar
       registry, downloads, session snapshot) persist through the same durable
       storage substrate as browsing history, and survive an app upgrade from
       an existing profile with no data loss — settings values, jar
       definitions (including per-jar retention), download records, and the
       saved session all come through intact, with the one-time migration
       running automatically on first boot.
-- [ ] With a missing or corrupt store database, the app still boots to a
+- [x] With a missing or corrupt store database, the app still boots to a
       usable state with defaults (quarantine-and-recreate, per the
       history-store precedent) — corruption of any single persisted surface
       can never brick the app.
-- [ ] Every persisted store remains Electron-free, dependency-injected, and
+- [x] Every persisted store remains Electron-free, dependency-injected, and
       unit-tested offline against a synthetic temp dir — including shields,
       which is brought up to that discipline as part of the move.
-- [ ] The Cookies panel on `goldfinch://jars` lists the selected jar's live
+- [x] The Cookies panel on `goldfinch://jars` lists the selected jar's live
       cookies (name, domain, expiry) with per-cookie delete, alongside the
       existing History list, and stays consistent with the jar's actual
       session state after deletes and clears. *(behavior-test-backed)*
-- [ ] The Other-site-data panel lists the jar's storage-bearing origins (with
+- [x] The Other-site-data panel lists the jar's storage-bearing origins (with
       usage where the platform exposes it) with per-origin delete.
       *(behavior-test-backed)*
-- [ ] The per-jar retention window governs cookies and site data, not just
+- [x] The per-jar retention window governs cookies and site data, not just
       history: persisted traces older than the jar's window are removed on
       the same cadence discipline as the history prune, without breaking the
       manual clear/wipe controls or the `history-changed`/`jars-changed`
       invalidation contracts. *(behavior-test-backed; mechanism is
       spike-gated — see Open Questions)*
-- [ ] The substrate ruling (DD1) is explicitly re-affirmed for the widened
+- [x] The substrate ruling (DD1) is explicitly re-affirmed for the widened
       footprint, and the documentation trail is current: `CLAUDE.md` reflects
       the new store architecture, and the BACKLOG "JSON stores → SQLite" seed
       is retired.
-- [ ] The `safeStorage` at-rest-encryption seam survives the migration: a
+- [x] The `safeStorage` at-rest-encryption seam survives the migration: a
       future encrypted codec can still be layered in without reshaping the
       stores (no encryption is built now).
 
@@ -254,7 +254,11 @@ Planning inputs adopted from prior artifacts and mission-design research:
 
 ## Known Issues
 
-- [ ] **HAT-scoped carries (accumulated F1-F2)**: (1) promote + merge PR
+- [x] **HAT-scoped carries (accumulated F1-F2)** — ALL DISCHARGED at F3
+      (2026-07-18): PRs #96/#98 merged (+ dependabot #73/#95; 0.10.1, no
+      tag; issue #94 closed); keys rotated by the operator; cookie-age
+      witness carry closed on unit+gate coverage per operator disposition.
+      Original items:: (1) promote + merge PR
       #96 (F1, draft) and F2's stacked PR — `gh pr ready`/`merge` are
       classifier-blocked for the FD this session; (2) **rotate/re-mint
       automation keys** — the FD leaked the registered jar-scoped bearer
@@ -282,6 +286,6 @@ Planning inputs adopted from prior artifacts and mission-design research:
       Other-site-data panel listings with per-item delete (new read-path IPC
       twins), retention applied to cookies/site data on the prune cadence,
       invalidation contracts verified end-to-end.
-- [ ] Flight 3: HAT & alignment — operator-guided review of the
+- [x] Flight 3: HAT & alignment — operator-guided review of the
       implementation across all mission behavior tests, with iterative fix
       legs for outstanding issues until aligned.

@@ -344,6 +344,34 @@ flight design:
   live: PASS.
 - Fix-riders (tab counts + icon refresh): **PASS** (operator, live).
 
+### Station completions (2026-07-18)
+
+- **Station A**: PR #96 promoted + merged; PR #98 retargeted to main (one
+  trivial BACKLOG conflict resolved on-branch, suite re-verified) and
+  merged. Operator additionally directed: dependabot PRs #73 (@types/node
+  26.1.1) + #95 (actions/setup-node 7) merged, suite/typecheck/lint green
+  on updated deps; patch version bumped to 0.10.1, pushed, NO tag (no
+  release, per operator). Issue #94 closed with a landing summary.
+- **Station B**: keys ROTATED by the operator (Settings → Automation
+  revoke + re-mint; new key placed in .mcp.json by the operator directly —
+  never transited this session). `.mcp.json` confirmed git-ignored.
+- **Station C**: NUL-delimiter fix landed (committed with the riders);
+  jar-ipc.test.js fixture conversion DEFERRED to routine maintenance
+  (operator did not elect it during HAT).
+- **Station D dispositions**: TC1/TC2 + all riders PASS (see walkthrough
+  progress above). TC5 retention sweep: operator unable/declined to test
+  at HAT ("not worried about retention in the dev env") — coverage stands
+  on the F2 Witnessed gate (storage/history live-PASS) + unit layer.
+  TC6 corrupt-DB: skipped (twice machine-witnessed). TC8
+  cookie-removal-by-age: **carry closed on unit + gate coverage** per the
+  operator's retention disposition; remains passively observable in
+  normal use whenever a low retention window meets day-old bookkeeping.
+  Orphan self-heal: passive watch, unit-covered. UX read: discharged
+  continuously through the session (four operator findings, all
+  addressed as riders).
+- **Station E**: behavior-test re-runs skipped (both ran this mission;
+  operator-witnessed evidence deemed sufficient).
+
 ## Decisions / Deviations / Anomalies
 
 *(recorded during the HAT session)*

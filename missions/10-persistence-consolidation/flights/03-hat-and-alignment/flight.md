@@ -1,11 +1,11 @@
 # Flight: HAT & Alignment
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Persistence Consolidation](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Operator review of the full mission implementation (all 8 mission
+- [x] Operator review of the full mission implementation (all 8 mission
       criteria walked live), with outstanding issues addressed via
       iterative fix legs until aligned.
 
@@ -26,21 +26,21 @@ lightweight design-review pass first).
 ### The accumulated HAT scope (single actionable checklist)
 
 **Station A — Branch & release hygiene**
-- [ ] Promote PR #96 (F1, draft) → ready; review; merge to main.
-- [ ] Re-base/promote PR #98 (F2, stacked on the F1 branch) → ready;
+- [x] Promote PR #96 (F1, draft) → ready; review; merge to main.
+- [x] Re-base/promote PR #98 (F2, stacked on the F1 branch) → ready;
       review; merge. (Stacked order: #96 first.)
 
 **Station B — Security carries**
-- [ ] **Rotate the automation keys**: the FD leaked the registered
+- [x] **Rotate the automation keys**: the FD leaked the registered
       jar-scoped bearer key into its session transcript (F1 leg 3);
       re-mint (fresh launch mints new keys; old key's hash removed from
       settings if the store keeps multiple), update the `.mcp.json`
       registration with the new key, verify the old key refuses.
-- [ ] Confirm no key material sits in any committed artifact (grep was
+- [x] Confirm no key material sits in any committed artifact (grep was
       clean at both flight-end reviews; operator spot-check).
 
 **Station C — Fix riders (small, queued by the debriefs)**
-- [ ] `retention-sweep.js` NUL-delimiter fix (literal NULs make the file
+- [x] `retention-sweep.js` NUL-delimiter fix (literal NULs make the file
       binary to git — switch to a printable delimiter or `\0`-escape;
       confirm `git diff` renders line-level afterward; unit suite green).
       *(Code change → Developer spawn, look-and-feel-class fix.)*
@@ -49,7 +49,7 @@ lightweight design-review pass first).
       maintenance).
 
 **Station D — Live witnesses the mission owes**
-- [ ] **Real-profile migration boot**: the operator's first launch of the
+- [x] **Real-profile migration boot**: the operator's first launch of the
       merged build migrates their real dev/user profile (JSON →
       `app.db` rows + `.migrated` renames, then v1→v2 ladder). Verify
       settings/jars/downloads/session/shields all intact by inspection.
@@ -109,7 +109,7 @@ anything needed (rebase, conflict resolution via Developer spawn if any).
 
 ### Legs
 
-- [ ] `hat-walkthrough` — Stations A-E with iterative fix riders until
+- [x] `hat-walkthrough` — Stations A-E with iterative fix riders until
       the operator is aligned. (Single interactive leg; fix riders spawn
       Developers as needed under the in-HAT protocol.)
 
@@ -119,11 +119,11 @@ anything needed (rebase, conflict resolution via Developer spawn if any).
 
 ### Completion Checklist
 
-- [ ] All stations discharged or explicitly dispositioned by the operator
-- [ ] PRs merged (or operator's alternative ruling recorded)
-- [ ] Keys rotated
-- [ ] Tests passing on main after merges
-- [ ] Mission criteria checklist updated in mission.md
+- [x] All stations discharged or explicitly dispositioned by the operator
+- [x] PRs merged (or operator's alternative ruling recorded)
+- [x] Keys rotated
+- [x] Tests passing on main after merges (2123)
+- [x] Mission criteria checklist updated in mission.md
 
 ### Verification
 
