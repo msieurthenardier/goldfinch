@@ -7,18 +7,36 @@
  * `jars-history-panel.js`): jars.js builds one instance per persistent jar's
  * Other-site-data region and delegates to it; this module owns everything
  * INSIDE the mount `<div class="jar-sitedata-mount">` it is handed — the
- * manual refresh affordance, the known-gap note, the origin list (two-tier
- * badges), and per-origin delete.
+ * known-gap note, the origin list (two-tier badges), and per-origin delete.
  *
  * DOM contract (mirrors DD7's History contract): the region has exactly two
  * children — jars.js's own `.jar-data-controls` block (Clear-storage button
  * + confirm) and this module's mount.
  *
+ * Manual refresh trigger (M10 Flight 3 HAT fix-rider B, operator-requested):
+ * same relocation as `jars-cookies-panel.js` — the refresh AFFORDANCE (icon,
+ * right-justified into jars.js's own `.jar-data-controls-buttons` row
+ * alongside the Clear-storage/Clear-cache buttons) now lives in jars.js; this
+ * module keeps only the `refresh()` query logic, exposed as a returned hook.
+ *
+ * Tab-badge count (M10 Flight 3 HAT fix-rider A, design review cycle 1 + FD
+ * revision rulings): same shape as `jars-cookies-panel.js` — an optional
+ * `onCountChanged(n)` constructor dep fires after every successful
+ * `refresh()` paint with the fresh origin-list length, routed by jars.js into
+ * this panel's own tab badge (keeps an OPEN tab's badge accurate across this
+ * panel's own per-origin deletes, which deliberately never broadcast).
+ *
  * Freshness (DD2, same discipline as the Cookies panel): queries fresh on
  * every ACTIVATION (`onActivated`, no "first time only" guard — see
  * `jars-cookies-panel.js`'s doc comment for the full rationale, which
  * applies identically here), immediately re-queries after its own
- * per-origin delete, and re-queries on `onJarDataChanged` (DD10).
+ * per-origin delete, and re-queries on `onJarDataChanged` (DD10). The
+ * tab-strip's BUILD-TIME count pass (jars.js's fetchSiteDataCount) is a
+ * SEPARATE, bounded one-shot query per page load (one `readdir` per
+ * persistent jar) — not a second live-probe trigger on this panel's own
+ * activation/broadcast gating; see `jars-cookies-panel.js`'s Freshness
+ * paragraph for the design-review rationale (a per-scroll live-probe shape
+ * was considered and REJECTED), which applies identically here.
  *
  * Two-tier composite (DD3 VERDICT): each origin carries a `tier` —
  * `'stored'` (IndexedDB-confirmed) or `'visited'` (history-derived,
@@ -39,6 +57,18 @@
  * No unit suite for this module (house practice for page controllers) —
  * static nets only; live behavior verification is this leg's smoke check +
  * a future behavior-test gate.
+ *
+ * Explainer + badge tooltips (M10 Flight 3 HAT fix-rider C, operator
+ * comprehension finding — look-and-feel fix, inline): the operator found
+ * the panel unexplained during the HAT walkthrough. Added a one-line
+ * plain-language explainer painted first in the mount (EXPLAINER_NOTE,
+ * `.textContent` only) plus supplementary `title` tooltips on the two badge
+ * types (TIER_TOOLTIP) — the badge's own text stays the accessible content,
+ * tooltips are additive. KNOWN_GAP_NOTE tightened to drop the now-redundant
+ * "(it acts on storage, not history)" aside without losing any of its three
+ * honesty clauses. Deeper "show what a site actually stores" capability is
+ * out of scope here — captured as a future-mission seed in BACKLOG.md
+ * ("Site-data inspector").
  */
 
 // ---------------------------------------------------------------------------
@@ -86,27 +116,55 @@ const TIER_LABEL = Object.freeze({
   visited: 'Visited — storage unconfirmed'
 });
 
+// M10 Flight 3 HAT fix-rider C (operator comprehension finding, inline
+// look-and-feel fix): tooltips on the two badge types, supplementary only —
+// the badge's own `.textContent` (TIER_LABEL, above) remains the accessible
+// content; these are plain `title` attributes, not aria-label overrides.
+const TIER_TOOLTIP = Object.freeze({
+  stored: 'This site has a database stored on your device in this jar.',
+  visited:
+    "You visited this site in this jar; it may hold storage that can't be " +
+    'listed. Delete still clears whatever is there.'
+});
+
+// M10 Flight 3 HAT fix-rider C: one-line plain-language explainer, painted
+// FIRST in the mount (above the known-gap note) — the operator found the
+// panel unexplained during the HAT walkthrough. Deliberately doesn't claim
+// localStorage coverage (KNOWN_GAP_NOTE below states it's invisible here).
+const EXPLAINER_NOTE =
+  'Sites that keep data on your device in this jar — like databases or ' +
+  "cached files — beyond cookies. Delete removes a site's stored data; " +
+  'your history is unaffected.';
+
+// Tightened for fix-rider C: the "(it acts on storage, not history)" aside
+// is now redundant with EXPLAINER_NOTE's "your history is unaffected" and
+// the `visited` tooltip's "Delete still clears whatever is there" — dropped
+// rather than duplicated. The three honesty clauses stay: localStorage is
+// invisible here, never-visited origins are absent, and a `visited`-tier
+// delete can succeed silently with nothing actually there.
 const KNOWN_GAP_NOTE =
   "This list may be incomplete: local storage isn't visible here, and origins never visited in this jar won't " +
   "appear even if they hold third-party data. Clearing a “Visited” origin with no actual storage " +
-  'succeeds silently (it acts on storage, not history).';
+  'still succeeds silently.';
 
 /**
  * @param {{
  *   bridge: GoldfinchInternalBridge,
  *   jarId: string,
  *   mountEl: HTMLElement,
- *   onError: (message: string) => void
+ *   onError: (message: string) => void,
+ *   onCountChanged?: (count: number) => void
  * }} deps
- * @returns {{ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void }}
+ * @returns {{ onActivated: () => void, onJarDataChanged: () => void, refresh: () => void, destroy: () => void }}
  */
-export function createSiteDataPanel({ bridge, jarId, mountEl, onError }) {
-  const refreshBtn = document.createElement('button');
-  refreshBtn.type = 'button';
-  refreshBtn.className = 'jar-btn jar-datalist-refresh';
-  refreshBtn.textContent = 'Refresh';
-  refreshBtn.setAttribute('aria-label', 'Refresh site data');
-  mountEl.appendChild(refreshBtn);
+export function createSiteDataPanel({ bridge, jarId, mountEl, onError, onCountChanged }) {
+  // Manual-refresh BUTTON lives in jars.js now (M10 Flight 3 HAT fix-rider
+  // B — module doc comment) — this module keeps only the refresh() QUERY
+  // logic, exposed below as a returned hook for jars.js's button to call.
+  const explainerNote = document.createElement('p');
+  explainerNote.className = 'jar-datalist-explainer-note';
+  explainerNote.textContent = EXPLAINER_NOTE;
+  mountEl.appendChild(explainerNote);
 
   const gapNote = document.createElement('p');
   gapNote.className = 'jar-datalist-gap-note';
@@ -144,6 +202,8 @@ export function createSiteDataPanel({ bridge, jarId, mountEl, onError }) {
     const badge = document.createElement('span');
     badge.className = `jar-datalist-badge jar-datalist-badge-${row.tier}`;
     badge.textContent = TIER_LABEL[row.tier] || row.tier;
+    const tooltip = TIER_TOOLTIP[row.tier];
+    if (tooltip) badge.title = tooltip;
     primaryWrap.appendChild(badge);
 
     textWrap.appendChild(primaryWrap);
@@ -190,14 +250,16 @@ export function createSiteDataPanel({ bridge, jarId, mountEl, onError }) {
         listEl.textContent = '';
         for (const row of rows) listEl.appendChild(buildRow(row));
         statusLine.textContent = rows.length === 0 ? 'No known storage for this jar' : '';
+        // M10 Flight 3 HAT fix-rider A: report the fresh count to jars.js's
+        // tab badge after EVERY successful paint — see
+        // jars-cookies-panel.js's identical note for the full rationale.
+        onCountChanged?.(rows.length);
       })
       .catch(() => {
         if (token !== viewGen) return;
         onError('Could not load site data');
       });
   }
-
-  refreshBtn.addEventListener('click', () => refresh());
 
   function onActivated() {
     // No "first time only" guard — see jars-cookies-panel.js's doc comment
@@ -217,5 +279,5 @@ export function createSiteDataPanel({ bridge, jarId, mountEl, onError }) {
     mountEl.textContent = '';
   }
 
-  return { onActivated, onJarDataChanged, destroy };
+  return { onActivated, onJarDataChanged, refresh, destroy };
 }

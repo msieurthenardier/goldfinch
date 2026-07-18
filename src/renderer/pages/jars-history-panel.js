@@ -5,12 +5,25 @@
  * Leg 2 / flight DD5–DD7; reworked M08 Flight 6 Leg 4 for H1/H2/H3 — HAT
  * findings). `jars.js` builds one instance per persistent jar's History
  * region and delegates to it; this module owns everything INSIDE the mount
- * `<div class="jar-history-mount">` it is handed — the retention select, the
- * search input, the visit list + numbered pager, and per-row delete. It
- * never reaches jars.js's page-level transient/reconcile state or its
- * per-section DOM registry, and never touches anything outside its own
- * `mountEl` — its only channels are the constructor deps and the four
- * returned hooks (DD7's DOM-contract divert criterion).
+ * `<div class="jar-history-mount">` it is handed — the search input, the
+ * visit list + numbered pager, and per-row delete. It never reaches jars.js's
+ * page-level transient/reconcile state or its per-section DOM registry, and
+ * never touches anything outside its own `mountEl` — its only channels are
+ * the constructor deps and the three returned hooks (DD7's DOM-contract
+ * divert criterion).
+ *
+ * Retention control RELOCATED (M10 Flight 3 HAT inline fix-rider, operator
+ * finding): the retention `<select>` used to be built here, at the top of
+ * this module's mount — a M08 fossil from when retention was history-only.
+ * Since M10 Flight 2 the retention window governs history + cookies + site
+ * data together (the generalized retention sweep — CLAUDE.md's "Retention
+ * sweep" section), so living inside the History tabpanel alone misled
+ * operators into reading it as history-scoped. It now lives in `jars.js`,
+ * in the jar-SECTION header — above the tab strip, so it reads as governing
+ * the whole jar — and this module lost the `getRetentionDays` constructor
+ * dep and the `onJarsRow` hook along with it (see jars.js's own
+ * `updateSectionRetention` for the patch-in-place logic `onJarsRow` used to
+ * do here). Every other behavior in this module is unchanged.
  *
  * DOM contract (DD7, Architect review): the History region has EXACTLY TWO
  * children — (a) jars.js's own `.jar-data-controls` block (Clear-History
@@ -74,18 +87,17 @@
  * including the self-correction re-fetch, which intentionally drops the
  * captured intent rather than re-arming it.
  *
- * Patch discipline: the retention `<select>` and the search `<input>` are
- * built ONCE at construction and never destroyed/recreated — only the list
- * container's children, the status line, and the pager bar's children are
- * replaced on paint. The search input therefore lives outside the repainted
- * subtree by construction, so a paint never disturbs its focus/caret.
+ * Patch discipline: the search `<input>` is built ONCE at construction and
+ * never destroyed/recreated — only the list container's children, the status
+ * line, and the pager bar's children are replaced on paint. The search input
+ * therefore lives outside the repainted subtree by construction, so a paint
+ * never disturbs its focus/caret.
  *
  * No unit suite for this module (house practice for page controllers) —
  * static nets (typecheck/lint/grep-ACs) only; live behavior verification is
  * deferred to the hat-reverification closing leg.
  */
 
-const RETENTION_PRESETS = Object.freeze([7, 14, 30, 90, 180, 365]);
 const PAGE_LIMIT = 50;
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -146,25 +158,18 @@ const ICON_DELETE = [
  *   jarId: string,
  *   mountEl: HTMLElement,
  *   onError: (message: string) => void,
- *   getRetentionDays: () => number,
  *   onPageChange?: () => void
  * }} deps
- * @returns {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void }}
+ * @returns {{ onExpanded: () => void, onHistoryChanged: () => void, destroy: () => void }}
  */
-export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetentionDays, onPageChange }) {
+export function createHistoryPanel({ bridge, jarId, mountEl, onError, onPageChange }) {
   // ---------------------------------------------------------------------
   // Mount DOM (built once at construction; all textContent — never markup
-  // from data). Order: retention row, search row, list container, status
-  // line, pager bar (H1 rework — replaces the old Show-more button).
+  // from data). Order: search row, list container, status line, pager bar
+  // (H1 rework — replaces the old Show-more button). The retention select
+  // that used to open this list is RELOCATED (module doc comment) — jars.js
+  // now owns it, in the jar-section header.
   // ---------------------------------------------------------------------
-
-  const retentionLabel = document.createElement('label');
-  retentionLabel.className = 'jar-history-retention-label';
-  retentionLabel.appendChild(document.createTextNode('Keep history for:'));
-  const retentionSelect = document.createElement('select');
-  retentionSelect.className = 'jar-history-retention-select';
-  retentionLabel.appendChild(retentionSelect);
-  mountEl.appendChild(retentionLabel);
 
   const searchInput = document.createElement('input');
   searchInput.type = 'search';
@@ -188,53 +193,6 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
   pagerEl.setAttribute('aria-label', 'History pages');
   pagerEl.hidden = true;
   mountEl.appendChild(pagerEl);
-
-  // ---------------------------------------------------------------------
-  // Retention select (DD5): presets + a non-preset "current value" option,
-  // instant-apply on change.
-  // ---------------------------------------------------------------------
-
-  /** @type {number} */
-  let lastKnownRetention = getRetentionDays();
-
-  /** @param {number} days */
-  function ensureRetentionOption(days) {
-    const has = Array.from(retentionSelect.options).some((opt) => Number(opt.value) === days);
-    if (has) return;
-    const opt = document.createElement('option');
-    opt.value = String(days);
-    opt.textContent = `${days} days`;
-    retentionSelect.appendChild(opt);
-  }
-
-  for (const preset of RETENTION_PRESETS) {
-    const opt = document.createElement('option');
-    opt.value = String(preset);
-    opt.textContent = `${preset} days`;
-    retentionSelect.appendChild(opt);
-  }
-  ensureRetentionOption(lastKnownRetention);
-  retentionSelect.value = String(lastKnownRetention);
-
-  retentionSelect.addEventListener('change', () => {
-    const days = Number(retentionSelect.value);
-    const prior = lastKnownRetention;
-    lastKnownRetention = days;
-    bridge
-      .jarsSetRetention({ id: jarId, days })
-      .then((result) => {
-        if (!result || !result.ok) {
-          lastKnownRetention = prior;
-          retentionSelect.value = String(prior);
-          onError('Could not update retention');
-        }
-      })
-      .catch(() => {
-        lastKnownRetention = prior;
-        retentionSelect.value = String(prior);
-        onError('Could not update retention');
-      });
-  });
 
   // ---------------------------------------------------------------------
   // List + search + pager state.
@@ -533,18 +491,6 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
     refresh(); // re-run the CURRENT view (recent page or active search)
   }
 
-  function onJarsRow() {
-    // No argument (design review — the page-model JarRow lacks
-    // retentionDays); re-read via getRetentionDays() instead. Patch-in-place:
-    // never overwrite a focused select.
-    if (document.activeElement === retentionSelect) return;
-    const days = getRetentionDays();
-    if (days === lastKnownRetention) return;
-    ensureRetentionOption(days);
-    retentionSelect.value = String(days);
-    lastKnownRetention = days;
-  }
-
   function destroy() {
     if (searchDebounceHandle != null) {
       window.clearTimeout(searchDebounceHandle);
@@ -554,5 +500,5 @@ export function createHistoryPanel({ bridge, jarId, mountEl, onError, getRetenti
     mountEl.textContent = '';
   }
 
-  return { onExpanded, onHistoryChanged, onJarsRow, destroy };
+  return { onExpanded, onHistoryChanged, destroy };
 }

@@ -416,6 +416,14 @@ interface GoldfinchInternalBridge {
     path?: string;
     secure?: boolean;
   }): Promise<{ ok: boolean; error?: string }>;
+  // F3 HAT walkthrough fix-rider (operator-requested): reveal a single cookie's
+  // value on demand, matched client-side to the exact {name, domain, path} identity.
+  jarsCookiesValue(payload: {
+    id: string;
+    name: string;
+    domain: string;
+    path: string;
+  }): Promise<{ ok: boolean; value?: string; error?: string }>;
   jarsSiteDataList(
     payload: { id: string }
   ): Promise<{ ok: boolean; origins?: Array<{ origin: string; tier: 'stored' | 'visited' }>; error?: string }>;

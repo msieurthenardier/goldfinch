@@ -310,7 +310,7 @@ function makeHarness(
 // ---------------------------------------------------------------------------
 // Registration surface
 // ---------------------------------------------------------------------------
-test('registers exactly the thirteen chrome + thirteen internal jar channels, no others', (t) => {
+test('registers exactly the fourteen chrome + fourteen internal jar channels, no others', (t) => {
   const h = makeHarness(t);
   assert.deepEqual(
     [...h.handlers.keys()].sort(),
@@ -319,6 +319,7 @@ test('registers exactly the thirteen chrome + thirteen internal jar channels, no
       'internal-jars-clear-data',
       'internal-jars-cookies-list',
       'internal-jars-cookies-remove',
+      'internal-jars-cookies-value',
       'internal-jars-get-default',
       'internal-jars-list',
       'internal-jars-remove',
@@ -332,6 +333,7 @@ test('registers exactly the thirteen chrome + thirteen internal jar channels, no
       'jars-clear-data',
       'jars-cookies-list',
       'jars-cookies-remove',
+      'jars-cookies-value',
       'jars-get-default',
       'jars-list',
       'jars-remove',
@@ -416,6 +418,7 @@ test('an untrusted event (wrong origin) is rejected on every internal-jars-* cha
     'internal-jars-set-retention',
     'internal-jars-cookies-list',
     'internal-jars-cookies-remove',
+    'internal-jars-cookies-value',
     'internal-jars-sitedata-list',
     'internal-jars-sitedata-remove-origin'
   ]) {
@@ -1334,6 +1337,108 @@ test('internal-jars-cookies-remove shares behavior with jars-cookies-remove', as
     domain: 'x.test'
   });
   assert.deepEqual(result, { ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// jars-cookies-value (F3 HAT walkthrough fix-rider, operator-requested). Same
+// three-phase validation as jars-cookies-remove (object-shape -> unknown-jar
+// -> per-field `typeof` checks on name/domain/path — including `path`, which
+// jars-cookies-remove leaves optional but this handler requires). Matches
+// client-side to the EXACT {name, domain, path} identity — never Electron's
+// subdomain-matching CookiesGetFilter.domain form.
+// ---------------------------------------------------------------------------
+
+// A second 'sid'-named cookie on a DIFFERENT domain — the exact-identity
+// match must never cross-match this against COOKIE_HOST_ONLY's 'sid'.
+const COOKIE_SID_OTHER_DOMAIN = {
+  name: 'sid',
+  domain: 'other.test',
+  path: '/',
+  secure: false,
+  hostOnly: true,
+  session: true,
+  value: 'other-domain-secret'
+};
+
+test('jars-cookies-value: exact-identity match returns { ok: true, value }', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_DOMAIN_ATTR] }
+  });
+  const result = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(result, { ok: true, value: 'super-secret-value' });
+});
+
+test('jars-cookies-value: two cookies sharing a name on different domains resolve to the correct one', async (t) => {
+  const h = makeHarness(t, {
+    cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY, COOKIE_SID_OTHER_DOMAIN] }
+  });
+  const first = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(first, { ok: true, value: 'super-secret-value' });
+  const second = await h.invoke('jars-cookies-value', { id: 'personal', name: 'sid', domain: 'other.test', path: '/' });
+  assert.deepEqual(second, { ok: true, value: 'other-domain-secret' });
+});
+
+test('jars-cookies-value: empty-name cookie is a valid reveal target (typeof check, not truthiness)', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_EMPTY_NAME] } });
+  const result = await h.invoke('jars-cookies-value', { id: 'personal', name: '', domain: 'x.test', path: '/' });
+  assert.deepEqual(result, { ok: true, value: 'v' });
+});
+
+test('jars-cookies-value: no matching cookie returns a static not-found error', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY] } });
+  const result = await h.invoke('jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/gone' // path mismatch — same name/domain, different path
+  });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-value — not-found' });
+});
+
+test('jars-cookies-value rejection matrix returns { ok: false, error }, no session call', async (t) => {
+  const h = makeHarness(t);
+  const cases = [
+    ['non-object payload', 'nope', 'jars: cookies-value — malformed-payload'],
+    ['unknown id', { id: 'nope', name: 'x', domain: 'y', path: '/' }, 'jars: cookies-value — unknown-jar'],
+    ['burner', { id: 'burner', name: 'x', domain: 'y', path: '/' }, 'jars: cookies-value — unknown-jar'],
+    ['missing name', { id: 'personal', domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['missing domain', { id: 'personal', name: 'x', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['missing path', { id: 'personal', name: 'x', domain: 'y' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string name', { id: 'personal', name: 42, domain: 'y', path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string domain', { id: 'personal', name: 'x', domain: 42, path: '/' }, 'jars: cookies-value — malformed-payload'],
+    ['non-string path', { id: 'personal', name: 'x', domain: 'y', path: 42 }, 'jars: cookies-value — malformed-payload']
+  ];
+  for (const [label, payload, error] of cases) {
+    assert.deepEqual(await h.invoke('jars-cookies-value', payload), { ok: false, error }, label);
+  }
+  assert.equal(h.sessions.length, 0);
+});
+
+test('jars-cookies-value: a throwing session call returns { ok: false, error }', async (t) => {
+  const h = makeHarness(t, { cookiesGetThrows: true });
+  const result = await h.invoke('jars-cookies-value', { id: 'personal', name: 'sid', domain: 'x.test', path: '/' });
+  assert.deepEqual(result, { ok: false, error: 'jars: cookies-value — session-failure: cookies.get failed' });
+});
+
+test('internal-jars-cookies-value shares behavior with jars-cookies-value', async (t) => {
+  const h = makeHarness(t, { cookiesByPartition: { 'persist:container:personal': [COOKIE_HOST_ONLY] } });
+  const result = await h.invokeInternal('internal-jars-cookies-value', {
+    id: 'personal',
+    name: 'sid',
+    domain: 'host-only.test',
+    path: '/'
+  });
+  assert.deepEqual(result, { ok: true, value: 'super-secret-value' });
 });
 
 // ---------------------------------------------------------------------------

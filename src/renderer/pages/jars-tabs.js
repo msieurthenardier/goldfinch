@@ -90,7 +90,7 @@
  *   panels: ReadonlyArray<{ id: string, label: string }>
  * }} deps
  * @returns {{
- *   build: (row: { id: string }, opts: { getRefs: () => any, buildPanelContent: (panelId: string, panelEl: HTMLElement) => void }) => { tabsWrap: HTMLElement, tabRefs: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }> },
+ *   build: (row: { id: string }, opts: { getRefs: () => any, buildPanelContent: (panelId: string, panelEl: HTMLElement) => void }) => { tabsWrap: HTMLElement, tabRefs: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan: HTMLElement }> },
  *   selectTab: (refs: any, panelId: string) => void
  * }}
  */
@@ -136,7 +136,7 @@ export function createJarTabs({ panels }) {
     tablist.setAttribute('aria-label', 'Jar data');
     tabsWrap.appendChild(tablist);
 
-    /** @type {Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }>} */
+    /** @type {Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan: HTMLElement }>} */
     const tabRefs = new Map();
 
     // ⚠ DOUBLE-HYPHEN separator on the tabpanel id is load-bearing (design
@@ -163,19 +163,21 @@ export function createJarTabs({ panels }) {
       tabBtn.tabIndex = isDefaultTab ? 0 : -1;
       tabBtn.appendChild(document.createTextNode(panel.label));
 
-      // History's count badge (DD6, repointed from the old disclosure-button
-      // label) lives in its own <span> inside the tab button so label
-      // patching stays targeted — see jars.js's fetchHistoryCount. Every
-      // other tab's label is the static panel.label alone; jars.js's
-      // render()/updateJarSection never touch this span (module doc
-      // INVARIANT, jars.js).
-      /** @type {HTMLElement|undefined} */
-      let countSpan;
-      if (panel.id === 'history') {
-        countSpan = document.createElement('span');
-        countSpan.className = 'jar-tab-count';
-        tabBtn.appendChild(countSpan);
-      }
+      // Count badge (DD6, repointed from the old disclosure-button label;
+      // GENERALIZED from History-only to ALL THREE panels — M10 Flight 3
+      // HAT fix-rider A, design review cycle 1 + FD revision rulings). Every
+      // panel's badge lives in its own <span> inside its tab button, right
+      // after the static panel.label text node, so the rendered name reads
+      // "<Label> (N)" (unified copy — replaces History's old "— N visits"/
+      // "— no visits" wording) with zero writes to the label text itself —
+      // see jars.js's fetchHistoryCount/fetchCookiesCount/fetchSiteDataCount
+      // and the Cookies/Other-site-data panels' onCountChanged hook. jars.js's
+      // render()/updateJarSection never touch these spans (module doc
+      // INVARIANT, jars.js) — they are written ONLY by jars.js's count-fetch
+      // call sites and the onCountChanged routing.
+      const countSpan = document.createElement('span');
+      countSpan.className = 'jar-tab-count';
+      tabBtn.appendChild(countSpan);
       tabBtn.addEventListener('click', () => selectTab(getRefs(), panel.id));
       tablist.appendChild(tabBtn);
 

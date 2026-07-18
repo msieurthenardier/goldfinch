@@ -63,6 +63,52 @@ caution in mission 02).
 
 ---
 
+## Site-data inspector: show users exactly what a site stores about them
+
+**Status:** future-mission seed (operator, 2026-07-18, during M10 F3 HAT).
+**Captured:** M10 HAT walkthrough — the operator's reaction to the Other-site-data
+panel: "the user should be able to see exactly what the site is storing about them
+without having to have tech skills."
+
+### The thesis
+The `goldfinch://jars` Other-site-data panel (M10 F2) lists which origins hold
+storage per jar, but not WHAT they hold. Cookies got a value-reveal eyeball
+(M10 F3 HAT rider) because Electron exposes cookie contents via `ses.cookies`.
+Site data has no equivalent API — IndexedDB/localStorage contents live in
+Chromium-internal LevelDB with undocumented value encoding (structured-clone
+blobs). A non-technical user currently has no way to see what a site persists
+about them short of DevTools (F12 → Application → Storage), which is exactly
+the tech-skills barrier this seed wants removed.
+
+### Feasibility notes (measured/ruled at M10, don't re-derive)
+- **Disk parsing of contents is a rejected class**: M10 F2 Spike B established
+  the safe ceiling is origin attribution from IndexedDB DIRECTORY NAMES (with
+  the `_0` default-port sentinel gotcha, unit-pinned); localStorage's LevelDB
+  is not even origin-attributable, let alone value-decodable, without parsing
+  undocumented internals.
+- **The one honest candidate: open-tab-scoped inspection.** For an origin with
+  a live tab in the jar, a storage dump can run in that page's own context
+  (`indexedDB.databases()` + object-store iteration, `localStorage`
+  enumeration) — the DevTools mechanism, surfaced in friendly form. Costs to
+  design deliberately: script injection into the user's live page from the
+  privacy UI (trust framing + the internal-ipc/session boundary), coverage
+  honesty (only open-tab origins), and a presentation layer that renders
+  structured-clone values legibly for non-technical users.
+- **Rejected as dishonest/invasive**: silently loading invisible pages of each
+  origin to dump storage (a privacy panel making network requests to the
+  sites it audits); presenting raw on-disk byte sizes as "usage".
+
+### Scope notes for when this becomes a mission
+- Likely one flight: inspector IPC + viewer UI; the panel's two-tier badge
+  model and the M10 read-path twins are the substrate.
+- Design the trust story first (who may evaluate into which tab, and how the
+  UI discloses it) — the M10 internal-session evaluate-exclusion posture is
+  the constraint to respect, not to relax casually.
+- Pair with a "explain like I'm not a developer" rendering pass (keys/values
+  summarized, blobs labeled, no raw JSON dumps as the primary view).
+
+---
+
 ## Persistent storage substrate: JSON stores → SQLite
 
 **Status:** landed in M10 (Persistence Consolidation) Flight 1

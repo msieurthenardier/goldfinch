@@ -399,6 +399,19 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     jarsCookiesRemove: (payload) => ipcRenderer.invoke('internal-jars-cookies-remove', payload),
 
     /**
+     * Reveal a single cookie's value on demand (F3 HAT walkthrough
+     * fix-rider, operator-requested). Payload carries the listed cookie's
+     * exact identity (name/domain/path — the same fields jarsCookiesList
+     * returns), matched client-side to that EXACT triple (never a
+     * subdomain-matching lookup). Resolves { ok: true, value } on a match;
+     * { ok: false, error } for a malformed payload, unknown jar, a
+     * no-longer-present cookie ('not-found'), or a session-layer failure.
+     * @param {{id:string, name:string, domain:string, path:string}} payload
+     * @returns {Promise<{ok:boolean, value?:string, error?:string}>}
+     */
+    jarsCookiesValue: (payload) => ipcRenderer.invoke('internal-jars-cookies-value', payload),
+
+    /**
      * List a jar's storage-bearing origins: the composite union (DD3
      * VERDICT) of IndexedDB-confirmed origins (tier 'stored') and
      * history-derived origins (tier 'visited') — NO usage/quota figure

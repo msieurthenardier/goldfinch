@@ -113,16 +113,45 @@ import { createConfirmModal } from './jars-confirm-modal.js';
  * and the History mount) via the `buildPanelContent` callback it hands to
  * `jarTabs.build()`.
  *
- * History count (DD6, repointed to the tab strip): the count renders ONLY
- * as a badge (`<span class="jar-tab-count">`) inside the History tab
- * button's own label, glanceable regardless of which tab is active.
- * **INVARIANT**: render()/updateJarSection NEVER write this span — the
+ * Tab counts (DD6, repointed to the tab strip; GENERALIZED from History-only
+ * to all three panels — M10 Flight 3 HAT fix-rider A, design review cycle 1 +
+ * FD revision rulings): every tab renders a live count badge
+ * (`<span class="jar-tab-count">`) inside its own label, unified as
+ * "<Label> (N)" (replaces History's former "— N visits"/"— no visits"
+ * copy — zero renders "(0)", not a "no X" phrase; see `tabCountSuffix`).
+ * **INVARIANT**: render()/updateJarSection NEVER write these spans — a
  * count isn't derivable from `row`/`state`, so a render-path write would
- * blank it on every unrelated broadcast with nothing to restore it. The ONLY
- * two writers are `fetchHistoryCount`'s call sites: build-time (uniform for
- * every section, boot-time and jarsAdd-created alike) and the module-level
- * `onHistoryChanged` handler (invalidation-signal semantics — re-query on
- * `{ jarId }`, never trust payload data).
+ * blank it on every unrelated broadcast with nothing to restore it. Each
+ * panel has its OWN freshness story, all funneling through `tabCountSuffix`
+ * for the actual DOM write:
+ *   - **Build time** (mandatory + uniform for every section, boot-time and
+ *     jarsAdd-created alike): `fetchHistoryCount`/`fetchCookiesCount`/
+ *     `fetchSiteDataCount` fire unconditionally per persistent jar — this
+ *     was already History's pre-existing mechanism; Cookies/Other-site-data
+ *     now mirror it via the SAME `jarsCookiesList`/`jarsSiteDataList` calls
+ *     their own tab-selection-gated `refresh()` already uses (`count =
+ *     response.{cookies,origins}.length` — no new IPC channel, FD ruling).
+ *     This is a BOUNDED ONE-SHOT per page load per jar (one `historyCount`
+ *     query / one `cookies.get` / one `readdir`), distinct from a per-scroll
+ *     live-probe shape that was considered and REJECTED at design review —
+ *     the LIST fetches those two panels' own modules make stay gated behind
+ *     tab-selection exactly as before (see those modules' own "Freshness
+ *     (DD2)" doc comments).
+ *   - **Broadcast re-fetch**: the module-level `onHistoryChanged` handler
+ *     re-queries History's count on `{ jarId }` (invalidation-signal
+ *     semantics, never trusting payload data — unchanged from DD6). The
+ *     module-level `onJarDataChanged` handler re-queries ONLY the badge(s)
+ *     for the classes actually reported in `payload.classes` (skip classes
+ *     not in the broadcast) — AND skips a panel that is currently the
+ *     section's `activeTab` (de-dup rule: that panel's own `refresh()` +
+ *     its `onCountChanged` hook, below, already carries it — see
+ *     `jarDataChangedHandle`).
+ *   - **`onCountChanged` hook**: the Cookies/Other-site-data panel modules
+ *     each take an optional `onCountChanged(n)` constructor dep, fired after
+ *     EVERY successful `refresh()` paint with the fresh list length —
+ *     `updateTabCount` routes it into that panel's own badge. This is what
+ *     keeps an OPEN tab's badge accurate across that panel's OWN per-row
+ *     deletes, which deliberately never broadcast.
  *
  * Lazy history fetch (design review): `historyPanel.onExpanded()` fires when
  * the section scrolls into view (the existing scroll-spy
@@ -232,6 +261,48 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     { tag: 'line', attrs: { x1: '14', x2: '14', y1: '11', y2: '17' } }
   ];
 
+  // Lucide "refresh-cw" path data (ISC license) — same vendored icon set/style
+  // as ICON_DELETE above. Used for the Cookies/Other-site-data panels' manual
+  // refresh trigger (M10 Flight 3 HAT fix-rider B, operator-requested:
+  // icon-only, right-justified into the panel's own data-controls row — see
+  // buildPanelRefreshButton below).
+  /** @type {ReadonlyArray<{tag: string, attrs: Record<string, string>}>} */
+  const ICON_REFRESH = [
+    { tag: 'path', attrs: { d: 'M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8' } },
+    { tag: 'path', attrs: { d: 'M3 3v5h5' } },
+    { tag: 'path', attrs: { d: 'M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16' } },
+    { tag: 'path', attrs: { d: 'M16 16h5v5' } }
+  ];
+
+  // Retention control (M10 Flight 3 HAT inline fix-rider, operator finding):
+  // RELOCATED here from jars-history-panel.js's mount — the retention window
+  // has governed history + cookies + site data together since M10 Flight 2's
+  // generalized retention sweep, so a control that lived inside the History
+  // tabpanel alone misled operators into reading it as history-only scope.
+  // It now lives in the jar-section header, above the tab strip (built in
+  // buildJarSection, patched in place by updateSectionRetention). Presets,
+  // the non-preset "current value" option, and the instant-apply bridge call
+  // are carried over UNCHANGED from the History panel's prior implementation
+  // — only the DOM location and the label text ("Keep data for:", was "Keep
+  // history for:") changed.
+  const RETENTION_PRESETS = Object.freeze([7, 14, 30, 90, 180, 365]);
+
+  /**
+   * Ensure `select` has an option for `days`, adding a non-preset "current
+   * value" option if it's missing one (DD5, carried over from the History
+   * panel's prior implementation).
+   * @param {HTMLSelectElement} select
+   * @param {number} days
+   */
+  function ensureRetentionOption(select, days) {
+    const has = Array.from(select.options).some((opt) => Number(opt.value) === days);
+    if (has) return;
+    const opt = document.createElement('option');
+    opt.value = String(days);
+    opt.textContent = `${days} days`;
+    select.appendChild(opt);
+  }
+
   /** @typedef {{ containers: Array<any>, defaultId: (string|null) }} JarsState */
   /** @typedef {{ mode: ('create'|'confirm'|null), rowId: (string|null), action: (string|null), draft: ({name: string, color: string}|null) }} UiState */
   /** @typedef {{ id: string, name: string, color: string, isDefault: boolean, isBurner: boolean }} JarRow */
@@ -256,9 +327,9 @@ import { createConfirmModal } from './jars-confirm-modal.js';
 
   /**
    * Read a jar's RAW store record by id — carries `retentionDays`, unlike
-   * the page-model `JarRow` built by `buildJarPageModel` (leg spec #2: the
-   * History panel's `getRetentionDays` callback needs the raw record, never
-   * the page-model row).
+   * the page-model `JarRow` built by `buildJarPageModel` (the section-header
+   * retention control's build/patch paths need the raw record, never the
+   * page-model row — see buildJarSection/updateSectionRetention).
    * @param {string} id
    * @returns {any}
    */
@@ -576,12 +647,13 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    *   makeDefaultBtn?: HTMLButtonElement, pendingColor?: (string|null),
    *   dataButtons?: Map<string, HTMLButtonElement>,
    *   activeTab?: string,
-   *   tabRefs?: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }>,
+   *   tabRefs?: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan: HTMLElement }>,
    *   activationHooks?: Map<string, () => void>,
    *   statusClearHandle?: (number|null), nameDirty?: boolean,
-   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null),
-   *   cookiesPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null),
-   *   siteDataPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null)
+   *   retentionSelect?: HTMLSelectElement, lastKnownRetention?: number,
+   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, destroy: () => void } | null),
+   *   cookiesPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, refresh: () => void, destroy: () => void } | null),
+   *   siteDataPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, refresh: () => void, destroy: () => void } | null)
    * }} SectionRefs
    */
 
@@ -596,6 +668,9 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    * verified reuse is safe). Used to build its own per-region confirm area
    * too, before H7 (M08 Flight 6 Leg 5) retired the per-region inline
    * confirms in favor of ONE page-level modal — see `jars-confirm-modal.js`.
+   * The Cookies/Other-site-data `buttonRow`s also host that panel's
+   * icon-only manual-refresh button (M10 Flight 3 HAT fix-rider B), appended
+   * after that panel's Clear-* button(s) — see buildPanelRefreshButton.
    * @returns {{ root: HTMLElement, buttonRow: HTMLElement }}
    */
   function buildRegionControls() {
@@ -626,6 +701,37 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     btn.appendChild(document.createTextNode('Delete jar…'));
     btn.setAttribute('aria-label', `Delete ${row.name}`);
     btn.addEventListener('click', () => openDataConfirm(row.id, 'delete'));
+    return btn;
+  }
+
+  /**
+   * Build the icon-only manual-refresh trigger for the Cookies/Other-site-data
+   * panels (M10 Flight 3 HAT fix-rider B, operator-requested — replaces the
+   * former full-text "Refresh" button each panel module used to build inside
+   * its own mount). Built and appended HERE, in jars.js, rather than inside
+   * the panel module, so it can land in the SAME `.jar-data-controls-buttons`
+   * flex row as that panel's Clear-* button(s) — "top row of the panel,
+   * right-aligned, no new line" (rider spec) — without the panel module
+   * reaching outside its own mount (DD7 boundary unchanged: jars.js already
+   * owns and appends into `buttonRow`; the panel module gains no new
+   * DOM-writing responsibility, only a plain `refresh()` trigger method this
+   * button's click calls — see buildJarSection's call sites below). Accessible
+   * name is the literal, panel-agnostic "Refresh" (rider spec, verbatim) —
+   * same convention for both panels, consistency over per-panel specificity.
+   * `.jar-datalist-refresh`'s `margin-left: auto` (jars.css) does the actual
+   * right-justify; this button must be APPENDED AFTER the Clear-* button(s)
+   * in its row (see buildJarSection) so DOM order stays [Clear-*, Refresh]
+   * within the pushed-right cluster.
+   * @param {() => void} onRefresh
+   * @returns {HTMLButtonElement}
+   */
+  function buildPanelRefreshButton(onRefresh) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'jar-btn jar-datalist-refresh';
+    btn.appendChild(buildIcon(ICON_REFRESH));
+    btn.setAttribute('aria-label', 'Refresh');
+    btn.addEventListener('click', () => onRefresh());
     return btn;
   }
 
@@ -672,6 +778,41 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     makeDefaultBtn.textContent = 'Make default';
     header.appendChild(makeDefaultBtn);
 
+    // Retention control (M10 Flight 3 HAT inline fix-rider — module-scope doc
+    // comment above RETENTION_PRESETS): right-aligned in the section header
+    // row (margin-left: auto, jars.css), above the tab strip, so it reads as
+    // governing the whole jar's data — not just the History tabpanel it used
+    // to live inside. Explicit for/id association (not the History panel's
+    // former implicit label-wraps-select shape) per the section's other
+    // form controls (see nameLabel's own `for`-free wrap vs this one — a11y
+    // review chose explicit association here since the control also needs a
+    // stable id for the section-scoped uniqueness `jar-<id>-retention`
+    // already guarantees). The change listener is wired below, after `refs`
+    // is assigned (same forward-declare pattern as nameInput's listeners).
+    const retentionWrap = document.createElement('div');
+    retentionWrap.className = 'jar-section-retention';
+    const retentionSelectId = 'jar-' + row.id + '-retention';
+    const retentionLabel = document.createElement('label');
+    retentionLabel.className = 'jar-section-retention-label';
+    retentionLabel.htmlFor = retentionSelectId;
+    retentionLabel.textContent = 'Keep data for:';
+    retentionWrap.appendChild(retentionLabel);
+    const retentionSelect = document.createElement('select');
+    retentionSelect.id = retentionSelectId;
+    retentionSelect.className = 'jar-section-retention-select';
+    retentionSelect.setAttribute('aria-label', `Keep data for (${row.name})`);
+    for (const preset of RETENTION_PRESETS) {
+      const opt = document.createElement('option');
+      opt.value = String(preset);
+      opt.textContent = `${preset} days`;
+      retentionSelect.appendChild(opt);
+    }
+    const initialRetention = currentRowFor(row.id)?.retentionDays ?? 30;
+    ensureRetentionOption(retentionSelect, initialRetention);
+    retentionSelect.value = String(initialRetention);
+    retentionWrap.appendChild(retentionSelect);
+    header.appendChild(retentionWrap);
+
     section.appendChild(header);
 
     const nameLabel = document.createElement('label');
@@ -699,11 +840,13 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     // keydown handler, and shared selectTab() all live in jars-tabs.js
     // (growth-checkpoint extraction — that module's own doc comment). This
     // page keeps only each tabpanel's CONTENT: the standard jars.js-owned
-    // data controls (Clear-<class> button, `buildRegionControls()`) for
-    // every panel, plus History's SECOND child — the module-owned mount
-    // (DD7 DOM contract — the panel has exactly two children; jars.js never
-    // writes inside the mount). Each button's confirm now opens the ONE
-    // page-level modal (H7, Leg 5) instead of an inline per-region area.
+    // data controls (Clear-<class> button(s) — plus, for Cookies/
+    // Other-site-data, the manual-refresh icon button, M10 Flight 3 HAT
+    // fix-rider B — via `buildRegionControls()`) for every panel, plus
+    // History's SECOND child — the module-owned mount (DD7 DOM contract —
+    // the panel has exactly two children; jars.js never writes inside the
+    // mount). Each button's confirm now opens the ONE page-level modal (H7,
+    // Leg 5) instead of an inline per-region area.
 
     /** @type {Map<string, HTMLButtonElement>} */
     const dataButtons = new Map();
@@ -711,6 +854,13 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     // JAR_DATA_CLASSES loop below can route each clear-* button in (leg spec #3).
     /** @type {Map<string, HTMLElement>} */
     const panelButtonRows = new Map();
+    // regionId ('cookies' | 'site-data') -> its manual-refresh icon button
+    // (M10 Flight 3 HAT fix-rider B) — built in buildPanelContent below,
+    // appended into panelButtonRows' matching row AFTER the Clear-* loop so
+    // DOM order stays [Clear-*, Refresh] (see buildPanelRefreshButton's doc
+    // comment). History has no entry — it has no manual refresh trigger.
+    /** @type {Map<string, HTMLButtonElement>} */
+    const panelRefreshButtons = new Map();
 
     // Forward-declared: `buildPanelContent`'s History branch (below) and its
     // module instance both close over `refs`, which is only assigned once
@@ -719,11 +869,11 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     // buildJarSection returns, by which point `refs` is set.
     /** @type {SectionRefs} */
     let refs;
-    /** @type {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null} */
+    /** @type {{ onExpanded: () => void, onHistoryChanged: () => void, destroy: () => void } | null} */
     let historyPanel = null;
-    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null} */
+    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, refresh: () => void, destroy: () => void } | null} */
     let cookiesPanel = null;
-    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null} */
+    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, refresh: () => void, destroy: () => void } | null} */
     let siteDataPanel = null;
 
     /**
@@ -745,7 +895,6 @@ import { createConfirmModal } from './jars-confirm-modal.js';
           jarId: row.id,
           mountEl: historyMount,
           onError: (message) => setSectionStatus(refs, message, false),
-          getRetentionDays: () => currentRowFor(row.id)?.retentionDays ?? 30,
           // H9 (M08 F6 Leg 7): on a user-initiated pager page change, scroll
           // this jar's own section back into view so the tab strip lands at
           // the top — same closes-over-`refs` pattern as `buildPanelContent`
@@ -773,8 +922,16 @@ import { createConfirmModal } from './jars-confirm-modal.js';
           bridge,
           jarId: row.id,
           mountEl: cookiesMount,
-          onError: (message) => setSectionStatus(refs, message, false)
+          onError: (message) => setSectionStatus(refs, message, false),
+          // M10 Flight 3 HAT fix-rider A: route this panel's own post-refresh
+          // list length into its own tab badge (updateTabCount, below).
+          onCountChanged: (count) => updateTabCount(refs, 'cookies', count)
         });
+        // M10 Flight 3 HAT fix-rider B: the manual-refresh icon lives in
+        // jars.js's OWN controls row (buildPanelRefreshButton's doc comment),
+        // not this module's mount — built here, appended after the Clear-*
+        // loop below.
+        panelRefreshButtons.set('cookies', buildPanelRefreshButton(() => cookiesPanel?.refresh()));
       } else if (panelId === 'site-data') {
         const siteDataMount = document.createElement('div');
         siteDataMount.className = 'jar-sitedata-mount';
@@ -784,8 +941,10 @@ import { createConfirmModal } from './jars-confirm-modal.js';
           bridge,
           jarId: row.id,
           mountEl: siteDataMount,
-          onError: (message) => setSectionStatus(refs, message, false)
+          onError: (message) => setSectionStatus(refs, message, false),
+          onCountChanged: (count) => updateTabCount(refs, 'site-data', count)
         });
+        panelRefreshButtons.set('site-data', buildPanelRefreshButton(() => siteDataPanel?.refresh()));
       }
     }
 
@@ -804,6 +963,19 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     // (never invoked before buildPanelContent has run for that panel, since
     // History is the only default-selected tab and the other two are only
     // ever reached via an explicit selectTab call after build() returns).
+    //
+    // DD2's "query trigger gates on TAB-SELECTION" ruling above governs the
+    // Cookies/Other-site-data panels' LIST fetch ONLY (their `refresh()`,
+    // dispatched via `onActivated` here) — it is UNCHANGED by M10 Flight 3
+    // HAT fix-rider A. That rider's tab-BADGE count pass
+    // (fetchCookiesCount/fetchSiteDataCount, below) is a separate, bounded
+    // one-shot query fired at SECTION BUILD TIME instead (one `cookies.get` /
+    // one `readdir` per persistent jar, once per page load) — mirroring
+    // History's own pre-existing fetchHistoryCount mechanism, which already
+    // fired unconditionally at build time before this rider (FD ruling,
+    // design review cycle 1: a per-scroll live-probe shape for the count pass
+    // was considered and REJECTED in favor of this uniform build-time trigger
+    // — see "Initial count fetch" below).
     /** @type {Map<string, () => void>} */
     const activationHooks = new Map([
       ['history', () => historyPanel?.onExpanded()],
@@ -826,6 +998,16 @@ import { createConfirmModal } from './jars-confirm-modal.js';
       btn.addEventListener('click', () => openDataConfirm(row.id, action));
       dataButtons.set(action, btn);
       buttonRow.appendChild(btn);
+    }
+
+    // Manual-refresh icon buttons (M10 Flight 3 HAT fix-rider B): appended
+    // AFTER the Clear-* loop above so DOM order stays [Clear-*, Refresh]
+    // inside each panel's SAME buttonRow — `.jar-datalist-refresh`'s
+    // `margin-left: auto` (jars.css) right-justifies the pushed-right
+    // cluster, keeping Clear-* left-aligned within it.
+    for (const [panelId, refreshBtn] of panelRefreshButtons) {
+      const buttonRow = panelButtonRows.get(panelId);
+      if (buttonRow) buttonRow.appendChild(refreshBtn);
     }
 
     // Footer (DD1): Wipe ("Clear identity") + Delete are jar-LEVEL identity
@@ -874,12 +1056,40 @@ import { createConfirmModal } from './jars-confirm-modal.js';
       activationHooks,
       statusClearHandle: null,
       nameDirty: false,
+      retentionSelect,
+      lastKnownRetention: initialRetention,
       historyPanel,
       cookiesPanel,
       siteDataPanel
     };
 
     makeDefaultBtn.addEventListener('click', () => handleSetDefault(row.id));
+
+    // Retention control change handler (relocated — module-scope doc comment
+    // above RETENTION_PRESETS): instant-apply, reverted on failure. Wired
+    // here (after `refs` is assigned) rather than at the header-build site
+    // above, mirroring nameInput's own listeners just below — the handler
+    // only ever runs after an operator interaction, well after buildJarSection
+    // has returned and assigned `refs`.
+    retentionSelect.addEventListener('change', () => {
+      const days = Number(retentionSelect.value);
+      const prior = refs.lastKnownRetention ?? days;
+      refs.lastKnownRetention = days;
+      bridge
+        .jarsSetRetention({ id: row.id, days })
+        .then((result) => {
+          if (!result || !result.ok) {
+            refs.lastKnownRetention = prior;
+            retentionSelect.value = String(prior);
+            setSectionStatus(refs, 'Could not update retention', false);
+          }
+        })
+        .catch(() => {
+          refs.lastKnownRetention = prior;
+          retentionSelect.value = String(prior);
+          setSectionStatus(refs, 'Could not update retention', false);
+        });
+    });
 
     // Dirty tracking (HAT review fix): ONLY this listener sets nameDirty, so it
     // fires exclusively on operator keystrokes, never on a programmatic
@@ -910,12 +1120,22 @@ import { createConfirmModal } from './jars-confirm-modal.js';
 
     updateJarSection(refs, row);
 
-    // Initial count fetch (design review, HIGH): mandatory + uniform for
-    // EVERY section build — boot-time jars and jars added later via jarsAdd
-    // alike (no local "assume 0" special case; a fresh query is ~0.1ms).
-    const historyTabRef = tabRefs.get('history');
-    if (historyTabRef && historyTabRef.countSpan) {
-      fetchHistoryCount(row.id, historyTabRef.countSpan);
+    // Initial count fetch (design review, HIGH; GENERALIZED to all three
+    // panels — M10 Flight 3 HAT fix-rider A, FD revision ruling): mandatory +
+    // uniform for EVERY section build, EVERY panel — boot-time jars and jars
+    // added later via jarsAdd alike (no local "assume 0" special case; each
+    // fetch is a single bounded query, not a live probe — see the
+    // activationHooks comment above for the FD ruling this generalizes).
+    // History's fetchHistoryCount already fired unconditionally at build time
+    // before this rider; fetchCookiesCount/fetchSiteDataCount now mirror it
+    // via the SAME jarsCookiesList/jarsSiteDataList calls those panels' own
+    // tab-selection-gated refresh() uses (no new IPC channel).
+    for (const panel of JAR_PANELS) {
+      const tabRef = tabRefs.get(panel.id);
+      if (!tabRef || !tabRef.countSpan) continue;
+      if (panel.id === 'history') fetchHistoryCount(row.id, tabRef.countSpan);
+      else if (panel.id === 'cookies') fetchCookiesCount(row.id, tabRef.countSpan);
+      else if (panel.id === 'site-data') fetchSiteDataCount(row.id, tabRef.countSpan);
     }
 
     return refs;
@@ -942,16 +1162,35 @@ import { createConfirmModal } from './jars-confirm-modal.js';
       refs.nameInput.value = row.name;
     }
     refs.nameInput.setAttribute('aria-label', `Name for ${row.name}`);
+    if (refs.retentionSelect) refs.retentionSelect.setAttribute('aria-label', `Keep data for (${row.name})`);
 
     updateSwatchGrid(refs, row);
     // Active-tab selection and tab/tabpanel DOM (incl. the History count
     // badge) are NEVER touched here (module doc INVARIANT) — static
     // labels/content give this function nothing else to reconcile in the
-    // tab widget. The History module's own content is reconciled by itself
-    // — no arg, per its module contract; it re-reads retentionDays via its
-    // own callback. The confirm modal (H7, Leg 5) is reconciled ONCE
+    // tab widget. The confirm modal (H7, Leg 5) is reconciled ONCE
     // page-wide, in render() via confirmModal.update() — not per section.
-    refs.historyPanel?.onJarsRow();
+    updateSectionRetention(refs, row.id);
+  }
+
+  /**
+   * Patch-in-place the section-level retention select from the raw store
+   * record (never the page-model `row`, which lacks `retentionDays` —
+   * `currentRowFor`'s own doc comment). Relocated from the History panel's
+   * former `onJarsRow` hook (module-scope doc comment above
+   * RETENTION_PRESETS) — same guard: never overwrite a focused select.
+   * @param {SectionRefs} refs
+   * @param {string} id
+   */
+  function updateSectionRetention(refs, id) {
+    const select = refs.retentionSelect;
+    if (!select) return; // Burner has no retention control
+    if (document.activeElement === select) return;
+    const days = currentRowFor(id)?.retentionDays ?? 30;
+    if (days === refs.lastKnownRetention) return;
+    ensureRetentionOption(select, days);
+    select.value = String(days);
+    refs.lastKnownRetention = days;
   }
 
   /**
@@ -1184,26 +1423,30 @@ import { createConfirmModal } from './jars-confirm-modal.js';
   }
 
   // ---------------------------------------------------------------------------
-  // History count (Flight 2, Leg 2 / DD6)
+  // Tab counts (Flight 2, Leg 2 / DD6; GENERALIZED from History-only to all
+  // three panels — M10 Flight 3 HAT fix-rider A, design review cycle 1 + FD
+  // revision rulings)
   // ---------------------------------------------------------------------------
 
   /**
-   * Format the History tab's count-badge suffix: "History —
-   * N visits" / "History — no visits" (DD6, repointed from the old
-   * disclosure-button label to the tab badge — H4/M08 Flight 6). Pre-fetch
-   * and failure states leave the bare "History" label (an empty suffix) —
-   * this function is only ever called on a successful count resolution; see
-   * fetchHistoryCount.
+   * Format a tab's count-badge suffix: unified " (N)" for ALL THREE panels
+   * (operator-requested copy change, fix-rider A — REPLACES History's former
+   * "— N visits" / "— no visits" wording; zero renders "(0)", never a "no X"
+   * phrase). Concatenated after the tab's own static label text node, this
+   * reads "<Label> (N)" — e.g. "History (154)", "Cookies (32)", "Other site
+   * data (56)". Pre-fetch and failure states leave the bare label (an empty
+   * suffix) — this function is only ever called on a successful count
+   * resolution; see fetchHistoryCount/fetchCookiesCount/fetchSiteDataCount.
    * @param {number} count
    * @returns {string}
    */
-  function historyCountSuffix(count) {
-    return count > 0 ? ` — ${count} visit${count === 1 ? '' : 's'}` : ' — no visits';
+  function tabCountSuffix(count) {
+    return ` (${count})`;
   }
 
   /**
-   * Fetch and patch one jar's History-panel count span. These are the ONLY
-   * TWO call sites for writing this span in the whole file (design review,
+   * Fetch and patch one jar's History-panel count span. Two of the several
+   * call sites that write ANY tab's count span in this file (design review,
    * HIGH) — build-time (buildJarSection, uniform for boot-time jars AND jars
    * added later via jarsAdd) and the module-level onHistoryChanged handler
    * below. render()/updateJarSection NEVER write it (module doc INVARIANT):
@@ -1223,7 +1466,7 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     try {
       bridge.historyCount({ jarId })
         .then((result) => {
-          if (result && result.ok) countSpan.textContent = historyCountSuffix(result.count);
+          if (result && result.ok) countSpan.textContent = tabCountSuffix(result.count);
         })
         .catch(() => {
           // Pre-fetch/failure state is the bare "History" label (edge case) —
@@ -1233,6 +1476,76 @@ import { createConfirmModal } from './jars-confirm-modal.js';
       // Defensive: never let a count fetch throw into a caller (build-time or
       // the onHistoryChanged handler), consistent with the file's style.
     }
+  }
+
+  /**
+   * Fetch and patch one jar's Cookies-panel count span (M10 Flight 3 HAT
+   * fix-rider A) — the SAME `jarsCookiesList` call the Cookies panel's own
+   * LIST view uses (no new IPC channel, FD ruling), `count =
+   * cookies.length`. Mirrors fetchHistoryCount's shape exactly, including the
+   * teardown-race guard (countSpan closure-captured at fetch-issue time) and
+   * the never-throws-into-caller discipline.
+   * @param {string} jarId
+   * @param {HTMLElement} countSpan
+   */
+  function fetchCookiesCount(jarId, countSpan) {
+    try {
+      bridge.jarsCookiesList({ id: jarId })
+        .then((result) => {
+          if (!result || !result.ok) return;
+          const count = Array.isArray(result.cookies) ? result.cookies.length : 0;
+          countSpan.textContent = tabCountSuffix(count);
+        })
+        .catch(() => {
+          // Pre-fetch/failure state is the bare "Cookies" label — leave the
+          // span untouched rather than writing an error into it.
+        });
+    } catch {
+      // Defensive: never let a count fetch throw into its caller.
+    }
+  }
+
+  /**
+   * Fetch and patch one jar's Other-site-data-panel count span (M10 Flight 3
+   * HAT fix-rider A) — the SAME `jarsSiteDataList` call that panel's own LIST
+   * view uses, `count = origins.length`. Mirrors fetchHistoryCount/
+   * fetchCookiesCount's shape exactly.
+   * @param {string} jarId
+   * @param {HTMLElement} countSpan
+   */
+  function fetchSiteDataCount(jarId, countSpan) {
+    try {
+      bridge.jarsSiteDataList({ id: jarId })
+        .then((result) => {
+          if (!result || !result.ok) return;
+          const count = Array.isArray(result.origins) ? result.origins.length : 0;
+          countSpan.textContent = tabCountSuffix(count);
+        })
+        .catch(() => {
+          // Pre-fetch/failure state is the bare "Other site data" label —
+          // leave the span untouched rather than writing an error into it.
+        });
+    } catch {
+      // Defensive: never let a count fetch throw into its caller.
+    }
+  }
+
+  /**
+   * Route a panel's fresh list length straight into its own tab's count
+   * badge, bypassing a fetch entirely (M10 Flight 3 HAT fix-rider A) — the
+   * `onCountChanged` hook the Cookies/Other-site-data panel modules fire
+   * after every successful `refresh()` paint. This is what keeps an OPEN
+   * tab's badge accurate across that panel's own per-row deletes, which
+   * deliberately never broadcast (see those modules' own doc comments). A
+   * no-op if the section/tabRefs/countSpan aren't (yet, or any longer)
+   * available — same teardown-tolerant shape as the fetch* functions above.
+   * @param {SectionRefs} refs
+   * @param {string} panelId
+   * @param {number} count
+   */
+  function updateTabCount(refs, panelId, count) {
+    const tabRef = refs.tabRefs?.get(panelId);
+    if (tabRef && tabRef.countSpan) tabRef.countSpan.textContent = tabCountSuffix(count);
   }
 
   /**
@@ -1648,17 +1961,44 @@ import { createConfirmModal } from './jars-confirm-modal.js';
   // jar-data-changed subscription (M10 Flight 2, Leg 2 / flight DD10) — the
   // Cookies + Other-site-data panels' invalidation-signal handler, mirroring
   // history-changed's shape (payload carries only { jarId, classes }; never
-  // trust payload data beyond routing). BOTH panels re-query on it,
-  // unconditionally of which classes fired it (leg spec AC), same as they
+  // trust payload data beyond routing). BOTH panels' LIST view re-queries on
+  // it, unconditionally of which classes fired it (leg spec AC), same as they
   // both re-query directly after their OWN mutations regardless of the
   // broadcast. No-op for a jarId with no live section or Burner (never has
   // either panel).
+  //
+  // Tab-badge counts (M10 Flight 3 HAT fix-rider A) get a NARROWER re-fetch,
+  // layered on top of the LIST re-query above: scoped to the classes the
+  // broadcast actually reports (skip classes not in the broadcast — `cache`
+  // alone, e.g., never touches either panel's badge) via panelForDataClass,
+  // AND skipping a panel that is currently the section's `activeTab`
+  // (de-dup rule) — that panel's own `refresh()` call just above already
+  // fires its `onCountChanged` hook with the fresh list length
+  // (updateTabCount), so a second independent count fetch here would be
+  // redundant, racing work.
   const jarDataChangedHandle = bridge.onJarDataChanged((payload) => {
     if (!payload || typeof payload.jarId !== 'string') return;
     const refs = sectionMap.get(payload.jarId);
     if (!refs || refs.isBurner) return;
     refs.cookiesPanel?.onJarDataChanged();
     refs.siteDataPanel?.onJarDataChanged();
+
+    if (!refs.tabRefs) return;
+    const classes = Array.isArray(payload.classes) ? payload.classes : [];
+    /** @type {Set<string>} */
+    const touchedPanels = new Set();
+    for (const classId of classes) {
+      const panelId = panelForDataClass(classId);
+      if (panelId) touchedPanels.add(panelId);
+    }
+    for (const panelId of touchedPanels) {
+      if (panelId === 'history') continue; // history's badge has its own onHistoryChanged path above
+      if (refs.activeTab === panelId) continue; // de-dup: the active panel's own refresh+hook carries it
+      const tabRef = refs.tabRefs.get(panelId);
+      if (!tabRef || !tabRef.countSpan) continue;
+      if (panelId === 'cookies') fetchCookiesCount(payload.jarId, tabRef.countSpan);
+      else if (panelId === 'site-data') fetchSiteDataCount(payload.jarId, tabRef.countSpan);
+    }
   });
 
   Promise.all([bridge.jarsList(), bridge.jarsGetDefault()])

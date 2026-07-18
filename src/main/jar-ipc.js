@@ -61,6 +61,12 @@
 // threaded through this module's deps — `app-db.js` is a module singleton,
 // so this module's `cookieSeen` instance and main.js's `session-created`
 // cookies-listener instance both resolve against the SAME live table.
+//
+// M10 Flight 3 (HAT walkthrough, fix-rider — operator-requested) adds the
+// `jars-cookies-value` / `internal-jars-cookies-value` twin: an on-demand
+// per-cookie value reveal for the Cookies panel, matched client-side to the
+// exact {name, domain, path} identity (see `handleCookiesValue`'s own doc
+// comment for the CHIPS/partitioned-cookie caveat).
 
 const fs = require('fs/promises');
 const path = require('path');
@@ -502,6 +508,43 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     return { ok: true };
   }
 
+  // handleCookiesValue (F3 HAT walkthrough fix-rider, operator-requested):
+  // reveal a single cookie's value on demand. Same three-phase validation as
+  // handleCookiesRemove (object-shape -> unknown-jar -> per-field `typeof`
+  // checks on name/domain/path — NOT truthiness, so an empty-name cookie
+  // stays revealable, same DD-precedent handleCookiesRemove already pins).
+  // Unlike handleCookiesRemove, `path` is REQUIRED here (not defaulted) —
+  // the identity must match the exact row jars-cookies-list rendered, and
+  // that response always carries a `path` string.
+  //
+  // Fetches every cookie via `ses.cookies.get({})` (unfiltered) and matches
+  // client-side on the exact {name, domain, path} triple — deliberately NOT
+  // `CookiesGetFilter.domain`, which SUBDOMAIN-matches (Electron's own
+  // `cookies.get` doc) and could hand back a parent-domain cookie's value
+  // for a child-domain request. One-line limitation note (jar-data-helpers.js
+  // habit): this identity tuple's uniqueness is contingent on Electron 42's
+  // `Cookie` shape carrying no CHIPS/partitioned-cookie field — re-check this
+  // assumption on any Electron version bump.
+  async function handleCookiesValue(_e, p) {
+    if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: cookies-value — malformed-payload' };
+    const entry = jars.list().find((j) => j.id === p.id);
+    if (!entry) return { ok: false, error: 'jars: cookies-value — unknown-jar' };
+    if (typeof p.name !== 'string' || typeof p.domain !== 'string' || typeof p.path !== 'string') {
+      return { ok: false, error: 'jars: cookies-value — malformed-payload' };
+    }
+    const ses = session.fromPartition(entry.partition);
+    /** @type {any[]} */
+    let raw;
+    try {
+      raw = await ses.cookies.get({});
+    } catch (e) {
+      return { ok: false, error: `jars: cookies-value — session-failure: ${String(e && e.message ? e.message : e)}` };
+    }
+    const match = raw.find((c) => c.name === p.name && c.domain === p.domain && c.path === p.path);
+    if (!match) return { ok: false, error: 'jars: cookies-value — not-found' };
+    return { ok: true, value: match.value };
+  }
+
   // handleSiteDataList: composite union (DD3 VERDICT) of (i) an IndexedDB-dir
   // scrape of `ses.storagePath` (a property, not a method — verified against
   // electron.d.ts at leg design) and (ii) historyStore.originsForJar. Both
@@ -588,6 +631,7 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   ipcMain.handle('jars-set-retention', handleSetRetention);
   ipcMain.handle('jars-cookies-list', handleCookiesList);
   ipcMain.handle('jars-cookies-remove', handleCookiesRemove);
+  ipcMain.handle('jars-cookies-value', handleCookiesValue);
   ipcMain.handle('jars-sitedata-list', handleSiteDataList);
   ipcMain.handle('jars-sitedata-remove-origin', handleSiteDataRemoveOrigin);
 
@@ -604,6 +648,7 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
   registerInternalHandler(ipcMain, 'internal-jars-set-retention', handleSetRetention);
   registerInternalHandler(ipcMain, 'internal-jars-cookies-list', handleCookiesList);
   registerInternalHandler(ipcMain, 'internal-jars-cookies-remove', handleCookiesRemove);
+  registerInternalHandler(ipcMain, 'internal-jars-cookies-value', handleCookiesValue);
   registerInternalHandler(ipcMain, 'internal-jars-sitedata-list', handleSiteDataList);
   registerInternalHandler(ipcMain, 'internal-jars-sitedata-remove-origin', handleSiteDataRemoveOrigin);
 
