@@ -1,6 +1,6 @@
 # Flight: Jar Data Surfaces + Generalized Retention
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Persistence Consolidation](../../mission.md)
 
 ## Contributing to Criteria
