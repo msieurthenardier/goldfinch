@@ -1,6 +1,6 @@
 # Flight: HAT & Alignment
 
-**Status**: ready
+**Status**: in-flight
 **Mission**: [Persistence Consolidation](../../mission.md)
 
 ## Contributing to Criteria
