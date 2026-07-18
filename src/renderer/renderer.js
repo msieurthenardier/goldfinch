@@ -1227,7 +1227,7 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
   btn.draggable = true;
   btn.addEventListener('click', (e) => {
     if (/** @type {HTMLElement} */ (e.target).closest('.tab-close')) {
-      if (tabs.size > 1) freezeTabWidths(); // DD5: defer reflow on pointer-close (not last tab)
+      if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths(); // DD5: defer reflow on pointer-close
       closeTab(id);
       return;
     }
@@ -1243,7 +1243,7 @@ function buildStripRecord({ id, url, jar, trusted, title = null }) {
   btn.addEventListener('auxclick', (e) => {
     if (e.button !== 1) return;
     e.preventDefault();
-    if (tabs.size > 1) freezeTabWidths();
+    if (tabs.size > 1 && !isLastTab(id)) freezeTabWidths();
     closeTab(id);
   });
   // Tab context menu (M09 F5 Leg 1, DD2): a real right-click AND the Context-Menu
@@ -1922,6 +1922,18 @@ function updateAddressChip(tab) {
     ? (secure ? `Site information, ${host}` : `Site information, ${host}, not secure`)
     : 'Site information');
   els.address.readOnly = false;
+}
+
+// Is `id` the last (rightmost) tab in DOM order? A pointer-close of the last tab must
+// NOT freeze widths (issue #97): with no right neighbour to slide into the vacated slot,
+// #newtab-pill shifts left under the stationary cursor and — because the pill lives inside
+// #tabstrip — the #tabstrip mouseleave that releases the freeze can never fire, wedging the
+// shrunken widths and capturing subsequent clicks on the pill. Reflowing immediately instead
+// lets the new last tab's ✕ expand back out toward the cursor (serial-close parity with the
+// mid-list case). DOM order is authoritative — orderedTabIds() reads the live strip.
+function isLastTab(id) {
+  const ids = orderedTabIds();
+  return ids[ids.length - 1] === id;
 }
 
 let widthsFrozen = false;
