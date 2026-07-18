@@ -1,6 +1,6 @@
 # Mission: Persistence Consolidation
 
-**Status**: active
+**Status**: completed
 
 > Source feature request: [goldfinch#94](https://github.com/msieurthenardier/goldfinch/issues/94),
 > executing the standing BACKLOG seed "Persistent storage substrate: JSON stores → SQLite"
