@@ -113,11 +113,15 @@ export default [
     // Leg 2) is jars.js's panel-content module; jars-tabs.js (H4, M08
     // Flight 6, Leg 3) is jars.js's per-jar tab-widget module; jars-confirm-
     // modal.js (H7, M08 Flight 6, Leg 5) is jars.js's page-level confirm
-    // modal module — also a real ES module.
+    // modal module; jars-cookies-panel.js / jars-sitedata-panel.js (M10
+    // Flight 2, Leg 2) are jars.js's Cookies / Other-site-data panel-content
+    // modules — also real ES modules, the jars-history-panel.js precedent.
     files: [
       'src/renderer/renderer.js',
       'src/renderer/pages/jars.js',
       'src/renderer/pages/jars-history-panel.js',
+      'src/renderer/pages/jars-cookies-panel.js',
+      'src/renderer/pages/jars-sitedata-panel.js',
       'src/renderer/pages/jars-tabs.js',
       'src/renderer/pages/jars-confirm-modal.js',
       'src/renderer/pages/settings.js',

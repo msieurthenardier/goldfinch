@@ -254,7 +254,16 @@ Planning inputs adopted from prior artifacts and mission-design research:
 
 ## Known Issues
 
-*(none yet — populated during execution as flights surface mission-level concerns)*
+- [ ] **HAT-scoped carries (accumulated F1-F2)**: (1) promote + merge PR
+      #96 (F1, draft) and F2's stacked PR — `gh pr ready`/`merge` are
+      classifier-blocked for the FD this session; (2) **rotate/re-mint
+      automation keys** — the FD leaked the registered jar-scoped bearer
+      key into its session transcript at F1 leg 3 (redaction regex missed
+      a leading-underscore token); re-register the session MCP entry after
+      rotation; (3) **live cookie-removal-by-age witness** — structurally
+      unobservable on a first-ever sweep (cold-start stamping, deliberate);
+      needs a sweep against day+-aged `cookie_seen` rows on the operator's
+      real profile (jar-data-surfaces run 1 disposition, 2026-07-18).
 
 ## Flights
 
@@ -268,7 +277,7 @@ Planning inputs adopted from prior artifacts and mission-design research:
       shields brought up to store discipline, boot-seam reshape
       (`initProfileAndStores`), corruption/quarantine semantics, docs +
       BACKLOG retirement.
-- [ ] Flight 2: Jar data surfaces + generalized retention — the retention
+- [x] Flight 2: Jar data surfaces + generalized retention — the retention
       premise-audit/spike (mechanism for Chromium-managed data), Cookies and
       Other-site-data panel listings with per-item delete (new read-path IPC
       twins), retention applied to cookies/site data on the prune cadence,

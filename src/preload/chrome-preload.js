@@ -68,6 +68,18 @@ contextBridge.exposeInMainWorld('goldfinch', {
   jarsRemove: (payload) => ipcRenderer.invoke('jars-remove', payload),
   jarsSetDefault: (payload) => ipcRenderer.invoke('jars-set-default', payload),
   jarsGetDefault: () => ipcRenderer.invoke('jars-get-default'),
+  // Retention-edit (M10 Flight 2, Leg 3 / behavior-spec finalization): the
+  // ALREADY chrome-trusted `jars-set-retention` channel (M08 Flight 3, Leg
+  // 1 / DD4) had no chrome-bridge wrapper before this leg — the goldfinch://
+  // jars page's own retention `<select>` drives it via
+  // window.goldfinchInternal.jarsSetRetention (internal-preload.js), which
+  // an `evaluate` call cannot reach (internal-session evaluate is uniformly
+  // refused — the apparatus fact this flight's behavior spec is built on).
+  // This wrapper gives the behavior test's step 6 the SAME mechanism class
+  // every prior act-path mutation already uses (a chrome-target `evaluate`
+  // call against window.goldfinch), instead of the unproven alternative of
+  // literally driving the internal page's `<select>` element.
+  jarsSetRetention: (payload) => ipcRenderer.invoke('jars-set-retention', payload),
   // Fired by main after every jar mutation with { containers, defaultId }
   // (defaultId null ⇔ Burner). Renderer subscribes as of Flight 2 (DD2).
   onJarsChanged: (cb) => ipcRenderer.on('jars-changed', (_e, d) => cb(d)),

@@ -664,6 +664,125 @@ main {
   color: var(--fg-dim);
 }
 
+/* ── Cookies + Other-site-data panel content (M10 Flight 2, Leg 2 / flight
+   DD2, DD3 VERDICT, DD7) — the module-owned mounts are each region's SECOND
+   child (DOM contract, mirroring History's own). `.jar-datalist*` is a
+   shared class family between the two panels (cloned shape — see each
+   module's own doc comment); tier badges are the one cookies/site-data
+   divergence. ── */
+.jar-cookies-mount,
+.jar-sitedata-mount {
+  margin-top: 4px;
+}
+
+.jar-datalist-refresh {
+  margin-bottom: 12px;
+}
+
+.jar-datalist-gap-note {
+  margin: 0 0 12px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.jar-datalist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.jar-datalist-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.jar-datalist-row:last-child {
+  border-bottom: none;
+}
+
+.jar-datalist-row-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.jar-datalist-row-primary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.jar-datalist-row-secondary {
+  margin: 2px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jar-datalist-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.jar-datalist-badge-stored {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.jar-datalist-badge-visited {
+  color: var(--fg-dim);
+  border-color: var(--border);
+}
+
+/* Icon-only trashcan delete button — identical treatment to
+   .jar-history-row-delete (kept as a separate rule so the two panel
+   families can diverge independently if a future leg needs to). */
+.jar-datalist-row-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.jar-datalist-row-delete:hover {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.jar-datalist-row-delete:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.jar-datalist-status {
+  margin: 8px 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
 /* ── Section footer (DD1): Wipe + Delete are jar-LEVEL identity actions,
    rendered outside the tab widget — reuses .jar-data-controls/-buttons/
    -confirm-area (design review verified safe: no per-region singleton

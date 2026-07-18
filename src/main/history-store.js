@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const { origin } = require('./jar-data-helpers');
 
 // ---------------------------------------------------------------------------
 // Schema v1 (flight DD3 — implement exactly)
@@ -231,7 +232,15 @@ function prepareStatements() {
     clearJar: d.prepare('DELETE FROM visits WHERE jar_id = ?'),
     countByJar: d.prepare('SELECT COUNT(*) AS c FROM visits WHERE jar_id = ?'),
     pruneJar: d.prepare('DELETE FROM visits WHERE jar_id = ? AND visited_at < ?'),
-    distinctJarIds: d.prepare('SELECT DISTINCT jar_id AS jarId FROM visits')
+    distinctJarIds: d.prepare('SELECT DISTINCT jar_id AS jarId FROM visits'),
+    // Site-data panel's history-derived union side (M10 Flight 2 Leg 2 /
+    // flight DD3 VERDICT candidate 3): reuses the shipped GROUP BY idiom
+    // (suggest, above) at url grain — origin normalization happens in JS
+    // (originsForJar below), via the shared `origin()` helper, since SQLite
+    // has no URL parser. No jar_id-only WHERE is enough: history rows are
+    // already pruned to the jar's retention window by the existing prune
+    // cadence, so no extra time-window filter belongs here.
+    originsForJar: d.prepare('SELECT url, MAX(visited_at) AS lastVisitedAt FROM visits WHERE jar_id = ? GROUP BY url')
   };
 }
 
@@ -571,6 +580,82 @@ function pruneOneJar(jarId, days, now) {
 }
 
 // ---------------------------------------------------------------------------
+// originsForJar (M10 Flight 2 Leg 2 / flight DD3 VERDICT candidate 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Origins with browsing activity in a jar, for the Other-site-data panel's
+ * "visited — storage unconfirmed" tier (composite union, flight DD3
+ * VERDICT). Groups per-URL rows (the shipped GROUP BY idiom, `suggest`
+ * above) then collapses to distinct ORIGINS in JS via the shared `origin()`
+ * helper (src/main/jar-data-helpers.js) — the same normalizer the
+ * IndexedDB-dirname union side uses, so both sides key identically for the
+ * merge. Multiple URLs on one origin keep the MAX `lastVisitedAt` across
+ * them. Unparseable URLs (should not occur — recordVisit validates its own
+ * input — but defensive regardless) are skipped, never thrown.
+ * @param {string} jarId
+ * @returns {Array<{ origin: string, lastVisitedAt: number }>}
+ */
+function originsForJar(jarId) {
+  assertOpen();
+  if (typeof jarId !== 'string' || jarId.length === 0) {
+    throw new TypeError('originsForJar: jarId must be a non-empty string');
+  }
+  const rows = /** @type {any[]} */ (statements.originsForJar.all(jarId));
+  /** @type {Map<string, number>} */
+  const byOrigin = new Map();
+  for (const row of rows) {
+    const o = origin(row.url);
+    if (o === null) continue;
+    const prev = byOrigin.get(o);
+    if (prev === undefined || row.lastVisitedAt > prev) byOrigin.set(o, row.lastVisitedAt);
+  }
+  return Array.from(byOrigin, ([originStr, lastVisitedAt]) => ({ origin: originStr, lastVisitedAt }));
+}
+
+// ---------------------------------------------------------------------------
+// expiredOriginsForJar (M10 Flight 2 Leg 3 / flight DD4b — storage-class
+// aging: "since last activity", never "since creation")
+// ---------------------------------------------------------------------------
+
+/**
+ * Origins in a jar whose MOST RECENT history activity predates `cutoffMs`
+ * (DD4b: the retention sweep's storage-class aging signal). A pure post-
+ * filter over `originsForJar`'s already-computed per-origin MAX
+ * `lastVisitedAt` — no separate SQL shape, same GROUP BY idiom, same
+ * `origin()` normalizer, so both this and the site-data panel's union side
+ * key identically for the same jar.
+ *
+ * **SEQUENCING (flight DD4b / leg-3 design review, HIGH — the load-bearing
+ * fix).** The caller MUST call this BEFORE running the same pass's history
+ * prune (`pruneExpired`/`pruneOneJar` in the SAME cutoff window):
+ * `pruneJar` deletes every visit row older than the SAME cutoff, which
+ * would erase the very rows this function reads — a post-prune call
+ * returns nothing for exactly the target case (an origin whose last
+ * activity predates the window loses every row to the prune, vanishing
+ * from `originsForJar` before a post-prune read could ever see it). This
+ * function is a pure read and cannot enforce that order itself; the
+ * invariant is a call-site discipline (`main.js`'s `pruneAllJars`,
+ * `jar-ipc.js`'s `handleSetRetention`), regression-guarded by those
+ * callers' own tests.
+ * @param {string} jarId
+ * @param {number} cutoffMs
+ * @returns {string[]} origins whose last activity predates cutoffMs
+ */
+function expiredOriginsForJar(jarId, cutoffMs) {
+  assertOpen();
+  if (typeof jarId !== 'string' || jarId.length === 0) {
+    throw new TypeError('expiredOriginsForJar: jarId must be a non-empty string');
+  }
+  if (typeof cutoffMs !== 'number' || !Number.isFinite(cutoffMs)) {
+    throw new TypeError('expiredOriginsForJar: cutoffMs must be a finite number');
+  }
+  return originsForJar(jarId)
+    .filter((row) => row.lastVisitedAt < cutoffMs)
+    .map((row) => row.origin);
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -587,5 +672,7 @@ module.exports = {
   clearJar,
   countByJar,
   pruneExpired,
-  pruneOneJar
+  pruneOneJar,
+  originsForJar,
+  expiredOriginsForJar
 };

@@ -12,6 +12,11 @@ const historyStore = require('./history-store');
 // App database (M10 Flight 1, Leg 1 / DD2-DD4): the Electron-free node:sqlite
 // substrate backing settings/downloads/session (jars/shields fold in leg 2).
 const appDb = require('./app-db');
+// Retention sweep engine (M10 Flight 2, Leg 3 / DD4 VERDICT, DD4b, DD6,
+// DD10): generalizes retention from history-only pruning to cookies + site
+// data. Electron-free — see retention-sweep.js's own header.
+const { createRetentionSweep } = require('./retention-sweep');
+const { cookieUrl, partitionFromStoragePath, cookieChangeAction } = require('./jar-data-helpers');
 const { createHistoryRecorder } = require('./history-recorder');
 const { registerHistoryIpc } = require('./history-ipc');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
@@ -193,7 +198,15 @@ const INTERNAL_PAGES = {
     // extraction, the SAME three-point-onboarding precedent as jars-tabs.js
     // above): the ONE page-level confirm modal, replacing the per-region
     // inline confirms every earlier flight used.
-    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js')
+    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js'),
+    // Cookies + Other-site-data panel content modules (M10 Flight 2, Leg 2 —
+    // design review: the exact-match resolver 404s an unregistered module,
+    // so this entry is a required onboarding step, not optional wiring — the
+    // jars-history-panel.js/jars-tabs.js three-point-onboarding precedent
+    // (this entry, the jars.html module tag, and the self-deriving
+    // jars-page-shared-scripts.test.js, which needs no edit).
+    '/jars-cookies-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-cookies-panel.js'),
+    '/jars-sitedata-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-sitedata-panel.js')
   }
 };
 
@@ -3561,6 +3574,25 @@ const { broadcastJarsChanged } = registerJarIpc({
   historyStore
 });
 
+// Retention sweep engine + its cookie first-seen bookkeeping store (M10
+// Flight 2, Leg 3 / DD4 VERDICT, DD4b, DD6, DD7, DD10). ONE instance, used
+// by BOTH the `session-created` cookies listener below (writes) and the
+// `pruneAllJars` cadence (reads + sweeps) — both resolve against the same
+// live `app.db` handle via app-db.js's module-singleton statements
+// regardless of instance identity (the createCookieSeenStore()/
+// createDocumentStore() precedent: methods read the CURRENT module-scope
+// statements at call time, so it's safe to build this before appDb.open()
+// has run — it isn't called until session-created/pruneAllJars fire, both
+// well after whenReady's appDb.open()).
+const cookieSeenStore = appDb.createCookieSeenStore();
+const retentionSweep = createRetentionSweep({
+  cookieSeen: cookieSeenStore,
+  historyOrigins: (jarId, cutoffMs) => historyStore.expiredOriginsForJar(jarId, cutoffMs),
+  sessionFor: (jar) => session.fromPartition(jar.partition),
+  cookieUrl,
+  now: () => Date.now()
+});
+
 // --- per-jar history IPC (M08 Flight 1 Leg 3 / DD9) ---
 // The four history read/mutate channels live in history-ipc.js, twin-registered
 // exactly like the jar-registry channels above. Registered at module scope
@@ -3710,19 +3742,93 @@ app.on('session-created', (ses) => {
   let spellcheckOn;
   try { spellcheckOn = settings.get('spellcheck') === true; } catch { spellcheckOn = false; }
   applySpellcheck(ses, spellcheckOn);
+
+  // Cookie first-seen bookkeeping listener (M10 Flight 2, Leg 3 / DD4
+  // VERDICT, review annotations a/b). Anchored HERE — NEVER an eager
+  // `fromPartition` warm — per the measured fact that `session-created`
+  // fires synchronously on a partition's FIRST `fromPartition` call only
+  // (flight-log Decisions, Spike A). The hook receives only the Session
+  // object, no partition field, so the partition is recovered from
+  // `ses.storagePath`'s `Partitions/<name>` on-disk segment
+  // (jar-data-helpers.js's `partitionFromStoragePath` — precedented by
+  // jar-ipc.js's own `ses.storagePath` read) and positive-matched against
+  // the live jar registry — a burner/internal/unregistered partition
+  // resolves to no match and gets no listener. `jars.list()` is read
+  // defensively (mirrors the spellcheck read above): a session-created
+  // firing before initProfileAndStores loads the jars store must not throw
+  // into Electron's event dispatch.
+  try {
+    const partition = partitionFromStoragePath(/** @type {any} */ (ses).storagePath);
+    const jarEntry = partition ? jars.list().find((j) => j.partition === partition) : null;
+    if (jarEntry) {
+      const jarId = jarEntry.id;
+      ses.cookies.on('changed', (_event, cookie, cause, removed) => {
+        // Will-quit quiesce guard (DD6 quit-ordering addendum — the F6-hang
+        // class): appDb.close() runs at will-quit; this listener outlives
+        // that close (Electron doesn't tear down session listeners on
+        // quit), so every write checks isOpen() FIRST and is try-caught —
+        // an uncaught throw here would wedge the quit path.
+        if (!appDb.isOpen()) return;
+        try {
+          // The cause-branch decision is a PURE, unit-pinned function
+          // (jar-data-helpers.js's cookieChangeAction — main.js itself has
+          // no unit-test harness, so the decision logic is extracted rather
+          // than inlined) — see its own doc comment for the full measured
+          // `cause` enum and the DD4 VERDICT overwrite ruling.
+          const action = cookieChangeAction(cause, removed);
+          if (action === 'skip') return;
+          if (action === 'delete') {
+            cookieSeenStore.deleteByIdentity(jarId, cookie.name, cookie.domain, cookie.path);
+          } else {
+            cookieSeenStore.insertIfAbsent(jarId, cookie.name, cookie.domain, cookie.path, Date.now());
+          }
+        } catch (e) {
+          console.error('[retention-sweep]', e);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[retention-sweep] cookies-listener attach failed:', e);
+  }
 });
 
 // Builds the retentionByJarId map from the live registry and runs one prune pass
 // (M08 Flight 1 / DD6). Wrapped in try/catch — a prune failure must never crash the
 // hourly interval or the boot-time first pass. Broadcasts history-changed per jar
 // with a nonzero deletion count (pruneExpired already returns nonzero-only).
+//
+// M10 Flight 2, Leg 3 / DD4b, DD6, DD10 — the boot + hourly cookie/storage
+// sweep rides this SAME cadence. **SEQUENCING (leg-3 design review, HIGH —
+// Context SEQUENCING, mirrors handleSetRetention's identical discipline in
+// jar-ipc.js):** the aged-out-origin snapshot for every jar is taken BEFORE
+// `historyStore.pruneExpired` runs — `pruneExpired` deletes every visit row
+// older than the SAME cutoff, which would erase the very rows the storage
+// sweep needs to see. Order, pinned: (1) `retentionSweep.snapshotAgedOutOrigins`,
+// (2) `historyStore.pruneExpired` (sync, unchanged), (3) the async
+// `retentionSweep.sweepAll` from the snapshot (DD6: fire-and-forget,
+// per-jar-isolated, never awaited here — the interval/boot call must
+// return promptly). DD10: `jar-data-changed` broadcasts per jar on the
+// sweep's COMPLETION, carrying only the classes actually swept.
 function pruneAllJars() {
   try {
-    const retentionByJarId = Object.fromEntries(jars.list().map((j) => [j.id, j.retentionDays]));
+    const jarList = jars.list();
+    const retentionByJarId = Object.fromEntries(jarList.map((j) => [j.id, j.retentionDays]));
+    const agedOutOriginsByJarId = retentionSweep.snapshotAgedOutOrigins(jarList);
     const deleted = historyStore.pruneExpired(retentionByJarId, Date.now());
     for (const jarId of Object.keys(deleted)) {
       broadcastToChromeAndInternal('history-changed', { jarId });
     }
+    retentionSweep
+      .sweepAll(jarList, agedOutOriginsByJarId)
+      .then((results) => {
+        for (const jarId of Object.keys(results)) {
+          const classes = results[jarId].classes;
+          if (classes && classes.length > 0) {
+            broadcastToChromeAndInternal('jar-data-changed', { jarId, classes });
+          }
+        }
+      })
+      .catch((err) => console.error('[retention-sweep] cadence sweep failed:', err));
   } catch (err) {
     console.error('[history] prune failed:', err);
   }

@@ -18,6 +18,10 @@ import { JAR_PANELS, panelForDataClass } from './jar-panel-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { createHistoryPanel } from './jars-history-panel.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createCookiesPanel } from './jars-cookies-panel.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createSiteDataPanel } from './jars-sitedata-panel.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { createJarTabs } from './jars-tabs.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { createConfirmModal } from './jars-confirm-modal.js';
@@ -573,8 +577,11 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    *   dataButtons?: Map<string, HTMLButtonElement>,
    *   activeTab?: string,
    *   tabRefs?: Map<string, { tab: HTMLButtonElement, panel: HTMLElement, countSpan?: HTMLElement }>,
+   *   activationHooks?: Map<string, () => void>,
    *   statusClearHandle?: (number|null), nameDirty?: boolean,
-   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null)
+   *   historyPanel?: ({ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null),
+   *   cookiesPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null),
+   *   siteDataPanel?: ({ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null)
    * }} SectionRefs
    */
 
@@ -714,6 +721,10 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     let refs;
     /** @type {{ onExpanded: () => void, onHistoryChanged: () => void, onJarsRow: () => void, destroy: () => void } | null} */
     let historyPanel = null;
+    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null} */
+    let cookiesPanel = null;
+    /** @type {{ onActivated: () => void, onJarDataChanged: () => void, destroy: () => void } | null} */
+    let siteDataPanel = null;
 
     /**
      * @param {string} panelId
@@ -747,11 +758,58 @@ import { createConfirmModal } from './jars-confirm-modal.js';
           // no JS-side media-query check is needed here.
           onPageChange: () => refs.root.scrollIntoView({ block: 'start' })
         });
+      } else if (panelId === 'cookies') {
+        // M10 Flight 2 Leg 2 / flight DD2, DD7: module-owned mount, same
+        // two-child DOM contract as History's (controls.root above + this
+        // mount). No onExpanded/onPageChange-style callbacks — the Cookies
+        // panel's ONLY freshness triggers are the tab-selection
+        // activationHooks entry (below), its own per-row mutations, and the
+        // jar-data-changed broadcast (module-level subscription, below).
+        const cookiesMount = document.createElement('div');
+        cookiesMount.className = 'jar-cookies-mount';
+        panelEl.appendChild(cookiesMount);
+
+        cookiesPanel = createCookiesPanel({
+          bridge,
+          jarId: row.id,
+          mountEl: cookiesMount,
+          onError: (message) => setSectionStatus(refs, message, false)
+        });
+      } else if (panelId === 'site-data') {
+        const siteDataMount = document.createElement('div');
+        siteDataMount.className = 'jar-sitedata-mount';
+        panelEl.appendChild(siteDataMount);
+
+        siteDataPanel = createSiteDataPanel({
+          bridge,
+          jarId: row.id,
+          mountEl: siteDataMount,
+          onError: (message) => setSectionStatus(refs, message, false)
+        });
       }
     }
 
     const { tabsWrap, tabRefs } = jarTabs.build(row, { getRefs: () => refs, buildPanelContent });
     section.appendChild(tabsWrap);
+
+    // Activation hooks (design review, HIGH — jars-tabs.js's generalized,
+    // data-driven `selectTab` dispatch; see that module's own doc comment).
+    // History's hook preserves the pre-existing onExpanded call (idempotent
+    // — also fired independently by the scroll-into-view
+    // IntersectionObserver, observeSectionsIfChanged); Cookies/Other-site-data
+    // have no section-visibility trigger at all (DD2) — tab-selection is
+    // their ONLY activation path, alongside their own mutations and the
+    // module-level jar-data-changed subscription below. Closures read the
+    // outer `historyPanel`/`cookiesPanel`/`siteDataPanel` lets at CALL time
+    // (never invoked before buildPanelContent has run for that panel, since
+    // History is the only default-selected tab and the other two are only
+    // ever reached via an explicit selectTab call after build() returns).
+    /** @type {Map<string, () => void>} */
+    const activationHooks = new Map([
+      ['history', () => historyPanel?.onExpanded()],
+      ['cookies', () => cookiesPanel?.onActivated()],
+      ['site-data', () => siteDataPanel?.onActivated()]
+    ]);
 
     // Clear-* buttons route into their panel via panelForDataClass (leg
     // spec #3) — data-driven, so a future JAR_DATA_CLASSES entry (Flight
@@ -813,9 +871,12 @@ import { createConfirmModal } from './jars-confirm-modal.js';
       dataButtons,
       activeTab: 'history',
       tabRefs,
+      activationHooks,
       statusClearHandle: null,
       nameDirty: false,
-      historyPanel
+      historyPanel,
+      cookiesPanel,
+      siteDataPanel
     };
 
     makeDefaultBtn.addEventListener('click', () => handleSetDefault(row.id));
@@ -1255,6 +1316,8 @@ import { createConfirmModal } from './jars-confirm-modal.js';
         // No timers firing into removed DOM (leg spec AC — feedback timing).
         if (removed.statusClearHandle != null) clearTimeout(removed.statusClearHandle);
         removed.historyPanel?.destroy();
+        removed.cookiesPanel?.destroy();
+        removed.siteDataPanel?.destroy();
         removed.root.remove();
         sectionMap.delete(id);
       }
@@ -1582,6 +1645,22 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     fetchHistoryCount(payload.jarId, historyTabRef.countSpan);
   });
 
+  // jar-data-changed subscription (M10 Flight 2, Leg 2 / flight DD10) — the
+  // Cookies + Other-site-data panels' invalidation-signal handler, mirroring
+  // history-changed's shape (payload carries only { jarId, classes }; never
+  // trust payload data beyond routing). BOTH panels re-query on it,
+  // unconditionally of which classes fired it (leg spec AC), same as they
+  // both re-query directly after their OWN mutations regardless of the
+  // broadcast. No-op for a jarId with no live section or Burner (never has
+  // either panel).
+  const jarDataChangedHandle = bridge.onJarDataChanged((payload) => {
+    if (!payload || typeof payload.jarId !== 'string') return;
+    const refs = sectionMap.get(payload.jarId);
+    if (!refs || refs.isBurner) return;
+    refs.cookiesPanel?.onJarDataChanged();
+    refs.siteDataPanel?.onJarDataChanged();
+  });
+
   Promise.all([bridge.jarsList(), bridge.jarsGetDefault()])
     .then(([containers, def]) => {
       applyState({ containers: Array.isArray(containers) ? containers : [], defaultId: normalizeDefaultId(def) });
@@ -1593,6 +1672,7 @@ import { createConfirmModal } from './jars-confirm-modal.js';
   window.addEventListener('pagehide', () => {
     bridge.offJarsChanged(handle);
     bridge.offHistoryChanged(historyChangedHandle);
+    bridge.offJarDataChanged(jarDataChangedHandle);
     if (scrollObserver) scrollObserver.disconnect();
   }, { once: true });
 })();
