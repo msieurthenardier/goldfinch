@@ -31,21 +31,22 @@ isolation + internal-exclusion properties are only true against the running app'
 
 - **automation surface** (tool results — measured via the goldfinch MCP surface): `getZoom` factor,
   `setZoom` acknowledgement, `enumerateTabs` for wcIds.
-- **browser** (in-page scale — measured via the `evaluate` tool): **`window.devicePixelRatio`** to
-  corroborate engine zoom independent of `getZoom`. *(Not `visualViewport.scale` — that tracks
-  pinch-zoom and stays ≈1 under `setZoomFactor`.)*
+- **browser** (independent visual witness): an unlocked, rendered-page capture before/after zoom,
+  inspected for a clear increase in text/content scale while the guest bounds remain unchanged.
+  `devicePixelRatio` is deliberately not used: on native macOS Chromium page zoom may leave the
+  backing-display DPR constant even when `webContents.getZoomFactor()` changes correctly.
 
 ## Steps
 
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Open a web tab in the **Default** jar to a stable page (e.g. `https://example.com`); record its `wcId` via `enumerateTabs`. | (setup — no judgment) |
-| 2 | Read baseline: `getZoom(wcId)` and `evaluate(wcId, "devicePixelRatio")`. | `getZoom` factor ≈ `1.0`; `devicePixelRatio` at its baseline. |
-| 3 | Send `Ctrl+=` to **the tab (guest)** twice via `pressKey` (name `=`, modifiers `["control"]`) — captured by the main-side `before-input-event` handler. | `getZoom(wcId)` factor `> 1.0` AND `devicePixelRatio` increased correspondingly — keyboard zoom-in (page-focused) reaches the page. |
-| 4 | Send `Ctrl+0` (name `0`, modifiers `["control"]`) to the guest. | `getZoom(wcId)` factor back to ≈ `1.0`; `devicePixelRatio` back to baseline — reset works. |
-| 5 | `setZoom(wcId, 1.5)`. | `getZoom(wcId)` ≈ `1.5` AND `devicePixelRatio` increased — the MCP tool applies zoom to web content. |
+| 2 | Read baseline `getZoom(wcId)` and capture the unlocked rendered page at factor 1.0. | `getZoom` factor ≈ `1.0`; the capture records the baseline text/content scale and guest bounds. |
+| 3 | Send `Ctrl+=` to **the tab (guest)** twice via `pressKey` (name `=`, modifiers `["control"]`) — captured by the main-side `before-input-event` handler. Read `getZoom` and capture again. | `getZoom(wcId)` factor `> 1.0`, and the rendered content is visibly larger than baseline without changing the guest slot — keyboard zoom-in reaches the page. |
+| 4 | Send `Ctrl+0` (name `0`, modifiers `["control"]`) to the guest; read and capture again. | `getZoom(wcId)` returns to ≈ `1.0`, and the rendered content returns to its baseline scale — reset works. |
+| 5 | `setZoom(wcId, 1.5)`; read and capture again. | `getZoom(wcId)` ≈ `1.5`, and the rendered content is visibly larger than baseline — independent visual confirmation that the MCP tool applies page zoom. |
 | 6 | Open a second web tab in a **different jar** (e.g. **Work**) to a **different origin**; record its `wcId2`. With tab 1 still at `1.5`, read `getZoom(wcId2)`. | `getZoom(wcId2)` ≈ `1.0` — zoom did not leak across jars (separate jar sessions). |
-| 7 | Identify the `goldfinch://settings` internal tab's wcId (open it via the trusted path — **out-of-band / HAT**: the automation surface itself cannot open or enumerate internal tabs, so a human opens Settings and the wcId is read out-of-band). Attempt `setZoom(internalWcId, 1.5)` under the **admin** key. | The attempt is **refused / no-op** via the op's *op-local* internal guard — `getZoom` on the internal tab does not report `1.5`; the refusal is clean, not an opaque error. *(Not reachable in an autonomous automation-only run — the op-local guard is unit-proven in `automation-zoom.test.js`; this row is a HAT checkpoint.)* |
+| 7 | Open `goldfinch://settings` through the trusted chrome path, identify its wcId from the **admin** `enumerateTabs` result, and attempt `setZoom(internalWcId, 1.5)`. | The attempt is refused by the op-local internal guard with `automation: setZoom — internal-session excluded`; no zoom is applied to the internal page. |
 
 **Row conventions:** Row 1 is pure setup (no judgment). Rows 2–7 each assert one observable
 checkpoint.

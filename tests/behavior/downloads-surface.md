@@ -54,10 +54,10 @@ the human downloads page (SC7, HAT-verified).
 | 3 | Call `downloadsList` (admin). | A **single** download produced **exactly one** new record — the count goes `N → N+1` (**not** `N+2`), and the new record's `id` is **distinct** from every prior record's `id` (no duplicate id). The **new** record has `filename` matching the fixture (sanitized), a terminal `state: 'completed'`, a non-empty `savePath`, and `received === total` (> 0). A single trigger ⇒ a single record — a recurrence of the Flight-5 double-`will-download` defect (two records / a duplicate id from one trigger) **fails** this step. |
 | 4 | `stat` the new record's `savePath` on the filesystem. | The file **exists** with **non-zero size** — `savePath` points at a real on-disk file (the model's `completed`/`savePath` is corroborated, not self-asserted). |
 | 5 | With a **jar key** (not admin), call `downloadsList`. | **Refused** with the distinct **admin-only** error — `downloadsList` is an app-level/admin capability and does not widen the jar surface's reach (SC8 gating half). |
-| 6 | **Same-filename dedup (REQUIRED — wrong-filename regression guard).** `navigate` the web tab to the **same** fixture URL a **second** time (same `filename` on disk); wait for the download to settle; call `downloadsList` (admin). | The list now carries **both** records **distinctly** (two separate entries with distinct `id`s, same `filename`), and the **second** record's `savePath` carries the `uniquePath` ` (n)` suffix (e.g. `download-fixture (1).bin`) — a **distinct on-disk path** from the first record's `savePath`. The model dedups the on-disk path rather than overwriting or mis-naming — the regression guard for the Flight-5 **wrong-filename** HAT defect. |
+| 6 | **Same-request filename dedup (REQUIRED — wrong-filename regression guard).** `navigate` the web tab to the **same** fixture URL a **second** time (same requested filename); wait for the download to settle; call `downloadsList` (admin). | The list now carries **both** records **distinctly** (two separate entries with distinct `id`s). Each record's `filename` equals `basename(savePath)`: the first is `download-fixture.bin`, while the **second** record's `filename` and `savePath` both carry the `uniquePath` ` (n)` suffix (e.g. `download-fixture (1).bin`) — a **distinct on-disk path** from the first record's `savePath`. The model reports the actual deduplicated on-disk basename rather than overwriting or mis-naming — the regression guard for the Flight-5 **wrong-filename** HAT defect. |
 | 7 | (Persistence, optional) Note a new record's `id`; if the run harness can restart the app, re-open and call `downloadsList` (admin) again. | The record with the same `id` is **still present** after restart — the list is persisted, not session-only (DD3). *(Skip if the harness cannot restart the app in-run; persistence is then a HAT checkpoint.)* |
 
-**Row conventions:** Rows 1–2 are setup (no judgment). Rows 3–7 each assert one observable checkpoint; row 6 is the required same-filename dedup guard.
+**Row conventions:** Rows 1–2 are setup (no judgment). Rows 3–7 each assert one observable checkpoint; row 6 is the required same-request filename dedup guard.
 
 ## Out of Scope
 
@@ -72,6 +72,6 @@ the human downloads page (SC7, HAT-verified).
 
 ## Variants (optional)
 
-- The same-filename dedup is now a **required** step (Step 6) — not a variant. As an optional extension,
+- The same-request filename dedup is now a **required** step (Step 6) — not a variant. As an optional extension,
   trigger a **third** (and further) download of the same filename and confirm the `uniquePath` suffix
   keeps incrementing (` (1)`, ` (2)`, …) with each record listed distinctly.
