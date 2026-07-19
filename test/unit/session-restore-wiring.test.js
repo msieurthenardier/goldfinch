@@ -9,9 +9,7 @@
 // is not vacuous. The DISCRIMINATION comes from the mutation flipping the reading — that is
 // what makes each scan non-vacuous, not any single count in isolation.
 //
-// MASKING (leg-1's source-scan helper) is applied and is CORRECT for src/main/main.js, whose
-// documented regex-literal blind-spot pattern reads 0 (source-scan.js header): the main.js
-// bodies below (whenReady, before-quit, window-boot-config) mask cleanly, so a comment
+// MASKING is applied to src/main/app-lifecycle.js, whose lifecycle bodies mask cleanly, so a comment
 // that happens to name a scanned token cannot trip those scans. src/renderer/renderer.js is
 // DIFFERENT: it trips maskComments' documented regex-literal blind spot BEFORE the boot loop,
 // so masking is unreliable in that region. The renderer scans below are therefore designed to
@@ -31,7 +29,7 @@ const { createHarness } = require('./helpers/window-factory-harness');
 const MAIN_JS = path.join(__dirname, '../../src/main/app-lifecycle.js');
 const RENDERER_JS = path.join(__dirname, '../../src/renderer/renderer.js');
 
-/** The real main.js, read fresh. @returns {string} */
+/** The real app lifecycle registrar, read fresh. @returns {string} */
 function mainSource() {
   return fs.readFileSync(MAIN_JS, 'utf8');
 }

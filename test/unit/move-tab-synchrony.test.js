@@ -25,9 +25,7 @@
 // deliberate — a pin whose prose claims more than it enforces is a proxy for the
 // property, not the property.
 //
-// ANCHORING — on code identity, never a line number. Not the `F8` tag either
-// (`grep -c "F8" src/main/main.js` → 17, verified; all M05/M06-era, NONE about this
-// invariant).
+// ANCHORING — on code identity in register-tab-ipc.js, never a line number or flight tag.
 //
 // RE-ANCHORED BY M09 F8 LEG 3, AND THAT IS THIS PIN'S DESIGN WORKING, NOT A REGRESSION.
 // Leg 1 anchored on the STRING LITERAL `'tab-move-to-new-window'` — the channel's
