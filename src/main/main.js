@@ -39,6 +39,7 @@ const { computeFindOverlayBounds } = require('./find-overlay-geometry');
 const { createMenuOverlayManager } = require('./menu-overlay-manager');
 const { createFindOverlayManager } = require('./find-overlay-manager');
 const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
+const { createWindowFactory } = require('./window-factory');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -306,164 +307,6 @@ const {
   closedTabStack,
   buildMoveTargets
 });
-
-// --- Find-overlay view construction (M05 Flight 7, DD1/DD2) ---------------------------
-// The floating find bar is a dedicated chrome-class WebContentsView stacked above the
-// active guest. Lifecycle + the find-session state machine live in the extracted,
-// Electron-free manager module (find-overlay-manager.js), instantiated ONCE PER WINDOW
-// into that window's registry record (F7 DD5 — the roaming singleton and its attachment
-// machinery are retired); ONLY Electron construction stays here (createOverlayView).
-// The overlay's webContents never enters `tabViews`, so automation enumerateTabs is
-// unaffected by construction (no MCP-enumerable drift).
-
-// Electron construction for the overlay view (injected into the manager). Chrome-class
-// webPreferences (mirrors chromeView); transparent so the guest shows through around the
-// rounded bar — if the platform compositor renders it opaque (WSLg caveat), the opaque
-// themed rect is the flight-accepted variation.
-function createOverlayView() {
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'find-overlay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  view.setBackgroundColor('#00000000');
-  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'find-overlay.html')).catch((err) => {
-    console.warn('[find-overlay] loadFile rejected:', err && (err.code || err.message || err));
-  });
-  return view;
-}
-
-// Electron construction for the tear-off pill overlay (injected into the manager,
-// M09 F10 Leg L4-rebuild). Deliberately DIVERGENT from createOverlayView: NO preload and
-// never focused (AC3) — the pill is pure paint that follows the cursor over the guest.
-// Transparent bg; the tiny document (pointer-events:none body) can never intercept input.
-// Its webContents never enters `tabViews`, so enumerateTabs is unaffected by construction.
-function createTearoffOverlayView() {
-  const view = new WebContentsView({
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
-  });
-  view.setBackgroundColor('#00000000');
-  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')).catch((err) => {
-    console.warn('[tearoff-overlay] loadFile rejected:', err && (err.code || err.message || err));
-  });
-  return view;
-}
-
-// --- Menu-overlay sheet (M05 Flight 8, DD2/DD4/DD9) -----------------------------------
-// A per-window lazy-singleton transparent WebContentsView covering the active guest's
-// bounds, stacked above the live guest — the surface hosting the chrome menus (kebab as
-// of Leg 2; container/site-info Leg 3; context/unpin Leg 4). Lifecycle + the menu-open
-// state machine live in the extracted, Electron-free manager module
-// (menu-overlay-manager.js), instantiated ONCE PER WINDOW into that window's registry
-// record (F7 DD5); ONLY Electron construction stays here (createSheetView).
-// The sheet's webContents NEVER enters `tabViews` (DD8 — invisible to enumerateTabs by
-// construction; addressable by probed wcId for test driving). NOT gated on
-// entry.trusted anywhere (DD7 — internal tabs are in scope, opposite of the find bar).
-
-// Electron construction for the sheet view (injected into the manager). Chrome-class
-// webPreferences (mirrors the find overlay); transparent background is the
-// CP1-probed DD2 setting.
-// F7 DD5: PER-WINDOW — `record` is the owning window's registry record, closed over by
-// the accelerator handler below. The pre-F7 attachment resolve (the sheet's recorded
-// attachment window → registry.get() → the last-focused fallback) collapses to this
-// closure: a per-window sheet serves exactly one window, so its accelerator scope IS
-// that window's record.
-/** @param {import('./window-registry').WindowRecord} record */
-function createSheetView(record) {
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  view.setBackgroundColor('#00000000');
-  // DD13 accelerator forwarding: while a menu is open, OS keyboard focus sits in the
-  // sheet's webContents — neither chrome's keydown handlers nor the guest
-  // before-input-event capture see anything. Forward the UNION of the guest-captured
-  // set and the chrome keydownToAction set via the pure mapper; unmodified APG keys
-  // (Arrow/Home/End/Enter/Space/Escape/Tab) return null and stay with the sheet page.
-  view.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return;
-    const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift, alt: input.alt });
-    if (!hit) return;
-    // Always swallow a matched accelerator (the sheet page must not see it), and
-    // respect the isAutoRepeat guards exactly as the guest branches do (devtools +
-    // downloads guarded; zoom/print/find deliberately not — parity).
-    event.preventDefault();
-    if (hit.autoRepeatGuard && input.isAutoRepeat) return;
-    // Accelerator scope (F7 DD5): this sheet serves exactly ONE window — chrome-scope
-    // sends, the guest-scope active-tab resolution, and the find/downloads sends all
-    // resolve THIS window's record by construction (window B's open menu cannot
-    // dispatch into window A's chrome or act on A's active tab, because window B's
-    // sheet only ever knows B). The pre-F7 attachment resolve + last-focused fallback
-    // are gone with the roaming singleton.
-    const accelRec = record;
-    const accelChrome = !accelRec.chromeView.webContents.isDestroyed()
-      ? accelRec.chromeView.webContents
-      : null;
-    if (hit.scope === 'chrome') {
-      // Chrome-class actions ride the main→chrome channel; the renderer's extracted
-      // dispatchChromeAction runs the same switch bodies as its keydown handler.
-      accelChrome?.send('chrome-shortcut-action', { action: hit.action });
-      return;
-    }
-    // Guest-class: replicate the guest before-input-event branch bodies against the
-    // ATTACHMENT window's active guest — guarded by isInternalContents (the original
-    // capture sat inside the !__goldfinchInternal guard, so F12/zoom/print/
-    // Ctrl+Shift+I are inert on internal tabs today and must stay so; Ctrl+J is
-    // tab-independent and exempt — see isGuestActionAllowed). Ctrl+F over an
-    // internal active tab is a FULL no-op (menu stays open, keystroke swallowed —
-    // symmetric with the guard).
-    const wc = accelRec && accelRec.activeTabWcId != null ? getTabContents(accelRec.activeTabWcId) : null;
-    const activeIsInternal = !wc || isInternalContents(wc);
-    if (!isGuestActionAllowed(hit.action, activeIsInternal)) return;
-    switch (hit.action) {
-      case 'devtools':
-        if (wc) toggleDevTools(wc);
-        break;
-      case 'zoom-in':
-        applyZoom(wc, 'in');
-        break;
-      case 'zoom-out':
-        applyZoom(wc, 'out');
-        break;
-      case 'zoom-reset':
-        applyZoom(wc, 'reset');
-        break;
-      case 'print':
-        // Replicates the guest branch verbatim (incl. its lack of an autoRepeat guard).
-        if (wc) {
-          wc.print({}, (ok, reason) => {
-            if (!ok) console.warn('print failed:', reason);
-          });
-        }
-        break;
-      case 'find':
-        // DD5 conflict resolution: the menu closes BEFORE find opens (the find bar
-        // and an open menu never co-exist), then chrome's openFind drives
-        // find-overlay:open exactly as the guest-captured Ctrl+F does. F7 DD5: the
-        // open-find lands in THIS window's chrome. Null-tolerant: the slot is nulled
-        // at window `close` (AC8b), after which the sheet wc is already destroyed.
-        record.sheet?.closeMenuOverlay('superseded');
-        accelChrome?.send('open-find');
-        break;
-      case 'downloads':
-        accelChrome?.send('open-downloads');
-        break;
-    }
-  });
-  view.webContents
-    .loadFile(path.join(__dirname, '..', 'renderer', 'menu-overlay.html'))
-    .catch((err) => {
-      console.warn('[menu-overlay] loadFile rejected:', err && (err.code || err.message || err));
-    });
-  return view;
-}
 
 // Resolve a chrome webContents for the sheet's DD7 attachment window (leg 4):
 // a live registered window → ITS chrome; a provided-but-gone window → null
@@ -967,374 +810,6 @@ function currentAutomationStatus() {
   };
 }
 
-// `opts` (M09 F6 Leg 4, DD5):
-//   - noBootTab: boot-tab suppression for move-created windows — part of the
-//     CREATE CHAIN (the registry record flag served via window-boot-config),
-//     never a renderer guess.
-//   - contentSize: create the window with the SOURCE window's content size
-//     (review H3 — identical chrome layout makes the guest-bounds seed exact;
-//     bounds are window-local content DIPs).
-/**
- * Register a `closed` handler that CANNOT reach through a destroyed window (F7 DD8).
- * The window's id is captured at REGISTRATION time (the window is alive here); the
- * handler receives only that primitive. A destroyed-BaseWindow property access THROWS
- * "Object has been destroyed", and an uncaught throw inside the native `closed`
- * emission aborts the listener chain AND permanently wedges the Wayland close path
- * with zero error output (the F6 leg-4 fix-cycle root cause; CLAUDE.md's
- * destroyed-window rule).
- *
- * This wrapper is the SANCTIONED `closed` registration site: the ESLint
- * no-restricted-syntax rule and test/unit/window-closed-invariant.test.js both
- * enforce that no raw `.on('closed'` / `.once('closed'` exists anywhere else in
- * src/main/**.
- * @param {Electron.BaseWindow} win
- * @param {(winId: number) => void} handler
- */
-function onWindowClosed(win, handler) {
-  const winId = win.id;
-  win.on('closed', () => handler(winId));
-}
-
-function createWindow({ noBootTab = false, contentSize = null } = {}) {
-  const isMac = process.platform === 'darwin';
-  /** @type {Electron.BaseWindowConstructorOptions} */
-  const frameOpts = isMac
-    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } } // mac inset — recheck on a mac (open question)
-    : { frame: false };
-  // DD1/DD2: the window host is now a BaseWindow (no webPreferences, no `.webContents`).
-  // The chrome (index.html + renderer.js) is hosted in a child WebContentsView; ALL
-  // renderer access goes through getChromeContents(). backgroundColor/min size/icon/title
-  // and the per-platform frameOpts carry over unchanged (DD4/DD6).
-  const initialWidth = contentSize ? contentSize.width : 1400;
-  const initialHeight = contentSize ? contentSize.height : 900;
-  const win = new BaseWindow({
-    width: initialWidth,
-    height: initialHeight,
-    minWidth: 900,
-    minHeight: 600,
-    backgroundColor: '#1e1f25',
-    title: 'Goldfinch',
-    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
-    ...frameOpts,
-  });
-  // H3 exactness: constructor width/height are WINDOW size; on a framed platform
-  // (mac hidden-titlebar) that under-sizes the content area. setContentSize makes
-  // the content size exactly the source's, so the re-applied guest bounds seed
-  // lands 1:1 (frameless win/linux: a no-op-sized call).
-  if (contentSize) win.setContentSize(contentSize.width, contentSize.height);
-
-  // The chrome WebContentsView carries the webPreferences that used to live on the
-  // BrowserWindow (DD1/DD2). Guest tabs are per-tab WebContentsViews wired explicitly
-  // in tab-create (Flight 3 — all <webview> machinery removed in Leg 4).
-  const chromeView = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
-      // can gate the automationDevInvoke bridge method. The chrome renderer's own process.argv
-      // does not otherwise carry the dev-automation switch, so it must be injected explicitly.
-      // Conditional spread so the key is simply absent in normal/release runs (AC3). (DD7)
-      // Gated on `!app.isPackaged` (DD4, Flight 8): the dev flag is a complete no-op in a
-      // packaged build, so additionalArguments is always absent there.
-      ...(isMcpAutomationEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
-    }
-  });
-
-  // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
-  // the window itself (DD3).
-  win.contentView.addChildView(chromeView);
-  // Opaque dark background matching the shell (Flight-2 DD6): prevents a white flash
-  // before the chrome renderer paints its first frame on slow/WSLg starts.
-  chromeView.setBackgroundColor('#1e1f25');
-  // DD3: chrome view fills the window. Set initial bounds from the constructed size (not
-  // getContentBounds() at the construction instant, which can lag the requested size on some
-  // platforms and flash a gap); steady-state geometry is owned by the resize handler below.
-  chromeView.setBounds({ x: 0, y: 0, width: initialWidth, height: initialHeight });
-
-  chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-
-  // Register the per-window record (F6 DD2). create() SEEDS last-focused (DD8 —
-  // under WSLg programmatic focus fires no event, so creation counts as focus);
-  // real focus events keep the tracker current, latest-event-wins. noBootTab
-  // rides the record (DD5 create-chain) and is served via window-boot-config.
-  const record = registry.create({ win, chromeView, noBootTab });
-  // F8 DD8: the window set grew — every OTHER chrome gains a move target. This
-  // window's own chrome is still pre-boot (a send would be silently dropped, the
-  // H1 hazard), so it seeds itself via the `move-targets` invoke instead.
-  broadcastMoveTargetsChanged();
-  // Capture the id while the window is alive: BaseWindow property access THROWS
-  // "Object has been destroyed" once the native window is gone, and the `closed`
-  // handler below runs exactly then. An uncaught throw inside the `closed`
-  // emission aborts the listener chain AND wedges Electron's native close
-  // sequence on Wayland — the main-process event loop starves permanently
-  // (the F6 leg-4 window-close hang; see the flight log's Anomalies resolution).
-  const winId = win.id;
-  win.on('focus', () => registry.noteFocus(winId));
-
-  // Class 1b — window-lifecycle events route to THIS window's OWN chrome via the
-  // create closure (pass-2 L-a: neither per-tab, broadcast, nor sender-resolved).
-  const sendToOwnChrome = (channel, payload) => {
-    const cc = chromeView.webContents;
-    if (!cc.isDestroyed()) cc.send(channel, payload);
-  };
-
-  // --- Per-window overlay managers (F7 DD5) -------------------------------------------
-  // BOTH overlays are per-window instances now — the roaming singletons and their
-  // attachment machinery are retired. Every dep closes over THIS window's `win`/`record`
-  // (never registry.getLastFocused()), so a per-window instance IS its own scope: the
-  // pre-F7 `=== thisWindow` conditioning checks become structurally redundant and are
-  // deleted rather than converted.
-  //
-  // The managers are constructed EAGERLY (they are closures — cheap); their VIEWS stay
-  // LAZY, created on first show exactly as before, so a window that never opens a menu
-  // or find pays nothing. Do not call ensureView() here.
-  //
-  // Both are reachable two ways, and the choice is not stylistic:
-  //   - these closure refs — used by the LIFECYCLE handlers (`close`, `blur`), which
-  //     must not go through registry.get() (see the `close` handler below);
-  //   - record.findOverlay / record.sheet — used by every owner-resolved IPC handler
-  //     (registered once at module scope, resolving the record from the sender/wcId).
-  const findOverlay = createFindOverlayManager({
-    // Electron's View is not structurally assignable to the manager's ContentViewLike
-    // (addChildView's parameter is contravariant), so the injected handle is cast —
-    // the same erasure the registry's WinLike typedef gives every other contentView
-    // read in this file. The isDestroyed() guard is live, not decorative: `close` is
-    // pre-teardown, but a late owner-resolved call must not touch a gone window.
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createOverlayView,
-    // The per-call live fetch of THIS record's active-guest bounds (the pre-F7 show-path
-    // behavior, preserved); the manager's own per-instance last-seen bounds are the
-    // last-resort fallback when there is no live active guest.
-    getActiveGuestBounds: () => {
-      const entry = record.activeTabWcId != null ? record.tabViews.get(record.activeTabWcId) : null;
-      return entry && !entry.view.webContents.isDestroyed() ? entry.view.getBounds() : null;
-    },
-    computeBounds: computeFindOverlayBounds,
-    getTabContents,
-    // DD4's web-tab-only refusal, scoped to THIS window: present, non-trusted, live.
-    isFindableTab: (wcId) => {
-      const entry = record.tabViews.get(wcId);
-      return !!entry && !entry.trusted && !entry.view.webContents.isDestroyed();
-    },
-    // Class 1b: the find session's tab always belongs to THIS window (open is
-    // owner-resolved; a tab that moves windows closes its session at the move), so the
-    // session tab's owning chrome IS this window's chrome.
-    notifyChrome: sendToOwnChrome
-  });
-
-  const sheet = createMenuOverlayManager({
-    // Electron's View is not structurally assignable to the manager's ContentViewLike
-    // (addChildView's parameter is contravariant), so the injected handle is cast —
-    // the same erasure the registry's WinLike typedef gives every other contentView
-    // read in this file. The isDestroyed() guard is live, not decorative: `close` is
-    // pre-teardown, but a late owner-resolved call must not touch a gone window.
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createSheetView: () => createSheetView(record),
-    // Channel-7 emitter (menu-overlay-closed → chrome). The manager still passes its
-    // recorded attachment window — always THIS window under per-window instances — and
-    // chromeForAttachment keeps the gone-attachment DROP semantics.
-    sendToChrome: (channel, payload, attWin) => {
-      const cc = chromeForAttachment(attWin);
-      if (cc && !cc.isDestroyed()) cc.send(channel, payload);
-    },
-    // DD5 sheet-show hook: find bar hidden while a menu is open (parity).
-    hideFindOverlay: () => findOverlay.hide(),
-    // DD5 close hook with the THREE-reason skip set: 'tab-switch' defers to
-    // tab-set-active's own per-tab find-restore logic; 'tab-hide' just hid the find
-    // overlay one line earlier and restore belongs to tab-set-active's re-add (the
-    // close runs BEFORE activeTabWcId is nulled in that handler, so restoring here
-    // would paint the bar over a hidden guest and then double-handle); 'tab-close'
-    // is skipped explicitly rather than relying on the activeTabWcId null-out
-    // ordering. Every other reason (escape/outside-click/blur/toggle/activated/
-    // superseded/teardown) re-shows iff the find session targets the active tab — at
-    // window teardown the find manager's teardown() has already nulled the session
-    // (it runs FIRST in the `close` handler — the F8 DD5 ordering pin), so the
-    // teardown restore naturally no-ops, while a sheet-crash teardown (find session
-    // still live) restores as desired.
-    restoreFindOverlay: (reason) => {
-      if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
-      // The find session's tab is one of THIS window's tabs by construction — restore
-      // iff it is this window's ACTIVE tab.
-      const sessionWcId = findOverlay.getSessionTabWcId();
-      if (sessionWcId != null && record.activeTabWcId === sessionWcId) findOverlay.show();
-    },
-    // Reason-resolved refocus, main-side half (escape/activated): webContents-level
-    // focus — chrome-side els.kebab.focus() alone cannot move keyboard focus off the
-    // sheet in a multi-view BaseWindow (F7 closeFindOverlaySession precedent).
-    focusChrome: (attWin) => chromeForAttachment(attWin)?.focus()
-  });
-
-  // Tear-off pill overlay (M09 F10 Leg L4-rebuild): per-window, same lifecycle discipline
-  // as the find/menu overlays — lazy view, teardown at `close` (the F6/F7 leak class).
-  // Deps close over THIS window's contentView; no find-session/menu state.
-  const tearoffOverlay = createTearoffOverlayManager({
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createOverlayView: createTearoffOverlayView
-  });
-
-  record.findOverlay = findOverlay;
-  record.sheet = sheet;
-  record.tearoffOverlay = tearoffOverlay;
-
-  // Lifecycle split (DD3, step assignment pinned by review F8): per-window teardown
-  // runs at `close` (pre-teardown — guests alive, navigationHistory readable, and
-  // win.contentView still readable; spike item (d)); `closed` only removes the record.
-  // Overlay DESTRUCTION lives HERE (F7 DD5) — per-window `close` is the SOLE
-  // destruction site and `before-quit` keeps NO overlay role (app.quit() closes every
-  // window, so every window destroys its own). The F8 DD5 ordering pin travels with it:
-  // find BEFORE sheet.
-  win.on('close', () => {
-    // Overlay DESTRUCTION (F7 DD5). ABOVE the `!rec` early-return: a fail-open path
-    // must not leak two WebContentsViews per closed window for the app's lifetime
-    // (the leak class F6 fixed for the chrome wc). Reached via the create closure, NOT
-    // registry.get() — on the `!rec` path there is no record to reach them through.
-    // ORDERING PIN (F8 DD5, traveling from the retired before-quit block): find BEFORE
-    // sheet — the find teardown nulls the session, so the sheet's teardown-reason
-    // find-restore naturally no-ops.
-    findOverlay.teardown();
-    tearoffOverlay.teardown();
-    sheet.closeMenuOverlay('teardown');
-    sheet.teardown();
-
-    const rec = registry.get(win.id);
-    // Null the record slots in the SAME breath as the teardown (leg-1 design review):
-    // the record stays reachable via registry.get() until `closed` (registry.remove
-    // below) and the chrome wc stays alive until its deferred destroy, so an
-    // owner-resolved IPC arriving in that gap would otherwise call ensureView() on a
-    // torn-down manager and RECONSTRUCT a view onto the dying window — a leak nothing
-    // tears down, since `close` fires once. Nulling makes the record path fail safe;
-    // the closure path above already tore down. Both paths, one breath.
-    if (rec) {
-      rec.findOverlay = null;
-      rec.tearoffOverlay = null;
-      rec.sheet = null;
-    }
-    if (!rec) return;
-    // (1) Whole-window closed-tab capture (DD4, leg 3): every persist-jar tab as
-    // an ordinary entry — same allowlist/exclusions as the tab-close site — in
-    // tabViews insertion order, each with the append sentinel and this window's
-    // id. Runs at `close` because the guests are still alive and their
-    // navigationHistory readable here (spike item (d)); the destroy loop below
-    // is what kills them. `win.destroy()` fires NO `close` event, so a
-    // destroyed-not-closed window is never captured — accepted, documented edge
-    // (DD3). Whole block try/catch — capture must never break close.
-    try {
-      const captured = captureWindowCloseEntries({
-        tabViews: rec.tabViews,
-        jarsList: jars.list(),
-        windowId: win.id,
-      });
-      for (const entry of captured) closedTabStack.push(entry);
-      if (captured.length > 0) broadcastClosedTabStackChanged();
-    } catch (err) {
-      console.error('[closed-tab-stack] window-close capture failed:', err);
-    }
-    // (1b) Session-restore snapshot write (M09 Flight 9 / DD3), a SIBLING to the
-    // closed-tab capture above — guests still alive here, and BEFORE the destroy loop
-    // (which nulls tabViews/activeTabWcId). Setting-gated AND suppressed while quitting
-    // (before-quit already captured the authoritative full set — this is what stops the
-    // menu-Exit path from shrinking the snapshot window-by-window). When !sessionQuitting
-    // this serves the close-last-window path (before-quit would otherwise fire on an
-    // empty registry) and mid-session dismissal. registry.records() momentarily
-    // over-includes the closing window (removed only at `closed`); always overwritten by
-    // the next close/quit — surfaces only on a crash between events, which DD6 scopes out.
-    // Whole block try/catch: session-store.write() propagates fs errors by design, and an
-    // uncaught throw here would wedge close (the F6 window-close-hang class).
-    try {
-      if (settings.get('restoreSession') === true && !sessionQuitting) {
-        sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
-      }
-    } catch (err) {
-      console.error('[session-store] window-close snapshot write failed:', err);
-    }
-    // (2) Per-tab side-effect suite + guest destroy (DD3/M5): Electron never
-    // auto-destroys an attached WebContentsView's webContents on window close
-    // (spike verdict 3) — the explicit destroy is mandatory, per dying guest,
-    // mirroring the tab-close path's forgetTab + removeChildView + destroy.
-    for (const [wcId, entry] of rec.tabViews) {
-      historyRecorder?.forgetTab(wcId);
-      if (!win.isDestroyed()) win.contentView.removeChildView(entry.view);
-      if (!entry.view.webContents.isDestroyed()) entry.view.webContents.destroy();
-    }
-    rec.tabViews.clear();
-    rec.activeTabWcId = null;
-    // The chrome is NOT destroyed here (DD3: "null the chrome" — the reference
-    // drops with the record at `closed`). Destroying the sender's own webContents
-    // synchronously inside its window-close IPC dispatch is a crash-risk pattern,
-    // and today's single-window behavior (chrome wc outlives the window until
-    // quit) is the byte-identical baseline.
-  });
-
-  onWindowClosed(win, (closedWinId) => {
-    // Record removal (DD3): singleton null-outs are gone; the DD8 accessor's
-    // membership validation makes a stale last-focused id fall back safely.
-    // The id is a PRIMITIVE captured at registration by onWindowClosed — NEVER a
-    // win.* read here (destroyed-window access throws; see the capture above).
-    registry.remove(closedWinId);
-    // F8 DD8: the window set shrank — the surviving chromes must drop this window
-    // from their menus. A menu built BEFORE this push still refuses correctly at
-    // dispatch (registry.get → null), which is the AC4 refusal; this just keeps
-    // the stale item from being offered in the first place.
-    broadcastMoveTargetsChanged();
-    // Chrome-webContents leak fix (M09 F6 Leg 4 / review M4 — the leg-2 deferral
-    // lands here): with N windows a closed window's chrome renderer would linger
-    // until quit. DEFERRED destroy via setImmediate — outside the sender's own
-    // window-close IPC dispatch (destroying the sender's webContents
-    // synchronously inside its own dispatch is the leg-2 crash-risk rationale).
-    // The record is already removed, so no send path can resolve this chrome
-    // between here and the destroy.
-    const chromeWc = chromeView.webContents;
-    setImmediate(() => {
-      if (!chromeWc.isDestroyed()) /** @type {any} */ (chromeWc).destroy();
-    });
-  });
-
-  // Menu-overlay close family (F8 DD4): BaseWindow blur — app switch closes any open
-  // menu. On an app switch the sheet's own blur ALSO fires (dismissed{blur}, stale by
-  // then): closeMenuOverlay is idempotent + stale-token-guarded, so chrome sees
-  // exactly one channel-7 close and the DD5 restore runs once. No refocus on 'blur'
-  // (never steal focus from the other app on return). Window MINIMIZE is deliberately
-  // NOT in the close family: where the platform fires blur on minimize the menu
-  // closes via this path; where it doesn't (WSLg uncertainty), a menu surviving
-  // minimize-restore is an accepted variation (leg AC3) — HAT observes.
-  // F7 DD5: unconditional on THIS window's OWN sheet (the create closure). The pre-F7
-  // attachment conditioning existed to stop A's blur from killing B's menu; a
-  // per-window sheet can only ever hold this window's menu, and closeMenuOverlay is
-  // idempotent when no menu is open — so the check is redundant, not load-bearing.
-  win.on('blur', () => {
-    sheet.closeMenuOverlay('blur');
-  });
-
-  // DD3: keep the chrome view sized to the window. No-op if the view is already gone
-  // (resize can fire during teardown).
-  // FIX 1 belt-and-suspenders: after the chrome view bounds are updated, push
-  // 'trigger-send-bounds' to the renderer so it immediately re-measures #webviews
-  // and resends the active guest's bounds. Belt-and-suspenders alongside the
-  // renderer-side ResizeObserver (which fires per CSS layout frame during transitions).
-  win.on('resize', () => {
-    if (chromeView.webContents.isDestroyed()) return;
-    const { width, height } = win.getContentBounds();
-    chromeView.setBounds({ x: 0, y: 0, width, height });
-    sendToOwnChrome('trigger-send-bounds');
-  });
-
-  // Forward maximize state to the renderer so the custom window controls can
-  // sync their label/icon/data-state (DD7 read path). Class 1b: THIS window's
-  // maximize state goes to THIS window's chrome, never the accessor's.
-  win.on('maximize', () => {
-    sendToOwnChrome('window-maximized-change', true);
-    sendToOwnChrome('trigger-send-bounds');
-  });
-  win.on('unmaximize', () => {
-    sendToOwnChrome('window-maximized-change', false);
-    sendToOwnChrome('trigger-send-bounds');
-  });
-
-  return record;
-}
-
 // ---------------------------------------------------------------------------
 // Page zoom. A discrete ladder mirroring Chrome's familiar steps. applyZoom reads
 // the guest's current factor, steps to the next/prev rung (or resets to 1.0),
@@ -1370,6 +845,51 @@ function applyZoom(wc, action) {
   // Class 3 (DD2): the zoomed tab's OWNING window's chrome, resolved at event time.
   chromeForTab(wc.id)?.send('zoom-changed', { wcId: wc.id, factor: next });
 }
+
+// Electron construction is confined to this dependency map; window-factory.js itself
+// remains Electron-free and its close/closed lifecycle runs under strict fake windows.
+const { createWindow } = createWindowFactory({
+  BaseWindow,
+  WebContentsView,
+  platform: process.platform,
+  argv: process.argv,
+  isPackaged: app.isPackaged,
+  paths: {
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    chromePreload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
+    chromeHtml: path.join(__dirname, '..', 'renderer', 'index.html'),
+    findPreload: path.join(__dirname, '..', 'preload', 'find-overlay-preload.js'),
+    findHtml: path.join(__dirname, '..', 'renderer', 'find-overlay.html'),
+    menuPreload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
+    menuHtml: path.join(__dirname, '..', 'renderer', 'menu-overlay.html'),
+    tearoffHtml: path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')
+  },
+  registry,
+  isAutomationEnabled: isMcpAutomationEnabled,
+  broadcastMoveTargetsChanged,
+  createFindOverlayManager,
+  createMenuOverlayManager,
+  createTearoffOverlayManager,
+  computeFindOverlayBounds,
+  getTabContents,
+  chromeForAttachment,
+  sheetAcceleratorAction,
+  isInternalContents,
+  isGuestActionAllowed,
+  toggleDevTools,
+  applyZoom,
+  captureWindowCloseEntries,
+  jars,
+  closedTabStack,
+  broadcastClosedTabStackChanged,
+  settings,
+  isSessionQuitting: () => sessionQuitting,
+  sessionStore,
+  buildSessionSnapshot,
+  getHistoryRecorder: () => historyRecorder,
+  defer: setImmediate,
+  logger: console
+});
 
 // ---------------------------------------------------------------------------
 // Each web guest WebContentsView gets the media-scanner preload (webview-preload.js)

@@ -20,7 +20,8 @@
 //     `rec.win`).
 // Banning the REGISTRATION SHAPE cannot be evaded by aliasing, and it forces the
 // onWindowClosed wrapper DD8 names "the primary net" rather than merely policing what
-// a callback reads.
+// a callback reads. The wrapper now lives in window-factory.js; its strict runtime
+// destroyed-object proof is complementary to this whole-tree exclusivity scan.
 //
 // SCOPE — `'closed'` ONLY, and deliberately not `'close'`. Electron's BaseWindow
 // `'closed'` and Node's stream/server `'close'` differ by exactly one character;
