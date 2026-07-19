@@ -47,6 +47,7 @@ const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
+const { registerAppLifecycle } = require('./app-lifecycle');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -891,6 +892,9 @@ const { rerollSeed } = registerBrowserIpc({
   toggleDevTools,
   registerInternalHandler,
   jars,
+  registry,
+  createWindow,
+  broadcastJarsChanged: () => broadcastJarsChanged(),
   isSafeTabUrl,
   getChromeContents,
   session,
@@ -904,23 +908,7 @@ const { rerollSeed } = registerBrowserIpc({
 // --- window controls (custom frameless min/max/close, win+linux) ---
 // Class 1 (F6 DD2/DD3): each control resolves the SENDER's window — window 2's
 // controls must never minimize/close window 1.
-ipcMain.on('window-minimize', (event) => {
-  registry.getWindowForChrome(event.sender)?.win.minimize();
-});
-ipcMain.on('window-toggle-maximize', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec) return;
-  if (rec.win.isMaximized()) rec.win.unmaximize();
-  else rec.win.maximize();
-});
 // DD6: close() → 'closed' → 'window-all-closed' → app.quit() (non-darwin); NOT app.quit() directly.
-ipcMain.on('window-close', (event) => {
-  registry.getWindowForChrome(event.sender)?.win.close();
-});
-ipcMain.handle('window-is-maximized', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  return !!(rec && rec.win.isMaximized());
-});
 
 // New Window command (M09 F6 Leg 4, DD5): kebab item + Ctrl/Cmd+N, both through
 // the one-classifier path → dispatchChromeAction('new-window') → this invoke.
@@ -928,11 +916,6 @@ ipcMain.handle('window-is-maximized', (event) => {
 // discipline). The window boots its home tab exactly like first launch (no
 // noBootTab), and registry.create seeds last-focused — so the DD8 automation
 // accessor deterministically retargets to the new window (WSLg-safe).
-ipcMain.handle('window-create', (event) => {
-  if (!registry.getWindowForChrome(event.sender)) return null;
-  const rec = createWindow();
-  return rec.win.id;
-});
 
 // Boot-config invoke (DD5 / review L4 transport + review H1 barrier). Joins the
 // chrome renderer's boot-gating Promise.all: returns { bootTab } (false only for
@@ -942,26 +925,9 @@ ipcMain.handle('window-create', (event) => {
 // onAdoptTab/onTabMovedAway registrations sit ABOVE the boot gate), so the
 // queued adopt-protocol sends flush here — a send any earlier would hit a
 // pre-boot document and be silently dropped with no retry.
-ipcMain.handle('window-boot-config', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec) return { bootTab: true };
-  rec.bootConfigServed = true;
-  const queued = rec.pendingChromeSends.splice(0);
-  const cc = rec.chromeView.webContents;
-  for (const buildMsg of queued) {
-    if (cc.isDestroyed()) break;
-    const [channel, payload] = buildMsg();
-    cc.send(channel, payload);
-  }
-  // M09 Flight 9 / DD4 / AC4: a restored window carries its ordered saved tab list on
-  // the record — serve it so the renderer boot loop creates each tab fresh (suppressing
-  // the home boot tab). Otherwise the unchanged bootTab decision (default-off byte-identity).
-  return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
-});
 
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
-ipcMain.on('app-quit', () => app.quit());
 
 // OS-clipboard string write for the page context menu's Copy link / Copy image address /
 // Copy selection (Leg 4). Chrome-trusted one-way send — same trust domain as window-minimize/
@@ -972,15 +938,6 @@ ipcMain.on('app-quit', () => app.quit());
 
 // New container creation: renderer collected the name (via inline input) and sends it here.
 // We create the jar and return it; the renderer calls createTab directly with the container object.
-ipcMain.handle('new-container-create', async (_event, { name }) => {
-  if (!name || typeof name !== 'string') return null;
-  const c = jars.add(name);
-  // Both add entry points emit jars-changed (DD6). broadcastJarsChanged's const
-  // destructuring sits at the jar section further down — legal (the handler runs
-  // long after module evaluation).
-  broadcastJarsChanged();
-  return c;
-});
 
 // Tab lifecycle and move IPC are registered as one ownership domain.
 registerTabIpc({
@@ -1193,261 +1150,60 @@ registerSettingsIpc({
   adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN
 });
 
-app.on('session-created', sessionRuntime.onSessionCreated);
-
-app.whenReady().then(() => {
-  // App database open (M10 Flight 1, Leg 2 / DD4, DD7, DD9): folded into the
-  // reshaped initProfileAndStores below, immediately after its dev-profile
-  // setPath redirect and before every store load (shields/settings/jars/
-  // downloads all read/write through this handle). This replaces leg 1's
-  // interim sibling call, which ran ahead of the redirect and so opened a dev
-  // (unpackaged) launch's app.db in the pre-redirect userData dir — see
-  // flight-log.md's Decisions section for the leg-1 nuance this resolves.
-  initProfileAndStores(app, { appDb, shields, settings, jars, downloads });
-  // History store: opened as a SIBLING call right after initProfileAndStores
-  // returns — deliberately NOT by widening that function's unit-pinned 4-store
-  // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
-  // dev-profile setPath redirect has already run by the time initProfileAndStores
-  // returns, so userData is correct here for free (Architect-pinned, flight DD8 /
-  // Technical Approach). historyRecorder is module-scoped so wireTabViewEvents'
-  // closure (built per tab-create) can see it.
-  historyStore.open(app.getPath('userData'));
-  // Session store load (M09 Flight 9 / AC2), a SIBLING to historyStore.open above —
-  // UNCONDITIONAL, deliberately NOT gated on the restoreSession setting. session-store
-  // .write() now resolves its row through the already-open app-db singleton (M10 Flight 1
-  // / DD4/DD7) rather than a load()-set dir — the failure mode if load() were skipped
-  // shifts from "throws without a dir" to "doc store unresolved", same uncaught-throw-
-  // wedges-quit hazard (the F6 hang class), so load() here remains load-bearing. When
-  // restore is off the loaded snapshot sits INERT (never read()); for a user who never
-  // enabled it, no session row/file exists so load()'s row read is genuinely empty. The
-  // dev-profile setPath('userData') redirect has already run, so userData is correct
-  // here (same discipline as history).
-  sessionStore.load(app.getPath('userData'));
-  historyRecorder = createHistoryRecorder({
-    store: historyStore,
-    listJars: () => jars.list(),
-    broadcast: broadcastToChromeAndInternal
-  });
-  // Prune once at open, then hourly — unref'd so the interval never holds the
-  // process open on its own (mirrors no other long-lived interval in main.js
-  // needing this, but the house pattern for background timers).
-  pruneAllJars();
-  setInterval(pruneAllJars, 60 * 60 * 1000).unref();
-  // Instantiate the app-level downloads manager ONCE, right after the stores load,
-  // injecting the loaded downloads-store. Module-scoped so the synchronous
-  // session-created hook's wireDownloadHandler closure can reference it. (DD3)
-  downloadsManager = createManager(downloads);
-  // Cover the session that may already exist before the hook was attached.
-  // No other pre-warm: jar sessions (including the migrated legacy `default` jar) get
-  // Shields/downloads/spellcheck lazily at their first `session-created` firing above —
-  // routing goes through the live default flag now, so there is no reserved partition
-  // to warm ahead of use (M06 F2 DD5).
-  wireDownloadHandler(session.defaultSession);
-  applyShields(session.defaultSession);
-  applySpellcheck(session.defaultSession, settings.get('spellcheck'));
-
-  // Dedicated internal session for `goldfinch://` pages. Set the flag BEFORE fromPartition
-  // so the synchronous `session-created` hook skips applyShields + wireDownloadHandler for
-  // it, then register the scheme handler on THIS session's protocol (session-scoped — the
-  // global protocol would bind the default session and the internal webview wouldn't see it). (DD2/DD3)
-  creatingInternalSession = true;
-  const internalSession = session.fromPartition(INTERNAL_PARTITION); // emits session-created synchronously NOW
-  creatingInternalSession = false;
-  /** @type {any} */ (internalSession).__goldfinchInternal = true; // belt-and-suspenders for any later applyShields call
-  internalSession.protocol.handle('goldfinch', handleInternal);
-
-  // Session restore (M09 Flight 9 / DD4 / AC4), gated on the setting. read() returns
-  // null unless restore is ON and a non-empty usable snapshot exists (leg 2 guarantees
-  // it can never yield zero windows), so OFF falls through to today's EXACT single
-  // createWindow() — the byte-identical default-off path. On restore, rebuild each saved
-  // window with noBootTab (no home tab) and stash its ordered saved tab list on the
-  // record (createWindow returns it); window-boot-config serves that list to the renderer,
-  // which CREATES each tab FRESH (never adopt — there is no live source view at cold start).
-  const restoreSnap = settings.get('restoreSession') === true ? sessionStore.read() : null;
-  if (restoreSnap) {
-    for (const w of restoreSnap.windows) {
-      const rec = createWindow({ noBootTab: true });
-      rec.restoreTabs = w.tabs;
-    }
-  } else {
-    createWindow();
-  }
-
-  // In-memory dev-enable override (DD3/DD4). Computed ONCE here (after app.whenReady,
-  // so app.isPackaged is settled), alongside the launch logic. It writes NOTHING to the
-  // settings store — it satisfies the bind decision, the flip-OFF guard, and the auth
-  // gate in dev while the persisted `automationEnabled` stays false (human-only invariant).
-  // `!app.isPackaged` makes `--automation-dev` a complete no-op in a packaged build (DD4).
-  devEnableOverride = !app.isPackaged && isMcpAutomationEnabled(process.argv);
-
-  // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
-  // Registered ONCE at startup, after createWindow() so a window record exists.
-  // Never registered in production: gated on the dev flag AND !app.isPackaged (DD4).
-  // The sender check (registry chrome membership) isolates the seam to the chrome
-  // renderers — a guest webview has its own webContents and cannot pass this check.
-  // No webContents.debugger anywhere (DD8).
-  if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
-    // dev seam is not admin-tier, so chrome-class overlay wcIds must refuse here too.
-    const engine = createEngine(getChromeContents, {
-      getDownloads: () => downloadsManager.listAll(),
-      grabWindow,
-      // F7 DD1/DD2 — the SECOND injection site, kept in parity with the MCP engine
-      // accessor above (AC12 greps for 2 on each of the three).
-      listWindows,
-      enumerateWindows,
-      // DD8 widening (review F3 — the SECOND injection site, kept in parity with
-      // the MCP engine accessor above): all-windows membership + any-chrome.
-      isTabViewWcId: (id) => registry.isTabViewWcId(id),
-      isChromeContents: (wc) => registry.isChromeContents(wc),
-      // F7 DD6: owner routing + window raise — the SECOND injection site, kept in
-      // parity with the MCP engine accessor above (the leg's AC6 greps for 2 on each).
-      chromeForTab,
-      raiseWindowForTab,
-      // History read accessors (Mission 08 Flight 5): same injection as the MCP
-      // getEngine accessor above, kept in parity for this dev-only seam.
-      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
-      isKnownJar: (id) => jars.list().some((j) => j.id === id),
-    });
-    ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
-      // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
-      // check): this handler is NEVER registered in production (dev-gated), and a guest
-      // webview is never a registered chrome, so the membership check fully isolates it.
-      // Widened to registry membership (F6 Leg 2 / review F3): any window's chrome.
-      if (!registry.getWindowForChrome(event.sender)) {
-        throw new Error('automation: dev-seam is chrome-renderer-only');
-      }
-      if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
-      return engine[op](...(Array.isArray(args) ? args : []));
-    });
-  }
-
-  // Loopback MCP automation server. DD2 (Flight 8): the human `automationEnabled`
-  // toggle is the SOLE bind gate in production — so a packaged build with the toggle
-  // persisted ON binds at launch. The `devEnableOverride` term (DD3/DD4) keeps the
-  // dev harness binding regardless of the persisted toggle, satisfying BOTH the bind
-  // decision and the auth gate WITHOUT writing `automationEnabled` (the human-only
-  // invariant is preserved even in dev). It is `!app.isPackaged && isMcpAutomationEnabled`
-  // — the isMcpAutomationEnabled predicate keys only on `--automation-dev` and is
-  // structurally independent of any legacy browser-process CDP debugging switch, so the
-  // MCP server is bound only by the dev-automation flag; and `!app.isPackaged` makes the
-  // flag a complete no-op in a packaged build (DD4).
-  // Started after createWindow() so the (lazy) engine accessor sees a live window. The
-  // SC7 Origin/Host guard is wired inside createMcpServer and runs before any MCP
-  // processing — the server never binds without it.
-  if (shouldBindAutomation({ automationEnabled: settings.get('automationEnabled') === true, devForceBind: devEnableOverride })) {
-    // Start the surface via the shared factory (Leg 7) — same option-bag + bind-status
-    // capture as a live rebind. Fire-and-forget here, matching the original launch
-    // behavior (the app does not block on the bind).
-    void startMcpServerInstance();
-  }
-
-  // Dev-only AUTO-MINT-TO-STDOUT affordance, gated on the dev-enable override (which
-  // already ANDs `!app.isPackaged` — DD4). The surface is enabled in dev by the
-  // override, not by minting (DD3).
-  if (devEnableOverride) {
-    // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The real key
-    // management now lives in goldfinch://settings (Flight 5, Leg 3) via the
-    // origin-checked automation:jar-key-mint / automation:admin-key-mint IPC; that
-    // surface is renderer-driven and so unreachable by an external headless /
-    // behavior-test harness. This block lets such a harness flip the surface on and
-    // read a key WITHOUT a renderer round-trip. DEV-ONLY and least-privilege:
-    //   - Fires ONLY under the double gate shouldAutoMint(argv, env): the EXACT
-    //     `--automation-dev` token (already true in this branch) AND
-    //     GOLDFINCH_AUTOMATION_DEV_MINT === '1'. A shipped build never carries
-    //     `--automation-dev`, so this can never run in production.
-    //   - A plain `npm run dev:automation` (no GOLDFINCH_AUTOMATION_DEV_MINT) does
-    //     NOT enable the surface and prints NOTHING — off-by-default stays observable.
-    //   - Mints for the RESOLVED default jar (M06 F2 DD7): resolveAutoMintTarget(jars)
-    //     reads jars.getDefault() and returns its id, or null when the resolved
-    //     default is the Burner sentinel (empty registry — the mint guard refuses
-    //     burner ids, so minting is skipped with one parseable stderr notice instead
-    //     of a thrown/caught guard error). Admin key minted only when
-    //     GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
-    //   - Prints the result ONCE to stdout as a single parseable line so the FD can
-    //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
-    if (shouldAutoMint(process.argv, process.env)) {
-      try {
-        const target = resolveAutoMintTarget(jars);
-        if (target === null) {
-          console.error('[mcp] dev auto-mint skipped: default is Burner (no persistent jars)');
-        }
-        const key = target === null ? null : mintJarKey(target, settings, jars);
-        const adminKey = process.env.GOLDFINCH_AUTOMATION_ADMIN ? mintAdminKey(settings) : null;
-        // mintJarKey mints the key hash only (no enable side-effect); the surface is
-        // enabled by the dev-enable override. Single parseable line.
-        process.stdout.write('AUTOMATION_DEV_MINT ' + JSON.stringify({ key, adminKey }) + '\n');
-      } catch (err) {
-        console.error('[mcp] dev auto-mint failed:', err && err.message);
-      }
-    }
-  }
-
-  app.on('activate', () => {
-    if (BaseWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-// Primary MCP stop hook — before-quit fires on a real quit across ALL platforms,
-// including macOS (where window-all-closed does NOT quit). stop() is idempotent,
-// so both this and the window-all-closed secondary firing is safe.
-app.on('before-quit', () => {
-  // NO overlay role here (F7 DD5): overlays are per-window instances destroyed by
-  // their own window's `close` handler — the sole destruction site. app.quit() closes
-  // every window, so every window destroys its own; a registry-iterating teardown here
-  // would run FIRST and double-destroy. The F8 DD5 find-before-sheet ordering pin
-  // traveled to that `close` handler with the code.
-  // Session-restore snapshot write (M09 Flight 9 / DD3), the FIRST-quit-event capture on
-  // the menu-Exit / Cmd+Q path (before-quit fires first, full registry alive). Set the
-  // coordination flag FIRST so every subsequent per-window `close` write is suppressed and
-  // cannot shrink this authoritative full-set snapshot. Setting-gated AND non-empty-guarded
-  // (an empty registry writes nothing — the close-last-window path leaves this a no-op and
-  // lets `close` own that write). Whole block try/catch: session-store.write() propagates
-  // fs errors by design, and an UNCAUGHT throw in before-quit wedges the quit (the F6 hang
-  // class) — log-and-continue instead.
-  sessionQuitting = true;
-  try {
-    if (settings.get('restoreSession') === true && registry.records().length) {
-      sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
-    }
-  } catch (err) {
-    console.error('[session-store] before-quit snapshot write failed:', err);
-  }
-  // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
-  // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
-  // guaranteed — a sync handler racing an I/O write — and the contract remains
-  // "in-progress is not durable". The loop is bounded by the in-progress count
-  // (typically 0–few), so the synchronous writes are acceptable quit latency.
-  downloadsManager?.flushInterrupted();
-  mcpServer?.stop();
-});
-
-app.on('window-all-closed', () => {
-  // Secondary MCP stop, INSIDE the non-darwin branch: on macOS closing all
-  // windows does not quit (the app stays dock-resident), so we must NOT tear the
-  // server down there while the app lives — before-quit handles macOS.
-  if (process.platform !== 'darwin') {
-    mcpServer?.stop();
-    app.quit();
-  }
-});
-
-// History store close (M08 Flight 1 / DD2) — a NEW, deliberately LATER lifecycle
-// seam than before-quit's teardown: will-quit fires after windows are torn down,
-// guaranteeing no in-flight navigation can still be writing when the store closes
-// (Architect review). close() checkpoints the WAL file.
-app.on('will-quit', () => {
-  try {
-    historyStore.close();
-  } catch {
-    // best-effort — quit must not hang or crash on a close failure
-  }
-  // App database close (M10 Flight 1, Leg 1 / DD2, DD7) — a sibling to
-  // historyStore.close() above; order between the two DBs is immaterial,
-  // both run after before-quit's writers. close() checkpoints the WAL file.
-  try {
-    appDb.close();
-  } catch {
-    // best-effort — quit must not hang or crash on a close failure
-  }
+registerAppLifecycle({
+  app,
+  ipcMain,
+  sessionRuntime,
+  initProfileAndStores,
+  profileStores: { appDb, shields, settings, jars, downloads },
+  historyStore,
+  sessionStore,
+  getUserDataPath: () => app.getPath('userData'),
+  createHistoryRecorder,
+  setHistoryRecorder: (recorder) => { historyRecorder = recorder; },
+  listJars: () => jars.list(),
+  broadcast: broadcastToChromeAndInternal,
+  pruneAllJars,
+  scheduleInterval: setInterval,
+  createDownloadsManager: createManager,
+  downloadsStore: downloads,
+  setDownloadsManager: (manager) => { downloadsManager = manager; },
+  getDownloadsManager: () => downloadsManager,
+  wireDownloadHandler,
+  applyShields,
+  applySpellcheck,
+  settings,
+  defaultSession: session.defaultSession,
+  fromPartition: (partition) => session.fromPartition(partition),
+  internalPartition: INTERNAL_PARTITION,
+  setCreatingInternalSession: (value) => { creatingInternalSession = value; },
+  handleInternal,
+  createWindow,
+  registry,
+  isMcpAutomationEnabled,
+  shouldBindAutomation,
+  shouldAutoMint,
+  setDevEnableOverride: (value) => { devEnableOverride = value; },
+  startMcpServerInstance,
+  createEngine,
+  getChromeContents,
+  grabWindow,
+  listWindows,
+  enumerateWindows,
+  chromeForTab,
+  raiseWindowForTab,
+  isKnownJar: (id) => jars.list().some((jar) => jar.id === id),
+  resolveAutoMintTarget,
+  mintJarKey,
+  mintAdminKey,
+  getMcpServer: () => mcpServer,
+  setSessionQuitting: (value) => { sessionQuitting = value; },
+  buildSessionSnapshot,
+  appDb,
+  getAllWindows: () => BaseWindow.getAllWindows(),
+  argv: process.argv,
+  env: process.env,
+  platform: process.platform,
+  stdout: process.stdout,
+  logger: console
 });

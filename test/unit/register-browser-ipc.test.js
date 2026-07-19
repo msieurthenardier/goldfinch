@@ -9,6 +9,7 @@ function makeHarness() {
   const listeners = new Map();
   const internal = new Map();
   const events = [];
+  const chromeSender = {};
   const webSession = {
     cookies: { get: async () => [], remove: async () => {} },
     clearStorageData: async (opts) => events.push(['clear-storage', opts]),
@@ -42,7 +43,17 @@ function makeHarness() {
     isInternalContents: (target) => target.session.__goldfinchInternal === true,
     toggleDevTools: () => { events.push(['devtools']); return true; },
     registerInternalHandler: (_ipc, channel, fn) => internal.set(channel, fn),
-    jars: { list: () => [{ id: 'personal', partition: 'persist:personal' }] },
+    jars: {
+      list: () => [{ id: 'personal', partition: 'persist:personal' }],
+      add: (name) => ({ id: 'new', name }),
+    },
+    registry: {
+      getWindowForChrome: (sender) => sender === chromeSender
+        ? { win: { id: 17, isMaximized: () => false, minimize: () => events.push(['minimize']), maximize: () => events.push(['maximize']), close: () => events.push(['close']) } }
+        : null,
+    },
+    createWindow: () => ({ win: { id: 23 } }),
+    broadcastJarsChanged: () => events.push(['jars-changed']),
     isSafeTabUrl: (url) => typeof url === 'string' && url.startsWith('https://'),
     getChromeContents: () => chrome,
     session: { fromPartition: (partition) => partition === 'internal' ? internalSession : webSession },
@@ -52,7 +63,7 @@ function makeHarness() {
     random: () => 0.5,
     logger: { warn: (...args) => events.push(['warn', ...args]) },
   });
-  return { handlers, listeners, internal, events, wc, chrome };
+  return { handlers, listeners, internal, events, wc, chrome, chromeSender };
 }
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
@@ -62,6 +73,20 @@ test('browser registrar preserves channel inventory and owner-routed media forwa
   assert.equal(h.listeners.has('guest-media-list'), true);
   h.listeners.get('guest-media-list')({ sender: { id: 5 } }, ['song']);
   assert.deepEqual(h.events, [['chrome-send', 'tab-media-list', { wcId: 5, mediaList: ['song'] }]]);
+});
+
+test('window actions derive authority from the sender and container creation broadcasts', async () => {
+  const h = makeHarness();
+  assert.equal(await h.handlers.get('window-create')({ sender: {} }), null);
+  assert.equal(await h.handlers.get('window-create')({ sender: h.chromeSender }), 23);
+  h.listeners.get('window-minimize')({ sender: {} });
+  assert.deepEqual(h.events, []);
+  h.listeners.get('window-minimize')({ sender: h.chromeSender });
+  assert.deepEqual(h.events, [['minimize']]);
+  h.events.length = 0;
+  assert.equal(await h.handlers.get('new-container-create')({}, null), null);
+  assert.deepEqual(await h.handlers.get('new-container-create')({}, { name: 'Work' }), { id: 'new', name: 'Work' });
+  assert.deepEqual(h.events, [['jars-changed']]);
 });
 
 test('browser target guards and page-context allowlist refuse malformed/internal requests', async () => {

@@ -28,7 +28,7 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 const { createHarness } = require('./helpers/window-factory-harness');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/app-lifecycle.js');
 const RENDERER_JS = path.join(__dirname, '../../src/renderer/renderer.js');
 
 /** The real main.js, read fresh. @returns {string} */
@@ -71,15 +71,15 @@ function count(hay, needle) {
 }
 
 // --- anchors (pure code; identical masked and unmasked) ---
-const WHENREADY = 'app.whenReady().then(() => {';
+const WHENREADY = 'const ready = app.whenReady().then(() => {';
 const BEFORE_QUIT = "app.on('before-quit', () => {";
 const BOOT_CONFIG = "ipcMain.handle('window-boot-config', (event) => {";
-const REBUILD_BRANCH = 'if (restoreSnap) {';
+const REBUILD_BRANCH = 'if (restoreSnapshot) {';
 const RENDERER_BRANCH =
   'if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {';
 
 const GUARD = "settings.get('restoreSession')";
-const LOAD_STMT = "sessionStore.load(app.getPath('userData'));";
+const LOAD_STMT = 'sessionStore.load(userDataPath);';
 const READ_TERNARY = "settings.get('restoreSession') === true ? sessionStore.read() : null";
 const BQ_GUARD_EXPR = "settings.get('restoreSession') === true && registry.records().length";
 const WRITE_CALL = 'sessionStore.write(';
@@ -189,7 +189,7 @@ test('AC4: window-boot-config returns restoreTabs — real → present, stripped
   assert.equal(realBody.includes('restoreTabs'), true, 'real → boot-config serves restoreTabs to the renderer');
 
   const mutated = mainSource().replace(
-    'return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };',
+    "return rec.restoreTabs\n      ? { bootTab: false, restoreTabs: rec.restoreTabs }\n      : { bootTab: !rec.noBootTab };",
     'return { bootTab: !rec.noBootTab };'
   );
   assertMutated(mainSource(), mutated, 'boot-config-restoreTabs-stripped');
@@ -206,8 +206,8 @@ test('AC4: the whenReady rebuild branch uses NO adopt path — real → absent, 
   assert.equal(realBody.includes('removeChildView'), false, 'real → the rebuild never adopts (removeChildView)');
 
   const mutated = mainSource().replace(
-    'rec.restoreTabs = w.tabs;',
-    'rec.restoreTabs = w.tabs; win.contentView.addChildView(x);'
+    'rec.restoreTabs = savedWindow.tabs;',
+    'rec.restoreTabs = savedWindow.tabs; win.contentView.addChildView(x);'
   );
   assertMutated(mainSource(), mutated, 'adopt-injected-into-rebuild');
   assert.equal(

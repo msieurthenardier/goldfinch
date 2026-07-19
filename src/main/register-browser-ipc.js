@@ -13,6 +13,9 @@ function registerBrowserIpc({
   toggleDevTools,
   registerInternalHandler,
   jars,
+  registry,
+  createWindow,
+  broadcastJarsChanged,
   isSafeTabUrl,
   getChromeContents,
   session,
@@ -41,6 +44,34 @@ function registerBrowserIpc({
       farble: shields.active('farble', site),
       seed: seedForSession(event.sender.session)
     };
+  });
+
+  ipcMain.on('window-minimize', (event) => {
+    registry.getWindowForChrome(event.sender)?.win.minimize();
+  });
+  ipcMain.on('window-toggle-maximize', (event) => {
+    const rec = registry.getWindowForChrome(event.sender);
+    if (!rec) return;
+    if (rec.win.isMaximized()) rec.win.unmaximize();
+    else rec.win.maximize();
+  });
+  ipcMain.on('window-close', (event) => {
+    registry.getWindowForChrome(event.sender)?.win.close();
+  });
+  ipcMain.handle('window-is-maximized', (event) => {
+    const rec = registry.getWindowForChrome(event.sender);
+    return !!(rec && rec.win.isMaximized());
+  });
+  ipcMain.handle('window-create', (event) => {
+    if (!registry.getWindowForChrome(event.sender)) return null;
+    return createWindow().win.id;
+  });
+  ipcMain.handle('new-container-create', async (_event, payload) => {
+    const name = payload && payload.name;
+    if (!name || typeof name !== 'string') return null;
+    const container = jars.add(name);
+    broadcastJarsChanged();
+    return container;
   });
 
   ipcMain.on('guest-media-list', (event, mediaList) => {
