@@ -35,9 +35,10 @@
 // re-issues the find (every RETRY=500ms, up to MAX=5 attempts within the
 // overall findTimeoutMs). After MAX attempts or timeout, resolve with `last`
 // ({0,0} for a genuine no-match — correct). Re-issues use the caller's
-// original opts — no findNext:true on retry (that would corrupt the
-// active-match ordinal). Whether the cold-start quirk still reproduces under
-// WebContentsView is re-verified live in Leg 4's find-in-page Witnessed run;
+// same translated Electron opts — retries remain NEW engine sessions instead
+// of stepping the active-match ordinal. Whether the cold-start quirk still
+// reproduces under WebContentsView is re-verified live in Leg 4's find-in-page
+// Witnessed run;
 // porting the retry keeps correctness regardless.
 //
 // SECURITY (DD5): Both ops carry an op-local isInternalContents guard AFTER
@@ -104,7 +105,10 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
   }
 
   const timeoutMs = (deps && deps.findTimeoutMs) || 3000;
-  const findOpts = { forward, findNext, matchCase };
+  // The public MCP contract uses findNext:true to STEP and false/omitted to
+  // start a NEW search. Electron's FindInPageOptions uses the inverse meaning:
+  // true starts a new session and false continues the existing one.
+  const findOpts = { forward, findNext: !findNext, matchCase };
 
   // requestId-correlated promise with cold-start retry.
   //
@@ -142,7 +146,7 @@ async function findInPage(wcId, text, deps, { forward = true, findNext = false, 
 
     const issue = () => {
       attempts++;
-      issued.add(wc.findInPage(text, findOpts)); // same opts on retry — no findNext flip
+      issued.add(wc.findInPage(text, findOpts)); // same translated opts on every retry
     };
 
     wc.on('found-in-page', onFound);
