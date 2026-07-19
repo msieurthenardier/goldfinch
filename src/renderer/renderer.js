@@ -22,76 +22,23 @@ import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
+import { createChromeContext } from './chrome/context.js';
+import { createJarsClient } from './chrome/jars-client.js';
+import {
+  buildKebabModel,
+  chromePointToSheet as convertChromePointToSheet,
+  createOverlayMenus,
+  fixedTriggerMenu,
+  leftSheetAnchor,
+  rightSheetAnchor
+} from './chrome/overlay-menus.js';
 
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
 function currentHomePage() { return homePageCache || HOMEPAGE; }
 
-const els = {
-  tabstrip: /** @type {HTMLElement} */ (document.getElementById('tabstrip')),
-  tabs: /** @type {HTMLElement} */ (document.getElementById('tabs')),
-  newTab: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab')),
-  newTabMenu: /** @type {HTMLButtonElement} */ (document.getElementById('new-tab-menu')),
-  winMin: /** @type {HTMLButtonElement} */ (document.getElementById('win-min')),
-  winMax: /** @type {HTMLButtonElement} */ (document.getElementById('win-max')),
-  winClose: /** @type {HTMLButtonElement} */ (document.getElementById('win-close')),
-  webviews: /** @type {HTMLElement} */ (document.getElementById('webviews')),
-  back: /** @type {HTMLButtonElement} */ (document.getElementById('back')),
-  forward: /** @type {HTMLButtonElement} */ (document.getElementById('forward')),
-  reload: /** @type {HTMLButtonElement} */ (document.getElementById('reload')),
-  address: /** @type {HTMLInputElement} */ (document.getElementById('address')),
-  toggleMedia: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-media')),
-  mediaCount: /** @type {HTMLElement} */ (document.getElementById('media-count')),
-  panel: /** @type {HTMLElement} */ (document.getElementById('media-panel')),
-  mediaList: /** @type {HTMLElement} */ (document.getElementById('media-list')),
-  mediaEmpty: /** @type {HTMLElement} */ (document.getElementById('media-empty')),
-  mediaStatus: /** @type {HTMLElement} */ (document.getElementById('media-status')),
-  tabStatus: /** @type {HTMLElement} */ (document.getElementById('tab-status')),
-  mediaClose: /** @type {HTMLButtonElement} */ (document.getElementById('media-close')),
-  mediaRescan: /** @type {HTMLButtonElement} */ (document.getElementById('media-rescan')),
-  mediaDownloadSelected: /** @type {HTMLButtonElement} */ (document.getElementById('media-download-selected')),
-  filters: /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.filter')),
-  toasts: /** @type {HTMLElement} */ (document.getElementById('toasts')),
-  lightbox: /** @type {HTMLElement} */ (document.getElementById('lightbox')),
-  lightboxStage: /** @type {HTMLElement} */ (document.getElementById('lightbox-stage')),
-  lightboxCaption: /** @type {HTMLElement} */ (document.getElementById('lightbox-caption')),
-  lightboxZoomLevel: /** @type {HTMLElement} */ (document.getElementById('lightbox-zoom-level')),
-  lightboxClose: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-close')),
-  lightboxZoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-in')),
-  lightboxZoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-out')),
-  lightboxZoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('lightbox-zoom-reset')),
-  togglePrivacy: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-privacy')),
-  toggleDevtools: /** @type {HTMLButtonElement} */ (document.getElementById('toggle-devtools')),
-  privacyCount: /** @type {HTMLElement} */ (document.getElementById('privacy-count')),
-  privacyPanel: /** @type {HTMLElement} */ (document.getElementById('privacy-panel')),
-  privacyBody: /** @type {HTMLElement} */ (document.getElementById('privacy-body')),
-  privacyClose: /** @type {HTMLButtonElement} */ (document.getElementById('privacy-close')),
-  privacyRefresh: /** @type {HTMLButtonElement} */ (document.getElementById('privacy-refresh')),
-  player: /** @type {HTMLElement} */ (document.getElementById('player')),
-  playerAudio: /** @type {HTMLAudioElement} */ (document.getElementById('player-audio')),
-  playerTitle: /** @type {HTMLElement} */ (document.getElementById('player-title')),
-  playerProgress: /** @type {HTMLElement} */ (document.getElementById('player-progress')),
-  playerSeek: /** @type {HTMLElement} */ (document.getElementById('player-seek')),
-  playerCur: /** @type {HTMLElement} */ (document.getElementById('player-cur')),
-  playerDur: /** @type {HTMLElement} */ (document.getElementById('player-dur')),
-  playerPlay: /** @type {HTMLButtonElement} */ (document.getElementById('player-play')),
-  playerPrev: /** @type {HTMLButtonElement} */ (document.getElementById('player-prev')),
-  playerNext: /** @type {HTMLButtonElement} */ (document.getElementById('player-next')),
-  kebab: /** @type {HTMLButtonElement} */ (document.getElementById('kebab')),
-  addressChip: /** @type {HTMLButtonElement} */ (document.getElementById('address-chip')),
-  automationIndicator: /** @type {HTMLButtonElement} */ (document.getElementById('automation-indicator')),
-  automationIndicatorBadge: /** @type {HTMLElement} */ (document.getElementById('automation-indicator-badge')),
-  zoomControl: /** @type {HTMLElement} */ (document.getElementById('zoom-control')),
-  zoomOut: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-out')),
-  zoomIn: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-in')),
-  zoomReset: /** @type {HTMLButtonElement} */ (document.getElementById('zoom-reset')),
-  zoomPercent: /** @type {HTMLElement} */ (document.getElementById('zoom-percent'))
-};
-
-// Tag <html> with the OS platform so window-chrome CSS can branch (mac native
-// traffic lights vs. win/linux custom controls). Optional-chained so a non-preload
-// load path never aborts init at the top level.
-document.documentElement.classList.add(`platform-${window.goldfinch?.platform ?? 'unknown'}`);
+const ctx = createChromeContext({ document, goldfinch: window.goldfinch });
+const { els, tabs } = ctx;
 
 /**
  * @typedef {{
@@ -112,142 +59,26 @@ document.documentElement.classList.add(`platform-${window.goldfinch?.platform ??
  * }} Tab
  */
 
-/** @type {Map<string, Tab>} */
-const tabs = new Map();
-let activeTabId = null;
-let activeFilter = 'all';
-let tabSeq = 0;
-// wcId of the view main is currently showing (web or internal); used to hide the outgoing
-// view when switching to a not-yet-ready tab.
-let activeViewWcId = null;
-// RAF pending flag for debounced geometry sends.
-let rafGeometryPending = false;
-
-/* ----------------------------------------------------- jars / containers */
-
-// Declared cache of the jar store (DD2) — source of truth is jars.js in main.
-// Rebuilt wholesale from the boot snapshot below, then invalidated wholesale by
-// every `jars-changed` broadcast (all four mutating jar-ipc channels plus the
-// picker's new-container-create already broadcast — verified at flight design).
-let containers = [];
-// undefined = boot snapshot not yet arrived; null = Burner holds the flag.
-/** @type {string | null | undefined} */
-let defaultId;
-function applyJarsState(list, dId) {
-  containers = Array.isArray(list) ? list : [];
-  defaultId = dId;
-  refreshOpenTabJars();
-  // The activity snapshot may have arrived before the jars state resolved, in which
-  // case a jar session's indicator title showed the raw jarId. Re-run with the cached
-  // snapshot now that `containers` is populated, so the friendly jar name is used.
-  updateAutomationIndicator(lastSnap);
-}
-// Read once at boot; the pair is reconciled together (DD3).
-const jarsBoot = Promise.all([
-  window.goldfinch.jarsList(),
-  window.goldfinch.jarsGetDefault()
-]).then(([list, d]) => {
-  // Reconciliation contract (DD3): jars-get-default structured-clones the frozen
-  // BURNER sentinel across the IPC boundary, so reference identity is meaningless
-  // here — detect it by id, NEVER by reference.
-  applyJarsState(list, d && d.id !== BURNER.id ? d.id : null);
-}).catch(() => { /* defaultId stays undefined → burner routing; Leg 3 real boots prove the happy path */ });
-window.goldfinch.onJarsChanged((p) => {
-  if (p && Array.isArray(p.containers)) applyJarsState(p.containers, p.defaultId);
-});
-// H6 close sweep (M08 Flight 6 HAT, flight-log Decisions — SUPERSEDES the F4
-// DD4 reload sweep): a full wipe broadcasts jar-wiped { id } — CLOSE every
-// open tab whose container matches, instead of reloading it. Reloading was
-// re-recording a fresh visit in the just-cleared history (H6 root cause);
-// closing means no reload → no re-recorded visit → history stays cleared.
-// The wipe confirm copy (jars.js WIPE_COPY) warns tabs will close. Same
-// isWebTab guard as the old reload sweep — internal tabs are excluded;
-// burner tabs never match (jars-wipe rejects burner, so no tab.container
-// ever equals it). Granular clears broadcast nothing — nothing else calls
-// this.
-//
-// Reuses the DD6 ordered-sweep shape (renderer.js:174-195, refreshOpenTabJars)
-// for the identical multi-close-with-active pattern, to avoid the
-// active-tab tabSetActive flicker (design review): snapshot first (closeTab
-// mutates `tabs`), activate a surviving NON-matching tab FIRST when the
-// active tab is among the matches (so closeTab's own active-tab fallback
-// never fires mid-sweep, and no intermediate matching tab is transiently
-// activated only to be closed again), then close every match — the
-// originally-active match last, if it's still the active tab (i.e. no
-// survivor existed).
-window.goldfinch.onJarWiped((p) => {
-  if (!p || typeof p.id !== 'string') return;
-  const snapshot = [...tabs.values()];
-  const matches = snapshot.filter((t) => t.container && t.container.id === p.id && isWebTab(t) && t.wcId != null);
-  if (matches.length === 0) return;
-
-  if (matches.some((t) => t.id === activeTabId)) {
-    const survivor = snapshot.find((t) => !matches.includes(t));
-    if (survivor) activateTab(survivor.id);
-  }
-  const activeMatch = matches.find((t) => t.id === activeTabId);
-  for (const t of matches) {
-    if (t !== activeMatch) closeTab(t.id);
-  }
-  if (activeMatch) closeTab(activeMatch.id);
+const jarsClient = createJarsClient({
+  bridge: window.goldfinch,
+  ctx,
+  burner: BURNER,
+  isWebTab,
+  isInternalTab,
+  activateTab,
+  closeTab,
+  updateAutomationIndicator,
+  getAutomationSnapshot: () => lastSnap,
+  inheritContainerDecision,
+  inheritFromPartition,
+  random: Math.random
 });
 
-// Refresh open tabs' jar dot (color + title) and `tab.container` reference after a
-// jars-state replace (DD2), and close any tab whose jar no longer exists (DD6 —
-// tabs-close-on-delete; broadcast-driven so closure is uniform across every
-// mutation source: page, picker, automation, future surfaces). Burner and internal
-// tabs are exempt — they never appear in `containers` by design, guarded by the
-// same early-continue the surviving-tab refresh already used.
-//
-// ORDERED-SWEEP ruling (DD6, flight-log Decision; leg design review cycle 2 —
-// sound, zero corrections). `closeTab` (below) is READ here but NOT modified: its
-// signature has no suppression hook, and none is needed. The naive unordered close
-// (just `closeTab` every orphan in Map-iteration order) is already CORRECT — it
-// converges to exactly one closeTab-triggered `createTab()` — but it IPC-thrashes:
-// every intermediate activation sends `tabSetActive`, which swaps native
-// WebContentsView visibility. Ordering makes the sweep flicker-free instead of
-// fixing a correctness bug:
-//   1. Collect orphans from a SNAPSHOT (`[...tabs.values()]`) — `closeTab` mutates
-//      the same `tabs` Map (and its last-tab fallback inserts a fresh tab), which a
-//      live iterator would revisit.
-//   2. If the active tab is among the orphans and a live non-orphan tab exists,
-//      activate that survivor FIRST — one deliberate activation, so the fallback
-//      never transiently lands on a doomed orphan.
-//   3. Close every orphan that is not the (possibly just-reassigned) active tab —
-//      these closes never touch `activeTabId`, so no activation fires at all.
-//   4. Close the remaining active orphan LAST, if one still exists (only when no
-//      survivor was found in step 2 — the true all-orphan case). That close is then
-//      the final close: `closeTab`'s own last-tab branch (`else createTab()`,
-//      below) fires EXACTLY ONCE, creating and activating the fresh
-//      default-resolved tab. No behavior change for surviving tabs' dot/title
-//      refresh.
-function refreshOpenTabJars() {
-  const snapshot = [...tabs.values()];
-  /** @type {Tab[]} */
-  const orphans = [];
-  for (const tab of snapshot) {
-    if (tab.trusted || (tab.container && tab.container.burner)) continue;
-    const fresh = containers.find((c) => c && tab.container && c.id === tab.container.id);
-    if (!fresh) { orphans.push(tab); continue; }
-    tab.container = fresh;
-    const dot = /** @type {HTMLElement | null} */ (tab.btn && tab.btn.querySelector('.tab-jar'));
-    if (!dot) continue; // absent only for pre-hot-reload tabs; skip silently
-    dot.style.background = fresh.color;
-    dot.title = fresh.name;
-  }
-  if (orphans.length === 0) return;
-
-  if (orphans.some((t) => t.id === activeTabId)) {
-    const survivor = snapshot.find((t) => !orphans.includes(t));
-    if (survivor) activateTab(survivor.id);
-  }
-  const activeOrphan = orphans.find((t) => t.id === activeTabId);
-  for (const t of orphans) {
-    if (t !== activeOrphan) closeTab(t.id);
-  }
-  if (activeOrphan) closeTab(activeOrphan.id);
+// Preserve the FD-approved evaluate seam's stable callable name while the
+// implementation and its mutable jar state live in the extracted client.
+function makeBurner() {
+  return jarsClient.makeBurner();
 }
-
 /* ------------------------------------------------------- kebab (overflow) menu */
 // APG menu-button: role="menu" popup with six static role="menuitem" items
 // (New window, Settings, Downloads, Cookie jars, Print…, Exit) + roving tabindex
@@ -299,101 +130,47 @@ const KEBAB_ACTIONS = {
 // Chrome-minted monotonic open-token, carried in channel 1 and echoed in
 // channels 4/5/7 — the stale-close discipline (round-2 design lock). Shared
 // across menu types (all five surfaces mint from the same counter).
-let menuOverlayToken = 0;
-// Per-menuType chrome-side state, driven ONLY by channels 1/7 (its own sends +
-// closes): open flag (toggle + aria), last-minted token (stale channel-7 drop),
-// and the 300 ms blur-close suppress timestamp (trigger re-click race, DD4).
-//
-// GENERALIZED entry shape (Leg 4 design-review decision — Leg 5 inherits it):
-//   ariaTarget: () => HTMLElement|null — aria-expanded is stamped (open) / reset
-//     (channel-7 close) ONLY when non-null. `page-context` returns null: its
-//     "trigger" is transient (address input / body / a foreign menu-button), so
-//     stamping it would leak a false AT signal — including the same-menuType-
-//     replace stale-close orphaning aria on a CHANGED element. The getter is
-//     READ-ONLY (the open path calls it too — it must not clear state on read).
-//   refocus(reason) — per-entry reason→refocus policy, run on every NON-STALE
-//     channel-7 close. Fixed-trigger menus keep the escape+activated→trigger
-//     contract; `page-context` refocuses on 'escape' ONLY → the captured
-//     pageCtx.returnFocus (guarded: isConnected, !== body), else els.address.
-//     returnFocus is cleared after use HERE (never leaks
-//     across opens; a second open overwrites it). Action-moved focus (e.g. the
-//     Unpin body's els.address.focus()) comes from the channel-6 DISPATCH BODY,
-//     not this map — page-context stays escape-only.
-/** @typedef {{ open: boolean, token: number, blurClosedAt: number, ariaTarget: () => (HTMLElement | null), refocus: (reason: string) => void }} OverlayMenuState */
-/** Standard fixed-trigger entry: aria on the trigger; escape/activated → trigger focus.
- * @param {() => HTMLElement} trigger @returns {OverlayMenuState} */
-const fixedTriggerMenu = (trigger) => ({
-  open: false,
-  token: 0,
-  blurClosedAt: -Infinity,
-  ariaTarget: trigger,
-  refocus(reason) {
-    if (reason === 'escape' || reason === 'activated') trigger().focus();
-  }
-});
-/** @type {{ [menuType: string]: OverlayMenuState }} */
 const overlayMenus = {
   kebab: fixedTriggerMenu(() => els.kebab),
   container: fixedTriggerMenu(() => els.newTabMenu),
   'site-info': fixedTriggerMenu(() => els.addressChip),
   'new-container': fixedTriggerMenu(() => els.newTabMenu),
   'page-context': {
-    open: false,
-    token: 0,
-    blurClosedAt: -Infinity,
-    ariaTarget: () => null, // transient trigger — never stamp aria-expanded
+    open: false, token: 0, blurClosedAt: -Infinity, ariaTarget: () => null,
     refocus(reason) {
       const ret = pageCtx.returnFocus;
-      pageCtx.returnFocus = null; // cleared after use — never leaks across opens
-      if (reason !== 'escape') return; // escape-only (blur/outside-click/etc: no refocus)
-      if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
-      else els.address.focus();
-    }
-  },
-  // Tab context menu (M09 Flight 5 Leg 1, DD2): page-context shape verbatim —
-  // transient trigger (no aria-expanded target), escape-only refocus to the
-  // captured tabCtx.returnFocus (the invoking tab, or the focused element at a
-  // keyboard invocation).
-  'tab-context': {
-    open: false,
-    token: 0,
-    blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus(reason) {
-      const ret = tabCtx.returnFocus;
-      tabCtx.returnFocus = null; // cleared after use — never leaks across opens
+      pageCtx.returnFocus = null;
       if (reason !== 'escape') return;
       if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
       else els.address.focus();
     }
   },
-  // Omnibox suggestions (M08 Flight 4 Leg 3 / flight DD5): the "trigger" is
-  // #address itself, which already holds focus in every keyboard path (the
-  // sheet's noFocus open never steals it) — aria-expanded rides this generic
-  // mechanism, no hand-rolled toggling (design review). refocus is NONE (flight
-  // pin: no surface ever moves focus away from #address on close). blurClosedAt
-  // is written by the generic Ch7 sink below but never READ here — this surface
-  // has no trigger-click path (overlayTriggerClick is not used for suggestions).
+  'tab-context': {
+    open: false, token: 0, blurClosedAt: -Infinity, ariaTarget: () => null,
+    refocus(reason) {
+      const ret = tabCtx.returnFocus;
+      tabCtx.returnFocus = null;
+      if (reason !== 'escape') return;
+      if (ret && ret.isConnected && ret !== document.body && typeof ret.focus === 'function') ret.focus();
+      else els.address.focus();
+    }
+  },
   suggestions: {
-    open: false,
-    token: 0,
-    blurClosedAt: -Infinity,
+    open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
-    refocus() {} // NONE — see comment above
+    refocus() {}
   }
 };
-const BLUR_REOPEN_SUPPRESS_MS = 300;
+const overlayMenuClient = createOverlayMenus({
+  bridge: window.goldfinch,
+  states: overlayMenus,
+  now: () => performance.now(),
+  onActivated: dispatchOverlayActivation,
+  onClosed: handleOverlayClosed
+});
 
 // Static kebab model — labels rendered via textContent in the sheet (DD8).
 // New window first (Chrome adjacency: window/tab creation ahead of app pages).
-const kebabModel = () => [
-  { id: 'new-window', label: 'New window' },
-  { id: 'settings', label: 'Settings' },
-  { id: 'downloads', label: 'Downloads' },
-  { id: 'jars', label: 'Cookie jars' },
-  { id: 'print', label: 'Print…' },
-  { id: 'exit', label: 'Exit' }
-];
 // DD2 anchor nuance: the kebab's anchor is a CHROME client rect — translate
 // chrome→sheet by subtracting the guest-region origin (#webviews). y clamps to 0
 // (DD12): the menu renders right-aligned, flush at the sheet's top edge (the
@@ -401,7 +178,7 @@ const kebabModel = () => [
 const kebabAnchor = () => {
   const wv = els.webviews.getBoundingClientRect();
   const r = els.kebab.getBoundingClientRect();
-  return { alignRight: Math.round(r.right - wv.left), y: 0 };
+  return rightSheetAnchor(wv, r);
 };
 // Left-aligned toolbar anchors (Leg 3 — ▾ and 🔒): same chrome→sheet translation,
 // LEFT edge, clamped ≥ 0; y clamps to 0 (DD12 flush-at-top, the accepted shift).
@@ -409,7 +186,7 @@ const kebabAnchor = () => {
 const leftAnchorOf = (el) => {
   const wv = els.webviews.getBoundingClientRect();
   const r = el.getBoundingClientRect();
-  return { alignLeft: Math.max(0, Math.round(r.left - wv.left)), y: 0 };
+  return leftSheetAnchor(wv, r);
 };
 const containerAnchor = () => leftAnchorOf(els.newTabMenu);
 const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
@@ -423,23 +200,16 @@ const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
 /** @param {string} menuType @param {any} model @param {any} anchor
  *  @param {number} startIndex 0 = first item; -1 = last (trigger ArrowUp)
  *  @param {{ noFocus?: boolean }} [opts] */
-const openOverlayMenu = (menuType, model, anchor, startIndex, opts = {}) => {
-  const st = overlayMenus[menuType];
-  st.token = ++menuOverlayToken;
-  st.open = true; // channel-1 send IS the chrome-side open transition
-  window.goldfinch.menuOverlayOpen({ menuType, model, anchor, startIndex, token: st.token, ...opts });
-  const ariaEl = st.ariaTarget(); // null for page-context — no false AT signal
-  if (ariaEl) ariaEl.setAttribute('aria-expanded', 'true');
-};
+const openOverlayMenu = overlayMenuClient.open;
 
 /** @param {number} startIndex */
-const openKebabOverlay = (startIndex) => openOverlayMenu('kebab', kebabModel(), kebabAnchor(), startIndex);
+const openKebabOverlay = (startIndex) => openOverlayMenu('kebab', buildKebabModel(), kebabAnchor(), startIndex);
 // Container model rebuilt per-open from the `containers` array (no runtime
 // jar-list refresh exists in the product); namespaced ids via the shared
 // buildContainerModel (src/shared/container-menu.js).
 /** @param {number} startIndex */
 const openContainerOverlay = (startIndex) =>
-  openOverlayMenu('container', buildContainerModel(containers, defaultId), containerAnchor(), startIndex);
+  openOverlayMenu('container', buildContainerModel(jarsClient.containers, jarsClient.defaultId), containerAnchor(), startIndex);
 // Site-info model derived from the active tab via the shared deriveSiteInfo
 // (the one derivation source). startIndex is meaningless for the no-items
 // popup — the sheet focuses the "Site settings →" action.
@@ -468,15 +238,7 @@ const openPageContextOverlaySheet = (anchor) =>
 // open-state BEFORE this click fired); other menus' triggers are unaffected
 // (same-menuType-only — composes with mutual exclusion).
 /** @param {string} menuType @param {() => void} openFn */
-const overlayTriggerClick = (menuType, openFn) => {
-  const st = overlayMenus[menuType];
-  if (st.open) {
-    window.goldfinch.menuOverlayClose({ reason: 'toggle' });
-    return;
-  }
-  if (performance.now() - st.blurClosedAt < BLUR_REOPEN_SUPPRESS_MS) return;
-  openFn();
-};
+const overlayTriggerClick = overlayMenuClient.trigger;
 
 els.kebab.addEventListener('click', () => overlayTriggerClick('kebab', () => openKebabOverlay(0)));
 
@@ -523,7 +285,7 @@ els.addressChip.addEventListener('keydown', (e) => {
 // the channel-7 'activated' close (main emits 7 before 6), so trigger state is
 // already reset and the action wins any focus race. `value` (Leg 3) is the
 // input-dialog's text — shape-validated main-side (string, ≤24), data here.
-window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
+function dispatchOverlayActivation({ menuType, id, value }) {
   switch (menuType) {
     case 'kebab': {
       const fn = KEBAB_ACTIONS[id];
@@ -544,12 +306,12 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
         // blink is the accepted variation.
         openNewContainerOverlay();
       } else if (id === 'action:burner') {
-        createTab(currentHomePage(), makeBurner());
+        createTab(currentHomePage(), jarsClient.makeBurner());
       } else if (id === 'action:manage-jars') {
         openJarsPage();
       } else if (id.startsWith('jar:')) {
         const jarId = id.slice('jar:'.length);
-        const c = containers.find((x) => x.id === jarId);
+        const c = jarsClient.containers.find((x) => x.id === jarId);
         if (c) createTab(currentHomePage(), c);
       }
       break;
@@ -580,7 +342,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       // createTab's default-jar resolution — computed once here (all three
       // call sites below are mutually exclusive per dispatch; the source tab
       // never changes mid-dispatch, so one lookup covers all three bodies).
-      const srcContainer = inheritContainerFrom(findTabByWcId(wcId));
+      const srcContainer = jarsClient.inheritContainerFrom(findTabByWcId(wcId));
       if (id === 'link:open') {
         if (typeof p.linkURL === 'string' && p.linkURL) createTab(p.linkURL, srcContainer);
       } else if (id === 'link:copy') {
@@ -677,7 +439,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
           ? ids.filter((i) => i !== tabId)
           : ids.slice(anchorIndex + 1);
         if (!targetIds.length) break;
-        if (targetIds.includes(activeTabId)) activateTab(tabId);
+        if (targetIds.includes(ctx.activeTabId)) activateTab(tabId);
         for (const t of targetIds) closeTab(t);
       } else if (id === 'tab:duplicate') {
         // Address + jar + nav history (DD1's resolved open question): the
@@ -767,7 +529,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
       break;
     }
   }
-});
+}
 
 // Channel 7: the single close-state sink. Stale tokens (a re-open raced an old
 // instance's close) are dropped WHOLE — a stale close must not clear the newer
@@ -781,15 +543,7 @@ window.goldfinch.onMenuOverlayActivated(({ menuType, id, value }) => {
 // already focused chrome); blur → NO refocus (never steal focus from another
 // app); tab-switch/superseded/tab-close/tab-hide/teardown → no move (the
 // incoming guest keeps focus).
-window.goldfinch.onMenuOverlayClosed(({ menuType, reason, token }) => {
-  const st = overlayMenus[menuType];
-  if (!st) return;
-  if (token !== st.token) return; // stale close — drop
-  st.open = false;
-  const ariaEl = st.ariaTarget();
-  if (ariaEl) ariaEl.setAttribute('aria-expanded', 'false');
-  if (reason === 'blur') st.blurClosedAt = performance.now();
-  st.refocus(reason);
+function handleOverlayClosed({ menuType, reason }) {
   // Suggestions branch (design review, HIGH): main-initiated closes (window
   // blur, tab-switch, etc.) reach the sheet WITHOUT going through
   // closeSuggestions() — this is the only place those reset local state, so
@@ -808,7 +562,7 @@ window.goldfinch.onMenuOverlayClosed(({ menuType, reason, token }) => {
       suggest.selectedIndex = -1;
     }
   }
-});
+}
 
 /* ------------------------------------------------------- container picker */
 // The ▾ picker renders menuType 'container' from the sheet (trigger wiring
@@ -829,44 +583,6 @@ function openDownloads() {
 // add dedupe logic here.
 function openJarsPage() {
   createTab('goldfinch://jars', null, { trusted: true });
-}
-
-function makeBurner() {
-  const n = Math.floor(Math.random() * 1e9);
-  // The burner-<n> id/partition scheme is identity-bearing — unchanged. Only the
-  // display name and color derive from the shared BURNER constant (DD8).
-  return { id: `burner-${n}`, name: BURNER.name, color: BURNER.color, partition: `burner:${n}`, burner: true };
-}
-
-// D3 (M06 F2 HAT inline fix): a link/image/selection-search opened FROM a page
-// inherits the SOURCE tab's jar — operator ruling at HAT — instead of the DD1
-// default-jar resolution every other partition-less createTab call site uses.
-// The pure decision (truth table, unit-tested) lives in the shared
-// inheritContainerDecision (../shared/inherit-container.js); makeBurner() stays
-// here because burner minting is per-tab stateful (the `burner-<n>` counter),
-// same split as resolveNewTabContainer/DD1.
-// @param {Tab|null} tab
-// @returns {{ id: string, name: string, color: string, partition: string, burner?: boolean } | null}
-function inheritContainerFrom(tab) {
-  const d = inheritContainerDecision(tab && tab.container, isInternalTab(tab));
-  if (d.freshBurner) return makeBurner();
-  return d.container || null;
-}
-
-// Popup inheritance (DD7, M06 F3 Leg 4): window.open/target=_blank popups are
-// captured main-side (no Tab object there, only the opener's session partition
-// string, forwarded via the `open-tab` payload). Resolves that partition into
-// the same createTab() container argument shape as inheritContainerFrom above
-// via the pure inheritFromPartition (../shared/inherit-container.js) — freshBurner
-// is minted HERE (burner minting is per-tab stateful, same split as
-// inheritContainerFrom/resolveNewTabContainer), never inheriting the opener's own
-// burner partition (never-share-state invariant, F2 D3 lineage).
-// @param {string | null | undefined} openerPartition
-// @returns {{ id: string, name: string, color: string, partition: string, burner?: boolean } | null}
-function inheritContainerFromPartition(openerPartition) {
-  const d = inheritFromPartition(openerPartition, containers);
-  if (d.freshBurner) return makeBurner();
-  return d.container || null;
 }
 
 /* ------------------------------------------------------- site-info popup */
@@ -950,7 +666,7 @@ function basenameFromUrl(url) {
  * @param {number} cx @param {number} cy @returns {{ x: number, y: number }} */
 function chromePointToSheet(cx, cy) {
   const wv = els.webviews.getBoundingClientRect();
-  return { x: Math.round(cx - wv.left), y: Math.max(0, Math.round(cy - wv.top)) };
+  return convertChromePointToSheet(wv, cx, cy);
 }
 
 // Subscription: the guest right-click flows guest -> main -> this IPC ({ wcId, params }).
@@ -1372,7 +1088,7 @@ function createTab(url = currentHomePage(), container = null, { trusted = false,
   // so web content reaching here via onOpenTab can never select the internal branch.
   const ok = trusted ? isInternalPageUrl(url) : isSafeTabUrl(url);
   if (!ok) return null;
-  const id = `tab-${++tabSeq}`;
+  const id = `tab-${++ctx.tabSeq}`;
   // ⚠️ DATA-LOSS TRAP: the synthetic internal jar is set as the `jar` ITSELF — one object
   // that the webview `partition` attribute, `tab.container`, AND the dot logic all derive
   // from. If the partition were set to the internal string while tab.container stayed the
@@ -1380,7 +1096,7 @@ function createTab(url = currentHomePage(), container = null, { trusted = false,
   // `persist:goldfinch` jar (identity-new reads tab.container.partition).
   const jar = trusted
     ? { id: 'internal', name: internalJarName(url), color: '#9aa0ac', partition: window.goldfinch.internalPartition }
-    : container || resolveNewTabContainer(containers, defaultId) || makeBurner();
+    : container || resolveNewTabContainer(jarsClient.containers, jarsClient.defaultId) || jarsClient.makeBurner();
 
   // Strip-record construction extracted (M09 F6 Leg 4, review M3): shared with
   // the adopt-tab branch. The initial-title seed covers the reopen/duplicate
@@ -1420,14 +1136,14 @@ function createTab(url = currentHomePage(), container = null, { trusted = false,
     if (!tabs.has(id)) return; // tab was closed before wcId arrived
     tab.wcId = wcId;
     // If this tab is still active, refresh state now that wcId is available.
-    if (tab.id === activeTabId) {
+    if (tab.id === ctx.activeTabId) {
       // Make the WebContentsView visible now that its wcId has arrived.
       // activateTab() ran synchronously in createTab() with wcId still null,
       // so the tab-set-active IPC was skipped — send it here to show the view.
       // Full slot: find never insets the guest (DD8 — the overlay floats).
       window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
       // Track the now-visible view (web or internal) for the outgoing-hide path.
-      activeViewWcId = tab.wcId;
+      ctx.activeViewWcId = tab.wcId;
       updateNavButtons();
       refreshZoomControl(tab);
       if (!els.privacyPanel.classList.contains('collapsed')) {
@@ -1750,13 +1466,13 @@ function closeTab(id) {
   const stripIndex = orderedTabIds().indexOf(id);
   // All tabs are WebContentsViews (Leg 3). Internal tabs (trusted) use tabClose just like web tabs.
   if (tab.wcId != null) {
-    if (tab.wcId === activeViewWcId) activeViewWcId = null;
+    if (tab.wcId === ctx.activeViewWcId) ctx.activeViewWcId = null;
     window.goldfinch.tabClose(tab.wcId, stripIndex);
   }
   tab.btn.remove();
   tabs.delete(id);
 
-  if (activeTabId === id) {
+  if (ctx.activeTabId === id) {
     // DD1: DOM order is authoritative — orderedTabIds() reads the current strip,
     // NOT Map insertion order (which no longer necessarily matches visual order
     // once a tab has been reordered).
@@ -1769,7 +1485,7 @@ function closeTab(id) {
 function activateTab(id) {
   const tab = tabs.get(id);
   if (!tab) return;
-  activeTabId = id;
+  ctx.activeTabId = id;
 
   // Suggestions invalidation (design review, HIGH): bump suggest.seq on EVERY
   // activation, unconditionally — an in-flight historySuggest response for the
@@ -1799,7 +1515,7 @@ function activateTab(id) {
     // never insets the guest (DD8 — the overlay floats over it).
     window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
     // Track the now-visible view (web or internal) for the outgoing-hide path.
-    activeViewWcId = tab.wcId;
+    ctx.activeViewWcId = tab.wcId;
     // Per-tab find restore (DD9): re-open the overlay session with this tab's saved
     // text. MUST be sent AFTER tabSetActive — same sender, so IPC delivery order is
     // guaranteed, and main's tab-set-active switch-close then precedes this reopen.
@@ -1812,8 +1528,8 @@ function activateTab(id) {
   } else {
     // wcId not yet arrived — hide the outgoing view while we wait; the tabCreate .then()
     // sends tabSetActive once wcId is available. Read the tracker BEFORE clearing.
-    if (activeViewWcId != null) window.goldfinch.tabHide(activeViewWcId);
-    activeViewWcId = null;
+    if (ctx.activeViewWcId != null) window.goldfinch.tabHide(ctx.activeViewWcId);
+    ctx.activeViewWcId = null;
     // Brand-new-tab path (design review, MEDIUM): createTab's synchronous
     // activateTab() call runs before any tab-set-active IPC reaches main (wcId
     // is still null here), so main's tab-switch close never fires in this
@@ -1847,12 +1563,12 @@ function activateTab(id) {
   els.toggleDevtools.disabled = internal;
 
   // DevTools pressed-state reconcile (DD3 rebuild trigger (b): tab activation).
-  // Query the newly-active tab's live open state; the activeTabId === tab.id re-check
+  // Query the newly-active tab's live open state; the ctx.activeTabId === tab.id re-check
   // guards the async isDevtoolsOpen promise against a fast double-switch painting the
   // wrong tab's state. Internal / no-wcId tabs force pressed false (button is inert there).
   if (!isInternalTab(tab) && tab.wcId != null) {
     window.goldfinch.isDevtoolsOpen({ webContentsId: tab.wcId })
-      .then((open) => { if (activeTabId === tab.id) setDevtoolsPressed(!!open); })
+      .then((open) => { if (ctx.activeTabId === tab.id) setDevtoolsPressed(!!open); })
       .catch(() => {});
   } else {
     setDevtoolsPressed(false);
@@ -1860,7 +1576,7 @@ function activateTab(id) {
 }
 
 function activeTab() {
-  return tabs.get(activeTabId) || null;
+  return tabs.get(ctx.activeTabId) || null;
 }
 
 /** @param {Tab|null} tab @returns {boolean} */
@@ -1968,10 +1684,10 @@ function measureWebviewsSlotDIP() {
 // Debounced geometry send: sends the active web tab's bounds after a rAF,
 // coalescing multiple rapid calls (resize, panel toggle) into one send.
 function sendActiveBounds() {
-  if (rafGeometryPending) return;
-  rafGeometryPending = true;
+  if (ctx.rafGeometryPending) return;
+  ctx.rafGeometryPending = true;
   requestAnimationFrame(() => {
-    rafGeometryPending = false;
+    ctx.rafGeometryPending = false;
     const t = activeTab();
     // All active views (web AND internal) need geometry updates on resize/panel-toggle —
     // internal tabs are WebContentsViews now (Leg 3), not <webview> elements. Excluding
@@ -2082,7 +1798,7 @@ function suggestGateNow() {
 /** @param {'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'} reason */
 function closeSuggestions(reason) {
   if (!overlayMenus.suggestions.open) return;
-  window.goldfinch.menuOverlayClose({ reason });
+  overlayMenuClient.close(reason);
   resetSuggestState();
 }
 
@@ -2255,7 +1971,7 @@ els.tabs.addEventListener('keydown', (e) => {
   if (!ids.length) return;
   // Cast the closest() RESULT (Element|null) to HTMLElement so `.dataset` typechecks —
   // `.closest()` returns Element regardless of receiver, and `.dataset` is HTMLElement-only.
-  const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || activeTabId;
+  const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || ctx.activeTabId;
 
   // Reorder (M09 F2 DD3): Ctrl+Shift+ArrowLeft/Right moves the FOCUSED tab one slot.
   // Checked BEFORE the plain-arrow branch below so a modified arrow never falls
@@ -2344,7 +2060,7 @@ els.filters.forEach((f) =>
       // Non-color cue (WCAG 1.4.1): expose the active filter to AT via aria-pressed.
       x.setAttribute('aria-pressed', String(isActive));
     });
-    activeFilter = f.dataset.filter;
+    ctx.activeFilter = f.dataset.filter;
     renderMedia();
   })
 );
@@ -2352,7 +2068,7 @@ els.filters.forEach((f) =>
 // Items currently shown in the panel, honoring the active filter.
 function visibleItems() {
   const media = (activeTab() && activeTab().media) || [];
-  return activeFilter === 'all' ? media : media.filter((m) => m.type === activeFilter);
+  return ctx.activeFilter === 'all' ? media : media.filter((m) => m.type === ctx.activeFilter);
 }
 
 function renderMedia() {
@@ -2946,7 +2662,7 @@ window.goldfinch.onPrivacyNet((d) => {
   const tab = findTabByWcId(d.webContentsId);
   if (!tab) return;
   tab.privacy.net = d.agg;
-  if (tab.id === activeTabId) renderPrivacy();
+  if (tab.id === ctx.activeTabId) renderPrivacy();
   updatePrivacyBadge();
 });
 
@@ -2956,7 +2672,7 @@ window.goldfinch.onPrivacyPermission((d) => {
   const existing = tab.privacy.permissions.find((p) => p.permission === d.permission);
   if (existing) existing.granted = d.granted;
   else tab.privacy.permissions.push({ permission: d.permission, granted: d.granted });
-  if (tab.id === activeTabId) renderPrivacy();
+  if (tab.id === ctx.activeTabId) renderPrivacy();
 });
 
 async function fetchCookies() {
@@ -2964,7 +2680,7 @@ async function fetchCookies() {
   if (!tab || tab.wcId == null) return;
   try {
     tab.privacy.cookies = await window.goldfinch.privacyCookies({ webContentsId: tab.wcId, url: tab.url });
-    if (tab.id === activeTabId) renderPrivacy();
+    if (tab.id === ctx.activeTabId) renderPrivacy();
   } catch {
     /* ignore */
   }
@@ -3032,7 +2748,7 @@ let lastKeyState = { enabledJarKeyCount: 0, adminKeyEnabled: false };
  * @returns {string}
  */
 function jarDisplayName(jarId) {
-  const c = containers.find((x) => x.id === jarId);
+  const c = jarsClient.containers.find((x) => x.id === jarId);
   return c ? c.name : (jarId || 'jar');
 }
 
@@ -3072,7 +2788,7 @@ function renderAutomationIndicator() {
     adminKeyEnabled: lastKeyState.adminKeyEnabled,
     activeJarIds,
     adminActive,
-    containers,
+    containers: jarsClient.containers,
   });
 
   els.automationIndicator.classList.toggle('hidden', !model.visible);
@@ -3204,7 +2920,7 @@ async function refreshZoomControl(tab) {
   const queriedId = tab.id;
   const factor = await window.goldfinch.getZoom({ webContentsId: tab.wcId });
   // Drop the result if the active tab changed while the query was in flight.
-  if (queriedId !== activeTabId) return;
+  if (queriedId !== ctx.activeTabId) return;
   const pct = Math.round((factor ?? 1.0) * 100) + '%';
   els.zoomPercent.textContent = pct;
   els.zoomPercent.setAttribute('aria-label', `Current zoom ${pct}`);
@@ -3620,7 +3336,7 @@ window.goldfinch.onDownloadDone((d) => {
 // SAME createTab(url, container) path context-menu opens use (fresh burner for
 // a burner opener; default routing for internal/unknown/missing partitions).
 window.goldfinch.onOpenTab(({ url, openerPartition }) => {
-  createTab(url, inheritContainerFromPartition(openerPartition));
+  createTab(url, jarsClient.inheritContainerFromPartition(openerPartition));
 });
 
 /* --------------------------------------------------------------- shortcuts */
@@ -3672,7 +3388,7 @@ function dispatchChromeAction(action) {
       createTab();
       return true;
     case 'close-tab':
-      if (activeTabId) closeTab(activeTabId);
+      if (ctx.activeTabId) closeTab(ctx.activeTabId);
       return true;
     // New Window (M09 F6 Leg 4, DD5): Ctrl/Cmd+N through the one-classifier
     // path — the same body the kebab item runs. Main creates the window; the
@@ -3693,7 +3409,7 @@ function dispatchChromeAction(action) {
     case 'reopen-closed-tab':
       window.goldfinch.tabReopen().then((entry) => {
         if (!entry) return; // empty stack — no-op (AC)
-        const container = inheritContainerFromPartition(entry.partition);
+        const container = jarsClient.inheritContainerFromPartition(entry.partition);
         createTab(entry.url, container, {
           trusted: false,
           restoreHistory: { entries: entry.navEntries, index: entry.navIndex, title: entry.title },
@@ -3742,7 +3458,7 @@ function dispatchChromeAction(action) {
       const ids = orderedTabIds();
       const len = ids.length;
       if (!len) return true; // never-zero invariant — defensive only
-      const cur = Math.max(ids.indexOf(activeTabId), 0);
+      const cur = Math.max(ids.indexOf(ctx.activeTabId), 0);
       const idx = action === 'tab-next' ? (cur + 1) % len : (cur - 1 + len) % len;
       activateTab(ids[idx]);
       return true;
@@ -3820,13 +3536,13 @@ window.__goldfinchAutomation = {
       url: t.url,
       title: t.title,
       jarId: t.container ? t.container.id : null,
-      active: t.id === activeTabId,
+      active: t.id === ctx.activeTabId,
     }));
   },
   openTab(url, jarId) {
     let container = null;
     if (jarId != null) {
-      container = containers.find((c) => c.id === jarId) || null;
+      container = jarsClient.containers.find((c) => c.id === jarId) || null;
       // Unknown jarId → REFUSE (DD3): do NOT silently fall back to the resolved default.
       if (!container) throw new Error('automation: unknown-jar — no container ' + jarId);
     }
@@ -3876,7 +3592,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.url = url;
-  if (tab.id === activeTabId) {
+  if (tab.id === ctx.activeTabId) {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
@@ -3886,7 +3602,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
   tab.media = [];
   tab.selected.clear();
   tab.privacy = blankPrivacy();
-  if (tab.id === activeTabId) {
+  if (tab.id === ctx.activeTabId) {
     renderMedia();
     renderPrivacy();
   }
@@ -3898,7 +3614,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
     // Chrome-initiated close: main resolves refocusGuest:false from the SENDER — a
     // page-initiated redirect must never yank OS focus into the guest (e.g. while
     // typing in the address bar). No find-overlay-closed echo comes back (we know).
-    if (tab.id === activeTabId) window.goldfinch.findOverlayClose();
+    if (tab.id === ctx.activeTabId) window.goldfinch.findOverlayClose();
   }
 });
 
@@ -3906,7 +3622,7 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.url = url;
-  if (tab.id === activeTabId) {
+  if (tab.id === ctx.activeTabId) {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
@@ -3939,7 +3655,7 @@ window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
 
 window.goldfinch.onTabLoading(({ wcId, loading }) => {
   const tab = findTabByWcId(wcId);
-  if (!tab || tab.id !== activeTabId) return;
+  if (!tab || tab.id !== ctx.activeTabId) return;
   if (loading) {
     els.reload.textContent = '✕';
     els.reload.setAttribute('aria-label', 'Stop');
@@ -3954,14 +3670,14 @@ window.goldfinch.onTabLoading(({ wcId, loading }) => {
 window.goldfinch.onTabDidFinishLoad(({ wcId }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
-  if (tab.id === activeTabId) refreshZoomControl(tab);
+  if (tab.id === ctx.activeTabId) refreshZoomControl(tab);
 });
 
 window.goldfinch.onTabDomReady(({ wcId }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   updateNavButtons();
-  if (tab.id === activeTabId) {
+  if (tab.id === ctx.activeTabId) {
     refreshZoomControl(tab);
     if (!els.privacyPanel.classList.contains('collapsed')) {
       fetchCookies();
@@ -3973,7 +3689,7 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.media = mediaList || [];
-  if (tab.id === activeTabId) renderMedia();
+  if (tab.id === ctx.activeTabId) renderMedia();
 });
 
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
@@ -3997,12 +3713,12 @@ window.goldfinch.onTabPrivacyFp(({ wcId, fpCounts }) => {
   const tab = findTabByWcId(wcId);
   if (!tab) return;
   tab.privacy.fp = fpCounts || tab.privacy.fp;
-  if (tab.id === activeTabId) renderPrivacy();
+  if (tab.id === ctx.activeTabId) renderPrivacy();
 });
 
 window.goldfinch.onTabNavState(({ wcId, canGoBack, canGoForward }) => {
   const tab = findTabByWcId(wcId);
-  if (!tab || tab.id !== activeTabId) return;
+  if (!tab || tab.id !== ctx.activeTabId) return;
   els.back.disabled = !canGoBack;
   els.forward.disabled = !canGoForward;
 });
@@ -4029,7 +3745,7 @@ window.goldfinch.onAdoptTab((payload) => {
   if (findTabByWcId(payload.wcId)) return; // already adopted — defensive no-op
   if (dnd) cancelDnd(); // tab-list mutation invalidates a live drag's snapshot
   pendingDrop = null; // DD6: an adopt is never the pending tab's own success — always invalidates
-  const id = `tab-${++tabSeq}`;
+  const id = `tab-${++ctx.tabSeq}`;
   const tab = buildStripRecord({
     id,
     url: typeof payload.url === 'string' ? payload.url : '',
@@ -4053,10 +3769,10 @@ window.goldfinch.onAdoptTab((payload) => {
 
 // tab-moved-away (SOURCE chrome): strip removal WITHOUT destroy — mirrors
 // closeTab FIELD BY FIELD minus the stack/IPC pieces: cancelDnd, button
-// remove, tabs.delete, the activeViewWcId clear, the next-activation fallback.
+// remove, tabs.delete, the ctx.activeViewWcId clear, the next-activation fallback.
 // NO stripIndex snapshot, NO tabClose IPC, NO closed-tab capture (the tab is
-// alive in another window). The activeViewWcId clear is load-bearing (review
-// M3's named cross-window bug): a stale activeViewWcId here would tabHide the
+// alive in another window). The ctx.activeViewWcId clear is load-bearing (review
+// M3's named cross-window bug): a stale ctx.activeViewWcId here would tabHide the
 // moved guest IN THE TARGET WINDOW on this window's next activation.
 window.goldfinch.onTabMovedAway((payload) => {
   if (!payload || typeof payload.wcId !== 'number') return;
@@ -4072,10 +3788,10 @@ window.goldfinch.onTabMovedAway((payload) => {
   // DD6 narrowed (see the pendingDrop note): this fires on the tear-off SUCCESS path, for the
   // pending tab, BEFORE its reply lands — clearing here would silence our own success.
   if (pendingDrop && pendingDrop.tabId !== tab.id) pendingDrop = null;
-  if (tab.wcId === activeViewWcId) activeViewWcId = null;
+  if (tab.wcId === ctx.activeViewWcId) ctx.activeViewWcId = null;
   tab.btn.remove();
   tabs.delete(tab.id);
-  if (activeTabId === tab.id) {
+  if (ctx.activeTabId === tab.id) {
     // DD1: DOM order is authoritative — same fallback as closeTab. NO
     // else-createTab arm (M09 F10 L3): an empty-strip tab-moved-away now means
     // main is CLOSING this window (the sole-tab consolidate path closes the
@@ -4100,7 +3816,7 @@ webviewsSlotObserver.observe(els.webviews);
 window.goldfinch.onTriggerSendBounds(() => {
   // Force a fresh measurement, bypassing the rAF coalescing guard.
   // Re-schedule a rAF-based send too for the settled-layout measurement.
-  rafGeometryPending = false;  // cancel any pending rAF (it was reading stale bounds)
+  ctx.rafGeometryPending = false;  // cancel any pending rAF (it was reading stale bounds)
   sendActiveBounds();          // reschedule with fresh pending
 });
 
@@ -4138,7 +3854,7 @@ async function createContainerAndOpenTab(rawName) {
 // this can never be blocked by a jars IPC error.
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
-  jarsBoot,
+  jarsClient.boot,
   window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
 ]).then(([url, , bootConfig]) => {
   // Session restore (M09 F9 / DD4 / AC5): when main serves an ordered saved tab list, CREATE
@@ -4155,7 +3871,7 @@ Promise.all([
   if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {
     let activeTab = null;
     for (const t of bootConfig.restoreTabs) {
-      const container = resolveRestoreContainer(t.jarId, containers);
+      const container = resolveRestoreContainer(t.jarId, jarsClient.containers);
       if (!container) continue;
       const tab = createTab(t.url, container, { trusted: false });
       if (tab && t.active) activeTab = tab;

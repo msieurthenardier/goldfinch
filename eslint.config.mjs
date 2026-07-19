@@ -118,6 +118,7 @@ export default [
     // modules — also real ES modules, the jars-history-panel.js precedent.
     files: [
       'src/renderer/renderer.js',
+      'src/renderer/chrome/**/*.js',
       'src/renderer/pages/jars.js',
       'src/renderer/pages/jars-history-panel.js',
       'src/renderer/pages/jars-cookies-panel.js',

@@ -252,8 +252,8 @@ test('AC5: the restore branch references NO restoreHistory and NO inheritContain
 
   // Inject the forbidden inheritContainerFromPartition onto the path.
   const mutated = rendererSource().replace(
-    'const container = resolveRestoreContainer(t.jarId, containers);',
-    'const container = inheritContainerFromPartition(t.jarId);'
+    'const container = resolveRestoreContainer(t.jarId, jarsClient.containers);',
+    'const container = jarsClient.inheritContainerFromPartition(t.jarId);'
   );
   assertMutated(rendererSource(), mutated, 'inherit-injected');
   assert.equal(
