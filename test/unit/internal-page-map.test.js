@@ -27,6 +27,8 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/jars-confirm-modal.js',
     '/jars-cookies-panel.js',
     '/jars-history-panel.js',
+    '/jars-nav-controller.js',
+    '/jars-page-state.js',
     '/jars-sitedata-panel.js',
     '/jars-tabs.js',
     '/jars.css',

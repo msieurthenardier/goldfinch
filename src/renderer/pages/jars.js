@@ -25,6 +25,18 @@ import { createSiteDataPanel } from './jars-sitedata-panel.js';
 import { createJarTabs } from './jars-tabs.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { createConfirmModal } from './jars-confirm-modal.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import {
+  createPanelModeKey,
+  exactHashTarget,
+  findContainer,
+  normalizeDefaultId as normalizeDefaultIdValue,
+  reconcileTransient,
+  sectionSetKey,
+  stateFromPayload
+} from './jars-page-state.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { createJarsNav } from './jars-nav-controller.js';
 
 /**
  * jars.js — the goldfinch://jars internal page controller.
@@ -334,7 +346,7 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    * @returns {any}
    */
   function currentRowFor(id) {
-    return state.containers.find((c) => c.id === id) || null;
+    return findContainer(state.containers, id);
   }
 
   // A data-action success note stays on screen for a few seconds before
@@ -461,180 +473,6 @@ import { createConfirmModal } from './jars-confirm-modal.js';
   }
 
   // ---------------------------------------------------------------------------
-  // Nav (dynamic left link-tree, DD1)
-  // ---------------------------------------------------------------------------
-
-  /** @typedef {{ li: HTMLElement, a: HTMLAnchorElement, dot: HTMLElement, nameSpan: HTMLElement, badge: HTMLElement }} NavEntry */
-
-  /** @type {Map<string, NavEntry>} */
-  const navMap = new Map();
-
-  /**
-   * @param {JarRow} row
-   * @returns {NavEntry}
-   */
-  function buildNavEntry(row) {
-    const li = document.createElement('li');
-    const a = document.createElement('a');
-    a.href = '#jar-' + row.id;
-
-    const dot = document.createElement('span');
-    dot.className = 'jar-dot jar-nav-dot';
-    a.appendChild(dot);
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'jar-nav-name';
-    a.appendChild(nameSpan);
-
-    const badge = document.createElement('span');
-    badge.className = 'jar-nav-badge';
-    badge.textContent = 'Default';
-    a.appendChild(badge);
-
-    li.appendChild(a);
-    const entry = { li, a, dot, nameSpan, badge };
-    updateNavEntry(entry, row);
-    return entry;
-  }
-
-  /**
-   * @param {NavEntry} entry
-   * @param {JarRow} row
-   */
-  function updateNavEntry(entry, row) {
-    entry.dot.style.background = isSafeColor(row.color) ? row.color : FALLBACK_COLOR;
-    entry.nameSpan.textContent = row.name;
-    entry.badge.hidden = !row.isDefault;
-  }
-
-  /**
-   * Rebuild/reconcile the nav from the fresh row set. Wholesale-rebuilt each
-   * pass UNLESS a nav link currently holds focus (uniform focus rule) — in that
-   * case entries are patched/reordered in place via insertBefore, which never
-   * loses focus on an element that stays attached to the document.
-   * @param {JarRow[]} rows
-   */
-  function renderNav(rows) {
-    const focusedInNav = document.activeElement instanceof Node && navEl.contains(document.activeElement);
-
-    if (!focusedInNav) {
-      navEl.textContent = '';
-      navMap.clear();
-      for (const row of rows) {
-        const entry = buildNavEntry(row);
-        navMap.set(row.id, entry);
-        navEl.appendChild(entry.li);
-      }
-      return;
-    }
-
-    const rowIds = new Set(rows.map((r) => r.id));
-    for (const id of Array.from(navMap.keys())) {
-      if (!rowIds.has(id)) {
-        navMap.get(id).li.remove();
-        navMap.delete(id);
-      }
-    }
-
-    let prevLi = null;
-    for (const row of rows) {
-      let entry = navMap.get(row.id);
-      if (!entry) {
-        entry = buildNavEntry(row);
-        navMap.set(row.id, entry);
-      } else {
-        updateNavEntry(entry, row);
-      }
-      if (prevLi == null) {
-        if (navEl.firstChild !== entry.li) navEl.insertBefore(entry.li, navEl.firstChild);
-      } else if (prevLi.nextSibling !== entry.li) {
-        navEl.insertBefore(entry.li, prevLi.nextSibling);
-      }
-      prevLi = entry.li;
-    }
-  }
-
-  /**
-   * Mark the nav link for the given section id as current; clear all others
-   * (the scroll-spy's setActive — settings.js:61-69 pattern).
-   * @param {string} sectionElementId e.g. "jar-personal"
-   */
-  function setActiveNav(sectionElementId) {
-    const rowId = sectionElementId.slice('jar-'.length);
-    for (const [id, entry] of navMap) {
-      if (id === rowId) {
-        entry.a.setAttribute('aria-current', 'true');
-      } else {
-        entry.a.removeAttribute('aria-current');
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Scroll-spy (settings.js:40-100 IntersectionObserver pattern, adapted for
-  // dynamic sections — re-observe only when the section SET changes). DD7:
-  // tab switching changes no scroll geometry (unlike the old collapsible
-  // panels), so this is unaffected by the tab conversion. Reused (design
-  // review) as the lazy-history-fetch trigger too (H4/M08 F6): a section
-  // becoming intersecting is also "scrolled into view" for its History tab's
-  // `onExpanded()` — cheaper than a second observer, and the callback
-  // already visits every intersecting section on each firing.
-  // ---------------------------------------------------------------------------
-
-  /** @type {IntersectionObserver|null} */
-  let scrollObserver = null;
-  /** @type {string|null} */
-  let lastSectionsKey = null;
-
-  /**
-   * @param {JarRow[]} rows
-   */
-  function observeSectionsIfChanged(rows) {
-    const key = rows.map((r) => r.id).join('|');
-    if (key === lastSectionsKey) return;
-    lastSectionsKey = key;
-
-    if (scrollObserver) scrollObserver.disconnect();
-
-    const sections = rows.map((r) => sectionMap.get(r.id).root);
-    if (!sections.length) {
-      scrollObserver = null;
-      return;
-    }
-
-    /** @type {Set<string>} */
-    const visible = new Set();
-    scrollObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            visible.add(entry.target.id);
-            // Lazy history fetch (design review): fires for every
-            // persistent-jar section as it scrolls into view, regardless of
-            // which tab is currently active — cheap and idempotent
-            // (onExpanded's own guard), and means History has already
-            // fetched by the time a later switch-to-History reaches it.
-            // no-ops for Burner (no historyPanel) and the create panel
-            // (never in `sections`).
-            const rowId = entry.target.id.slice('jar-'.length);
-            sectionMap.get(rowId)?.historyPanel?.onExpanded();
-          } else {
-            visible.delete(entry.target.id);
-          }
-        }
-        for (const section of sections) {
-          if (visible.has(section.id)) {
-            setActiveNav(section.id);
-            return;
-          }
-        }
-      },
-      { rootMargin: '0px 0px -50% 0px', threshold: 0 }
-    );
-    for (const section of sections) scrollObserver.observe(section);
-  }
-
-  // ---------------------------------------------------------------------------
   // Sections (one always-expanded <section> per jar, keyed by id)
   // ---------------------------------------------------------------------------
 
@@ -659,6 +497,16 @@ import { createConfirmModal } from './jars-confirm-modal.js';
 
   /** @type {Map<string, SectionRefs>} */
   const sectionMap = new Map();
+  const jarsNav = createJarsNav({
+    document,
+    Node,
+    navEl,
+    IntersectionObserver,
+    isSafeColor,
+    fallbackColor: FALLBACK_COLOR,
+    getSectionRefs: (rowId) => sectionMap.get(rowId),
+    sectionSetKey
+  });
 
   /**
    * One region's always-visible button row (leg spec #4/#8) — reused
@@ -1795,7 +1643,7 @@ import { createConfirmModal } from './jars-confirm-modal.js';
 
   /** Rebuild the create panel only when ui.mode actually transitioned to/from 'create'. */
   function maybeRenderCreatePanel() {
-    const targetMode = ui.mode === 'create' ? 'create' : null;
+    const targetMode = createPanelModeKey(ui);
     if (targetMode === createPanelMode) return;
     createPanelMode = targetMode;
     renderCreatePanel();
@@ -1851,7 +1699,10 @@ import { createConfirmModal } from './jars-confirm-modal.js';
   function tryExpandFromHash() {
     const hash = location.hash;
     if (!hash || hash.length < 2) return;
-    const targetId = hash.slice(1);
+    const targetId = exactHashTarget(hash, new Set(Array.from(sectionMap.values()).flatMap((refs) =>
+      refs.tabRefs ? Array.from(refs.tabRefs.values()).map((tabRef) => tabRef.panel.id) : []
+    )));
+    if (!targetId) return;
     const el = document.getElementById(targetId);
     if (!el || !el.classList.contains('jar-tabpanel')) return;
     for (const refs of sectionMap.values()) {
@@ -1884,9 +1735,7 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    * @param {JarRow[]} rows
    */
   function reconcileUi(rows) {
-    if (ui.mode === 'confirm' && !rows.some((r) => r.id === ui.rowId)) {
-      ui = { mode: null, rowId: null, action: null, draft: null };
-    }
+    ui = reconcileTransient(ui, rows);
   }
 
   /** Render is a pure function of `state` + `ui` — never of an invoke's resolved value. */
@@ -1894,10 +1743,10 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     const rows = buildJarPageModel(state.containers, state.defaultId);
     reconcileUi(rows);
 
-    renderNav(rows);
+    jarsNav.render(rows);
     renderSections(rows);
     anchorCreatePanel(rows);
-    observeSectionsIfChanged(rows);
+    jarsNav.observeSectionsIfChanged(rows);
     maybeRenderCreatePanel();
     // Confirm modal (H7, Leg 5) reconciled AFTER renderSections — see
     // jars-confirm-modal.js's update() doc comment for why the ordering
@@ -1915,13 +1764,12 @@ import { createConfirmModal } from './jars-confirm-modal.js';
    * @returns {string|null}
    */
   function normalizeDefaultId(def) {
-    if (!def || typeof def.id !== 'string') return null;
-    return def.id === BURNER.id ? null : def.id;
+    return normalizeDefaultIdValue(def, BURNER.id);
   }
 
   /** @param {JarsState} payload */
   function applyState(payload) {
-    state = { containers: Array.isArray(payload.containers) ? payload.containers : [], defaultId: payload.defaultId };
+    state = stateFromPayload(state, payload);
     render();
     // Boot-race pin (design review): sections only exist after this first
     // successful render — running the hash check any earlier would find
@@ -2013,6 +1861,6 @@ import { createConfirmModal } from './jars-confirm-modal.js';
     bridge.offJarsChanged(handle);
     bridge.offHistoryChanged(historyChangedHandle);
     bridge.offJarDataChanged(jarDataChangedHandle);
-    if (scrollObserver) scrollObserver.disconnect();
+    jarsNav.destroy();
   }, { once: true });
 })();

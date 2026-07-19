@@ -26,6 +26,8 @@ const path = require('path');
 const JARS_HTML = path.join(__dirname, '../../src/renderer/pages/jars.html');
 const SHARED_DIR = path.join(__dirname, '../../src/shared');
 const PAGES_DIR = path.join(__dirname, '../../src/renderer/pages');
+const MAIN_DIR = path.join(__dirname, '../../src/main');
+const { createInternalPageMap } = require('../../src/main/internal-page-map');
 
 // Parse EVERY <script ... src="..."> tag straight out of jars.html — sourced
 // from the real file, not a hand-maintained list, so this test tracks
@@ -105,5 +107,14 @@ test('jars.html module pin: every src/shared/*.js script tag is type="module"', 
       `jars.html loads the shared file "${t.src}" as a classic script — src/shared/ is ESM, ` +
         'and a classic tag on an ESM file is a parse-time SyntaxError only a live boot would catch'
     );
+  }
+});
+
+test('jars page-local module imports have exact internal routes and wrong paths stay unmapped', () => {
+  const map = createInternalPageMap({ baseDir: MAIN_DIR, path }).jars;
+  for (const name of ['jars-page-state.js', 'jars-nav-controller.js']) {
+    assert.equal(map[`/${name}`], path.join(PAGES_DIR, name));
+    assert.ok(fs.existsSync(map[`/${name}`]));
+    assert.equal(map[`/pages/${name}`], undefined);
   }
 });

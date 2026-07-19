@@ -29,6 +29,8 @@ function createInternalPageMap({ baseDir, path }) {
       '/': rendererPage('jars.html'),
       '/jars.css': rendererPage('jars.css'),
       '/jars.js': rendererPage('jars.js'),
+      '/jars-page-state.js': rendererPage('jars-page-state.js'),
+      '/jars-nav-controller.js': rendererPage('jars-nav-controller.js'),
       '/jar-page-model.js': shared('jar-page-model.js'),
       '/safe-color.js': shared('safe-color.js'),
       '/burner.js': shared('burner.js'),
