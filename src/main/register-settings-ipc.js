@@ -11,7 +11,7 @@ function registerSettingsIpc({
   broadcast,
   applyAutomationEnabledChange,
   applySpellcheck,
-  defaultSession,
+  getDefaultSession,
   getAllWebContents,
   currentAutomationStatus,
   rebindMcpServer,
@@ -50,7 +50,7 @@ function registerSettingsIpc({
     if (key === 'automationEnabled') await applyAutomationEnabledChange(value === true);
     if (key === 'spellcheck') {
       const enabled = value === true;
-      applySpellcheck(defaultSession, enabled);
+      applySpellcheck(getDefaultSession(), enabled);
       const seen = new Set();
       for (const wc of getAllWebContents()) {
         const ses = wc.session;

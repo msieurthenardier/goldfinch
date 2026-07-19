@@ -6,6 +6,7 @@ const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
 
 test('settings registrar preserves bare chrome reads and guarded internal mutations', () => {
   const h = makeSettingsIpcHarness();
+  assert.equal(h.defaultSessionReads(), 0, 'registration must not touch Electron session before ready');
   assert.deepEqual([...h.bare.keys()].sort(), [
     'automation:get-activity', 'chrome-clipboard-write', 'settings-get',
     'shields-get', 'shields-pause', 'shields-set'
@@ -24,6 +25,7 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
 test('settings writes broadcast before their live side effects', async () => {
   const h = makeSettingsIpcHarness();
   await h.invokeInternal('internal-settings-set', 'spellcheck', true);
+  assert.equal(h.defaultSessionReads(), 1);
   assert.deepEqual(h.events.map((event) => event.slice(0, 2)), [
     ['set', 'spellcheck'],
     ['broadcast', 'settings-changed'],

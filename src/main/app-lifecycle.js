@@ -26,7 +26,7 @@ function registerAppLifecycle({
   applyShields,
   applySpellcheck,
   settings,
-  defaultSession,
+  getDefaultSession,
   fromPartition,
   internalPartition,
   setCreatingInternalSession,
@@ -90,6 +90,7 @@ function registerAppLifecycle({
     scheduleInterval(pruneAllJars, 60 * 60 * 1000).unref();
     const downloadsManager = createDownloadsManager(downloadsStore);
     setDownloadsManager(downloadsManager);
+    const defaultSession = getDefaultSession();
     wireDownloadHandler(defaultSession);
     applyShields(defaultSession);
     applySpellcheck(defaultSession, settings.get('spellcheck'));

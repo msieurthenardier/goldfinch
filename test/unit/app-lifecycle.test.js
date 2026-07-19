@@ -18,6 +18,7 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
   const internalSession = {
     protocol: { handle: (scheme) => events.push(`protocol:${scheme}`) }
   };
+  let defaultSessionReads = 0;
   const app = {
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
@@ -56,7 +57,7 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     applyShields: () => events.push('apply-shields'),
     applySpellcheck: () => events.push('apply-spellcheck'),
     settings: { get: (key) => settingsValues[key] },
-    defaultSession: {},
+    getDefaultSession: () => { defaultSessionReads++; return {}; },
     fromPartition: () => { events.push('internal-session'); return internalSession; },
     internalPartition: 'goldfinch-internal',
     setCreatingInternalSession: (value) => events.push(`creating:${value}`),
@@ -102,13 +103,16 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
   });
   return {
     events, appListeners, handlers, ipcListeners, lifecycle, created, internalSession,
+    defaultSessionReads: () => defaultSessionReads,
     setBootRecord: (record) => { bootRecord = record; },
   };
 }
 
 test('ready path preserves store/session initialization order and default window creation', async () => {
   const h = makeHarness();
+  assert.equal(h.defaultSessionReads(), 0, 'lifecycle registration must not touch Electron session');
   await h.lifecycle.ready;
+  assert.equal(h.defaultSessionReads(), 1, 'default session resolves only inside the ready continuation');
   assert.deepEqual(h.events.slice(0, 14), [
     'init-stores', 'history-open', 'session-load', 'history-recorder', 'prune', 'interval',
     'downloads-manager', 'set-downloads-manager', 'wire-downloads', 'apply-shields',
