@@ -24,6 +24,8 @@ const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
+const { createInternalPageMap } = require('./internal-page-map');
+const { createBroadcasters } = require('./broadcasts');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
@@ -136,79 +138,9 @@ for (const stream of [process.stdout, process.stderr]) {
 // CSP; `secure: true` marks it a trusted origin. Do NOT "simplify" these privileges away. (DD2)
 protocol.registerSchemesAsPrivileged([{ scheme: 'goldfinch', privileges: { standard: true, secure: true } }]);
 
-// Fixed host -> per-path allowlist for the internal scheme. Each entry is
-// { [normalizedPathname]: absoluteFilePath }. Absolute paths stay HERE (in main.js
-// with __dirname access); internal-assets.js is __dirname-free so it can be unit-tested
-// with a synthetic map. Adding a page (Flight 5+) is an explicit edit here, never a
-// directory passthrough — paths are NOT derived from the URL, so traversal is structurally
-// impossible. `asar:false` + `files: src/**/*` ship these unpacked, so pathToFileURL
-// resolves in dev and packaged builds alike.
-const INTERNAL_PAGES = {
-  settings: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'settings.html'),
-    '/settings.css': path.join(__dirname, '..', 'renderer', 'pages', 'settings.css'),
-    '/settings.js': path.join(__dirname, '..', 'renderer', 'pages', 'settings.js'),
-    // Pure pagination/freshness module loaded by settings.html as a same-origin
-    // <script> before settings.js. Kept in src/shared/ for the lint-clean UMD tail
-    // + node-test require(); served here so the goldfinch://settings guest can load
-    // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
-    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js'),
-    // Injection-safe color validator (M06 F4 Leg 5 HAT F7): the automation-key
-    // list guards the jar color it tints the robot glyph / unkeyed dot with, the
-    // same isSafeColor/FALLBACK_COLOR idiom jars.js uses — precedent: jars serves
-    // this same shared module (see the jars host entry below).
-    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js')
-  },
-  // Second internal page (Flight 5, Leg 2): the app-level downloads surface. Same
-  // allowlist-driven serving as settings — handleInternal/createResolver/INTERNAL_CSP
-  // are unchanged. Adding it here is the explicit edit that registers the page.
-  downloads: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.html'),
-    '/downloads.css': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.css'),
-    '/downloads.js': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.js')
-  },
-  // Third internal page (Flight 3, Leg 1): the jar-management surface. Same
-  // allowlist-driven serving as settings/downloads. Its script list pulls three
-  // shared modules straight from src/shared/ (burner.js, safe-color.js,
-  // jar-page-model.js) — precedent: settings serves audit-paging.js from shared.
-  jars: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'jars.html'),
-    '/jars.css': path.join(__dirname, '..', 'renderer', 'pages', 'jars.css'),
-    '/jars.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars.js'),
-    '/jar-page-model.js': path.join(__dirname, '..', 'shared', 'jar-page-model.js'),
-    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js'),
-    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
-    // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
-    // list, loaded before jars.js (see jars.html's script-order comment).
-    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
-    // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
-    // for the page's History/Cookies/Other-site-data tabs.
-    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js'),
-    // History panel content module (M08 Flight 3, Leg 2 / flight DD7) — a
-    // page-local module (src/renderer/pages/, not src/shared/), unlike the
-    // entries above.
-    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js'),
-    // Per-jar WAI-ARIA tab widget (H4, M08 Flight 6, Leg 3 — growth-checkpoint
-    // extraction): another page-local module, the jars-history-panel.js
-    // three-point-onboarding precedent (this entry, the jars.html module
-    // tag, and the jars-page-shared-scripts.test.js contract test, which
-    // self-derives from jars.html and needed no edit).
-    '/jars-tabs.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-tabs.js'),
-    // Confirm-modal module (H7, M08 Flight 6, Leg 5 — growth-checkpoint
-    // extraction, the SAME three-point-onboarding precedent as jars-tabs.js
-    // above): the ONE page-level confirm modal, replacing the per-region
-    // inline confirms every earlier flight used.
-    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js'),
-    // Cookies + Other-site-data panel content modules (M10 Flight 2, Leg 2 —
-    // design review: the exact-match resolver 404s an unregistered module,
-    // so this entry is a required onboarding step, not optional wiring — the
-    // jars-history-panel.js/jars-tabs.js three-point-onboarding precedent
-    // (this entry, the jars.html module tag, and the self-deriving
-    // jars-page-shared-scripts.test.js, which needs no edit).
-    '/jars-cookies-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-cookies-panel.js'),
-    '/jars-sitedata-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-sitedata-panel.js')
-  }
-};
+// Fixed internal assets remain an exact host/path allowlist. The extracted
+// builder receives __dirname and path; it never derives a file from a URL.
+const INTERNAL_PAGES = createInternalPageMap({ baseDir: __dirname, path });
 
 // Build the resolver once at startup; handleInternal calls it per request.
 const resolveInternal = createResolver(INTERNAL_PAGES);
@@ -360,45 +292,20 @@ function queueChromeSend(rec, buildMsg) {
 // main owns capture (tab-close, below) and reopen (Leg 2) wiring around it.
 const closedTabStack = createClosedTabStack();
 
-// DD6 push-cache (F6 leg 3): push the stack's size to EVERY registered chrome on
-// every stack mutation — both capture sites' pushes and the reopen handler's pop
-// (no clear path exists today; any future one must call this too). Chromes ONLY,
-// deliberately NOT broadcastToChromeAndInternal: no internal-session consumer
-// exists (flight design review L1). The chrome caches the size so the tab-context
-// opener builds its model synchronously; the `closed-tab-stack-size` invoke
-// (below) remains solely as the cache's boot seed.
-function broadcastClosedTabStackChanged() {
-  const payload = { size: closedTabStack.size() };
-  for (const rec of registry.records()) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) cc.send('closed-tab-stack-changed', payload);
-  }
-}
-
-// F8 DD8 push-cache — the SAME shape as the closed-tab-stack push above, and for
-// the same reason: openTabContextMenu builds its model SYNCHRONOUSLY (F6 DD6
-// deleted the async opener and its stale-resolve guard), so the "Move to window …"
-// target list has to already be renderer-side when the menu opens.
-//
-// PER-RECORD payloads, unlike the stack push's one shared object: every chrome
-// gets the list with ITS OWN window excluded, so no window is ever offered a move
-// to itself.
-//
-// WHAT IS CACHED IS ONLY THE LABEL, and that is what makes this cache cheap to
-// reason about. The `windowId` a renderer echoes back is re-resolved through
-// registry.get() and re-validated against the SENDER's own record at dispatch
-// (DD8's AUTHORITY rule), so a MISSED push here degrades to a stale caption on a
-// menu item — visible, cosmetic, self-healing on the next push — and can never
-// mis-target a move. That is DD8's windowId-over-ordinal reversal paying out: an
-// ordinal-keyed list with a missed invalidation would silently move the tab into
-// the WRONG window.
-function broadcastMoveTargetsChanged() {
-  const recs = registry.records();
-  for (const rec of recs) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) cc.send('move-targets-changed', { targets: buildMoveTargets(recs, rec) });
-  }
-}
+// Push helpers read the live registry on every call. Closed-tab updates are
+// chrome-only; move targets are per-record; shared state fans out to every
+// chrome plus each trusted internal page, never ordinary web guests.
+const {
+  broadcastClosedTabStackChanged,
+  broadcastMoveTargetsChanged,
+  broadcastToChromeAndInternal
+} = createBroadcasters({
+  registry,
+  webContents,
+  isInternalContents,
+  closedTabStack,
+  buildMoveTargets
+});
 
 // --- Find-overlay view construction (M05 Flight 7, DD1/DD2) ---------------------------
 // The floating find bar is a dedicated chrome-class WebContentsView stacked above the
@@ -2199,32 +2106,6 @@ function applyShields(ses) {
 // is the file:// chrome (window.goldfinch surface in chrome-preload.js), same as shields-get.
 // Web webviews have no ipcRenderer.invoke, so only the chrome + internal guest can reach IPC.
 ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
-
-/**
- * Broadcast a channel+payload to both audiences that need settings/shields change events:
- *  1. EVERY registered window's chrome renderer (class 2, F6 DD2 — the fan-out goes to
- *     ALL chromes, never just the accessor's) — sent separately because the
- *     __goldfinchInternal filter below intentionally excludes them (a chrome is not an
- *     internal-session webContents).
- *  2. Every webContents whose session carries __goldfinchInternal === true (the settings guest
- *     and any other future goldfinch:// internal pages) — ONCE GLOBALLY, never per-window.
- * Leg 4 reuses this helper for the shields-changed broadcast to the settings guest.
- * @param {string} channel
- * @param {unknown} payload
- */
-function broadcastToChromeAndInternal(channel, payload) {
-  for (const rec of registry.records()) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) {
-      cc.send(channel, payload);
-    }
-  }
-  for (const wc of webContents.getAllWebContents()) {
-    if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
-      wc.send(channel, payload);
-    }
-  }
-}
 
 // Shields config IPC. INTENTIONALLY NOT behind the internal-sender guard — their trust
 // domain is the file:// chrome (window.goldfinch surface in chrome-preload.js), not the

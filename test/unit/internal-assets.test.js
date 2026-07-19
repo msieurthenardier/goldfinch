@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { contentTypeFor, createResolver } = require('../../src/main/internal-assets');
+const { createInternalPageMap } = require('../../src/main/internal-page-map');
 
 // ---------------------------------------------------------------------------
 // Synthetic map with predictable fake paths (no real files needed — the
@@ -166,4 +167,15 @@ test('resolve: a second host resolves its own paths independently', () => {
   // Cross-host isolation: settings path doesn't bleed into other and vice versa
   assert.equal(r('settings', '/settings.css'), null); // not in twoHostMap
   assert.equal(r('other', '/settings.css'), null);
+});
+
+test('resolver accepts the production map builder without weakening exact-path refusal', () => {
+  const map = createInternalPageMap({
+    baseDir: '/fake/main',
+    path: { join: (...parts) => parts.join('/') }
+  });
+  const productionResolve = createResolver(map);
+  assert.match(productionResolve('downloads', '/downloads.js').file, /renderer\/pages\/downloads\.js$/);
+  assert.equal(productionResolve('downloads', '/../main.js'), null);
+  assert.equal(productionResolve('downloads', '/downloads.js/extra'), null);
 });
