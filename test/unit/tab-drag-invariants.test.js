@@ -38,13 +38,15 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const REPO_ROOT = path.join(__dirname, '../..');
-const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
+const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/chrome/tab-controller.js');
+const RENDERER_COMPOSITION_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const STYLES_CSS = path.join(REPO_ROOT, 'src/renderer/styles.css');
 const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
 
 /** @returns {string} */
 function rendererSource() {
-  return fs.readFileSync(RENDERER_JS, 'utf8');
+  const owner = fs.readFileSync(RENDERER_JS, 'utf8').replace(/^ {2}/gm, '');
+  return `${owner}\n${fs.readFileSync(RENDERER_COMPOSITION_JS, 'utf8')}`;
 }
 
 /** Assert a mutation actually applied — a no-op .replace() would "discharge" vacuously. */

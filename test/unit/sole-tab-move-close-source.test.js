@@ -35,7 +35,7 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const MAIN_JS = path.join(__dirname, '../../src/main/register-tab-ipc.js');
-const RENDERER_JS = path.join(__dirname, '../../src/renderer/renderer.js');
+const RENDERER_JS = path.join(__dirname, '../../src/renderer/chrome/tab-controller.js');
 
 // The move core's body — anchored on the function name + the L3 signature (never a line;
 // move-tab-synchrony's header measured four different line numbers for one pair). The
@@ -55,7 +55,7 @@ const CONSOLIDATE_CALL = '() => target, true)';
 const NEWWINDOW_TRUE = 'newWindowForMove(source), true)';
 
 const realMain = () => fs.readFileSync(MAIN_JS, 'utf8');
-const realRenderer = () => fs.readFileSync(RENDERER_JS, 'utf8');
+const realRenderer = () => fs.readFileSync(RENDERER_JS, 'utf8').replace(/^ {2}/gm, '');
 
 /** Slice a `{ … }` body opened by the first match of `re`, comments masked. */
 function bodyOf(source, re, what) {
@@ -166,11 +166,8 @@ test('AC4: onTabMovedAway has no createTab( arm — real → 0, mutated → 1', 
 // it, so a future maskComments fix (or a comment reword) is caught as a changed reading.
 // ---------------------------------------------------------------------------
 
-test('the renderer mask is INVERTED here — the bare token reads the comment, the paren-qualified one does not', () => {
+test('the extracted controller mask is stable — neither token reads comments', () => {
   const body = movedAwayBody(realRenderer());
-  assert.ok(
-    count(body, 'createTab') > 0,
-    'the (masked) body still reads `createTab` from the comment — maskComments is inverted here (regex blind spot)'
-  );
+  assert.equal(count(body, 'createTab'), 0, 'the extracted owner no longer crosses the old renderer regex blind spot');
   assert.equal(count(body, 'createTab('), 0, 'the paren-qualified token the AC4 pin uses is comment-proof → 0');
 });
