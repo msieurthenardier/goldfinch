@@ -117,7 +117,7 @@ const { maskComments, findMatchingBracket, collectSources } = require('../helper
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const MAIN_DIR = path.join(REPO_ROOT, 'src/main');
-const MAIN_JS = path.join(MAIN_DIR, 'main.js');
+const MAIN_JS = path.join(MAIN_DIR, 'register-tab-ipc.js');
 
 // The move core's name — the pin's anchor since leg 3, re-spelled at leg 4 (see the
 // header). `\b`-bounded so the DEFINITION and the call sites are counted by the same token,

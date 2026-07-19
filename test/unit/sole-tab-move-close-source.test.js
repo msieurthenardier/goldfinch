@@ -34,7 +34,7 @@ const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/register-tab-ipc.js');
 const RENDERER_JS = path.join(__dirname, '../../src/renderer/renderer.js');
 
 // The move core's body — anchored on the function name + the L3 signature (never a line;

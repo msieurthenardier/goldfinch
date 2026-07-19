@@ -39,7 +39,7 @@ const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/register-tab-ipc.js');
 const HANDLER = 'tab-set-active';
 
 // --- the scan -------------------------------------------------------------------
@@ -109,7 +109,7 @@ function analyzeHandler(body) {
 
 // --- the net --------------------------------------------------------------------
 
-test("main.js `tab-set-active` reads the outgoing guest's isFocused() and CONDITIONALLY focuses the incoming guest", () => {
+test("register-tab-ipc `tab-set-active` reads outgoing focus and conditionally focuses the incoming guest", () => {
   const body = extractHandlerBody(maskComments(fs.readFileSync(MAIN_JS, 'utf8')), HANDLER);
 
   // Vacuity guard: fail loudly if the handler was renamed/refactored out of reach rather

@@ -40,7 +40,7 @@ const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 const REPO_ROOT = path.join(__dirname, '../..');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const STYLES_CSS = path.join(REPO_ROOT, 'src/renderer/styles.css');
-const MAIN_JS = path.join(REPO_ROOT, 'src/main/main.js');
+const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
 
 /** @returns {string} */
 function rendererSource() {

@@ -45,7 +45,7 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const REPO_ROOT = path.join(__dirname, '../..');
-const MAIN_JS = path.join(REPO_ROOT, 'src/main/main.js');
+const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 
 const realMain = () => fs.readFileSync(MAIN_JS, 'utf8');
