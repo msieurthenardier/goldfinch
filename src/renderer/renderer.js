@@ -21,6 +21,7 @@ import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's re
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
+import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
 import { createMediaController } from './chrome/media-controller.js';
 import { createNavigationController } from './chrome/navigation-controller.js';
@@ -68,6 +69,7 @@ let navigationController;
 let mediaController;
 let privacyController;
 let windowController;
+let downloadsController;
 let shortcutController;
 let pageActions;
 const jarsClient = createJarsClient({
@@ -243,6 +245,27 @@ const overlayMenus = {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
     refocus() {}
+  },
+  // Downloads popup (M11 F1 Leg 3) — a CUSTOM state literal (the suggestions /
+  // page-context shape), NOT fixedTriggerMenu (which nests the whole state object
+  // under `ariaTarget` and makes state.ariaTarget() throw). ariaTarget = the
+  // #downloads-indicator button, so its aria-expanded flips on open/close.
+  downloads: {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => els.downloadsIndicator,
+    refocus(reason) {
+      // acknowledge-on-close (DD5 refinement): call acknowledge() FIRST — refocus
+      // runs before handleOverlayClosed (overlay-menus.js:81-82), so the following
+      // isVisible() sees the POST-acknowledge state. The button is refocused only
+      // when in-flight downloads keep it visible; otherwise focus falls back to the
+      // address bar (page-context parity) so we never focus a now-hidden button.
+      downloadsController.acknowledge();
+      if ((reason === 'escape' || reason === 'activated') && downloadsController.isVisible()) {
+        els.downloadsIndicator.focus();
+      } else {
+        els.address.focus();
+      }
+    }
   }
 };
 const overlayMenuClient = createOverlayMenus({
@@ -300,6 +323,13 @@ mediaController = createMediaController({
   openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl),
   createTab
 });
+
+// App-scoped top-bar downloads indicator (M11 F1 Leg 2). Subscribes independently to
+// the download broadcasts and self-manages #downloads-indicator. Leg 3's downloads
+// popup now consumes it: getSnapshot() builds the popup model, isVisible() guards the
+// close-refocus, acknowledge() fires on popup close, and forceShowForAudit() backs the
+// a11y-sweep seam.
+downloadsController = createDownloadsController({ els, goldfinch: window.goldfinch });
 
 privacyController = createPrivacyController({
   window,
@@ -419,6 +449,54 @@ const openNewContainerOverlay = () => openOverlayMenu('new-container', [], conta
 const openPageContextOverlaySheet = (anchor) =>
   openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem), anchor, 0);
 
+/* --------------------------------------------- downloads popup (M11 F1 Leg 3) */
+// Snapshot-at-open, close-then-act (flight DD2/DD3): the popup renders the
+// snapshot captured at open; a row activation closes the sheet, then the chrome
+// performs the action (Leg-1 chrome-trust bridges). The id-set captured here is
+// the dispatch-validation gate — a `dl:open:<id>` / `dl:folder:<id>` whose id is
+// not in this set (vanished / malformed) is a validated no-op.
+const downloadsOpen = { ids: new Set() };
+
+// Right-aligned anchor under the #downloads-indicator button (chrome→sheet
+// translation, RIGHT edge; y clamps to 0 — flush at the sheet's top edge).
+const downloadsAnchor = () => {
+  const wv = els.webviews.getBoundingClientRect();
+  const r = els.downloadsIndicator.getBoundingClientRect();
+  return rightSheetAnchor(wv, r);
+};
+
+// Build the model from downloadsController.getSnapshot() — each snapshot item
+// carries `state` (not `completed`), so map to the popup shape. Retain the id-set
+// for dispatch validation. Guard: no-op on an empty model (never an empty dialog).
+// Do NOT acknowledge() here — acknowledge fires on CLOSE (the state's refocus, DD5).
+function openDownloadsOverlay() {
+  const snapshot = downloadsController.getSnapshot();
+  if (!snapshot.length) return;
+  const model = snapshot.map((e) => ({
+    id: e.id,
+    filename: e.filename,
+    completed: e.state === 'completed',
+    received: e.received,
+    total: e.total,
+    paused: e.paused
+  }));
+  downloadsOpen.ids = new Set(snapshot.map((e) => e.id));
+  openOverlayMenu('downloads', model, downloadsAnchor(), 0);
+}
+
+// a11y-sweep seams (M11 F1 Leg 3, FD-ruled — scoped SOLELY to `npm run a11y`,
+// mirroring the openTabContextMenuForAudit precedent). forceShowForAudit injects a
+// synthetic completed entry so the button/popup render even with no real download
+// history; the overlay opener force-shows THEN opens. Published on the closed-set
+// globalThis seam at the bottom of this file.
+function showDownloadsIndicatorForAudit() {
+  downloadsController.forceShowForAudit();
+}
+function openDownloadsOverlayForAudit() {
+  downloadsController.forceShowForAudit();
+  openDownloadsOverlay();
+}
+
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
 // 'toggle' close (the sheet's blur usually resolves the close first — see the
 // suppress window; when the click wins the race this is the explicit close, no
@@ -467,6 +545,23 @@ els.addressChip.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     openSiteInfoOverlay();
+  }
+});
+
+// #downloads-indicator trigger (M11 F1 Leg 3): click toggle + APG menu-button
+// keydown (Enter/Space/ArrowDown/ArrowUp — startIndex is moot for the dialog, so
+// all four open the same way). Guard: do nothing while the button is `.hidden`
+// (idle) — a hidden trigger must never open its popup. openDownloadsOverlay itself
+// no-ops on an empty snapshot.
+els.downloadsIndicator.addEventListener('click', () => {
+  if (els.downloadsIndicator.classList.contains('hidden')) return;
+  overlayTriggerClick('downloads', () => openDownloadsOverlay());
+});
+els.downloadsIndicator.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (els.downloadsIndicator.classList.contains('hidden')) return;
+    openDownloadsOverlay();
   }
 });
 
@@ -712,6 +807,33 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // raced the click and bumped suggest.seq, invalidating suggest.items in
       // between) → no-op, never throw.
       navigationController.dispatchSuggestion(id);
+      break;
+    }
+    case 'downloads': {
+      // Snapshot-at-open dispatch (DD3): `dl:page` opens the downloads page;
+      // `dl:open:<id>` / `dl:folder:<id>` parse the id, validate it is an integer
+      // PRESENT in the open-time snapshot (vanished / malformed → no-op), then call
+      // the Leg-1 chrome-trust bridges by id. The completion gate lives in Leg 1's
+      // main handler (open refuses a non-completed record); in-progress rows carry
+      // no open/folder buttons, so an open id here is always a completed row.
+      if (id === 'dl:page') {
+        openDownloads();
+        break;
+      }
+      let rawId = null;
+      let action = null;
+      if (id.startsWith('dl:open:')) {
+        action = 'open';
+        rawId = id.slice('dl:open:'.length);
+      } else if (id.startsWith('dl:folder:')) {
+        action = 'folder';
+        rawId = id.slice('dl:folder:'.length);
+      }
+      if (!action) break;
+      const n = Number(rawId);
+      if (!Number.isInteger(n) || !downloadsOpen.ids.has(n)) break; // vanished / malformed → no-op
+      if (action === 'open') window.goldfinch.openDownloadedFile(n);
+      else window.goldfinch.revealDownloadedFile(n);
       break;
     }
   }
@@ -1165,14 +1287,16 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 19-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 21-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 19 is
+// do not grow it without an FD ruling — an evaluate caller outside these 21 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
-// the flight's Checkpoints.)
+// the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
+// showDownloadsIndicatorForAudit + openDownloadsOverlayForAudit for the new
+// downloads-button + sheet:downloads a11y states.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1195,5 +1319,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openSiteInfoOverlay,
   openNewContainerOverlay,
   openPageContextMenuForAudit,
-  openTabContextMenuForAudit // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  openTabContextMenuForAudit, // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  showDownloadsIndicatorForAudit, // M11 F1 Leg 3 — chrome state 'downloads-button' (FD-ruled addition)
+  openDownloadsOverlayForAudit // M11 F1 Leg 3 — SHEET_STATES 'sheet:downloads' (FD-ruled addition)
 });

@@ -1,7 +1,8 @@
 // Menu-overlay sheet page script (M05 Flight 8, Legs 2-3 / M08 Flight 4 Leg 2).
 // Presentation-only: receives the serialized menu model over `menu-overlay:init`
 // (channel 3), renders it under #menu-root via a TEMPLATE REGISTRY keyed by
-// menuType (Leg 3, suggestions added M08 F4 Leg 2 — FOUR templates now):
+// menuType (Leg 3, suggestions added M08 F4 Leg 2, downloads added M11 F1 Leg 3
+// — FIVE templates now):
 //
 //   menu         (kebab, container)  — role="menu" item list, APG roving via the
 //                                      SHARED menu-controller.js
@@ -16,6 +17,12 @@
 //                                      the sheet never takes focus in this
 //                                      template's regime (M08 F4 DD2); Escape/
 //                                      arrows/typing all live in the chrome
+//   downloads    (downloads popup)   — role="dialog" download-row list, NO items
+//                                      getter (chrome-popup regime); local keydown
+//                                      owns Escape (close) + Tab/Shift+Tab (CYCLE
+//                                      among the buttons — input-dialog regime);
+//                                      snapshot-at-open, one-shot activation (M11
+//                                      F1 Leg 3)
 //
 // EVERY template registers a menuController entry and opens via menuController.open,
 // so the controller's global pointerdown/blur listeners deliver outside-click/blur
@@ -518,9 +525,161 @@ import { isSafeColor } from '../shared/safe-color.js';
     positionNode(suggestionsNode, anchor);
   }
 
+  /* ----------------------------------------------------------- template: downloads */
+  // Downloads popup (M11 Flight 1 Leg 3, DD2/DD3): a role="dialog" list of the
+  // current/recent downloads captured in the snapshot the chrome sent at open
+  // (presentation-only, one-shot activation — no live progress push here; live
+  // progress stays in the #downloads-indicator button). COMPLETED rows render a
+  // filename button (dl:open:<id>) + a folder-reveal button (dl:folder:<id>);
+  // IN-PROGRESS rows render the filename as non-interactive text + a progress
+  // indicator with NO action buttons (so an in-progress item is inherently not
+  // openable — cleaner than a disabled button, and it avoids a disabled-first-
+  // button focus trap). A footer button (dl:page) is ALWAYS present, so
+  // onOpen's querySelector('button') always lands on an enabled control even when
+  // every row is in-progress. Registered WITHOUT an items getter (the controller's
+  // roving no-ops — the chrome-popup regime, like info-popup); the local keydown
+  // owns Escape (close) and Tab/Shift+Tab (CYCLE focus among the enabled buttons —
+  // the input-dialog regime, a multi-button dialog must cycle, NOT close on Tab).
+
+  const downloadsNode = document.createElement('div');
+  downloadsNode.id = 'sheet-downloads';
+  downloadsNode.setAttribute('role', 'dialog');
+  downloadsNode.tabIndex = -1;
+  downloadsNode.classList.add('hidden');
+  root.appendChild(downloadsNode);
+
+  const DOWNLOADS_LABELS = { downloads: 'Downloads' };
+
+  const downloadsEntry = menuController.register({
+    trigger: downloadsNode,
+    menu: downloadsNode,
+    // no `items` — roving no-ops (controller guard); the local keydown owns Tab.
+    onOpen() {
+      downloadsNode.classList.remove('hidden');
+      // Focus the first button (a completed row's filename, or — when every row is
+      // in-progress — the always-present footer). querySelector('button') is safe:
+      // only completed rows and the footer render buttons, all enabled.
+      (downloadsNode.querySelector('button') || downloadsNode).focus();
+    },
+    onClose() {
+      downloadsNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Local keydown: Escape → dismiss (escape flavor); Tab/Shift+Tab → cycle focus
+  // among the enabled buttons (input-dialog regime — NO dismissal, NO lastStimulus
+  // write on Tab). The controller's menu-keydown no-ops (!entry.items), so this
+  // listener owns both keys.
+  downloadsNode.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      lastStimulus = 'escape';
+      menuController.close(downloadsEntry);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const cycle = /** @type {HTMLElement[]} */ ([...downloadsNode.querySelectorAll('button')]);
+      if (!cycle.length) return;
+      const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
+      const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
+      cycle[n].focus();
+    }
+  });
+
+  /** Folder-reveal icon (Lucide folder, ISC) built via createElementNS — no
+   * innerHTML, and it is aria-hidden (the button's aria-label carries the name).
+   * @returns {SVGElement} */
+  function folderIcon() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '15');
+    svg.setAttribute('height', '15');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', 'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z');
+    svg.appendChild(p);
+    return svg;
+  }
+
+  /** Progress label for an in-progress row (WORDS, not color alone).
+   * @param {any} item @returns {string} */
+  function downloadProgressText(item) {
+    if (item.paused) return 'Paused';
+    const total = item.total;
+    const received = item.received;
+    if (typeof total === 'number' && total > 0 && typeof received === 'number') {
+      return Math.min(100, Math.max(0, Math.floor((received / total) * 100))) + '%';
+    }
+    return 'In progress';
+  }
+
+  /** Render the downloads list from the open-time snapshot (a flat item array).
+   * All filenames via textContent (DD8 — untrusted / RTL / long names; CSS
+   * ellipsis handles length).
+   * @param {string} menuType @param {any[]} model @param {any} anchor */
+  function renderDownloads(menuType, model, anchor) {
+    downloadsNode.textContent = '';
+    downloadsNode.dataset.menuType = menuType;
+    downloadsNode.setAttribute('aria-label', DOWNLOADS_LABELS[menuType] || 'Downloads');
+    for (const item of model) {
+      if (!item || typeof item.id !== 'number') continue;
+      const row = document.createElement('div');
+      row.className = 'dl-row';
+      if (item.completed) {
+        // Completed: filename button (open) + folder-reveal button.
+        const name = document.createElement('button');
+        name.className = 'dl-name';
+        name.type = 'button';
+        name.textContent = String(item.filename != null ? item.filename : '');
+        name.addEventListener('click', () => {
+          if (sendActivatedOnce({ id: 'dl:open:' + item.id })) menuController.close(downloadsEntry);
+        });
+        const folder = document.createElement('button');
+        folder.className = 'dl-folder';
+        folder.type = 'button';
+        folder.setAttribute('aria-label', 'Show in folder');
+        folder.appendChild(folderIcon());
+        folder.addEventListener('click', () => {
+          if (sendActivatedOnce({ id: 'dl:folder:' + item.id })) menuController.close(downloadsEntry);
+        });
+        row.append(name, folder);
+      } else {
+        // In-progress: filename as NON-INTERACTIVE text + progress; no buttons.
+        const name = document.createElement('span');
+        name.className = 'dl-name';
+        name.textContent = String(item.filename != null ? item.filename : '');
+        const progress = document.createElement('span');
+        progress.className = 'dl-progress';
+        progress.textContent = downloadProgressText(item);
+        row.append(name, progress);
+      }
+      downloadsNode.appendChild(row);
+    }
+    // Footer is ALWAYS a button (the enabled-first-button guarantee for onOpen).
+    const footer = document.createElement('button');
+    footer.className = 'dl-footer';
+    footer.type = 'button';
+    footer.textContent = 'Open downloads page';
+    footer.addEventListener('click', () => {
+      if (sendActivatedOnce({ id: 'dl:page' })) menuController.close(downloadsEntry);
+    });
+    downloadsNode.appendChild(footer);
+    // Unhide before positioning (point/align clamps measure the node).
+    downloadsNode.classList.remove('hidden');
+    positionNode(downloadsNode, anchor);
+  }
+
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
@@ -532,13 +691,15 @@ import { isSafeColor } from '../shared/safe-color.js';
     // would silently fall into it and break the suggestions template's
     // non-focusing guarantee. The suggestions template must NEVER focus the
     // sheet — never remove this entry without an equivalent non-focusing fallback.
-    suggestions: 'suggestions'
+    suggestions: 'suggestions',
+    downloads: 'downloads' // M11 Flight 1 Leg 3 — role="dialog" downloads popup
   };
   const NODE_OF_ENTRY = new Map([
     [menuEntry, menuNode],
     [popupEntry, popupNode],
     [dialogEntry, dialogNode],
-    [suggestionsEntry, suggestionsNode]
+    [suggestionsEntry, suggestionsNode],
+    [downloadsEntry, downloadsNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -606,6 +767,11 @@ import { isSafeColor } from '../shared/safe-color.js';
       // Still opened through the shared controller so the global outside-click/
       // blur listeners cover this template uniformly (module header rule).
       menuController.open(suggestionsEntry, 0);
+    } else if (template === 'downloads') {
+      // Flat item array (modelShapeOk's non-suggestions branch). startIndex is
+      // meaningless without items — onOpen focuses the first enabled button.
+      renderDownloads(menuType, model, anchor);
+      menuController.open(downloadsEntry, 0);
     } else {
       // input-dialog: fixed layout, model may be empty; centered via CSS —
       // the anchor is deliberately ignored.

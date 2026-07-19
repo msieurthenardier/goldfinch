@@ -60,6 +60,11 @@ html.platform-linux body {
 .tab {
   -webkit-app-region: no-drag; /* keep the pill and tabs clickable */
 }
+/* Downloads indicator (M11 F1 Leg 2): app-scoped button living in the #tabstrip drag
+   region — opt it out so it stays clickable, same as the pill / tabs / window controls. */
+#downloads-indicator {
+  -webkit-app-region: no-drag;
+}
 #window-controls {
   flex: none;
   display: flex;
@@ -1202,7 +1207,8 @@ a:focus-visible {
 #toggle-media,
 #toggle-privacy,
 #toggle-devtools,
-#automation-indicator {
+#automation-indicator,
+#downloads-indicator {
   position: relative;
   width: 36px; /* slightly wider than the 32px default to give the badge room */
   display: flex;
@@ -1322,6 +1328,47 @@ a:focus-visible {
        from .automation-multi's plain accent, no motion for a reduced-motion user. */
     animation: none;
     filter: hue-rotate(120deg) saturate(1.6);
+  }
+}
+
+/* Downloads indicator (M11 F1 Leg 2, DD1/DD5). App-scoped top-bar button mirroring
+   #automation-indicator's icon+badge treatment. Idle-hidden via the shared .hidden
+   class (the controller toggles it from the pure model). Two visible states, driven by
+   the controller from deriveModel — accent only; the authoritative state cue is the
+   aria-label (state via words, per DD5):
+     .downloads-active  — at least one download in flight: accent tint + a subtle
+                          gentle pulse (reduced-motion users get the static tint).
+     .downloads-recent  — visible only because of an unacknowledged recent completion:
+                          a steady accent, no motion.
+   The count badge shows the in-flight count (hidden at 0); the recent-only state is
+   carried by the class + label, not the badge. */
+#downloads-indicator {
+  color: var(--fg-dim);
+}
+#downloads-indicator .tb-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+#downloads-indicator.downloads-active {
+  color: var(--accent);
+  animation: downloads-pulse 1.6s ease-in-out infinite;
+}
+#downloads-indicator.downloads-recent {
+  color: var(--accent);
+}
+@keyframes downloads-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #downloads-indicator.downloads-active {
+    /* Static accent tint instead of the pulse — still distinct from idle, no motion. */
+    animation: none;
   }
 }
 

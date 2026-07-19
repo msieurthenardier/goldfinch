@@ -11,9 +11,10 @@ function makeHarness() {
   const events = [];
   const chromeSender = {};
   const downloader = { downloadURL: (url) => events.push(['download', url]) };
-  const record = { id: 1, url: 'https://retry.example/file', savePath: '/trusted/file' };
+  const record = { id: 1, url: 'https://retry.example/file', savePath: '/trusted/file', state: 'completed' };
+  const partialRecord = { id: 2, url: 'https://retry.example/partial', savePath: '/trusted/partial', state: 'progressing' };
   const manager = {
-    listAll: () => [record],
+    listAll: () => [record, partialRecord],
     register: () => 1,
     update: (...args) => events.push(['update', ...args]),
     finalize: (...args) => events.push(['finalize', ...args]),
@@ -55,7 +56,7 @@ function makeHarness() {
 
 test('download directory authority is minted by the chooser and enforced by download-media', async () => {
   const h = makeHarness();
-  assert.deepEqual([...h.handlers.keys()].sort(), ['choose-download-dir', 'download-media', 'show-item-in-folder']);
+  assert.deepEqual([...h.handlers.keys()].sort(), ['choose-download-dir', 'download-media', 'open-downloaded-file', 'reveal-downloaded-file', 'show-item-in-folder']);
   assert.deepEqual([...h.internal.keys()].sort(), ['internal-downloads-action', 'internal-downloads-clear', 'internal-downloads-list']);
 
   const payload = { webContentsId: 9, url: 'https://example/file', suggestedName: 'file', saveDir: '/approved' };
@@ -83,4 +84,38 @@ test('downloads-page action allowlist resolves open/show paths only from the man
     id: 1, action: 'show', savePath: '/attacker/path'
   }), { ok: true });
   assert.deepEqual(h.events, [['show', '/trusted/file']]);
+});
+
+test('open-downloaded-file resolves savePath by id from the manager, never a path arg', async () => {
+  const h = makeHarness();
+  // A bogus path passed as a second/third arg must be ignored — the handler
+  // signature is (_event, id); savePath comes only from the resolved record.
+  assert.deepEqual(await h.handlers.get('open-downloaded-file')({}, 1, '/attacker/path'), {
+    ok: true, error: undefined
+  });
+  assert.deepEqual(h.events, [['open', '/trusted/file']]);
+});
+
+test('open-downloaded-file returns { ok: false } and does not open for an unknown id', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('open-downloaded-file')({}, 999), { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('open-downloaded-file gates on completion — an in-progress record is not opened', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('open-downloaded-file')({}, 2), { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('reveal-downloaded-file resolves savePath by id and shows it', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('reveal-downloaded-file')({}, 1, '/attacker/path'), { ok: true });
+  assert.deepEqual(h.events, [['show', '/trusted/file']]);
+});
+
+test('reveal-downloaded-file returns { ok: false } and does not show for an unknown id', async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.handlers.get('reveal-downloaded-file')({}, 999), { ok: false });
+  assert.deepEqual(h.events, []);
 });

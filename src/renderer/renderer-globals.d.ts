@@ -57,6 +57,10 @@ interface GoldfinchBridge {
   downloadMedia(payload: any): Promise<any>;
   chooseDownloadDir(): Promise<string | null>;
   showItemInFolder(savePath: string): void;
+  // M11 F1 Leg 1 chrome-trust file actions — resolve the actionable savePath
+  // MAIN-SIDE by numeric id (never a path from the renderer).
+  openDownloadedFile(id: number): Promise<{ ok: boolean; error?: string }>;
+  revealDownloadedFile(id: number): Promise<{ ok: boolean }>;
 
   // --- privacy ---
   onPrivacyNet(cb: (data: any) => void): void;

@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   downloadMedia: (payload) => ipcRenderer.invoke('download-media', payload),
   chooseDownloadDir: () => ipcRenderer.invoke('choose-download-dir'),
   showItemInFolder: (savePath) => ipcRenderer.invoke('show-item-in-folder', savePath),
+  // M11 F1 Leg 1 (DD4): the downloads popup calls these with a numeric id only;
+  // main resolves savePath from the downloads manager (never a renderer path).
+  openDownloadedFile: (id) => ipcRenderer.invoke('open-downloaded-file', id),
+  revealDownloadedFile: (id) => ipcRenderer.invoke('reveal-downloaded-file', id),
 
   // --- privacy ---
   onPrivacyNet: (cb) => ipcRenderer.on('privacy-net', (_e, data) => cb(data)),
