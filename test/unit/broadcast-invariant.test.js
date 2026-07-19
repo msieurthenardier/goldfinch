@@ -16,10 +16,9 @@
 //     `registerInternalHandler(ipcMain, 'chan', (…) => {…})`), so the callback
 //     body is scanned right at the REGISTRATION SITE — paren-balanced from the
 //     call's opening '(' to its matching ')'.
-//   - src/main/jar-ipc.js: every handler is a NAMED function declaration
-//     (`function handleX(...) {...}`) registered by reference elsewhere
-//     (`ipcMain.handle('chan', handleX)`), so this file is scanned by FUNCTION
-//     BODY instead — brace-balanced from the '{' after the parameter list.
+// Jar IPC was moved to domain registrars by issue #99. Its mutation/broadcast
+// contract is now exercised through captured runtime handlers below rather
+// than parsing a facade or a god file.
 //
 // The extraction is deliberately dumb (a convention tripwire, not a parser), but
 // two real footguns are guarded against explicitly:
@@ -49,9 +48,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
+const { makeHarness } = require('./helpers/jar-ipc-harness');
 
 const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
-const JAR_IPC_JS = path.join(__dirname, '../../src/main/jar-ipc.js');
 
 const MUTATION_MARKERS = ['settings.set(', 'mintJarKey(', 'revokeJarKey(', 'mintAdminKey(', 'revokeAdminKey('];
 const BROADCAST_MARKER = 'settings-changed';
@@ -106,30 +105,6 @@ function extractMainRegistrations(source) {
 }
 
 // ---------------------------------------------------------------------------
-// jar-ipc.js: function-body extraction
-// ---------------------------------------------------------------------------
-const FUNCTION_RE = /(?:async\s+)?function\s+(handle\w+)\s*\([^)]*\)\s*\{/g;
-
-/**
- * @param {string} source
- * @returns {Array<{ label: string, slice: string }>}
- */
-function extractJarIpcHandlers(source) {
-  const masked = maskComments(source);
-  /** @type {Array<{ label: string, slice: string }>} */
-  const out = [];
-  let m;
-  FUNCTION_RE.lastIndex = 0;
-  while ((m = FUNCTION_RE.exec(masked))) {
-    const openIdx = m.index + m[0].length - 1; // the matched trailing '{'
-    const closeIdx = findMatchingBracket(masked, openIdx, '{', '}');
-    assert.notEqual(closeIdx, -1, `unbalanced function body for ${m[1]} in jar-ipc.js`);
-    out.push({ label: m[1], slice: masked.slice(m.index, closeIdx + 1) });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // The net
 // ---------------------------------------------------------------------------
 test('every settings-mutating IPC handler in main.js broadcasts settings-changed in the same body', () => {
@@ -146,16 +121,16 @@ test('every settings-mutating IPC handler in main.js broadcasts settings-changed
   assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
 });
 
-test('every settings-mutating handler function in jar-ipc.js broadcasts settings-changed in the same body', () => {
-  const source = fs.readFileSync(JAR_IPC_JS, 'utf8');
-  const handlers = extractJarIpcHandlers(source);
-  assert.ok(handlers.length >= 8, `expected at least the eight jar-ipc.js handlers, found ${handlers.length}`);
-
-  const violations = handlers
-    .filter((r) => mutatesSettings(r.slice) && !broadcastsSettingsChanged(r.slice))
-    .filter((r) => !ALLOWLIST.has(r.label))
-    .map((r) => r.label);
-  assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
+test('jar removal revokes settings then broadcasts settings-changed before jars-changed', async (t) => {
+  const harness = makeHarness(t);
+  const result = await harness.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    harness.events
+      .filter((event) => event.fn === 'revokeJarKey' || event.fn === 'broadcast')
+      .map((event) => (event.fn === 'broadcast' ? event.channel : event.fn)),
+    ['revokeJarKey', 'settings-changed', 'jars-changed']
+  );
 });
 
 test('the allowlist is empty — the automation:set-port gap this net found is fixed, not allowlisted', () => {
