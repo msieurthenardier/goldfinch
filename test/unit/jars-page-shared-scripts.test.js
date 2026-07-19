@@ -112,7 +112,12 @@ test('jars.html module pin: every src/shared/*.js script tag is type="module"', 
 
 test('jars page-local module imports have exact internal routes and wrong paths stay unmapped', () => {
   const map = createInternalPageMap({ baseDir: MAIN_DIR, path }).jars;
-  for (const name of ['jars-page-state.js', 'jars-nav-controller.js']) {
+  for (const name of [
+    'jars-page-state.js',
+    'jars-nav-controller.js',
+    'jars-section-controller.js',
+    'jars-create-controller.js'
+  ]) {
     assert.equal(map[`/${name}`], path.join(PAGES_DIR, name));
     assert.ok(fs.existsSync(map[`/${name}`]));
     assert.equal(map[`/pages/${name}`], undefined);

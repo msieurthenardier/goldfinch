@@ -31,6 +31,8 @@ function createInternalPageMap({ baseDir, path }) {
       '/jars.js': rendererPage('jars.js'),
       '/jars-page-state.js': rendererPage('jars-page-state.js'),
       '/jars-nav-controller.js': rendererPage('jars-nav-controller.js'),
+      '/jars-section-controller.js': rendererPage('jars-section-controller.js'),
+      '/jars-create-controller.js': rendererPage('jars-create-controller.js'),
       '/jar-page-model.js': shared('jar-page-model.js'),
       '/safe-color.js': shared('safe-color.js'),
       '/burner.js': shared('burner.js'),
