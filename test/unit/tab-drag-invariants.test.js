@@ -38,13 +38,15 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const REPO_ROOT = path.join(__dirname, '../..');
-const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
+const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/chrome/tab-controller.js');
+const RENDERER_COMPOSITION_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
 const STYLES_CSS = path.join(REPO_ROOT, 'src/renderer/styles.css');
-const MAIN_JS = path.join(REPO_ROOT, 'src/main/main.js');
+const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
 
 /** @returns {string} */
 function rendererSource() {
-  return fs.readFileSync(RENDERER_JS, 'utf8');
+  const owner = fs.readFileSync(RENDERER_JS, 'utf8').replace(/^ {2}/gm, '');
+  return `${owner}\n${fs.readFileSync(RENDERER_COMPOSITION_JS, 'utf8')}`;
 }
 
 /** Assert a mutation actually applied — a no-op .replace() would "discharge" vacuously. */
@@ -60,7 +62,7 @@ function assertMutated(before, after, what) {
 // ---------------------------------------------------------------------------
 
 // A CALL, not the definition and not a comment mention. The naive
-// `grep -c "cancelDnd()" src/renderer/renderer.js` over-counts on the real file: the FIVE
+// `grep -c "cancelDnd()" src/renderer/chrome/tab-controller.js` over-counts on the owner: the FIVE
 // calls, plus `function cancelDnd() {` and the prose mentions. That over-count is exactly
 // what a real (masked, definition-excluding) scan exists to defeat.
 //
@@ -430,7 +432,7 @@ test('DD16: no src/** file reads a cross-window coordinate — real → 0, mutat
   //
   // SCOPED TO WINDOW-LEVEL READS, AND THAT IS A CORRECTION TO DD16's WORDING, NOT A
   // LOOPHOLE. DD16 says "nothing reads `screenX`, `getBounds`, `getPosition`". Read
-  // literally that bans `view.getBounds()` too — and src/main/main.js has FIVE of those,
+  // literally that bans `view.getBounds()` too — and the main tree has legitimate uses,
   // all predating F8, one of them (`entry.view.getBounds()`, the guest geometry seed) INSIDE
   // the move core this leg factored. They are not the hazard: a WebContentsView's bounds are
   // window-local, expressed against its own window's content view, and never cross a window

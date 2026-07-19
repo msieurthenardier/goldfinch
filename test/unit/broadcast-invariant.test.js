@@ -1,25 +1,10 @@
 'use strict';
 
-// DD8 broadcast-invariant net (M06 Flight 4, Leg 1) — a self-deriving source-scan
-// test asserting the project convention the F7 bug violated (CLAUDE.md "Convention
-// — settings writes from a handler must broadcast"): every IPC handler body that
-// mutates settings (directly via `settings.set(`, or transitively via a helper
-// that does — `mintJarKey(` / `revokeJarKey(` / `mintAdminKey(` / `revokeAdminKey(`)
-// must broadcast `settings-changed` in that SAME body. The net derives its handler
-// inventory from the source itself (never a hand-kept list), so a new mutating
-// handler added later without a broadcast makes this test fail WITHOUT anyone
-// editing it.
-//
-// Two extraction strategies, one per file (leg spec implementation guidance):
-//   - src/main/main.js: every handler is registered with an INLINE callback
-//     (`ipcMain.handle('chan', (…) => {…})` / `ipcMain.on(…)` /
-//     `registerInternalHandler(ipcMain, 'chan', (…) => {…})`), so the callback
-//     body is scanned right at the REGISTRATION SITE — paren-balanced from the
-//     call's opening '(' to its matching ')'.
-//   - src/main/jar-ipc.js: every handler is a NAMED function declaration
-//     (`function handleX(...) {...}`) registered by reference elsewhere
-//     (`ipcMain.handle('chan', handleX)`), so this file is scanned by FUNCTION
-//     BODY instead — brace-balanced from the '{' after the parameter list.
+// DD8 broadcast invariant. Issue #99 moved settings and jar handlers out of the
+// god file, so the production contract is now exercised by invoking captured
+// registrar callbacks and observing their mutation/broadcast order. The small
+// source-extraction helpers below remain only as regression insurance for the
+// historical scanner itself; they no longer parse a production entrypoint.
 //
 // The extraction is deliberately dumb (a convention tripwire, not a parser), but
 // two real footguns are guarded against explicitly:
@@ -46,12 +31,9 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
-
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
-const JAR_IPC_JS = path.join(__dirname, '../../src/main/jar-ipc.js');
+const { makeHarness } = require('./helpers/jar-ipc-harness');
+const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
 
 const MUTATION_MARKERS = ['settings.set(', 'mintJarKey(', 'revokeJarKey(', 'mintAdminKey(', 'revokeAdminKey('];
 const BROADCAST_MARKER = 'settings-changed';
@@ -106,56 +88,42 @@ function extractMainRegistrations(source) {
 }
 
 // ---------------------------------------------------------------------------
-// jar-ipc.js: function-body extraction
-// ---------------------------------------------------------------------------
-const FUNCTION_RE = /(?:async\s+)?function\s+(handle\w+)\s*\([^)]*\)\s*\{/g;
-
-/**
- * @param {string} source
- * @returns {Array<{ label: string, slice: string }>}
- */
-function extractJarIpcHandlers(source) {
-  const masked = maskComments(source);
-  /** @type {Array<{ label: string, slice: string }>} */
-  const out = [];
-  let m;
-  FUNCTION_RE.lastIndex = 0;
-  while ((m = FUNCTION_RE.exec(masked))) {
-    const openIdx = m.index + m[0].length - 1; // the matched trailing '{'
-    const closeIdx = findMatchingBracket(masked, openIdx, '{', '}');
-    assert.notEqual(closeIdx, -1, `unbalanced function body for ${m[1]} in jar-ipc.js`);
-    out.push({ label: m[1], slice: masked.slice(m.index, closeIdx + 1) });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // The net
 // ---------------------------------------------------------------------------
-test('every settings-mutating IPC handler in main.js broadcasts settings-changed in the same body', () => {
-  const source = fs.readFileSync(MAIN_JS, 'utf8');
-  const registrations = extractMainRegistrations(source);
-  // Sanity: fail loudly if the extraction itself breaks (e.g. a future refactor
-  // changes the registration shape) rather than silently scanning zero handlers.
-  assert.ok(registrations.length > 40, `expected dozens of main.js registrations, found ${registrations.length}`);
-
-  const violations = registrations
-    .filter((r) => mutatesSettings(r.slice) && !broadcastsSettingsChanged(r.slice))
-    .filter((r) => !ALLOWLIST.has(r.label))
-    .map((r) => r.label);
-  assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
+test('every settings-mutating settings registrar handler broadcasts settings-changed at runtime', async () => {
+  const h = makeSettingsIpcHarness();
+  const mutations = [
+    ['internal-settings-set', ['spellcheck', true]],
+    ['automation:set-port', [45123]],
+    ['automation:jar-key-mint', ['personal']],
+    ['automation:jar-key-revoke', ['personal']],
+    ['automation:admin-key-mint', []],
+    ['automation:admin-key-revoke', []],
+  ];
+  for (const [channel, args] of mutations) {
+    h.events.length = 0;
+    await h.invokeInternal(channel, ...args);
+    assert.equal(
+      h.events.some((event) => event[0] === 'broadcast' && event[1] === 'settings-changed'),
+      true,
+      channel
+    );
+  }
+  h.events.length = 0;
+  h.send('unpin-toolbar-item', 'media');
+  assert.equal(h.events.some((event) => event[0] === 'broadcast' && event[1] === 'settings-changed'), true);
 });
 
-test('every settings-mutating handler function in jar-ipc.js broadcasts settings-changed in the same body', () => {
-  const source = fs.readFileSync(JAR_IPC_JS, 'utf8');
-  const handlers = extractJarIpcHandlers(source);
-  assert.ok(handlers.length >= 8, `expected at least the eight jar-ipc.js handlers, found ${handlers.length}`);
-
-  const violations = handlers
-    .filter((r) => mutatesSettings(r.slice) && !broadcastsSettingsChanged(r.slice))
-    .filter((r) => !ALLOWLIST.has(r.label))
-    .map((r) => r.label);
-  assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
+test('jar removal revokes settings then broadcasts settings-changed before jars-changed', async (t) => {
+  const harness = makeHarness(t);
+  const result = await harness.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    harness.events
+      .filter((event) => event.fn === 'revokeJarKey' || event.fn === 'broadcast')
+      .map((event) => (event.fn === 'broadcast' ? event.channel : event.fn)),
+    ['revokeJarKey', 'settings-changed', 'jars-changed']
+  );
 });
 
 test('the allowlist is empty — the automation:set-port gap this net found is fixed, not allowlisted', () => {

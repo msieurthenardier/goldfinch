@@ -25,9 +25,7 @@
 // deliberate — a pin whose prose claims more than it enforces is a proxy for the
 // property, not the property.
 //
-// ANCHORING — on code identity, never a line number. Not the `F8` tag either
-// (`grep -c "F8" src/main/main.js` → 17, verified; all M05/M06-era, NONE about this
-// invariant).
+// ANCHORING — on code identity in register-tab-ipc.js, never a line number or flight tag.
 //
 // RE-ANCHORED BY M09 F8 LEG 3, AND THAT IS THIS PIN'S DESIGN WORKING, NOT A REGRESSION.
 // Leg 1 anchored on the STRING LITERAL `'tab-move-to-new-window'` — the channel's
@@ -117,7 +115,7 @@ const { maskComments, findMatchingBracket, collectSources } = require('../helper
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const MAIN_DIR = path.join(REPO_ROOT, 'src/main');
-const MAIN_JS = path.join(MAIN_DIR, 'main.js');
+const MAIN_JS = path.join(MAIN_DIR, 'register-tab-ipc.js');
 
 // The move core's name — the pin's anchor since leg 3, re-spelled at leg 4 (see the
 // header). `\b`-bounded so the DEFINITION and the call sites are counted by the same token,

@@ -288,10 +288,10 @@ test('findInPage: listener cleanup after timeout — listenerCount is 0', async 
 });
 
 // ---------------------------------------------------------------------------
-// findInPage — opts threading
+// findInPage — public-contract to Electron-options translation
 // ---------------------------------------------------------------------------
 
-test('findInPage: default options threaded to wc.findInPage (forward:true, findNext:false, matchCase:false)', async () => {
+test('findInPage: public new-search default maps to Electron findNext:true', async () => {
   const wc = makeFakeWc(10);
   const deps = {
     fromId: makeFakeFromId({ 10: wc }),
@@ -303,10 +303,10 @@ test('findInPage: default options threaded to wc.findInPage (forward:true, findN
   });
 
   await findInPage(10, 'hello', deps);
-  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: false, matchCase: false });
+  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: true, matchCase: false });
 });
 
-test('findInPage: findNext:true, forward:true threaded to wc.findInPage', async () => {
+test('findInPage: public forward step maps to Electron findNext:false', async () => {
   const wc = makeFakeWc(11);
   const deps = {
     fromId: makeFakeFromId({ 11: wc }),
@@ -318,10 +318,10 @@ test('findInPage: findNext:true, forward:true threaded to wc.findInPage', async 
   });
 
   await findInPage(11, 'term', deps, { findNext: true, forward: true });
-  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: true, matchCase: false });
+  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: false, matchCase: false });
 });
 
-test('findInPage: findNext:true, forward:false threaded to wc.findInPage', async () => {
+test('findInPage: public backward step maps to Electron findNext:false', async () => {
   const wc = makeFakeWc(12);
   const deps = {
     fromId: makeFakeFromId({ 12: wc }),
@@ -333,7 +333,7 @@ test('findInPage: findNext:true, forward:false threaded to wc.findInPage', async
   });
 
   await findInPage(12, 'term', deps, { findNext: true, forward: false });
-  assert.deepEqual(wc._finds[0].opts, { forward: false, findNext: true, matchCase: false });
+  assert.deepEqual(wc._finds[0].opts, { forward: false, findNext: false, matchCase: false });
 });
 
 test('findInPage: matchCase:true threaded to wc.findInPage', async () => {
@@ -348,7 +348,7 @@ test('findInPage: matchCase:true threaded to wc.findInPage', async () => {
   });
 
   await findInPage(13, 'Hello', deps, { matchCase: true });
-  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: false, matchCase: true });
+  assert.deepEqual(wc._finds[0].opts, { forward: true, findNext: true, matchCase: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -390,10 +390,10 @@ test('findInPage: MAX-retry exhaustion resolves last immediately without waiting
 });
 
 // ---------------------------------------------------------------------------
-// findInPage — retry uses same opts (no findNext:true on retry)
+// findInPage — retry reuses the same translated Electron opts
 // ---------------------------------------------------------------------------
 
-test('findInPage: retry issues use same caller opts — no findNext:true corruption', async (t) => {
+test('findInPage: retry issues reuse the translated new-search opts', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
   const wc = makeFakeWc(51);
   const deps = {
@@ -420,10 +420,11 @@ test('findInPage: retry issues use same caller opts — no findNext:true corrupt
 
   const result = await p;
 
-  // All issues must use the original opts (not findNext:true)
+  // Every retry remains a new Electron find session. The public false means
+  // new search, while Electron's option uses true for that same intent.
   for (const call of wc._finds) {
-    assert.deepEqual(call.opts, { forward: false, findNext: false, matchCase: true },
-      'retry must not corrupt opts by flipping findNext:true');
+    assert.deepEqual(call.opts, { forward: false, findNext: true, matchCase: true },
+      'retry must preserve the translated new-search options');
   }
   assert.deepEqual(result, { activeMatchOrdinal: 1, matches: 2 });
 });

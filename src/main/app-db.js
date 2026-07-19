@@ -215,10 +215,18 @@ function prepareStatements() {
  * app must boot. Calling open() while already open closes first (safe,
  * idempotent re-open — DD4, used by tests to reset between cases).
  * @param {string} userDataPath
+ * @param {{ memory?: boolean }} [opts]
  */
-function open(userDataPath) {
+function open(userDataPath, opts = {}) {
   if (dbOpen) {
     close();
+  }
+
+  if (opts.memory === true) {
+    db = attemptOpen(':memory:');
+    dbOpen = true;
+    prepareStatements();
+    return;
   }
 
   fs.mkdirSync(userDataPath, { recursive: true });

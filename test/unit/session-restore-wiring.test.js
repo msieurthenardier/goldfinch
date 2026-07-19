@@ -1,23 +1,15 @@
 'use strict';
 
-// Session-restore wiring pins (M09 Flight 9, Leg 3) — masked source-scans over the REAL
-// src/main/main.js and src/renderer/renderer.js, in the move-core-fix.test.js /
-// tab-drag-invariants.test.js house pattern. These are CODE-SHAPE pins, NOT runtime ones:
-// this repo has no main-process harness (main.js is never executed by any test) and no DOM
-// harness for renderer.js. The RUNTIME readings — the terminal snapshot's correctness on
-// both quit paths (incl. the 2-window menu-Exit case), fresh-create restore at saved
-// addresses+jars, active-tab restore, deleted-jar drop, and default-off byte-identity — are
-// LEG 4's (the session-restore behavior spec). Stated here so no one reads this file as
-// runtime proof it is not.
+// Session-restore wiring pins (M09 Flight 9, Leg 3). Main/renderer composition claims
+// remain narrow masked source checks; the extracted window factory's close-time setting
+// gate and snapshot-before-destroy order run through a strict fake-window harness.
 //
 // Two readings per AC (DD10), on the REAL source, mutated IN MEMORY (no file written):
 // the real source reads as claimed; a described mutation flips the reading, proving the scan
 // is not vacuous. The DISCRIMINATION comes from the mutation flipping the reading — that is
 // what makes each scan non-vacuous, not any single count in isolation.
 //
-// MASKING (leg-1's source-scan helper) is applied and is CORRECT for src/main/main.js, whose
-// documented regex-literal blind-spot pattern reads 0 (source-scan.js header): the main.js
-// bodies below (whenReady, before-quit, close, window-boot-config) mask cleanly, so a comment
+// MASKING is applied to src/main/app-lifecycle.js, whose lifecycle bodies mask cleanly, so a comment
 // that happens to name a scanned token cannot trip those scans. src/renderer/renderer.js is
 // DIFFERENT: it trips maskComments' documented regex-literal blind spot BEFORE the boot loop,
 // so masking is unreliable in that region. The renderer scans below are therefore designed to
@@ -32,11 +24,12 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
+const { createHarness } = require('./helpers/window-factory-harness');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/app-lifecycle.js');
 const RENDERER_JS = path.join(__dirname, '../../src/renderer/renderer.js');
 
-/** The real main.js, read fresh. @returns {string} */
+/** The real app lifecycle registrar, read fresh. @returns {string} */
 function mainSource() {
   return fs.readFileSync(MAIN_JS, 'utf8');
 }
@@ -76,21 +69,18 @@ function count(hay, needle) {
 }
 
 // --- anchors (pure code; identical masked and unmasked) ---
-const WHENREADY = 'app.whenReady().then(() => {';
+const WHENREADY = 'const ready = app.whenReady().then(() => {';
 const BEFORE_QUIT = "app.on('before-quit', () => {";
-const CLOSE = "win.on('close', () => {";
 const BOOT_CONFIG = "ipcMain.handle('window-boot-config', (event) => {";
-const REBUILD_BRANCH = 'if (restoreSnap) {';
+const REBUILD_BRANCH = 'if (restoreSnapshot) {';
 const RENDERER_BRANCH =
   'if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {';
 
 const GUARD = "settings.get('restoreSession')";
-const LOAD_STMT = "sessionStore.load(app.getPath('userData'));";
+const LOAD_STMT = 'sessionStore.load(userDataPath);';
 const READ_TERNARY = "settings.get('restoreSession') === true ? sessionStore.read() : null";
 const BQ_GUARD_EXPR = "settings.get('restoreSession') === true && registry.records().length";
-const CLOSE_GUARD_EXPR = "settings.get('restoreSession') === true && !sessionQuitting";
 const WRITE_CALL = 'sessionStore.write(';
-const DESTROY = 'webContents.destroy()';
 
 // ---------------------------------------------------------------------------
 // AC2 — sessionStore.load() is wired in whenReady, UNCONDITIONALLY (not settings-gated).
@@ -142,42 +132,31 @@ test('AC3: the before-quit write is settings-gated — real → gated, guard rem
   );
 });
 
-test('AC3: the close write is settings-gated — real → gated, guard removed → ungated', () => {
-  const realBody = bodyAfter(maskComments(mainSource()), CLOSE);
-  assert.equal(count(realBody, WRITE_CALL), 1, 'the close handler writes the snapshot (masked)');
-  assert.equal(
-    precedingWindow(realBody, WRITE_CALL).includes('restoreSession'),
-    true,
-    'real → the close write is behind the restoreSession guard'
-  );
+test('AC3: close snapshot is settings-gated and precedes guest destruction at runtime', () => {
+  let enabled = false;
+  const h = createHarness({ settings: { get: () => enabled } });
+  const first = h.factory.createWindow();
+  first.win.emit('close');
+  assert.equal(h.log.includes('snapshot-write'), false, 'disabled → close does not write');
 
-  const mutated = mainSource().replace(CLOSE_GUARD_EXPR, '!sessionQuitting');
-  assertMutated(mainSource(), mutated, 'close-guard-removed');
-  assert.equal(
-    precedingWindow(bodyAfter(maskComments(mutated), CLOSE), WRITE_CALL).includes('restoreSession'),
-    false,
-    'mutated → the guard is gone and this pin FAILS'
-  );
-});
+  enabled = true;
+  const second = h.factory.createWindow();
+  const guest = new h.FakeWebContentsView({});
+  second.tabViews.set(guest.webContents.id, { view: guest, trusted: false });
+  h.log.length = 0;
+  second.win.emit('close');
+  const write = h.log.indexOf('snapshot-write');
+  const destroy = h.log.indexOf(`destroy-wc:${guest.webContents.id}`);
+  assert.notEqual(write, -1, 'enabled → close writes');
+  assert.notEqual(destroy, -1, 'guest is destroyed');
+  assert.ok(write < destroy, 'snapshot is written while guest state is still live');
 
-test('AC3: within the close handler the write PRECEDES the guest destroy — real → holds, relocated → fails', () => {
-  const realBody = bodyAfter(maskComments(mainSource()), CLOSE);
-  const wIdx = realBody.indexOf(WRITE_CALL);
-  const dIdx = realBody.indexOf(DESTROY);
-  assert.notEqual(wIdx, -1, 'the close write is present');
-  assert.notEqual(dIdx, -1, 'the guest destroy is present');
-  assert.ok(wIdx < dIdx, 'real → the snapshot write runs BEFORE tabViews are destroyed');
-
-  // Relocate the write to AFTER the destroy loop (after activeTabWcId is nulled) — the exact
-  // ordering bug the pin guards (a write after destroy captures an emptied window).
-  const WRITE_STMT = 'sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));';
-  const relocatedBody = realBody
-    .replace(WRITE_STMT, '')
-    .replace('rec.activeTabWcId = null;', 'rec.activeTabWcId = null;\n    ' + WRITE_STMT);
-  assertMutated(realBody, relocatedBody, 'write-relocated-after-destroy');
-  const w2 = relocatedBody.indexOf(WRITE_CALL);
-  const d2 = relocatedBody.indexOf(DESTROY);
-  assert.ok(w2 > d2, 'relocated → the write now follows the destroy and this pin FAILS');
+  const quitting = createHarness({
+    settings: { get: () => true },
+    isSessionQuitting: () => true
+  });
+  quitting.factory.createWindow().win.emit('close');
+  assert.equal(quitting.log.includes('snapshot-write'), false, 'before-quit ownership suppresses close writes');
 });
 
 // ---------------------------------------------------------------------------
@@ -208,7 +187,7 @@ test('AC4: window-boot-config returns restoreTabs — real → present, stripped
   assert.equal(realBody.includes('restoreTabs'), true, 'real → boot-config serves restoreTabs to the renderer');
 
   const mutated = mainSource().replace(
-    'return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };',
+    "return rec.restoreTabs\n      ? { bootTab: false, restoreTabs: rec.restoreTabs }\n      : { bootTab: !rec.noBootTab };",
     'return { bootTab: !rec.noBootTab };'
   );
   assertMutated(mainSource(), mutated, 'boot-config-restoreTabs-stripped');
@@ -225,8 +204,8 @@ test('AC4: the whenReady rebuild branch uses NO adopt path — real → absent, 
   assert.equal(realBody.includes('removeChildView'), false, 'real → the rebuild never adopts (removeChildView)');
 
   const mutated = mainSource().replace(
-    'rec.restoreTabs = w.tabs;',
-    'rec.restoreTabs = w.tabs; win.contentView.addChildView(x);'
+    'rec.restoreTabs = savedWindow.tabs;',
+    'rec.restoreTabs = savedWindow.tabs; win.contentView.addChildView(x);'
   );
   assertMutated(mainSource(), mutated, 'adopt-injected-into-rebuild');
   assert.equal(
@@ -271,8 +250,8 @@ test('AC5: the restore branch references NO restoreHistory and NO inheritContain
 
   // Inject the forbidden inheritContainerFromPartition onto the path.
   const mutated = rendererSource().replace(
-    'const container = resolveRestoreContainer(t.jarId, containers);',
-    'const container = inheritContainerFromPartition(t.jarId);'
+    'const container = resolveRestoreContainer(t.jarId, jarsClient.containers);',
+    'const container = jarsClient.inheritContainerFromPartition(t.jarId);'
   );
   assertMutated(rendererSource(), mutated, 'inherit-injected');
   assert.equal(
@@ -283,18 +262,18 @@ test('AC5: the restore branch references NO restoreHistory and NO inheritContain
 });
 
 // ---------------------------------------------------------------------------
-// AC6 — the THREE behavioral touch points are settings-gated, and load() is NOT.
-// (read + before-quit write + close write each carry the guard; load stays unconditional.)
+// AC6 — all three behavioral touch points are settings-gated, and load() is NOT.
+// Main owns read + before-quit; the extracted close path is runtime-pinned above.
 // ---------------------------------------------------------------------------
 
-test('AC6: exactly three restoreSession guards in main.js (read + two writes) — remove one → two', () => {
-  assert.equal(count(maskComments(mainSource()), GUARD), 3, 'real → three behavioral guards (masked)');
+test('AC6: main keeps the read/before-quit guards; close gating is runtime-pinned above', () => {
+  assert.equal(count(maskComments(mainSource()), GUARD), 2, 'main owns the read and before-quit guards');
 
   // Removing the read guard (one of the three) drops the count — the default-off byte-identity
   // guarantee weakens the instant any one guard is lost.
   const mutated = mainSource().replace(READ_TERNARY, 'sessionStore.read()');
   assertMutated(mainSource(), mutated, 'one-guard-removed');
-  assert.equal(count(maskComments(mutated), GUARD), 2, 'mutated → a guard is gone and this pin FAILS');
+  assert.equal(count(maskComments(mutated), GUARD), 1, 'mutated → a main lifecycle guard is gone');
 });
 
 test('AC6: the guard is on read()/write()/write() but NOT on load()', () => {

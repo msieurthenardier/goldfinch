@@ -97,6 +97,38 @@ test('requiring the module alone does not open or create anything', () => {
 // ---------------------------------------------------------------------------
 // Schema bootstrap
 // ---------------------------------------------------------------------------
+test('open(userDataPath, { memory: true }) creates a current in-memory schema without filesystem artifacts', () => {
+  const parent = makeTempDir();
+  const absentUserData = path.join(parent, 'must-not-be-created');
+  try {
+    const store = freshStore();
+    store.open(absentUserData, { memory: true });
+    assert.equal(store.isOpen(), true);
+    assert.equal(fs.existsSync(absentUserData), false, 'memory mode must skip userData directory creation');
+
+    const doc = store.createDocumentStore('jars');
+    doc.write('{"version":2}', 1000);
+    assert.equal(doc.read(), '{"version":2}', 'the v2 documents table is available in memory');
+
+    const cookieSeen = store.createCookieSeenStore();
+    assert.equal(cookieSeen.insertIfAbsent('personal', 'sid', 'example.com', '/', 2000), true);
+    assert.deepEqual(cookieSeen.selectExpired('personal', 3000), [
+      { name: 'sid', domain: 'example.com', path: '/', firstSeenMs: 2000 }
+    ]);
+
+    // Existing reopen semantics still apply: open() closes the current handle
+    // before opening a fresh one, and close() remains idempotent.
+    store.open(absentUserData, { memory: true });
+    assert.equal(store.createDocumentStore('jars').read(), null, 'reopen receives a fresh in-memory database');
+    assert.doesNotThrow(() => store.close());
+    assert.doesNotThrow(() => store.close());
+    assert.equal(store.isOpen(), false);
+    assert.equal(fs.existsSync(absentUserData), false, 'memory mode must leave no database family behind');
+  } finally {
+    removeTempDir(parent);
+  }
+});
+
 test('open() on an empty temp dir creates app.db at user_version=2 with BOTH tables (M10 F2 Leg 3 ladder)', () => {
   const dir = makeTempDir();
   try {

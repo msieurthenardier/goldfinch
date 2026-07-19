@@ -45,11 +45,11 @@ const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
 const REPO_ROOT = path.join(__dirname, '../..');
-const MAIN_JS = path.join(REPO_ROOT, 'src/main/main.js');
-const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
+const MAIN_JS = path.join(REPO_ROOT, 'src/main/register-tab-ipc.js');
+const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/chrome/tab-controller.js');
 
 const realMain = () => fs.readFileSync(MAIN_JS, 'utf8');
-const rendererSource = () => fs.readFileSync(RENDERER_JS, 'utf8');
+const rendererSource = () => fs.readFileSync(RENDERER_JS, 'utf8').replace(/^ {2}/gm, '');
 
 /** Assert a mutation actually applied — a no-op .replace() would "discharge" vacuously. */
 function assertMutated(before, after, what) {

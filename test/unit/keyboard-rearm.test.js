@@ -11,7 +11,7 @@
 // guest, orphaning OS keyboard focus. The design-review fix (main-only, no renderer/
 // preload change) is: read whether the OUTGOING active guest holds OS focus BEFORE the
 // visibility swap (`isFocused()`), and focus the INCOMING guest IFF it did. This test
-// pins that exact code SHAPE on the real src/main/main.js `tab-set-active` handler:
+// pins that exact code SHAPE on the real src/main/register-tab-ipc.js `tab-set-active` handler:
 //
 //   (1) it READS the outgoing guest's isFocused() into a captured guard, AND
 //   (2) it CONDITIONALLY calls .focus() on the incoming guest, gated by that guard.
@@ -22,7 +22,7 @@
 // The synthetic-mutation tests at the bottom exercise both directions on fixture
 // strings (never real source mutation).
 //
-// HONEST SCOPE — THIS IS A CODE-SHAPE PIN, NOT A RUNTIME PROOF. main.js is NEVER
+// HONEST SCOPE — THIS IS A CODE-SHAPE PIN, NOT A RUNTIME PROOF. The registrar is NEVER
 // executed by the unit suite; a source scan cannot prove OS focus actually re-routes.
 // The RUNTIME reading — two consecutive Ctrl+# from page-content focus with NO
 // intervening click both landing, on the real WSLg rig — is the MANUAL HAT verification
@@ -39,7 +39,7 @@ const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/register-tab-ipc.js');
 const HANDLER = 'tab-set-active';
 
 // --- the scan -------------------------------------------------------------------
@@ -109,7 +109,7 @@ function analyzeHandler(body) {
 
 // --- the net --------------------------------------------------------------------
 
-test("main.js `tab-set-active` reads the outgoing guest's isFocused() and CONDITIONALLY focuses the incoming guest", () => {
+test("register-tab-ipc `tab-set-active` reads outgoing focus and conditionally focuses the incoming guest", () => {
   const body = extractHandlerBody(maskComments(fs.readFileSync(MAIN_JS, 'utf8')), HANDLER);
 
   // Vacuity guard: fail loudly if the handler was renamed/refactored out of reach rather

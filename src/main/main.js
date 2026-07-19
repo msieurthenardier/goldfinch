@@ -24,6 +24,8 @@ const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
+const { createInternalPageMap } = require('./internal-page-map');
+const { createBroadcasters } = require('./broadcasts');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
@@ -37,6 +39,15 @@ const { computeFindOverlayBounds } = require('./find-overlay-geometry');
 const { createMenuOverlayManager } = require('./menu-overlay-manager');
 const { createFindOverlayManager } = require('./find-overlay-manager');
 const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
+const { createWindowFactory } = require('./window-factory');
+const { createGuestWiring } = require('./guest-wiring');
+const { createSessionRuntime } = require('./session-runtime');
+const { registerTabIpc } = require('./register-tab-ipc');
+const { registerOverlayIpc } = require('./register-overlay-ipc');
+const { registerDownloadIpc } = require('./register-download-ipc');
+const { registerSettingsIpc } = require('./register-settings-ipc');
+const { registerBrowserIpc } = require('./register-browser-ipc');
+const { registerAppLifecycle } = require('./app-lifecycle');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
 // Zero state — every field derives from the live records at call time.
 const { buildWindowCensus } = require('./window-census');
@@ -136,79 +147,9 @@ for (const stream of [process.stdout, process.stderr]) {
 // CSP; `secure: true` marks it a trusted origin. Do NOT "simplify" these privileges away. (DD2)
 protocol.registerSchemesAsPrivileged([{ scheme: 'goldfinch', privileges: { standard: true, secure: true } }]);
 
-// Fixed host -> per-path allowlist for the internal scheme. Each entry is
-// { [normalizedPathname]: absoluteFilePath }. Absolute paths stay HERE (in main.js
-// with __dirname access); internal-assets.js is __dirname-free so it can be unit-tested
-// with a synthetic map. Adding a page (Flight 5+) is an explicit edit here, never a
-// directory passthrough — paths are NOT derived from the URL, so traversal is structurally
-// impossible. `asar:false` + `files: src/**/*` ship these unpacked, so pathToFileURL
-// resolves in dev and packaged builds alike.
-const INTERNAL_PAGES = {
-  settings: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'settings.html'),
-    '/settings.css': path.join(__dirname, '..', 'renderer', 'pages', 'settings.css'),
-    '/settings.js': path.join(__dirname, '..', 'renderer', 'pages', 'settings.js'),
-    // Pure pagination/freshness module loaded by settings.html as a same-origin
-    // <script> before settings.js. Kept in src/shared/ for the lint-clean UMD tail
-    // + node-test require(); served here so the goldfinch://settings guest can load
-    // it (the internal scheme serves ONLY this allowlist — a ../shared/ path 404s).
-    '/audit-paging.js': path.join(__dirname, '..', 'shared', 'audit-paging.js'),
-    // Injection-safe color validator (M06 F4 Leg 5 HAT F7): the automation-key
-    // list guards the jar color it tints the robot glyph / unkeyed dot with, the
-    // same isSafeColor/FALLBACK_COLOR idiom jars.js uses — precedent: jars serves
-    // this same shared module (see the jars host entry below).
-    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js')
-  },
-  // Second internal page (Flight 5, Leg 2): the app-level downloads surface. Same
-  // allowlist-driven serving as settings — handleInternal/createResolver/INTERNAL_CSP
-  // are unchanged. Adding it here is the explicit edit that registers the page.
-  downloads: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.html'),
-    '/downloads.css': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.css'),
-    '/downloads.js': path.join(__dirname, '..', 'renderer', 'pages', 'downloads.js')
-  },
-  // Third internal page (Flight 3, Leg 1): the jar-management surface. Same
-  // allowlist-driven serving as settings/downloads. Its script list pulls three
-  // shared modules straight from src/shared/ (burner.js, safe-color.js,
-  // jar-page-model.js) — precedent: settings serves audit-paging.js from shared.
-  jars: {
-    '/': path.join(__dirname, '..', 'renderer', 'pages', 'jars.html'),
-    '/jars.css': path.join(__dirname, '..', 'renderer', 'pages', 'jars.css'),
-    '/jars.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars.js'),
-    '/jar-page-model.js': path.join(__dirname, '..', 'shared', 'jar-page-model.js'),
-    '/safe-color.js': path.join(__dirname, '..', 'shared', 'safe-color.js'),
-    '/burner.js': path.join(__dirname, '..', 'shared', 'burner.js'),
-    // Per-jar data controls (M06 Flight 4, Leg 1): the pure clearable-data-class
-    // list, loaded before jars.js (see jars.html's script-order comment).
-    '/jar-data-classes.js': path.join(__dirname, '..', 'shared', 'jar-data-classes.js'),
-    // Panel taxonomy (M08 Flight 2, Leg 1): the pure data-class -> panel mapping
-    // for the page's History/Cookies/Other-site-data tabs.
-    '/jar-panel-model.js': path.join(__dirname, '..', 'shared', 'jar-panel-model.js'),
-    // History panel content module (M08 Flight 3, Leg 2 / flight DD7) — a
-    // page-local module (src/renderer/pages/, not src/shared/), unlike the
-    // entries above.
-    '/jars-history-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-history-panel.js'),
-    // Per-jar WAI-ARIA tab widget (H4, M08 Flight 6, Leg 3 — growth-checkpoint
-    // extraction): another page-local module, the jars-history-panel.js
-    // three-point-onboarding precedent (this entry, the jars.html module
-    // tag, and the jars-page-shared-scripts.test.js contract test, which
-    // self-derives from jars.html and needed no edit).
-    '/jars-tabs.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-tabs.js'),
-    // Confirm-modal module (H7, M08 Flight 6, Leg 5 — growth-checkpoint
-    // extraction, the SAME three-point-onboarding precedent as jars-tabs.js
-    // above): the ONE page-level confirm modal, replacing the per-region
-    // inline confirms every earlier flight used.
-    '/jars-confirm-modal.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-confirm-modal.js'),
-    // Cookies + Other-site-data panel content modules (M10 Flight 2, Leg 2 —
-    // design review: the exact-match resolver 404s an unregistered module,
-    // so this entry is a required onboarding step, not optional wiring — the
-    // jars-history-panel.js/jars-tabs.js three-point-onboarding precedent
-    // (this entry, the jars.html module tag, and the self-deriving
-    // jars-page-shared-scripts.test.js, which needs no edit).
-    '/jars-cookies-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-cookies-panel.js'),
-    '/jars-sitedata-panel.js': path.join(__dirname, '..', 'renderer', 'pages', 'jars-sitedata-panel.js')
-  }
-};
+// Fixed internal assets remain an exact host/path allowlist. The extracted
+// builder receives __dirname and path; it never derives a file from a URL.
+const INTERNAL_PAGES = createInternalPageMap({ baseDir: __dirname, path });
 
 // Build the resolver once at startup; handleInternal calls it per request.
 const resolveInternal = createResolver(INTERNAL_PAGES);
@@ -334,229 +275,24 @@ function raiseWindowForTab(wcId) {
   registry.noteFocus(rec.win.id);
 }
 
-// H1 readiness barrier (M09 F6 Leg 4, DD5 / review H1): a send to a pre-boot
-// chrome DOCUMENT is silently dropped — no error, no retry. The adopt protocol's
-// two sends (adopt-tab + the follow-up tab-nav-state) therefore queue on the
-// registry record as THUNKS until the target chrome's `window-boot-config`
-// invoke has been served (the invoke arriving proves module evaluation
-// completed, and the renderer's onAdoptTab/onTabMovedAway registrations sit at
-// module top level ABOVE the boot gate). Thunks — not payloads — so the
-// main-authoritative fields (url/title/nav-state off the live wc) are computed
-// at DELIVERY time, not queue time.
-/** @param {any} rec @param {() => [string, any]} buildMsg */
-function queueChromeSend(rec, buildMsg) {
-  if (rec.bootConfigServed) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) {
-      const [channel, payload] = buildMsg();
-      cc.send(channel, payload);
-    }
-  } else {
-    rec.pendingChromeSends.push(buildMsg);
-  }
-}
-
 // M09 F4 Leg 1 (DD1): the closed-tab stack singleton — pure data structure,
 // main owns capture (tab-close, below) and reopen (Leg 2) wiring around it.
 const closedTabStack = createClosedTabStack();
 
-// DD6 push-cache (F6 leg 3): push the stack's size to EVERY registered chrome on
-// every stack mutation — both capture sites' pushes and the reopen handler's pop
-// (no clear path exists today; any future one must call this too). Chromes ONLY,
-// deliberately NOT broadcastToChromeAndInternal: no internal-session consumer
-// exists (flight design review L1). The chrome caches the size so the tab-context
-// opener builds its model synchronously; the `closed-tab-stack-size` invoke
-// (below) remains solely as the cache's boot seed.
-function broadcastClosedTabStackChanged() {
-  const payload = { size: closedTabStack.size() };
-  for (const rec of registry.records()) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) cc.send('closed-tab-stack-changed', payload);
-  }
-}
-
-// F8 DD8 push-cache — the SAME shape as the closed-tab-stack push above, and for
-// the same reason: openTabContextMenu builds its model SYNCHRONOUSLY (F6 DD6
-// deleted the async opener and its stale-resolve guard), so the "Move to window …"
-// target list has to already be renderer-side when the menu opens.
-//
-// PER-RECORD payloads, unlike the stack push's one shared object: every chrome
-// gets the list with ITS OWN window excluded, so no window is ever offered a move
-// to itself.
-//
-// WHAT IS CACHED IS ONLY THE LABEL, and that is what makes this cache cheap to
-// reason about. The `windowId` a renderer echoes back is re-resolved through
-// registry.get() and re-validated against the SENDER's own record at dispatch
-// (DD8's AUTHORITY rule), so a MISSED push here degrades to a stale caption on a
-// menu item — visible, cosmetic, self-healing on the next push — and can never
-// mis-target a move. That is DD8's windowId-over-ordinal reversal paying out: an
-// ordinal-keyed list with a missed invalidation would silently move the tab into
-// the WRONG window.
-function broadcastMoveTargetsChanged() {
-  const recs = registry.records();
-  for (const rec of recs) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) cc.send('move-targets-changed', { targets: buildMoveTargets(recs, rec) });
-  }
-}
-
-// --- Find-overlay view construction (M05 Flight 7, DD1/DD2) ---------------------------
-// The floating find bar is a dedicated chrome-class WebContentsView stacked above the
-// active guest. Lifecycle + the find-session state machine live in the extracted,
-// Electron-free manager module (find-overlay-manager.js), instantiated ONCE PER WINDOW
-// into that window's registry record (F7 DD5 — the roaming singleton and its attachment
-// machinery are retired); ONLY Electron construction stays here (createOverlayView).
-// The overlay's webContents never enters `tabViews`, so automation enumerateTabs is
-// unaffected by construction (no MCP-enumerable drift).
-
-// Electron construction for the overlay view (injected into the manager). Chrome-class
-// webPreferences (mirrors chromeView); transparent so the guest shows through around the
-// rounded bar — if the platform compositor renders it opaque (WSLg caveat), the opaque
-// themed rect is the flight-accepted variation.
-function createOverlayView() {
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'find-overlay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  view.setBackgroundColor('#00000000');
-  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'find-overlay.html')).catch((err) => {
-    console.warn('[find-overlay] loadFile rejected:', err && (err.code || err.message || err));
-  });
-  return view;
-}
-
-// Electron construction for the tear-off pill overlay (injected into the manager,
-// M09 F10 Leg L4-rebuild). Deliberately DIVERGENT from createOverlayView: NO preload and
-// never focused (AC3) — the pill is pure paint that follows the cursor over the guest.
-// Transparent bg; the tiny document (pointer-events:none body) can never intercept input.
-// Its webContents never enters `tabViews`, so enumerateTabs is unaffected by construction.
-function createTearoffOverlayView() {
-  const view = new WebContentsView({
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
-  });
-  view.setBackgroundColor('#00000000');
-  view.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')).catch((err) => {
-    console.warn('[tearoff-overlay] loadFile rejected:', err && (err.code || err.message || err));
-  });
-  return view;
-}
-
-// --- Menu-overlay sheet (M05 Flight 8, DD2/DD4/DD9) -----------------------------------
-// A per-window lazy-singleton transparent WebContentsView covering the active guest's
-// bounds, stacked above the live guest — the surface hosting the chrome menus (kebab as
-// of Leg 2; container/site-info Leg 3; context/unpin Leg 4). Lifecycle + the menu-open
-// state machine live in the extracted, Electron-free manager module
-// (menu-overlay-manager.js), instantiated ONCE PER WINDOW into that window's registry
-// record (F7 DD5); ONLY Electron construction stays here (createSheetView).
-// The sheet's webContents NEVER enters `tabViews` (DD8 — invisible to enumerateTabs by
-// construction; addressable by probed wcId for test driving). NOT gated on
-// entry.trusted anywhere (DD7 — internal tabs are in scope, opposite of the find bar).
-
-// Electron construction for the sheet view (injected into the manager). Chrome-class
-// webPreferences (mirrors the find overlay); transparent background is the
-// CP1-probed DD2 setting.
-// F7 DD5: PER-WINDOW — `record` is the owning window's registry record, closed over by
-// the accelerator handler below. The pre-F7 attachment resolve (the sheet's recorded
-// attachment window → registry.get() → the last-focused fallback) collapses to this
-// closure: a per-window sheet serves exactly one window, so its accelerator scope IS
-// that window's record.
-/** @param {import('./window-registry').WindowRecord} record */
-function createSheetView(record) {
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-  view.setBackgroundColor('#00000000');
-  // DD13 accelerator forwarding: while a menu is open, OS keyboard focus sits in the
-  // sheet's webContents — neither chrome's keydown handlers nor the guest
-  // before-input-event capture see anything. Forward the UNION of the guest-captured
-  // set and the chrome keydownToAction set via the pure mapper; unmodified APG keys
-  // (Arrow/Home/End/Enter/Space/Escape/Tab) return null and stay with the sheet page.
-  view.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return;
-    const hit = sheetAcceleratorAction({ key: input.key, control: input.control, meta: input.meta, shift: input.shift, alt: input.alt });
-    if (!hit) return;
-    // Always swallow a matched accelerator (the sheet page must not see it), and
-    // respect the isAutoRepeat guards exactly as the guest branches do (devtools +
-    // downloads guarded; zoom/print/find deliberately not — parity).
-    event.preventDefault();
-    if (hit.autoRepeatGuard && input.isAutoRepeat) return;
-    // Accelerator scope (F7 DD5): this sheet serves exactly ONE window — chrome-scope
-    // sends, the guest-scope active-tab resolution, and the find/downloads sends all
-    // resolve THIS window's record by construction (window B's open menu cannot
-    // dispatch into window A's chrome or act on A's active tab, because window B's
-    // sheet only ever knows B). The pre-F7 attachment resolve + last-focused fallback
-    // are gone with the roaming singleton.
-    const accelRec = record;
-    const accelChrome = !accelRec.chromeView.webContents.isDestroyed()
-      ? accelRec.chromeView.webContents
-      : null;
-    if (hit.scope === 'chrome') {
-      // Chrome-class actions ride the main→chrome channel; the renderer's extracted
-      // dispatchChromeAction runs the same switch bodies as its keydown handler.
-      accelChrome?.send('chrome-shortcut-action', { action: hit.action });
-      return;
-    }
-    // Guest-class: replicate the guest before-input-event branch bodies against the
-    // ATTACHMENT window's active guest — guarded by isInternalContents (the original
-    // capture sat inside the !__goldfinchInternal guard, so F12/zoom/print/
-    // Ctrl+Shift+I are inert on internal tabs today and must stay so; Ctrl+J is
-    // tab-independent and exempt — see isGuestActionAllowed). Ctrl+F over an
-    // internal active tab is a FULL no-op (menu stays open, keystroke swallowed —
-    // symmetric with the guard).
-    const wc = accelRec && accelRec.activeTabWcId != null ? getTabContents(accelRec.activeTabWcId) : null;
-    const activeIsInternal = !wc || isInternalContents(wc);
-    if (!isGuestActionAllowed(hit.action, activeIsInternal)) return;
-    switch (hit.action) {
-      case 'devtools':
-        if (wc) toggleDevTools(wc);
-        break;
-      case 'zoom-in':
-        applyZoom(wc, 'in');
-        break;
-      case 'zoom-out':
-        applyZoom(wc, 'out');
-        break;
-      case 'zoom-reset':
-        applyZoom(wc, 'reset');
-        break;
-      case 'print':
-        // Replicates the guest branch verbatim (incl. its lack of an autoRepeat guard).
-        if (wc) {
-          wc.print({}, (ok, reason) => {
-            if (!ok) console.warn('print failed:', reason);
-          });
-        }
-        break;
-      case 'find':
-        // DD5 conflict resolution: the menu closes BEFORE find opens (the find bar
-        // and an open menu never co-exist), then chrome's openFind drives
-        // find-overlay:open exactly as the guest-captured Ctrl+F does. F7 DD5: the
-        // open-find lands in THIS window's chrome. Null-tolerant: the slot is nulled
-        // at window `close` (AC8b), after which the sheet wc is already destroyed.
-        record.sheet?.closeMenuOverlay('superseded');
-        accelChrome?.send('open-find');
-        break;
-      case 'downloads':
-        accelChrome?.send('open-downloads');
-        break;
-    }
-  });
-  view.webContents
-    .loadFile(path.join(__dirname, '..', 'renderer', 'menu-overlay.html'))
-    .catch((err) => {
-      console.warn('[menu-overlay] loadFile rejected:', err && (err.code || err.message || err));
-    });
-  return view;
-}
+// Push helpers read the live registry on every call. Closed-tab updates are
+// chrome-only; move targets are per-record; shared state fans out to every
+// chrome plus each trusted internal page, never ordinary web guests.
+const {
+  broadcastClosedTabStackChanged,
+  broadcastMoveTargetsChanged,
+  broadcastToChromeAndInternal
+} = createBroadcasters({
+  registry,
+  webContents,
+  isInternalContents,
+  closedTabStack,
+  buildMoveTargets
+});
 
 // Resolve a chrome webContents for the sheet's DD7 attachment window (leg 4):
 // a live registered window → ITS chrome; a provided-but-gone window → null
@@ -570,124 +306,6 @@ function chromeForAttachment(win) {
   }
   return getChromeContents();
 }
-
-// --- Overlay sender-identity reverse lookups (F7 DD5) ---------------------------------
-// Pre-F7 the sheet and find overlay were single global views, so a sender-identity check
-// was a one-line compare against that view. Under per-window instances each window has
-// its own view, and these IPC handlers are registered ONCE at module scope (they cannot
-// close over a record) — so the sender must be reverse-looked-up to find which window's
-// manager owns it. Same discipline as the registry's getWindowForChrome /
-// getWindowForGuest (window-registry.js): identity compare, null when no match.
-//
-// A sender matching NO record is DROPPED, never re-routed to another window's manager —
-// the established rule (see chromeForAttachment's gone-attachment drop below: cross-
-// window token spaces collide). Both tolerate a null slot (nulled at `close`, AC8b) and
-// a destroyed view on any record.
-
-/**
- * The record whose SHEET view's webContents IS this sender. Null when no match.
- * @param {any} sender
- */
-function recordForSheetSender(sender) {
-  if (!sender) return null;
-  for (const rec of registry.records()) {
-    const v = rec.sheet ? rec.sheet.getView() : null;
-    if (v && !v.webContents.isDestroyed() && v.webContents === sender) return rec;
-  }
-  return null;
-}
-
-/**
- * The record whose FIND-OVERLAY view's webContents IS this sender. Null when no match.
- * @param {any} sender
- */
-function recordForFindSender(sender) {
-  if (!sender) return null;
-  for (const rec of registry.records()) {
-    const v = rec.findOverlay ? rec.findOverlay.getView() : null;
-    if (v && !v.webContents.isDestroyed() && v.webContents === sender) return rec;
-  }
-  return null;
-}
-
-// --- Menu-overlay DD4 IPC (channels 1/2/4/5). Chrome-class trust domain, but every
-// handler validates event.sender by IDENTITY (DD8, F7 pattern): chrome contents for
-// open/close; the sheet's own webContents for activated/dismissed. Payload-declared
-// identity is never trusted. Channels 3/6/7 are .send()s (manager → sheet/chrome). ---
-
-// Channel 1 — chrome → main: open (or model-replace) a menu on the sheet.
-// Sender identity check widened to registry membership (F6 Leg 2): ANY registered
-// window's chrome may open — with one window this is the same identity compare.
-// F7 DD5: the open drives the SENDER window's OWN sheet manager (rec.sheet). The
-// attachment the manager records is therefore always this same window — the machinery
-// goes inert but stays (menu-overlay-manager.js is byte-unchanged this leg; retiring
-// its now-unread attachment accessor inherits to leg 3).
-// Null-tolerant (AC8b): the slot is nulled at `close`, so an IPC arriving in the
-// close→closed gap resolves a live record with a null manager and no-ops here rather
-// than reconstructing a view onto the dying window.
-ipcMain.on('menu-overlay:open', (event, payload) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec || !rec.sheet) return;
-  const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
-  const bounds = activeEntry && !activeEntry.view.webContents.isDestroyed()
-    ? activeEntry.view.getBounds()
-    : null;
-  rec.sheet.openMenu(payload, { contentView: rec.win.contentView, win: rec.win, bounds });
-});
-
-// Channel 2 — chrome → main: programmatic close. `reason` is allowlisted
-// (mirrors SHEET_DISMISS_REASONS' style below) — 'toggle' (trigger re-click
-// close), 'superseded' (mutual exclusion / other programmatic close; the
-// fallback for anything unrecognized), plus the omnibox-suggestions close
-// triggers added this flight (DD5 amendment): 'escape', 'blur', 'navigation',
-// 'input-empty', 'activated'.
-const MENU_CLOSE_REASONS = new Set([
-  'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
-]);
-ipcMain.on('menu-overlay:close', (event, payload) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec || !rec.sheet) return;
-  const r = payload && payload.reason;
-  rec.sheet.closeMenuOverlay(MENU_CLOSE_REASONS.has(r) ? r : 'superseded');
-});
-
-// Channel 4 — sheet → main: item activated. Stale tokens dropped; channel 7 (from
-// the close) is emitted BEFORE channel 6, so chrome resets trigger state first and
-// the action wins any focus race (round-2 design lock). Leg 3: the payload may
-// carry an optional `value` string (the input-dialog's text) — shape-validated by
-// the pure sanitizeActivatedValue helper (string, ≤24; anything else DROPPED — the
-// payload is still forwarded, just without `value`).
-ipcMain.on('menu-overlay:activated', (event, payload) => {
-  // F7 DD5: reverse-look-up the SHEET-sender's record — that record IS the menu's
-  // owner, so channel 6 lands in its own chrome (no attachment capture needed; the
-  // window is fixed for a per-window sheet, where the pre-F7 code had to capture the
-  // attachment before the close cleared it).
-  const rec = recordForSheetSender(event.sender);
-  if (!rec || !rec.sheet) return;
-  const { id, token, value } = payload || {};
-  if (typeof id !== 'string' || typeof token !== 'number') return;
-  const cur = rec.sheet.getCurrentMenu();
-  if (!cur || token !== cur.token) return; // stale sheet report
-  rec.sheet.closeMenuOverlay('activated', token);
-  /** @type {{ menuType: string, id: string, value?: string }} */
-  const out = { menuType: cur.menuType, id };
-  const v = sanitizeActivatedValue(value);
-  if (v !== undefined) out.value = v;
-  chromeForAttachment(rec.win)?.send('menu-overlay-activated', out);
-});
-
-// Channel 5 — sheet → main: dismissed. `reason` allowlisted to the page-attributable
-// flavors; anything else is treated as the page's default flavor ('blur'). Stale
-// tokens are dropped inside closeMenuOverlay.
-const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
-ipcMain.on('menu-overlay:dismissed', (event, payload) => {
-  const rec = recordForSheetSender(event.sender);
-  if (!rec || !rec.sheet) return;
-  const { reason, token } = payload || {};
-  if (typeof token !== 'number') return;
-  rec.sheet.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
-});
-
 
 // Returns the guest webContents for a tab view by its wcId (or null if not
 // found/destroyed). Resolves across ALL windows' records.
@@ -1060,374 +678,6 @@ function currentAutomationStatus() {
   };
 }
 
-// `opts` (M09 F6 Leg 4, DD5):
-//   - noBootTab: boot-tab suppression for move-created windows — part of the
-//     CREATE CHAIN (the registry record flag served via window-boot-config),
-//     never a renderer guess.
-//   - contentSize: create the window with the SOURCE window's content size
-//     (review H3 — identical chrome layout makes the guest-bounds seed exact;
-//     bounds are window-local content DIPs).
-/**
- * Register a `closed` handler that CANNOT reach through a destroyed window (F7 DD8).
- * The window's id is captured at REGISTRATION time (the window is alive here); the
- * handler receives only that primitive. A destroyed-BaseWindow property access THROWS
- * "Object has been destroyed", and an uncaught throw inside the native `closed`
- * emission aborts the listener chain AND permanently wedges the Wayland close path
- * with zero error output (the F6 leg-4 fix-cycle root cause; CLAUDE.md's
- * destroyed-window rule).
- *
- * This wrapper is the SANCTIONED `closed` registration site: the ESLint
- * no-restricted-syntax rule and test/unit/window-closed-invariant.test.js both
- * enforce that no raw `.on('closed'` / `.once('closed'` exists anywhere else in
- * src/main/**.
- * @param {Electron.BaseWindow} win
- * @param {(winId: number) => void} handler
- */
-function onWindowClosed(win, handler) {
-  const winId = win.id;
-  win.on('closed', () => handler(winId));
-}
-
-function createWindow({ noBootTab = false, contentSize = null } = {}) {
-  const isMac = process.platform === 'darwin';
-  /** @type {Electron.BaseWindowConstructorOptions} */
-  const frameOpts = isMac
-    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 12, y: 14 } } // mac inset — recheck on a mac (open question)
-    : { frame: false };
-  // DD1/DD2: the window host is now a BaseWindow (no webPreferences, no `.webContents`).
-  // The chrome (index.html + renderer.js) is hosted in a child WebContentsView; ALL
-  // renderer access goes through getChromeContents(). backgroundColor/min size/icon/title
-  // and the per-platform frameOpts carry over unchanged (DD4/DD6).
-  const initialWidth = contentSize ? contentSize.width : 1400;
-  const initialHeight = contentSize ? contentSize.height : 900;
-  const win = new BaseWindow({
-    width: initialWidth,
-    height: initialHeight,
-    minWidth: 900,
-    minHeight: 600,
-    backgroundColor: '#1e1f25',
-    title: 'Goldfinch',
-    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
-    ...frameOpts,
-  });
-  // H3 exactness: constructor width/height are WINDOW size; on a framed platform
-  // (mac hidden-titlebar) that under-sizes the content area. setContentSize makes
-  // the content size exactly the source's, so the re-applied guest bounds seed
-  // lands 1:1 (frameless win/linux: a no-op-sized call).
-  if (contentSize) win.setContentSize(contentSize.width, contentSize.height);
-
-  // The chrome WebContentsView carries the webPreferences that used to live on the
-  // BrowserWindow (DD1/DD2). Guest tabs are per-tab WebContentsViews wired explicitly
-  // in tab-create (Flight 3 — all <webview> machinery removed in Leg 4).
-  const chromeView = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      // Dev-only: inject --automation-dev into the renderer process.argv so chrome-preload.js
-      // can gate the automationDevInvoke bridge method. The chrome renderer's own process.argv
-      // does not otherwise carry the dev-automation switch, so it must be injected explicitly.
-      // Conditional spread so the key is simply absent in normal/release runs (AC3). (DD7)
-      // Gated on `!app.isPackaged` (DD4, Flight 8): the dev flag is a complete no-op in a
-      // packaged build, so additionalArguments is always absent there.
-      ...(isMcpAutomationEnabled(process.argv) && !app.isPackaged ? { additionalArguments: ['--automation-dev'] } : {})
-    }
-  });
-
-  // BaseWindow exposes children via contentView — addChildView is on contentView, NOT
-  // the window itself (DD3).
-  win.contentView.addChildView(chromeView);
-  // Opaque dark background matching the shell (Flight-2 DD6): prevents a white flash
-  // before the chrome renderer paints its first frame on slow/WSLg starts.
-  chromeView.setBackgroundColor('#1e1f25');
-  // DD3: chrome view fills the window. Set initial bounds from the constructed size (not
-  // getContentBounds() at the construction instant, which can lag the requested size on some
-  // platforms and flash a gap); steady-state geometry is owned by the resize handler below.
-  chromeView.setBounds({ x: 0, y: 0, width: initialWidth, height: initialHeight });
-
-  chromeView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-
-  // Register the per-window record (F6 DD2). create() SEEDS last-focused (DD8 —
-  // under WSLg programmatic focus fires no event, so creation counts as focus);
-  // real focus events keep the tracker current, latest-event-wins. noBootTab
-  // rides the record (DD5 create-chain) and is served via window-boot-config.
-  const record = registry.create({ win, chromeView, noBootTab });
-  // F8 DD8: the window set grew — every OTHER chrome gains a move target. This
-  // window's own chrome is still pre-boot (a send would be silently dropped, the
-  // H1 hazard), so it seeds itself via the `move-targets` invoke instead.
-  broadcastMoveTargetsChanged();
-  // Capture the id while the window is alive: BaseWindow property access THROWS
-  // "Object has been destroyed" once the native window is gone, and the `closed`
-  // handler below runs exactly then. An uncaught throw inside the `closed`
-  // emission aborts the listener chain AND wedges Electron's native close
-  // sequence on Wayland — the main-process event loop starves permanently
-  // (the F6 leg-4 window-close hang; see the flight log's Anomalies resolution).
-  const winId = win.id;
-  win.on('focus', () => registry.noteFocus(winId));
-
-  // Class 1b — window-lifecycle events route to THIS window's OWN chrome via the
-  // create closure (pass-2 L-a: neither per-tab, broadcast, nor sender-resolved).
-  const sendToOwnChrome = (channel, payload) => {
-    const cc = chromeView.webContents;
-    if (!cc.isDestroyed()) cc.send(channel, payload);
-  };
-
-  // --- Per-window overlay managers (F7 DD5) -------------------------------------------
-  // BOTH overlays are per-window instances now — the roaming singletons and their
-  // attachment machinery are retired. Every dep closes over THIS window's `win`/`record`
-  // (never registry.getLastFocused()), so a per-window instance IS its own scope: the
-  // pre-F7 `=== thisWindow` conditioning checks become structurally redundant and are
-  // deleted rather than converted.
-  //
-  // The managers are constructed EAGERLY (they are closures — cheap); their VIEWS stay
-  // LAZY, created on first show exactly as before, so a window that never opens a menu
-  // or find pays nothing. Do not call ensureView() here.
-  //
-  // Both are reachable two ways, and the choice is not stylistic:
-  //   - these closure refs — used by the LIFECYCLE handlers (`close`, `blur`), which
-  //     must not go through registry.get() (see the `close` handler below);
-  //   - record.findOverlay / record.sheet — used by every owner-resolved IPC handler
-  //     (registered once at module scope, resolving the record from the sender/wcId).
-  const findOverlay = createFindOverlayManager({
-    // Electron's View is not structurally assignable to the manager's ContentViewLike
-    // (addChildView's parameter is contravariant), so the injected handle is cast —
-    // the same erasure the registry's WinLike typedef gives every other contentView
-    // read in this file. The isDestroyed() guard is live, not decorative: `close` is
-    // pre-teardown, but a late owner-resolved call must not touch a gone window.
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createOverlayView,
-    // The per-call live fetch of THIS record's active-guest bounds (the pre-F7 show-path
-    // behavior, preserved); the manager's own per-instance last-seen bounds are the
-    // last-resort fallback when there is no live active guest.
-    getActiveGuestBounds: () => {
-      const entry = record.activeTabWcId != null ? record.tabViews.get(record.activeTabWcId) : null;
-      return entry && !entry.view.webContents.isDestroyed() ? entry.view.getBounds() : null;
-    },
-    computeBounds: computeFindOverlayBounds,
-    getTabContents,
-    // DD4's web-tab-only refusal, scoped to THIS window: present, non-trusted, live.
-    isFindableTab: (wcId) => {
-      const entry = record.tabViews.get(wcId);
-      return !!entry && !entry.trusted && !entry.view.webContents.isDestroyed();
-    },
-    // Class 1b: the find session's tab always belongs to THIS window (open is
-    // owner-resolved; a tab that moves windows closes its session at the move), so the
-    // session tab's owning chrome IS this window's chrome.
-    notifyChrome: sendToOwnChrome
-  });
-
-  const sheet = createMenuOverlayManager({
-    // Electron's View is not structurally assignable to the manager's ContentViewLike
-    // (addChildView's parameter is contravariant), so the injected handle is cast —
-    // the same erasure the registry's WinLike typedef gives every other contentView
-    // read in this file. The isDestroyed() guard is live, not decorative: `close` is
-    // pre-teardown, but a late owner-resolved call must not touch a gone window.
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createSheetView: () => createSheetView(record),
-    // Channel-7 emitter (menu-overlay-closed → chrome). The manager still passes its
-    // recorded attachment window — always THIS window under per-window instances — and
-    // chromeForAttachment keeps the gone-attachment DROP semantics.
-    sendToChrome: (channel, payload, attWin) => {
-      const cc = chromeForAttachment(attWin);
-      if (cc && !cc.isDestroyed()) cc.send(channel, payload);
-    },
-    // DD5 sheet-show hook: find bar hidden while a menu is open (parity).
-    hideFindOverlay: () => findOverlay.hide(),
-    // DD5 close hook with the THREE-reason skip set: 'tab-switch' defers to
-    // tab-set-active's own per-tab find-restore logic; 'tab-hide' just hid the find
-    // overlay one line earlier and restore belongs to tab-set-active's re-add (the
-    // close runs BEFORE activeTabWcId is nulled in that handler, so restoring here
-    // would paint the bar over a hidden guest and then double-handle); 'tab-close'
-    // is skipped explicitly rather than relying on the activeTabWcId null-out
-    // ordering. Every other reason (escape/outside-click/blur/toggle/activated/
-    // superseded/teardown) re-shows iff the find session targets the active tab — at
-    // window teardown the find manager's teardown() has already nulled the session
-    // (it runs FIRST in the `close` handler — the F8 DD5 ordering pin), so the
-    // teardown restore naturally no-ops, while a sheet-crash teardown (find session
-    // still live) restores as desired.
-    restoreFindOverlay: (reason) => {
-      if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
-      // The find session's tab is one of THIS window's tabs by construction — restore
-      // iff it is this window's ACTIVE tab.
-      const sessionWcId = findOverlay.getSessionTabWcId();
-      if (sessionWcId != null && record.activeTabWcId === sessionWcId) findOverlay.show();
-    },
-    // Reason-resolved refocus, main-side half (escape/activated): webContents-level
-    // focus — chrome-side els.kebab.focus() alone cannot move keyboard focus off the
-    // sheet in a multi-view BaseWindow (F7 closeFindOverlaySession precedent).
-    focusChrome: (attWin) => chromeForAttachment(attWin)?.focus()
-  });
-
-  // Tear-off pill overlay (M09 F10 Leg L4-rebuild): per-window, same lifecycle discipline
-  // as the find/menu overlays — lazy view, teardown at `close` (the F6/F7 leak class).
-  // Deps close over THIS window's contentView; no find-session/menu state.
-  const tearoffOverlay = createTearoffOverlayManager({
-    getContentView: () => (win.isDestroyed() ? null : /** @type {any} */ (win.contentView)),
-    createOverlayView: createTearoffOverlayView
-  });
-
-  record.findOverlay = findOverlay;
-  record.sheet = sheet;
-  record.tearoffOverlay = tearoffOverlay;
-
-  // Lifecycle split (DD3, step assignment pinned by review F8): per-window teardown
-  // runs at `close` (pre-teardown — guests alive, navigationHistory readable, and
-  // win.contentView still readable; spike item (d)); `closed` only removes the record.
-  // Overlay DESTRUCTION lives HERE (F7 DD5) — per-window `close` is the SOLE
-  // destruction site and `before-quit` keeps NO overlay role (app.quit() closes every
-  // window, so every window destroys its own). The F8 DD5 ordering pin travels with it:
-  // find BEFORE sheet.
-  win.on('close', () => {
-    // Overlay DESTRUCTION (F7 DD5). ABOVE the `!rec` early-return: a fail-open path
-    // must not leak two WebContentsViews per closed window for the app's lifetime
-    // (the leak class F6 fixed for the chrome wc). Reached via the create closure, NOT
-    // registry.get() — on the `!rec` path there is no record to reach them through.
-    // ORDERING PIN (F8 DD5, traveling from the retired before-quit block): find BEFORE
-    // sheet — the find teardown nulls the session, so the sheet's teardown-reason
-    // find-restore naturally no-ops.
-    findOverlay.teardown();
-    tearoffOverlay.teardown();
-    sheet.closeMenuOverlay('teardown');
-    sheet.teardown();
-
-    const rec = registry.get(win.id);
-    // Null the record slots in the SAME breath as the teardown (leg-1 design review):
-    // the record stays reachable via registry.get() until `closed` (registry.remove
-    // below) and the chrome wc stays alive until its deferred destroy, so an
-    // owner-resolved IPC arriving in that gap would otherwise call ensureView() on a
-    // torn-down manager and RECONSTRUCT a view onto the dying window — a leak nothing
-    // tears down, since `close` fires once. Nulling makes the record path fail safe;
-    // the closure path above already tore down. Both paths, one breath.
-    if (rec) {
-      rec.findOverlay = null;
-      rec.tearoffOverlay = null;
-      rec.sheet = null;
-    }
-    if (!rec) return;
-    // (1) Whole-window closed-tab capture (DD4, leg 3): every persist-jar tab as
-    // an ordinary entry — same allowlist/exclusions as the tab-close site — in
-    // tabViews insertion order, each with the append sentinel and this window's
-    // id. Runs at `close` because the guests are still alive and their
-    // navigationHistory readable here (spike item (d)); the destroy loop below
-    // is what kills them. `win.destroy()` fires NO `close` event, so a
-    // destroyed-not-closed window is never captured — accepted, documented edge
-    // (DD3). Whole block try/catch — capture must never break close.
-    try {
-      const captured = captureWindowCloseEntries({
-        tabViews: rec.tabViews,
-        jarsList: jars.list(),
-        windowId: win.id,
-      });
-      for (const entry of captured) closedTabStack.push(entry);
-      if (captured.length > 0) broadcastClosedTabStackChanged();
-    } catch (err) {
-      console.error('[closed-tab-stack] window-close capture failed:', err);
-    }
-    // (1b) Session-restore snapshot write (M09 Flight 9 / DD3), a SIBLING to the
-    // closed-tab capture above — guests still alive here, and BEFORE the destroy loop
-    // (which nulls tabViews/activeTabWcId). Setting-gated AND suppressed while quitting
-    // (before-quit already captured the authoritative full set — this is what stops the
-    // menu-Exit path from shrinking the snapshot window-by-window). When !sessionQuitting
-    // this serves the close-last-window path (before-quit would otherwise fire on an
-    // empty registry) and mid-session dismissal. registry.records() momentarily
-    // over-includes the closing window (removed only at `closed`); always overwritten by
-    // the next close/quit — surfaces only on a crash between events, which DD6 scopes out.
-    // Whole block try/catch: session-store.write() propagates fs errors by design, and an
-    // uncaught throw here would wedge close (the F6 window-close-hang class).
-    try {
-      if (settings.get('restoreSession') === true && !sessionQuitting) {
-        sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
-      }
-    } catch (err) {
-      console.error('[session-store] window-close snapshot write failed:', err);
-    }
-    // (2) Per-tab side-effect suite + guest destroy (DD3/M5): Electron never
-    // auto-destroys an attached WebContentsView's webContents on window close
-    // (spike verdict 3) — the explicit destroy is mandatory, per dying guest,
-    // mirroring the tab-close path's forgetTab + removeChildView + destroy.
-    for (const [wcId, entry] of rec.tabViews) {
-      historyRecorder?.forgetTab(wcId);
-      if (!win.isDestroyed()) win.contentView.removeChildView(entry.view);
-      if (!entry.view.webContents.isDestroyed()) entry.view.webContents.destroy();
-    }
-    rec.tabViews.clear();
-    rec.activeTabWcId = null;
-    // The chrome is NOT destroyed here (DD3: "null the chrome" — the reference
-    // drops with the record at `closed`). Destroying the sender's own webContents
-    // synchronously inside its window-close IPC dispatch is a crash-risk pattern,
-    // and today's single-window behavior (chrome wc outlives the window until
-    // quit) is the byte-identical baseline.
-  });
-
-  onWindowClosed(win, (closedWinId) => {
-    // Record removal (DD3): singleton null-outs are gone; the DD8 accessor's
-    // membership validation makes a stale last-focused id fall back safely.
-    // The id is a PRIMITIVE captured at registration by onWindowClosed — NEVER a
-    // win.* read here (destroyed-window access throws; see the capture above).
-    registry.remove(closedWinId);
-    // F8 DD8: the window set shrank — the surviving chromes must drop this window
-    // from their menus. A menu built BEFORE this push still refuses correctly at
-    // dispatch (registry.get → null), which is the AC4 refusal; this just keeps
-    // the stale item from being offered in the first place.
-    broadcastMoveTargetsChanged();
-    // Chrome-webContents leak fix (M09 F6 Leg 4 / review M4 — the leg-2 deferral
-    // lands here): with N windows a closed window's chrome renderer would linger
-    // until quit. DEFERRED destroy via setImmediate — outside the sender's own
-    // window-close IPC dispatch (destroying the sender's webContents
-    // synchronously inside its own dispatch is the leg-2 crash-risk rationale).
-    // The record is already removed, so no send path can resolve this chrome
-    // between here and the destroy.
-    const chromeWc = chromeView.webContents;
-    setImmediate(() => {
-      if (!chromeWc.isDestroyed()) /** @type {any} */ (chromeWc).destroy();
-    });
-  });
-
-  // Menu-overlay close family (F8 DD4): BaseWindow blur — app switch closes any open
-  // menu. On an app switch the sheet's own blur ALSO fires (dismissed{blur}, stale by
-  // then): closeMenuOverlay is idempotent + stale-token-guarded, so chrome sees
-  // exactly one channel-7 close and the DD5 restore runs once. No refocus on 'blur'
-  // (never steal focus from the other app on return). Window MINIMIZE is deliberately
-  // NOT in the close family: where the platform fires blur on minimize the menu
-  // closes via this path; where it doesn't (WSLg uncertainty), a menu surviving
-  // minimize-restore is an accepted variation (leg AC3) — HAT observes.
-  // F7 DD5: unconditional on THIS window's OWN sheet (the create closure). The pre-F7
-  // attachment conditioning existed to stop A's blur from killing B's menu; a
-  // per-window sheet can only ever hold this window's menu, and closeMenuOverlay is
-  // idempotent when no menu is open — so the check is redundant, not load-bearing.
-  win.on('blur', () => {
-    sheet.closeMenuOverlay('blur');
-  });
-
-  // DD3: keep the chrome view sized to the window. No-op if the view is already gone
-  // (resize can fire during teardown).
-  // FIX 1 belt-and-suspenders: after the chrome view bounds are updated, push
-  // 'trigger-send-bounds' to the renderer so it immediately re-measures #webviews
-  // and resends the active guest's bounds. Belt-and-suspenders alongside the
-  // renderer-side ResizeObserver (which fires per CSS layout frame during transitions).
-  win.on('resize', () => {
-    if (chromeView.webContents.isDestroyed()) return;
-    const { width, height } = win.getContentBounds();
-    chromeView.setBounds({ x: 0, y: 0, width, height });
-    sendToOwnChrome('trigger-send-bounds');
-  });
-
-  // Forward maximize state to the renderer so the custom window controls can
-  // sync their label/icon/data-state (DD7 read path). Class 1b: THIS window's
-  // maximize state goes to THIS window's chrome, never the accessor's.
-  win.on('maximize', () => {
-    sendToOwnChrome('window-maximized-change', true);
-    sendToOwnChrome('trigger-send-bounds');
-  });
-  win.on('unmaximize', () => {
-    sendToOwnChrome('window-maximized-change', false);
-    sendToOwnChrome('trigger-send-bounds');
-  });
-
-  return record;
-}
-
 // ---------------------------------------------------------------------------
 // Page zoom. A discrete ladder mirroring Chrome's familiar steps. applyZoom reads
 // the guest's current factor, steps to the next/prev rung (or resets to 1.0),
@@ -1464,369 +714,75 @@ function applyZoom(wc, action) {
   chromeForTab(wc.id)?.send('zoom-changed', { wcId: wc.id, factor: next });
 }
 
-// ---------------------------------------------------------------------------
-// Each web guest WebContentsView gets the media-scanner preload (webview-preload.js)
-// injected via its webPreferences.preload, set at construction time in tab-create
-// so pages can never opt out.
-// ---------------------------------------------------------------------------
-// wireGuestContents — wires event listeners onto a guest webContents. Called from
-// the global app.on('web-contents-created') handler AND
-// explicitly for new WebContentsViews in ipcMain.handle('tab-create') (because
-// web-contents-created fires SYNCHRONOUSLY during new WebContentsView(), before the
-// tabViews registry entry can be set — so the global handler cannot identify them).
-//
-// handleGuestCrossViewNav — the guest→chrome keyboard bridge (M05 Flight 5 Leg 2).
-// Two keys must cross the multi-WebContentsView boundary from a focused guest back
-// to the chrome view: Ctrl/Cmd+L (focus the address bar) and an unmodified Tab
-// (hand focus off to the chrome's pinned first control, the address bar). Both are
-// chrome-level — not guest features — so they apply to WEB and INTERNAL guests
-// alike; this helper is invoked from BOTH the web-guest before-input-event and the
-// minimal internal-guest one. The pure decision (which key, if any) lives in the
-// unit-tested crossViewNavAction; here we run the side effects. Returns true iff it
-// handled (swallowed) the key so callers can early-return.
-function handleGuestCrossViewNav(event, input, contents) {
-  if (input.type !== 'keyDown') return false;
-  const nav = crossViewNavAction({
-    key: input.key,
-    control: input.control,
-    meta: input.meta,
-    shift: input.shift,
-    alt: input.alt,
-  });
-  if (!nav) return false;
-  // Swallow the key so the guest never sees it (both keys leave the guest).
-  event.preventDefault();
-  // Held key: swallow but don't re-hand-off — a repeated Tab/Ctrl+L must not thrash
-  // focus back to chrome on every keyDown repeat (mirrors the guest branches' own
-  // isAutoRepeat guards).
-  if (input.isAutoRepeat) return true;
-  // Focus-then-send (F4 rule): OS-focus the chrome VIEW before the focus-address IPC.
-  // dispatchChromeAction('focus-address') only DOM-focuses els.address; for the input
-  // to actually accept typing the chrome view must hold OS keyboard focus (which, on a
-  // focused guest, it does not). Class 3 (F6 DD2): the guest's OWNING window's chrome,
-  // resolved at event time — a window-2 guest keystroke must never dispatch into
-  // window 1's chrome. Both cross-view keys resolve to the pinned address bar, so
-  // both ride the existing chrome-shortcut-action:focus-address channel.
-  const cc = chromeForTab(contents.id);
-  cc?.focus();
-  cc?.send('chrome-shortcut-action', { action: 'focus-address' });
-  return true;
-}
+// Electron construction is confined to this dependency map; window-factory.js itself
+// remains Electron-free and its close/closed lifecycle runs under strict fake windows.
+const { createWindow } = createWindowFactory({
+  BaseWindow,
+  WebContentsView,
+  platform: process.platform,
+  argv: process.argv,
+  isPackaged: app.isPackaged,
+  paths: {
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    chromePreload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
+    chromeHtml: path.join(__dirname, '..', 'renderer', 'index.html'),
+    findPreload: path.join(__dirname, '..', 'preload', 'find-overlay-preload.js'),
+    findHtml: path.join(__dirname, '..', 'renderer', 'find-overlay.html'),
+    menuPreload: path.join(__dirname, '..', 'preload', 'menu-overlay-preload.js'),
+    menuHtml: path.join(__dirname, '..', 'renderer', 'menu-overlay.html'),
+    tearoffHtml: path.join(__dirname, '..', 'renderer', 'tearoff-overlay.html')
+  },
+  registry,
+  isAutomationEnabled: isMcpAutomationEnabled,
+  broadcastMoveTargetsChanged,
+  createFindOverlayManager,
+  createMenuOverlayManager,
+  createTearoffOverlayManager,
+  computeFindOverlayBounds,
+  getTabContents,
+  chromeForAttachment,
+  sheetAcceleratorAction,
+  isInternalContents,
+  isGuestActionAllowed,
+  toggleDevTools,
+  applyZoom,
+  captureWindowCloseEntries,
+  jars,
+  closedTabStack,
+  broadcastClosedTabStackChanged,
+  settings,
+  isSessionQuitting: () => sessionQuitting,
+  sessionStore,
+  buildSessionSnapshot,
+  getHistoryRecorder: () => historyRecorder,
+  defer: setImmediate,
+  logger: console
+});
 
-// Generalized chrome-class accelerator forwarder (DD8, M06 F3 Leg 4). Replaces
-// the accumulating handleGuest* one-offs — flagged at Flight 2's debrief
-// ("before more handleGuest* functions accumulate") — with ONE classifier-driven
-// forwarder: classify the keystroke with the SAME pure `keydownToAction` the
-// chrome DOM keydown handler uses (renderer.js), and forward it as a single
-// `chrome-shortcut-action` send iff the per-guest-kind allowlist
-// (`isChromeActionForwardable`, src/shared/guest-forward-allowlist.js) admits
-// it. Parity goal (FD ruling): an accelerator that works under chrome focus
-// works identically under guest focus.
-//
-// ABSORBS the former handleGuestNewTab (M06 F2 HAT D2 fix — Ctrl/Cmd+T silently
-// swallowed under guest focus with no forward anywhere): new-tab is now just
-// one member of the WEB/INTERNAL allowlists, going through the same classify+
-// allowlist path as every other forwarded action. Ctrl+T still forwards on both
-// guest branches as new-tab (no regression) — Ctrl+Shift+T forwards as
-// reopen-closed-tab on both guest kinds too (M09 F4 DD2 — retires the former
-// reserved-unassigned/intentional-drop status; pinned by a classifier-level
-// unit test).
-//
-// Main-side-handled keys (zoom/print/find/downloads/devtools) are NOT in either
-// allowlist, so this forwarder no-ops for them (returns false, no
-// preventDefault) and callers fall through unchanged to their existing branches
-// below — this function adds no regression surface over those.
-//
-// MUST be called AFTER handleGuestCrossViewNav in both guest branches
-// (design-review catch): crossViewNavAction and keydownToAction both map
-// Ctrl+L → focus-address; handleGuestCrossViewNav's early return is what makes
-// that safe. Calling this first would double-dispatch focus-address.
-//
-// @param {Electron.Event} event
-// @param {Electron.Input} input
-// @param {'web' | 'internal'} guestKind
-// @param {Electron.WebContents} contents  the guest — resolves its OWNING window's chrome (class 3)
-// @returns {boolean} whether it handled (swallowed) the key
-function handleGuestChromeShortcut(event, input, guestKind, contents) {
-  if (input.type !== 'keyDown') return false;
-  const action = keydownToAction({
-    key: input.key,
-    ctrl: input.control,
-    meta: input.meta,
-    shift: input.shift,
-    // Guests hold no lightbox state (lightbox is chrome-only UI); none of the
-    // actions either allowlist admits are lightbox-gated in keydownToAction
-    // (devtools/zoom/find are excluded by the allowlist itself), so this is safe.
-    lightboxOpen: false,
-    // Real input.alt threaded through (M09 F3, i18n ruling): AltGr digits report
-    // ctrl+alt on European layouts and must not be misread as a tab-jump.
-    alt: input.alt,
-  });
-  if (!isChromeActionForwardable(action, guestKind)) return false;
-  event.preventDefault();
-  // Swallow but don't stack/repeat-fire on a held key (mirrors the former
-  // handleGuestNewTab / Ctrl+J downloads guard below) — EXCEPT the tab-cycle/
-  // jump actions (M09 F3 fix-cycle, FD ruling): the leg's Edge Cases ruling is
-  // "allow repeat cycling" (Chrome allows held-Ctrl+Tab to cycle), so this
-  // guard must not swallow repeats for those. isRepeatSafeAction is the pure,
-  // unit-tested predicate for that carve-out (src/shared/guest-forward-allowlist.js).
-  if (isRepeatSafeAction(action) || !input.isAutoRepeat) {
-    // Class 3 (F6 DD2): the guest's OWNING window's chrome at event time.
-    chromeForTab(contents.id)?.send('chrome-shortcut-action', { action });
-  }
-  return true;
-}
-
-function wireGuestContents(contents) {
-  // Open target=_blank / window.open as new tabs in our own UI instead of
-  // spawning native Electron windows.
-  //
-  // Popup inheritance (DD7, M06 F3 Leg 4): forward the OPENER's session partition
-  // alongside the URL, read from the existing per-view tabViews registry (set at
-  // tab-create time, cleaned up on tab-close — no staleness risk; `contents` here
-  // IS the opener guest's webContents, keyed by its own wcId). The renderer
-  // resolves `openerPartition` into a container decision via the pure
-  // `inheritFromPartition` (src/shared/inherit-container.js) and consumes it
-  // through the SAME path as context-menu opens. A missing registry entry (e.g.
-  // the opener closed before this IPC lands) yields `openerPartition: undefined`,
-  // which inheritFromPartition resolves to default routing — never a throw.
-  contents.setWindowOpenHandler(({ url }) => {
-    const owner = registry.getWindowForGuest(contents.id);
-    const openerPartition = owner ? owner.tabViews.get(contents.id)?.partition : undefined;
-    // Class 3 (F6 DD2): the popup opens in the OPENER's window's chrome.
-    chromeForTab(contents.id)?.send('open-tab', { url, openerPartition });
-    return { action: 'deny' };
-  });
-  // Session-aware navigation guard (DD4). The internal `goldfinch://` session may
-  // navigate only within its own allowlist; every web-origin webview keeps the
-  // stricter web rule (still rejects goldfinch://, file:, data:, javascript:, …).
-  // Optional access → a missing/falsy session falls through to the stricter web branch.
-  contents.on('will-navigate', (e, url) => {
-    if (/** @type {any} */ (contents.session)?.__goldfinchInternal) {
-      // Internal session: only ever on the internal allowlist (goldfinch://settings).
-      if (!isInternalPageUrl(url)) e.preventDefault();
-    } else {
-      // Web session: unchanged.
-      if (!isSafeTabUrl(url)) e.preventDefault();
-    }
-  });
-  // Page-scoped zoom capture (DD6). This is the path that fires while the PAGE
-  // has focus (the normal case); the renderer keydown handler is the fallback for
-  // when the chrome shell is focused. Skip the internal session entirely (DD3) —
-  // internal pages never zoom.
-  if (!(/** @type {any} */ (contents.session)?.__goldfinchInternal)) {
-    contents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown') return;
-      // Cross-view keyboard bridge (M05 F5 Leg 2) FIRST — Ctrl+L / unmodified Tab hand
-      // focus back to the chrome view. Contained approach: this single call sits above
-      // the existing accelerator branches, which stay UNTOUCHED (no regression surface
-      // over F12/zoom/print/find/downloads/devtools). crossViewNavAction returns null
-      // for every one of those keys, so it never shadows them.
-      if (handleGuestCrossViewNav(event, input, contents)) return;
-      // Generalized chrome-class accelerator forwarder (DD8, M06 F3 Leg 4) — same
-      // contained-call pattern as the cross-view bridge just above, and MUST stay
-      // second (after cross-view nav, before everything below — see the ordering
-      // comment on handleGuestChromeShortcut). The WEB allowlist
-      // (new-tab/close-tab/focus-address/toggle-panel/toggle-privacy/reload) never
-      // overlaps the keys handled by the branches below (devtools/zoom/print/find/
-      // downloads are excluded from the allowlist itself), so this never shadows an
-      // existing accelerator.
-      if (handleGuestChromeShortcut(event, input, 'web', contents)) return;
-      // DevTools F12 (SC5 / DD2). MODIFIER-LESS — must sit BETWEEN the keyDown filter (above)
-      // and the modifier gate (below): before the gate or it never fires (F12 has no modifier);
-      // after the keyDown filter or a keyUp F12 would double-fire. The outer __goldfinchInternal
-      // skip already excludes internal sessions (DD5). Guard isAutoRepeat so a HELD F12
-      // doesn't rapid-toggle (main-side before-input-event repeats keyDown while held).
-      if (input.key === 'F12') {
-        if (!input.isAutoRepeat) toggleDevTools(contents);  // contents IS the guest wc — pre-guarded by the outer skip
-        event.preventDefault();
-        return;
-      }
-      if (!(input.control || input.meta)) return;
-      // Match '=' regardless of shift (US-layout Ctrl+Shift+= → zoom in) and '+'.
-      let action = null;
-      if (input.key === '=' || input.key === '+') action = 'in';
-      else if (input.key === '-') action = 'out';
-      else if (input.key === '0') action = 'reset';
-      // Native print (SC2). Save-as-PDF is a destination within the OS dialog.
-      // print() returns immediately; on WSLg with no CUPS printer it fails
-      // silently, so surface the failureReason via the callback (DD/WSLg note).
-      if (input.key === 'p' || input.key === 'P') {
-        contents.print({}, (ok, reason) => {
-          if (!ok) console.warn('print failed:', reason);
-        });
-        event.preventDefault();
-        return;
-      }
-      // Find in page (SC4 / DD2, M05 F7). Suppress Chromium's native find and tell
-      // the chrome renderer to open the floating find OVERLAY (a main-owned
-      // chrome-class WebContentsView, not chrome DOM): the renderer's openFind
-      // resolves per-tab state and drives find-overlay:open back into main. No
-      // payload — the renderer infers via activeTab(). The __goldfinchInternal
-      // skip already excludes internal sessions, satisfying DD5.
-      if (input.key === 'f' || input.key === 'F') {
-        event.preventDefault();
-        // No chrome focus here (DD6): main focuses the overlay webContents in
-        // openFindOverlaySession when the renderer drives find-overlay:open —
-        // a chrome-view focus would actively fight that. Class 3: the guest's
-        // owning window's chrome.
-        chromeForTab(contents.id)?.send('open-find');
-        return;
-      }
-      // Downloads Ctrl+J (DD2) — page-focused capture; open the downloads page in the chrome
-      // renderer (onOpenDownloads), mirroring the find path. isAutoRepeat guard is REQUIRED:
-      // this path has no isInternalTab guard, so a HELD Ctrl+J would stack downloads tabs
-      // (before-input-event repeats keyDown while held — mirrors the F12/Ctrl+Shift+I branches).
-      if ((input.key === 'j' || input.key === 'J') && !input.isAutoRepeat) {
-        event.preventDefault();
-        chromeForTab(contents.id)?.send('open-downloads');
-        return;
-      }
-      // DevTools Ctrl+Shift+I (SC5 / DD2) — the conventional alternate to F12, in the gated
-      // section. Same isAutoRepeat guard so a held chord doesn't rapid-toggle. contents is the
-      // guest wc, pre-guarded by the outer __goldfinchInternal skip (DD5).
-      if (input.control && input.shift && (input.key === 'I' || input.key === 'i')) {
-        if (!input.isAutoRepeat) toggleDevTools(contents);
-        event.preventDefault();
-        return;
-      }
-      if (!action) return;
-      applyZoom(contents, action);
-      event.preventDefault();
-    });
-    // DevTools live-state broadcast (Flight-3 DD3). The leg-1 spike was POSITIVE: both
-    // devtools-opened/devtools-closed fire on the main-process guest webContents (unlike
-    // found-in-page, which fired only on the renderer <webview> tag — Flight-2 D1). We wire the
-    // GUEST side here and forward to the chrome renderer (mirrors the zoom-changed broadcast) so
-    // Leg 2's toolbar button updates live — including a DevTools-window-initiated close, which the
-    // on-demand isDevtoolsOpen reconcile alone would miss until the next tab activation.
-    const sendDevtoolsState = (open) => {
-      // Class 3 (F6 DD2): resolved at event time, not captured at wiring time.
-      chromeForTab(contents.id)?.send('devtools-state-changed', { wcId: contents.id, open });
-    };
-    contents.on('devtools-opened', () => sendDevtoolsState(true));
-    contents.on('devtools-closed', () => sendDevtoolsState(false));
-    // Custom page context menu (DD2/DD6). The context-menu event fires on the
-    // main-process guest webContents. We forward ONLY the params; the chrome
-    // renderer builds the model (pure pageContextModel) and opens it on the
-    // menu-overlay sheet at the 1:1 guest coords (M05 F8). Internal goldfinch://
-    // guests are excluded by the !__goldfinchInternal guard (DD6).
-    contents.on('context-menu', (event, params) => {
-      event.preventDefault();
-      if (isInternalContents(contents)) return;
-      // Class 3 (F6 DD2): the tab's owning window's chrome at event time — the
-      // owner-resolve null also covers the former window-gone guard.
-      chromeForTab(contents.id)?.send('page-context-menu', { wcId: contents.id, params });
-    });
-  } else {
-    // Internal goldfinch:// guests get NO before-input-event from the block above
-    // (it sits inside the !__goldfinchInternal guard, so F12/zoom/print/find/downloads/
-    // devtools are all inert on internal tabs — intentional). But the two CROSS-VIEW
-    // keys (Ctrl+L, Tab) are chrome-level, not guest features, and must still work when
-    // an internal tab holds OS focus — the only viable capture is a main-side
-    // before-input-event on the internal guest's webContents (a chrome renderer-keydown
-    // fallback never fires while the internal view holds focus). Register a SEPARATE,
-    // MINIMAL handler that calls ONLY handleGuestCrossViewNav and the generalized
-    // forwarder with the INTERNAL allowlist (DD8 FD ruling, deliberately thin —
-    // extend one action at a time at future leg design for anything PRIVILEGED)
-    // — so internal tabs gain the keyboard bridge and Ctrl+T (M06 F2 HAT D2 fix,
-    // absorbed — dispatchChromeAction('new-tab') has no isInternalTab gate, so
-    // it must work here too) plus Ctrl+W. The allowlist also forwards the M09 F3
-    // tab-cycle/jump set (tab-next/tab-prev/tab-jump-1..8/tab-jump-last —
-    // navigation-neutral chrome actions; an internal settings page must not trap
-    // the operator), added to BOTH guest kinds per that flight's explicit
-    // ruling — the deliberately-thin principle still governs everything else.
-    // Cross-view nav MUST run first (early return) — see the ordering comment on
-    // handleGuestChromeShortcut (Ctrl+L double-dispatch otherwise).
-    contents.on('before-input-event', (event, input) => {
-      if (handleGuestCrossViewNav(event, input, contents)) return;
-      handleGuestChromeShortcut(event, input, 'internal', contents);
-    });
-  }
-}
-
-// Wire tab-strip event forwarding for a WebContentsView guest (Flight 3, Leg 1).
-// Forwards did-navigate / title / favicon / loading to the chrome renderer; the
-// found-in-page count fans out to the find-overlay webContents (path B, DD3).
-// `partition` (M08 Flight 1, Leg 2 / DD5) is the SAME raw value passed to
-// tabViews.set at the call site (trusted ? INTERNAL_PARTITION : partition) — the
-// history recorder's positive-allowlist gate rejects the internal partition on
-// its own, so there is no divergence to keep in sync.
-function wireTabViewEvents(view, wcId, partition) {
-  const wc = view.webContents;
-  // Class 3 (F6 DD2): the OWNING window's chrome, resolved INSIDE the closure at
-  // event time — never captured at wiring time. Event-time resolution is what
-  // makes DD5's adopt re-bind automatic when a tab moves between windows.
-  const sendToChrome = (channel, payload) => {
-    chromeForTab(wcId)?.send(channel, payload);
-  };
-  // guard: wraps a handler so it no-ops if the webContents is already destroyed.
-  // Uses rest args to forward all event arguments through unchanged.
-  const guard = (fn) => (...args) => { if (!wc.isDestroyed()) fn(...args); };
-
-  wc.on('did-navigate', guard(() => {
-    sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
-    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
-    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
-  }));
-  wc.on('did-navigate-in-page', guard(() => {
-    sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
-    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
-    historyRecorder?.handleNavigation({ wcId, partition, url: wc.getURL() });
-  }));
-  wc.on('page-title-updated', guard((_e, title) => {
-    sendToChrome('tab-title', { wcId, title });
-    historyRecorder?.handleTitleUpdated(wcId, title);
-    // F8 DD8: a window's caption IS its active tab's title, so this retitles a
-    // move target. Gated on being the ACTIVE tab — a background tab's title
-    // appears in no caption, and re-broadcasting for one would be pure chatter.
-    if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
-  }));
-  wc.on('page-favicon-updated', guard((_e, favicons) => {
-    sendToChrome('tab-favicon', { wcId, favicons });
-  }));
-  wc.on('did-start-loading', guard(() => {
-    sendToChrome('tab-loading', { wcId, loading: true });
-  }));
-  wc.on('did-stop-loading', guard(() => {
-    sendToChrome('tab-loading', { wcId, loading: false });
-  }));
-  wc.on('did-finish-load', guard(() => {
-    sendToChrome('tab-did-finish-load', { wcId });
-    sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
-  }));
-  wc.on('dom-ready', guard(() => {
-    sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
-  }));
-  wc.on('found-in-page', guard((_e, result) => {
-    // Count path B (DD3, M05 Flight 7): when the overlay find session targets THIS
-    // tab, fan the count directly to the overlay webContents — no renderer round-trip
-    // (the old chrome fan-out was retired at the F7 cutover; the chrome count display
-    // was its only consumer).
-    // F7 DD5: the OWNING window's find manager, resolved at event time (never captured
-    // at tab construction — the overlay is lazy). The isSessionActive(wcId) guard also
-    // drops stale results from a non-target tab after a fast tab switch.
-    const fo = registry.getWindowForGuest(wcId)?.findOverlay;
-    if (fo && fo.isSessionActive(wcId)) {
-      const v = fo.getView();
-      if (v && !v.webContents.isDestroyed()) {
-        v.webContents.send?.('find-overlay:count', {
-          activeMatchOrdinal: result.activeMatchOrdinal,
-          matches: result.matches
-        });
-      }
-    }
-  }));
-}
+// Guest event wiring is pure composition: the extracted module sees only injected
+// owner lookups, decisions, and side effects. Both entry points read live state.
+const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
+  registry,
+  chromeForTab,
+  crossViewNavAction,
+  keydownToAction,
+  isChromeActionForwardable,
+  isRepeatSafeAction,
+  isInternalPageUrl,
+  isSafeTabUrl,
+  toggleDevTools,
+  applyZoom,
+  isInternalContents,
+  getHistoryRecorder: () => historyRecorder,
+  broadcastMoveTargetsChanged,
+  logger: console
+});
 
 // ---------------------------------------------------------------------------
 // Downloads. The renderer asks us to download a media URL using the *page's*
 // own session (so cookies / referer / auth are preserved). We resolve the
 // originating webview by its webContents id.
 // ---------------------------------------------------------------------------
-const pendingDownloads = new Map(); // url -> { suggestedName, saveDir }
-const approvedDownloadDirs = new Set(); // session-scoped; populated by choose-download-dir
-
 // App-level downloads model (Flight 5, Leg 1 / DD3). MODULE-SCOPED — not a whenReady
 // local — because wireDownloadHandler is also invoked from the synchronous
 // session-created hook for web jars created before whenReady, so its closure must
@@ -1835,564 +791,48 @@ const approvedDownloadDirs = new Set(); // session-scoped; populated by choose-d
 // fire before a window exists, but module-scoping removes the undefined-manager hazard.
 /** @type {ReturnType<typeof createManager> | null} */
 let downloadsManager = null;
-// Live DownloadItem references keyed by the manager id. SEAM FOR LEG 2: the
-// pause/resume/cancel/open/show action handlers will look items up here. This leg only
-// keeps the reference; it wires no action IPC channels.
-/** @type {Map<number, Electron.DownloadItem>} */
-const liveDownloadItems = new Map();
 
-ipcMain.handle('download-media', async (event, { webContentsId, url, suggestedName, saveDir }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  // Class 1 (F6 DD2): the fallback chain resolves the SENDER's window record —
-  // its active tab, then its chrome (accessor-rule fallback for a non-chrome sender).
-  const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
-  const senderActiveTab = rec && rec.activeTabWcId != null ? getTabContents(rec.activeTabWcId) : null;
-  const downloader = wc || senderActiveTab || (rec ? rec.chromeView.webContents : null);
-  if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
-
-  if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
-    return { ok: false, error: 'Download directory not approved.' };
-  }
-
-  pendingDownloads.set(url, { suggestedName, saveDir });
-  try {
-    downloader.downloadURL(url);
-    return { ok: true };
-  } catch (err) {
-    pendingDownloads.delete(url);
-    return { ok: false, error: String(err && err.message ? err.message : err) };
-  }
+const { wireDownloadHandler } = registerDownloadIpc({
+  ipcMain,
+  webContents,
+  registry,
+  getTabContents,
+  path,
+  fs,
+  sanitizeFilename,
+  isWithinDir,
+  dialog,
+  shell,
+  getDownloadsPath: () => app.getPath('downloads'),
+  getDownloadsManager: () => downloadsManager,
+  buildRegisterRecord,
+  buildProgressPayload,
+  buildDonePayload,
+  broadcast: broadcastToChromeAndInternal,
+  registerInternalHandler,
+  getChromeContents,
+  now: () => Date.now(),
+  logger: console
 });
-
-// Build a non-colliding path inside dir for filename, sanitizing the name.
-function uniquePath(dir, filename) {
-  const safe = sanitizeFilename(filename);
-  const ext = path.extname(safe);
-  const base = path.basename(safe, ext);
-  let candidate = path.join(dir, safe);
-  let n = 1;
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(dir, `${base} (${n})${ext}`);
-    n++;
-  }
-  if (!isWithinDir(dir, candidate)) {
-    console.warn('[uniquePath] candidate escaped dir, falling back:', candidate);
-    candidate = path.join(dir, 'download');
-  }
-  return candidate;
-}
-
-ipcMain.handle('choose-download-dir', async (event) => {
-  // Class 1 (F6 DD2): parent the dialog to the SENDER's window (accessor-rule
-  // fallback keeps a parent when the sender is somehow recordless).
-  const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
-  const dialogOpts = /** @type {Electron.OpenDialogOptions} */ ({
-    title: 'Choose a folder to download all media into',
-    properties: ['openDirectory', 'createDirectory']
-  });
-  const res = rec
-    ? await dialog.showOpenDialog(/** @type {Electron.BaseWindow} */ (rec.win), dialogOpts)
-    : await dialog.showOpenDialog(dialogOpts);
-  if (res.canceled || !res.filePaths.length) return null;
-  const chosen = res.filePaths[0];
-  approvedDownloadDirs.add(path.resolve(chosen));
-  return chosen;
-});
-
-function wireDownloadHandler(sess) {
-  if (sess.__goldfinchDownloads) return; // wire each session once
-  sess.__goldfinchDownloads = true;
-  sess.on('will-download', (_event, item) => {
-    const url = item.getURL();
-    const meta = pendingDownloads.get(url);
-    const suggested = (meta && meta.suggestedName) || item.getFilename() || 'download';
-
-    if (meta && meta.saveDir) {
-      // Bulk / media download: save straight into the chosen, pre-approved folder.
-      item.setSavePath(uniquePath(meta.saveDir, suggested));
-    } else {
-      // Chrome-like SILENT default-save (DD5): drop the native save dialog and write
-      // straight into the OS Downloads folder. Correctness leans on uniquePath's (n)
-      // dedup. setSavePath BEFORE register so getSavePath() is the real target.
-      item.setSavePath(uniquePath(app.getPath('downloads'), suggested));
-    }
-
-    // getSavePath() is now final (set above). The record + payloads are built by the
-    // electron-free downloads-payload helper, which reads the display name as
-    // basename(getSavePath()) (NOT getFilename()) and `paused` from isPaused(). The live
-    // `item` is passed whole as the accessor bag (it structurally satisfies the accessors).
-    // Register in the app-level model. Module-scoped manager (assigned at store-load
-    // time); guard defensively in case a will-download somehow fires before load.
-    const record = buildRegisterRecord(item, { url, startTime: Date.now() });
-    const id = downloadsManager ? downloadsManager.register(record) : -1;
-    if (id !== -1) liveDownloadItems.set(id, item);
-
-    item.on('updated', (_e, state) => {
-      // Single-source assembly: the helper hoists the byte getters and reads isPaused()
-      // once, and the manager.update patch reuses those values — so the same bindings feed
-      // manager.update AND the broadcast (byte-identical to the prior inline payload).
-      const payload = buildProgressPayload(item, { id, url, state });
-      if (downloadsManager) {
-        downloadsManager.update(id, {
-          state: payload.state,
-          received: payload.received,
-          total: payload.total,
-          paused: payload.paused
-        });
-      }
-      // id-keyed broadcast through the fan-out helper (DD3): the chrome renderer AND
-      // every internal session see it. Carries BOTH id (for the downloads page, leg 2)
-      // AND url (for the renderer's URL-keyed toast/bulk tracker — it has no id).
-      broadcastToChromeAndInternal('download-progress', payload);
-    });
-
-    item.once('done', (_e, state) => {
-      pendingDownloads.delete(url);
-      const payload = buildDonePayload(item, { id, url, state });
-      if (downloadsManager) {
-        downloadsManager.finalize(id, { state, savePath: payload.savePath, endTime: Date.now() });
-      }
-      liveDownloadItems.delete(id);
-      broadcastToChromeAndInternal('download-done', payload);
-    });
-  });
-}
-
-ipcMain.handle('show-item-in-folder', (_event, savePath) => {
-  if (savePath) shell.showItemInFolder(savePath);
-});
-
-// ---------------------------------------------------------------------------
-// Privacy monitor (observe-only). Watches page network traffic, classifies
-// third-party / tracker requests, flags mixed content, and logs permission
-// requests. Aggregated per tab and streamed to the renderer.
-// ---------------------------------------------------------------------------
-const SENSITIVE_PERMISSIONS = new Set([
-  'media',
-  'geolocation',
-  'notifications',
-  'midi',
-  'midiSysex',
-  'clipboard-read',
-  'hid',
-  'serial',
-  'usb',
-  'bluetooth',
-  'idle-detection',
-  'display-capture'
-]);
-
-const privacyByTab = new Map(); // webContentsId -> aggregate
-const privacySendTimers = new Map();
-
-function blankAgg(firstParty) {
-  return {
-    firstParty: firstParty || '',
-    secure: true,
-    total: 0,
-    mixedContent: 0,
-    blocked: 0, // tracker requests cancelled (raw)
-    strippedDomains: {}, // distinct domains whose URLs were cleaned
-    cookieBlockedDomains: {}, // distinct third-party domains whose cookies were dropped
-    thirdPartyDomains: {}, // domain -> count
-    // each category: { domain -> { blocked } }
-    trackers: { ads: {}, analytics: {}, social: {}, other: {} }
-  };
-}
-
-function serializeAgg(a) {
-  const cats = ['ads', 'analytics', 'social', 'other'];
-  let count = 0,
-    blockedT = 0;
-  const trackers = { count: 0, blocked: 0, allowed: 0 };
-  for (const cat of cats) {
-    trackers[cat] = Object.entries(a.trackers[cat]).map(([domain, v]) => {
-      count++;
-      if (v.blocked) blockedT++;
-      return { domain, blocked: v.blocked };
-    });
-  }
-  trackers.count = count;
-  trackers.blocked = blockedT;
-  trackers.allowed = count - blockedT;
-  return {
-    firstParty: a.firstParty,
-    secure: a.secure,
-    total: a.total,
-    mixedContent: a.mixedContent,
-    blocked: a.blocked, // raw request count (kept for reference)
-    stripped: Object.keys(a.strippedDomains).length, // distinct domains
-    cookiesBlocked: Object.keys(a.cookieBlockedDomains).length, // distinct domains
-    thirdPartyCount: Object.keys(a.thirdPartyDomains).length,
-    thirdPartyList: Object.entries(a.thirdPartyDomains)
-      .map(([domain, count]) => ({ domain, count }))
-      .sort((x, y) => y.count - x.count)
-      .slice(0, 200),
-    trackers
-  };
-}
-
-function schedulePrivacySend(id) {
-  if (privacySendTimers.has(id)) return;
-  privacySendTimers.set(
-    id,
-    setTimeout(() => {
-      privacySendTimers.delete(id);
-      const agg = privacyByTab.get(id);
-      // Class 3 (F6 DD2): the tab's OWNING window's chrome, resolved when the
-      // timer FIRES (send time), not when it was scheduled.
-      const cc = chromeForTab(id);
-      if (agg && cc) {
-        cc.send('privacy-net', { webContentsId: id, agg: serializeAgg(agg) });
-      }
-    }, 350)
-  );
-}
-
-// action: 'allow' | 'block' | 'strip'
-function recordRequest(details, action) {
-  const id = details.webContentsId;
-  if (id == null) return;
-
-  if (details.resourceType === 'mainFrame') {
-    // New top-level navigation -> reset this tab's privacy aggregate.
-    const agg = blankAgg(registrableDomain(hostnameOf(details.url)));
-    agg.secure = details.url.startsWith('https:');
-    privacyByTab.set(id, agg);
-    schedulePrivacySend(id);
-    return;
-  }
-
-  let agg = privacyByTab.get(id);
-  if (!agg) {
-    agg = blankAgg('');
-    privacyByTab.set(id, agg);
-  }
-  agg.total++;
-  if (action === 'block') agg.blocked++;
-  if (action === 'strip') agg.strippedDomains[registrableDomain(hostnameOf(details.url))] = 1;
-  if (agg.secure && details.url.startsWith('http:')) agg.mixedContent++;
-
-  const c = classify(details.url, agg.firstParty);
-  if (c.thirdParty && c.domain) {
-    agg.thirdPartyDomains[c.domain] = (agg.thirdPartyDomains[c.domain] || 0) + 1;
-    if (c.tracker && agg.trackers[c.tracker]) {
-      const entry = agg.trackers[c.tracker][c.domain] || (agg.trackers[c.tracker][c.domain] = { blocked: false });
-      if (action === 'block') entry.blocked = true;
-    }
-  }
-  schedulePrivacySend(id);
-}
-
-// First-party registrable domain for a tab (from its privacy aggregate).
-function tabFirstParty(id) {
-  const agg = privacyByTab.get(id);
-  return agg ? agg.firstParty : '';
-}
-
-// Spellcheck is opt-in and gated at the SESSION layer (DD1 architect [HIGH]):
-// setSpellCheckerLanguages is session-scoped, so it reaches already-attached guests
-// (webPreferences.spellcheck is immutable after attach). Web sessions only — NEVER the
-// internal session (goldfinch:// has no business spellchecking, and we never want it to
-// trigger the dictionary CDN fetch). Premise-audit (flight-log Leg 2) confirmed at the API
-// level: a web session defaults to enabled+['en-US']; setSpellCheckerLanguages([]) disables
-// (isSpellCheckerEnabled()===false) and ['en-US'] re-enables, live on an already-open guest.
-// IDEMPOTENT BY NATURE: unlike applyShields (which wires webRequest hooks exactly once and
-// therefore carries a __goldfinchShields guard), setSpellCheckerLanguages is safe to re-call
-// on whenReady + every toggle + every session-created — do NOT add a __goldfinchSpellcheck guard.
-function applySpellcheck(ses, enabled) {
-  if (!ses || ses.__goldfinchInternal) return; // DD1: never the internal session
-  ses.setSpellCheckerLanguages(enabled ? ['en-US'] : []);
-}
-
-// Applied to EVERY session/jar (via app.on('session-created')). One handler per
-// webRequest event: it both records privacy data (observe) and enforces the
-// active Shields (block / strip / isolate).
-function applyShields(ses) {
-  // Belt-and-suspenders: the internal session is excluded primarily by the module-flag
-  // skip in the `session-created` hook (it fires synchronously during fromPartition, before
-  // this marker is set). This guard only catches any later explicit applyShields call.
-  if (ses.__goldfinchInternal) return;
-  if (ses.__goldfinchShields) return; // wire each session once
-  ses.__goldfinchShields = true;
-
-  ses.webRequest.onBeforeRequest((details, cb) => {
-    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
-    let action = 'allow';
-    let response = {};
-
-    // Block known trackers (never the top-level document).
-    if (details.resourceType !== 'mainFrame' && shields.active('block', fp)) {
-      const c = classify(details.url, fp);
-      if (c.thirdParty && c.tracker) {
-        action = 'block';
-        response = { cancel: true };
-      }
-    }
-    // Strip tracking params (redirect to the clean URL).
-    if (action === 'allow' && shields.active('strip', fp)) {
-      const clean = shields.stripUrl(details.url);
-      if (clean && clean !== details.url) {
-        action = 'strip';
-        response = { redirectURL: clean };
-      }
-    }
-    try {
-      recordRequest(details, action);
-    } catch {
-      /* never break traffic */
-    }
-    cb(response);
-  });
-
-  ses.webRequest.onBeforeSendHeaders((details, cb) => {
-    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
-    const headers = details.requestHeaders;
-    if (shields.active('strip', fp) && headers.Referer) {
-      try {
-        headers.Referer = new URL(headers.Referer).origin + '/';
-      } catch {
-        delete headers.Referer;
-      }
-    }
-    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && headers.Cookie) {
-      const c = classify(details.url, fp);
-      if (c.thirdParty) {
-        delete headers.Cookie;
-        const agg = privacyByTab.get(details.webContentsId);
-        if (agg && c.domain) {
-          agg.cookieBlockedDomains[c.domain] = 1;
-          schedulePrivacySend(details.webContentsId);
-        }
-      }
-    }
-    cb({ requestHeaders: headers });
-  });
-
-  ses.webRequest.onHeadersReceived((details, cb) => {
-    const fp = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
-    const headers = details.responseHeaders || {};
-    if (shields.active('isolate', fp) && details.resourceType !== 'mainFrame' && classify(details.url, fp).thirdParty) {
-      for (const k of Object.keys(headers)) {
-        if (k.toLowerCase() === 'set-cookie') delete headers[k];
-      }
-    }
-    cb({ responseHeaders: headers });
-  });
-
-  // Sensitive permissions are denied by default (Electron otherwise grants
-  // them to any site); everything is logged for the panel.
-  ses.setPermissionRequestHandler((wc, permission, callback) => {
-    const granted = !SENSITIVE_PERMISSIONS.has(permission);
-    const id = wc ? wc.id : null;
-    // Class 3 (F6 DD2): the requesting tab's owning window's chrome at event time.
-    const cc = id != null ? chromeForTab(id) : null;
-    if (cc) {
-      cc.send('privacy-permission', { webContentsId: id, permission, granted });
-    }
-    callback(granted);
-  });
-  ses.setPermissionCheckHandler((_wc, permission) => !SENSITIVE_PERMISSIONS.has(permission));
-}
 
 // Settings read channel. INTENTIONALLY NOT behind the internal-sender guard — trust domain
 // is the file:// chrome (window.goldfinch surface in chrome-preload.js), same as shields-get.
 // Web webviews have no ipcRenderer.invoke, so only the chrome + internal guest can reach IPC.
-ipcMain.handle('settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
-
-/**
- * Broadcast a channel+payload to both audiences that need settings/shields change events:
- *  1. EVERY registered window's chrome renderer (class 2, F6 DD2 — the fan-out goes to
- *     ALL chromes, never just the accessor's) — sent separately because the
- *     __goldfinchInternal filter below intentionally excludes them (a chrome is not an
- *     internal-session webContents).
- *  2. Every webContents whose session carries __goldfinchInternal === true (the settings guest
- *     and any other future goldfinch:// internal pages) — ONCE GLOBALLY, never per-window.
- * Leg 4 reuses this helper for the shields-changed broadcast to the settings guest.
- * @param {string} channel
- * @param {unknown} payload
- */
-function broadcastToChromeAndInternal(channel, payload) {
-  for (const rec of registry.records()) {
-    const cc = rec.chromeView.webContents;
-    if (cc && !cc.isDestroyed()) {
-      cc.send(channel, payload);
-    }
-  }
-  for (const wc of webContents.getAllWebContents()) {
-    if (!wc.isDestroyed() && wc.session && /** @type {any} */ (wc.session).__goldfinchInternal === true) {
-      wc.send(channel, payload);
-    }
-  }
-}
+// Settings, Shields, automation preferences, and clipboard IPC register after
+// sessionRuntime construction so the live spellcheck applier is available.
 
 // Shields config IPC. INTENTIONALLY NOT behind the internal-sender guard — their trust
 // domain is the file:// chrome (window.goldfinch surface in chrome-preload.js), not the
 // goldfinch:// internal session. Do not "close" these channels with registerInternalHandler.
-ipcMain.handle('shields-get', () => shields.get());
-ipcMain.handle('shields-set', (_e, patch) => {
-  const cfg = shields.set(patch || {});
-  broadcastToChromeAndInternal('shields-changed', cfg);
-  return cfg;
-});
-ipcMain.handle('shields-pause', (_e, { site, paused }) => {
-  const cfg = shields.setPaused(site, paused);
-  broadcastToChromeAndInternal('shields-changed', cfg);
-  return cfg;
-});
 
 // Internal-session-only settings IPC. These channels are guarded by registerInternalHandler:
 // the wrapper verifies that event.senderFrame.origin === 'goldfinch://settings' AND the
 // sender's session carries __goldfinchInternal === true before forwarding to the handler.
 // A non-trusted sender gets a rejected invoke (the throw propagates as a promise rejection).
-registerInternalHandler(ipcMain, 'internal-settings-get', (_e, key) => key ? settings.get(key) : settings.getAll());
-registerInternalHandler(ipcMain, 'internal-settings-set', async (_e, key, value) => {
-  const cfg = settings.set(key, value);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  // DD2 (Flight 8): the toggle is the sole bind gate — drive the live surface to match.
-  // No explicit status broadcast: the automation-activity-changed channel carries an
-  // activity snapshot { sessions, log }, not a status object, so pushing status here
-  // would break the indicator/audit-viewer consumers. The indicator clears for free via
-  // stop()'s transport-close cascade; the Settings status-line is refreshed by the
-  // renderer re-fetch after settingsSet resolves.
-  if (key === 'automationEnabled') {
-    await applyAutomationEnabledChange(value === true);
-  }
-  // Spellcheck live side-effect (DD1 architect [HIGH]): drive EVERY live web session so the
-  // toggle reaches already-open tabs. setSpellCheckerLanguages is an imperative per-session
-  // push with NO lazy-read fallback (unlike shields' webRequest hooks that lazily read global
-  // state), so driving only the two base sessions would leave an already-open per-jar /
-  // container / burner tab stale. webContents.getAllWebContents() is the only live-session
-  // route (the broadcastToChromeAndInternal precedent above); applySpellcheck no-ops the
-  // internal session belt-and-suspenders. NOTE (premise-audit, flight-log Leg 2): the API-level
-  // toggle is confirmed live, but squiggle RENDERING was inconclusive under WSLg — the toggle
-  // help + behavior spec carry the conservative new-tabs-only wording pending macOS/HAT.
-  if (key === 'spellcheck') {
-    const enabled = value === true;
-    // Base web session (always present).
-    applySpellcheck(session.defaultSession, enabled);
-    // Every live web jar/container/burner session (already-open tabs).
-    const seen = new Set();
-    for (const wc of webContents.getAllWebContents()) {
-      const ses = wc.session;
-      if (!ses || /** @type {any} */ (ses).__goldfinchInternal || seen.has(ses)) continue;
-      seen.add(ses);
-      applySpellcheck(ses, enabled);
-    }
-  }
-  return cfg;
-});
-registerInternalHandler(ipcMain, 'internal-shields-get', () => shields.get());
-registerInternalHandler(ipcMain, 'internal-shields-set', (_e, patch) => {
-  const cfg = shields.set(patch || {});
-  broadcastToChromeAndInternal('shields-changed', cfg);
-  return cfg;
-});
-
-// Downloads surface IPC (Flight 5, Leg 2). All origin-checked via
-// registerInternalHandler — the goldfinch://downloads page is the only allowed sender;
-// web content cannot invoke them (no web gate is relaxed). The savePath for open/show
-// is resolved MAIN-SIDE by id from the trusted manager/store — the renderer NEVER
-// supplies a path (avoids an arbitrary-open vector).
-registerInternalHandler(ipcMain, 'internal-downloads-list', () =>
-  downloadsManager ? downloadsManager.listAll() : []
-);
-// Single dispatch surface with a main-side action allowlist (mirrors the
-// page-context-action allowlisted-dispatch pattern): one origin-checked surface, one
-// validation point. Every branch tolerates a missing/pruned id (no-op, no throw — the
-// DD3 cache contract). Returns { ok } so the page can refresh on a no-op.
-const DOWNLOADS_ACTIONS = new Set(['pause', 'resume', 'cancel', 'remove', 'retry', 'open', 'show']);
-registerInternalHandler(ipcMain, 'internal-downloads-action', (_e, payload) => {
-  const id = payload && payload.id;
-  const action = payload && payload.action;
-  if (typeof id !== 'number' || !DOWNLOADS_ACTIONS.has(action) || !downloadsManager) {
-    return { ok: false };
-  }
-
-  // Resolve the trusted record by id main-side (open/show/retry need it).
-  const record = downloadsManager.listAll().find((r) => /** @type {any} */ (r).id === id);
-
-  switch (action) {
-    case 'pause':
-    case 'resume':
-    case 'cancel': {
-      // Live-item-only ops: act on the DownloadItem registry. No-op on a missing id.
-      const item = liveDownloadItems.get(id);
-      if (item) {
-        item[action]();
-        // pause() and resume() do not reliably emit 'updated', so push an explicit
-        // broadcast so the downloads page can flip the Pause↔Resume button immediately.
-        // cancel() fires 'done' which already broadcasts — skip it.
-        if (action !== 'cancel') {
-          // Route through the same progress builder so the shape has one definition. The
-          // `state || 'progressing'` fallback is computed here (the helper takes state as
-          // given); the helper reads url/received/total/paused/filename off the live item.
-          // Single-source assembly: isPaused() is read once in the helper and the
-          // manager.update patch reuses payload.paused (byte-identical to the prior inline).
-          const payload = buildProgressPayload(item, {
-            id,
-            url: item.getURL(),
-            state: item.getState?.() || 'progressing'
-          });
-          if (downloadsManager) {
-            downloadsManager.update(id, {
-              state: payload.state,
-              received: payload.received,
-              total: payload.total,
-              paused: payload.paused
-            });
-          }
-          broadcastToChromeAndInternal('download-progress', payload);
-        }
-      }
-      break;
-    }
-    case 'remove':
-      // History-only — never deletes the file. Terminal records only (the page gates
-      // the affordance); manager.remove tolerates a missing id.
-      downloadsManager.remove(id);
-      break;
-    case 'retry': {
-      // Re-issue a FRESH download for a failed/cancelled record. The chrome contents uses
-      // session.defaultSession (no partition in webPreferences), which is download-wired
-      // at whenReady, so downloadURL registers through wireDownloadHandler and gets a
-      // NEW id/new record; the old failed record stays visible (DD3). No fallback needed.
-      const url = record ? /** @type {any} */ (record).url : null;
-      const cc = getChromeContents();
-      if (url && cc && !cc.isDestroyed()) {
-        cc.downloadURL(url);
-      }
-      break;
-    }
-    case 'open': {
-      // Resolve savePath main-side by id; open only a real path. shell.openPath returns
-      // a non-empty error string when the file is gone — return it so the page can show
-      // an inline notice (don't throw).
-      const savePath = record ? /** @type {any} */ (record).savePath : null;
-      if (savePath) {
-        const error = shell.openPath(savePath);
-        return Promise.resolve(error).then((e) => ({ ok: !e, error: e || undefined }));
-      }
-      return { ok: false };
-    }
-    case 'show': {
-      const savePath = record ? /** @type {any} */ (record).savePath : null;
-      if (savePath) shell.showItemInFolder(savePath);
-      break;
-    }
-  }
-  return { ok: true };
-});
-registerInternalHandler(ipcMain, 'internal-downloads-clear', () => {
-  if (downloadsManager) downloadsManager.clear();
-  return { ok: true };
-});
-
 // Automation bind-status surface (Flight 5 / DD1). The shape is shared with
 // set-port via currentAutomationStatus() (Leg 7) — `port` reflects the bound port
 // when the surface is active, else the would-be resolved port; host is hard-pinned
 // to loopback (SC7 — never configurable).
-registerInternalHandler(ipcMain, 'automation:get-status', () => currentAutomationStatus());
 // Persist the port AND live-rebind the running surface to it (Flight 5, Leg 7).
 // settings.set throws on an invalid port → rejected invoke → the renderer shows
 // "Invalid port". rebindMcpServer rebinds if the surface is active (resolvePort
@@ -2403,25 +843,14 @@ registerInternalHandler(ipcMain, 'automation:get-status', () => currentAutomatio
 // genuine pre-existing gap the F7 fix (see jar-key-revoke/admin-mint/admin-revoke
 // below) did not cover. Fixed to match those siblings, so any other open
 // internal tab / the chrome sees the new port without a separate reload.
-registerInternalHandler(ipcMain, 'automation:set-port', async (_e, port) => {
-  settings.set('automationPort', port);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  await rebindMcpServer();
-  return currentAutomationStatus();
-});
 // Advisory free-port scan over the loopback dynamic range for the Settings UI's
 // "find a free port" affordance (leg 2). Returns { port: null } if none free.
-registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
 
 // Clipboard write fallback (Flight 5, Leg 2 — DD4). navigator.clipboard is the
 // primary path in the secure goldfinch://settings page, but it can be blocked at
 // runtime under contextIsolation + sandbox; this origin-checked IPC gives the
 // settings copy buttons a reliable fallback. First copy consumer is leg 2's MCP
 // address; leg 3's key copy reuses the shared copyText() helper that calls this.
-registerInternalHandler(ipcMain, 'clipboard:write', (_e, text) => {
-  clipboard.writeText(String(text == null ? '' : text));
-  return { ok: true };
-});
 
 // Automation key management (Flight 5, Leg 3 / SC9). All origin-checked
 // (registerInternalHandler) — the secure goldfinch://settings page is the only
@@ -2430,24 +859,6 @@ registerInternalHandler(ipcMain, 'clipboard:write', (_e, text) => {
 // `list-keys` is the single source for the admin env gate (AC2 — get-status does
 // NOT report it). Generate and rotate are the same mint op (DD5); the UI labels
 // the button per hasKey/adminKeySet.
-registerInternalHandler(ipcMain, 'automation:list-keys', () => {
-  const hashes = settings.get('automationKeyHashes') || {};
-  return {
-    jars: jars.list().map((j) => ({ id: j.id, name: j.name, color: j.color, hasKey: !!hashes[j.id] })),
-    adminEnabled: !!process.env.GOLDFINCH_AUTOMATION_ADMIN,
-    adminKeySet: (settings.get('automationAdminKeyHash') || '') !== '',
-  };
-});
-registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
-  // mintJarKey changes only `automationKeyHashes` (DD3 — it no longer enables the
-  // surface; enabling is human-only via the toggle). `automationKeyHashes` IS a
-  // setting, so broadcast settings-changed: the key list's hasKey/adminKeySet
-  // rendering re-syncs without a reload. The enable toggle's onSettingsChanged
-  // listener sees no automationEnabled change and leaves the checkbox untouched.
-  const key = mintJarKey(jarId, settings, jars);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  return { key };
-});
 // F7 (Flight 3, Leg 6 HAT): revoke/admin-mint/admin-revoke ALSO mutate
 // `automationKeyHashes` / `automationAdminKeyHash` (both settings values) but
 // were missing the broadcast mint already carries — a pre-existing gap against
@@ -2458,21 +869,6 @@ registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_e, jarId) => {
 // open internal tab) would silently lag until the next unrelated broadcast.
 // Fixed here to match jar-key-mint's existing broadcast, needed for the F7
 // indicator to react live to a revoke.
-registerInternalHandler(ipcMain, 'automation:jar-key-revoke', (_e, jarId) => {
-  revokeJarKey(jarId, settings);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  return { ok: true };
-});
-registerInternalHandler(ipcMain, 'automation:admin-key-mint', () => {
-  const key = mintAdminKey(settings);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  return { key };
-});
-registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => {
-  revokeAdminKey(settings);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-  return { ok: true };
-});
 
 // Read-only automation activity snapshot (Flight 5, Leg 4 / SC10 / DD6).
 // INTENTIONALLY a bare ipcMain.handle — NOT registerInternalHandler — for the SAME
@@ -2485,54 +881,34 @@ registerInternalHandler(ipcMain, 'automation:admin-key-revoke', () => {
 // all — a web webview has no ipcRenderer. The sibling automation:* handlers above ARE
 // origin-checked because only the settings page calls them; this one is the deliberate
 // exception because the chrome also reads it.
-ipcMain.handle('automation:get-activity', () => (mcpServer ? mcpServer.getActivity() : { sessions: [], log: [] }));
 
-// Per-jar fingerprint seed. Stable for a session so a site sees a consistent
-// (but fake) fingerprint; different per jar = a different "persona". Rerolled
-// by New Identity (stage 3).
-const farbleSeeds = new WeakMap();
-function seedForSession(ses) {
-  let s = farbleSeeds.get(ses);
-  if (s == null) {
-    s = Math.floor(Math.random() * 0xffffffff) >>> 0;
-    farbleSeeds.set(ses, s);
-  }
-  return s;
-}
-function rerollSeed(ses) {
-  farbleSeeds.set(ses, Math.floor(Math.random() * 0xffffffff) >>> 0);
-}
-
-// The webview preload asks (synchronously, at document-start) whether to farble
-// and with which seed.
-ipcMain.on('shields-farble', (event, url) => {
-  const site = registrableDomain(hostnameOf(url || ''));
-  event.returnValue = {
-    farble: shields.active('farble', site),
-    seed: seedForSession(event.sender.session)
-  };
+const { rerollSeed } = registerBrowserIpc({
+  ipcMain,
+  webContents,
+  chromeForTab,
+  getTabContents,
+  applyZoom,
+  isInternalContents,
+  toggleDevTools,
+  registerInternalHandler,
+  jars,
+  registry,
+  createWindow,
+  broadcastJarsChanged: () => broadcastJarsChanged(),
+  isSafeTabUrl,
+  getChromeContents,
+  session,
+  registrableDomain,
+  hostnameOf,
+  shields,
+  random: Math.random,
+  logger: console
 });
 
 // --- window controls (custom frameless min/max/close, win+linux) ---
 // Class 1 (F6 DD2/DD3): each control resolves the SENDER's window — window 2's
 // controls must never minimize/close window 1.
-ipcMain.on('window-minimize', (event) => {
-  registry.getWindowForChrome(event.sender)?.win.minimize();
-});
-ipcMain.on('window-toggle-maximize', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec) return;
-  if (rec.win.isMaximized()) rec.win.unmaximize();
-  else rec.win.maximize();
-});
 // DD6: close() → 'closed' → 'window-all-closed' → app.quit() (non-darwin); NOT app.quit() directly.
-ipcMain.on('window-close', (event) => {
-  registry.getWindowForChrome(event.sender)?.win.close();
-});
-ipcMain.handle('window-is-maximized', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  return !!(rec && rec.win.isMaximized());
-});
 
 // New Window command (M09 F6 Leg 4, DD5): kebab item + Ctrl/Cmd+N, both through
 // the one-classifier path → dispatchChromeAction('new-window') → this invoke.
@@ -2540,11 +916,6 @@ ipcMain.handle('window-is-maximized', (event) => {
 // discipline). The window boots its home tab exactly like first launch (no
 // noBootTab), and registry.create seeds last-focused — so the DD8 automation
 // accessor deterministically retargets to the new window (WSLg-safe).
-ipcMain.handle('window-create', (event) => {
-  if (!registry.getWindowForChrome(event.sender)) return null;
-  const rec = createWindow();
-  return rec.win.id;
-});
 
 // Boot-config invoke (DD5 / review L4 transport + review H1 barrier). Joins the
 // chrome renderer's boot-gating Promise.all: returns { bootTab } (false only for
@@ -2554,26 +925,9 @@ ipcMain.handle('window-create', (event) => {
 // onAdoptTab/onTabMovedAway registrations sit ABOVE the boot gate), so the
 // queued adopt-protocol sends flush here — a send any earlier would hit a
 // pre-boot document and be silently dropped with no retry.
-ipcMain.handle('window-boot-config', (event) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec) return { bootTab: true };
-  rec.bootConfigServed = true;
-  const queued = rec.pendingChromeSends.splice(0);
-  const cc = rec.chromeView.webContents;
-  for (const buildMsg of queued) {
-    if (cc.isDestroyed()) break;
-    const [channel, payload] = buildMsg();
-    cc.send(channel, payload);
-  }
-  // M09 Flight 9 / DD4 / AC4: a restored window carries its ordered saved tab list on
-  // the record — serve it so the renderer boot loop creates each tab fresh (suppressing
-  // the home boot tab). Otherwise the unchanged bootTab decision (default-off byte-identity).
-  return rec.restoreTabs ? { bootTab: false, restoreTabs: rec.restoreTabs } : { bootTab: !rec.noBootTab };
-});
 
 // Kebab-menu Exit (mission SC4): quit on ALL platforms. Distinct from `window-close`
 // (the window button), whose `window-all-closed` path does not quit on macOS (main.js:536-537).
-ipcMain.on('app-quit', () => app.quit());
 
 // OS-clipboard string write for the page context menu's Copy link / Copy image address /
 // Copy selection (Leg 4). Chrome-trusted one-way send — same trust domain as window-minimize/
@@ -2581,847 +935,47 @@ ipcMain.on('app-quit', () => app.quit());
 // (settings page only): the chrome renderer cannot reach that one, and navigator.clipboard is
 // unreliable from a file:// doc right after a guest context-menu steals focus. Writes a STRING
 // only (coerced) — not a guest mutation, no general-write concern.
-ipcMain.handle('chrome-clipboard-write', (_e, text) => {
-  clipboard.writeText(String(text == null ? '' : text));
-});
 
 // New container creation: renderer collected the name (via inline input) and sends it here.
 // We create the jar and return it; the renderer calls createTab directly with the container object.
-ipcMain.handle('new-container-create', async (_event, { name }) => {
-  if (!name || typeof name !== 'string') return null;
-  const c = jars.add(name);
-  // Both add entry points emit jars-changed (DD6). broadcastJarsChanged's const
-  // destructuring sits at the jar section further down — legal (the handler runs
-  // long after module evaluation).
-  broadcastJarsChanged();
-  return c;
+
+// Tab lifecycle and move IPC are registered as one ownership domain.
+registerTabIpc({
+  ipcMain,
+  WebContentsView,
+  internalPreloadPath: path.join(__dirname, '..', 'preload', 'internal-preload.js'),
+  webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.js'),
+  INTERNAL_PARTITION,
+  registry,
+  wireGuestContents,
+  wireTabViewEvents,
+  captureClosedTabEntry,
+  jars,
+  APPEND_SENTINEL,
+  closedTabStack,
+  broadcastClosedTabStackChanged,
+  getHistoryRecorder: () => historyRecorder,
+  isSafeTabUrl,
+  reopenStripIndex,
+  webContents,
+  isInternalContents,
+  buildMoveTargets,
+  createWindow,
+  validateMoveTabPayload,
+  buildAdoptPayload,
+  broadcastMoveTargetsChanged,
+  getTabContents,
+  schedule: setTimeout,
+  cancelScheduled: clearTimeout,
+  logger: console
 });
 
-// ---------------------------------------------------------------------------
-// Tab view IPC handlers (Flight 3, Leg 1 — web tab lifecycle via WebContentsView)
-// ---------------------------------------------------------------------------
-
-ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }) => {
-  // -----------------------------------------------------------------------
-  // Pick webPreferences by trust level (Leg 3).
-  //
-  // INTERNAL (trusted=true): byte-exact webPreferences set at construction time on the
-  // trusted `tab-create` path. The partition MUST come from the INTERNAL_PARTITION constant —
-  // any literal drift silently resolves a different session → marker absent → gates,
-  // protocol.handle, bridge, and automation exclusion all fail open. (DD0 / security)
-  //
-  // WEB (trusted=false): web prefs — contextIsolation:false so the farbling preload runs
-  // in the page main world (required). NO spellcheck key — the session-layer applier
-  // (applySpellcheck) owns the live web toggle; a constructed view's spellcheck pref is
-  // immutable after attach, so inheriting the session default is correct. (DD3)
-  // -----------------------------------------------------------------------
-  let preloadPath;
-  let webPreferencesObj;
-  if (trusted) {
-    preloadPath = path.join(__dirname, '..', 'preload', 'internal-preload.js');
-    webPreferencesObj = {
-      preload: preloadPath,
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      partition: INTERNAL_PARTITION,
-      spellcheck: false,
-    };
-  } else {
-    preloadPath = path.join(__dirname, '..', 'preload', 'webview-preload.js');
-    webPreferencesObj = {
-      preload: preloadPath,
-      contextIsolation: false,
-      sandbox: false,
-      nodeIntegration: false,
-      partition: partition,
-      // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
-    };
-  }
-  // Class 1 (F6 DD2): the tab is created in the SENDER's window. The former
-  // unguarded mainWindow deref is now a guarded early return (a tab-create racing
-  // window teardown returns null instead of crashing main).
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec) return null;
-  const view = new WebContentsView({ webPreferences: webPreferencesObj });
-  rec.win.contentView.addChildView(view);
-
-  // Seed initial bounds
-  {
-    const { width, height } = rec.win.getContentBounds();
-    view.setBounds({ x: 0, y: 0, width, height });
-  }
-  view.setVisible(false);
-
-  const wcId = view.webContents.id;
-  rec.tabViews.set(wcId, { view, partition: trusted ? INTERNAL_PARTITION : partition, trusted, active: false });
-
-  // Explicit construction-time wiring: web-contents-created fires synchronously
-  // during new WebContentsView(), so the global handler cannot identify the view yet.
-  // Wire explicitly here so all guest event listeners are installed before loadURL.
-  wireGuestContents(view.webContents);
-
-  // Tab-strip event forwarding
-  wireTabViewEvents(view, wcId, trusted ? INTERNAL_PARTITION : partition);
-
-  // M09 F4 Leg 2 (DD2 step 4) — reopen-chain restore branch (design-review race
-  // fix). When the payload carries `restoreHistory`, SKIP `loadURL(url)`
-  // entirely and call `navigationHistory.restore()` instead — `restore()`
-  // triggers its own navigation, so calling `loadURL` too would race two
-  // competing navigations against the same fresh WebContentsView. `index` is
-  // passed EXPLICITLY: omitting it loads the newest entry, silently wrong for
-  // a tab that had navigated back before it was closed. `restore()` already
-  // attaches a noop rejection handler (Electron docs) — the `.catch` here is
-  // purely diagnostic logging, mirroring the `loadURL` branch below.
-  if (restoreHistory && Array.isArray(restoreHistory.entries)) {
-    view.webContents.navigationHistory.restore({
-      entries: restoreHistory.entries,
-      index: restoreHistory.index,
-    }).catch((err) => {
-      console.warn('[tab-create] navigationHistory.restore rejected:', err && (err.code || err.message || err));
-    });
-  } else {
-    view.webContents.loadURL(url).catch((err) => {
-      console.warn('[tab-create] loadURL rejected:', err && (err.code || err.message || err));
-    });
-  }
-  return wcId;
-});
-
-ipcMain.on('tab-close', (event, wcId, stripIndex) => {
-  // Class 1 (F6 DD2): resolve the OWNING window's record (guest reverse lookup) —
-  // also the guard that replaces the former unguarded mainWindow deref below.
-  const owner = registry.getWindowForGuest(wcId);
-  const entry = owner ? owner.tabViews.get(wcId) : null;
-  if (!owner || !entry) return;
-  // Captured BEFORE the null-out below — one line lower and this is always false.
-  const wasActive = owner.activeTabWcId === wcId;
-  // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
-  // tabViews.delete below (the webContents and its navigationHistory must still be
-  // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry
-  // (F6 leg 3 — shared with the whole-window `close` capture site): positive
-  // persist-jar allowlist, burner/internal structurally excluded, `!trusted`
-  // belt-and-suspenders. The entry is tagged with the OWNING window's id (DD4 —
-  // `owner` is the guest's reverse-resolved record above), which the pop rule
-  // compares against the reopen invoker. Whole block try/catch — capture must
-  // never break close.
-  try {
-    const captured = captureClosedTabEntry({
-      tabEntry: entry,
-      jarsList: jars.list(),
-      stripIndex: Number.isInteger(stripIndex) ? stripIndex : APPEND_SENTINEL,
-      windowId: owner.win.id,
-    });
-    if (captured) {
-      closedTabStack.push(captured);
-      broadcastClosedTabStackChanged();
-    }
-  } catch (err) {
-    console.error('[closed-tab-stack] capture failed:', err);
-  }
-  if (!owner.win.isDestroyed()) {
-    owner.win.contentView.removeChildView(entry.view);
-  }
-  if (!entry.view.webContents.isDestroyed()) {
-    entry.view.webContents.destroy();
-  }
-  owner.tabViews.delete(wcId);
-  historyRecorder?.forgetTab(wcId);
-  if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
-  // Find-overlay session teardown (AC6d): the session target is being destroyed —
-  // close the session with NO refocus (nothing sensible to focus; the stopFind inside
-  // close tolerates the mid-destruction guest via getTabContents' guards, and the
-  // entry is already deleted above so it resolves null). Placed with the Leg-1
-  // overlay lines, AFTER tabViews.delete.
-  if (owner.findOverlay?.isSessionActive(wcId)) owner.findOverlay.closeSession({ refocusGuest: false });
-  // Belt-and-suspenders (DD1, Leg 1): closing the active tab, or the last web tab
-  // (all-internal remaining), removes the overlay from the stack even sessionless.
-  // Menu-overlay close family (F8 DD4): closing the ACTIVE tab while a menu is open
-  // closes the menu ('tab-close' — restore explicitly skipped in the DD5 hook, not
-  // left to the activeTabWcId null-out accident). Deliberately NO "no web tabs left"
-  // mirror — the sheet serves internal tabs as well (DD7); active-tab lifecycle
-  // covers it.
-  // F7 DD5: THIS owner window's OWN overlays — closing a tab in window B is
-  // structurally unable to reach window A's find bar or menu, so the pre-F7
-  // attachment conditioning is deleted (both calls are idempotent when inactive).
-  if (wasActive) {
-    owner.findOverlay?.hide();
-    owner.sheet?.closeMenuOverlay('tab-close');
-  }
-  const anyWebTabLeft = [...owner.tabViews.values()].some((e) => e.trusted === false);
-  if (!anyWebTabLeft) owner.findOverlay?.hide();
-});
-
-// M09 F4 Leg 2 (DD2 step 2) — reopen-chain invoke #1. Pops the closed-tab stack
-// and returns the entry the renderer needs to reconstruct the tab (renderer-
-// orchestrated: this handler never constructs a view itself — see DD2's
-// design-review correction). Returns `null` on an empty stack (renderer no-ops
-// silently, no error surface).
-ipcMain.handle('tab-reopen', (event) => {
-  const entry = closedTabStack.pop();
-  if (!entry) return null;
-  // DD6: the pop is a stack MUTATION — the size push fires even when the safety
-  // re-check below drops the entry (the stack shrank either way).
-  broadcastClosedTabStackChanged();
-  // Defense-in-depth re-validation (two-point-boundary parity — DD2 ruling): the
-  // URL was already safety-checked at capture-adjacent points, but main re-checks
-  // before handing it back to the renderer, same discipline as internal-open-tab-
-  // in-jar above. A failed re-check silently drops the reopen (never surfaces a
-  // now-unsafe URL) rather than erroring — parity with the empty-stack no-op.
-  if (!isSafeTabUrl(entry.url)) return null;
-  // Resolve the entry's original jar by id (NOT by partition — the entry stores
-  // jarId, resolved at capture time against the SAME jars.list() this re-resolves
-  // against). Absent => the jar was deleted between close and reopen: omit
-  // `partition` and flag `jarFallback` so the renderer's existing fallback chain
-  // (inheritFromPartition -> resolveNewTabContainer -> makeBurner) picks the
-  // resolved default, and announces the fallback explicitly.
-  const jar = jars.list().find((j) => j.id === entry.jarId);
-  // DD4 pop rule (F6 leg 3): the entry's stripIndex is honored only when it was
-  // captured in the INVOKING window (sender-resolved) — a reopen invoked from any
-  // other window appends instead of landing at a position that belonged to a
-  // different strip. Whole-window entries always append by construction (their
-  // origin window is gone, so the ids can never match).
-  const invoker = registry.getWindowForChrome(event.sender);
-  return {
-    url: entry.url,
-    title: entry.title,
-    ...(jar ? { partition: jar.partition } : {}),
-    stripIndex: reopenStripIndex(entry, invoker ? invoker.win.id : null),
-    navEntries: entry.navEntries,
-    navIndex: entry.navIndex,
-    jarFallback: !jar,
-  };
-});
-
-// M09 F5 Leg 1 (DD3) — two tiny chrome-trust-domain invokes for the tab context
-// menu's duplicate + reopen-closed items. Bare ipcMain.handle (same trust domain
-// as tab-reopen/get-zoom above) — no new privileged surface, both return data the
-// chrome already receives through other flows.
-
-// Snapshot a live web tab's navigation history for Duplicate (DD1's resolved open
-// question: address + jar + nav history). Acts on the PASSED webContentsId (TOCTOU
-// guard, same discipline as toggle-devtools/page-context-correct) — never
-// activeTab(). Web tabs only: a dead/missing/internal target returns null (the
-// renderer's duplicate dispatch then no-ops rather than duplicating nothing).
-ipcMain.handle('tab-history-snapshot', (_e, { webContentsId }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return null;
-  if (isInternalContents(wc)) return null;
-  return {
-    entries: wc.navigationHistory.getAllEntries(),
-    index: wc.navigationHistory.getActiveIndex(),
-  };
-});
-
-// Read-only closed-tab-stack size — since F6 leg 3 (DD6) this is the push-cache's
-// BOOT SEED only: the renderer invokes it once at chrome load, and every later
-// update arrives via the closed-tab-stack-changed push (which always wins the
-// seed/push race renderer-side). Trivial wrapper over the existing
-// closedTabStack.size() the tab-reopen handler already shares.
-ipcMain.handle('closed-tab-stack-size', () => closedTabStack.size());
-
-// The move-target cache's BOOT SEED (F8 DD8) — the closed-tab-stack-size mirror.
-// A chrome that boots into an already-multi-window app sees no push until the
-// next window/title change, so without this seed its menu would offer no move
-// targets at all. Sender-resolved: the list excludes the ASKING window, and an
-// unregistered sender (a pre-registration or torn-down chrome) gets [] rather
-// than a list it has no business seeing.
-ipcMain.handle('move-targets', (event) => {
-  const source = registry.getWindowForChrome(event.sender);
-  return source ? buildMoveTargets(registry.records(), source) : [];
-});
-
-// Move to new window (M09 F6 Leg 4 — DD5 steps 1–4, renderer-initiated,
-// main-executed; spike verdict GO → LIVE re-parent, same webContents).
-// (H2) the payload is the SOURCE renderer's strip snapshot ({wcId, url, title,
-// favicon, container}) — chrome→chrome trust domain; main shape-validates and
-// relays into `adopt-tab`, re-deriving url/title off the live wc at SEND time
-// (a burner's synthesized container and the favicon exist ONLY renderer-side).
-
-/**
- * A NEW window sized to `source`'s content box, for the two move paths that make
- * their own target (F8 leg 4: extracted from the core when the core gained a
- * third caller that does NOT create one). Identical chrome layout is what makes
- * the re-applied guest seed exact — spike answer (b).
- * @param {import('./window-registry').WindowRecord} source
- * @returns {import('./window-registry').WindowRecord}
- */
-function newWindowForMove(source) {
-  const srcContent = source.win.getContentBounds();
-  return createWindow({
-    noBootTab: true,
-    contentSize: { width: srcContent.width, height: srcContent.height },
-  });
-}
-
-/**
- * The tab-move core (F8 leg 3; generalized over its target at leg 4): re-parent
- * `p.wcId` out of `source` and into the window `resolveTarget` hands back.
- * Factored out of the handler below so the menu path, drag tear-off, and the
- * cross-window keyboard move share ONE move, not three transcriptions of it.
- * SYNCHRONOUS BY CONTRACT — see the invariant at the delete/set pair; do not
- * make it `async`.
- *
- * WHY THE TARGET ARRIVES AS A THUNK rather than a record. Two of the three
- * callers CREATE their target, and creating one before the refusal guards below
- * have run would leave an orphaned empty window behind every refused move.
- * `resolveTarget` is therefore invoked only once the move is committed to. The
- * cross-window caller passes `() => target` for a record it has ALREADY resolved
- * and validated — a pure lookup has no side effect to defer, and doing it in the
- * handler is what keeps a refused cross-window move from closing the source's
- * find session on its way out.
- *
- * DISCRIMINATED RESULT, never a bare null (DD5): the menu ITEM can be omitted at
- * build time (tab-context-model.js omits at !isLastTab && !isInternal); a DRAG
- * cannot be — the user performs it and is owed an outcome. The menu handler
- * narrows this back to F6's bare `null`.
- *
- * @param {import('./window-registry').WindowRecord} source
- * @param {import('./move-tab-payload').MoveTabPayload} p
- * @param {() => import('./window-registry').WindowRecord | null} resolveTarget
- *   The destination, resolved LAZILY — called only after every refusal guard has
- *   passed, and never before.
- * @param {boolean} [allowSoleTab] M09 F10 L3. Defaults false: a sole-tab move
- *   is refused (`sole-tab`), the F8 behavior every caller inherits. The two
- *   EXISTING-window consolidate paths pass true — `tab-move-to-window` and
- *   `tab-adopt-by-drop` (F11 L3, the same semantics by drag) — the source is
- *   then left at zero tabs and CLOSED below. The two `newWindowForMove`
- *   callers (`tab-move-to-new-window`, `tab-tear-off`) keep the default: a
- *   sole-tab move to a NEW window is a no-op window swap.
- * @returns {{ ok: true, windowId: number } | { ok: false, reason: 'no-tab' | 'internal' | 'sole-tab' | 'no-target' }}
- */
-function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
-  const entry = source.tabViews.get(p.wcId);
-  // The tab must belong to the SENDER's window and be a live WEB tab (internal
-  // tabs are omitted from the model row — review M4 — and refused here as
-  // defense-in-depth). A sole-tab move to a NEW window is a no-op window swap:
-  // the model omits move-new-window at isLastTab; main refuses it too by default
-  // (never leave the source at zero tabs). M09 F10 L3: the EXISTING-window
-  // consolidate path passes allowSoleTab, which lets the source empty and closes
-  // it below. F6 collapsed these three into ONE `return null`; F8 splits them
-  // because a drag must announce WHICH refusal it hit.
-  if (!entry || entry.view.webContents.isDestroyed()) return { ok: false, reason: 'no-tab' };
-  if (entry.trusted) return { ok: false, reason: 'internal' };
-  if (!allowSoleTab && source.tabViews.size <= 1) return { ok: false, reason: 'sole-tab' };
-  const wc = entry.view.webContents;
-
-  // (M2) the live find session targets the moved tab: close it FIRST (the
-  // tab-close precedent — refocusGuest:false; the session is bound to the
-  // source window and does not survive the move; findText/findOpen reset is
-  // the documented renderer-side lost state).
-  if (source.findOverlay?.isSessionActive(p.wcId)) source.findOverlay.closeSession({ refocusGuest: false });
-
-  // (H3) geometry: capture the guest's current window-local content-DIP bounds
-  // BEFORE detach. A window-LOCAL view rect, never a window origin — the DD16
-  // ban is on `win.getBounds()`, the screen-space fiction, not on this (leg 3's
-  // narrowing, upheld by the FD).
-  // ACCEPTED interim visual (documented): for a move-CREATED target the live
-  // guest renders over the target's still-booting chrome until adopt completes —
-  // a static seed, never an animation (the native-surface invariant: guest
-  // bounds are a discrete setBounds STEP).
-  const guestBounds = entry.view.getBounds();
-  const target = resolveTarget();
-  // Defense-in-depth (F8 leg 4). The two creating callers cannot land here —
-  // createWindow always returns a record — and the cross-window caller has
-  // already refused a dead/absent/self target against the registry. A bare
-  // `return` would be a silent death; DD5 forbids one, so this is an announced
-  // refusal like any other.
-  if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
-
-  // Re-parent (DD1 spike primitive: destroy-free removeChildView → addChildView
-  // across windows; webContents survives, wcId stable, live state intact).
-  source.win.contentView.removeChildView(entry.view);
-  target.win.contentView.addChildView(entry.view);
-  // The seed is EXACT only for a move-created target (same content size by
-  // construction). Moving into an EXISTING window of a different size seeds a
-  // stale rect for one frame; the target's adopt-tab → activateTab → tab-set-active
-  // re-sends the real bounds, which is the same correction every activation makes.
-  entry.view.setBounds(guestBounds);
-  entry.view.setVisible(true);
-
-  // Move the tabViews entry between records + update activeTabWcId both sides.
-  // Event-time class-3 routing (DD2) makes the per-tab main→chrome fan re-bind
-  // to the target window automatically from this point on (verified per channel
-  // by the leg's live sweep).
-  // DD1 SYNCHRONY INVARIANT — NO SUSPENSION POINT may separate this delete from
-  // the set below. Synchronous code between them is fine (it cannot yield); an
-  // `await` is not. Across a yield the tab is in NEITHER record, and DD1's
-  // "duplicate tabs are structurally impossible" degrades from a LOUD duplicate
-  // to a SILENT MISSING TAB — quieter than the bug DD1 replaced. Adjacency is
-  // NOT the invariant and is not pinned; this function staying synchronous is.
-  // Pinned by test/unit/move-tab-synchrony.test.js — anchored on THIS function's
-  // name, never a line number (F7 logged 4 different ones). Leg 1 anchored it on
-  // the `'tab-move-to-new-window'` callback; F8 leg 3's factoring moved the pair
-  // out, its vacuity guard failed loudly as designed, and forced this re-anchor.
-  source.tabViews.delete(p.wcId);
-  target.tabViews.set(p.wcId, entry);
-  entry.active = true;
-  if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
-  // THE TARGET'S OUTGOING TAB IS HIDDEN HERE, AND THE MENU IS CLOSED HERE, because the
-  // adopt round-trip that would otherwise do them is ASYNC:
-  // adopt-tab → onAdoptTab → activateTab → tab-set-active arrives on a LATER turn. Until
-  // it does, the target must never render two guests, so the core mirrors both effects
-  // SYNCHRONOUSLY here, holding the interim to exactly one active / one visible guest —
-  // the property leg 4's `tab-tearoff` row 8a asserts.
-  //
-  // The round-trip's `tab-set-active` guard (`owner.activeTabWcId !== null &&
-  // owner.activeTabWcId !== wcId`) is now ARMED and RE-DOES both idempotently: we no
-  // longer pre-set `target.activeTabWcId = p.wcId`, so `activeTabWcId` still holds the
-  // OLD active tab when the round-trip lands, the guard is true, and its hide-old branch
-  // and `closeMenuOverlay('tab-switch')` branch both fire (re-hiding an already-hidden
-  // guest and re-closing an already-closed menu — no-ops). F8 DID pre-set it here, which
-  // made that guard FALSE by round-trip time and forced the core to be the SOLE doer; that
-  // pattern — disarm a guard, then hand-compensate for what it guarded — produced HIGH-1's
-  // double-active and the re-shown stale menu, so F9 leg 1 removes the pre-set (F8 Rec 5).
-  // The only thing the pre-set bought was a transient move-target caption (broadcastMove-
-  // TargetsChanged reads each window's activeTabWcId); that stale label is doctrine-
-  // sanctioned cosmetic ("can never mis-target") and self-heals on the round-trip's caption
-  // broadcast (`tab-set-active` at the `broadcastMoveTargetsChanged()` call below it).
-  //
-  // TEAR-OFF NEVER SAW THE OLD DEFECT: a move-CREATED target is a `noBootTab` window whose
-  // activeTabWcId is null, so there is no outgoing tab to hide. It is exclusive to the
-  // move-into-an-EXISTING-window path (F8 leg 4), and at equal window sizes the moved tab
-  // visually COVERS the stale guest — the silent wrong state this synchronous hide prevents.
-  //
-  // Read BEFORE any overwrite, and SYNCHRONOUSLY: no `await` may enter this function at all
-  // (the DD1 pin above).
-  const prevActive = target.activeTabWcId !== null ? target.tabViews.get(target.activeTabWcId) : null;
-  if (prevActive && prevActive !== entry) {
-    // Never read through a destroyed webContents — an uncaught throw in this area
-    // wedges the Wayland close path permanently with zero error output (the F6 leg-4
-    // root cause). The `active` flag is corrected either way: it is main-side state and
-    // survives its view's destruction.
-    if (!prevActive.view.webContents.isDestroyed()) prevActive.view.setVisible(false);
-    prevActive.active = false;
-    // AND CLOSE THE TARGET'S OPEN MENU HERE, FOR THE SAME REASON THE HIDE IS HERE: the
-    // async round-trip cannot close it on THIS turn. `tab-set-active`'s guard
-    // (`owner.activeTabWcId !== null && owner.activeTabWcId !== wcId`) gates TWO effects —
-    // the outgoing-tab hide (mirrored just above) AND
-    // `owner.sheet?.closeMenuOverlay('tab-switch')` — and, now that the guard is armed
-    // (the pre-set is gone), re-closes the menu idempotently when the round-trip lands. The
-    // core still closes it ITSELF, synchronously, so the target's stale menu (its active
-    // guest changed underneath it) is never re-shown in the interim window. Idempotent when
-    // no menu is open, and `target.sheet` is null-tolerant on a live record.
-    target.sheet?.closeMenuOverlay('tab-switch');
-  }
-
-  // Focus rules (Chrome parity): the target window is raised and the moved tab is
-  // active — true for a created window and for an existing one the tab is sent
-  // into (Chrome raises the destination either way). Programmatic win.focus()
-  // fires NO focus event under WSLg (spike verdict 4) — noteFocus seeds the DD8
-  // accessor deterministically.
-  target.win.focus();
-  registry.noteFocus(target.win.id);
-
-  // Source strip closes ranks NOW (the source chrome is booted — no barrier).
-  const sourceCc = source.chromeView.webContents;
-  if (!sourceCc.isDestroyed()) sourceCc.send('tab-moved-away', { wcId: p.wcId });
-
-  // (H1) queue the target pair on the registry record — delivered only after
-  // the target chrome's window-boot-config invoke is served. Thunks: the adopt
-  // payload's main-authoritative url/title and the nav-state read off the live
-  // wc at DELIVERY time.
-  queueChromeSend(target, () => ['adopt-tab', buildAdoptPayload(p, wc)]);
-  queueChromeSend(target, () => ['tab-nav-state', {
-    wcId: p.wcId,
-    canGoBack: !wc.isDestroyed() && wc.canGoBack(),
-    canGoForward: !wc.isDestroyed() && wc.canGoForward(),
-  }]);
-  // Both records' active tab just changed, so both windows' captions did (DD8).
-  // Synchronous sends, and AFTER the pair — never between it.
-  broadcastMoveTargetsChanged();
-  // (M09 F10 L3) EMPTY-SOURCE DISPOSAL. A sole-tab consolidate into an existing
-  // window (allowSoleTab, the ONLY path that reaches this at size 0) left the
-  // source with no tabs — close it. `size === 0` is SELF-SELECTING: only a
-  // sole-tab move can empty the source, and that is only reachable with
-  // allowSoleTab, so no path/allowSoleTab re-check is needed. LAST statement
-  // before the return, AFTER broadcastMoveTargetsChanged so the target's adopt
-  // queuing never depends on close() timing. Same shape as the window-close IPC
-  // (win.close() on the sender's own window inside an IPC dispatch); the close
-  // handler tolerates empty tabViews (its capture loop no-ops).
-  if (source.tabViews.size === 0 && !source.win.isDestroyed()) source.win.close();
-  return { ok: true, windowId: target.win.id };
-}
-
-// The MENU path (F6's, unchanged): narrows the core's result back to the bare
-// `null` its renderer ignores and `renderer-globals.d.ts` declares.
-ipcMain.handle('tab-move-to-new-window', (event, payload) => {
-  const source = registry.getWindowForChrome(event.sender);
-  if (!source) return null;
-  const p = validateMoveTabPayload(payload);
-  if (!p) return null;
-  const r = moveTabIntoWindow(source, p, () => newWindowForMove(source));
-  return r.ok ? r : null;
-});
-
-// The KEYBOARD CROSS-WINDOW path (F8 leg 4, DD8) — "Move to window …". The ONLY
-// way a tab crosses windows in F8: the cross-window DRAG was deferred at leg 2
-// (the transport is a cached fiction), and this path needs NO coordinate at all.
-// Menu → windowId → main.
-//
-// THE AUTHORITY RULE, HONORED ON ITS OWN TERMS (DD8; main.js:270's rule restated).
-// `payload.windowId` is a DESTINATION REQUEST and nothing more — never a claim of
-// ownership, and never trusted as one:
-//   - the SOURCE is resolved from `event.sender` through the registry, exactly as
-//     the two paths above do it. The payload does not get to name it.
-//   - the tab must be in THAT record's tabViews — the core's own `no-tab` guard.
-//     A payload naming a tab the sender does not own is refused there, and the
-//     registry is what refuses it.
-//   - the TARGET is re-resolved through registry.get(). A window that closed
-//     between menu build and this dispatch resolves to null and REFUSES (DD5) —
-//     it never re-points at whichever window now sits where that one was. That
-//     refusal is only reachable because DD8 keys the item on `windowId`; the
-//     reversed ordinal scheme had to rebuild or cache the list to resolve one,
-//     and both of those re-point silently.
-ipcMain.handle('tab-move-to-window', (event, payload) => {
-  const source = registry.getWindowForChrome(event.sender);
-  if (!source) return { ok: false, reason: 'no-source' };
-  const p = validateMoveTabPayload(payload);
-  if (!p) return { ok: false, reason: 'bad-payload' };
-  const wantedId = payload && typeof payload.windowId === 'number' ? payload.windowId : null;
-  const target = wantedId === null ? null : registry.get(wantedId);
-  // Resolved and refused HERE rather than inside the core: registry.get is a pure
-  // lookup with no side effect to defer, and refusing before the core runs is what
-  // keeps a refused move from closing the source's find session on its way out.
-  if (!target || target.win.isDestroyed() || target === source) return { ok: false, reason: 'no-target' };
-  // (M09 F10 L3) allowSoleTab: this is the EXISTING-window consolidate path — a
-  // sole tab may move here, and the move core closes the emptied source. The two
-  // newWindowForMove callers below do NOT pass it (sole-tab → new window is a
-  // no-op swap, AC3).
-  return moveTabIntoWindow(source, p, () => target, true);
-});
-
-// The DRAG path (F8 leg 3, DD5/DD16): a tab dragged out of the strip and released.
-// The renderer decided "the pointer left the strip" against the strip's own rect in
-// its OWN viewport and sends NO coordinate — this flight has no global coordinate.
-// Returns the result verbatim; silence is not an outcome for a physical gesture.
-ipcMain.handle('tab-tear-off', (event, payload) => {
-  const source = registry.getWindowForChrome(event.sender);
-  if (!source) return { ok: false, reason: 'no-source' };
-  const p = validateMoveTabPayload(payload);
-  if (!p) return { ok: false, reason: 'bad-payload' };
-  return moveTabIntoWindow(source, p, () => newWindowForMove(source));
-});
-
-// DD2 PROVENANCE REGISTRATION (M09 F11 Leg 3). The drop-adopt below resolves its
-// SOURCE from a payload-supplied wcId — any guest page can setData() our MIME with
-// an arbitrary wcId, so the payload alone must not move a tab. These two chrome-only
-// sends bookend a real drag: dragstart declares the wcId (verified against the
-// SENDER's own tabViews — the payload does not get to name a tab the sender does not
-// own), dragend clears it on a GRACE TIMER rather than immediately — the target's
-// adopt invoke rides a different IPC pipe with no cross-pipe ordering guarantee, and
-// an immediate clear could race a legitimate adopt into 'not-dragging'.
-const DRAG_END_GRACE_MS = 1500;
-// Pending grace-clear timers, PER RECORD: a fresh tab-drag-started cancels only its
-// own record's pending clear. Keyed weakly so a record removed mid-drag (window
-// closed) takes its timer entry with it — a timer that still fires then mutates an
-// unreachable record, which is harmless (no cancel-on-close machinery needed).
-/** @type {WeakMap<import('./window-registry').WindowRecord, ReturnType<typeof setTimeout>>} */
-const dragEndClearTimers = new WeakMap();
-
-ipcMain.on('tab-drag-started', (event, wcId) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec || typeof wcId !== 'number' || !rec.tabViews.has(wcId)) return;
-  const pending = dragEndClearTimers.get(rec);
-  if (pending) { clearTimeout(pending); dragEndClearTimers.delete(rec); }
-  rec.dragWcId = wcId;
-});
-
-ipcMain.on('tab-drag-ended', (event, wcId) => {
-  const rec = registry.getWindowForChrome(event.sender);
-  if (!rec || rec.dragWcId !== wcId) return;
-  const pending = dragEndClearTimers.get(rec);
-  if (pending) clearTimeout(pending);
-  dragEndClearTimers.set(rec, setTimeout(() => {
-    dragEndClearTimers.delete(rec);
-    rec.dragWcId = null;
-  }, DRAG_END_GRACE_MS));
-});
-
-// The CROSS-WINDOW DROP path (M09 F11 Leg 3, DD1/DD2): a tab dragged from another
-// window's strip and released on THIS window's strip. INVERTS tab-move-to-window's
-// authority shape — source-from-payload, target-from-sender — which is exactly the
-// DD2 weakening the provenance gate above closes: the resolved source must have
-// DECLARED this wcId at dragstart, so a forged MIME payload dies at 'not-dragging'
-// (guests cannot send tab-drag-started; the bridge is chrome-only). allowSoleTab:
-// this is an existing-window consolidate (the F10 L3 ruling) — dragging a window's
-// only tab moves it and the core closes the emptied source. Result verbatim (DD5).
-ipcMain.handle('tab-adopt-by-drop', (event, payload) => {
-  const target = registry.getWindowForChrome(event.sender);
-  if (!target) return { ok: false, reason: 'no-source' };
-  const p = validateMoveTabPayload(payload);
-  if (!p) return { ok: false, reason: 'bad-payload' };
-  const source = registry.getWindowForGuest(p.wcId);
-  if (!source) return { ok: false, reason: 'no-tab' };
-  // The renderer handles a same-window drop as reorder and guards the canceled-drag
-  // corner itself; refusing here is defense-in-depth, not the primary gate.
-  if (source === target) return { ok: false, reason: 'same-window' };
-  if (source.dragWcId !== p.wcId) return { ok: false, reason: 'not-dragging' };
-  const r = moveTabIntoWindow(source, p, () => target, true);
-  if (r.ok) {
-    // A successful adopt CONSUMES the registration (DD2 refinement): one drag = one
-    // drop, shrinking the post-success forgery window to ~0.
-    const pending = dragEndClearTimers.get(source);
-    if (pending) { clearTimeout(pending); dragEndClearTimers.delete(source); }
-    source.dragWcId = null;
-  }
-  return r;
-});
-
-ipcMain.on('tab-hide', (event, wcId) => {
-  // Class 1 (F6 DD2): owner-record resolve replaces the singleton activeTabWcId.
-  const owner = registry.getWindowForGuest(wcId);
-  if (!owner) return;
-  // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
-  // takes the overlay out of the stack too. Restore needs no code here —
-  // late-activation lands in tab-set-active's re-add.
-  // Menu-overlay close family (F8 DD4): hiding the active guest while a sheet menu
-  // is open CLOSES the menu ('tab-hide'). The DD5 hook skips the find-restore for
-  // this reason (the close runs BEFORE activeTabWcId is nulled below — a restore
-  // here would paint the bar over a hidden guest).
-  // F7 DD5: THIS owner window's OWN overlays — hiding window B's active guest cannot
-  // reach window A's overlays, so the pre-F7 attachment conditioning is deleted.
-  if (wcId === owner.activeTabWcId) {
-    owner.findOverlay?.hide();
-    owner.sheet?.closeMenuOverlay('tab-hide');
-  }
-  const entry = owner.tabViews.get(wcId);
-  if (!entry) return;
-  if (!entry.view.webContents.isDestroyed()) {
-    entry.view.setVisible(false);
-  }
-  entry.active = false;
-  if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
-});
-
-ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
-  const wc = getTabContents(wcId);
-  if (!wc || wc.isDestroyed()) return;
-  if (verb === 'loadURL' && args && args[0]) {
-    wc.loadURL(args[0]).catch((err) => {
-      console.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
-    });
-  } else if (verb === 'reload') {
-    wc.reload();
-  } else if (verb === 'stop') {
-    wc.stop();
-  } else if (verb === 'goBack') {
-    wc.goBack();
-  } else if (verb === 'goForward') {
-    wc.goForward();
-  }
-});
-
-ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
-  // Class 1 (F6 DD2): activation is scoped to the tab's OWNING window's record —
-  // activating a tab in window 2 must not touch window 1's active state.
-  const owner = registry.getWindowForGuest(wcId);
-  if (!owner) return;
-  // L2 (T3): capture whether the OUTGOING active guest holds OS focus BEFORE the
-  // visibility swap below. isFocused() on the outgoing guest is exactly the "focus was in
-  // the page" signal — a page-content chord leaves the outgoing guest focused, while strip
-  // keyboard nav / find / sheet all leave it NOT focused. We re-focus the incoming guest
-  // iff this is true (see below), so page-focused Ctrl+#/Ctrl+Tab keeps routing to a
-  // guest's before-input-event; AC5 strip nav / find / sheet are preserved untouched.
-  // getTabContents already null-guards a missing/destroyed guest.
-  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();
-  // Atomic: set-bounds → setVisible(true) incoming → setVisible(false) outgoing
-  const entry = owner.tabViews.get(wcId);
-  if (entry) {
-    // Hoisted rounded bounds so the guest setBounds and the overlay bounds-sync below
-    // share one object.
-    const rounded = bounds
-      ? { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) }
-      : null;
-    if (rounded) {
-      entry.view.setBounds(rounded);
-    }
-    if (!entry.view.webContents.isDestroyed()) {
-      entry.view.setVisible(true);
-    }
-    entry.active = true;
-    // Raise the active guest view to the top so page input works.
-    if (!owner.win.isDestroyed()) {
-      owner.win.contentView.addChildView(entry.view);
-    }
-    // L2 (T3): re-arm keyboard routing — focus the INCOMING guest iff the OUTGOING was
-    // page-focused (captured above), so a page-content Ctrl+#/Ctrl+Tab does not orphan OS
-    // focus. Internal/trusted incoming tabs are focused too (deliberate: cycling INTO a
-    // goldfinch:// page must not re-orphan focus).
-    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {
-      entry.view.webContents.focus();
-    }
-    // Find-overlay z-order re-assert (DD2 invariant): strictly AFTER the guest re-add
-    // above, or the guest buries the overlay. Do not "optimize" this away when the
-    // overlay is already visible — every guest re-add raises the guest.
-    // F7 DD5: the switch-away close reads THIS owner window's OWN find session — the
-    // pre-F7 owner.tabViews.has(session) guard is structural now (the instance only
-    // ever knows its own window's session), so activating a tab in window B cannot
-    // close window A's live session.
-    const sessionWcId = owner.findOverlay ? owner.findOverlay.getSessionTabWcId() : null;
-    if (sessionWcId != null && wcId !== sessionWcId) {
-      // AC6a: activating a DIFFERENT tab (internal or web alike — also covers DD7)
-      // CLOSES the session: stopFind clearSelection on the old guest, hide, clear
-      // state. NO refocus — the new guest was already added/raised above; refocusing
-      // the OLD guest would land OS focus on a view about to be hidden and steal
-      // focus from tab-strip keyboard navigation (AC5).
-      owner.findOverlay.closeSession({ refocusGuest: false });
-    } else if (owner.findOverlay?.isSessionActive(wcId)) {
-      // AC6b / DD5 restore: re-activating the session's own tab re-shows the
-      // overlay — the session survives a hide/re-add cycle.
-      // isSessionActive(wcId) implies !entry.trusted (open refuses trusted).
-      if (rounded) owner.findOverlay.syncBounds(rounded);
-      owner.findOverlay.show();
-    }
-    // Menu-overlay sheet (F8 DD4/DD9/DD7): strictly AFTER the guest re-add AND the
-    // find-overlay re-assert above, so the sheet sits top-of-stack. No entry.trusted
-    // gate — the sheet serves internal tabs too (DD7).
-    // F7 DD5: ALL three sheet touches below act on THIS owner window's OWN sheet —
-    // window B's tab activity is structurally unable to move/close/re-raise window A's
-    // menu, so the pre-F7 attachment conditioning is deleted (syncBounds stores always
-    // regardless; closeMenuOverlay is idempotent when no menu is open).
-    if (rounded) owner.sheet?.syncBounds(rounded);
-    if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
-      // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
-      // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
-      // skips the find-restore for 'tab-switch' — this handler's own per-tab
-      // find-restore logic above governs.
-      owner.sheet?.closeMenuOverlay('tab-switch');
-    } else if (owner.sheet?.isMenuOpen()) {
-      // Same-tab re-activation with a menu open: the re-add keeps the sheet
-      // top-of-stack via re-add-last (the recorded attachment — never re-resolved).
-      owner.sheet.show();
-    }
-    // Tear-off pill z-order re-assert (AC5): a tab activation MID-drag is rare, but the
-    // guest re-add above buries the pill — re-show it (re-add RAISES) so it stays above.
-    // Gated on visibility, so no cost when no tear-off is live. Strictly last: topmost.
-    if (owner.tearoffOverlay?.isVisible()) owner.tearoffOverlay.show();
-  }
-  // Hide old active tab (within the owning window only)
-  if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
-    const oldEntry = owner.tabViews.get(owner.activeTabWcId);
-    if (oldEntry && !oldEntry.view.webContents.isDestroyed()) {
-      oldEntry.view.setVisible(false);
-    }
-    if (oldEntry) oldEntry.active = false;
-  }
-  const captionChanged = owner.activeTabWcId !== wcId;
-  owner.activeTabWcId = wcId;
-  // F8 DD8: this window's caption is its ACTIVE tab's title, so an activation
-  // retitles it for every OTHER window's menu. Gated on the active tab actually
-  // changing — a re-activation of the same tab (the menu/find re-assert path
-  // above) changes no caption.
-  if (captionChanged) broadcastMoveTargetsChanged();
-});
-
-ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
-  // Class 1 (F6 DD2): owner-record resolve for the active-tab compare below.
-  const owner = registry.getWindowForGuest(wcId);
-  const entry = owner ? owner.tabViews.get(wcId) : null;
-  if (!entry || entry.view.webContents.isDestroyed()) return;
-  const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
-  entry.view.setBounds(rounded);
-  // Find-overlay position-sync (DD2): the overlay tracks the ACTIVE guest's bounds —
-  // resize/maximize/panel toggles all funnel here via sendActiveBounds/ResizeObserver/
-  // trigger-send-bounds. F7 DD5 (recon S9): both syncBounds calls hit THIS owner
-  // window's OWN managers, so window B's bounds churn cannot re-position window A's
-  // find bar / menu — and, critically, the pre-F7 last-guest-bounds write went to a
-  // SHARED module slot that every window's bounds churn polluted unconditionally (DD7
-  // had fixed only the read). It is per-instance closure state now: each manager
-  // stores always and applies only while visible.
-  if (wcId === owner.activeTabWcId) {
-    owner.findOverlay?.syncBounds(rounded);
-    // Menu-overlay geometry-follow (F8 DD12): identity mapping — the sheet's bounds
-    // ARE the active guest's rounded bounds.
-    owner.sheet?.syncBounds(rounded);
-  }
-});
-
-ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
-  const wc = getTabContents(wcId);
-  if (!wc || wc.isDestroyed()) return;
-  if (stop) {
-    wc.stopFindInPage(options || 'clearSelection');
-  } else if (text) {
-    wc.findInPage(text, options || {});
-  }
-});
-
-// --- Find-overlay DD4 IPC (M05 Flight 7). Chrome-class trust domain, but every
-// handler still validates event.sender — a guest page must never be able to open or
-// drive the overlay. Open/close route through the shared session functions above. ------
-
-// Sender: a chrome webContents ONLY (the renderer's openFind / activateTab restore).
-// Identity check widened to registry membership (F6 Leg 2) — any window's chrome.
-ipcMain.on('find-overlay:open', (event, payload) => {
-  if (!registry.getWindowForChrome(event.sender)) return;
-  const { wcId, findText } = payload || {};
-  // F7 DD5: owner-resolved — the session opens on the manager of the window that OWNS
-  // the target tab (the pre-F7 shared entry did the same owner resolve internally).
-  // Null-tolerant (AC8b): a target in a dying window no-ops rather than reconstructing.
-  registry.getWindowForGuest(wcId)?.findOverlay?.openSession(wcId, typeof findText === 'string' ? findText : '');
-});
-
-// Sender: chrome OR the overlay itself. The SENDER resolves the close semantics
-// (design decision, Leg 3 — no payload flag, nothing to spoof):
-// - overlay sender = the user explicitly closed the bar (Esc/✕) → refocus the guest
-//   (AC5, the only refocusing close path) AND notify the chrome (find-overlay-closed)
-//   so it clears the tab's findOpen — otherwise switch-back would ghost-reopen.
-// - chrome sender = programmatic navigation-close → NO focus move (a page-initiated
-//   redirect must not yank OS focus into the guest, e.g. mid-typing in the address
-//   bar) and NO notification (the chrome initiated it; no echo needed).
-ipcMain.on('find-overlay:close', (event) => {
-  // F7 DD5: the overlay sender is reverse-looked-up (each window has its own view);
-  // a chrome sender closes ITS OWN window's session.
-  const fromRec = recordForFindSender(event.sender);
-  const fromOverlay = fromRec != null;
-  const rec = fromRec || registry.getWindowForChrome(event.sender);
-  if (!rec || !rec.findOverlay) return;
-  // Notify BEFORE closing — closeSession nulls the session wcId.
-  // Class 3 (F6 DD2): the session tab's OWNING window's chrome gets the close.
-  const sessionWcId = rec.findOverlay.getSessionTabWcId();
-  if (fromOverlay && sessionWcId != null) {
-    chromeForTab(sessionWcId)?.send('find-overlay-closed', { wcId: sessionWcId });
-  }
-  rec.findOverlay.closeSession({ refocusGuest: fromOverlay });
-});
-
-// Sender: the overlay ONLY. Forwards the query text to the chrome for per-tab state
-// sync (DD9 — EVERY query, empty included: deletion sync, so tab.findText tracks a
-// delete-to-empty and switch-back restores a blank bar, not resurrected text), then
-// resolves the session's target guest and runs findInPage. Empty text skips findInPage
-// (the page blanks its own count; NO stopFindInPage — the highlight persists until
-// close). A hidden-but-live guest is allowed — counts land when the overlay
-// re-shows. A stale/destroyed target resolves null → no-op.
-//
-// FLAG MAPPING (HAT-1 fix): the payload's `findNext` keeps the chrome-bar shape
-// ("this is a STEP request"), but Electron's FindInPageOptions.findNext means "begin a
-// NEW find session" — the inverse. A step continues the engine session (Electron
-// findNext:false) ONLY when the text is unchanged since the last issued query; every
-// text change — incremental typing, backspace edits — and every first query of a
-// session begins a NEW session (Electron findNext:true) so the edited term re-searches
-// immediately instead of advancing the stale session. (The pre-F7 inset bar had the
-// same inversion — pre-existing defect, not carried contract.)
-ipcMain.on('find-overlay:query', (event, payload) => {
-  // F7 DD5: reverse-look-up the FIND-sender's record; the session-state half (the
-  // HAT-1 flag mapping above included) lives in that window's manager.
-  const rec = recordForFindSender(event.sender);
-  if (!rec || !rec.findOverlay) return;
-  rec.findOverlay.query(payload || {});
-});
-
-// --- Tear-off pill overlay IPC (M09 F10 Leg L4-rebuild). Chrome-origin, fire-and-forget:
-// the renderer drives show/move/hide as a tear-off drag arms, follows the cursor, and
-// ends. The sender's own window is resolved (getWindowForChrome); a guest page has no
-// tearoffOverlay path to reach. Coordinates are 1:1 DIP (e.clientX/Y → pill setBounds). --
-ipcMain.on('tearoff-overlay:show', (event, { x, y } = {}) => {
-  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.show(x, y);
-});
-ipcMain.on('tearoff-overlay:move', (event, { x, y } = {}) => {
-  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.setPosition(x, y);
-});
-ipcMain.on('tearoff-overlay:hide', (event) => {
-  registry.getWindowForChrome(event.sender)?.tearoffOverlay?.hide();
+registerOverlayIpc({
+  ipcMain,
+  registry,
+  chromeForAttachment,
+  chromeForTab,
+  sanitizeActivatedValue
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
@@ -3429,32 +983,11 @@ ipcMain.on('tearoff-overlay:hide', (event) => {
 // Class 3 (F6 DD2 / review F1): the SENDER guest's OWNING window's chrome, resolved
 // at event time — leg 4's adopt lost-state ruling (media list + privacy aggregate
 // repopulate in the TARGET window after a move) depends on this owner routing.
-ipcMain.on('guest-media-list', (event, mediaList) => {
-  const wcId = event.sender.id;
-  chromeForTab(wcId)?.send('tab-media-list', { wcId, mediaList });
-});
-
-ipcMain.on('guest-privacy-fp', (event, fpCounts) => {
-  const wcId = event.sender.id;
-  chromeForTab(wcId)?.send('tab-privacy-fp', { wcId, fpCounts });
-});
 
 // rescan-media for WebContentsView tabs (push from chrome → tab wc).
-ipcMain.on('rescan-media', (_event, { wcId } = {}) => {
-  if (wcId == null) return;
-  const wc = getTabContents(wcId);
-  if (!wc || wc.isDestroyed()) return;
-  wc.send('rescan-media');
-});
 
 // Renderer fallback zoom path (chrome-focused case). The renderer already filters
 // internal tabs; we guard again here (defense in depth) before applying.
-ipcMain.on('zoom-apply', (_e, { webContentsId, action }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return;
-  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return;
-  applyZoom(wc, action);
-});
 
 // Query the guest's ACTUAL current engine zoom (DD1 stale-cache fix). Chromium's
 // per-origin host-zoom map re-zooms ALL same-origin tabs in a jar when ANY one is
@@ -3464,24 +997,10 @@ ipcMain.on('zoom-apply', (_e, { webContentsId, action }) => {
 // reflects the live factor. Distinct from the automation `getZoom` MCP tool (a
 // different layer); this CHROME-IPC channel is named `get-zoom`. Returns null for a
 // dead/missing/internal target (renderer falls back to 1.0 / hides the control).
-ipcMain.handle('get-zoom', (_e, { webContentsId }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return null;
-  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return null;
-  return wc.getZoomFactor();
-});
 
 // Renderer kebab Print… path (SC2). The renderer already filters internal tabs;
 // we guard again here (defense in depth) before printing. The print() callback
 // surfaces WSLg no-printer failures instead of swallowing them.
-ipcMain.on('print', (_e, { webContentsId }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return;
-  if (/** @type {any} */ (wc.session)?.__goldfinchInternal) return;
-  wc.print({}, (ok, reason) => {
-    if (!ok) console.warn('print failed:', reason);
-  });
-});
 
 // DevTools human path (Flight-3 DD1). Two-way invoke (over zoom's one-way send) because the
 // renderer button reflects the AUTHORITATIVE open/closed state. Acts on the PASSED webContentsId,
@@ -3490,19 +1009,7 @@ ipcMain.on('print', (_e, { webContentsId }) => {
 // dead/missing target (return false, no throw) and refuses an internal-session target via the
 // SHARED isInternalContents predicate (DD5 — never DevTools on goldfinch://). The actual
 // open/close mechanics live in the shared toggleDevTools helper, also called by the M03 MCP ops.
-ipcMain.handle('toggle-devtools', (_e, { webContentsId }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return false;
-  if (isInternalContents(wc)) return false;             // DD5; never on goldfinch://
-  return toggleDevTools(wc);                            // shared helper → post-toggle isDevToolsOpened()
-});
 // On-demand open-state read for the on-activation reconcile (DD3). Exposed for Leg 2's button.
-ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return false;
-  if (isInternalContents(wc)) return false;
-  return wc.isDevToolsOpened();
-});
 
 // Spelling correction round-trip (DD2/DD6). chrome -> main -> guest. Acts on the PASSED
 // webContentsId (never activeTab() — the active tab can change mid-round-trip; the user
@@ -3513,19 +1020,6 @@ ipcMain.handle('is-devtools-open', (_e, { webContentsId }) => {
 // correction — cut/copy/paste/undo/redo — is Leg 4's to add with its own action-allowlist.)
 // Dead/destroyed targets return safely; replaceMisspelling is itself a no-op outside an active
 // misspelling/editing context, so the main side never throws.
-ipcMain.handle('page-context-correct', (_e, { webContentsId, word }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return;
-  if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
-  if (typeof word === 'string' && word) {
-    // Re-focus the guest first: opening the chrome context menu pulls focus off the guest editable,
-    // and replaceMisspelling is a no-op unless the guest holds the active editing/misspelling context
-    // (symptom without this: the first suggestion click does nothing, the second works once focus has
-    // returned). Focusing the guest webContents restores the context before the replace.
-    wc.focus();
-    wc.replaceMisspelling(word);
-  }
-});
 
 // Page-context edit-action dispatch (Leg 4 — the cut/copy/paste/undo/redo Leg 1 deferred).
 // Mirrors page-context-correct's trust discipline EXACTLY: acts on the PASSED webContentsId
@@ -3536,26 +1030,12 @@ ipcMain.handle('page-context-correct', (_e, { webContentsId, word }) => {
 // (rather than widening page-context-correct's narrow `word`-string contract) keeps each
 // surface's audited trust contract self-evident. wc.paste() reads the OS clipboard into the
 // guest — same as a native menu Paste, the user-invoked intended behavior, not a new exfil path.
-const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
-ipcMain.handle('page-context-action', (_e, { webContentsId, action }) => {
-  const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
-  if (!wc || wc.isDestroyed()) return;
-  if (isInternalContents(wc)) return;                   // DD6; never on goldfinch://
-  if (!PAGE_CONTEXT_ACTIONS.has(action)) return;        // fixed allowlist — not a verb dispatcher
-  wc[action]();                                          // wc.cut()/copy()/paste()/undo()/redo()
-});
 
 // Unpin a toolbar item from the custom toolbar-mode context menu (Leg 5; replaces the retired
 // native Electron popup-menu handler). Chrome-trusted one-way send — same trust domain as
 // window-minimize/app-quit/chrome-clipboard-write (no origin check). NOT a general settings-write
 // surface: item-allowlisted, writes only toolbarPins[item] = false. Same write+broadcast the native
 // handler did, so applyToolbarPins' settings-changed reaction keeps the toolbar in sync live.
-ipcMain.on('unpin-toolbar-item', (_e, item) => {
-  if (item !== 'media' && item !== 'shields' && item !== 'devtools') return;  // fixed allowlist
-  const pins = { ...settings.get('toolbarPins'), [item]: false };             // READ-MERGE current
-  settings.set('toolbarPins', pins);
-  broadcastToChromeAndInternal('settings-changed', settings.getAll());
-});
 
 // --- cookie jars / container identities ---
 // The six jar-registry channels (list/add/rename/remove/set-default/get-default) live in
@@ -3618,475 +1098,112 @@ registerHistoryIpc({
 // (defense-in-depth — the downstream createTab untrusted branch re-checks it
 // too, the documented two-point boundary). Fail-closed static strings, no
 // interpolation.
-registerInternalHandler(ipcMain, 'internal-open-tab-in-jar', (_e, p) => {
-  if (p === null || typeof p !== 'object') {
-    return { ok: false, error: 'open-tab-in-jar — malformed-payload' };
-  }
-  const entry = jars.list().find((j) => j.id === p.jarId);
-  if (!entry) return { ok: false, error: 'open-tab-in-jar — unknown-jar' };
-  if (typeof p.url !== 'string' || !isSafeTabUrl(p.url)) {
-    return { ok: false, error: 'open-tab-in-jar — bad-args' };
-  }
-  getChromeContents()?.send('open-tab', { url: p.url, openerPartition: entry.partition });
-  return { ok: true };
-});
 
 // New Identity: wipe a jar's cookies + storage and reroll its fingerprint seed,
 // so the site can no longer link you to who you just were.
-ipcMain.handle('identity-new', async (_e, { partition }) => {
-  if (!partition) return { ok: false };
-  const ses = session.fromPartition(partition);
-  // Same internal-session guard as privacy-cookies (the privacy panel can stay open
-  // across a switch to Settings / goldfinch:// — never wipe the privileged partition).
-  if (/** @type {any} */ (ses).__goldfinchInternal) {
-    return { ok: false };
-  }
-  try {
-    await ses.clearStorageData();
-    await ses.clearCache();
-    rerollSeed(ses);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e && e.message ? e.message : e) };
-  }
+
+// Session-created and retention cadence behavior are dependency-injected; registration
+// and interval ownership remain visible here until app lifecycle extraction (Task 9).
+const sessionRuntime = createSessionRuntime({
+  isCreatingInternalSession: () => creatingInternalSession,
+  wireDownloadHandler,
+  settings,
+  partitionFromStoragePath,
+  jars,
+  appDb,
+  cookieChangeAction,
+  cookieSeenStore,
+  now: () => Date.now(),
+  retentionSweep,
+  historyStore,
+  broadcast: broadcastToChromeAndInternal,
+  registrableDomain,
+  hostnameOf,
+  classify,
+  shields,
+  chromeForTab,
+  schedule: setTimeout,
+  logger: console
+});
+const { applySpellcheck, applyShields, pruneAllJars } = sessionRuntime;
+
+registerSettingsIpc({
+  ipcMain,
+  registerInternalHandler,
+  settings,
+  shields,
+  broadcast: broadcastToChromeAndInternal,
+  applyAutomationEnabledChange,
+  applySpellcheck,
+  getDefaultSession: () => session.defaultSession,
+  getAllWebContents: () => webContents.getAllWebContents(),
+  currentAutomationStatus,
+  rebindMcpServer,
+  freePortInRange,
+  clipboard,
+  jars,
+  mintJarKey,
+  revokeJarKey,
+  mintAdminKey,
+  revokeAdminKey,
+  getMcpServer: () => mcpServer,
+  adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN
 });
 
-ipcMain.handle('privacy-cookies', async (_e, { webContentsId, url }) => {
-  const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-  // DD4: strictly per-tab — a missing/destroyed webContents (or the internal Settings
-  // session, reachable if the privacy panel stays open across a tab switch) returns the
-  // channel's empty shape instead of silently falling back to a cross-jar session.
-  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
-    return { firstParty: null, first: 0, third: 0, total: 0, list: [] };
-  }
-  const ses = wc.session;
-  const fp = registrableDomain(hostnameOf(url || (wc && wc.getURL()) || ''));
-  const all = await ses.cookies.get({});
-  let first = 0,
-    third = 0;
-  const list = all
-    .map((ck) => {
-      const d = registrableDomain(ck.domain.replace(/^\./, ''));
-      const isThird = !!fp && d !== fp;
-      isThird ? third++ : first++;
-      return { name: ck.name, domain: ck.domain, third: isThird, secure: ck.secure, session: !ck.expirationDate };
-    })
-    .sort((a, b) => (a.third === b.third ? 0 : a.third ? 1 : -1));
-  return { firstParty: fp, first, third, total: all.length, list: list.slice(0, 300) };
-});
-
-ipcMain.handle('privacy-clear-cookies', async (_e, { webContentsId, scope, url }) => {
-  const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-  // DD4: strictly per-tab — see privacy-cookies above for the internal-session guard
-  // rationale (the privacy panel can stay open across a switch to Settings).
-  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
-    return { removed: 0 };
-  }
-  const ses = wc.session;
-  const fp = registrableDomain(hostnameOf(url || (wc && wc.getURL()) || ''));
-  const all = await ses.cookies.get({});
-  let removed = 0;
-  for (const ck of all) {
-    const isThird = !!fp && registrableDomain(ck.domain.replace(/^\./, '')) !== fp;
-    if (scope === 'all' || (scope === 'third' && isThird)) {
-      const host = ck.domain.replace(/^\./, '');
-      const proto = ck.secure ? 'https' : 'http';
-      try {
-        await ses.cookies.remove(`${proto}://${host}${ck.path || '/'}`, ck.name);
-        removed++;
-      } catch {
-        /* skip */
-      }
-    }
-  }
-  return { removed };
-});
-
-ipcMain.handle('privacy-clear-storage', async (_e, { url, webContentsId }) => {
-  const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
-  // DD4: strictly per-tab (this handler previously always acted on the legacy
-  // partition — a real cross-jar bug for any non-legacy tab). Same internal-session
-  // guard as its two siblings: newly reachable here since this handler never touched
-  // `wc` before this leg.
-  if (!wc || /** @type {any} */ (wc.session).__goldfinchInternal) {
-    return { ok: false, error: 'no-tab' };
-  }
-  try {
-    const origin = new URL(url).origin;
-    await wc.session.clearStorageData({ origin });
-    return { ok: true, origin };
-  } catch (e) {
-    return { ok: false, error: String(e && e.message ? e.message : e) };
-  }
-});
-
-// Apply Shields + downloads to EVERY jar the app ever creates. This is the
-// keystone for the multi-jar model: containers, burners and per-site jars all
-// inherit protection automatically.
-app.on('session-created', (ses) => {
-  // PRIMARY exclusion of the internal session: this hook fires synchronously inside
-  // session.fromPartition(INTERNAL_PARTITION) (see whenReady), so the module flag is the
-  // only reliable discriminator — a post-creation marker isn't set yet. Skip BOTH the web
-  // Shields/tracker hooks and the download handler, which have no business on a bundled
-  // local page. (DD3)
-  if (creatingInternalSession) {
-    /** @type {any} */ (ses).__goldfinchInternal = true;
-    return;
-  }
-  applyShields(ses);
-  wireDownloadHandler(ses);
-  // Apply the current spellcheck setting to this fresh web jar (DD1 session-layer gating).
-  // Read defensively: a session-created can fire before initProfileAndStores loads the store
-  // (settings.get would then throw on null dir) — treat an unreadable store as OFF. whenReady
-  // re-applies the correct state to defaultSession after stores load anyway.
-  let spellcheckOn;
-  try { spellcheckOn = settings.get('spellcheck') === true; } catch { spellcheckOn = false; }
-  applySpellcheck(ses, spellcheckOn);
-
-  // Cookie first-seen bookkeeping listener (M10 Flight 2, Leg 3 / DD4
-  // VERDICT, review annotations a/b). Anchored HERE — NEVER an eager
-  // `fromPartition` warm — per the measured fact that `session-created`
-  // fires synchronously on a partition's FIRST `fromPartition` call only
-  // (flight-log Decisions, Spike A). The hook receives only the Session
-  // object, no partition field, so the partition is recovered from
-  // `ses.storagePath`'s `Partitions/<name>` on-disk segment
-  // (jar-data-helpers.js's `partitionFromStoragePath` — precedented by
-  // jar-ipc.js's own `ses.storagePath` read) and positive-matched against
-  // the live jar registry — a burner/internal/unregistered partition
-  // resolves to no match and gets no listener. `jars.list()` is read
-  // defensively (mirrors the spellcheck read above): a session-created
-  // firing before initProfileAndStores loads the jars store must not throw
-  // into Electron's event dispatch.
-  try {
-    const partition = partitionFromStoragePath(/** @type {any} */ (ses).storagePath);
-    const jarEntry = partition ? jars.list().find((j) => j.partition === partition) : null;
-    if (jarEntry) {
-      const jarId = jarEntry.id;
-      ses.cookies.on('changed', (_event, cookie, cause, removed) => {
-        // Will-quit quiesce guard (DD6 quit-ordering addendum — the F6-hang
-        // class): appDb.close() runs at will-quit; this listener outlives
-        // that close (Electron doesn't tear down session listeners on
-        // quit), so every write checks isOpen() FIRST and is try-caught —
-        // an uncaught throw here would wedge the quit path.
-        if (!appDb.isOpen()) return;
-        try {
-          // The cause-branch decision is a PURE, unit-pinned function
-          // (jar-data-helpers.js's cookieChangeAction — main.js itself has
-          // no unit-test harness, so the decision logic is extracted rather
-          // than inlined) — see its own doc comment for the full measured
-          // `cause` enum and the DD4 VERDICT overwrite ruling.
-          const action = cookieChangeAction(cause, removed);
-          if (action === 'skip') return;
-          if (action === 'delete') {
-            cookieSeenStore.deleteByIdentity(jarId, cookie.name, cookie.domain, cookie.path);
-          } else {
-            cookieSeenStore.insertIfAbsent(jarId, cookie.name, cookie.domain, cookie.path, Date.now());
-          }
-        } catch (e) {
-          console.error('[retention-sweep]', e);
-        }
-      });
-    }
-  } catch (e) {
-    console.error('[retention-sweep] cookies-listener attach failed:', e);
-  }
-});
-
-// Builds the retentionByJarId map from the live registry and runs one prune pass
-// (M08 Flight 1 / DD6). Wrapped in try/catch — a prune failure must never crash the
-// hourly interval or the boot-time first pass. Broadcasts history-changed per jar
-// with a nonzero deletion count (pruneExpired already returns nonzero-only).
-//
-// M10 Flight 2, Leg 3 / DD4b, DD6, DD10 — the boot + hourly cookie/storage
-// sweep rides this SAME cadence. **SEQUENCING (leg-3 design review, HIGH —
-// Context SEQUENCING, mirrors handleSetRetention's identical discipline in
-// jar-ipc.js):** the aged-out-origin snapshot for every jar is taken BEFORE
-// `historyStore.pruneExpired` runs — `pruneExpired` deletes every visit row
-// older than the SAME cutoff, which would erase the very rows the storage
-// sweep needs to see. Order, pinned: (1) `retentionSweep.snapshotAgedOutOrigins`,
-// (2) `historyStore.pruneExpired` (sync, unchanged), (3) the async
-// `retentionSweep.sweepAll` from the snapshot (DD6: fire-and-forget,
-// per-jar-isolated, never awaited here — the interval/boot call must
-// return promptly). DD10: `jar-data-changed` broadcasts per jar on the
-// sweep's COMPLETION, carrying only the classes actually swept.
-function pruneAllJars() {
-  try {
-    const jarList = jars.list();
-    const retentionByJarId = Object.fromEntries(jarList.map((j) => [j.id, j.retentionDays]));
-    const agedOutOriginsByJarId = retentionSweep.snapshotAgedOutOrigins(jarList);
-    const deleted = historyStore.pruneExpired(retentionByJarId, Date.now());
-    for (const jarId of Object.keys(deleted)) {
-      broadcastToChromeAndInternal('history-changed', { jarId });
-    }
-    retentionSweep
-      .sweepAll(jarList, agedOutOriginsByJarId)
-      .then((results) => {
-        for (const jarId of Object.keys(results)) {
-          const classes = results[jarId].classes;
-          if (classes && classes.length > 0) {
-            broadcastToChromeAndInternal('jar-data-changed', { jarId, classes });
-          }
-        }
-      })
-      .catch((err) => console.error('[retention-sweep] cadence sweep failed:', err));
-  } catch (err) {
-    console.error('[history] prune failed:', err);
-  }
-}
-
-app.whenReady().then(() => {
-  // App database open (M10 Flight 1, Leg 2 / DD4, DD7, DD9): folded into the
-  // reshaped initProfileAndStores below, immediately after its dev-profile
-  // setPath redirect and before every store load (shields/settings/jars/
-  // downloads all read/write through this handle). This replaces leg 1's
-  // interim sibling call, which ran ahead of the redirect and so opened a dev
-  // (unpackaged) launch's app.db in the pre-redirect userData dir — see
-  // flight-log.md's Decisions section for the leg-1 nuance this resolves.
-  initProfileAndStores(app, { appDb, shields, settings, jars, downloads });
-  // History store: opened as a SIBLING call right after initProfileAndStores
-  // returns — deliberately NOT by widening that function's unit-pinned 4-store
-  // load(path) signature (test/unit/init-profile-order.test.js hardcodes it). The
-  // dev-profile setPath redirect has already run by the time initProfileAndStores
-  // returns, so userData is correct here for free (Architect-pinned, flight DD8 /
-  // Technical Approach). historyRecorder is module-scoped so wireTabViewEvents'
-  // closure (built per tab-create) can see it.
-  historyStore.open(app.getPath('userData'));
-  // Session store load (M09 Flight 9 / AC2), a SIBLING to historyStore.open above —
-  // UNCONDITIONAL, deliberately NOT gated on the restoreSession setting. session-store
-  // .write() now resolves its row through the already-open app-db singleton (M10 Flight 1
-  // / DD4/DD7) rather than a load()-set dir — the failure mode if load() were skipped
-  // shifts from "throws without a dir" to "doc store unresolved", same uncaught-throw-
-  // wedges-quit hazard (the F6 hang class), so load() here remains load-bearing. When
-  // restore is off the loaded snapshot sits INERT (never read()); for a user who never
-  // enabled it, no session row/file exists so load()'s row read is genuinely empty. The
-  // dev-profile setPath('userData') redirect has already run, so userData is correct
-  // here (same discipline as history).
-  sessionStore.load(app.getPath('userData'));
-  historyRecorder = createHistoryRecorder({
-    store: historyStore,
-    listJars: () => jars.list(),
-    broadcast: broadcastToChromeAndInternal
-  });
-  // Prune once at open, then hourly — unref'd so the interval never holds the
-  // process open on its own (mirrors no other long-lived interval in main.js
-  // needing this, but the house pattern for background timers).
-  pruneAllJars();
-  setInterval(pruneAllJars, 60 * 60 * 1000).unref();
-  // Instantiate the app-level downloads manager ONCE, right after the stores load,
-  // injecting the loaded downloads-store. Module-scoped so the synchronous
-  // session-created hook's wireDownloadHandler closure can reference it. (DD3)
-  downloadsManager = createManager(downloads);
-  // Cover the session that may already exist before the hook was attached.
-  // No other pre-warm: jar sessions (including the migrated legacy `default` jar) get
-  // Shields/downloads/spellcheck lazily at their first `session-created` firing above —
-  // routing goes through the live default flag now, so there is no reserved partition
-  // to warm ahead of use (M06 F2 DD5).
-  wireDownloadHandler(session.defaultSession);
-  applyShields(session.defaultSession);
-  applySpellcheck(session.defaultSession, settings.get('spellcheck'));
-
-  // Dedicated internal session for `goldfinch://` pages. Set the flag BEFORE fromPartition
-  // so the synchronous `session-created` hook skips applyShields + wireDownloadHandler for
-  // it, then register the scheme handler on THIS session's protocol (session-scoped — the
-  // global protocol would bind the default session and the internal webview wouldn't see it). (DD2/DD3)
-  creatingInternalSession = true;
-  const internalSession = session.fromPartition(INTERNAL_PARTITION); // emits session-created synchronously NOW
-  creatingInternalSession = false;
-  /** @type {any} */ (internalSession).__goldfinchInternal = true; // belt-and-suspenders for any later applyShields call
-  internalSession.protocol.handle('goldfinch', handleInternal);
-
-  // Session restore (M09 Flight 9 / DD4 / AC4), gated on the setting. read() returns
-  // null unless restore is ON and a non-empty usable snapshot exists (leg 2 guarantees
-  // it can never yield zero windows), so OFF falls through to today's EXACT single
-  // createWindow() — the byte-identical default-off path. On restore, rebuild each saved
-  // window with noBootTab (no home tab) and stash its ordered saved tab list on the
-  // record (createWindow returns it); window-boot-config serves that list to the renderer,
-  // which CREATES each tab FRESH (never adopt — there is no live source view at cold start).
-  const restoreSnap = settings.get('restoreSession') === true ? sessionStore.read() : null;
-  if (restoreSnap) {
-    for (const w of restoreSnap.windows) {
-      const rec = createWindow({ noBootTab: true });
-      rec.restoreTabs = w.tabs;
-    }
-  } else {
-    createWindow();
-  }
-
-  // In-memory dev-enable override (DD3/DD4). Computed ONCE here (after app.whenReady,
-  // so app.isPackaged is settled), alongside the launch logic. It writes NOTHING to the
-  // settings store — it satisfies the bind decision, the flip-OFF guard, and the auth
-  // gate in dev while the persisted `automationEnabled` stays false (human-only invariant).
-  // `!app.isPackaged` makes `--automation-dev` a complete no-op in a packaged build (DD4).
-  devEnableOverride = !app.isPackaged && isMcpAutomationEnabled(process.argv);
-
-  // Dev-only automation seam (DD7 — interim; folded into the gated transport at Flight 3).
-  // Registered ONCE at startup, after createWindow() so a window record exists.
-  // Never registered in production: gated on the dev flag AND !app.isPackaged (DD4).
-  // The sender check (registry chrome membership) isolates the seam to the chrome
-  // renderers — a guest webview has its own webContents and cannot pass this check.
-  // No webContents.debugger anywhere (DD8).
-  if (isMcpAutomationEnabled(process.argv) && !app.isPackaged) {
-    // isTabViewWcId (F8 DD8): same hardening as the MCP engine accessor above — the
-    // dev seam is not admin-tier, so chrome-class overlay wcIds must refuse here too.
-    const engine = createEngine(getChromeContents, {
-      getDownloads: () => downloadsManager.listAll(),
-      grabWindow,
-      // F7 DD1/DD2 — the SECOND injection site, kept in parity with the MCP engine
-      // accessor above (AC12 greps for 2 on each of the three).
-      listWindows,
-      enumerateWindows,
-      // DD8 widening (review F3 — the SECOND injection site, kept in parity with
-      // the MCP engine accessor above): all-windows membership + any-chrome.
-      isTabViewWcId: (id) => registry.isTabViewWcId(id),
-      isChromeContents: (wc) => registry.isChromeContents(wc),
-      // F7 DD6: owner routing + window raise — the SECOND injection site, kept in
-      // parity with the MCP engine accessor above (the leg's AC6 greps for 2 on each).
-      chromeForTab,
-      raiseWindowForTab,
-      // History read accessors (Mission 08 Flight 5): same injection as the MCP
-      // getEngine accessor above, kept in parity for this dev-only seam.
-      getHistoryReads: { listRecent: (id, o) => historyStore.listRecent(id, o), search: (id, q, o) => historyStore.search(id, q, o) },
-      isKnownJar: (id) => jars.list().some((j) => j.id === id),
-    });
-    ipcMain.handle('automation:dev-invoke', async (event, { op, args } = {}) => {
-      // event.sender identity is sufficient here (unlike internal-ipc's senderFrame.origin
-      // check): this handler is NEVER registered in production (dev-gated), and a guest
-      // webview is never a registered chrome, so the membership check fully isolates it.
-      // Widened to registry membership (F6 Leg 2 / review F3): any window's chrome.
-      if (!registry.getWindowForChrome(event.sender)) {
-        throw new Error('automation: dev-seam is chrome-renderer-only');
-      }
-      if (typeof engine[op] !== 'function') throw new Error('automation: unknown op ' + op);
-      return engine[op](...(Array.isArray(args) ? args : []));
-    });
-  }
-
-  // Loopback MCP automation server. DD2 (Flight 8): the human `automationEnabled`
-  // toggle is the SOLE bind gate in production — so a packaged build with the toggle
-  // persisted ON binds at launch. The `devEnableOverride` term (DD3/DD4) keeps the
-  // dev harness binding regardless of the persisted toggle, satisfying BOTH the bind
-  // decision and the auth gate WITHOUT writing `automationEnabled` (the human-only
-  // invariant is preserved even in dev). It is `!app.isPackaged && isMcpAutomationEnabled`
-  // — the isMcpAutomationEnabled predicate keys only on `--automation-dev` and is
-  // structurally independent of any legacy browser-process CDP debugging switch, so the
-  // MCP server is bound only by the dev-automation flag; and `!app.isPackaged` makes the
-  // flag a complete no-op in a packaged build (DD4).
-  // Started after createWindow() so the (lazy) engine accessor sees a live window. The
-  // SC7 Origin/Host guard is wired inside createMcpServer and runs before any MCP
-  // processing — the server never binds without it.
-  if (shouldBindAutomation({ automationEnabled: settings.get('automationEnabled') === true, devForceBind: devEnableOverride })) {
-    // Start the surface via the shared factory (Leg 7) — same option-bag + bind-status
-    // capture as a live rebind. Fire-and-forget here, matching the original launch
-    // behavior (the app does not block on the bind).
-    void startMcpServerInstance();
-  }
-
-  // Dev-only AUTO-MINT-TO-STDOUT affordance, gated on the dev-enable override (which
-  // already ANDs `!app.isPackaged` — DD4). The surface is enabled in dev by the
-  // override, not by minting (DD3).
-  if (devEnableOverride) {
-    // Dev-only AUTO-MINT-TO-STDOUT affordance (Flight 4, Leg 5). The real key
-    // management now lives in goldfinch://settings (Flight 5, Leg 3) via the
-    // origin-checked automation:jar-key-mint / automation:admin-key-mint IPC; that
-    // surface is renderer-driven and so unreachable by an external headless /
-    // behavior-test harness. This block lets such a harness flip the surface on and
-    // read a key WITHOUT a renderer round-trip. DEV-ONLY and least-privilege:
-    //   - Fires ONLY under the double gate shouldAutoMint(argv, env): the EXACT
-    //     `--automation-dev` token (already true in this branch) AND
-    //     GOLDFINCH_AUTOMATION_DEV_MINT === '1'. A shipped build never carries
-    //     `--automation-dev`, so this can never run in production.
-    //   - A plain `npm run dev:automation` (no GOLDFINCH_AUTOMATION_DEV_MINT) does
-    //     NOT enable the surface and prints NOTHING — off-by-default stays observable.
-    //   - Mints for the RESOLVED default jar (M06 F2 DD7): resolveAutoMintTarget(jars)
-    //     reads jars.getDefault() and returns its id, or null when the resolved
-    //     default is the Burner sentinel (empty registry — the mint guard refuses
-    //     burner ids, so minting is skipped with one parseable stderr notice instead
-    //     of a thrown/caught guard error). Admin key minted only when
-    //     GOLDFINCH_AUTOMATION_ADMIN is also set (gated in mintAdminKey).
-    //   - Prints the result ONCE to stdout as a single parseable line so the FD can
-    //     scrape the Bearer key. The plaintext key is never persisted (only its hash).
-    if (shouldAutoMint(process.argv, process.env)) {
-      try {
-        const target = resolveAutoMintTarget(jars);
-        if (target === null) {
-          console.error('[mcp] dev auto-mint skipped: default is Burner (no persistent jars)');
-        }
-        const key = target === null ? null : mintJarKey(target, settings, jars);
-        const adminKey = process.env.GOLDFINCH_AUTOMATION_ADMIN ? mintAdminKey(settings) : null;
-        // mintJarKey mints the key hash only (no enable side-effect); the surface is
-        // enabled by the dev-enable override. Single parseable line.
-        process.stdout.write('AUTOMATION_DEV_MINT ' + JSON.stringify({ key, adminKey }) + '\n');
-      } catch (err) {
-        console.error('[mcp] dev auto-mint failed:', err && err.message);
-      }
-    }
-  }
-
-  app.on('activate', () => {
-    if (BaseWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-// Primary MCP stop hook — before-quit fires on a real quit across ALL platforms,
-// including macOS (where window-all-closed does NOT quit). stop() is idempotent,
-// so both this and the window-all-closed secondary firing is safe.
-app.on('before-quit', () => {
-  // NO overlay role here (F7 DD5): overlays are per-window instances destroyed by
-  // their own window's `close` handler — the sole destruction site. app.quit() closes
-  // every window, so every window destroys its own; a registry-iterating teardown here
-  // would run FIRST and double-destroy. The F8 DD5 find-before-sheet ordering pin
-  // traveled to that `close` handler with the code.
-  // Session-restore snapshot write (M09 Flight 9 / DD3), the FIRST-quit-event capture on
-  // the menu-Exit / Cmd+Q path (before-quit fires first, full registry alive). Set the
-  // coordination flag FIRST so every subsequent per-window `close` write is suppressed and
-  // cannot shrink this authoritative full-set snapshot. Setting-gated AND non-empty-guarded
-  // (an empty registry writes nothing — the close-last-window path leaves this a no-op and
-  // lets `close` own that write). Whole block try/catch: session-store.write() propagates
-  // fs errors by design, and an UNCAUGHT throw in before-quit wedges the quit (the F6 hang
-  // class) — log-and-continue instead.
-  sessionQuitting = true;
-  try {
-    if (settings.get('restoreSession') === true && registry.records().length) {
-      sessionStore.write(buildSessionSnapshot({ windows: registry.records(), jarsList: jars.list() }));
-    }
-  } catch (err) {
-    console.error('[session-store] before-quit snapshot write failed:', err);
-  }
-  // Best-effort teardown persist of in-progress downloads as 'interrupted' (DD3).
-  // BEFORE mcpServer?.stop() (flush first; stop() may be slower). This is NOT
-  // guaranteed — a sync handler racing an I/O write — and the contract remains
-  // "in-progress is not durable". The loop is bounded by the in-progress count
-  // (typically 0–few), so the synchronous writes are acceptable quit latency.
-  downloadsManager?.flushInterrupted();
-  mcpServer?.stop();
-});
-
-app.on('window-all-closed', () => {
-  // Secondary MCP stop, INSIDE the non-darwin branch: on macOS closing all
-  // windows does not quit (the app stays dock-resident), so we must NOT tear the
-  // server down there while the app lives — before-quit handles macOS.
-  if (process.platform !== 'darwin') {
-    mcpServer?.stop();
-    app.quit();
-  }
-});
-
-// History store close (M08 Flight 1 / DD2) — a NEW, deliberately LATER lifecycle
-// seam than before-quit's teardown: will-quit fires after windows are torn down,
-// guaranteeing no in-flight navigation can still be writing when the store closes
-// (Architect review). close() checkpoints the WAL file.
-app.on('will-quit', () => {
-  try {
-    historyStore.close();
-  } catch {
-    // best-effort — quit must not hang or crash on a close failure
-  }
-  // App database close (M10 Flight 1, Leg 1 / DD2, DD7) — a sibling to
-  // historyStore.close() above; order between the two DBs is immaterial,
-  // both run after before-quit's writers. close() checkpoints the WAL file.
-  try {
-    appDb.close();
-  } catch {
-    // best-effort — quit must not hang or crash on a close failure
-  }
+registerAppLifecycle({
+  app,
+  ipcMain,
+  sessionRuntime,
+  initProfileAndStores,
+  profileStores: { appDb, shields, settings, jars, downloads },
+  historyStore,
+  sessionStore,
+  getUserDataPath: () => app.getPath('userData'),
+  createHistoryRecorder,
+  setHistoryRecorder: (recorder) => { historyRecorder = recorder; },
+  listJars: () => jars.list(),
+  broadcast: broadcastToChromeAndInternal,
+  pruneAllJars,
+  scheduleInterval: setInterval,
+  createDownloadsManager: createManager,
+  downloadsStore: downloads,
+  setDownloadsManager: (manager) => { downloadsManager = manager; },
+  getDownloadsManager: () => downloadsManager,
+  wireDownloadHandler,
+  applyShields,
+  applySpellcheck,
+  settings,
+  getDefaultSession: () => session.defaultSession,
+  fromPartition: (partition) => session.fromPartition(partition),
+  internalPartition: INTERNAL_PARTITION,
+  setCreatingInternalSession: (value) => { creatingInternalSession = value; },
+  handleInternal,
+  createWindow,
+  registry,
+  isMcpAutomationEnabled,
+  shouldBindAutomation,
+  shouldAutoMint,
+  setDevEnableOverride: (value) => { devEnableOverride = value; },
+  startMcpServerInstance,
+  createEngine,
+  getChromeContents,
+  grabWindow,
+  listWindows,
+  enumerateWindows,
+  chromeForTab,
+  raiseWindowForTab,
+  isKnownJar: (id) => jars.list().some((jar) => jar.id === id),
+  resolveAutoMintTarget,
+  mintJarKey,
+  mintAdminKey,
+  getMcpServer: () => mcpServer,
+  setSessionQuitting: (value) => { sessionQuitting = value; },
+  buildSessionSnapshot,
+  appDb,
+  getAllWindows: () => BaseWindow.getAllWindows(),
+  argv: process.argv,
+  env: process.env,
+  platform: process.platform,
+  stdout: process.stdout,
+  logger: console
 });

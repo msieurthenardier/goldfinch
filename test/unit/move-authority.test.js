@@ -34,7 +34,7 @@ const fs = require('fs');
 const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 
-const MAIN_JS = path.join(__dirname, '../../src/main/main.js');
+const MAIN_JS = path.join(__dirname, '../../src/main/register-tab-ipc.js');
 
 const CHANNEL = "'tab-move-to-window'";
 const REGISTRATION_RE = /\bipcMain\.handle\(\s*'tab-move-to-window'\s*,/;

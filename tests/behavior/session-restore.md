@@ -20,11 +20,12 @@
 > source-scans), and the **live E2E cycle is HAT-scoped to F10**, where the operator has the rig.
 > This spec is written so F10 can run it as-is. **Do not mark it `active` until it runs clean.**
 >
-> **The clean quit itself is in-band** (DD9): the `window.goldfinch.windowClose()` chrome bridge —
-> the same one `tab-tearoff` row 9 drives — fires the per-window `close` capture and, on the last
-> window, `window-all-closed → app.quit()`. Only the **relaunch + admin-MCP reconnect** is
-> genuinely out-of-band. A `SIGKILL` must NOT be used — it fires no clean-quit handler, so no
-> snapshot is written and there would be nothing to restore.
+> **The clean quit itself is in-band** (DD9), but platform-aware. On Windows/Linux, the last-window
+> `window.goldfinch.windowClose()` path reaches `window-all-closed → app.quit()`. On macOS, the
+> deliberate Darwin lifecycle guard keeps the app resident after its last window closes, so the
+> clean-exit witness is menu Exit / `window.goldfinch.appQuit()` after the window topology has been
+> staged. Only the **relaunch + admin-MCP reconnect** is genuinely out-of-band. A `SIGKILL` must NOT
+> be used — it fires no clean-quit handler, so no snapshot is written.
 
 ## Intent
 
@@ -42,8 +43,9 @@ unit test can observe; the unit layer pins the pure pieces, this pins the end-to
   listeners. A live sibling Goldfinch may hold the default profile's port — leave it untouched.
 - The admin MCP key is available **by env-var reference ONLY, never a command literal** (standing
   carry — an F6 executor leaked one). Capture it from the launch's `AUTOMATION_DEV_MINT` line.
-- **The out-of-band relaunch harness is available**: the Orchestrator can (a) drive a clean quit via
-  the `windowClose` bridge, (b) relaunch the same `dev:automation` process against the **same
+- **The out-of-band relaunch harness is available**: the Orchestrator can (a) drive a platform-correct
+  clean quit (`windowClose` on non-Darwin; menu Exit / `appQuit` on Darwin), (b) relaunch the same
+  `dev:automation` process against the **same
   userData profile** (so `session.json` persists across the restart), and (c) reconnect the admin MCP
   client to the relaunched instance. **This is the DD9 premise — confirm it before running.**
 - At least **two** persist jars exist (e.g. `work` and `personal`) plus the default jar, so a
@@ -63,7 +65,7 @@ unit test can observe; the unit layer pins the pure pieces, this pins the end-to
 | 1 | **Active-precondition probe.** Connect the admin MCP client; `tools/list`; call `enumerateWindows()` and `enumerateTabs()`. | `tools/list` includes (presence-checked) `enumerateWindows`, `enumerateTabs`, `openTab`, `evaluate`, `getChromeTarget`. `enumerateWindows` returns ≥1 window. If not, halt — preconditions not met. |
 | 2 | **Enable the setting.** Navigate a tab to `goldfinch://settings`; via the Settings UI toggle "Restore session on startup" **on** (`click` the labeled checkbox, or `evaluate` the internal `settingsSet('restoreSession', true)` on that origin). Read it back. | The toggle reads **on** (`settingsGet('restoreSession') === true`). (setup row) |
 | 3 | **Build a known session with a burner.** In window W1, open three tabs at distinct fixture URLs: **T-work** in jar `work`, **T-personal** in jar `personal`, and **T-burner** in a **burner** jar. Make **T-work** the active tab. Record the exact set via `enumerateTabs()`: for each, `{ url, jarId, active, windowId }`. | `enumerateTabs` shows the three tabs with the expected `jarId`s (`work`, `personal`, and the burner's ephemeral id), exactly one `active: true` (T-work). (setup row — the burner is present NOW; step 6 asserts it is GONE after restore.) |
-| 4 | **Clean quit (in-band).** Drive `evaluate(chrome, "window.goldfinch.windowClose()")` on W1 (the last/only window) → the `close` capture fires, then `window-all-closed → app.quit()`. Confirm the OS process has exited (Bash: the pid is gone). **Do NOT SIGKILL.** | The process exits cleanly (a clean quit fired the snapshot write). The MCP transport is now dead — expected. |
+| 4 | **Clean quit (in-band, platform-aware).** On non-Darwin, drive `evaluate(chrome, "window.goldfinch.windowClose()")` on W1 (the last/only window), which reaches `window-all-closed → app.quit()`. On Darwin, use menu Exit / `evaluate(chrome, "window.goldfinch.appQuit()")`; last-window close alone is intentionally non-quitting. Confirm the OS process exits. **Do NOT SIGKILL.** | The process exits cleanly through the platform's supported quit path and the snapshot write fires. The MCP transport is now dead — expected. On macOS, remaining resident after `windowClose()` is correct lifecycle behavior, not a failure. |
 | 5 | **Relaunch (out-of-band) + reconnect.** Bash: relaunch `dev:automation` against the **same userData profile**; bind-probe a free port; reconnect the admin MCP client; capture the new admin key by env reference. | A new instance is up and the admin client is reconnected. `enumerateWindows()` returns. |
 | 6 | **Restore verdict — the RIGHT observable.** `enumerateTabs()` on the relaunched app. | **Exactly two** restored tabs: **T-work** (jarId `work`) and **T-personal** (jarId `personal`), at their saved URLs, with **T-work** `active: true`. **The burner tab is POSITIVELY ABSENT** — assert no tab carries the burner's jarId and the total restored count is exactly 2 (not "≥2"). *(This is the assertion that matters — a bare "the window came back" would pass over a burner that leaked into the snapshot. Burner exclusion is the mission's absolute constraint; assert its ABSENCE explicitly.)* No navigation back-history is expected (DD5 — restore is address+jar only). |
 | 7 | **Two-window menu-Exit regression guard (the DD3 two-writer bug).** Fresh session: open **window W1** (a tab in `work`) and a **second window W2** (a tab in `personal`). Quit via the **menu Exit** path (`app-quit`/`evaluate(chrome,"window.goldfinch.appQuit()")` — NOT closing windows one by one). Relaunch + reconnect (as steps 4–5). `enumerateWindows()` + `enumerateTabs()`. | **BOTH** windows are restored — `enumerateWindows` shows **two** windows, each with its saved tab and jar. *(A single-window E2E would pass over the exact bug the two-writer coordination fixes: on menu-Exit the naive per-close write shrinks the snapshot to just the last-closed window. This row fails if only one window comes back.)* |
