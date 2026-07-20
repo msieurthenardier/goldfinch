@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('goldfinch', {
   downloadMedia: (payload) => ipcRenderer.invoke('download-media', payload),
   chooseDownloadDir: () => ipcRenderer.invoke('choose-download-dir'),
   showItemInFolder: (savePath) => ipcRenderer.invoke('show-item-in-folder', savePath),
+  downloadsSnapshot: () => ipcRenderer.invoke('downloads-snapshot'),
   // M11 F1 Leg 1 (DD4): the downloads popup calls these with a numeric id only;
   // main resolves savePath from the downloads manager (never a renderer path).
   openDownloadedFile: (id) => ipcRenderer.invoke('open-downloaded-file', id),
@@ -243,8 +244,8 @@ contextBridge.exposeInMainWorld('goldfinch', {
   menuOverlayOpen: (payload) => ipcRenderer.send('menu-overlay:open', payload),
   // Channel 2: programmatic close — reason allowlisted main-side to 'toggle' (trigger
   // re-click close, no focus move) | 'superseded' (default) | 'escape' | 'blur' |
-  // 'navigation' | 'input-empty' | 'activated' (the omnibox-suggestions close
-  // triggers added this flight — DD5 amendment).
+  // 'navigation' | 'input-empty' | 'activated' (`input-empty` restores chrome
+  // WebContents focus when a focused sheet auto-closes).
   menuOverlayClose: (/** @type {{ reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }} */ payload = {}) =>
     ipcRenderer.send('menu-overlay:close', { reason: payload.reason }),
   // Channel 6: an item was activated on the sheet — {menuType, id}; chrome executes the action.

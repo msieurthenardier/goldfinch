@@ -418,8 +418,9 @@ async function main() {
         // all five items render, mirroring the page-context hook's synthetic params.
         { label: 'sheet:tab-context', open: 'openTabContextMenuForAudit()' },
         // M11 Flight 1 Leg 3: the downloads popup. openDownloadsOverlayForAudit()
-        // force-shows a synthetic completed entry then opens the role="dialog"
-        // popup (a completed row → filename-open + folder buttons, plus the footer).
+        // force-shows a capped synthetic completed list then opens the role="dialog"
+        // popup (filename-open + folder buttons, a keyboard-scrollable overflow
+        // region, and the footer).
         // role="dialog" content raises no region advisory (info-popup/input-dialog
         // precedent), so no ACCEPTED entry is expected.
         { label: 'sheet:downloads', open: 'openDownloadsOverlayForAudit()' }
@@ -429,6 +430,13 @@ async function main() {
         await evaluate(client, wcId, state.open);
         await sleep(400);
         if (sheetWcId == null) sheetWcId = await findSheetWcId(client); // once — stable across states
+        // Force the capped downloads list into its short-window overflow state.
+        // The product's 900x600 minimum reaches this naturally; the audit rig's
+        // current window is taller and would otherwise leave all 25 rows unscrolled.
+        if (state.label === 'sheet:downloads') {
+          await evaluate(client, sheetWcId,
+            "document.getElementById('sheet-downloads').style.maxHeight = '320px'");
+        }
         allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
         const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
         if (dismissed !== 'escaped') {

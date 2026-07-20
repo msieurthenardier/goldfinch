@@ -38,6 +38,7 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // closed-set rule"). Growing the seam requires an FD ruling AND this
 // constant's update — enforcement by design (AC4).
 const SEAM_COUNT = 21;
+const RENDERER_LINE_BUDGET = 1200;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
@@ -72,6 +73,12 @@ function extractSeamIdentifiers(rendererSource) {
   }
   return identifiers;
 }
+
+test('renderer.js remains a thin composition root within its 1,200-line budget', () => {
+  const source = fs.readFileSync(RENDERER_JS, 'utf8');
+  const lines = source.split(/\r?\n/).length;
+  assert.ok(lines <= RENDERER_LINE_BUDGET, `renderer.js has ${lines} lines; budget is ${RENDERER_LINE_BUDGET}`);
+});
 
 // ---------------------------------------------------------------------------
 // Audit extraction, two-tier (AC3, pure in-file):

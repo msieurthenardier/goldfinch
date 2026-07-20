@@ -28,8 +28,10 @@ tab-scoped pin system and the toolbar invariant stays intact.
 The signal layer already exists: `register-download-ipc.js` broadcasts `download-progress`
 (`:109`) and `download-done` (`:117`) to the chrome and internal targets via
 `broadcastToChromeAndInternal`, and the chrome preload already exposes `onDownloadProgress` /
-`onDownloadDone` (`src/preload/chrome-preload.js:146-147`). No new download-*tracking* IPC is
-required — the indicator subscribes to signals that are already flowing. Note the distinction
+`onDownloadDone` (`src/preload/chrome-preload.js:146-147`). No new continuous download-*tracking*
+feed is required — the indicator subscribes to signals that are already flowing. A sanitized,
+one-shot `downloads-snapshot` read seeds each newly created window so app-scoped state is not
+lost before that window subscribed. Note the distinction
 surfaced during viability review: **the chrome keeps no recent-completed list today** (the
 toast nodes are transient), so accumulating that list is genuinely new chrome-side state —
 the substance of this mission — even though the events feeding it already exist. Separately,
@@ -47,8 +49,8 @@ the file **actions** (open, reveal) do require new chrome-trust IPC handlers (se
 - [ ] The popup offers a way to open the full `goldfinch://downloads` page.
 - [ ] Opening or revealing a file never trusts a renderer-supplied filesystem path — the path
       is resolved authoritatively in the main process from the download's id.
-- [ ] The indicator is app-scoped: present regardless of the active tab (including internal
-      tabs) and independent of the tab-scoped toolbar-pin system.
+- [ ] The indicator is app-scoped: present in every window regardless of the active tab
+      (including internal tabs) and independent of the tab-scoped toolbar-pin system.
 - [ ] The accessibility audit (`npm run a11y`) passes for the new button and popup, and
       existing behavior tests remain unaffected.
 
@@ -60,10 +62,10 @@ the file **actions** (open, reveal) do require new chrome-trust IPC handlers (se
 
 ## Constraints
 
-- **No new download-*tracking* IPC.** Drive the indicator's list from the existing
-  `download-progress` / `download-done` broadcasts, accumulated chrome-side. New chrome-trust
-  *action* IPC (open, reveal) is expected and allowed — the constraint is against re-plumbing
-  the download data feed, not against the file-action handlers the trust boundary requires.
+- **No new continuous download-*tracking* IPC.** Drive live changes from the existing
+  `download-progress` / `download-done` broadcasts, accumulated chrome-side. A one-shot,
+  chrome-authorized, path-free bootstrap snapshot is allowed for new-window catch-up. New
+  chrome-trust *action* IPC (open, reveal) is also allowed.
 - **Preserve the toolbar invariant.** The indicator must NOT be pinnable and must NOT touch
   `toolbarPins`, `applyToolbarPins`, the unpin context menu, or the Appearance-pins settings
   controller.
@@ -84,15 +86,13 @@ the file **actions** (open, reveal) do require new chrome-trust IPC handlers (se
 
 ## Open Questions
 
-- [x] **Popup: live vs. snapshot-at-open?** → Resolved during viability review: **snapshot-at-open,
-      close-then-act**, matching the existing `site-info` popup. The menu-overlay sheet is
-      presentation-only (one-shot activation, no main→sheet push channel), so a live-updating
-      popup would break that invariant. In-progress rows render the progress captured when the
-      popup opens; acting on a row closes the sheet. (Persistent live feedback lives in the
-      *button*, which the chrome updates directly — not in the sheet.)
-- [ ] Exact idle-visibility / eviction policy — how long a completed download keeps the
-      indicator visible and how the chrome-side recent list evicts. Coupled to the accumulator
-      design; resolve during flight design, not a throwaway detail.
+- [x] **Popup: live vs. snapshot-at-open?** → Final HAT ruling: **live model-replace,
+      close-then-act**. The chrome reuses the suggestions transport to refresh the existing
+      sheet model; unchanged row structure is patched in place so focus survives. No new push
+      channel was introduced, and acting on a row still closes the sheet before dispatch.
+- [x] **Exact idle-visibility / eviction policy.** → Cap 25; retain a contiguous completion epoch
+      whose adjacent completions are less than five minutes apart. A five-minute gap starts a new
+      epoch, and five minutes after the newest completion clears it. Acknowledgment affects attention only.
 
 ## Known Issues
 

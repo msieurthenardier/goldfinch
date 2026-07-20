@@ -69,7 +69,6 @@ let navigationController;
 let mediaController;
 let privacyController;
 let windowController;
-let downloadsController;
 let shortcutController;
 let pageActions;
 const jarsClient = createJarsClient({
@@ -166,22 +165,7 @@ function createContainerAndOpenTab(rawName) { return pageActions.createContainer
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with six static role="menuitem" items
-// (New window, Settings, Downloads, Cookie jars, Print…, Exit) + roving tabindex
-// + arrow-nav. Count and order track `kebabModel` below — the single source of
-// truth; if you add an item there, this line is stale until you edit it too.
-//
-// All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
-// chrome keeps the trigger, open stimuli, model building, and action execution;
-// the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
-// freeze-frame apparatus were retired at the Leg-5 cutover.
-
-// The kebab item actions, extracted into NAMED functions consumed by the
-// sheet's channel-6 activation — one source of truth (Exit is verified by this
-// shared body, never activated live).
-// New Window (M09 F6 Leg 4, DD5): the same body Ctrl/Cmd+N dispatches through
-// dispatchChromeAction('new-window') — main creates the window; its chrome
-// document boots a home tab normally (window-boot-config bootTab:true).
+// Named action bodies are shared by sheet activation and keyboard shortcuts.
 function kebabActionNewWindow() {
   window.goldfinch.windowCreate();
 }
@@ -211,11 +195,16 @@ const KEBAB_ACTIONS = {
   exit: kebabActionExit
 };
 
-/* ---- kebab (and every menu below) over the menu-overlay sheet (DD4 protocol) ---- */
+let overlayMenuClient;
+const downloadsController = createDownloadsController({
+  els, goldfinch: window.goldfinch, openDownloadsPage: openDownloads, rightSheetAnchor,
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args),
+  closeOverlayMenu: (reason) => overlayMenuClient.close(reason),
+  triggerOverlayMenu: (menuType, open) => overlayMenuClient.trigger(menuType, open)
+});
+const { showDownloadsIndicatorForAudit, openDownloadsOverlayForAudit } = downloadsController;
 
-// Chrome-minted monotonic open-token, carried in channel 1 and echoed in
-// channels 4/5/7 — the stale-close discipline (round-2 design lock). Shared
-// across menu types (all five surfaces mint from the same counter).
+/* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
 const overlayMenus = {
   kebab: fixedTriggerMenu(() => els.kebab),
   container: fixedTriggerMenu(() => els.newTabMenu),
@@ -246,43 +235,15 @@ const overlayMenus = {
     ariaTarget: () => els.address,
     refocus() {}
   },
-  // Downloads popup (M11 F1 Leg 3) — a CUSTOM state literal (the suggestions /
-  // page-context shape), NOT fixedTriggerMenu (which nests the whole state object
-  // under `ariaTarget` and makes state.ariaTarget() throw). ariaTarget = the
-  // #downloads-indicator button, so its aria-expanded flips on open/close.
-  downloads: {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => els.downloadsIndicator,
-    refocus(reason) {
-      // Leg 4 (HAT live-progress bar): cancel any pending repaint rAF on every
-      // close — the popup is going away (or a different menu is superseding
-      // it), so a queued paintDownloads() must not fire against a closed sheet.
-      // Belt-and-suspenders: paintDownloads's own rAF callback also re-checks
-      // overlayMenus.downloads.open, since `open` flips false (above, in
-      // overlay-menus.js's onMenuOverlayClosed) before this refocus runs.
-      if (downloadsPaintRaf != null) {
-        cancelAnimationFrame(downloadsPaintRaf);
-        downloadsPaintRaf = null;
-      }
-      // acknowledge-on-close (DD5 refinement): call acknowledge() FIRST — refocus
-      // runs before handleOverlayClosed (overlay-menus.js:81-82), so the following
-      // isVisible() sees the POST-acknowledge state. The button is refocused only
-      // when in-flight downloads keep it visible; otherwise focus falls back to the
-      // address bar (page-context parity) so we never focus a now-hidden button.
-      downloadsController.acknowledge();
-      if ((reason === 'escape' || reason === 'activated') && downloadsController.isVisible()) {
-        els.downloadsIndicator.focus();
-      } else {
-        els.address.focus();
-      }
-    }
-  }
+  downloads: downloadsController.overlayState
 };
-const overlayMenuClient = createOverlayMenus({
+overlayMenuClient = createOverlayMenus({
   bridge: window.goldfinch,
   states: overlayMenus,
   now: () => performance.now(),
-  onActivated: dispatchOverlayActivation,
+  onActivated: (payload) => {
+    if (!downloadsController.handleActivation(payload)) dispatchOverlayActivation(payload);
+  },
   onClosed: handleOverlayClosed
 });
 
@@ -333,13 +294,6 @@ mediaController = createMediaController({
   openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl),
   createTab
 });
-
-// App-scoped top-bar downloads indicator (M11 F1 Leg 2). Subscribes independently to
-// the download broadcasts and self-manages #downloads-indicator. Leg 3's downloads
-// popup now consumes it: getSnapshot() builds the popup model, isVisible() guards the
-// close-refocus, acknowledge() fires on popup close, and forceShowForAudit() backs the
-// a11y-sweep seam.
-downloadsController = createDownloadsController({ els, goldfinch: window.goldfinch });
 
 privacyController = createPrivacyController({
   window,
@@ -459,106 +413,6 @@ const openNewContainerOverlay = () => openOverlayMenu('new-container', [], conta
 const openPageContextOverlaySheet = (anchor) =>
   openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem), anchor, 0);
 
-/* --------------------------------------------- downloads popup (M11 F1 Leg 3) */
-// Snapshot-at-open, close-then-act (flight DD2/DD3): the popup renders the
-// snapshot captured at open; a row activation closes the sheet, then the chrome
-// performs the action (Leg-1 chrome-trust bridges). The id-set captured here is
-// the dispatch-validation gate — a `dl:open:<id>` / `dl:folder:<id>` whose id is
-// not in this set (vanished / malformed) is a validated no-op.
-const downloadsOpen = { ids: new Set() };
-
-// Right-aligned anchor under the #downloads-indicator button (chrome→sheet
-// translation, RIGHT edge; y clamps to 0 — flush at the sheet's top edge).
-const downloadsAnchor = () => {
-  const wv = els.webviews.getBoundingClientRect();
-  const r = els.downloadsIndicator.getBoundingClientRect();
-  return rightSheetAnchor(wv, r);
-};
-
-// Build the model from downloadsController.getSnapshot() — each snapshot item
-// carries `state` (not `completed`), so map to the popup shape. Retain the id-set
-// for dispatch validation. Guard: no-op on an empty model (never an empty dialog).
-// Do NOT acknowledge() here — acknowledge fires on CLOSE (the state's refocus, DD5).
-function openDownloadsOverlay() {
-  const snapshot = downloadsController.getSnapshot();
-  if (!snapshot.length) return;
-  const model = snapshot.map((e) => ({
-    id: e.id,
-    filename: e.filename,
-    completed: e.state === 'completed',
-    received: e.received,
-    total: e.total,
-    paused: e.paused
-  }));
-  downloadsOpen.ids = new Set(snapshot.map((e) => e.id));
-  openOverlayMenu('downloads', model, downloadsAnchor(), 0);
-}
-
-// Live-progress repaint driver (Leg 4, HAT — design-selected Option 1): mirrors
-// navigation-controller's paintSuggestions — rebuild the model from the live
-// controller snapshot and re-invoke open() on the ALREADY-open sheet. Main's
-// openMenu (menu-overlay-manager.js) treats an open-while-open as a flicker-free
-// MODEL-REPLACE (no hide/re-show), and the sheet's onInit (menu-overlay.js)
-// additionally detects the unchanged-row-structure case and patches only the
-// in-progress rows' text/bar in place — no rebuild, no stolen focus. `noFocus`
-// (the suggestions idiom, DD2) stops even the model-replace's webContents-level
-// focus call. downloadsOpen.ids is rebuilt every paint — same as the open-time
-// build — so a completion mid-open still validates dl:open/dl:folder dispatch
-// (DD3 gate). No guard on emptiness here (unlike openDownloadsOverlay): a
-// progress event firing at all means at least one in-flight item exists.
-function paintDownloads() {
-  const snapshot = downloadsController.getSnapshot();
-  const model = snapshot.map((e) => ({
-    id: e.id,
-    filename: e.filename,
-    completed: e.state === 'completed',
-    received: e.received,
-    total: e.total,
-    paused: e.paused
-  }));
-  downloadsOpen.ids = new Set(snapshot.map((e) => e.id));
-  openOverlayMenu('downloads', model, downloadsAnchor(), 0, { noFocus: true });
-}
-
-// rAF handle for the coalesced repaint below — read/cleared from the
-// overlayMenus.downloads state's refocus() (declared above; the free-variable
-// reference resolves fine since refocus only ever runs from an async IPC
-// callback, well after this whole module has finished evaluating).
-let downloadsPaintRaf = null;
-
-// Chrome-side subscription (Leg 4): ADDITIVE — chrome-preload.js's
-// onDownloadProgress is a plain ipcRenderer.on registration, so this coexists
-// with downloadsController's own subscription (neither disturbs the other,
-// same idiom as media-controller.js's independent download-toast subscriber).
-// Progress fires per network chunk; requestAnimationFrame coalesces a whole
-// burst into at most one repaint per frame, and the whole thing is gated on
-// overlayMenus.downloads.open so a closed (the common case) or never-opened
-// popup pays zero cost — no model rebuild, no IPC, not even a scheduled rAF.
-if (window.goldfinch && typeof window.goldfinch.onDownloadProgress === 'function') {
-  window.goldfinch.onDownloadProgress(() => {
-    if (!overlayMenus.downloads.open) return;
-    if (downloadsPaintRaf != null) return; // a repaint is already queued for this frame
-    downloadsPaintRaf = requestAnimationFrame(() => {
-      downloadsPaintRaf = null;
-      if (!overlayMenus.downloads.open) return; // closed between schedule and fire
-      paintDownloads();
-    });
-  });
-}
-
-// a11y-sweep seams (M11 F1 Leg 3, FD-ruled — scoped SOLELY to `npm run a11y`,
-// mirroring the openTabContextMenuForAudit precedent). forceShowForAudit injects a
-// synthetic completed entry so the button/popup render even with no real download
-// history; the overlay opener force-shows THEN opens. Published on the closed-set
-// globalThis seam at the bottom of this file.
-function showDownloadsIndicatorForAudit() {
-  downloadsController.forceShowForAudit();
-}
-function openDownloadsOverlayForAudit() {
-  downloadsController.forceShowForAudit();
-  openDownloadsOverlay();
-}
-
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
 // 'toggle' close (the sheet's blur usually resolves the close first — see the
 // suppress window; when the click wins the race this is the explicit close, no
@@ -607,23 +461,6 @@ els.addressChip.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     openSiteInfoOverlay();
-  }
-});
-
-// #downloads-indicator trigger (M11 F1 Leg 3): click toggle + APG menu-button
-// keydown (Enter/Space/ArrowDown/ArrowUp — startIndex is moot for the dialog, so
-// all four open the same way). Guard: do nothing while the button is `.hidden`
-// (idle) — a hidden trigger must never open its popup. openDownloadsOverlay itself
-// no-ops on an empty snapshot.
-els.downloadsIndicator.addEventListener('click', () => {
-  if (els.downloadsIndicator.classList.contains('hidden')) return;
-  overlayTriggerClick('downloads', () => openDownloadsOverlay());
-});
-els.downloadsIndicator.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault();
-    if (els.downloadsIndicator.classList.contains('hidden')) return;
-    openDownloadsOverlay();
   }
 });
 
@@ -869,33 +706,6 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // raced the click and bumped suggest.seq, invalidating suggest.items in
       // between) → no-op, never throw.
       navigationController.dispatchSuggestion(id);
-      break;
-    }
-    case 'downloads': {
-      // Snapshot-at-open dispatch (DD3): `dl:page` opens the downloads page;
-      // `dl:open:<id>` / `dl:folder:<id>` parse the id, validate it is an integer
-      // PRESENT in the open-time snapshot (vanished / malformed → no-op), then call
-      // the Leg-1 chrome-trust bridges by id. The completion gate lives in Leg 1's
-      // main handler (open refuses a non-completed record); in-progress rows carry
-      // no open/folder buttons, so an open id here is always a completed row.
-      if (id === 'dl:page') {
-        openDownloads();
-        break;
-      }
-      let rawId = null;
-      let action = null;
-      if (id.startsWith('dl:open:')) {
-        action = 'open';
-        rawId = id.slice('dl:open:'.length);
-      } else if (id.startsWith('dl:folder:')) {
-        action = 'folder';
-        rawId = id.slice('dl:folder:'.length);
-      }
-      if (!action) break;
-      const n = Number(rawId);
-      if (!Number.isInteger(n) || !downloadsOpen.ids.has(n)) break; // vanished / malformed → no-op
-      if (action === 'open') window.goldfinch.openDownloadedFile(n);
-      else window.goldfinch.revealDownloadedFile(n);
       break;
     }
   }

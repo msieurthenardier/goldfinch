@@ -19,10 +19,9 @@
 //                                      arrows/typing all live in the chrome
 //   downloads    (downloads popup)   — role="dialog" download-row list, NO items
 //                                      getter (chrome-popup regime); local keydown
-//                                      owns Escape (close) + Tab/Shift+Tab (CYCLE
-//                                      among the buttons — input-dialog regime);
-//                                      snapshot-at-open, one-shot activation (M11
-//                                      F1 Leg 3)
+  //                                      owns Escape (close) + Tab/Shift+Tab (CYCLE
+  //                                      through the scroll region + buttons);
+//                                      live model-replace, one-shot activation
 //
 // EVERY template registers a menuController entry and opens via menuController.open,
 // so the controller's global pointerdown/blur listeners deliver outside-click/blur
@@ -527,9 +526,9 @@ import { isSafeColor } from '../shared/safe-color.js';
 
   /* ----------------------------------------------------------- template: downloads */
   // Downloads popup (M11 Flight 1 Leg 3, DD2/DD3): a role="dialog" list of the
-  // current/recent downloads captured in the snapshot the chrome sent at open
-  // (presentation-only, one-shot activation — no live progress push here; live
-  // progress stays in the #downloads-indicator button). COMPLETED rows render a
+  // current/recent downloads in the latest chrome-owned model. The sheet remains
+  // presentation-only: while open, progress/terminal events replace or update
+  // that model; the sheet owns no download state. COMPLETED rows render a
   // filename button (dl:open:<id>) + a folder-reveal button (dl:folder:<id>);
   // IN-PROGRESS rows render the filename as non-interactive text + a progress
   // indicator with NO action buttons (so an in-progress item is inherently not
@@ -538,8 +537,8 @@ import { isSafeColor } from '../shared/safe-color.js';
   // onOpen's querySelector('button') always lands on an enabled control even when
   // every row is in-progress. Registered WITHOUT an items getter (the controller's
   // roving no-ops — the chrome-popup regime, like info-popup); the local keydown
-  // owns Escape (close) and Tab/Shift+Tab (CYCLE focus among the enabled buttons —
-  // the input-dialog regime, a multi-button dialog must cycle, NOT close on Tab).
+  // owns Escape (close) and Tab/Shift+Tab (CYCLE focus through the keyboard-
+  // scrollable list and enabled buttons — the dialog must not close on Tab).
 
   const downloadsNode = document.createElement('div');
   downloadsNode.id = 'sheet-downloads';
@@ -569,9 +568,9 @@ import { isSafeColor } from '../shared/safe-color.js';
   });
 
   // Local keydown: Escape → dismiss (escape flavor); Tab/Shift+Tab → cycle focus
-  // among the enabled buttons (input-dialog regime — NO dismissal, NO lastStimulus
-  // write on Tab). The controller's menu-keydown no-ops (!entry.items), so this
-  // listener owns both keys.
+  // through the list scroll region + enabled buttons (NO dismissal, NO
+  // lastStimulus write on Tab). The controller's menu-keydown no-ops
+  // (!entry.items), so this listener owns both keys.
   downloadsNode.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -579,7 +578,7 @@ import { isSafeColor } from '../shared/safe-color.js';
       menuController.close(downloadsEntry);
     } else if (e.key === 'Tab') {
       e.preventDefault();
-      const cycle = /** @type {HTMLElement[]} */ ([...downloadsNode.querySelectorAll('button')]);
+      const cycle = /** @type {HTMLElement[]} */ ([...downloadsNode.querySelectorAll('.dl-list, button')]);
       if (!cycle.length) return;
       const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
       const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
@@ -694,7 +693,7 @@ import { isSafeColor } from '../shared/safe-color.js';
     }
   }
 
-  /** Render the downloads list from the open-time snapshot (a flat item array).
+  /** Render the downloads list from the current chrome model (a flat item array).
    * All filenames via textContent (DD8 — untrusted / RTL / long names; CSS
    * ellipsis handles length).
    * @param {string} menuType @param {any[]} model @param {any} anchor */
@@ -702,6 +701,12 @@ import { isSafeColor } from '../shared/safe-color.js';
     downloadsNode.textContent = '';
     downloadsNode.dataset.menuType = menuType;
     downloadsNode.setAttribute('aria-label', DOWNLOADS_LABELS[menuType] || 'Downloads');
+    const list = document.createElement('div');
+    list.className = 'dl-list';
+    list.tabIndex = 0;
+    list.setAttribute('role', 'region');
+    list.setAttribute('aria-label', 'Download items');
+    downloadsNode.appendChild(list);
     for (const item of model) {
       if (!item || typeof item.id !== 'number') continue;
       const row = document.createElement('div');
@@ -742,7 +747,7 @@ import { isSafeColor } from '../shared/safe-color.js';
       // sameDownloadsStructure() to decide update-in-place vs. rebuild.
       row.dataset.id = String(item.id);
       row.dataset.completed = String(!!item.completed);
-      downloadsNode.appendChild(row);
+      list.appendChild(row);
     }
     // Footer is ALWAYS a button (the enabled-first-button guarantee for onOpen).
     const footer = document.createElement('button');

@@ -6,7 +6,7 @@
 // `attention` emphasis flag). Covers every transition: progress upsert + visibility,
 // same-id dedupe, done→recent move, acknowledge clears attention (stays visible),
 // done-after-ack re-raises attention, the cap-25 eviction, and the time-injected
-// expire (past / before the 5-min window, and blocked while in-flight), plus the
+// expire (past / before the 5-min window, including while another item is active), plus the
 // ariaLabel strings for active / recent / idle.
 
 const { test } = require('node:test');
@@ -82,17 +82,63 @@ test('done newest-first ordering', () => {
   assert.deepEqual(s.recent.map((e) => e.id), [2, 1]);
 });
 
+test('a completion after a five-minute gap starts a new recent epoch', () => {
+  let s = reduce(initialState(), done(1, T0));
+  s = reduce(s, done(2, T0 + IDLE_TIMEOUT_MS));
+  assert.deepEqual(s.recent.map((entry) => entry.id), [2]);
+});
+
 test('done for an id never seen in progress still records a recent entry (no crash)', () => {
   const s = reduce(initialState(), done(99, T0));
   assert.equal(s.recent.length, 1);
   assert.equal(s.inFlight.size, 0);
 });
 
-test('non-completed done with null savePath is recorded, not dropped', () => {
-  const s = reduce(initialState(), { type: 'done', d: { id: 5, filename: 'x', state: 'cancelled', savePath: null }, now: T0 });
-  assert.equal(s.recent.length, 1);
-  assert.equal(s.recent[0].state, 'cancelled');
-  assert.equal(s.recent[0].savePath, null);
+test('non-completed done removes in-flight without claiming a recent completion', () => {
+  let s = reduce(initialState(), progress(5));
+  s = reduce(s, { type: 'done', d: { id: 5, filename: 'x', state: 'cancelled', savePath: null }, now: T0 });
+  assert.equal(s.inFlight.size, 0);
+  assert.equal(s.recent.length, 0);
+  assert.equal(deriveModel(s).visible, false);
+});
+
+test('hydrate seeds active + the whole live recent epoch and excludes failed rows', () => {
+  const s = reduce(initialState(), {
+    type: 'hydrate',
+    now: T0,
+    d: [
+      { id: 1, filename: 'active', state: 'progressing', active: true },
+      { id: 2, filename: 'fresh', state: 'completed', active: false, endTime: T0 - 2 * 60 * 1000 },
+      { id: 3, filename: 'failed', state: 'cancelled', active: false, endTime: T0 - 1 },
+      { id: 4, filename: 'older-in-epoch', state: 'completed', active: false, endTime: T0 - 6 * 60 * 1000 },
+    ],
+  });
+  assert.deepEqual([...s.inFlight.keys()], [1]);
+  assert.deepEqual(s.recent.map((entry) => entry.id), [2, 4]);
+  assert.equal(s.lastCompletionAt, T0 - 2 * 60 * 1000);
+});
+
+test('hydrate excludes the whole completion epoch once the newest completion expired', () => {
+  const s = reduce(initialState(), {
+    type: 'hydrate',
+    now: T0,
+    d: [
+      { id: 1, filename: 'newest-old', state: 'completed', active: false, endTime: T0 - IDLE_TIMEOUT_MS },
+      { id: 2, filename: 'older', state: 'completed', active: false, endTime: T0 - IDLE_TIMEOUT_MS - 1 },
+    ],
+  });
+  assert.deepEqual(s.recent, []);
+  assert.equal(s.lastCompletionAt, null);
+});
+
+test('hydrate never overwrites ids already observed from the live event stream', () => {
+  let s = reduce(initialState(), progress(8, { received: 9 }));
+  s = reduce(s, {
+    type: 'hydrate', now: T0, seen: new Set([8]),
+    d: [{ id: 8, filename: 'stale', state: 'progressing', active: true, received: 1 }],
+  });
+  assert.equal(s.inFlight.get(8).received, 9);
+  assert.equal(s.inFlight.get(8).filename, 'file-8.bin');
 });
 
 // ---------------------------------------------------------------------------
@@ -181,11 +227,11 @@ test('expire before the 5-min window is a no-op', () => {
   assert.equal(s.recent.length, 1);
 });
 
-test('expire while a download is in-flight is a no-op even past the window', () => {
+test('expire clears stale recent while an in-flight download keeps the indicator visible', () => {
   let s = reduce(initialState(), done(1, T0));
   s = reduce(s, progress(2)); // still active
   s = reduce(s, { type: 'expire', now: T0 + IDLE_TIMEOUT_MS + 5000 });
-  assert.equal(s.recent.length, 1);
+  assert.equal(s.recent.length, 0);
   assert.equal(s.inFlight.size, 1);
   assert.equal(deriveModel(s).visible, true);
 });

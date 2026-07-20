@@ -465,8 +465,8 @@ test('a STALE token is dropped: the close no-ops and the current menu stays open
   assert.equal(closes().length, 1);
 });
 
-test('focusChrome runs for escape/activated ONLY (reason-resolved refocus, main-side half)', () => {
-  for (const reason of ['escape', 'activated']) {
+test('focusChrome runs for escape/activated/input-empty only (reason-resolved main-side half)', () => {
+  for (const reason of ['escape', 'activated', 'input-empty']) {
     setupProto();
     readySheet();
     mgr.openMenu(payloadFor(1));
@@ -480,6 +480,18 @@ test('focusChrome runs for escape/activated ONLY (reason-resolved refocus, main-
     mgr.closeMenuOverlay(reason);
     assert.equal(focusChromeCalls, 0, `focusChrome must NOT run for '${reason}'`);
   }
+});
+
+test('input-empty closes the focused sheet and restores chrome WebContents focus', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(9, 'downloads'));
+  mgr.closeMenuOverlay('input-empty');
+  assert.equal(mgr.isVisible(), false);
+  assert.equal(focusChromeCalls, 1);
+  assert.deepEqual(closes()[0][1], {
+    menuType: 'downloads', reason: 'input-empty', token: 9
+  });
 });
 
 test('the DD5 hook receives EVERY close reason (the tab-lifecycle skip lives in the injected impl)', () => {

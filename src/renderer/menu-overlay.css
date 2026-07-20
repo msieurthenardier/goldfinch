@@ -328,25 +328,39 @@ body {
 }
 
 /* ---------- downloads template (M11 Flight 1 Leg 3) ----------
-   Snapshot-at-open popup, one .dl-row per current/recent download: COMPLETED rows
+   Live popup, one .dl-row per current/recent download: COMPLETED rows
    = filename-open button + folder-reveal button; IN-PROGRESS rows = filename text
    + progress (no buttons). A persistent footer button opens the downloads page.
    role="dialog" panel — same chrome as #sheet-popup (this document does not load
    styles.css). Positioned inline from the translated right-aligned anchor. */
 #sheet-downloads {
   position: absolute;
+  box-sizing: border-box;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px;
   min-width: 260px;
   max-width: 380px;
+  max-height: calc(100vh - 8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   outline: none;
 }
 #sheet-downloads:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.dl-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dl-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .dl-row {
   display: flex;

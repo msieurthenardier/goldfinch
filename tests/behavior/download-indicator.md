@@ -1,16 +1,14 @@
 # Behavior Test: Top-Bar Download Indicator + Popup
 
 **Slug**: `download-indicator`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-19
-**Last Run**: never
+**Last Run**: 2026-07-19
 
-> **Deferred at M11 Flight 1 HAT (2026-07-19).** This Witnessed run needs an **admin-scoped** MCP key —
-> `getChromeTarget` reads the chrome (button) + sheet (popup), which is admin-only. The run session had a
-> jar-scoped key (admin mints only under `GOLDFINCH_AUTOMATION_ADMIN`), so the run was deferred. Every
-> assertion below was instead **manually operator-verified** during the HAT session. To activate: launch
-> with `GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation`, point the MCP at the admin key + printed
-> port, run `/behavior-test download-indicator`, and on pass flip **Status → active**.
+> **Activated by scripted live integration smoke (2026-07-19).** The admin-scoped MCP run exercised the
+> real download feed, chrome indicator, downloads sheet, downloads-page footer action, and a newly created
+> window's snapshot hydration. The timing-dependent in-progress row was skipped because the 4 KiB fixture
+> completed before observation; its transition/repaint contract remains unit-covered. See the run record.
 
 > **Apparatus note.** The observable UI lives in the **chrome** (the `#downloads-indicator` button) and
 > the **menu-overlay sheet** (the downloads popup) — NOT the internal `goldfinch://downloads` page (which
@@ -79,3 +77,8 @@ dependent); rows 5 and 7 are the core popup-flow assertions.
 
 - Multiple concurrent downloads: the popup lists each as a distinct row; the button reflects an
   aggregate active state.
+- New window after a completion: the second window hydrates the still-recent completion and shows the
+  same app-scoped indicator without waiting for another download event.
+- Cancelled/interrupted terminal state: the row leaves the active list and is not counted or described
+  as a recent completion.
+- Capacity: with 25 recent rows, the row list scrolls while the footer remains reachable.

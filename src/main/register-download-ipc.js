@@ -1,6 +1,7 @@
 'use strict';
 
 const DOWNLOADS_ACTIONS = new Set(['pause', 'resume', 'cancel', 'remove', 'retry', 'open', 'show']);
+const INDICATOR_RECENT_CAP = 25;
 
 function registerDownloadIpc({
   ipcMain,
@@ -90,6 +91,32 @@ function registerDownloadIpc({
     if (!manager) return null;
     return manager.listAll().find((entry) => entry.id === id) || null;
   }
+
+  // One-shot chrome bootstrap for newly created windows. The live feed remains
+  // download-progress/download-done; this read only closes the event-history gap
+  // before a new chrome renderer subscribed. Paths and URLs stay main-side.
+  ipcMain.handle('downloads-snapshot', (event) => {
+    if (!registry.getWindowForChrome(event.sender)) return [];
+    const records = getDownloadsManager()?.listAll() || [];
+    const rows = records
+      .filter((entry) => entry && typeof entry.id === 'number')
+      .map((entry) => ({
+        id: entry.id,
+        filename: entry.filename,
+        state: entry.state,
+        received: entry.received,
+        total: entry.total,
+        paused: entry.paused,
+        endTime: entry.endTime ?? null,
+        active: entry.endTime == null
+      }));
+    const active = rows.filter((entry) => entry.active);
+    const recent = rows
+      .filter((entry) => !entry.active && entry.state === 'completed' && typeof entry.endTime === 'number')
+      .sort((a, b) => b.endTime - a.endTime)
+      .slice(0, INDICATOR_RECENT_CAP);
+    return [...active, ...recent];
+  });
 
   ipcMain.handle('open-downloaded-file', (_event, id) => {
     const record = resolveDownloadRecord(id);

@@ -29,7 +29,7 @@ chrome-trust IPC pair for the file actions.
 
 ### Open Questions
 
-- [x] Popup live vs. snapshot-at-open? → **snapshot-at-open, close-then-act** (see DD2).
+- [x] Popup live vs. snapshot-at-open? → **live model-replace, close-then-act** (final HAT DD2).
 - [x] Reuse `info-popup` template or add a new one? → **new `downloads` template** (see DD3).
 - [x] Does reveal need id-resolution too, or is the existing path-trusting handler acceptable? →
       **reveal also resolves by id** (see DD4); the popup never calls the legacy path-trusting handler.
@@ -53,17 +53,11 @@ button — reuse its hidden/badge/non-pinnable CSS and self-managed `.hidden` pa
   in the toolbar row. This is the intended app-scoped semantics (mirrors mainstream browsers).
 - It is NOT `disabled` on internal tabs — downloads aren't tied to the active tab.
 
-**DD2 — Popup is snapshot-at-open, close-then-act (not live).**
-The menu-overlay sheet is presentation-only: it renders once from the channel-3 model, has one-shot
-activation (exactly one `activated`/`dismissed` per open token, first send wins), and has *no
-main→sheet push channel* by design (`menu-overlay.js` header). A live-updating popup would break that
-invariant. So the popup renders the download list captured at open time; in-progress rows show the
-progress snapshot from that instant; activating any row closes the sheet, then the chrome performs the
-action.
-- Rationale: preserves the sheet's presentation-only invariant and the "no new tracking IPC" constraint.
-- Trade-off: a download's progress does not animate *inside* an open popup. Persistent live feedback
-  lives in the **button** (which the chrome updates directly, DD5), which is the glanceable surface that
-  matters; the popup is a transient action surface, re-opened for a fresh snapshot.
+**DD2 — Popup uses live model-replace, close-then-act.**
+The sheet remains presentation-only and one-shot for activation. The chrome re-invokes the existing
+open/model transport on progress and terminal events; unchanged row structure updates in place, while
+completion/add/remove transitions rebuild the model. No dedicated push channel is added. Activating a
+row still closes the sheet before the chrome performs the id-authorized action.
 
 **DD3 — New `downloads` menu-overlay template (not an overload of `info-popup`).**
 `info-popup` (used by `site-info`) collects all `action` items into a single footer `.si-actions` bar
@@ -127,20 +121,15 @@ exposes `openDownloadedFile(id)` / `revealDownloadedFile(id)` on `window.goldfin
 The chrome keeps no recent-completed list today (toast nodes are transient). A new chrome controller
 maintains: an **in-flight** map keyed by download id (`{filename, received, total, paused, state}`, fed
 by `download-progress`) and a **recent-completed** list (fed by `download-done`, capped at the last 25,
-oldest evicted). Button visibility predicate: visible iff `inFlight.size > 0 || (recent.length > 0 &&
-!acknowledged)`.
-Default idle policy: acknowledgment fires on popup close (once the user has opened and dismissed the
-popup they have seen the recent list), then the button hides as soon as `inFlight` reaches 0.
-_(Refined during Leg 3 design from the original acknowledge-on-open — see flight-log Decisions "DD5
-refinement"; acknowledge-on-open would hide the trigger under its own open popup.)_ A new completion after acknowledgment resets `acknowledged = false` (there is
-something new to surface). As a fallback for users who never open the popup, a 5-minute idle timeout
-after the last completion also hides the button and clears recent.
-- Rationale: acknowledge-on-open sidesteps the close-reason ambiguity flagged in design review — channel-7
-  close fires for many reasons (`superseded`, `blur`, `tab-switch`, `activated`, `escape`), and keying
-  acknowledgment off those would hide the button on an incidental tab-switch or clear it when the user
-  merely clicked a row. Open is an unambiguous "I've seen it" signal.
-- Trade-off / knob: the 25-cap, the 5-minute fallback, and acknowledge-on-open are the most subjective
-  choices — explicitly earmarked for tuning in the HAT leg.
+oldest evicted). Each window seeds this state from the sanitized bootstrap snapshot, then follows the
+live broadcasts. Recent completions form one deterministic epoch: adjacent completions less than five
+minutes apart remain together; a five-minute gap starts a new list. The list clears five minutes after
+its newest completion even if another download is active (the active map keeps the button visible).
+Button visibility is `inFlight.size > 0 || recent.length > 0`. Acknowledgment on popup close only clears
+the new-completion attention treatment; it never hides the trigger or changes the epoch.
+- Rationale: the gap-defined epoch makes live state exactly reconstructible for a later window while
+  retaining the Chrome-like "recent batch" behavior chosen in HAT.
+- Trade-off / knob: the 25-cap and five-minute epoch gap remain the subjective tuning points.
 - The reducer over these events is extracted pure (mirroring the `downloads-payload.js` extraction
   pattern) so visibility, eviction, `acknowledged` transitions, and the aria-label string are
   unit-testable without the DOM.

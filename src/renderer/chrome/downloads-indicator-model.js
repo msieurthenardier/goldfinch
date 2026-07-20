@@ -29,7 +29,7 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes after the last completion
 
 /**
  * @typedef {{ id: number, filename: string, received?: number, total?: number, paused?: boolean, state?: string }} InFlightEntry
- * @typedef {{ id: number, filename: string, state?: string, savePath?: string|null }} RecentEntry
+ * @typedef {{ id: number, filename: string, state?: string, savePath?: string|null, endTime?: number }} RecentEntry
  * @typedef {{ inFlight: Map<number, InFlightEntry>, recent: RecentEntry[], acknowledged: boolean, lastCompletionAt: number|null }} DownloadsState
  */
 
@@ -41,7 +41,7 @@ export function initialState() {
 /**
  * Pure reducer — never mutates `state`; returns a fresh state (fresh Map + array).
  * @param {DownloadsState} state
- * @param {{ type: 'progress'|'done'|'acknowledge'|'expire', d?: any, now?: number }} event
+ * @param {{ type: 'progress'|'done'|'hydrate'|'acknowledge'|'expire', d?: any, now?: number, seen?: Set<number> }} event
  * @returns {DownloadsState}
  */
 export function reduce(state, event) {
@@ -63,26 +63,91 @@ export function reduce(state, event) {
       const d = event.d || {};
       const inFlight = new Map(state.inFlight);
       inFlight.delete(d.id);
+      // Cancelled/interrupted terminal events are not completions. Remove them
+      // from the live set without polluting the completed count or rendering an
+      // eternally "In progress" terminal row in the popup.
+      if (d.state !== 'completed') return { ...state, inFlight };
+      const eventNow = typeof event.now === 'number' ? event.now : null;
+      // A gap of five minutes starts a new completion epoch. This makes the
+      // live reducer reconstructible from the canonical terminal history when
+      // a later window hydrates.
+      const sameEpoch = eventNow == null || state.lastCompletionAt == null
+        || eventNow - state.lastCompletionAt < IDLE_TIMEOUT_MS;
       // Prepend newest-first, then truncate to the cap (evict oldest / tail).
       const recent = [
-        { id: d.id, filename: d.filename, state: d.state, savePath: d.savePath ?? null },
-        ...state.recent,
+        {
+          id: d.id,
+          filename: d.filename,
+          state: d.state,
+          savePath: d.savePath ?? null,
+          endTime: eventNow ?? undefined
+        },
+        ...(sameEpoch ? state.recent : []).filter((entry) => entry.id !== d.id),
       ].slice(0, RECENT_CAP);
       return {
         ...state,
         inFlight,
         recent,
         acknowledged: false,
-        lastCompletionAt: typeof event.now === 'number' ? event.now : state.lastCompletionAt,
+        lastCompletionAt: eventNow ?? state.lastCompletionAt,
+      };
+    }
+    case 'hydrate': {
+      const now = typeof event.now === 'number' ? event.now : null;
+      const rows = Array.isArray(event.d) ? event.d : [];
+      const seen = event.seen instanceof Set ? event.seen : new Set();
+      const inFlight = new Map(state.inFlight);
+      const recentById = new Map(state.recent.map((entry) => [entry.id, entry]));
+      for (const row of rows) {
+        if (!row || typeof row.id !== 'number' || seen.has(row.id)) continue;
+        if (row.active === true) {
+          inFlight.set(row.id, {
+            id: row.id,
+            filename: row.filename,
+            received: row.received,
+            total: row.total,
+            paused: row.paused,
+            state: row.state,
+          });
+          continue;
+        }
+        if (row.state !== 'completed' || typeof row.endTime !== 'number') continue;
+        recentById.set(row.id, {
+          id: row.id,
+          filename: row.filename,
+          state: row.state,
+          savePath: null,
+          endTime: row.endTime,
+        });
+      }
+      const candidates = [...recentById.values()].sort((a, b) => (b.endTime ?? 0) - (a.endTime ?? 0));
+      const latestAt = candidates[0]?.endTime ?? null;
+      const epochActive = now != null && latestAt != null && now - latestAt < IDLE_TIMEOUT_MS;
+      const recent = [];
+      if (epochActive) {
+        let newerAt = /** @type {number} */ (latestAt);
+        for (const entry of candidates) {
+          const endTime = entry.endTime ?? 0;
+          if (newerAt - endTime >= IDLE_TIMEOUT_MS) break;
+          recent.push(entry);
+          newerAt = endTime;
+          if (recent.length === RECENT_CAP) break;
+        }
+      }
+      return {
+        ...state,
+        inFlight,
+        recent,
+        lastCompletionAt: epochActive ? latestAt : null,
       };
     }
     case 'acknowledge': {
       return { ...state, acknowledged: true };
     }
     case 'expire': {
-      // Only clears once nothing is in-flight AND the idle window has fully elapsed
-      // since the last completion. Otherwise a no-op (returns state unchanged).
-      if (state.inFlight.size > 0) return state;
+      // Clear completion history once its idle window elapsed. An active download
+      // still keeps the indicator visible through inFlight; it must not bridge two
+      // otherwise-separated completion epochs.
       if (state.lastCompletionAt == null) return state;
       if (typeof event.now !== 'number') return state;
       if (event.now - state.lastCompletionAt < IDLE_TIMEOUT_MS) return state;
