@@ -288,7 +288,7 @@ Resolved at the owning flight, not blocking mission approval:
 > created one at a time as work progresses. This list will evolve based on discoveries
 > during implementation.
 
-- [ ] Flight 1: **Vault core + automation surface** — the `.gfvault` format, KDF and
+- [x] Flight 1: **Vault core + automation surface** — the `.gfvault` format, KDF and
       all four envelope types (master / recovery / per-jar symmetric / admin X25519),
       AES-256-GCM item crypto, unlock-state lifecycle + auto-lock + zeroization,
       step-up re-auth policy gate, RFC 6238 TOTP generation, the structural
