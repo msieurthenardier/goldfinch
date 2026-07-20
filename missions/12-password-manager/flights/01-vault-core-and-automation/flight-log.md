@@ -423,6 +423,28 @@ _(unexpected issues — append during execution)_
 
 _(chronological notes from work sessions)_
 
+### Behavior-test live-run — outcome (2026-07-20): harness fixed + committed; in-session run blocked on MCP identity wiring
+
+Operator authorized "fix the gap + retry live." Outcome of the genuine attempt:
+- **Environment IS capable** (WSLg `DISPLAY=:0` + Wayland). Operator's real 968M dev profile
+  (`~/.config/goldfinch-dev`) was NOT touched — isolation via `XDG_CONFIG_HOME` was the plan;
+  no fixtures were written there (confirmed clean).
+- **Two real harness gaps found + fixed + committed (acca328)** — the prior fixture builder staged
+  vault files for jars the app registry never knew about (so per-jar transport keys couldn't be
+  minted), and provisioned no transport keys at all. The builder now fully provisions a fresh
+  profile (jars registered, vaults staged, per-jar + admin transport keys written to settings,
+  automation enabled) — 16/16 headless consistency checks pass. **The test is now push-button.**
+- **In-session automated run BLOCKED (a real boundary, not a defect):** the Claude session's
+  `goldfinch-dev` MCP apparatus authenticates with a single fixed pre-configured Bearer key, but the
+  10-step test needs three distinct transport identities (jar-a, jar-b, admin), each a
+  fixture-provisioned secret. A spawned Executor/Validator can't present the fixture's freshly-minted
+  keys through the session's fixed-key MCP servers, and MCP servers can't be reconfigured mid-flight.
+  That key↔fixture coordination is inherently an operator-interactive-session step. So the live run
+  is handed to the operator — now genuinely push-button (recipe below / in the fixture README).
+- **Disposition:** flight stays **in-flight** / PR **draft**. The `vault-mcp-surface` behavior test is
+  the sole remaining acceptance gate (checkpoint c). Everything else is complete, reviewed, and
+  committed (2308 unit tests + two-pass security review that caught + fixed the `'global'` collision).
+
 ### Behavior-test live-run attempt (2026-07-20) — blocked on a fixture-harness gap
 
 Operator authorized attempting the `vault-mcp-surface` behavior test live in-session. Environment
