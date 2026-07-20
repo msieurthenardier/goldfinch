@@ -5,6 +5,13 @@
 **Created**: 2026-07-19
 **Last Run**: never
 
+> **Deferred at M11 Flight 1 HAT (2026-07-19).** This Witnessed run needs an **admin-scoped** MCP key —
+> `getChromeTarget` reads the chrome (button) + sheet (popup), which is admin-only. The run session had a
+> jar-scoped key (admin mints only under `GOLDFINCH_AUTOMATION_ADMIN`), so the run was deferred. Every
+> assertion below was instead **manually operator-verified** during the HAT session. To activate: launch
+> with `GOLDFINCH_AUTOMATION_ADMIN=1 npm run dev:automation`, point the MCP at the admin key + printed
+> port, run `/behavior-test download-indicator`, and on pass flip **Status → active**.
+
 > **Apparatus note.** The observable UI lives in the **chrome** (the `#downloads-indicator` button) and
 > the **menu-overlay sheet** (the downloads popup) — NOT the internal `goldfinch://downloads` page (which
 > automation cannot read; see `downloads-surface.md`). Both surfaces are reached with the **admin** key:

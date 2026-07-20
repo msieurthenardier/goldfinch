@@ -184,6 +184,88 @@ processes (Electron + fixture server) were cleaned up afterward.
 
 ---
 
+## Leg Progress
+
+### `hat-and-alignment` — in-flight (operator HAT session)
+
+**Session 1 — operator findings:**
+1. In-progress feedback in the popup read as frozen ("stuck at 49%, no bar, no progress"). Diagnosed as
+   the DD2 snapshot-at-open behavior (the popup deliberately does not live-update). Operator confirmed the
+   49% was in the popup.
+2. The indicator disappeared immediately after the operator opened and closed the popup. Diagnosed (and
+   operator-confirmed sequence) as the DD5 acknowledge-on-close behavior — NOT a bug; the reducer keeps
+   recent visible unless acknowledged, and close → `acknowledge()`.
+
+**Operator alignment decisions:**
+- **Recent persistence → Chrome-like.** The indicator must persist after a finish AND after viewing, until
+  the 5-minute idle timeout. Acknowledge should only clear the "new" visual emphasis, not hide the button.
+  Classified **FIX** (single-surface DD5 tuning) → inline implementation + inverted unit tests.
+- **Popup progress → live-updating bar.** Overrides DD2 (snapshot-at-open). Classified **FEATURE** →
+  scoped design assessment before implementation (feasibility vs. the presentation-only sheet, mechanism,
+  cost, invariant impact), then operator go-ahead.
+
+**HAT fix #1 (recent persistence) — implemented + green.** `deriveModel` visibility no longer depends on
+`acknowledged` (`visible = active || recentCount > 0`); added an `attention` flag (`recent>0 &&
+!acknowledged`) driving a new `.downloads-recent-new` emphasis class. Acknowledge now only clears the
+"new" emphasis; the button persists until the 5-min idle `expire`. Inverted-and-renamed the unit test that
+pinned acknowledge→hidden. `npm test` 2242/2242, typecheck + lint clean.
+
+**HAT feature (live popup progress) — design assessment complete → Option 1 chosen.** The live-update
+transport already exists and ships: the **omnibox suggestions** template re-renders a live model into the
+open sheet by re-invoking open (`navigation-controller.js:164` `paintSuggestions`), which the manager
+handles as a flicker-free model-replace via the same channel-3 `init` (`menu-overlay-manager.js:249-284`)
+— so DD2's "no *separate* main→sheet push channel" is honored. **Option 1**: reuse that transport +
+add a sheet-side in-place `updateDownloads` branch that refreshes only in-progress rows' progress element
+(no rebuild, no refocus). Focus-safe precisely because DD3 gives in-progress rows no buttons. ~2 files,
+low risk; the just-shipped acknowledge/visibility fix is unaffected (repaints never close, superseded ticks
+are token-swallowed before `onClosed`/`acknowledge`). Operator pre-authorized the live bar; proceeding
+with an animated bar, rAF throttle, open-guard, paused/unknown-total handled sensibly.
+
+### DD2 revision (HAT, operator-directed)
+
+DD2's *snapshot-at-open* clause is narrowed: the downloads popup now does a **live model-replace refresh at
+progress cadence via the same channel-3 `init` path the suggestions template uses** (M08 F4 DD2 precedent)
+— updates ride `init`; NO separate push channel is introduced. The *close-then-act* and
+*no-buttons-on-in-progress-rows* clauses are **unchanged and reaffirmed** (live progress adds no action
+affordance to in-progress rows; that is what keeps in-place updates focus-safe). DD3's snapshot id-set
+dispatch gate is rebuilt on each paint so a download completing while the popup is open validates correctly.
+
+**HAT changes — independent review: `[HANDOFF:confirmed]`.** Fresh-context Reviewer verified both HAT changes
+against the diff since `9a2089c`: change A (visibility/attention split, inverted tests, idle timer unaffected
+by acknowledge) and change B's focus/lifecycle traps — repaints never fire `acknowledge()` (superseded old
+token swallowed because the chrome bumps `state.token` synchronously before the IPC round-trip), the in-place
+`updateDownloads` preserves focus/Tab position, `sameDownloadsStructure` correctly falls through to rebuild on
+a real structural change, `downloadsOpen.ids` rebuilt per paint, rAF throttle guarded + cancelled on close, no
+`src/main`/preload change, bar `aria-hidden` with the text carrying AT state. Gates: `npm test` 2242/2242,
+typecheck + lint clean. Non-blocking: the new sheet-side fns rely on the `download-indicator` behavior test
+(DOM convention) — that run should exercise Tab-focus retention during a live in-place repaint.
+
+**HAT session 2 — operator re-test: BOTH PASS.** Recent-downloads persistence (indicator stays after
+finishing + after viewing the popup, hides on idle) and the live-updating popup progress bar both confirmed
+working in the live app by the operator.
+
+**HAT session 3 — remaining acceptance checks: ALL PASS (manual).** Operator hand-verified the human-only /
+external-effect criteria: open file (default app), reveal in folder (OS file manager), footer →
+`goldfinch://downloads`, app-scoped presence on internal tabs, and keyboard/focus (Escape, Tab cycle,
+aria-expanded). Every HAT acceptance criterion confirmed.
+
+**Behavior test — DEFERRED (apparatus unavailable).** `/behavior-test download-indicator` requires an
+admin-scoped MCP key (`getChromeTarget` reads the chrome + sheet); this session's goldfinch MCP was
+jar-scoped (`enumerateWindows` refused admin-only), and admin keys mint only under
+`GOLDFINCH_AUTOMATION_ADMIN` (`app-lifecycle.js:157`), printed on stdout (block-buffered when piped, so
+only readable from a TTY launch). Rather than reconfigure the MCP + restart mid-session, the operator
+elected to close out on the completed manual verification. The `download-indicator` spec stays `draft`
+with the deferral + re-activation steps recorded in its header; every assertion it makes was
+operator-verified by hand this session.
+
+**HAT leg complete → flight landing.** All four legs completed. Two HAT changes (recent-persistence fix +
+live popup progress feature) implemented, independently reviewed (`[HANDOFF:confirmed]`), and
+operator-confirmed. Flight → `landed`; flight checked off in mission.md; HAT changes committed with the
+flight (new commit, no amend); PR #107 marked ready for review. Follow-ups: `/flight-debrief` then
+`/mission-debrief` (single-flight mission), and run the deferred behavior test once an admin MCP key is set.
+
+---
+
 ## Decisions
 
 ### DD5 refinement — acknowledge on popup CLOSE, not open

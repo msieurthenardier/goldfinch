@@ -254,6 +254,16 @@ const overlayMenus = {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.downloadsIndicator,
     refocus(reason) {
+      // Leg 4 (HAT live-progress bar): cancel any pending repaint rAF on every
+      // close — the popup is going away (or a different menu is superseding
+      // it), so a queued paintDownloads() must not fire against a closed sheet.
+      // Belt-and-suspenders: paintDownloads's own rAF callback also re-checks
+      // overlayMenus.downloads.open, since `open` flips false (above, in
+      // overlay-menus.js's onMenuOverlayClosed) before this refocus runs.
+      if (downloadsPaintRaf != null) {
+        cancelAnimationFrame(downloadsPaintRaf);
+        downloadsPaintRaf = null;
+      }
       // acknowledge-on-close (DD5 refinement): call acknowledge() FIRST — refocus
       // runs before handleOverlayClosed (overlay-menus.js:81-82), so the following
       // isVisible() sees the POST-acknowledge state. The button is refocused only
@@ -482,6 +492,58 @@ function openDownloadsOverlay() {
   }));
   downloadsOpen.ids = new Set(snapshot.map((e) => e.id));
   openOverlayMenu('downloads', model, downloadsAnchor(), 0);
+}
+
+// Live-progress repaint driver (Leg 4, HAT — design-selected Option 1): mirrors
+// navigation-controller's paintSuggestions — rebuild the model from the live
+// controller snapshot and re-invoke open() on the ALREADY-open sheet. Main's
+// openMenu (menu-overlay-manager.js) treats an open-while-open as a flicker-free
+// MODEL-REPLACE (no hide/re-show), and the sheet's onInit (menu-overlay.js)
+// additionally detects the unchanged-row-structure case and patches only the
+// in-progress rows' text/bar in place — no rebuild, no stolen focus. `noFocus`
+// (the suggestions idiom, DD2) stops even the model-replace's webContents-level
+// focus call. downloadsOpen.ids is rebuilt every paint — same as the open-time
+// build — so a completion mid-open still validates dl:open/dl:folder dispatch
+// (DD3 gate). No guard on emptiness here (unlike openDownloadsOverlay): a
+// progress event firing at all means at least one in-flight item exists.
+function paintDownloads() {
+  const snapshot = downloadsController.getSnapshot();
+  const model = snapshot.map((e) => ({
+    id: e.id,
+    filename: e.filename,
+    completed: e.state === 'completed',
+    received: e.received,
+    total: e.total,
+    paused: e.paused
+  }));
+  downloadsOpen.ids = new Set(snapshot.map((e) => e.id));
+  openOverlayMenu('downloads', model, downloadsAnchor(), 0, { noFocus: true });
+}
+
+// rAF handle for the coalesced repaint below — read/cleared from the
+// overlayMenus.downloads state's refocus() (declared above; the free-variable
+// reference resolves fine since refocus only ever runs from an async IPC
+// callback, well after this whole module has finished evaluating).
+let downloadsPaintRaf = null;
+
+// Chrome-side subscription (Leg 4): ADDITIVE — chrome-preload.js's
+// onDownloadProgress is a plain ipcRenderer.on registration, so this coexists
+// with downloadsController's own subscription (neither disturbs the other,
+// same idiom as media-controller.js's independent download-toast subscriber).
+// Progress fires per network chunk; requestAnimationFrame coalesces a whole
+// burst into at most one repaint per frame, and the whole thing is gated on
+// overlayMenus.downloads.open so a closed (the common case) or never-opened
+// popup pays zero cost — no model rebuild, no IPC, not even a scheduled rAF.
+if (window.goldfinch && typeof window.goldfinch.onDownloadProgress === 'function') {
+  window.goldfinch.onDownloadProgress(() => {
+    if (!overlayMenus.downloads.open) return;
+    if (downloadsPaintRaf != null) return; // a repaint is already queued for this frame
+    downloadsPaintRaf = requestAnimationFrame(() => {
+      downloadsPaintRaf = null;
+      if (!overlayMenus.downloads.open) return; // closed between schedule and fire
+      paintDownloads();
+    });
+  });
 }
 
 // a11y-sweep seams (M11 F1 Leg 3, FD-ruled — scoped SOLELY to `npm run a11y`,

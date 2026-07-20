@@ -1,6 +1,6 @@
 # Leg: hat-and-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Top-Bar Download Indicator + Downloads Popup](../flight.md)
 
 > **Interactive leg.** This is a guided **HAT (human acceptance test)** + alignment session — NOT an
@@ -27,29 +27,29 @@ mission's success criteria and the operator's judgment — and tune the subjecti
 
 ## Acceptance Criteria (operator-judged verification steps)
 
-- [ ] **Appears on download**: starting a download surfaces the `#downloads-indicator` in the top bar,
-      immediately left of the window controls, with active/animated feedback and (if applicable) a count
-      badge. The strip stays draggable around it (`no-drag` only on the button).
-- [ ] **Recently-completed state**: when the download finishes, the button reflects a recently-completed
-      state; a screen reader announces the state change via the label (not color/animation alone).
-- [ ] **Popup opens + lists**: clicking the button opens the popup (a `role="dialog"`) anchored under it,
-      listing current + recent downloads with correct filenames.
-- [ ] **Open + reveal work**: a completed row's filename **opens the file** in its default app; the folder
-      icon **reveals it** in the OS file manager. (These external effects are the human-only checks.)
-- [ ] **In-progress rows**: show progress and are not openable (filename is plain text, no open/reveal
-      buttons).
-- [ ] **Footer**: the "Open downloads page" footer opens `goldfinch://downloads`.
-- [ ] **Keyboard + focus**: the popup is fully keyboard-operable — Escape closes, Tab cycles among the
-      row/footer buttons; `aria-expanded` on the button flips true/false; focus returns sensibly on close;
-      the button is never focused while idle-hidden.
-- [ ] **App-scoped**: the indicator is present regardless of the active tab (including internal
-      `goldfinch://` tabs) and does not appear in the pinnable toolbar row / pin controls.
-- [ ] **Idle policy** (DD5, tunable): after opening + closing the popup with nothing in flight, the button
-      hides; the 5-minute idle fallback also hides it. Operator confirms the feel or requests a tune.
-- [ ] **Behavior test**: `/behavior-test download-indicator` passes; on pass, flip that spec's
-      `Status: draft → active`.
-- [ ] **Operator satisfied**: any look-and-feel adjustments requested during the session are applied
-      (inline for fixes; via scoped design review for features) and re-verified.
+- [x] **Appears on download**: operator confirmed the `#downloads-indicator` surfaces in the top bar on a
+      live download.
+- [x] **Recently-completed state**: confirmed — after the recent-persistence HAT fix, the button reflects
+      and holds the recently-completed state (label-announced).
+- [x] **Popup opens + lists**: confirmed — clicking the button opens the `role="dialog"` popup listing the
+      download with the correct filename.
+- [x] **Open + reveal work**: operator confirmed a completed row opens the file and the folder icon reveals
+      it in the OS file manager (the human-only external-effect checks).
+- [x] **In-progress rows**: confirmed — progress shown (now a live-updating bar), filename is plain text,
+      not openable.
+- [x] **Footer**: confirmed — "Open downloads page" opens `goldfinch://downloads`.
+- [x] **Keyboard + focus**: confirmed — Escape closes, Tab cycles; `aria-expanded` flips; focus retained
+      across live repaints; button not focused while idle-hidden.
+- [x] **App-scoped**: confirmed present on internal `goldfinch://` tabs; not in the pinnable toolbar row.
+- [x] **Idle policy** (DD5): tuned during HAT to Chrome-like persistence (persists after viewing until the
+      5-min idle timeout); operator confirmed the feel.
+- [~] **Behavior test**: **DEFERRED** — the Witnessed `download-indicator` run needs an admin-scoped MCP
+      key (`getChromeTarget` reads the chrome + sheet), which was not available in the run session (jar key
+      only; admin mints only under `GOLDFINCH_AUTOMATION_ADMIN`). All its assertions were instead
+      operator-verified by hand this session. Spec stays `draft`; run it once an admin MCP key is
+      configured, then flip `draft → active`. Disposition recorded in the flight log.
+- [x] **Operator satisfied**: two alignment gaps raised mid-HAT (recent-persistence FIX; live popup
+      progress FEATURE via scoped design review) — both implemented, reviewed, and operator-re-confirmed.
 
 ## Verification Steps
 
@@ -75,10 +75,12 @@ visual/idle tuning are the heart of this leg; the DOM-observable flow is corrobo
 
 ## Post-Completion Checklist
 
-- [ ] All operator-judged criteria confirmed (or accepted dispositions recorded in the flight log)
-- [ ] `/behavior-test download-indicator` run; run log committed; spec flipped to `active` on pass
-- [ ] Any inline fixes committed (new commits, no amend)
-- [ ] Update flight-log.md with the HAT session outcome + any tuning decisions
-- [ ] Set this leg's status to `completed`
-- [ ] Check off this leg in flight.md; this is the final leg → update flight.md status to `landed`,
-      check off the flight in mission.md, commit, and mark the PR ready for review
+- [x] All operator-judged criteria confirmed (behavior-test disposition recorded in the flight log)
+- [~] `/behavior-test download-indicator` — DEFERRED (admin MCP apparatus unavailable in-session); spec
+      stays `draft`, all assertions manually operator-verified. Run + flip to `active` once admin key set.
+- [x] Two HAT changes made (recent-persistence fix + live popup progress) — committed with the flight
+      (new commit on the branch, no amend)
+- [x] Update flight-log.md with the HAT session outcome + tuning decisions (DD2 & DD5 revisions recorded)
+- [x] Set this leg's status to `completed`
+- [x] Check off this leg in flight.md; final leg → flight.md status `landed`, flight checked off in
+      mission.md, committed, PR #107 marked ready for review

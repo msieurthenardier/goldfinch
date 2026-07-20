@@ -406,6 +406,55 @@ button.dl-name:focus-visible,
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+/* Live-updating progress bar (Leg 4, HAT). Decorative only — aria-hidden on the
+   element (.dl-progress's WORDS are the AT-facing state carrier, per DD5's
+   words-not-color-alone rule; a live progressbar role in a dialog would be
+   chatty). Known received/total sets the inner span's width directly (updated
+   in place on repaint, see menu-overlay.js's updateDownloads). Unknown/zero
+   total gets .dl-bar-indeterminate — a sweeping fill via keyframe animation,
+   fully behind the reduced-motion query below. Paused freezes for free (the
+   received/total pair stops changing), plus .dl-bar-paused halts the
+   indeterminate sweep so a paused+unknown-total row doesn't keep animating as
+   if still downloading. */
+.dl-bar {
+  flex: 0 0 46px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.dl-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s linear;
+}
+.dl-bar-indeterminate > span {
+  width: 40% !important;
+  animation: dl-bar-sweep 1.2s ease-in-out infinite;
+}
+.dl-bar-indeterminate.dl-bar-paused > span {
+  animation-play-state: paused;
+}
+@keyframes dl-bar-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dl-bar > span {
+    transition: none;
+  }
+  .dl-bar-indeterminate > span {
+    animation: none;
+    width: 40% !important;
+  }
+}
 .dl-footer {
   display: block;
   width: 100%;

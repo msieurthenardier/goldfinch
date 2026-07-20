@@ -1331,17 +1331,24 @@ a:focus-visible {
   }
 }
 
-/* Downloads indicator (M11 F1 Leg 2, DD1/DD5). App-scoped top-bar button mirroring
-   #automation-indicator's icon+badge treatment. Idle-hidden via the shared .hidden
-   class (the controller toggles it from the pure model). Two visible states, driven by
-   the controller from deriveModel — accent only; the authoritative state cue is the
-   aria-label (state via words, per DD5):
-     .downloads-active  — at least one download in flight: accent tint + a subtle
-                          gentle pulse (reduced-motion users get the static tint).
-     .downloads-recent  — visible only because of an unacknowledged recent completion:
-                          a steady accent, no motion.
+/* Downloads indicator (M11 F1 Leg 2, DD1/DD5; HAT fix Leg 4 — Chrome-like persistence).
+   App-scoped top-bar button mirroring #automation-indicator's icon+badge treatment.
+   Idle-hidden via the shared .hidden class (the controller toggles it from the pure
+   model — visibility now persists across acknowledgment, hiding only via the 5-min
+   idle expiry). Three visible states, driven by the controller from deriveModel —
+   accent only; the authoritative state cue is the aria-label (state via words, per
+   DD5):
+     .downloads-active     — at least one download in flight: accent tint + a subtle
+                              gentle pulse (reduced-motion users get the static tint).
+     .downloads-recent-new — visible because of a recent completion NOT YET viewed
+                              (attention=true, popup not opened since): the stronger
+                              accent emphasis (pulse), same treatment class as active
+                              used to carry alone — this is the "new" cue.
+     .downloads-recent     — any recent-completion state (viewed or not); once
+                              acknowledged (.downloads-recent without -new) it settles
+                              to a calm, steady tint with no motion.
    The count badge shows the in-flight count (hidden at 0); the recent-only state is
-   carried by the class + label, not the badge. */
+   carried by the classes + label, not the badge. */
 #downloads-indicator {
   color: var(--fg-dim);
 }
@@ -1353,8 +1360,16 @@ a:focus-visible {
   color: var(--accent);
   animation: downloads-pulse 1.6s ease-in-out infinite;
 }
+/* Acknowledged recent (calm/steady) — the baseline recent tint. */
 #downloads-indicator.downloads-recent {
   color: var(--accent);
+}
+/* Unacknowledged recent (attention) — stronger emphasis than the calm steady tint;
+   layered on top of .downloads-recent's color so this rule must win by specificity
+   order (declared after it) rather than needing !important. */
+#downloads-indicator.downloads-recent-new {
+  color: var(--accent);
+  animation: downloads-pulse 1.6s ease-in-out infinite;
 }
 @keyframes downloads-pulse {
   0%,
@@ -1366,7 +1381,8 @@ a:focus-visible {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  #downloads-indicator.downloads-active {
+  #downloads-indicator.downloads-active,
+  #downloads-indicator.downloads-recent-new {
     /* Static accent tint instead of the pulse — still distinct from idle, no motion. */
     animation: none;
   }

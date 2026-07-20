@@ -621,6 +621,79 @@ import { isSafeColor } from '../shared/safe-color.js';
     return 'In progress';
   }
 
+  /** Build a decorative progress bar element for an in-progress row (Leg 4,
+   * Option 1). aria-hidden — the row's progress TEXT is the AT-facing state
+   * carrier (avoids a chatty live progressbar role in a dialog). Structure:
+   * `<div class="dl-bar" aria-hidden="true"><span></span></div>` — the inner
+   * span's inline width is the only thing mutated per update.
+   * @param {any} item @returns {HTMLElement} */
+  function buildProgressBar(item) {
+    const bar = document.createElement('div');
+    bar.className = 'dl-bar';
+    bar.setAttribute('aria-hidden', 'true');
+    bar.appendChild(document.createElement('span'));
+    applyProgressBar(bar, item);
+    return bar;
+  }
+
+  /** Apply an item's progress to an existing bar element IN PLACE (shared by
+   * initial render and the in-place update path). Known received/total → the
+   * inner span's width = the fraction (clamped 0-100%). Unknown/zero total →
+   * `.dl-bar-indeterminate` (CSS-driven sweep animation). Paused freezes the
+   * bar "for free": received/total stop changing while paused, so re-applying
+   * the same fraction repaints the same width; `.dl-bar-paused` additionally
+   * halts the indeterminate sweep so a paused-with-unknown-total row doesn't
+   * keep animating as if still downloading.
+   * @param {HTMLElement} bar @param {any} item */
+  function applyProgressBar(bar, item) {
+    const fill = /** @type {HTMLElement | null} */ (bar.firstElementChild);
+    const total = item.total;
+    const received = item.received;
+    const known = typeof total === 'number' && total > 0 && typeof received === 'number';
+    bar.classList.toggle('dl-bar-indeterminate', !known);
+    bar.classList.toggle('dl-bar-paused', !!item.paused);
+    if (fill) fill.style.width = known ? Math.min(100, Math.max(0, (received / total) * 100)) + '%' : '';
+  }
+
+  /** Structural-change predicate (Leg 4, Option 1): true iff the CURRENT
+   * rendered rows carry the exact same ordered (id, completed) pairs as the
+   * incoming model — the update-vs-rebuild decision. A mismatch (a download
+   * completed and gained buttons, or one appeared/vanished) returns false so
+   * the caller falls through to the normal rebuild-and-reopen path.
+   * @param {any[]} model @returns {boolean} */
+  function sameDownloadsStructure(model) {
+    if (!Array.isArray(model)) return false;
+    const rows = /** @type {HTMLElement[]} */ ([...downloadsNode.querySelectorAll('.dl-row')]);
+    if (rows.length !== model.length) return false;
+    for (let i = 0; i < rows.length; i++) {
+      const item = model[i];
+      if (!item || typeof item.id !== 'number') return false;
+      if (rows[i].dataset.id !== String(item.id)) return false;
+      if (rows[i].dataset.completed !== String(!!item.completed)) return false;
+    }
+    return true;
+  }
+
+  /** In-place update (Leg 4, Option 1): walks the EXISTING `.dl-row`s (same
+   * order as the model — guaranteed by sameDownloadsStructure having just
+   * passed) and rewrites only each in-progress row's progress text + bar.
+   * Completed rows are untouched (their buttons never change once completed).
+   * No DOM removal/creation, no closeAll, no onOpen — focus/Tab position and
+   * the sheet's open/hidden state are all left exactly as they were.
+   * @param {any[]} model */
+  function updateDownloads(model) {
+    const rows = /** @type {HTMLElement[]} */ ([...downloadsNode.querySelectorAll('.dl-row')]);
+    for (let i = 0; i < rows.length; i++) {
+      const item = model[i];
+      if (!item || item.completed) continue; // completed rows carry no live fields
+      const row = rows[i];
+      const progressEl = row.querySelector('.dl-progress');
+      if (progressEl) progressEl.textContent = downloadProgressText(item);
+      const bar = /** @type {HTMLElement | null} */ (row.querySelector('.dl-bar'));
+      if (bar) applyProgressBar(bar, item);
+    }
+  }
+
   /** Render the downloads list from the open-time snapshot (a flat item array).
    * All filenames via textContent (DD8 — untrusted / RTL / long names; CSS
    * ellipsis handles length).
@@ -652,15 +725,23 @@ import { isSafeColor } from '../shared/safe-color.js';
         });
         row.append(name, folder);
       } else {
-        // In-progress: filename as NON-INTERACTIVE text + progress; no buttons.
+        // In-progress: filename as NON-INTERACTIVE text + progress + a decorative
+        // live-updating bar (Leg 4, Option 1). The bar is aria-hidden — the
+        // adjacent progress text (WORDS, not the bar alone) already carries the
+        // state to AT (a live progressbar role in a dialog would be chatty).
         const name = document.createElement('span');
         name.className = 'dl-name';
         name.textContent = String(item.filename != null ? item.filename : '');
         const progress = document.createElement('span');
         progress.className = 'dl-progress';
         progress.textContent = downloadProgressText(item);
-        row.append(name, progress);
+        const bar = buildProgressBar(item);
+        row.append(name, bar, progress);
       }
+      // Structural fingerprint (Leg 4): id + completed-flag, read back by
+      // sameDownloadsStructure() to decide update-in-place vs. rebuild.
+      row.dataset.id = String(item.id);
+      row.dataset.completed = String(!!item.completed);
       downloadsNode.appendChild(row);
     }
     // Footer is ALWAYS a button (the enabled-first-button guarantee for onOpen).
@@ -740,6 +821,22 @@ import { isSafeColor } from '../shared/safe-color.js';
       ? model && typeof model === 'object' && !Array.isArray(model)
       : Array.isArray(model);
     if (!modelShapeOk) return;
+
+    // In-place downloads update (Leg 4, Option 1): a repaint that arrives while
+    // the downloads popup is ALREADY the open template, with an unchanged row
+    // structure (sameDownloadsStructure), patches only the in-progress rows'
+    // progress text + bar — checked and handled BEFORE the shared reset below,
+    // so it skips closeAll()/rebuild/onOpen entirely (no hide flash, no stolen
+    // focus). The new token is adopted silently (`sent` stays whatever it was —
+    // false, since the dialog is still open and nothing has activated/dismissed
+    // it yet). Falls through to the normal rebuild-and-reopen path when the
+    // popup isn't already open OR the structure changed (a download completed,
+    // appeared, or vanished — rare; full rebuild is acceptable there).
+    if (template === 'downloads' && menuController.current === downloadsEntry && sameDownloadsStructure(model)) {
+      currentToken = token;
+      updateDownloads(model);
+      return;
+    }
 
     // Silence any still-open prior render (model-replace / re-open of a persisted
     // DOM after a main-initiated close): null the token FIRST so the closing

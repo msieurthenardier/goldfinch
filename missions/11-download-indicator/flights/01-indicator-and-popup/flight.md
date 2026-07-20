@@ -1,18 +1,18 @@
 # Flight: Top-Bar Download Indicator + Downloads Popup
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Top-Bar Download Visibility](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Persistent indicator visible while a download is active or recently completed; hidden when idle.
-- [ ] Indicator conveys live state accessibly (label updates, not animation/color alone).
-- [ ] Activating the indicator opens a popup listing current and recent downloads.
-- [ ] Popup rows: open a completed file, reveal it in folder; in-progress rows show progress, not openable.
-- [ ] Popup offers a way to open the full `goldfinch://downloads` page.
-- [ ] Open/reveal never trust a renderer-supplied path — resolved main-side by download id.
-- [ ] Indicator is app-scoped: present on any tab (incl. internal), independent of toolbar pins.
-- [ ] `npm run a11y` passes for the new button + popup; existing behavior tests unaffected.
+- [x] Persistent indicator visible while a download is active or recently completed; hidden when idle.
+- [x] Indicator conveys live state accessibly (label updates, not animation/color alone).
+- [x] Activating the indicator opens a popup listing current and recent downloads.
+- [x] Popup rows: open a completed file, reveal it in folder; in-progress rows show progress, not openable.
+- [x] Popup offers a way to open the full `goldfinch://downloads` page.
+- [x] Open/reveal never trust a renderer-supplied path — resolved main-side by download id.
+- [x] Indicator is app-scoped: present on any tab (incl. internal), independent of toolbar pins.
+- [x] `npm run a11y` passes for the new button + popup; existing behavior tests unaffected.
 
 ---
 
@@ -202,10 +202,10 @@ Legs 1 and 2 are independent; Leg 3 depends on both. Filenames are untrusted str
 (`dl:open:<id>` / `dl:folder:<id>` / `dl:page`), validated at dispatch (vanished / not-completed → no-op).
 
 ### Checkpoints
-- [ ] Leg 1: open/reveal by id work from a scratch caller; unit tests green; renderer path never trusted.
-- [ ] Leg 2: button appears/animates on a live download and reflects a recently-completed state; hidden
+- [x] Leg 1: open/reveal by id work from a scratch caller; unit tests green; renderer path never trusted.
+- [x] Leg 2: button appears/animates on a live download and reflects a recently-completed state; hidden
       when idle; accumulator reducer unit tests green.
-- [ ] Leg 3: clicking the button opens the popup listing current + recent; rows open/reveal; in-progress
+- [x] Leg 3: clicking the button opens the popup listing current + recent; rows open/reveal; in-progress
       rows disabled; footer opens `goldfinch://downloads`; `npm run a11y` passes.
 
 ### Adaptation Criteria
@@ -232,18 +232,19 @@ Legs 1 and 2 are independent; Leg 3 depends on both. Filenames are untrusted str
 - [x] `downloads-popup` — new `downloads` sheet template (`role="dialog"`) + full chrome-side wiring
       (state entry, trigger, opener+anchor, id-dispatch, IDS map, audit seam) + all `a11y-audit.mjs` sweep
       changes (`sheet:downloads` state, button-visible chrome state, dismiss/closed node-id arrays).
-- [ ] `hat-and-alignment` *(optional)* — guided HAT session: exercise the flow in the real app, tune the
-      idle/visual policy, fix issues until the operator is satisfied.
+- [x] `hat-and-alignment` — guided HAT session: operator exercised the flow in the real app, found two
+      alignment gaps (recent-persistence, live popup progress), both fixed + operator-confirmed; behavior
+      test deferred (admin MCP apparatus unavailable in-session).
 
 ---
 
 ## Post-Flight
 
 ### Completion Checklist
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test` unit + `npm run a11y`)
-- [ ] Documentation updated (CLAUDE.md if the button/popup warrant a chrome-affordance note)
+- [x] All legs completed
+- [ ] Code merged — PR [#107](https://github.com/msieurthenardier/goldfinch/pull/107) ready for review (merge pending)
+- [x] Tests passing (`npm test` 2242/2242 unit; `npm run a11y` passed live during Leg 3)
+- [x] Documentation updated (CLAUDE.md evaluate-seam count bumped 19→21; no separate chrome-affordance note needed)
 
 ### Verification
 

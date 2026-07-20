@@ -1,10 +1,13 @@
 'use strict';
 
-// Unit tests for the pure downloads-indicator decision model (M11 F1 Leg 2, DD5).
-// Covers every DD5 transition the leg enumerates (§7): progress upsert + visibility,
-// same-id dedupe, done→recent move, acknowledge hide, done-after-ack re-show, the
-// cap-25 eviction, and the time-injected expire (past / before the 5-min window, and
-// blocked while in-flight), plus the ariaLabel strings for active / recent / idle.
+// Unit tests for the pure downloads-indicator decision model (M11 F1 Leg 2, DD5;
+// HAT fix Leg 4 — Chrome-like persistence: visibility survives acknowledgment,
+// hiding only via the 5-min idle expiry; acknowledgment instead clears the separate
+// `attention` emphasis flag). Covers every transition: progress upsert + visibility,
+// same-id dedupe, done→recent move, acknowledge clears attention (stays visible),
+// done-after-ack re-raises attention, the cap-25 eviction, and the time-injected
+// expire (past / before the 5-min window, and blocked while in-flight), plus the
+// ariaLabel strings for active / recent / idle.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -58,7 +61,7 @@ test('reduce does not mutate the prior state (pure)', () => {
 // done → recent
 // ---------------------------------------------------------------------------
 
-test('done removes from in-flight and prepends to recent; still visible (unacked)', () => {
+test('done removes from in-flight and prepends to recent; visible + attention (unacked)', () => {
   let s = reduce(initialState(), progress(1));
   s = reduce(s, done(1, T0));
   assert.equal(s.inFlight.size, 0);
@@ -70,6 +73,7 @@ test('done removes from in-flight and prepends to recent; still visible (unacked
   assert.equal(m.visible, true);
   assert.equal(m.active, false);
   assert.equal(m.recentCount, 1);
+  assert.equal(m.attention, true);
 });
 
 test('done newest-first ordering', () => {
@@ -92,31 +96,43 @@ test('non-completed done with null savePath is recorded, not dropped', () => {
 });
 
 // ---------------------------------------------------------------------------
-// acknowledge + re-show
+// acknowledge clears attention, NOT visibility (HAT fix, Leg 4 — Chrome-like:
+// the indicator persists after the popup is viewed; only the 5-min idle expiry
+// hides it). Inverted from the pre-fix "acknowledge hides the indicator" test —
+// renamed rather than deleted so git blame shows the behavior/intent shift.
 // ---------------------------------------------------------------------------
 
-test('acknowledge hides the indicator once in-flight is empty', () => {
+test('acknowledge clears attention but keeps the indicator visible once in-flight is empty', () => {
   let s = reduce(initialState(), progress(1));
   s = reduce(s, done(1, T0));
   s = reduce(s, { type: 'acknowledge' });
   assert.equal(s.acknowledged, true);
-  assert.equal(deriveModel(s).visible, false);
+  const m = deriveModel(s);
+  assert.equal(m.visible, true);
+  assert.equal(m.attention, false);
+  assert.equal(m.recentCount, 1);
 });
 
-test('a done after acknowledge resets acknowledgment and re-shows', () => {
+test('a done after acknowledge resets acknowledgment and re-raises attention (stays visible throughout)', () => {
   let s = reduce(initialState(), done(1, T0));
   s = reduce(s, { type: 'acknowledge' });
-  assert.equal(deriveModel(s).visible, false);
+  let m = deriveModel(s);
+  assert.equal(m.visible, true);
+  assert.equal(m.attention, false);
   s = reduce(s, done(2, T0 + 1));
   assert.equal(s.acknowledged, false);
-  assert.equal(deriveModel(s).visible, true);
-  assert.equal(deriveModel(s).recentCount, 2);
+  m = deriveModel(s);
+  assert.equal(m.visible, true);
+  assert.equal(m.attention, true);
+  assert.equal(m.recentCount, 2);
 });
 
-test('acknowledged but still in-flight stays visible (active wins)', () => {
+test('acknowledged but still in-flight stays visible (active wins) and carries no attention', () => {
   let s = reduce(initialState(), progress(1));
   s = reduce(s, { type: 'acknowledge' });
-  assert.equal(deriveModel(s).visible, true);
+  const m = deriveModel(s);
+  assert.equal(m.visible, true);
+  assert.equal(m.attention, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -144,6 +160,17 @@ test('expire past the 5-min window with no in-flight clears recent and hides', (
   assert.equal(s.acknowledged, false);
   assert.equal(s.lastCompletionAt, null);
   assert.equal(deriveModel(s).visible, false);
+});
+
+test('expire past the 5-min window still clears recent and hides after acknowledgment', () => {
+  let s = reduce(initialState(), done(1, T0));
+  s = reduce(s, { type: 'acknowledge' });
+  assert.equal(deriveModel(s).visible, true); // acknowledged but not yet expired: still visible
+  s = reduce(s, { type: 'expire', now: T0 + IDLE_TIMEOUT_MS });
+  assert.equal(s.recent.length, 0);
+  const m = deriveModel(s);
+  assert.equal(m.visible, false);
+  assert.equal(m.attention, false);
 });
 
 test('expire before the 5-min window is a no-op', () => {
@@ -187,6 +214,15 @@ test('ariaLabel: all-paused active state reads as paused', () => {
 test('ariaLabel: recent-only state names the completed count', () => {
   const s = reduce(initialState(), done(1, T0));
   assert.equal(deriveModel(s).ariaLabel, 'Downloads — 1 recently completed');
+});
+
+test('ariaLabel: acknowledged recent is still visible and keeps the same completed-count wording', () => {
+  let s = reduce(initialState(), done(1, T0));
+  s = reduce(s, { type: 'acknowledge' });
+  const m = deriveModel(s);
+  assert.equal(m.visible, true);
+  assert.equal(m.attention, false);
+  assert.equal(m.ariaLabel, 'Downloads — 1 recently completed');
 });
 
 test('ariaLabel: idle state is the plain label', () => {

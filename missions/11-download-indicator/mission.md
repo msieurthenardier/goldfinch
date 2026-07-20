@@ -102,6 +102,6 @@ _None yet — emergent blockers will be recorded here as the flight surfaces the
 
 > **Note:** These are tentative suggestions, not commitments.
 
-- [ ] Flight 1: Top-bar download indicator + downloads popup — the button, its live state,
+- [x] Flight 1: Top-bar download indicator + downloads popup — the button, its live state,
       the sheet-hosted popup, the chrome-trust open-file handler, and accessibility, closed
       out by a guided HAT (human acceptance test) leg for hands-on alignment.

@@ -34,9 +34,12 @@ export function createDownloadsController({ els, goldfinch }) {
     btn.classList.toggle('hidden', !model.visible);
     // State via WORDS (aria-label) is the source of truth for AT; the classes are a
     // visual accent only. active = at least one in-flight download; recent = visible
-    // purely because of an unacknowledged completion.
+    // because of a completion (acknowledged or not — HAT fix, Leg 4: acknowledgment no
+    // longer hides the button); recent-new = recent AND not yet acknowledged (the
+    // un-viewed "attention" emphasis, cleared by acknowledge() without hiding).
     btn.classList.toggle('downloads-active', model.active);
     btn.classList.toggle('downloads-recent', model.visible && !model.active);
+    btn.classList.toggle('downloads-recent-new', model.attention);
     btn.setAttribute('aria-label', model.ariaLabel);
     btn.title = model.ariaLabel;
 
@@ -81,7 +84,10 @@ export function createDownloadsController({ els, goldfinch }) {
   render();
 
   return {
-    /** Leg 3 calls this on popup CLOSE (via the overlay state's refocus); a later completion re-shows via reduce's ack reset. */
+    /** Leg 3 calls this on popup CLOSE (via the overlay state's refocus). HAT fix (Leg 4):
+     * no longer hides the indicator — it only clears the `attention` (new/unseen) visual
+     * emphasis; the button stays visible per `recent`/`active` until the idle expiry. A
+     * later completion re-raises attention via reduce's ack reset. */
     acknowledge() {
       state = reduce(state, { type: 'acknowledge' });
       render();

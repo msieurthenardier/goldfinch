@@ -18,7 +18,11 @@
 //     to false by any new completion so a fresh finish re-shows the indicator.
 //   - lastCompletionAt: timestamp of the most recent completion, for the idle expiry.
 //
-// Visibility (DD5): inFlight.size > 0 || (recent.length > 0 && !acknowledged).
+// Visibility (HAT fix, Leg 4): inFlight.size > 0 || recent.length > 0 — the indicator
+// PERSISTS after a completion AND after the popup has been viewed (Chrome-like), hiding
+// only via the 5-minute idle `expire` event clearing `recent`. Acknowledgment
+// (`acknowledged`) no longer affects visibility at all; it now only controls the
+// separate `attention` (new/unseen) emphasis flag deriveModel returns.
 
 const RECENT_CAP = 25;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes after the last completion
@@ -92,27 +96,32 @@ export function reduce(state, event) {
 /**
  * Project the accumulator into the view-model the controller applies to the DOM.
  * State is conveyed in WORDS via ariaLabel (never color/animation alone).
+ * `visible` persists across acknowledgment (HAT fix, Leg 4) — only `active` /
+ * `recentCount` drive it. `attention` is the separate "new/unseen" emphasis flag:
+ * true when there are recent completions the user hasn't viewed (opened the popup)
+ * yet; acknowledging clears it without hiding the button.
  * @param {DownloadsState} state
- * @returns {{ visible: boolean, active: boolean, activeCount: number, recentCount: number, ariaLabel: string }}
+ * @returns {{ visible: boolean, active: boolean, activeCount: number, recentCount: number, attention: boolean, ariaLabel: string }}
  */
 export function deriveModel(state) {
   const activeCount = state.inFlight.size;
   const active = activeCount > 0;
   const recentCount = state.recent.length;
-  const visible = active || (recentCount > 0 && !state.acknowledged);
+  const visible = active || recentCount > 0;
+  const attention = recentCount > 0 && !state.acknowledged;
 
   let ariaLabel;
   if (active) {
     const allPaused = [...state.inFlight.values()].every((e) => e && e.paused);
     const lead = allPaused ? 'Downloads paused' : 'Downloading';
     ariaLabel = `${lead} — ${activeCount} in progress`;
-  } else if (visible) {
+  } else if (recentCount > 0) {
     ariaLabel = `Downloads — ${recentCount} recently completed`;
   } else {
     ariaLabel = 'Downloads';
   }
 
-  return { visible, active, activeCount, recentCount, ariaLabel };
+  return { visible, active, activeCount, recentCount, attention, ariaLabel };
 }
 
 export { RECENT_CAP, IDLE_TIMEOUT_MS };
