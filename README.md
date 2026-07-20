@@ -21,7 +21,7 @@ or download **v0.10.4** directly:
 
 | Platform | Installer |
 |----------|-----------|
-| **Windows** | [Goldfinch Setup 0.10.4.exe](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/Goldfinch.Setup.0.10.4.exe) |
+| **Windows** | [Goldfinch Setup 0.10.4.exe](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/Goldfinch-Setup-0.10.4.exe) |
 | **macOS** (Apple Silicon) | [Goldfinch-0.10.4-arm64.dmg](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/Goldfinch-0.10.4-arm64.dmg) · [.zip](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/Goldfinch-0.10.4-arm64-mac.zip) |
 | **Linux** | [Goldfinch-0.10.4.AppImage](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/Goldfinch-0.10.4.AppImage) · [.deb](https://github.com/msieurthenardier/goldfinch/releases/download/v0.10.4/goldfinch_0.10.4_amd64.deb) |
 
