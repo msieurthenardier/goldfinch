@@ -1,6 +1,6 @@
 # Leg: vault-crypto
 
-**Status**: landed
+**Status**: completed
 **Flight**: [Vault Core + Automation Surface](../flight.md)
 
 ## Objective

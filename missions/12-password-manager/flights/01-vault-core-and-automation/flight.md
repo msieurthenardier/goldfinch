@@ -1,6 +1,6 @@
 # Flight: Vault Core + Automation Surface
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Built-in Password Manager](../../mission.md)
 
 ## Contributing to Criteria
