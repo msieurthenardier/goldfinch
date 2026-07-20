@@ -28,6 +28,12 @@ const { createInternalPageMap } = require('./internal-page-map');
 const { createBroadcasters } = require('./broadcasts');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
+// Password vault store (Mission 12, Flight 1). Wired here only for the automation
+// surface's STATELESS read path (Leg 3): a dedicated instance the per-session MCP
+// vault context reaches via unlockVaultWithAccessKey / openAllWithAdminKey /
+// readVaultItems — none of which mutate the store's human lock state. The human
+// unlock UI / IPC is a separate concern (later legs).
+const vaultStoreModule = require('./vault/vault-store');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
 // (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
 const sessionStore = require('./session-store');
@@ -551,6 +557,22 @@ async function grabWindow(windowId) {
 // is exactly what makes a live-rebind pick up a newly-saved port and keeps the
 // precedence coherent with a fresh launch. Sets bound=true on a successful bind, or
 // records the error (e.g. EADDRINUSE) and leaves bound=false on failure.
+// Lazily-constructed, memoized vault-store instance for the automation surface's
+// stateless read path (M12 F1 Leg 3). Constructed once (reads manager.json if
+// present — no side effects otherwise), shares the app's jars registry + the
+// vaultAutoLockMinutes setting. Only its stateless methods are used by the MCP
+// vault context, so it never mutates human lock state.
+let _vaultStore = null;
+function getVaultStore() {
+  if (_vaultStore === null) {
+    _vaultStore = vaultStoreModule.load(app.getPath('userData'), {
+      listJars: () => jars.list(),
+      getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
+    });
+  }
+  return _vaultStore;
+}
+
 async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
@@ -598,6 +620,21 @@ async function startMcpServerInstance() {
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
     broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
+    // Password-vault surface (Mission 12, Flight 1, Leg 3). The per-session MCP
+    // vault context reaches the vault store's STATELESS methods only (no singleton
+    // coupling).
+    vaultStore: getVaultStore(),
+    // The REAL main→preload fill delegate (Leg 4). vault-context.fill resolves +
+    // membership/origin-checks the credential, then hands us `{ wcId, credential }`;
+    // we deliver it to the target tab's TOP-FRAME preload over the 'vault-fill'
+    // channel. webContents.send targets the main frame only, so a cross-origin
+    // iframe is never reached. The credential is NEVER returned across the MCP
+    // boundary (vault-context.fill returns `{ filled, id }` only). A tab closed
+    // mid-fill → fromId() is null → the optional-chain no-ops safely.
+    fillDelegate: ({ wcId, credential }) => {
+      webContents.fromId(wcId)?.send('vault-fill', credential);
+    },
+    getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
     // In-memory dev-enable override (DD3/DD4, Flight 8). Read LAZILY per request by
     // the auth gate so it tracks the module-scoped value. It lets a dev `dev:automation`
     // run resolve identity with the persisted toggle off, but a valid Bearer key is

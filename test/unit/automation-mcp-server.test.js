@@ -24,7 +24,8 @@ const { hashKey, validateKey } = require('../../src/main/automation/automation-a
 const TEST_PORT = 7790;
 const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
 // M09 F7 DD2: 29 → 30 (enumerateWindows, the window-topology discovery primitive).
-const EXPECTED_TOOL_COUNT = 30;
+// M12 F1 Leg 3: 30 → 34 (the four vault tools — vaultUnlock/vaultList/vaultTotp/vaultFill).
+const EXPECTED_TOOL_COUNT = 34;
 
 // The valid key the test harness mints. The injected settings stub stores its
 // hash and reports the surface enabled, so a Bearer with this key passes the gate.

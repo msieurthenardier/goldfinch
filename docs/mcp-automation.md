@@ -16,13 +16,16 @@ the browser's tabs over a loopback HTTP transport.
 
 The server is built on the official MCP TypeScript SDK (`@modelcontextprotocol/sdk`, Goldfinch's
 first and only runtime dependency). It speaks **Streamable HTTP** with a stateful session model,
-binds to **loopback only** (`127.0.0.1`), and advertises **30 tools** — 18 drive tools, 4
+binds to **loopback only** (`127.0.0.1`), and advertises **34 tools** — 18 drive tools, 4
 observe tools, 2 eval tools, 2 devtools tools, 3 admin chrome/app-level tools (`getChromeTarget`
-+ `enumerateWindows` + `downloadsList`), and 1 history tool (`getHistory`, jar-confined — not
-admin-only). Tools are a
++ `enumerateWindows` + `downloadsList`), 1 history tool (`getHistory`, jar-confined — not
+admin-only), and 4 **vault tools** (`vaultUnlock` / `vaultList` / `vaultTotp` / `vaultFill` — the
+**fill-only** password-vault surface). The first 30 tools are a
 thin adapter over Goldfinch's
 internal automation engine; the same
-security guards that protect the engine (URL safety, handle resolution) apply unchanged.
+security guards that protect the engine (URL safety, handle resolution) apply unchanged. The 4
+vault tools are **non-engine-op**: they dispatch to a per-session vault context, cryptographically
+scoped by the session's identity (see *Vault tools*).
 
 ## Consumer Contract
 
@@ -438,10 +441,11 @@ input artifact.
 
 ## Tool reference
 
-All 30 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
+All 34 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
 by its integer **`wcId`** (the tab's `webContents.id`), obtained from `openTab`, `enumerateTabs`,
 or (for the chrome renderer) `getChromeTarget`; the two admin chrome/app-level tools
-(`getChromeTarget`, `downloadsList`) take no `wcId`.
+(`getChromeTarget`, `downloadsList`) take no `wcId`. The four **vault tools** (`vaultUnlock` /
+`vaultList` / `vaultTotp` / `vaultFill`) are documented in their own section below.
 
 ### Drive tools (18)
 
@@ -587,6 +591,63 @@ jar key hits this the same as admin. `limit` applies to either mode.
 This is a **read-only** surface — there is no history mutation tool here (clear/delete stay
 operator-surface only, `goldfinch://jars`); agents get memory of a jar's history, not the ability
 to erase it.
+
+### Vault tools (4)
+
+The four vault tools expose Goldfinch's password vault (Mission 12) over automation as a
+deliberately **fill-only** surface: an agent can unlock, browse metadata, read a TOTP code, and
+**fill** a matching credential into a page — but a **password is never returned across this
+boundary**. These tools are **non-engine-op**: they dispatch to a **per-session vault context**,
+not the automation engine, and hold no cross-session state.
+
+| Tool | Input schema | Result shape |
+|------|--------------|--------------|
+| `vaultUnlock` | `{ accessKey: string }` *(required)* | JSON text: `{ unlocked: [vaultId, …] }` — the vaults this session opened. A **wrong/foreign key opens nothing** (`{ unlocked: [] }`, a **normal** result, not an error). |
+| `vaultList` | *(none)* | JSON text: array of `{ vaultId, id, title, origin, username, hasTotp }` — **metadata only** for the login items in this session's unlocked vaults. **Never** a password, TOTP secret, or card data. Only unlocked vaults contribute. |
+| `vaultTotp` | `{ itemId: string }` *(required)* | JSON text: `{ id, code }` — the **current** TOTP code for a named unlocked item. `code` is `null` when the item is absent, not in an unlocked vault, or has no TOTP. The TOTP **secret** is never returned. |
+| `vaultFill` | `{ wcId: integer, itemId: string }` *(required)* | JSON text: `{ filled: true, id }` on success, or a **normal** `{ filled: false, reason }` (`"locked"` / `"no-match"` / `"origin-mismatch"`) when nothing was filled. The credential is handed to Goldfinch's internal fill effect and **never returned**. |
+
+**Cryptographic scope by session identity (DD4).** The reachable vault set is decided by the
+session's key identity, not a tool argument:
+
+- **Jar key** — `vaultUnlock`'s `accessKey` is that jar's **per-jar vault access secret**, and it
+  unlocks **only that jar's vault**. A per-jar access key structurally holds no envelope for the
+  global vault or sibling jars, so a jar automation session **cannot reach the global vault** in
+  this flight (global logins via automation require the admin key — a dedicated global-scoped
+  access-key tier is a deferred open question).
+- **Admin key** — `vaultUnlock`'s `accessKey` is the **X25519 admin private key (base64)**. It
+  opens the Manager Root Key and therefore **every** vault (including jar vaults created after
+  setup). Handing the admin private key over a tool argument is the intended admin-automation
+  unlock; the Settings UI recommends against embedding it in config.
+
+**`vaultFill` wire policy (fill-only).** `vaultFill` resolves the login item by id from an unlocked
+reachable vault, then enforces **two** gates before filling:
+
+1. **Jar membership** — the target `wcId` must belong to this session's reachable jar (a jar session
+   naming a **foreign/sibling** tab is refused with `automation: out-of-jar`, the same
+   session-object-identity check the drive/observe tools use). Admin may target any tab.
+2. **Top-frame origin match** — the resolved tab's origin must match the item's stored origin; a
+   mismatch is a **normal** `{ filled: false, reason: "origin-mismatch" }`, and the credential is
+   **not** filled.
+
+Only then is `{ wcId, credential }` handed to Goldfinch's internal fill effect. The credential
+(username/password) **never crosses back to the client** — the result carries only `{ filled, id }`.
+"Locked" (nothing unlocked) and "no-match" (no such item) are likewise **normal results**, not
+errors.
+
+**Session lifecycle + zeroization.** A session's vault keys live in memory as Buffers and are
+`.fill(0)`-**zeroized on transport teardown** (a graceful `DELETE` or a dropped SSE stream) — a
+fresh session must `vaultUnlock` again. A **per-session idle timer** (duration from the
+`vaultAutoLockMinutes` setting, reset on each vault op) zeroizes the session as a belt-and-suspenders
+backstop for a client that drops without signalling. There is **no singleton coupling** with the
+operator's own vault lock in either direction: automation unlock/teardown never changes the human
+lock state, and a human "Lock now" never empties a live automation session (each holds its own
+fresh-buffer copies).
+
+**Audit.** All four vault tools flow through the standard activity audit (below). The recorded
+`detail` carries the **item id** for `vaultFill` / `vaultTotp` and **nothing** for `vaultUnlock` /
+`vaultList` — **never** the `accessKey` (per-jar secret or admin private key), a password, a TOTP
+secret, or a vault key.
 
 ## Result and refusal semantics
 

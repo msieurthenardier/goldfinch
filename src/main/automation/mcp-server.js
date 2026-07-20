@@ -53,6 +53,7 @@ const { buildToolRegistry } = require('./mcp-tools');
 const { validateKey } = require('./automation-auth');
 const { scopeEngine } = require('./scope');
 const { createAuditLog } = require('./audit-log');
+const { createVaultContext } = require('../vault/vault-context');
 
 // Parse the discriminated error code from an `automation: <code> — …` message.
 // The hyphenated codes (`out-of-jar`, `admin-only`, `internal-session`, …) all
@@ -123,6 +124,20 @@ function deriveAuditDetail(op, args) {
       if (!from || to == null || from.x == null || from.y == null || to.x == null || to.y == null) return null;
       return '(' + from.x + ',' + from.y + ')->(' + to.x + ',' + to.y + ')';
     }
+    // Vault ops (M12 F1 Leg 3). The `accessKey` (a per-jar vault access secret OR
+    // the X25519 admin private key) must NEVER be logged — it is not in any case
+    // below, and default-null already drops it. vaultFill/vaultTotp record the
+    // ITEM ID only (safe, not a secret); the resolved origin and the unlock
+    // outcome/count depend on the RESULT, which this args-only derivation cannot
+    // see, so there is nothing more to add. NEVER a password/TOTP secret/vault key.
+    case 'vaultUnlock':
+      return null; // accessKey is a secret — record nothing derived from it.
+    case 'vaultList':
+      return null;
+    case 'vaultTotp':
+      return args.itemId != null ? 'item=' + String(args.itemId) : null;
+    case 'vaultFill':
+      return args.itemId != null ? 'item=' + String(args.itemId) : null;
     default:
       return null;
   }
@@ -262,6 +277,19 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   every recorded tool call and every session open/close. main.js injects
  *   `(payload) => broadcastToChromeAndInternal('automation-activity-changed', payload)`.
  *   Defaults to a no-op so headless tests need no Electron.
+ * @param {{
+ *   unlockVaultWithAccessKey: (vaultId: string, secret: string) => Buffer,
+ *   openAllWithAdminKey: (privB64: string) => Map<string, Buffer>,
+ *   readVaultItems: (vaultId: string, key: Buffer) => any[],
+ * }} [opts.vaultStore]  the STATELESS vault-store methods (M12 F1 Leg 3) the
+ *   per-session vault context dispatches to — never the human-lock singleton.
+ *   Absent (engine-only tests) → vault ops degrade to "nothing unlocks".
+ * @param {(arg: { wcId: number, credential: any }) => any} [opts.fillDelegate]
+ *   the vaultFill effect (M12 F1 Leg 3). Leg 4 injects the real main→preload
+ *   fill; Leg 3 tests inject a fake; the running app injects a stub that throws
+ *   until Leg 4. Defaults to a throwing stub. The credential never crosses back.
+ * @param {() => number} [opts.getAutoLockMinutes]  idle auto-lock minutes reader
+ *   for the per-session vault idle backstop (DD5). Defaults to `() => 10`.
  * @param {string} [opts.version]  server version advertised in the handshake;
  *   defaults to the app version from package.json.
  * @param {number} [opts.port]  listen port override (takes precedence over
@@ -337,6 +365,20 @@ function createMcpServer(opts = {}) {
   // Audit fan-out (Leg 3 / DD8). Default no-op so headless tests need no Electron.
   const broadcast = typeof opts.broadcast === 'function' ? opts.broadcast : () => {};
 
+  // Vault surface deps (Mission 12, Flight 1, Leg 3). The vault store (stateless
+  // methods only) + the fill delegate are injected per the leg DECISION; a
+  // per-session vault context (createVaultContext) is minted PER session in
+  // routeRequest. The fill delegate is Leg-4 real / here a caller-injected fake;
+  // the running app injects a stub that throws until Leg 4 wires the real
+  // main→preload fill effect. getAutoLockMinutes drives the DD5 idle backstop.
+  const vaultStore = opts.vaultStore;
+  const fillDelegate = typeof opts.fillDelegate === 'function'
+    ? opts.fillDelegate
+    : () => { throw new Error('automation: vault-fill-not-wired — the main→preload fill delegate lands in Leg 4'); };
+  const getVaultAutoLockMinutes = typeof opts.getAutoLockMinutes === 'function'
+    ? opts.getAutoLockMinutes
+    : () => 10;
+
   // ONE audit log per server (shared across all per-session Servers). Its onChange
   // fires the injected broadcast with the fresh snapshot on every mutation — one
   // local consumer this flight, so a per-mutation broadcast is acceptable (Flight 5
@@ -347,7 +389,7 @@ function createMcpServer(opts = {}) {
   // owns a Server + its StreamableHTTPServerTransport + the IDENTITY bound at
   // session creation (DD4 / Leg 2). Created on `initialize`, routed to thereafter
   // by the `Mcp-Session-Id` header, evicted on transport `onclose`.
-  /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport, identity: string }>} */
+  /** @type {Map<string, { server: import('@modelcontextprotocol/sdk/server/index.js').Server, transport: StreamableHTTPServerTransport, identity: string, vaultCtx: ReturnType<typeof createVaultContext> }>} */
   const sessions = new Map();
   // Reservations close the async gap between the capacity check and the
   // transport's onsessioninitialized callback, so concurrent initializes cannot
@@ -355,13 +397,21 @@ function createMcpServer(opts = {}) {
   let pendingSessions = 0;
 
   /**
-   * Build a fresh MCP Server with the 30 tools wired over a per-session,
-   * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2). One per session:
+   * Build a fresh MCP Server with the 34 tools wired over a per-session,
+   * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2) + the per-session VAULT
+   * CONTEXT (M12 F1 Leg 3). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
    *   - wrapped by scopeEngine(engine, identity, ctx) — admin → unchanged; jar →
    *     a jar-confined façade.
    * getEngine + scopeEngine are called FRESH per callTool inside the registry so a
    * recreated/closed window AND a runtime jars-add are always picked up.
+   *
+   * The four VAULT tools are non-engine-op: they dispatch to `vaultCtx` (the SAME
+   * per-session reference stored in the sessions entry and zeroized in onclose),
+   * through a per-session BOUND adapter that closes over the session IDENTITY + the
+   * fill membership deps (scopeCtx) so the static tool defs need neither. Vault
+   * ops stay in the registry so the audit wrap below records them (they never
+   * bypass registry.callTool).
    *
    * Audit recording (Leg 3 / DD8) is wrapped AROUND registry.callTool HERE — the
    * single choke point — so mcp-tools.js stays audit-free. The sessionId is read
@@ -370,15 +420,29 @@ function createMcpServer(opts = {}) {
    * the ref OBJECT and read `.id` inside the wrapped fn, never capture null at wrap.
    * @param {string} identity  'admin' or a jarId — bound to this session
    * @param {{ id: string|null }} sessionRef  per-session id holder, filled on init
+   * @param {ReturnType<typeof createVaultContext>} vaultCtx  the per-session vault ctx
    * @returns {import('@modelcontextprotocol/sdk/server/index.js').Server}
    */
-  function buildServer(identity, sessionRef) {
+  function buildServer(identity, sessionRef, vaultCtx) {
     const server = new Server(
       { name: SERVER_NAME, version },
       { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS }
     );
+    // Per-session BOUND vault adapter: the four vault tool defs receive THIS as the
+    // 3rd callTool arg. It closes over the session identity + the fill membership
+    // deps (scopeCtx, the same shape vault-context.fill expects) so the static
+    // defs stay identity-free. The RAW vaultCtx (its keys + zeroize) is the shared
+    // reference — stored in the sessions entry and zeroized in transport.onclose.
+    const boundVault = {
+      unlock: (/** @type {string} */ accessKey) => vaultCtx.unlock(identity, accessKey),
+      list: () => vaultCtx.list(),
+      totp: (/** @type {string} */ itemId) => vaultCtx.totp(itemId),
+      fill: (/** @type {{ wcId: number, itemId: string }} */ target) =>
+        vaultCtx.fill(identity, target, scopeCtx || {}),
+    };
     const registry = buildToolRegistry(
-      () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx)
+      () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx),
+      () => boundVault
     );
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: registry.listTools() }));
     server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -693,6 +757,16 @@ function createMcpServer(opts = {}) {
     // shared/module-level ref would be a cross-session bug.
     const sessionRef = { id: /** @type {string|null} */ (null) };
 
+    // Fresh PER-SESSION vault context (M12 F1 Leg 3). Minted BEFORE the transport
+    // (like sessionRef) so the SAME reference threads into buildServer (the tools),
+    // the sessions entry, AND transport.onclose (zeroize). Holds this session's
+    // vault key Buffers; carries NO cross-session state — a fresh ctx per initialize.
+    const vaultCtx = createVaultContext({
+      vaultStore,
+      fillDelegate,
+      getAutoLockMinutes: getVaultAutoLockMinutes,
+    });
+
     // Create a NEW session: fresh transport + Server scoped to this identity,
     // registered on init with the identity BOUND into the entry (DD4 / Leg 2).
     const transport = new StreamableHTTPServerTransport({
@@ -704,12 +778,18 @@ function createMcpServer(opts = {}) {
           hasReservation = false;
         }
         sessionRef.id = sid;
-        sessions.set(sid, { server, transport, identity });
+        // Store the SAME vaultCtx reference the tools use (M12 F1 Leg 3).
+        sessions.set(sid, { server, transport, identity, vaultCtx });
         // Mark the session active (Leg 3 / DD8) — fires the broadcast.
         auditLog.noteSessionOpen(sid, identity);
       },
     });
     transport.onclose = () => {
+      // Session-scoped zeroization (M12 F1 Leg 3): .fill(0) + clear this session's
+      // vault key Buffers BEFORE eviction. The SAME reference the tools used, so a
+      // fresh session must vaultUnlock again. Idempotent (also fired by the idle
+      // backstop), so a double-teardown is a clean no-op.
+      try { vaultCtx.zeroize(); } catch { /* already zeroized */ }
       if (transport.sessionId) {
         sessions.delete(transport.sessionId);
         // Close-tracking is wired into onclose ONLY (stop() cascades through here),
@@ -717,7 +797,7 @@ function createMcpServer(opts = {}) {
         auditLog.noteSessionClose(transport.sessionId);
       }
     };
-    const server = buildServer(identity, sessionRef);
+    const server = buildServer(identity, sessionRef, vaultCtx);
     try {
       await server.connect(transport);
       // Pass the already-parsed body so the SDK does not try to re-read the stream.

@@ -100,13 +100,21 @@ let codec = { serialize: defaultSerialize, deserialize: defaultDeserialize };
 
 // Reserved identities (DD4): burner-tab ids are minted as `burner-<n>`, while
 // admin/internal/default have privileged or built-in meanings outside user jars.
+// `global` is reserved for the vault-store's manager-wide global vault (M12 F1):
+// vault-store._resolveTarget treats the literal id `global` as a hard sentinel for
+// that shared vault, so a container minting id `global` (slug('Global') === 'global')
+// would alias every jar-scoped vault op onto the manager-wide vault — a per-jar
+// access key would then unlock the shared global vault (cross-vault escalation).
+// Reserving it here means slug()/add() remap it to `jar-global` and validateContainers
+// remaps any pre-existing `global` entry, so no container id can ever collide.
 function isReservedId(id) {
   return (
     id === 'burner' ||
     id.startsWith('burner-') ||
     id === 'admin' ||
     id === 'internal' ||
-    id === 'default'
+    id === 'default' ||
+    id === 'global'
   );
 }
 

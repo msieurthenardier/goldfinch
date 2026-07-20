@@ -79,7 +79,11 @@ export default [
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
   {
-    files: ['src/preload/webview-preload.js'], // runs in page main world: node (ipcRenderer) AND DOM
+    // webview-preload.js runs in the page main world (node ipcRenderer AND DOM);
+    // vault-fill-fields.js is its pure, testable field-selection/fill core (M12 F1
+    // Leg 4) — same main-world context (uses window/document/Event), CJS-required
+    // by the preload, so it carries the identical globals.
+    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },

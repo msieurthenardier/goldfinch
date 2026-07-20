@@ -8,6 +8,7 @@
 // WebContentsView, not a <webview> element.)
 
 const { ipcRenderer } = require('electron');
+const { fillLoginForm } = require('./vault-fill-fields');
 
 function absUrl(src) {
   if (!src) return null;
@@ -204,6 +205,14 @@ if (document.documentElement) {
 
 // Allow the UI to force a refresh.
 ipcRenderer.on('rescan-media', () => send());
+
+// Vault fill (M12 F1 Leg 4): the main→preload credential-injection channel. The
+// resolved credential arrives ONLY here (never over the MCP wire) and is filled
+// into the TOP-FRAME login form; fillLoginForm guards `window.top === window`
+// and webContents.send targets the main frame, so a cross-origin iframe is never
+// filled. page JS cannot register a rogue 'vault-fill' listener — the guest runs
+// nodeIntegration:false, so it has no ipcRenderer (DD7).
+ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred));
 
 // ---------------------------------------------------------------------------
 // Privacy: fingerprinting detection. The webview runs this preload in the
