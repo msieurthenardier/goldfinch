@@ -281,6 +281,12 @@ Resolved at the owning flight, not blocking mission approval:
       exported vault key under fresh master/recovery envelopes at export time**, so the
       "imports on a fresh profile and unlocks with the master password or recovery key"
       criterion still holds. No network egress; still file-based. See Flight 1 log Decisions.
+- [ ] **Audit trail records the vault *event* but not the *origin*** — discovered in Flight 1
+      (debrief), affects the MCP-wire criterion + F2/F3. `deriveAuditDetail` is args-only, but the
+      resolved fill origin lives in the tool result, so `vaultFill`/`vaultTotp` audit `item=<id>` only
+      and `vaultUnlock`/`vaultList` derive a null origin. Every unlock/fill/TOTP *event* is audited
+      (that criterion holds), but the intended origin-in-audit does not. Fix needs a **result-aware
+      detail hook**, not the args-only seam — or a deliberate decision to accept event-only auditing.
 
 ## Flights
 
