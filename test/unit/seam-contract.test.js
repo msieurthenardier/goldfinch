@@ -7,9 +7,11 @@
 // (sheet state-drivers) — both paths only work if the named function is
 // republished on globalThis by the seam block at the tail of
 // src/renderer/renderer.js (see CLAUDE.md "Renderer evaluate-seam closed-set
-// rule"). The seam is a CLOSED SET of exactly 19 FD-approved entries (M09
+// rule"). The seam is a CLOSED SET of exactly 21 FD-approved entries (M09
 // Flight 5 Leg 1 added openTabContextMenuForAudit for the sheet:tab-context
-// a11y state — see the flight's Checkpoints).
+// a11y state; M11 Flight 1 Leg 3 added showDownloadsIndicatorForAudit +
+// openDownloadsOverlayForAudit for the downloads-button + sheet:downloads
+// a11y states — see the respective flights' Checkpoints).
 //
 // This test statically parses BOTH files as text — no boot, no vm execution
 // — and asserts every audit-driven identifier is present in the seam, so a
@@ -35,7 +37,8 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
 // closed-set rule"). Growing the seam requires an FD ruling AND this
 // constant's update — enforcement by design (AC4).
-const SEAM_COUNT = 19;
+const SEAM_COUNT = 21;
+const RENDERER_LINE_BUDGET = 1200;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
@@ -70,6 +73,12 @@ function extractSeamIdentifiers(rendererSource) {
   }
   return identifiers;
 }
+
+test('renderer.js remains a thin composition root within its 1,200-line budget', () => {
+  const source = fs.readFileSync(RENDERER_JS, 'utf8');
+  const lines = source.split(/\r?\n/).length;
+  assert.ok(lines <= RENDERER_LINE_BUDGET, `renderer.js has ${lines} lines; budget is ${RENDERER_LINE_BUDGET}`);
+});
 
 // ---------------------------------------------------------------------------
 // Audit extraction, two-tier (AC3, pure in-file):

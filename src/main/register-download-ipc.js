@@ -1,6 +1,7 @@
 'use strict';
 
 const DOWNLOADS_ACTIONS = new Set(['pause', 'resume', 'cancel', 'remove', 'retry', 'open', 'show']);
+const INDICATOR_RECENT_CAP = 25;
 
 function registerDownloadIpc({
   ipcMain,
@@ -81,6 +82,59 @@ function registerDownloadIpc({
     if (savePath) shell.showItemInFolder(savePath);
   });
 
+  // Chrome-trust file actions (M11 F1 Leg 1, DD4): resolve savePath MAIN-SIDE by
+  // numeric id — never trust a renderer-supplied path. Shared with the internal
+  // downloads-action open/show bodies via resolveDownloadRecord below.
+  function resolveDownloadRecord(id) {
+    if (typeof id !== 'number') return null;
+    const manager = getDownloadsManager();
+    if (!manager) return null;
+    return manager.listAll().find((entry) => entry.id === id) || null;
+  }
+
+  // One-shot chrome bootstrap for newly created windows. The live feed remains
+  // download-progress/download-done; this read only closes the event-history gap
+  // before a new chrome renderer subscribed. Paths and URLs stay main-side.
+  ipcMain.handle('downloads-snapshot', (event) => {
+    if (!registry.getWindowForChrome(event.sender)) return [];
+    const records = getDownloadsManager()?.listAll() || [];
+    const rows = records
+      .filter((entry) => entry && typeof entry.id === 'number')
+      .map((entry) => ({
+        id: entry.id,
+        filename: entry.filename,
+        state: entry.state,
+        received: entry.received,
+        total: entry.total,
+        paused: entry.paused,
+        endTime: entry.endTime ?? null,
+        active: entry.endTime == null
+      }));
+    const active = rows.filter((entry) => entry.active);
+    const recent = rows
+      .filter((entry) => !entry.active && entry.state === 'completed' && typeof entry.endTime === 'number')
+      .sort((a, b) => b.endTime - a.endTime)
+      .slice(0, INDICATOR_RECENT_CAP);
+    return [...active, ...recent];
+  });
+
+  ipcMain.handle('open-downloaded-file', (_event, id) => {
+    const record = resolveDownloadRecord(id);
+    // Completion gate is the trust-boundary enforcement of "never openable until
+    // complete": an in-flight record already carries a savePath, so opening by id
+    // must confirm completion or it would launch a partially-written file.
+    if (!record || record.state !== 'completed' || !record.savePath) return { ok: false };
+    return Promise.resolve(shell.openPath(record.savePath))
+      .then((error) => ({ ok: !error, error: error || undefined }));
+  });
+
+  ipcMain.handle('reveal-downloaded-file', (_event, id) => {
+    const record = resolveDownloadRecord(id);
+    if (!record || !record.savePath) return { ok: false };
+    shell.showItemInFolder(record.savePath);
+    return { ok: true };
+  });
+
   function wireDownloadHandler(sess) {
     if (sess.__goldfinchDownloads) return;
     sess.__goldfinchDownloads = true;
@@ -128,7 +182,7 @@ function registerDownloadIpc({
     const action = payload && payload.action;
     const manager = getDownloadsManager();
     if (typeof id !== 'number' || !DOWNLOADS_ACTIONS.has(action) || !manager) return { ok: false };
-    const record = manager.listAll().find((entry) => entry.id === id);
+    const record = resolveDownloadRecord(id);
 
     if (action === 'pause' || action === 'resume' || action === 'cancel') {
       const item = liveDownloadItems.get(id);

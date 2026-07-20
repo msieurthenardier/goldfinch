@@ -326,3 +326,162 @@ body {
   font-size: 12px;
   padding: 7px 8px;
 }
+
+/* ---------- downloads template (M11 Flight 1 Leg 3) ----------
+   Live popup, one .dl-row per current/recent download: COMPLETED rows
+   = filename-open button + folder-reveal button; IN-PROGRESS rows = filename text
+   + progress (no buttons). A persistent footer button opens the downloads page.
+   role="dialog" panel — same chrome as #sheet-popup (this document does not load
+   styles.css). Positioned inline from the translated right-aligned anchor. */
+#sheet-downloads {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 260px;
+  max-width: 380px;
+  max-height: calc(100vh - 8px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+#sheet-downloads:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dl-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dl-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.dl-row:hover {
+  background: var(--bg-2);
+}
+/* Filename — button (completed) or span (in-progress); ellipsis for long/RTL names. */
+.dl-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  color: var(--fg);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.dl-name {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+}
+button.dl-name:hover {
+  text-decoration: underline;
+}
+button.dl-name:focus-visible,
+.dl-folder:focus-visible,
+.dl-footer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dl-folder {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  padding: 3px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.dl-folder:hover {
+  background: var(--bg);
+  color: var(--fg);
+}
+.dl-progress {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* Live-updating progress bar (Leg 4, HAT). Decorative only — aria-hidden on the
+   element (.dl-progress's WORDS are the AT-facing state carrier, per DD5's
+   words-not-color-alone rule; a live progressbar role in a dialog would be
+   chatty). Known received/total sets the inner span's width directly (updated
+   in place on repaint, see menu-overlay.js's updateDownloads). Unknown/zero
+   total gets .dl-bar-indeterminate — a sweeping fill via keyframe animation,
+   fully behind the reduced-motion query below. Paused freezes for free (the
+   received/total pair stops changing), plus .dl-bar-paused halts the
+   indeterminate sweep so a paused+unknown-total row doesn't keep animating as
+   if still downloading. */
+.dl-bar {
+  flex: 0 0 46px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.dl-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s linear;
+}
+.dl-bar-indeterminate > span {
+  width: 40% !important;
+  animation: dl-bar-sweep 1.2s ease-in-out infinite;
+}
+.dl-bar-indeterminate.dl-bar-paused > span {
+  animation-play-state: paused;
+}
+@keyframes dl-bar-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dl-bar > span {
+    transition: none;
+  }
+  .dl-bar-indeterminate > span {
+    animation: none;
+    width: 40% !important;
+  }
+}
+.dl-footer {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+.dl-footer:hover {
+  background: var(--bg);
+}

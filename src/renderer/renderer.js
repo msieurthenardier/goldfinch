@@ -21,6 +21,7 @@ import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's re
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
+import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
 import { createMediaController } from './chrome/media-controller.js';
 import { createNavigationController } from './chrome/navigation-controller.js';
@@ -164,22 +165,7 @@ function createContainerAndOpenTab(rawName) { return pageActions.createContainer
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with six static role="menuitem" items
-// (New window, Settings, Downloads, Cookie jars, Print…, Exit) + roving tabindex
-// + arrow-nav. Count and order track `kebabModel` below — the single source of
-// truth; if you add an item there, this line is stale until you edit it too.
-//
-// All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
-// chrome keeps the trigger, open stimuli, model building, and action execution;
-// the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
-// freeze-frame apparatus were retired at the Leg-5 cutover.
-
-// The kebab item actions, extracted into NAMED functions consumed by the
-// sheet's channel-6 activation — one source of truth (Exit is verified by this
-// shared body, never activated live).
-// New Window (M09 F6 Leg 4, DD5): the same body Ctrl/Cmd+N dispatches through
-// dispatchChromeAction('new-window') — main creates the window; its chrome
-// document boots a home tab normally (window-boot-config bootTab:true).
+// Named action bodies are shared by sheet activation and keyboard shortcuts.
 function kebabActionNewWindow() {
   window.goldfinch.windowCreate();
 }
@@ -209,11 +195,16 @@ const KEBAB_ACTIONS = {
   exit: kebabActionExit
 };
 
-/* ---- kebab (and every menu below) over the menu-overlay sheet (DD4 protocol) ---- */
+let overlayMenuClient;
+const downloadsController = createDownloadsController({
+  els, goldfinch: window.goldfinch, openDownloadsPage: openDownloads, rightSheetAnchor,
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args),
+  closeOverlayMenu: (reason) => overlayMenuClient.close(reason),
+  triggerOverlayMenu: (menuType, open) => overlayMenuClient.trigger(menuType, open)
+});
+const { showDownloadsIndicatorForAudit, openDownloadsOverlayForAudit } = downloadsController;
 
-// Chrome-minted monotonic open-token, carried in channel 1 and echoed in
-// channels 4/5/7 — the stale-close discipline (round-2 design lock). Shared
-// across menu types (all five surfaces mint from the same counter).
+/* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
 const overlayMenus = {
   kebab: fixedTriggerMenu(() => els.kebab),
   container: fixedTriggerMenu(() => els.newTabMenu),
@@ -243,13 +234,16 @@ const overlayMenus = {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
     refocus() {}
-  }
+  },
+  downloads: downloadsController.overlayState
 };
-const overlayMenuClient = createOverlayMenus({
+overlayMenuClient = createOverlayMenus({
   bridge: window.goldfinch,
   states: overlayMenus,
   now: () => performance.now(),
-  onActivated: dispatchOverlayActivation,
+  onActivated: (payload) => {
+    if (!downloadsController.handleActivation(payload)) dispatchOverlayActivation(payload);
+  },
   onClosed: handleOverlayClosed
 });
 
@@ -1165,14 +1159,16 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 19-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 21-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 19 is
+// do not grow it without an FD ruling — an evaluate caller outside these 21 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
-// the flight's Checkpoints.)
+// the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
+// showDownloadsIndicatorForAudit + openDownloadsOverlayForAudit for the new
+// downloads-button + sheet:downloads a11y states.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1195,5 +1191,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openSiteInfoOverlay,
   openNewContainerOverlay,
   openPageContextMenuForAudit,
-  openTabContextMenuForAudit // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  openTabContextMenuForAudit, // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  showDownloadsIndicatorForAudit, // M11 F1 Leg 3 — chrome state 'downloads-button' (FD-ruled addition)
+  openDownloadsOverlayForAudit // M11 F1 Leg 3 — SHEET_STATES 'sheet:downloads' (FD-ruled addition)
 });
