@@ -1,6 +1,6 @@
 # Mission: Top-Bar Download Visibility
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 

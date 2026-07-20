@@ -1,6 +1,6 @@
 # Flight: Top-Bar Download Indicator + Downloads Popup
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Top-Bar Download Visibility](../../mission.md)
 
 ## Contributing to Criteria
