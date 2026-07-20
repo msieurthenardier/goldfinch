@@ -423,7 +423,30 @@ _(unexpected issues — append during execution)_
 
 _(chronological notes from work sessions)_
 
-### Behavior-test live-run — outcome (2026-07-20): harness fixed + committed; in-session run blocked on MCP identity wiring
+### Behavior-test — LIVE partial verification PASSED (2026-07-20, after operator wired the MCP)
+
+The operator reconfigured the `goldfinch-development` MCP server (a **work**-jar key) onto the running
+dev build (49707) and green-lit provisioning the throwaway dev instance. I drove the surface live and
+**verified the load-bearing assertions against the real app** — run log:
+`tests/behavior/vault-mcp-surface/runs/2026-07-20-22-12-31.md`. Provisioned a `work` vault into the
+running profile (the access-key unlock path reads `.gfvault` fresh → no restart needed). Results:
+- **Step 1 `vaultUnlock`** (work per-jar secret) → `{"unlocked":["work"]}` — scoped to own vault. PASS
+- **Step 2 `vaultList`** → metadata only, no password/TOTP secret. PASS
+- **Steps 3–5 (load-bearing): `vaultFill` filled the real top-frame form** with the correct credential,
+  `{"filled":true}` carried **no password**, and the live DOM showed the password populated + form not
+  submitted. PASS — this is the one thing only a live run can prove.
+- **Step 6 `vaultTotp`** → `985630`, **exact match** to an independent RFC 6238 reference. PASS
+- **Step 8 (load-bearing): file-level absent-envelope scope** — the work access keyId is absent from
+  `global.gfvault`; MRK model confirmed on disk (`manager.json` mrk under master/recovery/admin). PASS
+- Steps 7 (second-jar sibling) + 9 (admin audit via getChromeTarget) NOT run — need a second-jar /
+  admin transport identity the single work-jar connection can't present (covered by unit tests + step 8).
+  Step 10 (teardown re-lock) observed incidentally (an MCP disconnect forced a re-unlock).
+
+**Method caveat:** this was Flight-Director-direct (executor+judge), NOT the two-agent Witnessed pattern
+— a strong live smoke verification, not the canonical run. The Witnessed `/behavior-test` (independent
+Validator + admin/sibling steps) remains an operator follow-up, but the core behavior is now proven live.
+
+### Behavior-test live-run — earlier outcome (2026-07-20): harness fixed + committed; in-session run initially blocked on MCP identity wiring
 
 Operator authorized "fix the gap + retry live." Outcome of the genuine attempt:
 - **Environment IS capable** (WSLg `DISPLAY=:0` + Wayland). Operator's real 968M dev profile
