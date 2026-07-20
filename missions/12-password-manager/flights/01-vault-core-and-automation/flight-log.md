@@ -423,6 +423,20 @@ _(unexpected issues — append during execution)_
 
 _(chronological notes from work sessions)_
 
+### Behavior-test live-run attempt (2026-07-20) — blocked on a fixture-harness gap
+
+Operator authorized attempting the `vault-mcp-surface` behavior test live in-session. Environment
+IS capable: WSLg gives `DISPLAY=:0` + Wayland (dev-launch handles the WSLg quirk), dev profile
+`~/.config/goldfinch-dev/vaults/` is clean. **Blocker found (a real gap, not an env limit):** the
+Leg-4 fixture builder stages vault *files* for `jar-a`/`jar-b` (via an injected `listJars`) but does
+NOT register those jars in the app's jar registry (`jars.js` / the `jars` app.db document). The
+behavior test step 1 needs a per-jar **transport** key, and `mintJarKey` only mints for a jarId in
+`jars.list()` — so the running app never recognizes `jar-a`/`jar-b`, and the jar-scoped steps can't
+run. The vault side and the jar-registry side are uncoupled. **Fix needed before ANY run (mine or
+operator's):** the fixture builder must also register its fixture jars in the jar registry (or the
+test must target the app's real default jar + a genuinely-created jar). Recorded as a behavior-test
+execution prerequisite; the flight stays in-flight until resolved + the test passes.
+
 ### Flight Director — flight-end review & commit disposition (2026-07-20)
 
 Independent flight-end review (Sonnet) over all four legs' diff confirmed crypto correctness,
@@ -487,3 +501,27 @@ spaces can diverge safely later.
 clean. Reviewer PoC path confirmed closed: a jar named "Global" can no longer be created
 (`isReservedId`), and a `listJars()` entry with id `global` can no longer reach the manager-wide
 vault via the jar path.
+
+### Fixture-builder enhancement (2026-07-20) — closes the behavior-test harness gap
+
+Rewrote `tests/behavior/fixtures/vault-login/build-fixtures.mjs` to FULLY provision a fresh userData
+profile so `npm run dev:automation` launched against it is immediately drivable by the
+`vault-mcp-surface` behavior test with **no UI / manual minting** — closing the blocker recorded
+above. The builder now (1) opens `app.db` and registers two real jars (`jars.add('Jar A')` /
+`jars.add('Jar B')`, reading the real minted ids — `jar-a`/`jar-b` — back from `jars.list()`); (2)
+stages the vault set as before but injecting the LIVE `jars.list()` and using the real ids; and (3)
+provisions the automation **transport** keys via `settings-store` — a per-jar key + an admin key,
+persisted as `automationKeyHashes` / `automationAdminKeyHash`, with `automationEnabled:true` — so the
+running app's MCP auth gate accepts the pre-known bearer tokens directly. Emitted JSON reshaped to
+`{ jarIds, jarTransportKeys, adminTransportKey, jarAccessSecrets, jarAccessKeyIds,
+adminVaultPrivateKeyB64, recoveryKeyDisplay, fixtureOrigin, masterPassword }` (`a`/`b` keyed). README
++ spec preconditions reconciled to the automated provisioning (no settings-UI minting step).
+
+No app source changed — only the fixture builder + its docs. **Verification (headless):** builder
+exits 0 and prints the JSON; a check script against a throwaway profile confirms `jars.load` shows
+the default + both fixture jars, `settings-store.load` shows `automationEnabled` + all three key
+hashes, all four vault files exist, each jar's emitted access secret unlocks + reads its vault (and a
+jar secret opens NEITHER a sibling jar NOR global — scope intact), and no plaintext
+secret/password/TOTP-seed appears in the vault files or `app.db` (grep). `npm run typecheck` + `npm
+run lint` clean; `vault-store.test.js` 20/20 (no store regression). The live GUI acceptance run
+remains the operator's gate.

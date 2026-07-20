@@ -5,11 +5,16 @@ the fill-only MCP vault surface end-to-end.
 
 ## Contents
 
-- **`build-fixtures.mjs`** — headless vault-fixture builder. Drives the
-  Electron-free `vault-store` API to stage a manager + global vault + two jar
-  vaults (`jar-a`, `jar-b`), each seeded with a Login item for the fixture origin
-  (jar-a's login carries a TOTP secret), and mints a per-jar access key for each
-  jar.
+- **`build-fixtures.mjs`** — headless fixture builder that **fully provisions a
+  fresh userData profile** so `npm run dev:automation` launched against it is
+  immediately drivable by the test with **no UI / manual minting**. It:
+  1. Registers two real jars (**Jar A** / **Jar B**) in the jar registry (`app.db`).
+  2. Stages a vault manager + global vault + one vault per jar, each seeded with a
+     Login item for the fixture origin (Jar A's login carries a TOTP secret), and
+     mints a per-jar vault **access key** for each jar.
+  3. Provisions the automation **transport keys** (a per-jar key + an admin key)
+     as `settings-store` hashes and flips `automationEnabled` on — so the running
+     app's MCP auth gate accepts the pre-known bearer tokens directly.
 - **`index.html`** — the static login page (username + `type=password` fields)
   the test navigates to and asserts `vaultFill` populates.
 
@@ -19,23 +24,37 @@ the fill-only MCP vault surface end-to-end.
 node tests/behavior/fixtures/vault-login/build-fixtures.mjs <userDataDir>
 ```
 
-`<userDataDir>` is Goldfinch's userData directory — the store writes under
+`<userDataDir>` is Goldfinch's userData directory — the jar registry + settings
+persist to `<userDataDir>/app.db` and the vault files under
 `<userDataDir>/vaults/`. Use a **fresh/empty** dir (the builder mints a new
 manager; it refuses an already-set-up dir). It prints a JSON blob to stdout:
 
 ```json
 {
-  "jarKeyIds":        { "jar-a": "...", "jar-b": "..." },
-  "jarAccessSecrets": { "jar-a": "...", "jar-b": "..." },
-  "adminPrivateKeyB64": "...",
+  "jarIds":            { "a": "jar-a", "b": "jar-b" },
+  "jarTransportKeys":  { "a": "...", "b": "..." },
+  "adminTransportKey": "...",
+  "jarAccessSecrets":  { "a": "...", "b": "..." },
+  "jarAccessKeyIds":   { "a": "...", "b": "..." },
+  "adminVaultPrivateKeyB64": "...",
   "recoveryKeyDisplay": "...",
-  "fixtureOrigin": "http://127.0.0.1:8099"
+  "fixtureOrigin": "http://127.0.0.1:8099",
+  "masterPassword": "..."
 }
 ```
 
-Capture these for the run — the access secrets, admin private key, and recovery
-key are returned **exactly once** and are never persisted in plaintext. `jarKeyIds`
-are the per-envelope key-ids the filesystem step (step 8) enumerates.
+Capture these for the run — the transport keys, vault access secrets, admin
+vault private key, recovery key, and master password are returned **exactly
+once**; the transport keys and vault access secrets live on disk only as
+hashes / wrapped envelopes, never in plaintext. Wiring for the run:
+
+- **`jarTransportKeys.a`** → `GOLDFINCH_MCP_KEY` (the per-jar bearer token for the
+  test-jar MCP session); **`adminTransportKey`** → `GOLDFINCH_MCP_ADMIN_KEY`.
+- **`jarAccessSecrets.a` / `.b`** are the per-jar vault access secrets presented to
+  `vaultUnlock`; **`jarAccessKeyIds`** are the per-envelope key-ids the filesystem
+  step (step 8) enumerates; **`adminVaultPrivateKeyB64`** is the admin vault-unlock
+  key for the admin variant.
+- The admin variant also needs `GOLDFINCH_AUTOMATION_ADMIN` set in the app's env.
 
 ## Serve the login page
 

@@ -20,20 +20,24 @@ scope property — none of which a unit test can observe.
 
 ## Preconditions
 
-- Goldfinch is running with the automation surface enabled (`npm run dev:automation`),
-  loopback MCP on port 49707.
-- The operator has exported, for the run: an **admin** transport key (`GOLDFINCH_MCP_ADMIN_KEY`)
-  and a **per-jar** transport key (`GOLDFINCH_MCP_KEY`) for a designated test jar, per the
-  ATTACH model the a11y harness uses.
-- A **fixture vault set** exists on disk under `userData/vaults/`: a global vault and the
-  test jar's vault, each set up (master password known to the fixture), each seeded with at
-  least one Login item for the fixture origin (one carrying a TOTP secret). These are built
-  by the **headless vault-fixture builder** — a node script driving the `vault-store` API,
-  since no UI exists yet (DD9). A **per-jar vault access key** for the test jar and one for
-  a *second* jar are minted by that builder and their plaintext captured for the run.
+- The **headless fixture builder** (`tests/behavior/fixtures/vault-login/build-fixtures.mjs`)
+  has been run against a fresh userData profile. Since no vault UI exists yet (DD9), it
+  fully provisions that profile so the app is drivable with **no UI / manual minting**:
+  it registers two jars (a designated **test jar** + a *second* jar) in the jar registry,
+  stages a global vault and each jar's vault (master password known to the fixture; each
+  seeded with a Login item for the fixture origin, the test jar's carrying a TOTP secret),
+  mints a per-jar **vault access key** per jar, and provisions the automation **transport
+  keys** (a per-jar key + an admin key) directly into settings with `automationEnabled`
+  on — so no settings-UI minting step is needed. It emits all run secrets to stdout once.
+- Goldfinch is launched against that profile with the automation surface enabled
+  (`npm run dev:automation`), loopback MCP on port 49707.
+- The operator has exported, from the builder's emitted JSON: the test jar's **per-jar**
+  transport key (`jarTransportKeys.a` → `GOLDFINCH_MCP_KEY`) and the **admin** transport key
+  (`adminTransportKey` → `GOLDFINCH_MCP_ADMIN_KEY`), per the ATTACH model the a11y harness
+  uses, plus the per-jar vault access secrets (`jarAccessSecrets`).
 - For the audit assertion (step 9) and the admin variant: `GOLDFINCH_AUTOMATION_ADMIN` is
-  set and an **admin transport key** is minted (`mintAdminKey` returns null otherwise),
-  plus the admin vault access key.
+  set in the app's env (the admin transport key is inert otherwise), plus the admin vault
+  private key (`adminVaultPrivateKeyB64`) for the admin vault-unlock path.
 - A **login-form fixture page** is reachable at a stable local origin: a page with a
   username input and a `type=password` input, at the origin the seeded Login item matches.
 - The operator can read files under `userData/vaults/` (filesystem apparatus).
