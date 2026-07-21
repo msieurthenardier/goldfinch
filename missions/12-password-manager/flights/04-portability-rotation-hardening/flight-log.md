@@ -9,9 +9,10 @@ Flight 4 of Mission 12 — the crypto-risk cluster split from the original F3 (o
 from-scratch admin provision, the registrable-domain PSL fill opt-in, the audit-origin fix, the
 jar-delete→vault-removal hook, and the docs/threat-model page.
 
-Status: **landed** — all 7 legs completed; whole-diff flight-end review CLEAN (`[HANDOFF:confirmed]`,
-2638 tests / 0 fail, typecheck + lint clean); committed `cf31cc3`; draft PR #111 (stacked on flight/03).
-Debrief pending. **Operator pre-approved "design + implement F4."** Executed leg-by-leg.
+Status: **completed** — all 7 legs completed; whole-diff flight-end review CLEAN (`[HANDOFF:confirmed]`,
+2638 tests / 0 fail, typecheck + lint clean); committed `cf31cc3`; draft PR #111 (stacked on flight/03);
+debrief written (`2a981d8`); **operator go/no-go PASSED 2026-07-21 — marked completed.** Executed
+leg-by-leg under the pre-approved "design + implement F4."
 
 **Branch**: `flight/04-portability-rotation-hardening`, **stacked on `flight/03-...`** (F1–F3 unmerged;
 F4 builds on F3's sheet family + F1's crypto). Rebases onto main as the stack merges.
