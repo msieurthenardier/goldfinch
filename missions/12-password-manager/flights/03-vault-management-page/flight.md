@@ -1,6 +1,6 @@
 # Flight: Vault Management Page
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Built-in Password Manager](../../mission.md)
 
 ## Contributing to Criteria
