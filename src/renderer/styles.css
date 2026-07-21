@@ -1325,6 +1325,33 @@ a:focus-visible {
   }
 }
 
+/* Vault ("lock") indicator (M12 Flight 2 Leg 2 chrome-unlock, DD10). Hidden until
+   the manager is set up (renderer.js toggles .hidden via buildVaultIndicatorModel);
+   then .vault-locked (dim, closed padlock) or .vault-unlocked (accent, open
+   padlock). Two stacked glyphs — exactly one shows per state. Flex-centered like
+   the other toolbar glyph buttons; no badge. */
+#vault-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#vault-indicator .vault-glyph-locked,
+#vault-indicator .vault-glyph-unlocked {
+  display: none;
+}
+#vault-indicator.vault-locked .vault-glyph-locked {
+  display: block;
+}
+#vault-indicator.vault-unlocked .vault-glyph-unlocked {
+  display: block;
+}
+#vault-indicator.vault-locked {
+  color: var(--fg-dim);
+}
+#vault-indicator.vault-unlocked {
+  color: var(--accent);
+}
+
 /* privacy status tones */
 .ps-main.ok {
   color: #6dff8f;

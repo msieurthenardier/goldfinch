@@ -20,5 +20,16 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   platform: process.platform,
   onInit: (cb) => ipcRenderer.on('menu-overlay:init', (_e, d) => cb(d)),
   sendActivated: (payload) => ipcRenderer.send('menu-overlay:activated', payload),
-  sendDismissed: (payload) => ipcRenderer.send('menu-overlay:dismissed', payload)
+  sendDismissed: (payload) => ipcRenderer.send('menu-overlay:dismissed', payload),
+  // DD4 (M12 F2 chrome-unlock): the master password's DEDICATED request/response
+  // secret channel. `secret` is a Uint8Array — NEVER routed through sendActivated
+  // (channel-4, string-only / 24-char capped). This is the FIRST `invoke` from the
+  // sheet preload (a reviewed upgrade over DD4's literal `send`): the wrong-
+  // password re-prompt needs the { ok } result back to keep the sheet open.
+  unlockVault: (payload) => ipcRenderer.invoke('menu-overlay:vault-unlock', payload),
+  // DD7 (M12 F2 capture-save): the sheet's Save reports the chosen vaultId + the
+  // stashed captureId (+ token). It rides an invoke like unlockVault (the sheet needs
+  // the { saved } result back to re-prompt on a lock race). The CAPTURED PASSWORD is
+  // NEVER on this path — it lives only in the main-side held record, keyed by captureId.
+  captureSave: (payload) => ipcRenderer.invoke('menu-overlay:vault-capture-save', payload)
 });

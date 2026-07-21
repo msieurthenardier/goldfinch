@@ -22,19 +22,15 @@
 const USERNAME_TYPES = new Set(['', 'text', 'email', 'tel']);
 
 /**
- * Locate the login fields on a document-like object. Returns null when there is
- * no password field (nothing to fill); otherwise `{ username, password }` where
- * `username` may be null (a password-only form).
- * @param {any} doc  a `document`-like object exposing querySelectorAll.
- * @returns {{ username: any, password: any } | null}
+ * Resolve one login entry for a given password field: its form (`pw.form`,
+ * fallback `pw.closest('form')`) and the LAST text/email/tel/no-type input that
+ * PRECEDES the password within that form (document order; null for a
+ * password-only / form-less field). Shared by `findLoginFields` (first field)
+ * and `findAllLoginFields` (per field) so the username heuristic is single-sourced.
+ * @param {any} password
+ * @returns {{ username: any, password: any, form: any }}
  */
-function findLoginFields(doc) {
-  const pwList = doc && typeof doc.querySelectorAll === 'function'
-    ? doc.querySelectorAll('input[type=password]')
-    : null;
-  const password = pwList && pwList.length ? pwList[0] : null;
-  if (!password) return null;
-
+function resolveLoginEntry(password) {
   const form = password.form
     || (typeof password.closest === 'function' ? password.closest('form') : null);
 
@@ -49,7 +45,45 @@ function findLoginFields(doc) {
       if (USERNAME_TYPES.has(type)) username = input;
     }
   }
+  return { username, password, form };
+}
+
+/**
+ * Locate the login fields on a document-like object. Returns null when there is
+ * no password field (nothing to fill); otherwise `{ username, password }` where
+ * `username` may be null (a password-only form). CONTRACT UNCHANGED (fill path):
+ * still the FIRST `input[type=password]`, shape `{ username, password }`.
+ * @param {any} doc  a `document`-like object exposing querySelectorAll.
+ * @returns {{ username: any, password: any } | null}
+ */
+function findLoginFields(doc) {
+  const pwList = doc && typeof doc.querySelectorAll === 'function'
+    ? doc.querySelectorAll('input[type=password]')
+    : null;
+  const password = pwList && pwList.length ? pwList[0] : null;
+  if (!password) return null;
+
+  const { username } = resolveLoginEntry(password);
   return { username, password };
+}
+
+/**
+ * Enumerate EVERY `input[type=password]` in the document (document order),
+ * returning one `{ username, password, form }` entry per field — the per-form
+ * lock-icon path needs all password fields, not just the first (M12 F2 Leg 1,
+ * DD2). `username` may be null (password-only / form-less); `form` may be null
+ * (a password field outside any `<form>`). Returns `[]` when there is no
+ * password field. Pure: reads only the passed `doc` (no `window`/DOM globals),
+ * so it stays `node --test`-importable alongside `findLoginFields`.
+ * @param {any} doc  a `document`-like object exposing querySelectorAll.
+ * @returns {Array<{ username: any, password: any, form: any }>}
+ */
+function findAllLoginFields(doc) {
+  const pwList = doc && typeof doc.querySelectorAll === 'function'
+    ? doc.querySelectorAll('input[type=password]')
+    : null;
+  if (!pwList || !pwList.length) return [];
+  return Array.from(pwList).map((pw) => resolveLoginEntry(pw));
 }
 
 /**
@@ -88,4 +122,4 @@ function fillLoginForm(doc, cred) {
   return { filled: true };
 }
 
-module.exports = { findLoginFields, fillLoginForm };
+module.exports = { findLoginFields, findAllLoginFields, fillLoginForm };

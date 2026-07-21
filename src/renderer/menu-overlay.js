@@ -45,6 +45,9 @@
 // isSafeColor is imported (the SAME color domain the product accepts —
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
+import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
+import { buildVaultPickerCard, renderVaultPickerRows, pickId } from '../shared/vault-picker-template.js';
+import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 
 (() => {
   const root = document.getElementById('menu-root');
@@ -518,15 +521,327 @@ import { isSafeColor } from '../shared/safe-color.js';
     positionNode(suggestionsNode, anchor);
   }
 
+  /* ------------------------------------------------------- template: vault-unlock */
+  // Master-password UNLOCK prompt (M12 Flight 2 Leg 2 chrome-unlock, DD4/DD10) —
+  // a FIFTH template kind, near-cloning input-dialog (a centered backdrop + card,
+  // role="dialog" aria-modal="true", dialog-local Tab-cycle + Escape) but with a
+  // type="password" input, an aria-live error line, and — critically — the secret
+  // leaving via the DEDICATED request/response channel (menuOverlay.unlockVault),
+  // NEVER channel-4 sendActivated (string-only / 24-char capped). The sheet awaits
+  // { ok }: false re-prompts (stays open, shows the error), true closes. The card
+  // DOM is built by the shared, unit-tested buildVaultUnlockCard.
+
+  const vault = buildVaultUnlockCard(document);
+  const vaultNode = vault.node;
+  const vaultInput = vault.input;
+  const vaultError = vault.error;
+  const vaultUnlockBtn = vault.unlock;
+  const vaultCancelBtn = vault.cancel;
+  root.appendChild(vaultNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click) from firing two
+  // invokes; reset on every open.
+  let vaultBusy = false;
+
+  const vaultEntry = menuController.register({
+    trigger: vaultNode,
+    menu: vaultNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    onOpen() {
+      vaultInput.value = '';
+      vaultError.textContent = '';
+      vaultBusy = false;
+      vaultNode.classList.remove('hidden');
+      vaultInput.focus();
+    },
+    onClose() {
+      vaultNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED secret channel. Encode to a Uint8Array (never a JS
+  // string on the wire), invoke, and act on { ok }. The sheet-side copy is
+  // zeroized after the round-trip (main zeroizes its own copy + the transferred
+  // array); the input's V8 string is unscrubbable — an accepted DD4 limitation.
+  async function submitVault() {
+    if (sent || currentToken == null || vaultBusy) return;
+    const value = vaultInput.value;
+    if (!value) {
+      // Empty → inline hint, stay open, no invoke (page-side no-op, like the
+      // input-dialog's whitespace guard).
+      vaultError.textContent = 'Enter your master password';
+      vaultInput.focus();
+      return;
+    }
+    const token = currentToken;
+    const secret = new TextEncoder().encode(value);
+    vaultBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.unlockVault({ token, secret });
+    } catch {
+      // A rejected invoke (e.g. the store isn't set up) degrades to a re-prompt —
+      // never an unhandled rejection / crash (edge case: raising this prompt when
+      // not set up is prevented by the trigger, but the handler must be safe).
+      res = { ok: false };
+    } finally {
+      vaultBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moves
+    // the live token; a late result must not act on the new menu.
+    if (currentToken !== token || sent) return;
+    if (res && res.ok) {
+      sent = true; // suppress the trailing dismissed; main also closes the sheet.
+      menuController.close(vaultEntry);
+    } else {
+      vaultError.textContent = 'Incorrect master password';
+      vaultInput.value = '';
+      vaultInput.focus();
+    }
+  }
+
+  vaultUnlockBtn.addEventListener('click', () => { void submitVault(); });
+  // Cancel is user-explicit like Escape: dismissed{reason:'escape'} → chrome
+  // returns focus to the trigger (wired by the pick-and-fill leg).
+  vaultCancelBtn.addEventListener('click', () => {
+    lastStimulus = 'escape';
+    menuController.close(vaultEntry);
+  });
+  vaultInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVault();
+    }
+  });
+  // Dialog-local keydown: Escape dismisses (escape flavor); Tab/Shift+Tab cycle
+  // the three focusables (input → Unlock → Cancel → input) — a dialog-local trap.
+  // The controller's menu-keydown no-ops (!entry.items), so this listener owns both.
+  vaultNode.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      lastStimulus = 'escape';
+      menuController.close(vaultEntry);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const cycle = [vaultInput, vaultUnlockBtn, vaultCancelBtn];
+      const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
+      const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
+      cycle[n].focus();
+    }
+  });
+  // Backdrop click (outside the card) dismisses — parity with input-dialog.
+  vaultNode.addEventListener('click', (e) => {
+    if (e.target === vaultNode) {
+      lastStimulus = 'outside-click';
+      menuController.close(vaultEntry);
+    }
+  });
+
+  /* ------------------------------------------------------- template: vault-picker */
+  // Human vault picker (M12 Flight 2 Leg 3 pick-and-fill, DD5/DD6) — the DEDICATED
+  // SIXTH template kind (the 'menu' kind renders only a single label + dot + a
+  // hardcoded "Default" badge and cannot express title+username+source-vault rows or
+  // emit a selection value). A centered backdrop + card (role="menu") like
+  // vault-unlock — the gesture carries no anchor. Rows are a roving list via the
+  // shared menu-controller; a click reports the row INDEX as `pick:<i>` (the 'sug:'+i
+  // idiom — non-secret; `id` is not length-capped). An empty model renders a single
+  // non-focusable note "No saved logins for this site". Metadata only — no password.
+
+  const picker = buildVaultPickerCard(document);
+  const pickerNode = picker.node;
+  const pickerCard = picker.card;
+  root.appendChild(pickerNode);
+
+  // The focusable rows for the current render (rebuilt per init) — the controller's
+  // items getter. Empty for the note state, so roving/arrows no-op safely.
+  /** @type {HTMLElement[]} */
+  let pickerRows = [];
+  const pickerItems = () => pickerRows;
+
+  const pickerEntry = menuController.register({
+    // trigger === menu === pickerNode (the backdrop): opens are programmatic (per
+    // init), so the controller skips its trigger-keydown opener — CRITICAL, since an
+    // opener on the same node would fire on the roving list's own Arrow/Enter keys and
+    // closeAll() it mid-navigation. The roving `items` live inside pickerCard; their
+    // keydowns bubble up to pickerNode's menu-keydown listener (the shared APG roving
+    // contract), and pickerCard carries role="menu"/menuitem for a11y. Outside-click
+    // is the local backdrop handler below (the controller's pointerdown sees
+    // pickerNode.contains(target) === true for every in-sheet click — parity with the
+    // input-dialog / vault-unlock backdrops).
+    trigger: pickerNode,
+    menu: pickerNode,
+    items: pickerItems,
+    /** @param {number} [startIndex] */
+    onOpen(startIndex = 0) {
+      pickerNode.classList.remove('hidden');
+      const list = pickerItems();
+      if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
+      else pickerCard.focus(); // empty (note) state — focus the card so Escape/Tab work
+    },
+    onClose() {
+      pickerNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  /** Render the picker rows from the metadata model + wire per-row selection.
+   * @param {any[]} model */
+  function renderPicker(model) {
+    pickerRows = renderVaultPickerRows(document, pickerCard, model);
+    pickerRows.forEach((btn, i) => {
+      btn.addEventListener('click', () => {
+        // Index selection — activation wins over the onClose dismissal (one report
+        // per token). The password is NEVER on this path; `pick:<i>` is an index.
+        if (sendActivatedOnce({ id: pickId(i) })) menuController.close(pickerEntry);
+      });
+    });
+  }
+
+  // Backdrop click (outside the card) dismisses — parity with input-dialog /
+  // vault-unlock (the controller's global pointerdown sees pickerNode.contains(target)
+  // === true for the backdrop, so it can't own this; this local handler does).
+  // Escape/Tab are handled by the shared controller's menu-keydown (items present →
+  // its Escape/Tab branch closes + returns focus; the empty note state has an items
+  // getter returning [], so arrows no-op safely).
+  pickerNode.addEventListener('click', (e) => {
+    if (e.target === pickerNode) {
+      lastStimulus = 'outside-click';
+      menuController.close(pickerEntry);
+    }
+  });
+
+  /* ------------------------------------------------------ template: vault-capture */
+  // Save / update prompt (M12 Flight 2 Leg 4 capture-save, DD7) — the DEDICATED
+  // SEVENTH template kind, a centered backdrop like vault-unlock (the submit carries
+  // no anchor). Shows the origin + username (read-only), a "Save password?" /
+  // "Update password?" heading, and — for a `save` only — a vault radio choice
+  // (default the active jar, "Global" selectable). Save reports the chosen vaultId +
+  // the stashed captureId to main via a DEDICATED invoke (menuOverlay.captureSave);
+  // the CAPTURED PASSWORD is never here — it lives only in the main-side held record.
+
+  const capture = buildVaultCaptureCard(document);
+  const captureNode = capture.node;
+  root.appendChild(captureNode);
+
+  // The captureId of the offer currently rendered (from the init model) + the render's
+  // choice radios. Set on every vault-capture init; the Save invoke carries the id back.
+  /** @type {string | null} */
+  let captureCaptureId = null;
+  /** @type {HTMLInputElement[]} */
+  let captureChoiceInputs = [];
+  // The fixed vaultId a save invoke falls back to (the update path's vault, which main
+  // ignores). Set per-init from the model's defaultVaultId.
+  /** @type {string | undefined} */
+  let captureDefaultVaultId;
+  let captureBusy = false; // guards a concurrent Save (double-Enter / Enter+click).
+
+  const captureEntry = menuController.register({
+    trigger: captureNode,
+    menu: captureNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    onOpen() {
+      captureBusy = false;
+      captureNode.classList.remove('hidden');
+      // Focus the first vault choice on a save, else the Save button (update has none).
+      if (captureChoiceInputs.length) captureChoiceInputs[0].focus();
+      else capture.save.focus();
+    },
+    onClose() {
+      captureNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Save → the DEDICATED captureSave invoke ({ token, captureId, vaultId }). The
+  // vaultId is the checked radio (save) or the fixed default (update — main ignores it,
+  // using the record's fixed vault). NO password on this path. { saved:true } → main
+  // closes the sheet (channel 7 'activated'); { saved:false } → re-prompt with an error
+  // (the held record is dropped on the eventual dismiss / the 2-min timeout).
+  async function submitCapture() {
+    if (sent || currentToken == null || captureBusy || captureCaptureId == null) return;
+    const token = currentToken;
+    const captureId = captureCaptureId;
+    const vaultId = selectedVaultId(captureChoiceInputs) || captureDefaultVaultId;
+    captureBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.captureSave({ token, captureId, vaultId });
+    } catch {
+      res = { saved: false };
+    } finally {
+      captureBusy = false;
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moved the
+    // live token; a late result must not act on the new menu.
+    if (currentToken !== token || sent) return;
+    if (res && res.saved) {
+      sent = true; // suppress the trailing dismissed; main also closes the sheet.
+      menuController.close(captureEntry);
+    } else {
+      capture.error.textContent = res && res.reason === 'locked'
+        ? 'The manager locked — unlock it and try again'
+        : 'Couldn’t save the password';
+    }
+  }
+
+  capture.save.addEventListener('click', () => { void submitCapture(); });
+  capture.cancel.addEventListener('click', () => {
+    lastStimulus = 'escape';
+    menuController.close(captureEntry);
+  });
+  // Dialog-local keydown: Escape dismisses (escape flavor); Tab/Shift+Tab cycle the
+  // focusables (choice radios → Save → Cancel). The controller's menu-keydown no-ops
+  // (!entry.items), so this listener owns both — parity with vault-unlock.
+  captureNode.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      lastStimulus = 'escape';
+      menuController.close(captureEntry);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitCapture();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const cycle = [...captureChoiceInputs, capture.save, capture.cancel];
+      const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
+      const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
+      cycle[n].focus();
+    }
+  });
+  // Backdrop click (outside the card) dismisses — parity with input-dialog / vault-unlock.
+  captureNode.addEventListener('click', (e) => {
+    if (e.target === captureNode) {
+      lastStimulus = 'outside-click';
+      menuController.close(captureEntry);
+    }
+  });
+
+  /** Render the capture card from the offer model + stash the captureId + choices.
+   * @param {any} model */
+  function renderCapture(model) {
+    captureCaptureId = model && typeof model.captureId === 'string' ? model.captureId : null;
+    captureDefaultVaultId = model && model.defaultVaultId;
+    const { choiceInputs } = renderVaultCaptureCard(document, capture, model);
+    captureChoiceInputs = choiceInputs;
+  }
+
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'vault-unlock' | 'vault-picker' | 'vault-capture' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
     'page-context': 'menu', // Leg 4 — point-anchored, separator/note item types
     'site-info': 'info-popup',
     'new-container': 'input-dialog',
+    'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
+    'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
+    'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
     // LOAD-BEARING (M08 Flight 4 DD2): the fallback below (`TEMPLATES[menuType] ||
     // 'menu'`) is the FOCUSING menu template — an unregistered/missing entry here
     // would silently fall into it and break the suggestions template's
@@ -538,7 +853,10 @@ import { isSafeColor } from '../shared/safe-color.js';
     [menuEntry, menuNode],
     [popupEntry, popupNode],
     [dialogEntry, dialogNode],
-    [suggestionsEntry, suggestionsNode]
+    [suggestionsEntry, suggestionsNode],
+    [vaultEntry, vaultNode],
+    [pickerEntry, pickerNode],
+    [captureEntry, captureNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -551,7 +869,7 @@ import { isSafeColor } from '../shared/safe-color.js';
       const cur = menuController.current;
       if (!cur || !NODE_OF_ENTRY.has(cur)) return;
       if (e.key === 'Escape') lastStimulus = 'escape';
-      else if (e.key === 'Tab' && cur === menuEntry) lastStimulus = 'escape';
+      else if (e.key === 'Tab' && (cur === menuEntry || cur === pickerEntry)) lastStimulus = 'escape';
     },
     true
   );
@@ -575,7 +893,11 @@ import { isSafeColor } from '../shared/safe-color.js';
     // emptyNote?}` — DD1). A bare `Array.isArray(model)` guard would reject that
     // object outright and the sheet would silently never render suggestions.
     const template = TEMPLATES[menuType] || 'menu';
-    const modelShapeOk = template === 'suggestions'
+    // `suggestions` and `vault-capture` carry an OBJECT model (the omnibox shape /
+    // the capture offer `{origin, username, mode, defaultVaultId, choices, captureId}`);
+    // every other template carries a flat item array. A bare Array.isArray guard would
+    // reject the object and the sheet would silently never render it.
+    const modelShapeOk = (template === 'suggestions' || template === 'vault-capture')
       ? model && typeof model === 'object' && !Array.isArray(model)
       : Array.isArray(model);
     if (!modelShapeOk) return;
@@ -606,6 +928,25 @@ import { isSafeColor } from '../shared/safe-color.js';
       // Still opened through the shared controller so the global outside-click/
       // blur listeners cover this template uniformly (module header rule).
       menuController.open(suggestionsEntry, 0);
+    } else if (template === 'vault-unlock') {
+      // Fixed layout (password + error + Unlock/Cancel), centered via CSS — the
+      // anchor is ignored, model may be empty. onOpen clears + focuses the input;
+      // it must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultEntry, 0);
+    } else if (template === 'vault-picker') {
+      // Roving list of badged credential rows, centered via CSS — the anchor is
+      // ignored. Build the rows FIRST (the items getter reads them at open), then
+      // open through the controller so roving/outside-click/blur apply uniformly.
+      // An empty model → the non-focusable note; onOpen focuses the card instead.
+      renderPicker(model);
+      menuController.open(pickerEntry, typeof startIndex === 'number' ? startIndex : 0);
+    } else if (template === 'vault-capture') {
+      // Fixed layout (heading + origin/username + optional vault choice + Save/Cancel),
+      // centered via CSS — the anchor is ignored. Render FIRST (stashes captureId +
+      // choices), then open through the controller. onOpen focuses the first choice
+      // (save) or Save (update); it must NOT fall through to the non-focusing fallback.
+      renderCapture(model);
+      menuController.open(captureEntry, 0);
     } else {
       // input-dialog: fixed layout, model may be empty; centered via CSS —
       // the anchor is deliberately ignored.

@@ -346,6 +346,19 @@ interface GoldfinchBridge {
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
+  onVaultGesture(cb: (d: { wcId: number }) => void): void;
+  // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): subscribe + init-time fetch.
+  onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): void;
+  getVaultLockState(): Promise<{ setUp: boolean; unlocked: boolean }>;
+  // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
+  // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
+  // a password — it is resolved and sent to the guest ONLY in main.
+  vaultReachableItems(wcId: number): Promise<Array<{ vaultId: string; id: string; title: string | null; origin: string | null; username: string | null; hasTotp: boolean }>>;
+  vaultFillHuman(payload: { wcId: number; vaultId: string; itemId: string }): Promise<{ filled: boolean; reason?: string }>;
+  // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
+  // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.
+  onVaultCaptureOffer(cb: (d: { captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update'; defaultVaultId: string; choices: string[] } }) => void): void;
+  vaultCaptureDismiss(captureId: string): Promise<void>;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 

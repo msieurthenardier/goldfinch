@@ -273,6 +273,30 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3): main forwards a TRUSTED lock-icon
+  // click as { wcId } (the trusted, main-derived tab id) — carries no secret.
+  // The pick-and-fill leg's consumer raises the chrome-owned unlock/pick prompt.
+  onVaultGesture: (cb) => ipcRenderer.on('vault-gesture', (_e, d) => cb(d)),
+  // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): the toolbar lock
+  // indicator subscribes to every transition push, then fetches the initial
+  // state once. Payload `{ setUp, unlocked }` — non-secret projection of the
+  // vault-store's MRK-present state.
+  onVaultLockState: (cb) => ipcRenderer.on('vault-lock-state', (_e, d) => cb(d)),
+  getVaultLockState: () => ipcRenderer.invoke('vault-lock-state-get'),
+  // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the picker's reachable-items read
+  // (metadata only — never a password) and the human fill dispatch (returns
+  // { filled, reason? } — the password is resolved + sent ONLY in main). Both are
+  // chrome-originated invokes; the wcId is the trusted, main-derived gesture tab id.
+  vaultReachableItems: (wcId) => ipcRenderer.invoke('vault-reachable-items', wcId),
+  vaultFillHuman: (payload) => ipcRenderer.invoke('vault-fill-human', payload),
+  // Capture-save (M12 F2 Leg 4, DD7): main forwards a save/update offer as
+  // { captureId, model } (model = origin/username/mode/defaultVaultId/choices — NO
+  // password). The chrome opens the vault-capture sheet with it; the sheet's own Save
+  // invoke reports the choice. On a dismiss (close WITHOUT a save) the chrome calls
+  // vaultCaptureDismiss so main drops+zeroizes the held record immediately (not only on
+  // the 2-min timeout). The captured password never crosses to chrome.
+  onVaultCaptureOffer: (cb) => ipcRenderer.on('vault-capture-offer', (_e, d) => cb(d)),
+  vaultCaptureDismiss: (captureId) => ipcRenderer.invoke('vault-capture-dismiss', captureId),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
   // The internal partition string (single source of truth, src/shared/internal-page.js),

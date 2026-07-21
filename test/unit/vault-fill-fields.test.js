@@ -9,7 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findLoginFields, fillLoginForm } = require('../../src/preload/vault-fill-fields');
+const { findLoginFields, findAllLoginFields, fillLoginForm } = require('../../src/preload/vault-fill-fields');
 
 class FakeInput {
   // `type` omitted models a no-type input (a real <input>.type is 'text').
@@ -129,6 +129,91 @@ test('password-only form fills the password and no username', () => {
 
   assert.deepEqual(result, { filled: true });
   assert.equal(pass.value, 'pw-only');
+});
+
+// A document over an ordered list of forms PLUS optional loose (form-less) inputs.
+// Document order is the concatenation of each form's inputs then the loose inputs.
+function makeMixedDoc(forms, loose = []) {
+  const all = [...forms.flatMap((f) => f.inputs), ...loose];
+  return {
+    querySelectorAll(selector) {
+      if (selector === 'input[type=password]') return all.filter((i) => i.type === 'password');
+      if (selector === 'input') return all.slice();
+      return [];
+    },
+  };
+}
+
+// --- findAllLoginFields (M12 F2 Leg 1, DD2): one entry per password field ---
+
+test('findAllLoginFields: multi-form page → one entry per password field, each with its own form/username', () => {
+  const userA = new FakeInput('text', 'user-a');
+  const passA = new FakeInput('password', 'pass-a');
+  const formA = new FakeForm([userA, passA]);
+  const userB = new FakeInput('email', 'user-b');
+  const passB = new FakeInput('password', 'pass-b');
+  const formB = new FakeForm([userB, passB]);
+  const doc = makeDoc([formA, formB]);
+
+  const entries = findAllLoginFields(doc);
+  assert.equal(entries.length, 2, 'one entry per password field, in document order');
+  assert.equal(entries[0].password, passA);
+  assert.equal(entries[0].username, userA);
+  assert.equal(entries[0].form, formA);
+  assert.equal(entries[1].password, passB);
+  assert.equal(entries[1].username, userB);
+  assert.equal(entries[1].form, formB);
+});
+
+test('findAllLoginFields: password-only form → username null, form set', () => {
+  const pass = new FakeInput('password', 'password');
+  const form = new FakeForm([pass]);
+  const doc = makeDoc([form]);
+
+  const entries = findAllLoginFields(doc);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].password, pass);
+  assert.equal(entries[0].username, null, 'no preceding text input → null username');
+  assert.equal(entries[0].form, form);
+});
+
+test('findAllLoginFields: form-less password field → form null, username null, still returned', () => {
+  const loosePass = new FakeInput('password', 'loose'); // .form stays null, no .closest
+  const doc = makeMixedDoc([], [loosePass]);
+
+  const entries = findAllLoginFields(doc);
+  assert.equal(entries.length, 1, 'a password field outside any <form> still yields an entry');
+  assert.equal(entries[0].password, loosePass);
+  assert.equal(entries[0].form, null);
+  assert.equal(entries[0].username, null);
+});
+
+test('findAllLoginFields: no-login page (no password field) → empty array', () => {
+  const search = new FakeInput('search', 'q');
+  const doc = makeDoc([new FakeForm([search])]);
+
+  assert.deepEqual(findAllLoginFields(doc), []);
+});
+
+test('findAllLoginFields: two password fields in ONE form (signup/confirm) → two entries, same form', () => {
+  const user = new FakeInput('text', 'username');
+  const pass1 = new FakeInput('password', 'new');
+  const pass2 = new FakeInput('password', 'confirm');
+  const form = new FakeForm([user, pass1, pass2]);
+  const doc = makeDoc([form]);
+
+  const entries = findAllLoginFields(doc);
+  assert.equal(entries.length, 2, 'per-field enumeration (grouping-by-form happens in the preload)');
+  assert.equal(entries[0].form, form);
+  assert.equal(entries[1].form, form);
+  // Both resolve the same closest-preceding username (the only preceding text input).
+  assert.equal(entries[0].username, user);
+  assert.equal(entries[1].username, user);
+});
+
+test('findAllLoginFields: null/garbage doc → empty array (pure, no throw)', () => {
+  assert.deepEqual(findAllLoginFields(null), []);
+  assert.deepEqual(findAllLoginFields({}), []);
 });
 
 test('top-frame guard: never fills inside an iframe (window.top !== window)', () => {

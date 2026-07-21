@@ -38,6 +38,14 @@ interface MenuOverlayBridge {
   sendActivated(payload: { id: string; token: number; value?: string }): void;
   /** sheet → main: the menu dismissed (channel 5). */
   sendDismissed(payload: { reason: string; token: number }): void;
+  /** sheet → main: the DEDICATED vault-unlock secret channel (M12 F2, DD4). The
+   * master password rides as a Uint8Array (never channel-4 activated). Returns
+   * { ok } — false re-prompts the sheet (wrong password); true closes it. */
+  unlockVault(payload: { token: number; secret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED vault-capture save channel (M12 F2 Leg 4, DD7). The
+   * chosen vaultId + the stashed captureId (+ token) — NEVER the captured password
+   * (held only in the main-side record). Returns { saved }; false re-prompts the sheet. */
+  captureSave(payload: { token: number; captureId: string; vaultId?: string }): Promise<{ saved: boolean; reason?: string }>;
 }
 
 interface Window {

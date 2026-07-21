@@ -34,6 +34,11 @@ const downloads = require('./downloads-store');
 // readVaultItems — none of which mutate the store's human lock state. The human
 // unlock UI / IPC is a separate concern (later legs).
 const vaultStoreModule = require('./vault/vault-store');
+// M12 F2 Leg 3 (pick-and-fill): the Electron-free human fill orchestration — the
+// reachable-items picker read + the origin/scope-rechecked human fill that hands
+// the credential to F1's fill delegate (in main only; the password never returns
+// to chrome). Constructed once from the vault-store singleton + registry idioms.
+const { createVaultHuman } = require('./vault/vault-human');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
 // (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
 const sessionStore = require('./session-store');
@@ -557,20 +562,65 @@ async function grabWindow(windowId) {
 // is exactly what makes a live-rebind pick up a newly-saved port and keeps the
 // precedence coherent with a fresh launch. Sets bound=true on a successful bind, or
 // records the error (e.g. EADDRINUSE) and leaves bound=false on failure.
-// Lazily-constructed, memoized vault-store instance for the automation surface's
-// stateless read path (M12 F1 Leg 3). Constructed once (reads manager.json if
-// present — no side effects otherwise), shares the app's jars registry + the
-// vaultAutoLockMinutes setting. Only its stateless methods are used by the MCP
-// vault context, so it never mutates human lock state.
+// Lazily-constructed, memoized vault-store instance (M12 F1 Leg 3). Constructed
+// once (reads manager.json if present — no side effects otherwise), shares the
+// app's jars registry + the vaultAutoLockMinutes setting. The MCP vault context
+// uses its stateless read methods; F2 (M12) additionally drives the STATEFUL
+// human unlock() through it (DD4/DD10) and wires onLock/onUnlock so every lock-
+// state transition — human unlock, idle auto-lock — broadcasts to every chrome.
 let _vaultStore = null;
 function getVaultStore() {
   if (_vaultStore === null) {
     _vaultStore = vaultStoreModule.load(app.getPath('userData'), {
       listJars: () => jars.list(),
       getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
+      // DD10: single source of truth = the store's MRK-present state, pushed on
+      // every transition. onUnlock fires from _installMrk (all three unlock
+      // paths); onLock fires from lockNow + the idle timer. Both are guarded
+      // inside the store, so a broadcast throw can never reject unlock()/lockNow().
+      onLock: () => broadcastVaultLockState(),
+      onUnlock: () => broadcastVaultLockState(),
     });
   }
   return _vaultStore;
+}
+
+// DD10 lock-state projection. `{ setUp, unlocked }` is the WHOLE truth the chrome
+// indicator needs; it is pushed on every transition (onLock/onUnlock) and also
+// fetched once at chrome init (getVaultLockState) — a fresher push always wins.
+function computeVaultLockState() {
+  const store = getVaultStore();
+  return { setUp: store.isSetUp(), unlocked: store.isUnlocked() };
+}
+function broadcastVaultLockState() {
+  broadcastToChromeAndInternal('vault-lock-state', computeVaultLockState());
+}
+
+// M12 F2 Leg 3 (pick-and-fill): the human fill orchestration, memoized like the
+// store. The tab-entry lookup is the trusted Leg-1 registry idiom
+// (getWindowForGuest → tabViews.get) — never renderer-supplied partition data.
+// fillDelegate is F1's exact channel: webContents.send targets the TOP frame only,
+// so a cross-origin iframe is never reached, and the credential built inside
+// vault-human is never returned to chrome.
+let _vaultHuman = null;
+function getVaultHuman() {
+  if (_vaultHuman === null) {
+    _vaultHuman = createVaultHuman({
+      getVaultStore,
+      fromId: (id) => webContents.fromId(id),
+      getTabEntry: (id) => registry.getWindowForGuest(id)?.tabViews.get(id),
+      listJars: () => jars.list(),
+      fillDelegate: ({ wcId, credential }) => {
+        webContents.fromId(wcId)?.send('vault-fill', credential);
+      },
+      // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
+      // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle),
+      now: () => Date.now(),
+    });
+  }
+  return _vaultHuman;
 }
 
 async function startMcpServerInstance() {
@@ -938,6 +988,7 @@ const { rerollSeed } = registerBrowserIpc({
   registrableDomain,
   hostnameOf,
   shields,
+  getVaultHuman,
   random: Math.random,
   logger: console
 });
@@ -1012,7 +1063,51 @@ registerOverlayIpc({
   registry,
   chromeForAttachment,
   chromeForTab,
-  sanitizeActivatedValue
+  sanitizeActivatedValue,
+  // DD4 (chrome-unlock leg): the secret handler's unlock delegate. Uses the
+  // memoized getVaultStore() singleton (not a captured ref — it may be
+  // unconstructed until first use) and the re-exported VaultAuthError. A wrong
+  // password → VaultAuthError → { ok:false } (sheet re-prompts, store stays
+  // locked); any other error propagates (the handler still zeroizes the buffer
+  // in its finally). Buffer zeroization lives in the handler, which owns the copy.
+  vaultUnlock: async (buf) => {
+    try {
+      await getVaultStore().unlock(buf);
+      return true;
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return false;
+      throw e;
+    }
+  },
+  // DD7 (capture-save leg): the sheet's Save delegate. Looks up the main-side held
+  // record by captureId, re-checks unlock, and persists via saveItem — the captured
+  // password lives ONLY in that record (never crosses to the sheet). Returns
+  // { saved, reason? }; the handler closes the sheet on saved.
+  vaultCaptureSave: ({ captureId, vaultId }) => getVaultHuman().captureSave({ captureId, vaultId })
+});
+
+// DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
+// trust domain; non-secret boolean projection only, per the bare-handle rule).
+// The indicator subscribes to the `vault-lock-state` broadcast FIRST, then calls
+// this once for the initial state; a push that already arrived wins.
+ipcMain.handle('vault-lock-state-get', () => computeVaultLockState());
+
+// M12 F2 Leg 3 (pick-and-fill): the two chrome-facing human fill invokes (bare
+// ipcMain.handle — file:// chrome trust domain, the same class as vault-lock-state-get
+// and the other chrome-only reads). The wcId is chrome-supplied (the trusted chrome
+// derived it from the main-forwarded gesture); trust lives in main + chrome, never
+// the guest. `vault-reachable-items` returns metadata only; `vault-fill-human`
+// returns `{ filled, reason? }` — NEVER the password (built + consumed in main).
+ipcMain.handle('vault-reachable-items', (_event, wcId) => {
+  if (typeof wcId !== 'number') return [];
+  return getVaultHuman().reachableItems(wcId);
+});
+ipcMain.handle('vault-fill-human', (_event, payload) => {
+  const { wcId, vaultId, itemId } = /** @type {any} */ (payload || {});
+  if (typeof wcId !== 'number' || typeof vaultId !== 'string' || typeof itemId !== 'string') {
+    return { filled: false, reason: 'ineligible' };
+  }
+  return getVaultHuman().fillHuman({ wcId, vaultId, itemId });
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.

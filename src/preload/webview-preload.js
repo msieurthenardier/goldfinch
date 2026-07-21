@@ -8,7 +8,7 @@
 // WebContentsView, not a <webview> element.)
 
 const { ipcRenderer } = require('electron');
-const { fillLoginForm } = require('./vault-fill-fields');
+const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-fill-fields');
 
 function absUrl(src) {
   if (!src) return null;
@@ -190,10 +190,184 @@ function scheduleScan(delay = 400) {
   timer = setTimeout(send, delay);
 }
 
-window.addEventListener('DOMContentLoaded', () => scheduleScan(150));
-window.addEventListener('load', () => scheduleScan(300));
+// ---------------------------------------------------------------------------
+// Vault lock-icon injection (M12 F2 Leg 1, DD1/DD2/DD3/DD9).
+//
+// A DECORATIVE, spoofable lock icon is injected into each detected login form in
+// the guest MAIN WORLD (contextIsolation is off). It carries NO secret and its
+// click emits only a bare "the user gestured on this tab" trigger — main derives
+// the trusted wcId from event.sender.id and drives the chrome-owned prompt, so a
+// hostile page that fakes/hides the icon gains nothing (DD1). Injection is
+// TOP-FRAME ONLY (matches fillLoginForm's window.top === window guard) and
+// suppressed entirely in burner/non-persistent tabs via a main-provided
+// eligibility flag queried once at init (DD9).
+// ---------------------------------------------------------------------------
 
-const observer = new MutationObserver(() => scheduleScan(600));
+// Top-frame gate FIRST: no query, no icons, no listeners inside a subframe (a
+// cross-origin iframe login must never raise the prompt via the shared tab wcId).
+const IS_TOP_FRAME = (typeof window === 'undefined') || window.top === window;
+
+// Eligibility: main answers `true` only when this tab's session resolves to a
+// PERSISTENT jar (resolvePersistJar). Mirrors the `shields-farble` sync-IPC idiom.
+let vaultEligible = false;
+if (IS_TOP_FRAME) {
+  try {
+    vaultEligible = !!ipcRenderer.sendSync('vault-eligible');
+  } catch {
+    /* main not ready / not eligible → no icons */
+  }
+}
+
+// Every injected icon node is tracked here so the MEDIA observer can filter out
+// icon-only DOM/style mutations before scheduleScan — otherwise appending an icon
+// (childList) and positioning it via `.style` (style attr, which the media
+// observer watches) would re-fire scheduleScan → collect() forever (HIGH).
+const iconNodes = new WeakSet();
+// Icons currently in the DOM, for pruning (WeakSet isn't iterable). Each icon
+// carries `_anchor` (its form, or the form-less password field) for reverse lookup.
+const placedIcons = new Set();
+// anchor (form | password field) → icon element, so re-scans reposition rather
+// than stack. WeakMap keys are DOM nodes → a removed form/field can be GC'd.
+const iconByAnchor = new WeakMap();
+
+// True iff a mutation is purely icon bookkeeping (icon append/remove, or an icon's
+// own style/attr change) — such mutations must NOT trigger the media rescan.
+function isIconOnlyMutation(m) {
+  if (m.type === 'attributes') return iconNodes.has(m.target);
+  if (m.type === 'childList') {
+    const added = Array.from(m.addedNodes);
+    const removed = Array.from(m.removedNodes);
+    if (!added.length && !removed.length) return false;
+    return added.every((n) => iconNodes.has(n)) && removed.every((n) => iconNodes.has(n));
+  }
+  return false;
+}
+
+// Capture the genuine isTrusted getter ONCE at init. contextIsolation is off, so
+// a hostile page can override Event.prototype's isTrusted getter; reading the
+// captured getter is annoyance-hardening only (a determined page can still raise
+// the prompt — it can NEVER complete a chrome-owned fill, DD1/DD3).
+const isTrustedGet = (() => {
+  try {
+    return (typeof Event !== 'undefined')
+      && Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
+  } catch {
+    return null;
+  }
+})();
+
+function onIconClick(e) {
+  const trusted = isTrustedGet ? isTrustedGet.call(e) : e.isTrusted;
+  if (!trusted) return; // scripted iconEl.click() / synthetic dispatch → ignored
+  try {
+    ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
+  } catch {
+    /* page navigated away mid-click */
+  }
+}
+
+function createVaultIcon() {
+  const el = document.createElement('div');
+  el.setAttribute('data-goldfinch-vault-lock', '');
+  el.setAttribute('role', 'img');
+  el.setAttribute('aria-label', 'Fill login from vault');
+  el.textContent = '🔒'; // 🔒
+  const s = el.style;
+  s.position = 'absolute';
+  s.zIndex = '2147483647';
+  s.cursor = 'pointer';
+  s.fontSize = '14px';
+  s.lineHeight = '16px';
+  s.width = '16px';
+  s.height = '16px';
+  s.textAlign = 'center';
+  s.userSelect = 'none';
+  s.pointerEvents = 'auto';
+  el.addEventListener('click', onIconClick);
+  return el;
+}
+
+function positionVaultIcon(icon, rect) {
+  const top = rect.top + (window.scrollY || 0) + (rect.height - 16) / 2;
+  const left = rect.left + (window.scrollX || 0) + rect.width - 20;
+  icon.style.top = `${Math.max(0, top)}px`;
+  icon.style.left = `${Math.max(0, left)}px`;
+}
+
+// A field is a valid anchor only if it's actually rendered — zero-size / display:none
+// honeypots (0×0 rect, or offsetParent null) get NO icon (else a 0×0 icon lands at
+// the page's top-left corner).
+function isFieldVisible(field) {
+  if (typeof field.getBoundingClientRect !== 'function') return null;
+  const rect = field.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+  if (field.offsetParent === null) return null;
+  return rect;
+}
+
+function placeVaultIcons() {
+  if (!vaultEligible || !IS_TOP_FRAME) return;
+  const parent = document.body || document.documentElement;
+  if (!parent) return;
+
+  const activeAnchors = new Set();
+  const seenAnchors = new Set();
+  for (const entry of findAllLoginFields(document)) {
+    // One icon per FORM (a form-less password field is its own anchor).
+    const anchor = entry.form || entry.password;
+    if (seenAnchors.has(anchor)) continue;
+    seenAnchors.add(anchor);
+
+    const rect = isFieldVisible(entry.password);
+    if (!rect) continue; // zero-rect / non-visible → skip (icon pruned below)
+
+    activeAnchors.add(anchor);
+    let icon = iconByAnchor.get(anchor);
+    if (!icon || !icon.isConnected) {
+      icon = createVaultIcon();
+      icon._anchor = anchor;
+      iconByAnchor.set(anchor, icon);
+      iconNodes.add(icon);
+      placedIcons.add(icon);
+      parent.appendChild(icon);
+    }
+    positionVaultIcon(icon, rect);
+  }
+
+  // Prune icons whose form/field vanished or went non-visible this pass.
+  for (const icon of placedIcons) {
+    if (!activeAnchors.has(icon._anchor)) {
+      icon.remove();
+      placedIcons.delete(icon);
+      iconByAnchor.delete(icon._anchor);
+    }
+  }
+}
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let iconTimer = null;
+function scheduleIconPlacement(delay = 300) {
+  if (!vaultEligible || !IS_TOP_FRAME) return;
+  clearTimeout(iconTimer);
+  iconTimer = setTimeout(placeVaultIcons, delay);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  scheduleScan(150);
+  scheduleIconPlacement(150);
+});
+window.addEventListener('load', () => {
+  scheduleScan(300);
+  scheduleIconPlacement(300);
+});
+
+const observer = new MutationObserver((mutations) => {
+  // Icon-only mutations (our own append/reposition) must not re-arm the media
+  // rescan or the scan would never settle (HIGH — DD3 feedback loop).
+  if (mutations.every(isIconOnlyMutation)) return;
+  scheduleScan(600);
+  scheduleIconPlacement(600);
+});
 if (document.documentElement) {
   observer.observe(document.documentElement, {
     childList: true,
@@ -213,6 +387,36 @@ ipcRenderer.on('rescan-media', () => send());
 // filled. page JS cannot register a rogue 'vault-fill' listener — the guest runs
 // nodeIntegration:false, so it has no ipcRenderer (DD7).
 ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred));
+
+// Vault capture (M12 F2 Leg 4, DD7): a capturing `submit` listener on detected login
+// forms (top-frame + vault-eligible only — the same gate as the lock icon; burner /
+// non-persistent tabs answer `vaultEligible=false`, so no observer). On a real form
+// submit whose form contains a detected login field, read the just-typed
+// { username, password } BEFORE navigation and send them to main — the password as a
+// Uint8Array (never a lingering JS string on the wire). The ORIGIN is NOT sent: main
+// derives it from the sender URL (a guest-supplied origin is never trusted). v1 covers
+// real <form> submits only; SPA / fetch logins with no submit event are a documented
+// F3 gap. contextIsolation is off, so a page could dispatch a synthetic submit — but
+// the credential captured is the user's OWN just-typed value (within the trust model),
+// and the prompt is chrome-owned, so a spurious offer leaks nothing.
+if (IS_TOP_FRAME && vaultEligible) {
+  document.addEventListener('submit', (e) => {
+    try {
+      const form = /** @type {any} */ (e.target);
+      if (!form || typeof form.querySelectorAll !== 'function') return;
+      const fields = findLoginFields(form);
+      if (!fields || !fields.password) return;
+      const password = fields.password.value != null ? String(fields.password.value) : '';
+      const username = fields.username && fields.username.value != null
+        ? String(fields.username.value)
+        : '';
+      const passwordBytes = new TextEncoder().encode(password);
+      ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
+    } catch {
+      /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
+    }
+  }, true);
+}
 
 // ---------------------------------------------------------------------------
 // Privacy: fingerprinting detection. The webview runs this preload in the

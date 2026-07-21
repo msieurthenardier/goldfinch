@@ -95,6 +95,7 @@ class VaultStateError extends Error {
  * @property {() => Array<{ id: string }>} [listJars]  persistent jars (burner excluded).
  * @property {() => number} [getAutoLockMinutes]  idle auto-lock minutes.
  * @property {(() => void)} [onLock]  called after any lock (Lock now / idle / quit).
+ * @property {(() => void)} [onUnlock]  called after any MRK install (master / recovery / admin unlock).
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  idle-timer arm (default global).
  * @property {(handle: any) => void} [clearTimeout]  idle-timer clear (default global).
  * @property {() => number} [now]  clock (default Date.now) — item timestamps.
@@ -137,6 +138,7 @@ class VaultStore {
     this.listJars = deps.listJars ?? (() => []);
     this.getAutoLockMinutes = deps.getAutoLockMinutes ?? (() => 10);
     this.onLock = deps.onLock ?? null;
+    this.onUnlock = deps.onUnlock ?? null;
     this._setTimeout = deps.setTimeout ?? setTimeout;
     this._clearTimeout = deps.clearTimeout ?? clearTimeout;
     this._now = deps.now ?? Date.now;
@@ -445,7 +447,8 @@ class VaultStore {
   // -------------------------------------------------------------------------
 
   /**
-   * @param {string} masterPassword
+   * @param {string | Buffer} masterPassword  a zeroizable Buffer from the human
+   *   unlock path (DD4) or a string from other callers; deriveMasterKey accepts both.
    * @returns {Promise<void>}
    */
   async unlock(masterPassword) {
@@ -496,6 +499,18 @@ class VaultStore {
     this.mrk = mrk;
     this.vaultKeys = new Map();
     this._touch();
+    // DD10: fire the unlock hook from the single MRK-install choke point so ALL
+    // three unlock paths (master / recovery / admin) broadcast `unlocked`.
+    // Guarded — symmetric with onLock in lockNow: a failing lock-state notify
+    // (e.g. broadcastToChromeAndInternal) must never reject unlock() (the store
+    // is already unlocked by the time we get here).
+    if (this.onUnlock) {
+      try {
+        this.onUnlock();
+      } catch {
+        // an unlock-notify failure must not throw out of the unlock paths.
+      }
+    }
   }
 
   /**
@@ -655,6 +670,60 @@ class VaultStore {
     if (doc === null) return [];
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
     return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+  }
+
+  /**
+   * Human picker reachability (M12 F2 Leg 3, DD5/DD6). Given a persistent jar id
+   * and the current tab origin, return the METADATA of the login items reachable
+   * for that jar — the GLOBAL vault + that jar only — whose stored `origin`
+   * EXACTLY equals the tab origin, each tagged with its source `vaultId` for
+   * badging. Exposes ONLY `{ vaultId, id, title, origin, username, hasTotp }` —
+   * NEVER the password / TOTP secret (metadata-only; parallels vault-context.list
+   * on the MRK/human side).
+   *
+   * `[]`-SAFE, never throws (DD9 state-machine guards): returns an EMPTY list when
+   * the store is LOCKED (guarded up front — `listItems` would throw VaultLockedError),
+   * when `jarId` is null/non-persistent (a burner tab — the caller passes null; a
+   * per-target `listItems` on an unknown jar throws VaultStateError and is caught),
+   * or when a vault has not been lazily created yet (`listItems` returns `[]`). The
+   * read is per-open (no caching) — a capture-added item shows on the next pick.
+   * @param {string | null} jarId  the tab's persistent jar id, or null (burner/none).
+   * @param {string} origin  the exact tab origin to match.
+   * @returns {Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>}
+   */
+  reachableLoginItems(jarId, origin) {
+    if (!this.isUnlocked()) return []; // locked → no MRK → nothing reachable.
+    // A null / falsy jarId is a BURNER / non-persistent tab (DD9): the global vault
+    // is NOT reachable via the picker for a burner tab — return [] rather than leak
+    // global metadata. (The vaultReachableItems caller already guards this; refusing
+    // here too keeps the store method itself honoring "[] on burner", defense in
+    // depth — a burner must never reach global.)
+    if (!jarId) return [];
+    // GLOBAL first, then the tab's jar (dedup a literal-'global' jarId so global is
+    // never double-visited).
+    const targets = jarId !== GLOBAL_ID ? [GLOBAL_ID, jarId] : [GLOBAL_ID];
+    const out = [];
+    for (const id of targets) {
+      let items;
+      try {
+        items = this.listItems(id);
+      } catch {
+        continue; // non-persistent/unknown jar (VaultStateError) or a lock race — skip.
+      }
+      for (const item of /** @type {any[]} */ (items)) {
+        if (item && item.type === 'login' && item.origin === origin) {
+          out.push({
+            vaultId: id,
+            id: item.id,
+            title: item.title ?? null,
+            origin: item.origin ?? null,
+            username: item.username ?? null,
+            hasTotp: Boolean(item.totp),
+          });
+        }
+      }
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------------

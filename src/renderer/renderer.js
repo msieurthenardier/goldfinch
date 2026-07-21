@@ -7,6 +7,8 @@
 import { BURNER } from '../shared/burner.js';
 import { buildContainerModel } from '../shared/container-menu.js';
 import { buildAutomationIndicatorModel } from '../shared/automation-indicator-model.js';
+import { buildVaultIndicatorModel } from '../shared/vault-indicator-model.js';
+import { parsePickIndex } from '../shared/vault-picker-template.js';
 import { isSafeColor } from '../shared/safe-color.js';
 import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
 import { keydownToAction } from '../shared/keydown-action.js';
@@ -242,6 +244,30 @@ const overlayMenus = {
   suggestions: {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
+    refocus() {}
+  },
+  // Human vault flow sheets (M12 F2 Leg 3 pick-and-fill, DD5/DD6). Both are raised
+  // from a guest lock-icon gesture — there is no chrome trigger element, so there is
+  // no aria-expanded target and no trigger refocus (the guest owns focus). The
+  // chrome-unlock leg added the vault-unlock TEMPLATE + secret handler; this leg
+  // wires its trigger→open here alongside the new picker.
+  'vault-unlock': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-picker': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Vault capture save/update sheet (M12 F2 Leg 4 capture-save, DD7). Raised from a
+  // main-forwarded login-submit offer — no chrome trigger element, so no aria-expanded
+  // target and no trigger refocus (the guest owns focus). handleOverlayClosed drops the
+  // held record on a non-save close.
+  'vault-capture': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
     refocus() {}
   }
 };
@@ -517,6 +543,29 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       if (id === 'create') createContainerAndOpenTab(value);
       break;
     }
+    case 'vault-picker': {
+      // Human fill selection (M12 F2 Leg 3, DD5/DD6). The id is `pick:<i>` — an
+      // INDEX into the last picker model (metadata only; NO password on this path).
+      // Resolve the row, capture the flow's wcId, then dispatch the fill in MAIN
+      // (vaultFillHuman resolves the credential by (vaultId, itemId) under the MRK
+      // and hands it to F1's channel — the return carries no password). On a lock
+      // between pick and fill (`reason:'locked'`), re-raise the unlock prompt →
+      // onVaultLockState re-opens the picker (re-pick), rather than erroring.
+      const idx = parsePickIndex(id);
+      const item = idx != null ? lastPickerModel[idx] : null;
+      const wcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
+      pendingVaultFlow = null;
+      if (!item || wcId == null) break;
+      Promise.resolve(window.goldfinch.vaultFillHuman({ wcId, vaultId: item.vaultId, itemId: item.id }))
+        .then((r) => {
+          if (r && r.reason === 'locked') {
+            pendingVaultFlow = { wcId, phase: 'unlocking' };
+            openOverlayMenu('vault-unlock', [], null, 0);
+          }
+        })
+        .catch(() => {});
+      break;
+    }
     case 'page-context': {
       // Bodies read the pageCtx fields CAPTURED at open (TOCTOU: acted-on
       // wcId is never re-resolved via activeTab()). VALIDATED-NO-OP discipline
@@ -743,6 +792,31 @@ function handleOverlayClosed({ menuType, reason }) {
   // resolve the clicked row's URL. Ch6 finishes the reset once it has read it.
   if (menuType === 'suggestions') {
     navigationController.handleSuggestionsClosed(reason);
+  }
+  // Human vault flow (M12 F2 Leg 3): the user dismissed the unlock prompt (Cancel/
+  // Escape/outside-click) without unlocking — abandon the flow so a later unrelated
+  // unlock (recovery/admin, or another tab) can't spring the picker on this stale
+  // tab. Guarded on the phase + still-locked state: a SUCCESSFUL unlock closes this
+  // sheet too, but by then onVaultLockState has advanced the phase to 'picking' and
+  // lockState.unlocked is true, so this clear is correctly skipped.
+  if (menuType === 'vault-unlock'
+    && pendingVaultFlow && pendingVaultFlow.phase === 'unlocking'
+    && !lockState.unlocked) {
+    pendingVaultFlow = null;
+  }
+  // Human vault capture (M12 F2 Leg 4, DD7 — the dismiss-drop path, HIGH): the
+  // save/update sheet closed. Tell main to drop+zeroize the held record NOW (not just
+  // on the 2-min timeout) UNLESS this was a save. 'activated' = a successful save (main
+  // already dropped the record). 'superseded' = a newer capture model-replaced this
+  // sheet: main's capture() already evicted the prior record, and pendingCaptureId now
+  // names the NEW capture — dismissing it would wrongly drop the live one, so skip the
+  // whole block (leaving pendingCaptureId intact for the new offer).
+  if (menuType === 'vault-capture' && reason !== 'superseded') {
+    const captureId = pendingCaptureId;
+    pendingCaptureId = null;
+    if (captureId != null && reason !== 'activated') {
+      Promise.resolve(window.goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
+    }
   }
 }
 
@@ -1087,6 +1161,124 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   tab.media = mediaList || [];
   if (tab.id === ctx.activeTabId) renderMedia();
 });
+
+// Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
+// lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
+//   gesture → (unlock if locked, via the Leg-2 vault-unlock sheet) → pick (the
+//   badged vault-picker sheet) → fill (F1's vault-fill channel, in MAIN only).
+// The chrome never sees a password: the picker model is metadata, the selection is
+// an index, and vaultFillHuman resolves + dispatches the credential entirely in main.
+//
+// `pendingVaultFlow` is phase-tracked so an UNRELATED later unlock (the lock-state
+// broadcast also fires for recovery/admin unlock, and for other tabs) never springs
+// the picker on a stale tab — we continue to the picker only when we are the tab
+// mid-unlock (`phase === 'unlocking'`). Last-wins: a new gesture replaces it, and
+// opening a sheet model-replaces any open one.
+/** @type {{ wcId: number, phase: 'unlocking' | 'picking' } | null} */
+let pendingVaultFlow = null;
+/** @type {any[]} the last picker model — the index→item source for dispatch. */
+let lastPickerModel = [];
+/** @type {string | null} the held capture's id (Leg 4) — the dismiss-drop path needs
+ * it when the vault-capture sheet closes without a save. */
+let pendingCaptureId = null;
+
+/** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
+ * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
+ * a jar display-name badge (Global vs the jar's name) — the store returns vaultId only.
+ * @param {number} wcId */
+async function openVaultPicker(wcId) {
+  let model;
+  try {
+    model = await window.goldfinch.vaultReachableItems(wcId);
+  } catch {
+    model = [];
+  }
+  lastPickerModel = Array.isArray(model) ? model : [];
+  // Badge enrichment: map each row's source vaultId to a display label for the sheet
+  // (Global for the global vault, else the jar's name). Kept off the metadata read
+  // (which returns vaultId only); dispatch still reads vaultId + id from the row.
+  for (const row of lastPickerModel) {
+    if (row && row.vaultId && row.vaultId !== 'global') {
+      const jar = jarsClient.containers.find((c) => c.id === row.vaultId);
+      row.badgeLabel = jar ? jar.name : row.vaultId;
+    }
+  }
+  openOverlayMenu('vault-picker', lastPickerModel, null, 0);
+}
+
+window.goldfinch.onVaultGesture(({ wcId }) => {
+  if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
+  if (lockState.unlocked) {
+    pendingVaultFlow = { wcId, phase: 'picking' };
+    openVaultPicker(wcId);
+  } else {
+    // Locked → raise the Leg-2 unlock prompt first; onVaultLockState continues to the
+    // picker on a successful unlock. openOverlayMenu is POSITIONAL (menuType, model,
+    // anchor, startIndex, opts); the vault-unlock card is centered (anchor ignored).
+    pendingVaultFlow = { wcId, phase: 'unlocking' };
+    openOverlayMenu('vault-unlock', [], null, 0);
+  }
+});
+
+// Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
+// model } after a login-form submit in a set-up, unlocked, persistent-jar tab (model =
+// origin/username/mode/defaultVaultId/choices — NEVER a password; the captured password
+// lives only in the main-side held record). Stash the captureId (the dismiss-drop path
+// reads it in handleOverlayClosed), enrich the SAVE choices with jar display labels
+// (Global vs the jar's name), and open the chrome-owned vault-capture sheet. The Save
+// invoke originates in the SHEET (window.menuOverlay.captureSave); chrome only opens it.
+window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
+  pendingCaptureId = captureId;
+  const choices = Array.isArray(model.choices)
+    ? model.choices.map((vaultId) => {
+        if (vaultId === 'global') return { vaultId, label: 'Global' };
+        const jar = jarsClient.containers.find((c) => c.id === vaultId);
+        return { vaultId, label: jar ? jar.name : vaultId };
+      })
+    : [];
+  // captureId rides INSIDE the model so the sheet's Save invoke can carry it back.
+  openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
+});
+
+// Vault lock indicator (M12 F2 Leg 2 chrome-unlock, DD10). A PURE projection of
+// the pushed `vault-lock-state` (single source of truth = vault-store MRK-present)
+// — never a cache. Hidden until the manager is set up; then locked / unlocked.
+// Leg 3 also STASHES the state (`lockState`) so the gesture handler can decide
+// unlock-first-vs-pick, and CONTINUES a mid-unlock flow to the picker.
+let vaultStatePushed = false;
+/** @type {{ setUp: boolean, unlocked: boolean }} the last-known lock state (stashed). */
+let lockState = { setUp: false, unlocked: false };
+function renderVaultIndicator(state) {
+  const el = els.vaultIndicator;
+  if (!el) return;
+  const model = buildVaultIndicatorModel(state);
+  el.classList.toggle('hidden', !model.visible);
+  el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
+  el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
+  const label = model.visible && model.state === 'unlocked'
+    ? 'Password manager unlocked'
+    : 'Password manager locked';
+  el.setAttribute('aria-label', label);
+}
+// Subscribe FIRST, then fetch the initial state — so a transition that fires
+// between subscribe and fetch is not lost, and a fresher push always wins over a
+// late init fetch (DD10 freshness contract).
+window.goldfinch.onVaultLockState((state) => {
+  vaultStatePushed = true;
+  lockState = state;
+  renderVaultIndicator(state);
+  // Continue a mid-unlock flow ONLY when we are the tab that raised the unlock
+  // prompt (phase === 'unlocking') and the store is now unlocked — the phase guard
+  // stops an unrelated later unlock (recovery/admin, or another tab) from springing
+  // the picker on a stale tab.
+  if (pendingVaultFlow && pendingVaultFlow.phase === 'unlocking' && state.unlocked) {
+    pendingVaultFlow.phase = 'picking';
+    openVaultPicker(pendingVaultFlow.wcId);
+  }
+});
+window.goldfinch.getVaultLockState()
+  .then((state) => { lockState = state; if (!vaultStatePushed) renderVaultIndicator(state); })
+  .catch(() => {});
 
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
 // EVERY overlay query — empty included (deletion sync: switch-back must restore a

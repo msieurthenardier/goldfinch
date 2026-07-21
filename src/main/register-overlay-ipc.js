@@ -14,6 +14,8 @@ function registerOverlayIpc({
   chromeForAttachment,
   chromeForTab,
   sanitizeActivatedValue,
+  vaultUnlock,
+  vaultCaptureSave,
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -66,6 +68,61 @@ function registerOverlayIpc({
     if (typeof token !== 'number') return;
     rec.sheet.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
   });
+
+  // DD4 (chrome-unlock leg): the master password's DEDICATED request/response
+  // secret channel — NOT channel-4 `menu-overlay:activated` (string-only, hard-
+  // capped at 24 chars by sanitizeActivatedValue). ipcMain.handle coexists with
+  // the ipcMain.on overlay handlers above, and closeMenuOverlay only HIDES the
+  // sheet view (never destroys its webContents), so the { ok } reply still reaches
+  // the sheet even when we close it on success. The sheet awaits { ok } to re-
+  // prompt on a wrong password. Gated on the vaultUnlock injection so callers that
+  // don't wire the vault (e.g. offline overlay tests) never register it. Sender-
+  // identity + open-token discipline mirrors the activated handler; `secret` is a
+  // Uint8Array (the deserialized typed array — a separate main-heap allocation).
+  if (vaultUnlock) {
+    ipcMain.handle('menu-overlay:vault-unlock', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, secret } = payload || {};
+      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      // Copy into a zeroizable Buffer (deriveMasterKey, via vaultStore.unlock,
+      // accepts string | Buffer). Zeroize BOTH the copy AND the incoming
+      // Uint8Array in finally — whether unlock succeeds OR throws — because
+      // Buffer.from() COPIES, leaving the deserialized array as a lingering
+      // separate allocation.
+      const buf = Buffer.from(secret);
+      try {
+        const ok = await vaultUnlock(buf);
+        if (ok) rec.sheet.closeMenuOverlay('activated', current.token);
+        return { ok };
+      } finally {
+        buf.fill(0);
+        secret.fill?.(0);
+      }
+    });
+  }
+
+  // DD7 (M12 F2 capture-save): the sheet's Save invoke. Sender-identity + open-token
+  // discipline mirror the vault-unlock handler; the payload carries only the captureId
+  // + the chosen vaultId (NEVER a password — the captured password lives solely in the
+  // main-side held record, keyed by captureId). Gated on the vaultCaptureSave injection
+  // so offline overlay tests that don't wire the vault never register it. On { saved }
+  // main closes the sheet ('activated'); { saved:false } keeps it open to re-prompt.
+  if (vaultCaptureSave) {
+    ipcMain.handle('menu-overlay:vault-capture-save', (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { saved: false };
+      const { token, captureId, vaultId } = payload || {};
+      if (typeof token !== 'number' || typeof captureId !== 'string') return { saved: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { saved: false };
+      const res = vaultCaptureSave({ captureId, vaultId });
+      if (res && res.saved) rec.sheet.closeMenuOverlay('activated', current.token);
+      return res || { saved: false };
+    });
+  }
 
   ipcMain.on('find-overlay:open', (event, payload) => {
     if (!registry.getWindowForChrome(event.sender)) return;

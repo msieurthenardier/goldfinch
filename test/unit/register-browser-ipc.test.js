@@ -31,6 +31,13 @@ function makeHarness() {
     print: () => events.push(['print']),
   };
   const chrome = { send: (...args) => events.push(['chrome-send', ...args]) };
+  // Leg 4 (capture-save): a fake human whose capture() returns a settable offer (or
+  // null when the gate drops) and records the dismiss ids.
+  const human = {
+    captures: [], dismissed: [], nextOffer: null,
+    capture(arg) { human.captures.push(arg); return human.nextOffer; },
+    captureDismiss(id) { human.dismissed.push(id); },
+  };
   registerBrowserIpc({
     ipcMain: {
       handle: (channel, fn) => handlers.set(channel, fn),
@@ -60,10 +67,11 @@ function makeHarness() {
     registrableDomain: (host) => host,
     hostnameOf: (url) => new URL(url).hostname,
     shields: { active: () => true },
+    getVaultHuman: () => human,
     random: () => 0.5,
     logger: { warn: (...args) => events.push(['warn', ...args]) },
   });
-  return { handlers, listeners, internal, events, wc, chrome, chromeSender };
+  return { handlers, listeners, internal, events, wc, chrome, chromeSender, human };
 }
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
@@ -104,6 +112,36 @@ test('browser target guards and page-context allowlist refuse malformed/internal
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, { jarId: 'personal', url: 'javascript:bad' }), {
     ok: false, error: 'open-tab-in-jar — bad-args'
   });
+});
+
+test('vault capture: an offer forwards to the owning chrome (no password on the wire); a dropped gate forwards nothing', () => {
+  const h = makeHarness();
+  // The main-side capture derives origin itself; the guest sends only { username, password }.
+  const passwordBytes = new TextEncoder().encode('typed-secret');
+
+  // GATE DROP: capture() returns null → no vault-capture-offer is sent.
+  h.human.nextOffer = null;
+  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
+  assert.deepEqual(h.human.captures[0], { wcId: 5, username: 'me@a', passwordBytes });
+  assert.deepEqual(h.events, [], 'no forward when the gate drops (null offer)');
+
+  // OFFER: capture() returns { captureId, model } → forwarded to the owning chrome.
+  h.human.nextOffer = { captureId: 'cap123', model: { origin: 'https://a.example', username: 'me@a', mode: 'save', defaultVaultId: 'personal', choices: ['personal', 'global'] } };
+  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
+  assert.deepEqual(h.events, [
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }],
+  ]);
+  // The forwarded payload never carries a password (grep the whole event stream).
+  assert.ok(!JSON.stringify(h.events).includes('typed-secret'), 'no captured password crosses to chrome');
+});
+
+test('vault capture dismiss: the chrome-invoked drop reaches the human ops', () => {
+  const h = makeHarness();
+  h.handlers.get('vault-capture-dismiss')({}, 'cap123');
+  assert.deepEqual(h.human.dismissed, ['cap123']);
+  // A non-string id is ignored (no drop).
+  h.handlers.get('vault-capture-dismiss')({}, 42);
+  assert.deepEqual(h.human.dismissed, ['cap123']);
 });
 
 test('privacy channels retain their exact empty/no-tab return shapes', async () => {

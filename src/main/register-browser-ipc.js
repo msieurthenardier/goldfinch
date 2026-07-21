@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolvePersistJar } = require('./persist-jar-gate');
+
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
 const EMPTY_COOKIES = Object.freeze({ firstParty: null, first: 0, third: 0, total: 0, list: [] });
 
@@ -22,6 +24,7 @@ function registerBrowserIpc({
   registrableDomain,
   hostnameOf,
   shields,
+  getVaultHuman,
   random = Math.random,
   logger = console,
 }) {
@@ -72,6 +75,53 @@ function registerBrowserIpc({
     const container = jars.add(name);
     broadcastJarsChanged();
     return container;
+  });
+
+  // Vault lock-icon eligibility (M12 F2 Leg 1, DD9): the guest preload queries this
+  // synchronously at init (shields-farble idiom) to decide whether to inject the
+  // decorative lock icon. Eligible ONLY when the tab's session resolves to a
+  // PERSISTENT jar (resolvePersistJar) — burner/non-persistent tabs are not
+  // eligible, so no icon, no gesture wiring. The wcId is the trusted sender id; we
+  // resolve the tab entry from the registry, never from renderer-supplied data.
+  ipcMain.on('vault-eligible', (event) => {
+    const entry = registry.getWindowForGuest(event.sender.id)?.tabViews.get(event.sender.id);
+    event.returnValue = Boolean(entry && resolvePersistJar(entry, jars.list()));
+  });
+
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3): a TRUSTED click on the injected lock
+  // icon arrives here carrying NO secret ({}). Derive the trusted wcId from
+  // event.sender.id (never a renderer-supplied id) and forward a bare trigger to
+  // the owning window's chrome — mirrors the guest-media-list → chromeForTab idiom.
+  ipcMain.on('guest-vault-gesture', (event) => {
+    const wcId = event.sender.id;
+    chromeForTab(wcId)?.send('vault-gesture', { wcId });
+  });
+
+  // Vault capture (M12 F2 Leg 4, DD7/DD9): a submitted login form's credential arrives
+  // here as { username, password } (password a Uint8Array). The trusted wcId is
+  // event.sender.id; the ORIGIN is derived in main from the sender URL (never the
+  // guest-supplied value — none is sent). getVaultHuman().capture applies the
+  // set-up/unlocked/persistent-jar gate and holds the password in a MAIN-SIDE record;
+  // it returns { captureId, model } (model carries NO password) or null (dropped). On a
+  // returned offer, forward it to the owning window's chrome — the guest-media-list →
+  // chromeForTab idiom. Gated on the getVaultHuman injection (offline tests omit it).
+  ipcMain.on('guest-vault-capture', (event, payload) => {
+    if (!getVaultHuman) return;
+    const wcId = event.sender.id;
+    const { username, password } = /** @type {any} */ (payload || {});
+    const offer = getVaultHuman().capture({ wcId, username, passwordBytes: password });
+    if (offer) {
+      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
+    }
+  });
+
+  // Vault capture DISMISS (M12 F2 Leg 4, DD7): the chrome invokes this when the
+  // vault-capture sheet closes WITHOUT a save (Cancel / Escape / outside-click / a
+  // lifecycle close), so main drops+zeroizes the held record immediately rather than
+  // waiting for the 2-min safety timeout. Chrome-trust bare handle (the same class as
+  // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
+  ipcMain.handle('vault-capture-dismiss', (_event, captureId) => {
+    if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
   });
 
   ipcMain.on('guest-media-list', (event, mediaList) => {

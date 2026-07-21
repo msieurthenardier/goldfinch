@@ -305,10 +305,10 @@ Resolved at the owning flight, not blocking mission approval:
       and tested first.)* This is the single largest risk concentration in the mission
       — plan it leg-gated with hard go/no-go checkpoints at (a) KDF + envelope core,
       (b) TOTP generation, (c) MCP surface + absent-envelope scope.
-- [ ] Flight 2: **Human fill trust boundary** — `webview-preload.js` lock-icon
+- [x] Flight 2: **Human fill trust boundary** — `webview-preload.js` lock-icon
       injection (decorative/spoofable), the chrome-owned unlock prompt + picker on the
       menu-overlay sheet, the gesture-only / origin-matched / top-frame fill flow, and
-      the chrome-rendered capture (save/update) prompt.
+      the chrome-rendered capture (save/update) prompt. *(Landed 2026-07-20; debrief pending.)*
 - [ ] Flight 3: **Management surface + portability** — `goldfinch://vault` internal
       page (four gates, `registerInternalHandler`, CSP, a11y), item CRUD with
       reveal/copy, TOTP enrollment + live display, per-vault export/import,
