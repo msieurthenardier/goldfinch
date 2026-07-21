@@ -155,10 +155,14 @@ function initialSecretStates(type, isNew) {
  * field present) plus the OUT-OF-BAND `unchangedSecrets` list naming the masked-
  * untouched secret fields main must preserve. A touched secret is sent verbatim
  * (an explicit '' clears it); a non-secret field is always sent.
- * @param {{ type: string, id?: string, nonSecretValues: Record<string, any>, secretStates: Record<string, SecretState> }} args
+ * `matchMode` (M12 F4 Leg 4 / DD5) is bespoke, NOT a layout field: it is set explicitly
+ * on `login` items to `'exact'` | `'registrable-domain'` (any other value → `'exact'`).
+ * Because saveItem is a WHOLE-item full-replace, a login MUST always carry an explicit
+ * matchMode or an edit-and-save would silently drop a prior opt-in back to exact.
+ * @param {{ type: string, id?: string, nonSecretValues: Record<string, any>, secretStates: Record<string, SecretState>, matchMode?: string }} args
  * @returns {{ item: Record<string, any>, unchangedSecrets: string[] }}
  */
-function assembleSave({ type, id, nonSecretValues = {}, secretStates = {} }) {
+function assembleSave({ type, id, nonSecretValues = {}, secretStates = {}, matchMode }) {
   /** @type {Record<string, any>} */
   const item = { type };
   if (typeof id === 'string' && id.length > 0) item.id = id;
@@ -178,6 +182,10 @@ function assembleSave({ type, id, nonSecretValues = {}, secretStates = {} }) {
       unchangedSecrets.push(name);
       item[name] = ''; // placeholder — main substitutes the existing secret.
     }
+  }
+
+  if (type === 'login') {
+    item.matchMode = matchMode === 'registrable-domain' ? 'registrable-domain' : 'exact';
   }
   return { item, unchangedSecrets };
 }

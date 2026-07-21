@@ -635,6 +635,62 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * minted secret is shown on the chrome-owned vault-accesskey-show sheet, never the page. */
     requestMint: (target) => ipcRenderer.invoke('internal-vault-request-mint', target),
 
+    // Portable export / import (M12 Flight 4, Leg 1 / DD1 — Option A). Export is fully main-side:
+    // the handler builds the ciphertext-only bundle from the store + runs the save dialog + writes
+    // the file — the bundle never crosses to the page (the sandboxed page can't write files anyway).
+    // Import is a two-step page flow: requestImport picks a destination + opens the bundle file
+    // (main-side dialog + read + hold), then main opens the chrome-owned vault-import-unlock sheet
+    // for the secret. NO secret ever crosses either channel.
+
+    /**
+     * Export a vault to a portable bundle file (save dialog runs in main). Resolves
+     * { ok, path }, { canceled }, or the structured { locked: true } (a locked manager).
+     * @param {string} target  `'global'` or a persistent jar id.
+     * @returns {Promise<{ ok?: boolean, path?: string, canceled?: boolean, locked?: boolean }>}
+     */
+    exportVault: (target) => ipcRenderer.invoke('internal-vault-export', target),
+
+    /**
+     * Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars
+     * page's Delete confirm surface the export-first offer only for a vault-bearing
+     * jar. A pure filesystem probe — no secret, non-throwing on a locked store.
+     * @param {string} vaultId  `'global'` or a persistent jar id.
+     * @returns {Promise<{ present: boolean }>}
+     */
+    hasVault: (vaultId) => ipcRenderer.invoke('internal-vault-has', vaultId),
+
+    /**
+     * Begin an import: open a bundle file (main-side dialog + read) for the given DESTINATION
+     * target, then main opens the chrome-owned vault-import-unlock secret sheet. Resolves
+     * { ok } (sheet opening), { canceled } (dialog dismissed), or { error }.
+     * @param {string} destinationTarget  `'global'` or a persistent jar id.
+     * @returns {Promise<{ ok?: boolean, canceled?: boolean, error?: string }>}
+     */
+    requestImport: (destinationTarget) => ipcRenderer.invoke('internal-vault-request-import', destinationTarget),
+
+    // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
+    // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever
+    // crosses these channels or enters the page DOM. rotate-recovery + change-master require the
+    // manager unlocked (rotation-section actions); recover is reachable FROM the LOCKED page (the
+    // recovery key is its own step-up + installs the MRK).
+
+    /** Request the recovery-key ROTATION sheet (reuses the chrome-owned vault-stepup card for a
+     * master-password step-up; the new recovery key is shown once on the recovery-show sheet). */
+    requestRotateRecovery: () => ipcRenderer.invoke('internal-vault-request-rotate-recovery'),
+
+    /** Request the admin-key PROVISION/ROTATE sheet (reuses the chrome-owned vault-stepup card for a
+     * master-password step-up, mode 'rotate-admin'; the new admin private key is shown once on the
+     * vault-adminkey-show sheet). M12 F4 Leg 3. */
+    requestRotateAdmin: () => ipcRenderer.invoke('internal-vault-request-rotate-admin'),
+
+    /** Request the master-password CHANGE sheet (chrome-owned vault-change-master card: old +
+     * new + confirm; the old password is the step-up). */
+    requestChangeMaster: () => ipcRenderer.invoke('internal-vault-request-change-master'),
+
+    /** Request the RECOVER-after-forgotten-master sheet (chrome-owned vault-recover card:
+     * recovery key + new + confirm; the recovery key is the step-up, installs the MRK). */
+    requestRecover: () => ipcRenderer.invoke('internal-vault-request-recover'),
+
     /**
      * Subscribe to vault lock-state transitions (`{ setUp, unlocked }`). The vault page
      * re-queries its state on every push so setup / unlock move the page not-set-up →

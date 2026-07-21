@@ -381,6 +381,91 @@ body {
 .vault-stepup-error:empty {
   color: transparent;
 }
+/* ---------- vault-import template (M12 Flight 4 Leg 1 export-import, DD1/DD2) ----------
+   Mirrors vault-stepup (a single secret field + aria-live error) but adds a secretKind radio
+   toggle (master password | recovery key). Reuses the input-dialog card chrome + centered
+   backdrop. */
+#sheet-vault-import {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-import-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-import-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-import-kind {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.vault-import-kind-legend {
+  font-size: 12px;
+  opacity: 0.8;
+  padding: 0;
+}
+.vault-import-kind-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.vault-import-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on first error */
+  line-height: 15px;
+}
+.vault-import-error:empty {
+  color: transparent;
+}
+/* ---------- vault-change-master + vault-recover templates (M12 Flight 4 Leg 2 key-rotation,
+   DD3/DD2) ---------- Both mirror vault-set (multi-field dialog card) — heading + lede + three
+   password fields + an aria-live error — on the centered backdrop. Reuse the .new-container-*
+   / .text-btn card chrome. */
+#sheet-vault-change-master,
+#sheet-vault-recover {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-change-master-heading,
+.vault-recover-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-change-master-lede,
+.vault-recover-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-change-master-error,
+.vault-recover-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on first error */
+  line-height: 15px;
+}
+.vault-change-master-error:empty,
+.vault-recover-error:empty {
+  color: transparent;
+}
+
 .vault-accesskey-inner {
   max-width: 360px;
 }
@@ -413,6 +498,52 @@ body {
 }
 .vault-accesskey-keyid:focus-visible,
 .vault-accesskey-secret:focus-visible {
+  outline: 2px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
+/* ---------- vault-adminkey-show template (M12 Flight 4 Leg 3 admin-key-provision, DD4)
+   ---------- Mirrors vault-accesskey-show (a read-only, dismiss-disabled one-time secret
+   display + Copy + acknowledge) but shows the admin PRIVATE key alone (no keyId). Reuses the
+   input-dialog card chrome + centered backdrop. */
+#sheet-vault-adminkey {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-adminkey-inner {
+  max-width: 360px;
+}
+.vault-adminkey-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-adminkey-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-adminkey-fieldlabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.vault-adminkey-secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+  user-select: all;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.vault-adminkey-secret:focus-visible {
   outline: 2px solid #6ea8fe;
   outline-offset: 2px;
 }
@@ -462,6 +593,12 @@ body {
   border-radius: 4px;
   padding: 1px 6px;
   white-space: nowrap;
+}
+.vault-picker-badge-widened {
+  /* a registrable-domain widen (subdomain match, not exact origin — M12 F4 Leg 4 / DD5):
+     a distinct, accented badge so the operator sees the offer is not exact-origin */
+  color: var(--accent, var(--fg));
+  border-color: var(--accent, var(--border));
 }
 .vault-picker-note {
   color: var(--fg-dim);

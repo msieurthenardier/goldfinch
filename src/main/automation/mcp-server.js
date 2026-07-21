@@ -73,12 +73,32 @@ const ERROR_CODE_RE = /^automation:\s*([a-z-]+)\s+—/;
  * Null-safe: `args` may be undefined (e.g. when a tool is called with no
  * arguments). All other ops whose wcId already names the tab return `null`.
  *
+ * The optional third `result` param (the MCP tool result, present at the live
+ * call site) lets result-dependent ops enrich the detail: `vaultFill` appends the
+ * resolved fill origin, `vaultUnlock` records the unlocked-vault count. It defaults
+ * to `undefined`, so every existing 2-arg caller keeps its exact prior behavior.
+ * The secret invariant holds: no accessKey / admin private key / password / TOTP
+ * secret / recovery code is ever read from args OR the result.
+ *
  * @param {string} op  MCP tool name
  * @param {Record<string, any> | undefined} args  tool call arguments
+ * @param {{ content?: { text?: string }[] } | undefined} [result]  the tool result
  * @returns {string | null}
  */
-function deriveAuditDetail(op, args) {
+function deriveAuditDetail(op, args, result) {
   if (!args) return null;
+  // Parse the single text-content block of a tool result back into its value.
+  // okResult() JSON-serializes the whole op return into content[0].text, so this
+  // recovers e.g. { filled, id, origin } / { unlocked }. An error result's text is
+  // a non-JSON error string, and an absent/2-arg result is undefined — BOTH (and
+  // any other malformed shape) degrade to null. NEVER throws.
+  const parseResultJson = (/** @type {any} */ r) => {
+    try {
+      return JSON.parse(r?.content?.[0]?.text);
+    } catch {
+      return null;
+    }
+  };
   switch (op) {
     case 'navigate':
       return args.url != null ? 'url=' + String(args.url) : null;
@@ -124,20 +144,37 @@ function deriveAuditDetail(op, args) {
       if (!from || to == null || from.x == null || from.y == null || to.x == null || to.y == null) return null;
       return '(' + from.x + ',' + from.y + ')->(' + to.x + ',' + to.y + ')';
     }
-    // Vault ops (M12 F1 Leg 3). The `accessKey` (a per-jar vault access secret OR
-    // the X25519 admin private key) must NEVER be logged — it is not in any case
-    // below, and default-null already drops it. vaultFill/vaultTotp record the
-    // ITEM ID only (safe, not a secret); the resolved origin and the unlock
-    // outcome/count depend on the RESULT, which this args-only derivation cannot
-    // see, so there is nothing more to add. NEVER a password/TOTP secret/vault key.
-    case 'vaultUnlock':
-      return null; // accessKey is a secret — record nothing derived from it.
+    // Vault ops (M12 F1 Leg 3; result-enriched M12 F4 Leg 5). The `accessKey` (a
+    // per-jar vault access secret OR the X25519 admin private key) must NEVER be
+    // logged — it is read from NEITHER args nor the result. vaultFill/vaultTotp
+    // record the ITEM ID only (safe, not a secret). The resolved fill origin and
+    // the unlock count come from the RESULT (DD6) — both non-secret — via
+    // parseResultJson, which degrades to null on any malformed/absent result.
+    case 'vaultUnlock': {
+      // The RESULT carries `{ unlocked: string[] }` (opened vault ids). Record the
+      // COUNT only — never the ids-as-secrets, never the accessKey. No result /
+      // 2-arg call / unparseable → null (unchanged from the args-only behavior).
+      const parsed = parseResultJson(result);
+      if (parsed === null) return null;
+      const n = Array.isArray(parsed.unlocked) ? parsed.unlocked.length : 0;
+      return 'unlocked=' + n;
+    }
     case 'vaultList':
       return null;
     case 'vaultTotp':
       return args.itemId != null ? 'item=' + String(args.itemId) : null;
-    case 'vaultFill':
-      return args.itemId != null ? 'item=' + String(args.itemId) : null;
+    case 'vaultFill': {
+      // Base detail is the item id from args (as before). On a SUCCESSFUL fill the
+      // result carries the resolved (non-secret) `origin` — append it. A no-fill /
+      // absent / unparseable result keeps `item=<id>` unchanged. NEVER a credential.
+      if (args.itemId == null) return null;
+      let detail = 'item=' + String(args.itemId);
+      const parsed = parseResultJson(result);
+      if (parsed && parsed.filled === true && parsed.origin) {
+        detail += ' origin=' + String(parsed.origin);
+      }
+      return detail;
+    }
     default:
       return null;
   }
@@ -466,7 +503,7 @@ function createMcpServer(opts = {}) {
         targetWcId: args?.wcId ?? null,
         outcome: isError ? 'error' : 'ok',
         errorCode,
-        detail: deriveAuditDetail(name, args),
+        detail: deriveAuditDetail(name, args, result),
       });
       return result;
     });

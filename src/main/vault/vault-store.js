@@ -53,9 +53,22 @@ const { GLOBAL_ID } = require('../../shared/reserved-ids');
 // Electron-free / app-db-free (the reserved-ids.js precedent).
 const { metadataOf, secretFieldsFor } = require('../../shared/vault-item-schema');
 
+// Fill matcher (M12 F4 Leg 4 / DD5) — exact-origin by default, optionally widened to
+// the registrable domain for `matchMode:'registrable-domain'` items behind the
+// fail-closed PSL matcher. reachableLoginItems passes `widen` through per call.
+const { originMatches } = require('../../shared/origin-match');
+
 // The manager document format id + version (vault-store OWNS this format).
 const MANAGER_FORMAT = 'gfmanager';
 const MANAGER_VERSION = 1;
+
+// The portable export-bundle format id + version (M12 F4 Leg 1 / DD1 — Option A).
+// A bundle is `{ format, version, sourceVaultId, kdf, mrk:{master,recovery,admin},
+// adminPublicKeyB64, vault:<.gfvault doc> }` — ALL ciphertext + the KDF params + the
+// admin PUBLIC key; NO plaintext secret, NO password needed to build it. vault-store
+// OWNS this format independently of the gfmanager / gfvault version spaces.
+const BUNDLE_FORMAT = 'gfvault-bundle';
+const BUNDLE_VERSION = 1;
 
 // The item types this store recognizes. vault-crypto treats items as opaque
 // JSON; the schema is validated HERE.
@@ -127,6 +140,19 @@ class VaultStateError extends Error {
  */
 function mrkEnvelopeAad(version) {
   return Buffer.from(`gfvault/mrk-env/v${version}`, 'utf8');
+}
+
+/**
+ * A secret argument is valid when it is a NON-EMPTY string OR a NON-EMPTY Buffer — the
+ * `setup` guard (`:401-405`) generalized for the M12 F4 Leg 2 rotation ops, whose master
+ * passwords arrive from the chrome-owned sheet as zeroizable Buffers (scrypt /
+ * deriveMasterKey accept either, exactly as the unlock path already does).
+ * @param {unknown} secret
+ * @returns {boolean}
+ */
+function isNonEmptySecret(secret) {
+  return (typeof secret === 'string' && secret.length > 0)
+    || (Buffer.isBuffer(secret) && secret.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -531,21 +557,306 @@ class VaultStore {
   }
 
   /**
-   * Re-wrap the MRK's master envelope under a new password (master change /
-   * recovery-after-forgotten flow). Requires the manager to be unlocked; touches
-   * ONLY the master envelope in manager.json — item ciphertext is never rewritten.
-   * @param {{ newMasterPassword: string }} args
+   * Re-wrap the MRK's master envelope under a NEW password, gated by an OLD-PASSWORD
+   * STEP-UP (M12 F4 Leg 2 / DD3). Requires the manager unlocked AND a fresh re-unwrap of
+   * the current master envelope with `oldMasterPassword` — a wrong old password throws
+   * VaultAuthError BEFORE any write (unlocked-session-hijack hardening, mirroring the
+   * `mintAccessKey` step-up). Touches ONLY `manager.mrk.master` — item ciphertext / the
+   * other mrk slots / every `.gfvault` file are never rewritten. Both passwords accept a
+   * zeroizable Buffer OR a string (the chrome-owned vault-change-master sheet submits both
+   * as Buffers; deriveMasterKey / unwrapMaster accept either — mirrors `setup`'s guard).
+   * @param {{ oldMasterPassword: string | Buffer, newMasterPassword: string | Buffer }} args
    * @returns {Promise<void>}
    */
-  async changeMasterPassword({ newMasterPassword } = /** @type {any} */ ({})) {
+  async changeMasterPassword({ oldMasterPassword, newMasterPassword } = /** @type {any} */ ({})) {
     const mrk = this._requireMrk();
-    if (typeof newMasterPassword !== 'string' || newMasterPassword.length === 0) {
+    if (!isNonEmptySecret(oldMasterPassword)) {
+      throw new VaultStateError('vault-store: oldMasterPassword is required');
+    }
+    if (!isNonEmptySecret(newMasterPassword)) {
       throw new VaultStateError('vault-store: newMasterPassword is required');
     }
     const manager = this._readManager();
+    // Step-up re-auth: re-unwrap the master envelope with the OLD password. A wrong old
+    // password throws VaultAuthError and rewrites NOTHING (the step-up precedes any write).
+    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
     manager.mrk.master = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
     this._writeManager(manager);
     this._touch();
+  }
+
+  /**
+   * Rotate the one-time RECOVERY KEY, gated by a MASTER-PASSWORD STEP-UP (M12 F4 Leg 2 /
+   * DD3, mission durable-grant re-auth). Requires the manager unlocked AND a fresh re-unwrap
+   * of the master envelope with the entered master password — a wrong password throws
+   * VaultAuthError BEFORE any write (mirroring the `mintAccessKey` step-up). On success mints
+   * a fresh recovery key, rewraps ONLY `manager.mrk.recovery`, writes the manager, and returns
+   * the new one-time `display` (shown once on the chrome-owned sheet). The MRK is never
+   * re-keyed — item ciphertext / the other mrk slots / every `.gfvault` file are untouched.
+   * @param {{ masterPassword: string | Buffer }} args
+   * @returns {Promise<string>}  the new recovery-key display (one-time).
+   */
+  async rotateRecovery({ masterPassword } = /** @type {any} */ ({})) {
+    const mrk = this._requireMrk();
+    if (!isNonEmptySecret(masterPassword)) {
+      throw new VaultStateError('vault-store: masterPassword is required');
+    }
+    const manager = this._readManager();
+    // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
+    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
+    const rec = vc.generateRecoveryKey();
+    manager.mrk.recovery = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
+    this._writeManager(manager);
+    rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer.
+    this._touch();
+    return rec.display;
+  }
+
+  /**
+   * Rotate (or from-scratch PROVISION) the ADMIN KEYPAIR, gated by a MASTER-PASSWORD STEP-UP
+   * (M12 F4 Leg 3 / DD4, mission durable-grant re-auth). Requires the manager unlocked AND a
+   * fresh re-unwrap of the master envelope with the entered master password — a wrong password
+   * throws VaultAuthError BEFORE any write (mirroring `rotateRecovery`'s step-up). On success
+   * mints a FRESH X25519 admin keypair, re-seals ONLY `manager.mrk.admin` to the new public key,
+   * overwrites `manager.adminPublicKeyB64` (BOTH — else a stale pubkey mismatches the seal and
+   * corrupts a subsequent export), writes the manager, and returns the new one-time admin PRIVATE
+   * key (base64; shown once on the chrome-owned sheet). This is BOTH admin rotation AND the
+   * from-scratch provision (F3's setup-minted admin private key was discarded, so the current seal
+   * is orphaned): it mints anew UNCONDITIONALLY — no old-admin-key input — and the prior admin key
+   * is invalidated (its seal is replaced). The MRK is never re-keyed — item ciphertext / the other
+   * mrk slots / every `.gfvault` file are untouched.
+   * @param {{ masterPassword: string | Buffer }} args
+   * @returns {Promise<string>}  the new admin private key, base64 (one-time).
+   */
+  async rotateAdminKey({ masterPassword } = /** @type {any} */ ({})) {
+    const mrk = this._requireMrk();
+    if (!isNonEmptySecret(masterPassword)) {
+      throw new VaultStateError('vault-store: masterPassword is required');
+    }
+    const manager = this._readManager();
+    // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
+    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
+    const admin = vc.generateAdminKeypair();
+    manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
+    manager.adminPublicKeyB64 = admin.publicKeyB64; // BOTH — a stale pubkey mismatches the seal + corrupts export.
+    this._writeManager(manager);
+    this._touch();
+    return admin.privateKeyB64; // operator-held one-time; the KeyObjects are GC'd with `admin`.
+  }
+
+  /**
+   * Recover after a FORGOTTEN master password (M12 F4 Leg 2 / DD3). A SINGLE dedicated op —
+   * NOT an `authenticated` flag on `changeMasterPassword` (that would bypass the step-up), NOT
+   * two calls: the RECOVERY KEY is itself the step-up (master-equivalent proof). Works FROM
+   * LOCKED (unlike the other rotations) — the recovery key installs the MRK. Unwraps the MRK
+   * from `manager.mrk.recovery` with the supplied recovery display STRING (a wrong key throws
+   * VaultAuthError and writes NOTHING), installs it (the user ends UNLOCKED — they recovered),
+   * then rewraps ONLY `manager.mrk.master` under the new password + writes the manager. The MRK
+   * is never re-keyed — item ciphertext / the other mrk slots / every `.gfvault` are untouched.
+   * @param {{ recoveryDisplay: string, newMasterPassword: string | Buffer }} args
+   * @returns {Promise<void>}
+   */
+  async recoverMasterPassword({ recoveryDisplay, newMasterPassword } = /** @type {any} */ ({})) {
+    if (typeof recoveryDisplay !== 'string' || recoveryDisplay.length === 0) {
+      throw new VaultStateError('vault-store: recoveryDisplay is required');
+    }
+    if (!isNonEmptySecret(newMasterPassword)) {
+      throw new VaultStateError('vault-store: newMasterPassword is required');
+    }
+    const manager = this._readManager();
+    // The recovery key IS the step-up: unwrap the MRK. Wrong key → VaultAuthError, nothing
+    // installed / written. The transient recovery material is zeroized in the finally
+    // (mirrors unlockWithRecovery).
+    const material = vc.parseRecoveryKey(recoveryDisplay);
+    let mrk;
+    try {
+      mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: MANAGER_VERSION });
+    } finally {
+      material.fill(0);
+    }
+    this._installMrk(mrk); // the user ends UNLOCKED (they recovered); fires onUnlock.
+    // Rewrap the master envelope under the new password — the recovery proof authenticated it.
+    manager.mrk.master = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    this._writeManager(manager);
+    this._touch();
+  }
+
+  // -------------------------------------------------------------------------
+  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A, no network egress)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Build a self-contained, portable export bundle for one vault (flight DD1 —
+   * Option A). Requires the manager UNLOCKED (POLICY, not a crypto necessity — every
+   * input is already on disk); takes NO password (satisfies mission.md:150 "encrypted
+   * export not re-prompted"). The bundle carries the manager's ALL THREE mrk envelopes
+   * (`master`, `recovery`, `admin` — `_readManager` structurally requires all three, so
+   * the fresh-profile adopt must have all three or the adopted profile wedges at boot;
+   * `mrk.admin` is ciphertext sealed to the pubkey, no plaintext, preserving admin
+   * portability), the KDF params, the admin PUBLIC key, and the target `.gfvault`
+   * document (its `mrk` envelope + item ciphertext). EVERYTHING is ciphertext — no
+   * plaintext secret ever enters the bundle. NO write.
+   * @param {string} target  `'global'` or a persistent jar id.
+   * @returns {{ format: string, version: number, sourceVaultId: string, kdf: any,
+   *   mrk: { master: any, recovery: any, admin: any }, adminPublicKeyB64: string, vault: any }}
+   */
+  exportVault(target) {
+    this._requireMrk(); // POLICY: export is an unlock-window op (VaultLockedError → catchLocked).
+    const sourceVaultId = this._resolveTarget(target);
+    const m = this._readManager(); // requires format+version+kdf+adminPublicKeyB64+all three mrk slots.
+    const vaultDoc = this._readVault(sourceVaultId);
+    if (vaultDoc === null) {
+      throw new VaultStateError(`vault-store: no vault for "${sourceVaultId}" — nothing to export`);
+    }
+    return {
+      format: BUNDLE_FORMAT,
+      version: BUNDLE_VERSION,
+      sourceVaultId,
+      kdf: m.kdf,
+      // All THREE envelopes (review [HIGH]) — ciphertext only.
+      mrk: { master: m.mrk.master, recovery: m.mrk.recovery, admin: m.mrk.admin },
+      adminPublicKeyB64: m.adminPublicKeyB64,
+      vault: vaultDoc,
+    };
+  }
+
+  /**
+   * Import a portable bundle (flight DD1 — Option A). Validates the bundle, then does
+   * ALL crypto BEFORE ANY write (a wrong secret throws VaultAuthError here → nothing is
+   * written / installed). The source MASTER PASSWORD (a Buffer) OR the source RECOVERY
+   * KEY (a base32 display STRING) opens the bundle:
+   *  - `secretKind:'master'` → `unwrapMaster(bundle.mrk.master, secret, { params: bundle.kdf })`.
+   *  - `secretKind:'recovery'` → `unwrapRecovery(bundle.mrk.recovery,
+   *    parseRecoveryKey(secret.toString('utf8')))` — parseRecoveryKey→base32Decode throws
+   *    on a non-string, so the recovery secret is decoded as a STRING (review [HIGH]); the
+   *    transient recovery material is zeroized in a finally (mirrors unlockWithRecovery).
+   * Then unwrap the vault key from the bundle vault's `mrk` envelope + decrypt its items.
+   *
+   * FRESH profile (`!isSetUp()`): ADOPT the bundle's manager — write the vault file FIRST
+   * (to GLOBAL_ID, the only target resolvable on a jar-less fresh profile — review [MED]:
+   * vault-before-manager so a failure never flips isSetUp() true without a vault), then
+   * `manager.json` from the bundle (all three mrk slots + kdf + adminPublicKeyB64), then
+   * `_installMrk` (leaves the profile UNLOCKED, fires onUnlock — analogous to setup). The
+   * source master password / recovery key unlock this profile on restart. The installed
+   * MRK is RETAINED (never zeroized).
+   *
+   * EXISTING profile (set up + unlocked): re-key the (source) vault key under the
+   * DESTINATION MRK (`this.mrk`) at the allowlist-resolved destination target; refuse a
+   * collision unless `overwrite`; evict the destination's cached key (a stale cached key
+   * GCM-fails against the new ciphertext); zeroize the transient bundle MRK + vault key.
+   * @param {any} bundle
+   * @param {{ destinationTarget?: string, secret: Buffer, secretKind?: 'master'|'recovery', overwrite?: boolean }} opts
+   * @returns {Promise<{ imported: true, fresh: boolean, vaultId: string }>}
+   */
+  async importVault(bundle, opts = /** @type {any} */ ({})) {
+    const { destinationTarget, secret, secretKind, overwrite } = opts;
+
+    // ---- validate the bundle (loud — VaultFormatError / VaultStateError) ----
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+      throw new VaultStateError('vault-store: import bundle must be an object');
+    }
+    if (bundle.format !== BUNDLE_FORMAT) {
+      throw new vc.VaultFormatError(`vault-store: unknown bundle format "${bundle.format}"`);
+    }
+    if (bundle.version !== BUNDLE_VERSION) {
+      throw new vc.VaultFormatError(`vault-store: unsupported bundle version "${bundle.version}"`);
+    }
+    if (!bundle.mrk || typeof bundle.mrk !== 'object') {
+      throw new vc.VaultFormatError('vault-store: bundle missing mrk envelope set');
+    }
+    for (const slot of ['master', 'recovery', 'admin']) {
+      const env = bundle.mrk[slot];
+      if (!env || typeof env !== 'object'
+        || typeof env.iv !== 'string' || typeof env.ct !== 'string' || typeof env.tag !== 'string') {
+        throw new vc.VaultFormatError(`vault-store: malformed bundle mrk.${slot} envelope`);
+      }
+    }
+    if (typeof bundle.adminPublicKeyB64 !== 'string') {
+      throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
+    }
+    if (!bundle.kdf || typeof bundle.kdf !== 'object') {
+      throw new vc.VaultFormatError('vault-store: bundle missing kdf');
+    }
+    if (!Buffer.isBuffer(secret)) {
+      throw new VaultStateError('vault-store: import secret must be a Buffer');
+    }
+    const kind = secretKind === 'recovery' ? 'recovery' : 'master';
+
+    // Parse the embedded `.gfvault` doc loudly (a tampered/malformed vault → VaultFormatError).
+    // The bundle round-trips through JSON on disk, so `bundle.vault` arrives as a parsed
+    // OBJECT; re-serialize for parseVault (it takes a string/Buffer) to get the same strict
+    // validation the load path uses. Tolerates a raw string too.
+    const vaultDoc = vc.parseVault(
+      typeof bundle.vault === 'string' ? bundle.vault : JSON.stringify(bundle.vault)
+    );
+    const mrkEnv = vaultDoc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
+    if (!mrkEnv) {
+      throw new vc.VaultFormatError('vault-store: bundle vault missing mrk envelope');
+    }
+
+    // ---- crypto phase (before ANY write) ----
+    let mrk;
+    if (kind === 'recovery') {
+      // Recovery is a base32 STRING (review [HIGH]) — parseRecoveryKey throws on a Buffer.
+      const material = vc.parseRecoveryKey(secret.toString('utf8'));
+      try {
+        mrk = vc.unwrapRecovery(bundle.mrk.recovery, material, { version: MANAGER_VERSION });
+      } finally {
+        material.fill(0); // zeroize the transient recovery material (mirrors unlockWithRecovery).
+      }
+    } else {
+      mrk = await vc.unwrapMaster(bundle.mrk.master, secret, { version: MANAGER_VERSION, params: bundle.kdf });
+    }
+
+    // From here `mrk` is a live buffer. The FRESH path INSTALLS it (retains); every other
+    // exit zeroizes it. `vaultKey` is transient on BOTH paths. A throw anywhere below still
+    // runs the finally, so a wrong-vault-envelope / collision / unknown-target leaves nothing
+    // installed and both buffers zeroized.
+    let vaultKey = null;
+    try {
+      vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(vaultDoc.version));
+      const items = /** @type {VaultItem[]} */ (vc.decryptItems(vaultDoc.items, vaultKey));
+
+      if (!this.isSetUp()) {
+        // FRESH profile: adopt the bundle's manager. Vault FIRST (to GLOBAL_ID — the sole
+        // target resolvable on a jar-less fresh profile), then manager.json, then install.
+        this._writeVaultForKey(GLOBAL_ID, vaultKey, mrk, items);
+        this._writeManager({
+          format: MANAGER_FORMAT,
+          version: MANAGER_VERSION,
+          kdf: bundle.kdf,
+          adminPublicKeyB64: bundle.adminPublicKeyB64,
+          mrk: {
+            master: bundle.mrk.master,
+            recovery: bundle.mrk.recovery,
+            admin: bundle.mrk.admin,
+          },
+        });
+        this._installMrk(mrk); // leaves UNLOCKED, fires onUnlock; takes ownership of `mrk`.
+        mrk = null; // INSTALLED — do NOT zeroize in the finally.
+        return { imported: true, fresh: true, vaultId: GLOBAL_ID };
+      }
+
+      // EXISTING profile: re-key the source vault key under the DESTINATION MRK.
+      this._requireMrk(); // must be unlocked (VaultLockedError → catchLocked at the IPC layer).
+      const dest = this.resolveTarget(destinationTarget ?? '');
+      if (fs.existsSync(this._vaultPath(dest)) && !overwrite) {
+        throw new VaultStateError(
+          `vault-store: a vault already exists for "${dest}" — pass overwrite to replace it`
+        );
+      }
+      this._writeVaultForKey(dest, vaultKey, this.mrk, items);
+      // Evict the destination's cached key — else a stale key GCM-fails on the new ciphertext.
+      this.vaultKeys.get(dest)?.fill(0);
+      this.vaultKeys.delete(dest);
+      return { imported: true, fresh: false, vaultId: dest };
+    } finally {
+      if (mrk) mrk.fill(0); // transient bundle MRK (existing path / any pre-install throw).
+      if (vaultKey) vaultKey.fill(0); // transient vault key (both paths).
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -592,6 +903,60 @@ class VaultStore {
    */
   resolveTarget(target) {
     return this._resolveTarget(target);
+  }
+
+  /**
+   * Delete a jar vault's `.gfvault` file (M12 F4 Leg 6 / flight DD7). Completes the
+   * vault lifecycle: a jar DELETE removes its vault, while a jar WIPE spares it.
+   * DESTRUCTIVE + IRREVERSIBLE.
+   *
+   * ENOENT-tolerant: a jar with no vault (the common case — a `.gfvault` is created
+   * LAZILY on the first credential save into that jar) is a clean no-op returning
+   * `{ deleted: false }`. Any other filesystem error (permissions, races) propagates —
+   * `handleRemove` catches it fail-soft. After the unlink, evict + zeroize any cached
+   * vault key (the exact `:853`-`:854` idiom) so no key material dangles once the file
+   * is gone.
+   *
+   * There is NO per-vault "manager row" to prune — `manager.json` holds only
+   * `{ format, version, kdf, adminPublicKeyB64, mrk }` and vault enumeration is
+   * `GLOBAL + jars.list()`, so this touches ONLY the `.gfvault` file.
+   *
+   * GLOBAL GUARD: refuses `GLOBAL_ID` — a jar delete must NEVER remove the manager-wide
+   * global vault. Defensive: a live jar id can never equal `'global'` (jars reserves it
+   * via `isReservedId`), but the guard is asserted here FIRST so even a mis-call can
+   * never unlink the global vault.
+   * @param {string} vaultId  A persistent jar id (never `GLOBAL_ID`).
+   * @returns {{ deleted: boolean }}  `deleted: true` iff a file was actually removed.
+   */
+  deleteVault(vaultId) {
+    if (vaultId === GLOBAL_ID) {
+      throw new VaultStateError('vault-store: refusing to delete the global vault');
+    }
+    let deleted = false;
+    try {
+      fs.unlinkSync(this._vaultPath(vaultId));
+      deleted = true;
+    } catch (err) {
+      // A no-vault jar → ENOENT → clean no-op. Any other error propagates.
+      if (/** @type {any} */ (err).code !== 'ENOENT') throw err;
+    }
+    // Evict + zeroize any cached key (idiom at :853-854) — no dangling key material.
+    this.vaultKeys.get(vaultId)?.fill(0);
+    this.vaultKeys.delete(vaultId);
+    return { deleted };
+  }
+
+  /**
+   * Does a `.gfvault` file exist for this vault id? (M12 F4 Leg 6.) Lets the renderer
+   * decide whether to surface the export-first offer before a jar delete. A pure
+   * filesystem probe — needs no MRK, never throws on a locked store, and (unlike
+   * `internal-vault-state`, which enumerates every jar regardless of file presence and
+   * whose count is locked-ambiguous) answers "does THIS jar have a vault file".
+   * @param {string} vaultId
+   * @returns {boolean}
+   */
+  hasVault(vaultId) {
+    return fs.existsSync(this._vaultPath(vaultId));
   }
 
   /**
@@ -844,13 +1209,21 @@ class VaultStore {
   }
 
   /**
-   * Human picker reachability (M12 F2 Leg 3, DD5/DD6). Given a persistent jar id
-   * and the current tab origin, return the METADATA of the login items reachable
-   * for that jar — the GLOBAL vault + that jar only — whose stored `origin`
-   * EXACTLY equals the tab origin, each tagged with its source `vaultId` for
-   * badging. Exposes ONLY `{ vaultId, id, title, origin, username, hasTotp }` —
-   * NEVER the password / TOTP secret (metadata-only; parallels vault-context.list
-   * on the MRK/human side).
+   * Human picker reachability (M12 F2 Leg 3, DD5/DD6; widen: M12 F4 Leg 4, DD5).
+   * Given a persistent jar id and the current tab origin, return the METADATA of the
+   * login items reachable for that jar — the GLOBAL vault + that jar only — that MATCH
+   * the tab origin, each tagged with its source `vaultId` for badging. Exposes ONLY
+   * `{ vaultId, id, title, origin, username, hasTotp, widened }` — NEVER the password /
+   * TOTP secret (metadata-only; parallels vault-context.list on the MRK/human side).
+   *
+   * MATCH MODE (the `{ widen }` option — DEFAULT false, so the whole option object is
+   * defaulted and the 2-arg capture-disposition caller never throws): with `widen:false`
+   * the match is EXACT origin, byte-for-byte as before. With `widen:true` a per-item
+   * `matchMode:'registrable-domain'` opt-in widens to the eTLD+1 behind the fail-closed
+   * `originMatches` matcher; `widened` on the row is true iff the match was a
+   * registrable-domain widen (not exact) so the picker can badge it. **Only the picker
+   * passes widen:true; capture disposition passes nothing (stays exact) — a subdomain
+   * submit must never disposition as an update to an eTLD+1 item.**
    *
    * `[]`-SAFE, never throws (DD9 state-machine guards): returns an EMPTY list when
    * the store is LOCKED (guarded up front — `listItems` would throw VaultLockedError),
@@ -859,10 +1232,11 @@ class VaultStore {
    * or when a vault has not been lazily created yet (`listItems` returns `[]`). The
    * read is per-open (no caching) — a capture-added item shows on the next pick.
    * @param {string | null} jarId  the tab's persistent jar id, or null (burner/none).
-   * @param {string} origin  the exact tab origin to match.
-   * @returns {Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>}
+   * @param {string} origin  the tab origin to match.
+   * @param {{ widen?: boolean }} [opts]  widen to registrable-domain for opt-in items (picker only).
+   * @returns {Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean, widened: boolean }>}
    */
-  reachableLoginItems(jarId, origin) {
+  reachableLoginItems(jarId, origin, { widen = false } = {}) {
     if (!this.isUnlocked()) return []; // locked → no MRK → nothing reachable.
     // A null / falsy jarId is a BURNER / non-persistent tab (DD9): the global vault
     // is NOT reachable via the picker for a burner tab — return [] rather than leak
@@ -882,7 +1256,7 @@ class VaultStore {
         continue; // non-persistent/unknown jar (VaultStateError) or a lock race — skip.
       }
       for (const item of /** @type {any[]} */ (items)) {
-        if (item && item.type === 'login' && item.origin === origin) {
+        if (item && item.type === 'login' && originMatches(item, origin, { widen })) {
           out.push({
             vaultId: id,
             id: item.id,
@@ -890,6 +1264,10 @@ class VaultStore {
             origin: item.origin ?? null,
             username: item.username ?? null,
             hasTotp: Boolean(item.totp),
+            // A match whose stored origin differs from the tab origin can only be a
+            // registrable-domain widen (an exact match requires equality). false for
+            // every exact match and for every row when widen is false.
+            widened: item.origin !== origin,
           });
         }
       }
@@ -1096,6 +1474,10 @@ function load(userDataPath, deps = {}) {
 module.exports = {
   load,
   VaultStore,
+  // Re-exported (M12 F4 Leg 1) so callers/tests reference the portable bundle format
+  // id + version without re-typing the literals.
+  BUNDLE_FORMAT,
+  BUNDLE_VERSION,
   // Re-exported (M12 F3 DD8) so the reserved-id cross-module test can assert this
   // store's global sentinel ∈ jars' reserved ids without re-typing the literal.
   GLOBAL_ID,

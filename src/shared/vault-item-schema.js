@@ -77,6 +77,11 @@ function nonSecretFieldsFor(type) {
  * (only `totp`'s presence is coerced to a boolean flag). Even a stray secret key
  * on the item is dropped, because the projection iterates the whitelist, not the
  * item's own keys.
+ * `matchMode` (M12 F4 Leg 4 / DD5) is surfaced the SAME way as `hasTotp` — a derived
+ * metadata flag, NOT a `nonSecret` text field (adding it to SCHEMA.login.nonSecret would
+ * trip the editor drift-guard and render a text input). It is emitted for `login` items
+ * ONLY, coerced to `'exact'` | `'registrable-domain'` (absent/legacy/any other value →
+ * `'exact'`, the positive-test default). It is never a secret and never carries one.
  * @param {any} item
  * @returns {{ id: any, type: string, hasTotp: boolean, [k: string]: any }}
  */
@@ -87,6 +92,9 @@ function metadataOf(item) {
   const meta = { id: item.id, type, hasTotp: Boolean(item.totp) };
   for (const f of spec.nonSecret) {
     meta[f] = item[f] ?? null;
+  }
+  if (type === 'login') {
+    meta.matchMode = item.matchMode === 'registrable-domain' ? 'registrable-domain' : 'exact';
   }
   return meta;
 }

@@ -35,6 +35,9 @@
 
 const { resolveContents, resolveContentsForJar } = require('../automation/resolve');
 const vc = require('./vault-crypto');
+// Fill matcher (M12 F4 Leg 4 / DD5): exact origin by default, widened to the
+// registrable domain for a per-item `matchMode:'registrable-domain'` opt-in, fail-closed.
+const { originMatches } = require('../../shared/origin-match');
 
 /**
  * The safe origin of a URL string, or null if it does not parse.
@@ -298,11 +301,12 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    *   5. origin-match the resolved tab's origin against the item — a mismatch (or
    *      no such item) is a NORMAL `{ filled: false }` (DD6), delegate NOT called;
    *   6. hand `{ wcId, credential }` to the INJECTED fill delegate;
-   *   7. return `{ filled: true, id }` — the credential/password is NEVER returned.
+   *   7. return `{ filled: true, id, origin }` — the credential/password is NEVER
+   *      returned; `origin` is the resolved (non-secret) top-frame origin.
    * @param {string} identity  jarId | 'admin'
    * @param {{ wcId: number, itemId: string }} target
    * @param {FillEngineDeps} [engineDeps]
-   * @returns {{ filled: boolean, id?: string, reason?: string }}
+   * @returns {{ filled: boolean, id?: string, origin?: string, reason?: string }}
    */
   function fill(identity, { wcId, itemId }, engineDeps = {}) {
     touch();
@@ -319,9 +323,10 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     }
     if (!found) return { filled: false, reason: 'no-match' };
 
-    // (5) top-frame origin match — mismatch is a normal no-fill, delegate untouched.
-    const itemOrigin = found.origin != null ? String(found.origin) : null;
-    if (!tabOrigin || !itemOrigin || itemOrigin !== tabOrigin) {
+    // (5) top-frame origin match — exact by default, widened to the registrable domain
+    // for a `matchMode:'registrable-domain'` item behind the fail-closed matcher (M12 F4
+    // Leg 4 / DD5). A mismatch is a normal no-fill, delegate untouched.
+    if (!tabOrigin || !originMatches(found, tabOrigin, { widen: true })) {
       return { filled: false, reason: 'origin-mismatch' };
     }
 
@@ -329,8 +334,10 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     const credential = { username: found.username, password: found.password };
     fillDelegate({ wcId, credential });
 
-    // (7) the tool result carries NO password/secret.
-    return { filled: true, id: itemId };
+    // (7) the tool result carries NO password/secret — only the resolved
+    // top-frame origin (non-secret; the client drove the fill into this wcId and
+    // can already read its URL via enumerateTabs). Audit records it via DD6.
+    return { filled: true, id: itemId, origin: tabOrigin };
   }
 
   return { unlock, list, totp, fill, touch, zeroize };

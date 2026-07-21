@@ -14,7 +14,7 @@ export default [
     // the src/shared/** module block below ignores them so this binding survives
     // later-wins — that keeps the lint parse guard (an `export` in a preload-reachable
     // file must FAIL lint, the leg-1 blocker class).
-    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/shared/reserved-ids.js', 'src/shared/vault-item-schema.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/shared/reserved-ids.js', 'src/shared/vault-item-schema.js', 'src/shared/origin-match.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
@@ -68,7 +68,12 @@ export default [
       // vault-item-schema.js is the M12 F3 Leg 2 secret/non-secret SSOT, consumed
       // main-side (vault-store, register-vault-ipc) as plain CJS (the reserved-ids
       // precedent — main-only, no require(esm) at app boot). Keep its commonjs binding.
-      'src/shared/vault-item-schema.js'
+      'src/shared/vault-item-schema.js',
+      // origin-match.js is the M12 F4 Leg 4 fill matcher, consumed main-side ONLY
+      // (vault-context, vault-human, vault-store) as plain CJS — it require()s the
+      // main-side psl.js (which reads the vendored .dat), so it can never be a page
+      // module. The guest-forward-allowlist.js precedent; keep its commonjs binding.
+      'src/shared/origin-match.js'
     ],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }

@@ -304,6 +304,42 @@ const overlayMenus = {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => null,
     refocus() {}
+  },
+  // Import-bundle secret entry (M12 F4 Leg 1 export-import, DD1/DD2). Raised from the
+  // goldfinch://vault page's cross-renderer import request (page → main → chrome) after the
+  // main-side file open — no chrome trigger element, so no aria-expanded target and no trigger
+  // refocus. The destination target + the bundle are held main-side; the sheet collects only the
+  // secret + secretKind over the dedicated Buffer channel.
+  'vault-import-unlock': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Key-rotation sheets (M12 F4 Leg 2 key-rotation, DD3/DD2). All raised from the
+  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — no chrome
+  // trigger element, so no aria-expanded target and no trigger refocus. vault-change-master is
+  // the old + new master-password entry; vault-recover is the recovery-key + new-master entry
+  // (reachable from the LOCKED page). Recovery rotation's master-password step-up REUSES the
+  // vault-stepup sheet above (mode 'rotate-recovery'), so it needs no entry of its own.
+  'vault-change-master': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-recover': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Admin-key provision/rotate display (M12 F4 Leg 3 admin-key-provision, DD4). Raised from the
+  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) — no chrome
+  // trigger element, so no aria-expanded target and no trigger refocus. vault-adminkey-show is the
+  // DISMISS-DISABLED one-time admin-private-key display (opened with { dismissible: false }); the
+  // master-password step-up REUSES the vault-stepup sheet (mode 'rotate-admin'), so it needs no entry.
+  'vault-adminkey-show': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
   }
 };
 const overlayMenuClient = createOverlayMenus({
@@ -485,6 +521,23 @@ const openVaultRecoveryShowOverlayForAudit = () =>
 const openVaultStepupOverlayForAudit = () => openOverlayMenu('vault-stepup', { target: 'global' }, null, 0);
 const openVaultAccessKeyShowOverlayForAudit = () =>
   openOverlayMenu('vault-accesskey-show', { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' }, null, 0, { dismissible: false });
+// M12 F4 Leg 1 (export-import, DD9): a11y SHEET_STATES hook for the vault-import-unlock sheet.
+// Opens with an empty array model (the destination target + bundle are held main-side); the sheet
+// renders the secretKind radios + the secret field + Import/Cancel (dialog-style, Escape-dismissible).
+const openVaultImportUnlockOverlayForAudit = () => openOverlayMenu('vault-import-unlock', [], null, 0);
+// M12 F4 Leg 2 (key-rotation, DD9): a11y SHEET_STATES hooks for the two new rotation sheets. Both
+// open with an empty array model (no secret; the destination is the manager itself); each renders
+// its three password fields + error + submit/cancel (dialog-style, Escape-dismissible). Recovery
+// rotation's step-up reuses vault-stepup, already covered above. Same evaluate-seam precedent as
+// the leg-1 openVaultImportUnlockOverlayForAudit.
+const openVaultChangeMasterOverlayForAudit = () => openOverlayMenu('vault-change-master', [], null, 0);
+const openVaultRecoverOverlayForAudit = () => openOverlayMenu('vault-recover', [], null, 0);
+// M12 F4 Leg 3 (admin-key-provision, DD4/DD9): a11y SHEET_STATES hook for the vault-adminkey-show
+// sheet. Opens with a synthetic NON-SECRET placeholder key so its read-only display + Copy +
+// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
+// Same evaluate-seam precedent as leg-5's openVaultAccessKeyShowOverlayForAudit.
+const openVaultAdminKeyShowOverlayForAudit = () =>
+  openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, { dismissible: false });
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -631,6 +684,12 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // deliberate "I've saved it". Main already closed the sheet; the vault page refreshes
       // its access-key list off its own post-mint path. Nothing reaches this dispatch (the
       // minted secret lived only on the sheet — never in the page or this chrome dispatch).
+      break;
+    }
+    case 'vault-adminkey-show': {
+      // Minted admin-key acknowledge (M12 F4 Leg 3). The only activation is id:'ack' — the
+      // deliberate "I've saved it". Main already closed the sheet; nothing reaches this dispatch
+      // (the admin private key lived only on the sheet — never in the page or this chrome dispatch).
       break;
     }
     case 'page-context': {
@@ -1319,12 +1378,52 @@ window.goldfinch.onVaultRecoveryShow(({ recoveryKey }) => {
 window.goldfinch.onVaultRequestMint(({ target }) => {
   openOverlayMenu('vault-stepup', { target }, null, 0);
 });
+// Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). The vault page's
+// Import CTA routes page → main (internal-vault-request-import → the main-side file open) →
+// chrome (here). Open the vault-import-unlock sheet; the destination target + the bundle are held
+// main-side, so the model is an empty array (the sheet collects only the secret + secretKind).
+// On a successful import main closes the sheet + broadcasts lock-state → the page re-renders.
+window.goldfinch.onVaultRequestImport(() => {
+  openOverlayMenu('vault-import-unlock', [], null, 0);
+});
 // Mint-success → open the read-only accesskey-show sheet with the minted { secret, keyId }.
 // Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time secret
 // (Escape/backdrop/blur all inert; only acknowledge closes). The secret lives only
 // main → chrome → sheet, never in the page.
 window.goldfinch.onVaultAccessKeyShow(({ secret, keyId }) => {
   openOverlayMenu('vault-accesskey-show', { secret, keyId }, null, 0, { dismissible: false });
+});
+
+// Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). The vault page's
+// rotation-section actions route page → main (internal-vault-request-*) → chrome (here). Recovery
+// rotation REUSES the vault-stepup sheet (mode 'rotate-recovery') for its master-password step-up;
+// on success main mints the new recovery key + drives vault-recovery-show (the setup idiom).
+// Change-master opens the vault-change-master sheet (old + new + confirm). Recover opens the
+// vault-recover sheet (recovery key + new + confirm) — reachable FROM the LOCKED page; on success
+// the store installs the MRK and the page moves to unlocked off the lock-state broadcast. NO secret
+// crosses these bare triggers — every secret + one-time display lives on the chrome-owned sheet.
+window.goldfinch.onVaultRequestRotateRecovery(() => {
+  openOverlayMenu('vault-stepup', { mode: 'rotate-recovery' }, null, 0);
+});
+// Admin-key provision/rotate cross-renderer trigger (M12 F4 Leg 3 admin-key-provision, DD4). The
+// vault page's Provision/rotate admin key action routes page → main (internal-vault-request-rotate-
+// admin) → chrome (here). REUSES the vault-stepup sheet (mode 'rotate-admin') for its master-password
+// step-up; on success main mints the new admin keypair + drives vault-adminkey-show (post-write). NO
+// secret crosses this bare trigger — the master password + the one-time admin key live on the sheet.
+window.goldfinch.onVaultRequestRotateAdmin(() => {
+  openOverlayMenu('vault-stepup', { mode: 'rotate-admin' }, null, 0);
+});
+// Admin-key rotate-success → open the read-only adminkey-show sheet with the minted { adminPrivateKey }.
+// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time key (Escape/backdrop/
+// blur all inert; only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
+window.goldfinch.onVaultAdminKeyShow(({ adminPrivateKey }) => {
+  openOverlayMenu('vault-adminkey-show', { adminPrivateKey }, null, 0, { dismissible: false });
+});
+window.goldfinch.onVaultRequestChangeMaster(() => {
+  openOverlayMenu('vault-change-master', [], null, 0);
+});
+window.goldfinch.onVaultRequestRecover(() => {
+  openOverlayMenu('vault-recover', [], null, 0);
 });
 
 // Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
@@ -1502,5 +1601,9 @@ Object.assign(/** @type {any} */ (globalThis), {
   openVaultSetOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-set' (DD9 addition)
   openVaultRecoveryShowOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-recovery-show' (DD9 addition)
   openVaultStepupOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-stepup' (DD9 addition)
-  openVaultAccessKeyShowOverlayForAudit // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-accesskey-show' (DD9 addition)
+  openVaultAccessKeyShowOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-accesskey-show' (DD9 addition)
+  openVaultImportUnlockOverlayForAudit, // M12 F4 Leg 1 — SHEET_STATES 'sheet:vault-import-unlock' (DD9 addition)
+  openVaultChangeMasterOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-change-master' (DD9 addition)
+  openVaultRecoverOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-recover' (DD9 addition)
+  openVaultAdminKeyShowOverlayForAudit // M12 F4 Leg 3 — SHEET_STATES 'sheet:vault-adminkey-show' (DD9 addition)
 });

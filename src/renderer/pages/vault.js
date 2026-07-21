@@ -142,6 +142,14 @@ function init() {
       root.dataset.unlockRequested = 'true';
       Promise.resolve(bridge.requestUnlock()).catch(() => {});
     }));
+    // M12 F4 Leg 2 (key-rotation): the RECOVER-after-forgotten-master affordance — reachable FROM
+    // the LOCKED state (the recovery key is its own step-up + installs the MRK). Routes to the
+    // chrome-owned vault-recover sheet (page → main → chrome); NO secret is entered here. On
+    // success the store installs the MRK and the page moves to unlocked off the lock-state
+    // broadcast. The recovery key + new master live only on the sheet.
+    banner.appendChild(button('Forgot master password? Recover', 'vault-btn vault-link-btn', () => {
+      Promise.resolve(bridge.requestRecover()).catch(() => {});
+    }));
     section.appendChild(banner);
     section.appendChild(note);
 
@@ -169,6 +177,15 @@ function init() {
 
     // Manager-wide auto-lock setting (M12 F3 Leg 5) — once, above the per-vault sections.
     wrap.appendChild(buildAutoLockSection());
+
+    // Portable import (M12 F4 Leg 1 export-import) — once, above the per-vault sections. Picks a
+    // destination target then routes to the chrome-owned secret sheet (page → main → chrome).
+    wrap.appendChild(buildImportSection(vaults));
+
+    // Operator-secret rotation (M12 F4 Leg 2 key-rotation, DD3) — once, above the per-vault
+    // sections. Change the master password / rotate the recovery key; each routes to a chrome-owned
+    // step-up sheet (page → main → chrome). NO secret is entered here.
+    wrap.appendChild(buildRotationSection());
 
     // A single editor host reused by every vault section; hidden until opened.
     const editorHost = el('div', 'vault-editor-host');
@@ -231,6 +248,90 @@ function init() {
   }
 
   /**
+   * Portable import control (M12 F4 Leg 1 export-import, DD1/DD2). A destination `<select>`
+   * (global + each persistent jar) + an Import button. The button routes to main
+   * (requestImport → the main-side bundle-file open) then the chrome-owned vault-import-unlock
+   * secret sheet — NO secret is entered here; the source master password / recovery key live
+   * only on the sheet. `textContent`-only.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
+   * @returns {HTMLElement}
+   */
+  function buildImportSection(vaults) {
+    const section = el('section', 'vault-section vault-import-section');
+    section.setAttribute('aria-labelledby', 'vault-import-heading');
+    const h2 = el('h2', undefined, 'Import a vault bundle');
+    h2.id = 'vault-import-heading';
+    section.appendChild(h2);
+    section.appendChild(el('p', 'vault-lede',
+      'Import a portable bundle into a destination vault. You’ll enter the source master password or recovery key on a secure prompt.'));
+
+    const row = el('label', 'vault-import-row');
+    row.appendChild(el('span', 'vault-import-label', 'Destination'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-import-select'));
+    select.setAttribute('aria-label', 'Import destination vault');
+    for (const v of vaults) {
+      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
+      opt.value = v.vaultId;
+      select.appendChild(opt);
+    }
+    row.appendChild(select);
+    section.appendChild(row);
+
+    const status = el('p', 'vault-import-status');
+    status.setAttribute('role', 'status');
+
+    section.appendChild(button('Import…', 'vault-btn', () => {
+      const target = select.value;
+      if (!target) return;
+      status.textContent = '';
+      Promise.resolve(bridge.requestImport(target)).then((res) => {
+        if (res && res.error) status.textContent = 'Could not read that bundle file.';
+      }).catch(() => { status.textContent = 'Import could not start.'; });
+    }));
+    section.appendChild(status);
+    return section;
+  }
+
+  /**
+   * Operator-secret rotation controls (M12 F4 Leg 2 key-rotation, DD3/DD2; M12 F4 Leg 3 admin-key-
+   * provision, DD4). Actions — Change master password (an old-password step-up), Rotate recovery key
+   * and Provision / rotate admin key (each a master-password step-up) — each routing page → main →
+   * chrome to a chrome-owned sheet. NO secret is entered
+   * or shown here: every master-equivalent secret entry + the new one-time recovery display lives
+   * on the sheet (DD2). `textContent`-only.
+   * @returns {HTMLElement}
+   */
+  function buildRotationSection() {
+    const section = el('section', 'vault-section vault-rotation-section');
+    section.setAttribute('aria-labelledby', 'vault-rotation-heading');
+    const h2 = el('h2', undefined, 'Master password & recovery key');
+    h2.id = 'vault-rotation-heading';
+    section.appendChild(h2);
+    section.appendChild(el('p', 'vault-lede',
+      'Change your master password or rotate your recovery key. You’ll confirm on a secure prompt — nothing is typed on this page.'));
+
+    const actions = el('div', 'vault-rotation-actions');
+    // Change the master password → the chrome-owned vault-change-master sheet (old + new + confirm).
+    actions.appendChild(button('Change master password', 'vault-btn', () => {
+      Promise.resolve(bridge.requestChangeMaster()).catch(() => {});
+    }));
+    // Rotate the recovery key → the chrome-owned vault-stepup step-up sheet; the new key is shown
+    // once on the recovery-show sheet (never here).
+    actions.appendChild(button('Rotate recovery key', 'vault-btn', () => {
+      Promise.resolve(bridge.requestRotateRecovery()).catch(() => {});
+    }));
+    // Provision / rotate the admin key (M12 F4 Leg 3, DD4) → the chrome-owned vault-stepup step-up
+    // sheet (mode 'rotate-admin'); the new admin private key is shown once on the adminkey-show sheet
+    // (never here). Same op provisions from scratch (setup's key was discarded) or rotates an existing
+    // admin key — the prior key is invalidated.
+    actions.appendChild(button('Provision / rotate admin key', 'vault-btn', () => {
+      Promise.resolve(bridge.requestRotateAdmin()).catch(() => {});
+    }));
+    section.appendChild(actions);
+    return section;
+  }
+
+  /**
    * @param {{ vaultId: string, label: string, count?: number }} v
    * @param {HTMLElement} editorHost
    */
@@ -257,6 +358,14 @@ function init() {
     header.appendChild(picker);
     header.appendChild(button('Add', 'vault-btn', () => {
       openEditor(editorHost, { vaultId: v.vaultId, meta: null, type: picker.value });
+    }));
+    // Portable export (M12 F4 Leg 1 export-import, DD1). Builds the ciphertext-only bundle + runs
+    // the save dialog fully in main — NO password prompt, NO secret in the page. A locked manager
+    // (idle-lock race) surfaces { locked } → refresh to the locked view.
+    header.appendChild(button('Export…', 'vault-btn', () => {
+      Promise.resolve(bridge.exportVault(v.vaultId)).then((res) => {
+        if (res && res.locked) refresh();
+      }).catch(() => {});
     }));
     section.appendChild(header);
 
@@ -435,6 +544,26 @@ function init() {
       form.appendChild(row);
     }
 
+    // Per-credential match-mode toggle (M12 F4 Leg 4 / DD5) — LOGIN only. Default exact;
+    // opting in fills across the whole registrable domain (any subdomain) behind the
+    // hardened, fail-closed matcher enforced in main. The registrable domain itself is
+    // resolved main-side (the PSL is not shipped to the page), so the label is generic.
+    let matchModeCheckbox = null;
+    if (itemType === 'login') {
+      const row = el('label', 'vault-field vault-field-toggle');
+      matchModeCheckbox = /** @type {HTMLInputElement} */ (el('input'));
+      matchModeCheckbox.type = 'checkbox';
+      matchModeCheckbox.className = 'vault-field-toggle-input';
+      matchModeCheckbox.checked = !isNew && !!(meta && meta.matchMode === 'registrable-domain');
+      row.appendChild(matchModeCheckbox);
+      const text = el('span', 'vault-field-toggle-text');
+      text.appendChild(el('span', 'vault-field-label', 'Match any subdomain of this site'));
+      text.appendChild(el('span', 'vault-field-hint',
+        'Fill on any subdomain of this website’s registrable domain, not just this exact address. Off by default.'));
+      row.appendChild(text);
+      form.appendChild(row);
+    }
+
     // Secret fields (masked; per-field reveal + copy on an existing item).
     const hasTotp = !isNew && itemType === 'login' && !!(meta && meta.hasTotp);
     for (const spec of layout.secret) {
@@ -449,8 +578,9 @@ function init() {
     actions.appendChild(button('Save', 'vault-btn primary', () => {
       const nonSecretValues = {};
       for (const [name, input] of Object.entries(nonSecretInputs)) nonSecretValues[name] = input.value;
+      const matchMode = matchModeCheckbox && matchModeCheckbox.checked ? 'registrable-domain' : 'exact';
       const { item, unchangedSecrets } = assembleSave({
-        type: itemType, id: meta && meta.id, nonSecretValues, secretStates,
+        type: itemType, id: meta && meta.id, nonSecretValues, secretStates, matchMode,
       });
       wipeSecretInputs(secretInputs); // clear-on-save DOM hygiene
       bridge.vaultItemSave({ vaultId, item, unchangedSecrets }).then((res) => {

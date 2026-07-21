@@ -70,8 +70,12 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  * @param {{ list: () => Array<{ id: string, name: string }> }} args.jars
  *        Injected because the store exposes no public vault-enumeration method — the
  *        handler composes the vault list itself as `'global' + jars.list()`.
+ * @param {((bundle: any) => Promise<{ ok?: boolean, canceled?: boolean, path?: string }>)} [args.vaultSaveBundle]
+ *        Main-side export delegate (M12 F4 Leg 1): given a ciphertext-only bundle, runs the
+ *        save dialog + writes the chosen path. Injected because this module has no Electron
+ *        `dialog` / `fs` handle. Gated — offline tests that omit it skip `internal-vault-export`.
  */
-function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jars }) {
+function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jars, vaultSaveBundle }) {
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
   // a metadata-only item `count` (via listItemsMeta — no secret, no plaintext); when
@@ -98,6 +102,16 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
       }
     }
     return { setUp: store.isSetUp(), unlocked, vaults };
+  });
+
+  // Per-jar vault-file presence (M12 F4 Leg 6). Answers "does THIS jar have a
+  // `.gfvault` file" so the jars page's Delete confirm can decide whether to surface
+  // the export-first offer. `internal-vault-state` cannot answer this — it enumerates
+  // every jar regardless of file presence and its item count is locked-ambiguous. A
+  // pure filesystem probe: needs no MRK, non-throwing on a locked store, non-secret.
+  registerInternalHandler(ipcMain, 'internal-vault-has', (_event, vaultId) => {
+    if (typeof vaultId !== 'string') return { present: false };
+    return { present: getVaultStore().hasVault(vaultId) };
   });
 
   // Metadata-only item list for one vault (DD10). Returns { items } (no secret) or
@@ -183,6 +197,27 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
     const store = getVaultStore();
     return { revoked: store.revokeAccessKey(store.resolveTarget(vaultId), keyId) };
   }));
+
+  // Portable EXPORT (M12 F4 Leg 1 / DD1 — Option A). Fully MAIN-SIDE: build the ciphertext-only
+  // bundle from the store (exportVault requires unlocked → VaultLockedError → { locked: true }),
+  // then hand it to the injected save-dialog delegate which writes the chosen path. The bundle
+  // (all ciphertext + kdf + admin PUBLIC key) never transits to the page — the internal page is
+  // sandbox:true and can't write files anyway. NO password is entered anywhere (the export is a
+  // frictionless unlock-window op). catchLocked is lock-only; exportVault is synchronous, so its
+  // VaultLockedError is mapped here explicitly (the async wrapper would swallow catchLocked's
+  // synchronous try/catch). Gated on the vaultSaveBundle injection (offline tests omit it).
+  if (vaultSaveBundle) {
+    registerInternalHandler(ipcMain, 'internal-vault-export', async (_event, target) => {
+      let bundle;
+      try {
+        bundle = getVaultStore().exportVault(target);
+      } catch (err) {
+        if (err instanceof VaultLockedError) return { locked: true };
+        throw err;
+      }
+      return await vaultSaveBundle(bundle);
+    });
+  }
 }
 
 module.exports = { registerVaultIpc };

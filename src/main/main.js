@@ -597,6 +597,86 @@ function broadcastVaultLockState() {
   broadcastToChromeAndInternal('vault-lock-state', computeVaultLockState());
 }
 
+// Portable vault IMPORT held state (M12 F4 Leg 1 export-import, DD1/DD2). The import is a
+// two-surface flow: the vault page picks a destination + triggers the file open (main-side
+// dialog + read), then the chrome-owned vault-import-unlock sheet collects the secret. The
+// bundle (ciphertext) + the destination target are held HERE between those two steps — never
+// on the page, never on the sheet — and consumed by the `menu-overlay:vault-import` handler's
+// `vaultImport` delegate. A later request overwrites a stale pending record (ciphertext-only,
+// low risk); a successful import clears it.
+/** @type {{ bundle: any, destinationTarget: string } | null} */
+let _pendingVaultImport = null;
+
+// Build a ciphertext-only export bundle → save dialog → write the chosen path (fully main-side;
+// the bundle never transits to the page). No parent window (a top-level modal) keeps this
+// reachable from the internal-handler without a registry lookup. Returns { ok, path } |
+// { canceled }.
+async function vaultSaveBundleToFile(bundle) {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Export vault bundle',
+    defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
+    filters: [
+      { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePath) return { canceled: true };
+  fs.writeFileSync(filePath, JSON.stringify(bundle), 'utf8');
+  return { ok: true, path: filePath };
+}
+
+// Open a bundle file (main-side dialog + read + JSON parse) and HOLD { bundle, destinationTarget }
+// for the sheet's secret step. Returns { ok } | { canceled } | { error } (never throws into the
+// internal handler). The destination target is validated as a non-empty string; the bundle's
+// deeper crypto validation happens in importVault at unlock time (loud there).
+async function vaultImportBeginFromFile(destinationTarget) {
+  if (typeof destinationTarget !== 'string' || destinationTarget.length === 0) {
+    return { error: 'bad-target' };
+  }
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Import vault bundle',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
+  let bundle;
+  try {
+    bundle = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+  } catch {
+    return { error: 'unreadable' };
+  }
+  _pendingVaultImport = { bundle, destinationTarget };
+  return { ok: true };
+}
+
+// The `menu-overlay:vault-import` delegate: consume the held { bundle, destinationTarget } and
+// run importVault with the sheet's secret Buffer + secretKind. Follows the vaultUnlock pattern
+// (VaultAuthError → { ok:false } so a wrong secret re-prompts the sheet, nothing written); other
+// errors propagate (the handler still dual-zeroizes). On success the record is consumed and the
+// lock-state is broadcast (the fresh-profile adopt already fires onUnlock; the existing-profile
+// re-key nudges the page to re-render its now-populated vault).
+async function vaultImportFromSheet(buf, secretKind) {
+  const pending = _pendingVaultImport;
+  if (!pending) return { ok: false };
+  try {
+    await getVaultStore().importVault(pending.bundle, {
+      destinationTarget: pending.destinationTarget,
+      secret: buf,
+      secretKind,
+      overwrite: false,
+    });
+    _pendingVaultImport = null;
+    broadcastVaultLockState();
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+    throw e;
+  }
+}
+
 // M12 F2 Leg 3 (pick-and-fill): the human fill orchestration, memoized like the
 // store. The tab-entry lookup is the trusted Leg-1 registry idiom
 // (getWindowForGuest → tabViews.get) — never renderer-supplied partition data.
@@ -990,6 +1070,9 @@ const { rerollSeed } = registerBrowserIpc({
   hostnameOf,
   shields,
   getVaultHuman,
+  // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
+  // hold). Gated — offline register-browser-ipc tests omit it.
+  vaultImportBegin: vaultImportBeginFromFile,
   random: Math.random,
   logger: console
 });
@@ -1114,6 +1197,71 @@ registerOverlayIpc({
       throw e;
     }
   },
+  // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret delegate. Follows the
+  // vaultUnlock pattern (VaultAuthError → { ok:false }) so a wrong secret re-prompts and nothing
+  // is written; the held { bundle, destinationTarget } is consumed here. The handler owns the
+  // Buffer copy + dual-zeroize; this delegate only runs the store op.
+  vaultImport: (buf, secretKind) => vaultImportFromSheet(buf, secretKind),
+  // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
+  // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
+  // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-
+  // zeroizes). rotateRecovery returns the NEW one-time recovery-key display — forwarded to the
+  // chrome vault-recovery-show sheet (never the invoke reply, never the page).
+  vaultRotateRecovery: async (buf) => {
+    try {
+      const recoveryKeyDisplay = await getVaultStore().rotateRecovery({ masterPassword: buf });
+      return { ok: true, recoveryKeyDisplay };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 3 (admin-key-provision): the vault-stepup sheet's ADMIN-KEY ROTATION/PROVISION
+  // delegate. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-
+  // password step-up re-prompts and NOTHING is rotated; any other error propagates (the handler
+  // still dual-zeroizes). rotateAdminKey returns the NEW one-time admin private key — forwarded to
+  // the chrome vault-adminkey-show sheet (never the invoke reply, never the page).
+  vaultRotateAdminKey: async (buf) => {
+    try {
+      const adminPrivateKeyB64 = await getVaultStore().rotateAdminKey({ masterPassword: buf });
+      return { ok: true, adminPrivateKeyB64 };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 2 (key-rotation): the vault-change-master sheet's delegate. Follows the vaultUnlock
+  // pattern (VaultAuthError → { ok:false }) so a WRONG old-password step-up re-prompts and NOTHING
+  // is written; any other error propagates (the handler still dual-zeroizes both buffers). Both
+  // master passwords ride as zeroizable Buffers (changeMasterPassword accepts Buffer|string).
+  vaultChangeMaster: async (oldBuf, newBuf) => {
+    try {
+      await getVaultStore().changeMasterPassword({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 2 (key-rotation): the vault-recover sheet's delegate — the recover-after-forgotten-
+  // master flow. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG recovery
+  // key re-prompts and NOTHING is written; any other error propagates (the handler still dual-
+  // zeroizes). The recovery secret is decoded as a STRING for parseRecoveryKey (the store contract);
+  // the new master rides as a Buffer. On success the store installs the MRK (the user ends UNLOCKED)
+  // — broadcast the lock-state so the page + chrome indicator move to unlocked.
+  vaultRecover: async (recoveryBuf, newBuf) => {
+    try {
+      await getVaultStore().recoverMasterPassword({
+        recoveryDisplay: recoveryBuf.toString('utf8'),
+        newMasterPassword: newBuf,
+      });
+      broadcastVaultLockState();
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
   // M12 F3 Leg 4: the recovery-show Copy delegate — main owns the OS clipboard string
   // write (the chrome-clipboard-write precedent). Sender-validated in the handler.
   writeClipboard: (text) => clipboard.writeText(String(text))
@@ -1216,7 +1364,12 @@ const { broadcastJarsChanged } = registerJarIpc({
   revokeJarKey,
   settings,
   broadcast: broadcastToChromeAndInternal,
-  historyStore
+  historyStore,
+  // M12 F4 Leg 6 (DD7): handleRemove removes the deleted jar's `.gfvault` fail-soft.
+  // Passed as the memoized accessor (not the eager singleton) — mirrors register-vault-ipc.
+  // registerJarIpc runs at module scope AFTER getVaultStore is defined (main.js:573),
+  // and the accessor is only invoked at delete time, so there is no init-order risk.
+  getVaultStore
 });
 
 // Retention sweep engine + its cookie first-seen bookkeeping store (M10
@@ -1324,7 +1477,11 @@ registerVaultIpc({
   ipcMain,
   registerInternalHandler,
   getVaultStore,
-  jars
+  jars,
+  // M12 F4 Leg 1 (export-import): the main-side export delegate (save dialog + write). The
+  // internal-vault-export handler builds the ciphertext-only bundle from the store, then hands
+  // it here. Gated — offline register-vault-ipc tests omit it.
+  vaultSaveBundle: vaultSaveBundleToFile
 });
 
 registerAppLifecycle({

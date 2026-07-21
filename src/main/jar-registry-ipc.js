@@ -14,7 +14,12 @@ function registerJarRegistryIpc({
   revokeJarKey,
   settings,
   broadcast,
-  broadcastJarsChanged
+  broadcastJarsChanged,
+  // M12 F4 Leg 6 (DD7): accessor for the memoized vault-store singleton (mirrors
+  // register-vault-ipc's getVaultStore injection). handleRemove removes the deleted
+  // jar's `.gfvault` fail-soft. GATED — offline tests that omit it skip the step
+  // (the existing injection-gated precedent).
+  getVaultStore
 }) {
   function handleList() {
     return jars.list();
@@ -56,11 +61,12 @@ function registerJarRegistryIpc({
     return jars.getDefault();
   }
 
-  // Delete composition (DD6). Order: remove → wipe (incl. history purge) →
-  // revoke → settings-changed → jars-changed. Only the wipe is fail-soft
-  // (registry removal already happened — matching identity-new's error
-  // containment); revoke/broadcasts run regardless. `handleRemove` emits no
-  // history broadcast — the section leaves the DOM entirely (flight DD2).
+  // Delete composition (DD6 + M12 F4 Leg 6 / DD7). Order: remove → wipe (incl.
+  // history purge) → revoke → deleteVault → settings-changed → jars-changed. The
+  // wipe AND the vault removal are fail-soft (registry removal already happened —
+  // matching identity-new's error containment); revoke/broadcasts run regardless.
+  // `handleRemove` emits no history broadcast — the section leaves the DOM entirely
+  // (flight DD2).
   async function handleRemove(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false };
     const removed = jars.remove(p.id);
@@ -81,9 +87,24 @@ function registerJarRegistryIpc({
     // key list (the revoke IPC path today doesn't broadcast; this delete path
     // closes that gap).
     revokeJarKey(removed.id, settings);
+    // Remove the deleted jar's `.gfvault` (M12 F4 Leg 6 / DD7). FAIL-SOFT, exactly
+    // like the wipe containment above: the registry entry is already gone, so a
+    // vault-unlink failure (permissions, races) sets vaultRemoved:false but NEVER
+    // fails the jar delete — revoke/broadcasts run regardless. The store op is
+    // ENOENT-tolerant (a no-vault jar → deleted:false, the common case), guards the
+    // GLOBAL vault internally, and there is NO manager row to prune. Gated on the
+    // injection (offline tests omit getVaultStore → the step is skipped).
+    let vaultRemoved = false;
+    if (getVaultStore) {
+      try {
+        vaultRemoved = getVaultStore().deleteVault(removed.id).deleted;
+      } catch {
+        vaultRemoved = false;
+      }
+    }
     broadcast('settings-changed', settings.getAll());
     broadcastJarsChanged();
-    return { ok: true, removed, wiped };
+    return { ok: true, removed, wiped, vaultRemoved };
   }
 
   ipcMain.handle('jars-list', handleList);

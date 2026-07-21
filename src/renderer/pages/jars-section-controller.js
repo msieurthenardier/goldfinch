@@ -569,8 +569,13 @@ const WIPE_COPY =
   "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will close.";
 const WIPE_OK_NOTE = 'Identity cleared — data wiped, fingerprint rerolled.';
 const DELETE_COPY = 'Deletes this jar and wipes its cookies, site storage, and cache. Open tabs in this jar will close.';
+// M12 F4 Leg 6: the permanence copy shown ONLY when the jar being deleted has a saved
+// `.gfvault` — deleting the jar removes the vault too (irreversible). The no-vault jar's
+// confirm keeps DELETE_COPY (byte-unchanged).
+const DELETE_VAULT_COPY =
+  'This jar has a saved password vault — deleting it is permanent and unrecoverable. Deletes the jar and wipes its cookies, site storage, and cache. Open tabs in this jar will close.';
 /**
- * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean } }}
+ * @type {{ [action: string]: { copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean }> } }}
  */
 const DATA_ACTIONS = {};
 for (const cls of JAR_DATA_CLASSES) {
@@ -592,7 +597,14 @@ DATA_ACTIONS.delete = {
   run: (id) => bridge.jarsRemove({ id }),
   okNote: '',
   failNote: "Couldn't delete jar",
-  silentSuccess: true
+  silentSuccess: true,
+  // M12 F4 Leg 6: offer-export-first for a vault-bearing jar. When `ui.vaultPresent`
+  // (resolved in openDataConfirm below), the confirm swaps to DELETE_VAULT_COPY and
+  // renders an "Export vault first" button that reuses Leg 1's export WITHOUT closing
+  // the modal. Delete stays the separate explicit Confirm click (never chained off
+  // export). A no-vault jar has neither field's effect (byte-unchanged 2-element modal).
+  vaultPresentCopy: DELETE_VAULT_COPY,
+  exportVault: (id) => bridge.exportVault(id)
 };
 /** @type {{ [action: string]: string }} */
 const CONFIRM_TITLE = {};
@@ -611,9 +623,25 @@ const confirmModal = createConfirmModal({
   fallbackFocusEl: newBtn
 });
 /** @param {string} id @param {string} action */
-function openDataConfirm(id, action) {
+async function openDataConfirm(id, action) {
+  // Capture the trigger BEFORE any await — the clicked button is document.activeElement
+  // now (the browser focuses a button on click before its handler runs); an await here
+  // does not move it (the button stays focused).
   confirmModal.captureTrigger();
-  setUi({ mode: 'confirm', rowId: id, action, draft: null });
+  // M12 F4 Leg 6: for a jar delete, probe whether the jar has a saved `.gfvault` so the
+  // confirm can surface the export-first offer. Only the delete action needs this; every
+  // other action opens synchronously with vaultPresent:false. Fail-closed to no-offer if
+  // the probe throws (the delete itself is unaffected — deleteVault is ENOENT-tolerant).
+  let vaultPresent = false;
+  if (action === 'delete' && bridge.hasVault) {
+    try {
+      const res = await bridge.hasVault(id);
+      vaultPresent = !!(res && res.present);
+    } catch {
+      vaultPresent = false;
+    }
+  }
+  setUi({ mode: 'confirm', rowId: id, action, draft: null, vaultPresent });
   requestRender();
 }
 /**

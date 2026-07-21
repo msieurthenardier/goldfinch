@@ -78,13 +78,14 @@ async function realHarness() {
 const CRUD_CHANNELS = ['internal-vault-list', 'internal-vault-reveal', 'internal-vault-item-save', 'internal-vault-item-delete'];
 const ACCESSKEY_CHANNELS = ['internal-vault-accesskey-list', 'internal-vault-accesskey-revoke'];
 
-test('registerVaultIpc registers the state read + the four item CRUD channels + live-totp + the two access-key channels', () => {
+test('registerVaultIpc registers the state read + the vault-presence probe + the four item CRUD channels + live-totp + the two access-key channels', () => {
   const ipcMain = wire();
   assert.deepEqual(
     Object.keys(ipcMain._handlers).sort(),
     [
       'internal-vault-accesskey-list',
       'internal-vault-accesskey-revoke',
+      'internal-vault-has',
       'internal-vault-item-delete',
       'internal-vault-item-save',
       'internal-vault-list',
@@ -333,5 +334,64 @@ test('internal-vault-accesskey-revoke resolves the target through the store allo
       () => ipcMain.invoke('internal-vault-accesskey-revoke', vaultEvent(), { vaultId: 'burner-xyz', keyId: 'x' }),
       (err) => err instanceof Error && /unknown or non-persistent/.test(err.message)
     );
+  } finally { rm(dir); }
+});
+
+// ---------------------------------------------------------------------------
+// Portable EXPORT (M12 Flight 4 Leg 1 export-import, DD1) — internal-vault-export.
+// GATED on the vaultSaveBundle injection; builds a ciphertext-only bundle from the store
+// and hands it to the save-dialog delegate; a LOCKED manager → { locked: true }.
+// ---------------------------------------------------------------------------
+
+test('internal-vault-export is GATED on the vaultSaveBundle injection', () => {
+  const ipcMain = wire(); // no vaultSaveBundle
+  assert.equal('internal-vault-export' in ipcMain._handlers, false);
+});
+
+test('internal-vault-export builds a ciphertext-only bundle from the store and hands it to vaultSaveBundle', async () => {
+  const dir = tmpDir();
+  try {
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
+    await store.setup({ masterPassword: MASTER }); // set up + unlocked
+    store.saveItem('global', { type: 'login', title: 'X', username: 'u', password: 'hunter2' });
+
+    const saved = [];
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({
+      ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS },
+      vaultSaveBundle: async (bundle) => { saved.push(bundle); return { ok: true, path: '/tmp/x.gfvaultbundle' }; },
+    });
+
+    const res = await ipcMain.invoke('internal-vault-export', vaultEvent(), 'global');
+    assert.deepEqual(res, { ok: true, path: '/tmp/x.gfvaultbundle' });
+    assert.equal(saved.length, 1);
+    const bundle = saved[0];
+    assert.equal(bundle.format, 'gfvault-bundle');
+    assert.equal(bundle.sourceVaultId, 'global');
+    for (const slot of ['master', 'recovery', 'admin']) {
+      assert.equal(typeof bundle.mrk[slot].ct, 'string');
+    }
+    // No plaintext password crosses to the delegate.
+    assert.equal(JSON.stringify(bundle).includes('hunter2'), false);
+  } finally { rm(dir); }
+});
+
+test('internal-vault-export on a LOCKED manager returns { locked: true } (never calls the save dialog)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
+    await store.setup({ masterPassword: MASTER });
+    store.lockNow();
+
+    let called = 0;
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({
+      ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS },
+      vaultSaveBundle: async () => { called += 1; return { ok: true }; },
+    });
+
+    const res = await ipcMain.invoke('internal-vault-export', vaultEvent(), 'global');
+    assert.deepEqual(res, { locked: true });
+    assert.equal(called, 0, 'the save dialog is never reached when locked');
   } finally { rm(dir); }
 });

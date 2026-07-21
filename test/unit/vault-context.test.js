@@ -227,7 +227,7 @@ test('vaultFill hands the credential to the fill delegate and returns NO passwor
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
     ctx.unlock('work', fx.workSecret);
     const res = ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)); // work tab, matching origin
-    assert.deepEqual(res, { filled: true, id: 'w1' });
+    assert.deepEqual(res, { filled: true, id: 'w1', origin: 'https://work.example' });
     assert.equal(fill.calls.length, 1);
     assert.equal(fill.calls[0].wcId, 10);
     assert.deepEqual(fill.calls[0].credential, { username: 'wuser', password: 'wpass' });
@@ -235,6 +235,35 @@ test('vaultFill hands the credential to the fill delegate and returns NO passwor
     const blob = JSON.stringify(res);
     assert.equal(blob.includes('wpass'), false);
     assert.equal(blob.includes('wuser'), false);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('vaultFill success return carries the resolved origin; not-filled shapes carry none (M12 F4 Leg 5)', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const fill = makeFill();
+    const world = makeWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    ctx.unlock('work', fx.workSecret);
+    // Success: origin present, matching the resolved top-frame origin (never a credential).
+    const ok = ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world));
+    assert.equal(ok.filled, true);
+    assert.equal(ok.origin, 'https://work.example');
+    const blob = JSON.stringify(ok);
+    assert.equal(blob.includes('wpass'), false);
+    assert.equal(blob.includes('wuser'), false);
+    // Locked: not-filled shape has no origin field.
+    const locked = createVaultContext({ vaultStore: makeStore(fx.dir), fillDelegate: makeFill().fn });
+    const lockedRes = locked.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world));
+    assert.deepEqual(lockedRes, { filled: false, reason: 'locked' });
+    assert.equal('origin' in lockedRes, false);
+    // Origin-mismatch: not-filled shape has no origin field either.
+    const mism = ctx.fill('work', { wcId: 30, itemId: 'w1' }, fillDeps(world));
+    assert.equal(mism.filled, false);
+    assert.equal('origin' in mism, false);
   } finally {
     rm(fx.dir);
   }
@@ -462,6 +491,27 @@ test('deriveAuditDetail NEVER emits a secret for vault ops (both accessKey types
         assert.equal(s.includes(secret), false, op + ' audit detail must not leak ' + secret);
       }
     }
+
+    // M12 F4 Leg 5: the RESULT-aware path must not leak a secret either. Feed an
+    // adversarial result that embeds every secret in fields the derivation does NOT
+    // read (password / accessKey / unlocked-ids). Only the non-secret origin and
+    // the unlock COUNT may surface; no secret substring may appear.
+    const mkResult = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
+    const hostile = mkResult({
+      filled: true, id: 'w1', origin: 'https://work.example',
+      password: 'wpass', accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, totp: TOTP_SECRET,
+      unlocked: [fx.workSecret, fx.adminPrivateKeyB64],
+    });
+    for (const op of ['vaultUnlock', 'vaultList', 'vaultTotp', 'vaultFill']) {
+      const detail = deriveAuditDetail(op, { accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, itemId: 'w1', wcId: 10 }, hostile);
+      const s = String(detail);
+      for (const secret of [fx.workSecret, fx.adminPrivateKeyB64, 'wpass', TOTP_SECRET]) {
+        assert.equal(s.includes(secret), false, op + ' result-aware audit detail must not leak ' + secret);
+      }
+    }
+    // The result-aware path DOES record the non-secret enrichments.
+    assert.equal(deriveAuditDetail('vaultFill', { itemId: 'w1' }, hostile), 'item=w1 origin=https://work.example');
+    assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: fx.workSecret }, hostile), 'unlocked=2');
   } finally {
     rm(fx.dir);
   }

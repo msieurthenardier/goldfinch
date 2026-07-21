@@ -246,16 +246,16 @@ async function findSheetWcId(client) {
 // The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
 // first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
 // SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey'];
+const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey'];
 const SHEET_DISMISS_EXPR = `(() => {
   const ids = ${JSON.stringify(SHEET_NODE_IDS)};
   const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
   if (!open) return 'none-open';
-  // vault-recovery-show and vault-accesskey-show are DISMISS-DISABLED (Escape / backdrop /
-  // blur are inert — the one-time recovery key / minted access secret is unrecoverable);
-  // only the explicit acknowledge ("I've saved it", the last actions button) closes them.
-  // Every other sheet dismisses on Escape.
-  if (open.id === 'sheet-vault-recovery' || open.id === 'sheet-vault-accesskey') {
+  // vault-recovery-show, vault-accesskey-show and vault-adminkey-show are DISMISS-DISABLED
+  // (Escape / backdrop / blur are inert — the one-time recovery key / minted access secret /
+  // admin private key is unrecoverable); only the explicit acknowledge ("I've saved it", the
+  // last actions button) closes them. Every other sheet dismisses on Escape.
+  if (open.id === 'sheet-vault-recovery' || open.id === 'sheet-vault-accesskey' || open.id === 'sheet-vault-adminkey') {
     const ack = open.querySelector('.new-container-actions button:last-child');
     if (ack) { ack.click(); return 'escaped'; }
     return 'no-ack';
@@ -433,7 +433,23 @@ async function main() {
         // (SHEET_DISMISS_EXPR clicks its acknowledge). Both raise no chrome-side trigger — the
         // audit hooks open them directly (openVault*OverlayForAudit, the evaluate-seam additions).
         { label: 'sheet:vault-stepup', open: 'openVaultStepupOverlayForAudit()' },
-        { label: 'sheet:vault-accesskey-show', open: 'openVaultAccessKeyShowOverlayForAudit()' }
+        { label: 'sheet:vault-accesskey-show', open: 'openVaultAccessKeyShowOverlayForAudit()' },
+        // M12 F4 Leg 1 (export-import, DD9): the import-bundle secret entry. Dialog-style,
+        // Escape-dismissible; secretKind radios + a secret field + Import/Cancel. Raises no
+        // chrome-side trigger element — the audit hook opens it directly.
+        { label: 'sheet:vault-import-unlock', open: 'openVaultImportUnlockOverlayForAudit()' },
+        // M12 F4 Leg 2 (key-rotation, DD9): the two new rotation sheets. vault-change-master is
+        // the old + new master-password entry; vault-recover is the recovery-key + new-master
+        // entry. Both dialog-style, Escape-dismissible; three password fields + submit/cancel.
+        // Recovery rotation's step-up reuses vault-stepup (already covered above). Raise no
+        // chrome-side trigger — the audit hooks open them directly.
+        { label: 'sheet:vault-change-master', open: 'openVaultChangeMasterOverlayForAudit()' },
+        { label: 'sheet:vault-recover', open: 'openVaultRecoverOverlayForAudit()' },
+        // M12 F4 Leg 3 (admin-key-provision, DD9): the one-time admin-key display. Read-only,
+        // DISMISS-DISABLED (SHEET_DISMISS_EXPR clicks its acknowledge); the master-password step-up
+        // reuses vault-stepup (already covered above). Raises no chrome-side trigger — the audit hook
+        // opens it directly.
+        { label: 'sheet:vault-adminkey-show', open: 'openVaultAdminKeyShowOverlayForAudit()' }
       ];
       let sheetWcId = null;
       for (const state of SHEET_STATES) {

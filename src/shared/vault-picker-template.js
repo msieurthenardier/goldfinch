@@ -91,7 +91,10 @@ export function buildVaultPickerCard(document) {
  * Returns the focusable row buttons in order (the menu-controller's items getter).
  * @param {Document} document
  * @param {HTMLElement} card
- * @param {Array<{ vaultId?: string, id?: string, title?: string|null, username?: string|null, hasTotp?: boolean, badgeLabel?: string }>} model
+ * A row whose `widened` flag is true (a registrable-domain match on a subdomain, not
+ * the exact origin — M12 F4 Leg 4 / DD5) gets an ADDITIONAL distinct badge so the
+ * operator sees the offer is not exact-origin. `textContent`-only, like every label.
+ * @param {Array<{ vaultId?: string, id?: string, title?: string|null, username?: string|null, hasTotp?: boolean, badgeLabel?: string, widened?: boolean }>} model
  * @returns {HTMLElement[]}
  */
 export function renderVaultPickerRows(document, card, model) {
@@ -134,6 +137,15 @@ export function renderVaultPickerRows(document, card, model) {
     badge.className = 'vault-picker-badge';
     badge.textContent = badgeLabelFor(item || {});
     btn.appendChild(badge);
+
+    // A registrable-domain widen (subdomain match, not exact origin): a distinct badge
+    // so the operator sees this offer is not exact-origin (M12 F4 Leg 4 / DD5).
+    if (item && item.widened) {
+      const widened = document.createElement('span');
+      widened.className = 'vault-picker-badge vault-picker-badge-widened';
+      widened.textContent = 'Subdomain match';
+      btn.appendChild(widened);
+    }
 
     card.appendChild(btn);
     buttons.push(btn);

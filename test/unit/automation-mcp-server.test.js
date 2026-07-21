@@ -20,6 +20,10 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { createMcpServer, mintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const vaultStoreApi = require('../../src/main/vault/vault-store');
 
 const TEST_PORT = 7790;
 const ENDPOINT = new URL('http://127.0.0.1:' + TEST_PORT + '/mcp');
@@ -1306,6 +1310,150 @@ test('deriveAuditDetail — null-safe: returns null when args is undefined', () 
   assert.equal(deriveAuditDetail('typeText', undefined), null);
   assert.equal(deriveAuditDetail('click', undefined), null);
   assert.equal(deriveAuditDetail('dragPointer', undefined), null);
+});
+
+// ---------------------------------------------------------------------------
+// deriveAuditDetail — result-aware vault enrichment (M12 F4 Leg 5, DD6). The
+// optional 3rd param carries the MCP tool result; vaultFill appends the resolved
+// origin, vaultUnlock records the unlocked COUNT. Malformed/absent results
+// degrade to the args-only (or null) detail and NEVER throw.
+// ---------------------------------------------------------------------------
+
+// Shape a tool result the way okResult() does: the whole op return JSON-serialized
+// into the single text-content block.
+const mkToolResult = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
+
+test('deriveAuditDetail — vaultFill appends origin from a filled result (item=<id> origin=<origin>)', () => {
+  const result = mkToolResult({ filled: true, id: 'w1', origin: 'https://work.example' });
+  assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }, result), 'item=w1 origin=https://work.example');
+});
+
+test('deriveAuditDetail — vaultFill with a NOT-filled result keeps item=<id> (no origin)', () => {
+  const result = mkToolResult({ filled: false, reason: 'origin-mismatch' });
+  assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }, result), 'item=w1');
+});
+
+test('deriveAuditDetail — vaultFill 2-arg (no result) keeps item=<id> — back-compat', () => {
+  assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }), 'item=w1');
+});
+
+test('deriveAuditDetail — vaultFill with a malformed (non-JSON) result degrades to item=<id>, never throws', () => {
+  const errResult = { content: [{ type: 'text', text: 'automation: some-error — not json' }] };
+  assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }, errResult), 'item=w1');
+  // Wholly malformed shapes are also safe.
+  assert.equal(deriveAuditDetail('vaultFill', { itemId: 'w1' }, {}), 'item=w1');
+  assert.equal(deriveAuditDetail('vaultFill', { itemId: 'w1' }, null), 'item=w1');
+});
+
+test('deriveAuditDetail — vaultUnlock records unlocked=<N> (the count) from the result', () => {
+  const result = mkToolResult({ unlocked: ['global', 'work'] });
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, result), 'unlocked=2');
+});
+
+test('deriveAuditDetail — vaultUnlock with an empty unlocked array records unlocked=0', () => {
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, mkToolResult({ unlocked: [] })), 'unlocked=0');
+});
+
+test('deriveAuditDetail — vaultUnlock with a non-array unlocked records unlocked=0 (Array.isArray guard)', () => {
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, mkToolResult({ unlocked: 'oops' })), 'unlocked=0');
+});
+
+test('deriveAuditDetail — vaultUnlock 2-arg (no result) returns null — preserves the secret-op default', () => {
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }), null);
+});
+
+test('deriveAuditDetail — vaultUnlock with a malformed/error result degrades to null, never throws', () => {
+  const errResult = { content: [{ type: 'text', text: 'automation: unlock-failed — not json' }] };
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, errResult), null);
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, {}), null);
+  assert.equal(deriveAuditDetail('vaultUnlock', { accessKey: 'secret' }, null), null);
+});
+
+// ---------------------------------------------------------------------------
+// Integration (M12 F4 Leg 5, DD6): a DRIVEN vaultUnlock + vaultFill over the MCP
+// surface produce audit records enriched from the RESULT (unlocked=<N> / origin=)
+// with NO secret substring. Built against a REAL .gfvault fixture (fast scrypt) +
+// a scopeCtx whose target tab origin-matches the item.
+// ---------------------------------------------------------------------------
+
+// Fast scrypt so the mint/derive round-trips stay quick (production params live in
+// vault-crypto's own suite).
+const VAULT_FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const VAULT_MASTER = 'correct horse battery staple';
+const VAULT_JARS = [{ id: 'work', partition: 'persist:container:work' }];
+
+async function buildVaultFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-mcp-vault-'));
+  const setup = vaultStoreApi.load(dir, { scryptParams: VAULT_FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => VAULT_JARS });
+  await setup.setup({ masterPassword: VAULT_MASTER });
+  setup.saveItem('work', { id: 'w1', type: 'login', title: 'Work', origin: 'https://work.example', username: 'wuser', password: 'wpass' });
+  const work = await setup.mintAccessKey('work', { masterPassword: VAULT_MASTER });
+  setup.lockNow(); // human store locked — the automation path is stateless.
+  return { dir, workSecret: work.secret };
+}
+
+async function startVaultServer(sink, fixture, fillCalls) {
+  const vsessions = new Map();
+  const vsessionFor = (p) => {
+    if (!vsessions.has(p)) vsessions.set(p, { __partition: p, __goldfinchInternal: false });
+    return vsessions.get(p);
+  };
+  const server = createMcpServer({
+    getEngine: (engineOpts) => makeFakeEngine(engineOpts),
+    getSettings: multiKeySettings({}),
+    scopeCtx: {
+      jars: { list: () => VAULT_JARS },
+      // wcId 501 is a work-session tab whose top-frame origin MATCHES the item.
+      fromId: (wcId) => (wcId === 501
+        ? { id: 501, session: vsessionFor('persist:container:work'), getURL: () => 'https://work.example/login', isDestroyed() { return false; } }
+        : null),
+      fromPartition: vsessionFor,
+      getChromeContents: () => ({ id: 0 }),
+    },
+    vaultStore: vaultStoreApi.load(fixture.dir, { scryptParams: VAULT_FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => VAULT_JARS }),
+    fillDelegate: (a) => fillCalls.push(a),
+    getAutoLockMinutes: () => 10,
+    broadcast: (payload) => sink.push(payload),
+    port: TEST_PORT,
+  });
+  await server.start();
+  return server;
+}
+
+test('audit — a driven vaultUnlock records unlocked=<N> and vaultFill records origin=; neither leaks a secret (M12 F4 Leg 5)', async () => {
+  const fixture = await buildVaultFixture();
+  const broadcasts = [];
+  const fillCalls = [];
+  const server = await startVaultServer(broadcasts, fixture, fillCalls);
+  try {
+    const client = await connectClient(WORK_KEY); // identity 'work'
+    try {
+      // (1) Unlock the work vault — the audit records the COUNT, never the accessKey.
+      const unlockRes = await client.callTool({ name: 'vaultUnlock', arguments: { accessKey: fixture.workSecret } });
+      assert.equal(unlockRes.isError, undefined);
+      const unlockEntry = server.getActivity().log.slice(-1)[0];
+      assert.equal(unlockEntry.op, 'vaultUnlock');
+      assert.equal(unlockEntry.detail, 'unlocked=1');
+      assert.ok(!String(unlockEntry.detail).includes(fixture.workSecret), 'unlock detail must not leak the accessKey');
+
+      // (2) Fill the origin-matched work tab — the audit records the resolved origin,
+      // never the credential/password.
+      const fillRes = await client.callTool({ name: 'vaultFill', arguments: { wcId: 501, itemId: 'w1' } });
+      assert.equal(fillRes.isError, undefined);
+      assert.equal(fillCalls.length, 1, 'the fill delegate ran once');
+      const fillEntry = server.getActivity().log.slice(-1)[0];
+      assert.equal(fillEntry.op, 'vaultFill');
+      assert.equal(fillEntry.detail, 'item=w1 origin=https://work.example');
+      for (const secret of [fixture.workSecret, 'wpass', 'wuser']) {
+        assert.ok(!fillEntry.detail.includes(secret), 'fill detail must not leak ' + secret);
+      }
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await server.stop();
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
 });
 
 test('audit — navigate tool call records detail=url=… in the log entry', async () => {

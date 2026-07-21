@@ -21,6 +21,7 @@
  * @returns {{
  *   node: HTMLElement,
  *   card: HTMLElement,
+ *   lede: HTMLElement,
  *   input: HTMLInputElement,
  *   error: HTMLElement,
  *   submit: HTMLButtonElement,
@@ -88,5 +89,8 @@ export function buildVaultStepupCard(document) {
   card.appendChild(error);
   card.appendChild(actions);
 
-  return { node, card, input, error, submit, cancel };
+  // `lede` is exposed so menu-overlay.js can re-label it when the sheet is REUSED for the M12
+  // F4 Leg 2 recovery-rotation master-password step-up (DD3) — the same re-auth UI, different
+  // copy + submit action. The build-time default stays the access-key mint text.
+  return { node, card, lede, input, error, submit, cancel };
 }

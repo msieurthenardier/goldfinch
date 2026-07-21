@@ -42,7 +42,15 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // M12 F3 Leg 5 (access-keys, DD9): +2 for openVaultStepupOverlayForAudit /
 // openVaultAccessKeyShowOverlayForAudit — the SHEET_STATES 'sheet:vault-stepup' /
 // 'sheet:vault-accesskey-show' a11y drivers (same leg-authorized seam-addition precedent).
-const SEAM_COUNT = 23;
+// M12 F4 Leg 1 (export-import, DD9): +1 for openVaultImportUnlockOverlayForAudit — the
+// SHEET_STATES 'sheet:vault-import-unlock' a11y driver (same leg-authorized seam-addition
+// precedent).
+// M12 F4 Leg 2 (key-rotation, DD9): +2 for openVaultChangeMasterOverlayForAudit /
+// openVaultRecoverOverlayForAudit — the SHEET_STATES 'sheet:vault-change-master' /
+// 'sheet:vault-recover' a11y drivers (same leg-authorized seam-addition precedent).
+// M12 F4 Leg 3 (admin-key-provision, DD9): +1 for openVaultAdminKeyShowOverlayForAudit — the
+// SHEET_STATES 'sheet:vault-adminkey-show' a11y driver (same leg-authorized seam-addition precedent).
+const SEAM_COUNT = 27;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

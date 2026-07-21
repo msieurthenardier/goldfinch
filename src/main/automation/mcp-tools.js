@@ -663,7 +663,8 @@ const VAULT_TOOLS = [
     description: 'Fill an origin-matched login credential into the target tab (wcId). Resolves the item by id from an unlocked reachable vault, ' +
       'enforces jar membership (a jar session naming a foreign/sibling tab is refused with automation: out-of-jar) and a top-frame origin match ' +
       'against the item, then performs the fill via Goldfinch\'s internal fill effect. ' +
-      'The credential/password is NEVER returned — the result is { filled: true, id } on success, or a NORMAL { filled: false, reason } ' +
+      'The credential/password is NEVER returned — the result is { filled: true, id, origin } on success (origin = the resolved top-frame ' +
+      'origin the fill matched against; non-secret, no credential/password), or a NORMAL { filled: false, reason } ' +
       '(reason "locked" / "no-match" / "origin-mismatch") when nothing was filled. Requires wcId.',
     inputSchema: {
       type: 'object',

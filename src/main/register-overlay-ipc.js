@@ -18,6 +18,11 @@ function registerOverlayIpc({
   vaultCaptureSave,
   vaultSetup,
   vaultMintAccessKey,
+  vaultImport,
+  vaultRotateRecovery,
+  vaultRotateAdminKey,
+  vaultChangeMaster,
+  vaultRecover,
   writeClipboard,
 }) {
   function recordForOverlaySender(sender, key) {
@@ -198,6 +203,190 @@ function registerOverlayIpc({
       } finally {
         buf.fill(0);
         secret.fill?.(0);
+      }
+    });
+  }
+
+  // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret channel, mirroring
+  // menu-overlay:vault-stepup-mint BYTE-FOR-BYTE (sender identity + open-token + `secret
+  // instanceof Uint8Array` + Buffer.from copy + DUAL-ZEROIZE in finally). The payload adds the
+  // NON-SECRET `secretKind` (master | recovery); the destination target + the bundle are held
+  // MAIN-SIDE by the vaultImport delegate (never on this sheet, never on the page). The
+  // vaultImport delegate (main.js) follows the vaultUnlock pattern: a WRONG secret →
+  // VaultAuthError → { ok:false } and NOTHING is written (importVault does all crypto before
+  // any write). On success we close the sheet ('activated'); the fresh-profile adopt leaves the
+  // store unlocked (its onUnlock broadcasts the lock-state, moving the page to unlocked).
+  // Gated on the vaultImport injection so offline overlay tests never register it.
+  if (vaultImport) {
+    ipcMain.handle('menu-overlay:vault-import', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, secret, secretKind } = payload || {};
+      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      const kind = secretKind === 'recovery' ? 'recovery' : 'master';
+      const buf = Buffer.from(secret);
+      try {
+        const res = await vaultImport(buf, kind); // { ok }
+        if (res && res.ok) {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          return { ok: true };
+        }
+        return { ok: false };
+      } finally {
+        buf.fill(0);
+        secret.fill?.(0);
+      }
+    });
+  }
+
+  // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION step-up channel,
+  // mirroring menu-overlay:vault-setup BYTE-FOR-BYTE (sender identity + open-token + `secret
+  // instanceof Uint8Array` + Buffer.from copy + DUAL-ZEROIZE in finally). The vault-stepup sheet
+  // is REUSED for this master-password step-up (DD3); it routes here (not stepup-mint) when in
+  // rotate-recovery mode. The vaultRotateRecovery delegate (main.js) maps VaultAuthError →
+  // { ok:false } (the vaultUnlock pattern) so a WRONG master password re-prompts and NOTHING is
+  // rotated (the step-up re-unwraps the master envelope BEFORE any write). On success we (a) close
+  // the sheet and (b) drive the OWNING window's chrome to open the read-only, dismiss-locked
+  // vault-recovery-show sheet with the NEW recovery key (POST-write ordering) — shown ONCE (never
+  // in the invoke reply, never in the page DOM). Gated on the vaultRotateRecovery injection.
+  if (vaultRotateRecovery) {
+    ipcMain.handle('menu-overlay:vault-rotate-recovery', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, secret } = payload || {};
+      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      const buf = Buffer.from(secret);
+      try {
+        const res = await vaultRotateRecovery(buf); // { ok, recoveryKeyDisplay? }
+        if (res && res.ok) {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          // The new one-time recovery key — main→chrome→sheet (channel-3 init carries the model).
+          // Shown ONCE on the dismiss-locked vault-recovery-show sheet, opened AFTER the write.
+          chromeForAttachment(rec.win)?.send('vault-recovery-show', {
+            recoveryKey: res.recoveryKeyDisplay,
+          });
+          return { ok: true };
+        }
+        return { ok: false };
+      } finally {
+        buf.fill(0);
+        secret.fill?.(0);
+      }
+    });
+  }
+
+  // M12 F4 Leg 3 (admin-key-provision): the vault-stepup sheet's ADMIN-KEY ROTATION step-up channel,
+  // mirroring menu-overlay:vault-rotate-recovery BYTE-FOR-BYTE (sender identity + open-token + `secret
+  // instanceof Uint8Array` + Buffer.from copy + DUAL-ZEROIZE in finally). The vault-stepup sheet is
+  // REUSED for this master-password step-up (DD4); it routes here (not stepup-mint / rotate-recovery)
+  // when in rotate-admin mode. The vaultRotateAdminKey delegate (main.js) maps VaultAuthError →
+  // { ok:false } (the vaultUnlock pattern) so a WRONG master password re-prompts and NOTHING is rotated
+  // (the step-up re-unwraps the master envelope BEFORE any write). On success we (a) close the sheet and
+  // (b) drive the OWNING window's chrome to open the read-only, dismiss-locked vault-adminkey-show sheet
+  // with the NEW admin private key (POST-write ordering) — shown ONCE (never in the invoke reply, never
+  // in the page DOM). Gated on the vaultRotateAdminKey injection.
+  if (vaultRotateAdminKey) {
+    ipcMain.handle('menu-overlay:vault-rotate-admin', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, secret } = payload || {};
+      if (typeof token !== 'number' || !(secret instanceof Uint8Array)) return { ok: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      const buf = Buffer.from(secret);
+      try {
+        const res = await vaultRotateAdminKey(buf); // { ok, adminPrivateKeyB64? }
+        if (res && res.ok) {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          // The new one-time admin private key — main→chrome→sheet (channel-3 init carries the model).
+          // Shown ONCE on the dismiss-locked vault-adminkey-show sheet, opened AFTER the write.
+          chromeForAttachment(rec.win)?.send('vault-adminkey-show', {
+            adminPrivateKey: res.adminPrivateKeyB64,
+          });
+          return { ok: true };
+        }
+        return { ok: false };
+      } finally {
+        buf.fill(0);
+        secret.fill?.(0);
+      }
+    });
+  }
+
+  // M12 F4 Leg 2 (key-rotation): the vault-change-master sheet's TWO-SECRET channel (old + new
+  // master passwords), mirroring the vault-setup handler's discipline (sender identity + open-
+  // token + `instanceof Uint8Array` + Buffer.from copy) but DUAL-ZEROIZING BOTH secret arrays +
+  // BOTH Buffer copies in finally. The confirm check is renderer-side; only old + new cross here.
+  // The vaultChangeMaster delegate (main.js) maps VaultAuthError → { ok:false } (the vaultUnlock
+  // pattern) so a WRONG old password re-prompts and NOTHING is written (the old-password step-up
+  // precedes any write). On success we close the sheet (no one-time display — the new master is
+  // operator-chosen). Gated on the vaultChangeMaster injection.
+  if (vaultChangeMaster) {
+    ipcMain.handle('menu-overlay:vault-change-master', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, oldSecret, newSecret } = payload || {};
+      if (typeof token !== 'number'
+        || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+        return { ok: false };
+      }
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      const oldBuf = Buffer.from(oldSecret);
+      const newBuf = Buffer.from(newSecret);
+      try {
+        const res = await vaultChangeMaster(oldBuf, newBuf); // { ok }
+        if (res && res.ok) {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          return { ok: true };
+        }
+        return { ok: false };
+      } finally {
+        oldBuf.fill(0);
+        newBuf.fill(0);
+        oldSecret.fill?.(0);
+        newSecret.fill?.(0);
+      }
+    });
+  }
+
+  // M12 F4 Leg 2 (key-rotation): the vault-recover sheet's TWO-SECRET channel (recovery key + new
+  // master password), mirroring the vault-change-master handler (DUAL-ZEROIZE BOTH arrays + BOTH
+  // Buffer copies). The confirm check is renderer-side; only recovery + new cross here. The
+  // vaultRecover delegate (main.js) maps VaultAuthError → { ok:false } so a WRONG recovery key
+  // re-prompts and NOTHING is written (recoverMasterPassword unwraps the recovery envelope BEFORE
+  // any write / install). On success the store installs the MRK (the user ends UNLOCKED) and its
+  // onUnlock/broadcast moves the page to unlocked; we close the sheet. Gated on the vaultRecover
+  // injection.
+  if (vaultRecover) {
+    ipcMain.handle('menu-overlay:vault-recover', async (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, recoverySecret, newSecret } = payload || {};
+      if (typeof token !== 'number'
+        || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+        return { ok: false };
+      }
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      const recoveryBuf = Buffer.from(recoverySecret);
+      const newBuf = Buffer.from(newSecret);
+      try {
+        const res = await vaultRecover(recoveryBuf, newBuf); // { ok }
+        if (res && res.ok) {
+          rec.sheet.closeMenuOverlay('activated', current.token);
+          return { ok: true };
+        }
+        return { ok: false };
+      } finally {
+        recoveryBuf.fill(0);
+        newBuf.fill(0);
+        recoverySecret.fill?.(0);
+        newSecret.fill?.(0);
       }
     });
   }

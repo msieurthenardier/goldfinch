@@ -25,6 +25,7 @@ function registerBrowserIpc({
   hostnameOf,
   shields,
   getVaultHuman,
+  vaultImportBegin,
   random = Math.random,
   logger = console,
 }) {
@@ -155,6 +156,51 @@ function registerBrowserIpc({
   // cannot mint against a burner/unknown target).
   registerInternalHandler(ipcMain, 'internal-vault-request-mint', (event, target) => {
     chromeForTab(event.sender.id)?.send('vault-request-mint', { target });
+    return { ok: true };
+  });
+
+  // Vault IMPORT request (M12 F4 Leg 1 export-import, DD1/DD2). Distinct from the setup/mint
+  // triggers: import needs a FILE first, so this awaits the injected main-side `vaultImportBegin`
+  // delegate — it runs the open dialog, reads + parses the bundle (ciphertext), and HOLDS
+  // { bundle, destinationTarget } main-side. ONLY on { ok } do we forward the BARE
+  // `vault-request-import` trigger to the owning chrome (chromeForTab(event.sender.id) — the
+  // internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
+  // secret is entered on that sheet and never touches this channel or the page. A canceled
+  // dialog / unreadable file returns without opening the sheet. Gated on the injection so
+  // offline harnesses that omit it never register it.
+  if (vaultImportBegin) {
+    registerInternalHandler(ipcMain, 'internal-vault-request-import', async (event, destinationTarget) => {
+      const res = await vaultImportBegin(destinationTarget);
+      if (res && res.ok) chromeForTab(event.sender.id)?.send('vault-request-import');
+      return res;
+    });
+  }
+
+  // Vault ROTATION / RECOVER cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). All
+  // three mirror internal-vault-request-setup — a BARE trigger with NO secret — routing the vault
+  // page's rotation-section actions to the owning chrome (chromeForTab(event.sender.id) — the
+  // internal tab is in tabViews). The secret entry lives on the chrome-owned sheet, never this
+  // channel or the page DOM. rotate-recovery reuses the vault-stepup sheet (master-pw step-up);
+  // change-master opens the vault-change-master sheet (old + new); recover opens the vault-recover
+  // sheet (recovery key + new — reachable FROM LOCKED). registerInternalHandler rejects any
+  // non-internal sender before the body runs.
+  registerInternalHandler(ipcMain, 'internal-vault-request-rotate-recovery', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-rotate-recovery');
+    return { ok: true };
+  });
+  // M12 F4 Leg 3 (admin-key-provision): the admin-key PROVISION/ROTATE affordance — a BARE trigger
+  // (no secret) reusing the vault-stepup sheet (master-pw step-up, mode 'rotate-admin'). The new
+  // admin private key is shown once on the chrome-owned vault-adminkey-show sheet, never this channel.
+  registerInternalHandler(ipcMain, 'internal-vault-request-rotate-admin', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-rotate-admin');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-change-master', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-change-master');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-recover', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-recover');
     return { ok: true };
   });
 

@@ -65,14 +65,16 @@ test('merges global + that jar only, exact-origin filtered, source-tagged, metad
     assert.equal(byUser['w@a'].hasTotp, true);
     assert.equal(byUser['g@a'].hasTotp, false);
 
-    // METADATA ONLY — exactly these keys, never a password / totp secret.
+    // METADATA ONLY — exactly these keys, never a password / totp secret. `widened`
+    // (M12 F4 Leg 4 / DD5) rides every row (false for an exact match).
     for (const r of rows) {
       assert.deepEqual(
         Object.keys(r).sort(),
-        ['hasTotp', 'id', 'origin', 'title', 'username', 'vaultId'],
+        ['hasTotp', 'id', 'origin', 'title', 'username', 'vaultId', 'widened'],
       );
       assert.ok(!('password' in r), 'no password key');
       assert.ok(!('totp' in r), 'no totp secret key');
+      assert.equal(r.widened, false, 'an exact-origin match is never widened');
     }
     // Belt-and-suspenders: the stored password never appears anywhere in the payload.
     assert.ok(!JSON.stringify(rows).includes('hunter2'), 'no password value in the model');
@@ -128,6 +130,61 @@ test('an UNKNOWN / non-persistent jarId does not throw — only global contribut
     const rows = store.reachableLoginItems('ghost', A);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].vaultId, 'global');
+  } finally { rm(dir); }
+});
+
+test('widen:true surfaces a registrable-domain item on a matched subdomain, badged widened', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    // A registrable-domain login stored at the eTLD+1 apex.
+    store.saveItem('global', login({ username: 'rd@ex', origin: 'https://example.com', matchMode: 'registrable-domain' }));
+
+    // On a subdomain, the picker (widen:true) surfaces it, flagged widened.
+    const sub = store.reachableLoginItems('work', 'https://accounts.example.com', { widen: true });
+    assert.equal(sub.length, 1);
+    assert.equal(sub[0].username, 'rd@ex');
+    assert.equal(sub[0].widened, true, 'a subdomain match is a widen');
+
+    // Exact origin still matches, and is NOT flagged widened.
+    const apex = store.reachableLoginItems('work', 'https://example.com', { widen: true });
+    assert.equal(apex.length, 1);
+    assert.equal(apex[0].widened, false, 'the exact apex match is not a widen');
+
+    // widen:false (the capture-disposition default) does NOT surface the subdomain match.
+    assert.deepEqual(store.reachableLoginItems('work', 'https://accounts.example.com'), []);
+  } finally { rm(dir); }
+});
+
+test('widen:true REFUSES a registrable-domain item across a registry sibling / tenant / scheme', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('global', login({ origin: 'https://a.co.id', matchMode: 'registrable-domain' }));
+    store.saveItem('global', login({ origin: 'https://alice.github.io', matchMode: 'registrable-domain' }));
+
+    // Registry sibling (co.id is a public suffix → a.co.id != b.co.id) — refused.
+    assert.deepEqual(store.reachableLoginItems('work', 'https://b.co.id', { widen: true }), []);
+    // Multi-tenant platform (github.io is a public suffix) — bob's tenant refused.
+    assert.deepEqual(store.reachableLoginItems('work', 'https://bob.github.io', { widen: true }), []);
+    // Scheme mismatch — refused even for a registrable-domain item (the MITM guard).
+    assert.deepEqual(store.reachableLoginItems('work', 'http://a.co.id', { widen: true }), []);
+  } finally { rm(dir); }
+});
+
+test('widen:true does NOT widen a legacy/exact item (no matchMode) — exact only', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    // No matchMode (legacy) → exact only, even under widen:true.
+    store.saveItem('global', login({ origin: 'https://example.com' }));
+    assert.deepEqual(store.reachableLoginItems('work', 'https://accounts.example.com', { widen: true }), []);
+    const apex = store.reachableLoginItems('work', 'https://example.com', { widen: true });
+    assert.equal(apex.length, 1);
+    assert.equal(apex[0].widened, false);
   } finally { rm(dir); }
 });
 

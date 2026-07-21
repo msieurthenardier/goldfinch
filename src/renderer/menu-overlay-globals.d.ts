@@ -55,6 +55,30 @@ interface MenuOverlayBridge {
    * target vault id. Returns { ok }; false re-prompts (wrong step-up password), true closes
    * it (main also opens vault-accesskey-show with the minted secret). */
   stepupMint(payload: { token: number; secret: Uint8Array; target?: string }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED vault-import bundle-unlock channel (M12 F4 Leg 1). Mirrors
+   * setupVault — the secret rides as a Uint8Array — plus the NON-SECRET secretKind
+   * (master | recovery). The destination target + the bundle are held main-side. Returns
+   * { ok }; false re-prompts (wrong secret), true closes it (main runs the import). */
+  importVault(payload: { token: number; secret: Uint8Array; secretKind: 'master' | 'recovery' }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED recovery-key ROTATION channel (M12 F4 Leg 2). Used when the
+   * reused vault-stepup sheet is in mode 'rotate-recovery'; the master password rides as a
+   * Uint8Array. Returns { ok }; false re-prompts (wrong master password), true closes it (main
+   * mints the new recovery key + opens vault-recovery-show). */
+  rotateRecovery(payload: { token: number; secret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED admin-key ROTATION/PROVISION channel (M12 F4 Leg 3). Used when the
+   * reused vault-stepup sheet is in mode 'rotate-admin'; the master password rides as a Uint8Array.
+   * Returns { ok }; false re-prompts (wrong master password), true closes it (main mints the new
+   * admin keypair + opens vault-adminkey-show). */
+  rotateAdminKey(payload: { token: number; secret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED master-password CHANGE channel (M12 F4 Leg 2). The old + new
+   * master passwords ride as Uint8Arrays (the confirm check is renderer-side). Returns { ok };
+   * false re-prompts (wrong old password), true closes it. */
+  changeMaster(payload: { token: number; oldSecret: Uint8Array; newSecret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED RECOVER-after-forgotten-master channel (M12 F4 Leg 2). The
+   * recovery key + new master password ride as Uint8Arrays (the confirm check is renderer-side).
+   * Returns { ok }; false re-prompts (wrong recovery key), true closes it (the store installs the
+   * MRK — the user ends unlocked). */
+  recoverMaster(payload: { token: number; recoverySecret: Uint8Array; newSecret: Uint8Array }): Promise<{ ok: boolean }>;
   /** sheet → main: copy a string to the OS clipboard (M12 F3 Leg 4 recovery-show Copy).
    * One-way; sender-validated main-side. */
   copyText(text: string): void;

@@ -357,13 +357,27 @@ interface GoldfinchBridge {
   // the NON-SECRET target vault id; onVaultAccessKeyShow carries the minted secret + keyId.
   onVaultRequestMint(cb: (d: { target: string }) => void): void;
   onVaultAccessKeyShow(cb: (d: { secret: string; keyId: string }) => void): void;
+  // Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). A bare trigger —
+  // the destination target + the bundle are held main-side; the chrome opens vault-import-unlock.
+  onVaultRequestImport(cb: () => void): void;
+  // Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). Bare triggers —
+  // the chrome opens the matching sheet (rotate-recovery reuses vault-stepup; change-master and
+  // recover open their own sheets). The new one-time recovery key reuses onVaultRecoveryShow.
+  onVaultRequestRotateRecovery(cb: () => void): void;
+  onVaultRequestChangeMaster(cb: () => void): void;
+  onVaultRequestRecover(cb: () => void): void;
+  // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
+  // onVaultRequestRotateAdmin is a bare trigger (reuses vault-stepup, mode 'rotate-admin');
+  // onVaultAdminKeyShow carries the new one-time admin private key for the adminkey-show sheet.
+  onVaultRequestRotateAdmin(cb: () => void): void;
+  onVaultAdminKeyShow(cb: (d: { adminPrivateKey: string }) => void): void;
   // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): subscribe + init-time fetch.
   onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): void;
   getVaultLockState(): Promise<{ setUp: boolean; unlocked: boolean }>;
   // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
   // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
   // a password — it is resolved and sent to the guest ONLY in main.
-  vaultReachableItems(wcId: number): Promise<Array<{ vaultId: string; id: string; title: string | null; origin: string | null; username: string | null; hasTotp: boolean }>>;
+  vaultReachableItems(wcId: number): Promise<Array<{ vaultId: string; id: string; title: string | null; origin: string | null; username: string | null; hasTotp: boolean; widened: boolean }>>;
   vaultFillHuman(payload: { wcId: number; vaultId: string; itemId: string }): Promise<{ filled: boolean; reason?: string }>;
   // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
   // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.
@@ -498,6 +512,29 @@ interface GoldfinchInternalBridge {
   vaultAccessKeyRevoke(payload: { vaultId: string; keyId: string }): Promise<{ revoked?: boolean; locked?: boolean }>;
   /** Request the chrome-owned access-key MINT sheet (vault-stepup) scoped to `target`. */
   requestMint(target: string): Promise<{ ok: boolean }>;
+  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A). Export is fully main-side (save
+  // dialog + write); import opens the bundle file main-side then the chrome-owned
+  // vault-import-unlock secret sheet. NO secret crosses either channel.
+  /** Export a vault to a portable bundle file (save dialog in main). { ok, path }, { canceled },
+   * or { locked }. */
+  exportVault(target: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean }>;
+  /** Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars page's Delete
+   * confirm surface the export-first offer only for a vault-bearing jar. */
+  hasVault(vaultId: string): Promise<{ present: boolean }>;
+  /** Begin an import for a destination target: open a bundle file (dialog + read in main) then
+   * open the chrome-owned secret sheet. { ok }, { canceled }, or { error }. */
+  requestImport(destinationTarget: string): Promise<{ ok?: boolean; canceled?: boolean; error?: string }>;
+  // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
+  // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
+  /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */
+  requestRotateRecovery(): Promise<{ ok: boolean }>;
+  /** Request the admin-key PROVISION/ROTATE sheet (reuses vault-stepup, mode 'rotate-admin'; the
+   * new admin private key is shown once on vault-adminkey-show). M12 F4 Leg 3. */
+  requestRotateAdmin(): Promise<{ ok: boolean }>;
+  /** Request the master-password CHANGE sheet (vault-change-master: old + new + confirm). */
+  requestChangeMaster(): Promise<{ ok: boolean }>;
+  /** Request the RECOVER-after-forgotten-master sheet (vault-recover: recovery key + new). */
+  requestRecover(): Promise<{ ok: boolean }>;
   /** Subscribe to vault lock-state transitions; the page re-queries on every push.
    * Returns a numeric handle for offVaultLockState. */
   onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): number;

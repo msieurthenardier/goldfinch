@@ -296,6 +296,25 @@ a.vault-item-origin:hover {
   gap: 6px;
 }
 
+/* Per-credential match-mode toggle (M12 F4 Leg 4 / DD5) — a checkbox + label + hint. */
+.vault-field-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.vault-field-toggle-input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+.vault-field-toggle-text {
+  display: block;
+}
+.vault-field-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
 .vault-input {
   width: 100%;
   background: var(--bg-3);
@@ -489,4 +508,62 @@ textarea.vault-input {
 }
 .vault-autolock-status:empty {
   display: none;
+}
+
+/* Portable import (M12 Flight 4 Leg 1 export-import). Mirrors the auto-lock row layout. */
+.vault-import-section {
+  margin-bottom: 24px;
+}
+.vault-import-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vault-import-label {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.vault-import-select {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.vault-import-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-import-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-import-status:empty {
+  display: none;
+}
+
+/* ── Operator-secret rotation (M12 F4 Leg 2 key-rotation, DD3) ── */
+.vault-rotation-section {
+  margin-bottom: 24px;
+}
+.vault-rotation-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* The locked-view "Forgot master password? Recover" affordance — a low-emphasis text link
+   beside the Unlock button. */
+.vault-link-btn {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.vault-link-btn:hover {
+  background: var(--bg-3, var(--bg-2));
+  border-color: transparent;
 }

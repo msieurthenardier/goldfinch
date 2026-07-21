@@ -23,6 +23,9 @@
 // only the pure persist-jar gate.
 
 const crypto = require('node:crypto');
+// Fill matcher (M12 F4 Leg 4 / DD5): exact origin by default, widened to the
+// registrable domain for a per-item `matchMode:'registrable-domain'` opt-in, fail-closed.
+const { originMatches } = require('../../shared/origin-match');
 
 const { resolvePersistJar } = require('../persist-jar-gate');
 
@@ -155,7 +158,9 @@ function createVaultHuman(deps) {
     if (!origin) return [];
     const jar = tabJarFor(wcId);
     if (!jar) return []; // burner / non-persistent — no reachable items (DD9).
-    return deps.getVaultStore().reachableLoginItems(jar.id, origin);
+    // Picker path WIDENS (M12 F4 Leg 4 / DD5): a `matchMode:'registrable-domain'` item
+    // surfaces on a hardened-matched subdomain, badged via the row's `widened` flag.
+    return deps.getVaultStore().reachableLoginItems(jar.id, origin, { widen: true });
   }
 
   /**
@@ -198,7 +203,11 @@ function createVaultHuman(deps) {
       }
       throw err;
     }
-    if (!item || item.type !== 'login' || item.origin !== tabOrigin) {
+    // Origin match — exact by default, widened to the registrable domain for a
+    // `matchMode:'registrable-domain'` item behind the fail-closed matcher (M12 F4 Leg 4
+    // / DD5). The picker only offers rows that already matched, but re-checking here
+    // (with the same widen) keeps the fill gate the authoritative boundary.
+    if (!item || item.type !== 'login' || !tabOrigin || !originMatches(item, tabOrigin, { widen: true })) {
       return { filled: false, reason: 'origin-mismatch' };
     }
 

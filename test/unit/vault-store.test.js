@@ -179,12 +179,18 @@ test('recovery unlocks a forgotten master, then a new master can be set (items u
     const ctBefore = JSON.parse(fs.readFileSync(vaultPath(dir, 'global'), 'utf8')).items;
 
     store.lockNow();
-    // master is "forgotten" — recover, then rotate to a new master.
-    store.unlockWithRecovery(recoveryKeyDisplay);
-    await store.changeMasterPassword({ newMasterPassword: 'brand-new-master' });
+    // master is "forgotten" — the single recoverMasterPassword op (M12 F4 Leg 2 / DD3): the
+    // recovery key unwraps + installs the MRK (the user ends unlocked) AND sets a new master in
+    // one atomic op. This replaces the old unlockWithRecovery + changeMasterPassword pairing —
+    // changeMasterPassword now REQUIRES the old password (an old-password step-up), which a
+    // forgotten-master user by definition cannot supply, so recover is the dedicated path.
+    await store.recoverMasterPassword({
+      recoveryDisplay: recoveryKeyDisplay, newMasterPassword: 'brand-new-master',
+    });
+    assert.equal(store.isUnlocked(), true, 'recover leaves the manager unlocked');
 
     const ctAfter = JSON.parse(fs.readFileSync(vaultPath(dir, 'global'), 'utf8')).items;
-    assert.deepEqual(ctAfter, ctBefore, 'item ciphertext is not rewritten by a master change');
+    assert.deepEqual(ctAfter, ctBefore, 'item ciphertext is not rewritten by a recover / master change');
 
     // The NEW master unlocks; the OLD one no longer does.
     store.lockNow();
@@ -679,6 +685,79 @@ test('listItems on the freshly set-up global vault returns an empty array', asyn
     // An uncreated jar vault also lists empty (no lazy creation on read).
     assert.deepEqual(store.listItems('work'), []);
     assert.ok(!fs.existsSync(vaultPath(dir, 'work')), 'listItems must not create a vault file');
+  } finally {
+    rm(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// deleteVault + hasVault (M12 F4 Leg 6) — completes the vault lifecycle: a jar
+// DELETE removes its `.gfvault`, a jar WIPE spares it. DESTRUCTIVE + irreversible;
+// the GLOBAL vault is guarded.
+// ---------------------------------------------------------------------------
+
+test('deleteVault unlinks an existing jar .gfvault and evicts+zeroizes the cached key', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    // A jar vault is created lazily on the first save into that jar.
+    store.saveItem('work', loginItem({ title: 'Work' }));
+    assert.ok(fs.existsSync(vaultPath(dir, 'work')), 'jar vault file exists after save');
+    const keyRef = store.vaultKeys.get('work');
+    assert.ok(Buffer.isBuffer(keyRef) && keyRef.some((b) => b !== 0), 'a cached key holds material');
+
+    const result = store.deleteVault('work');
+
+    assert.deepEqual(result, { deleted: true });
+    assert.ok(!fs.existsSync(vaultPath(dir, 'work')), 'the .gfvault file is gone');
+    assert.equal(store.vaultKeys.has('work'), false, 'the cached key is evicted');
+    assert.ok(keyRef.every((b) => b === 0), 'the evicted key buffer is zeroized in place');
+    // The GLOBAL vault is untouched by a jar delete.
+    assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'the global vault survives');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('deleteVault on a jar with no vault is a clean ENOENT no-op → { deleted: false }, no throw', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    assert.ok(!fs.existsSync(vaultPath(dir, 'work')), 'no jar vault (the common case)');
+    // Never touched → no cached key; the call must not throw.
+    assert.deepEqual(store.deleteVault('work'), { deleted: false });
+  } finally {
+    rm(dir);
+  }
+});
+
+test('deleteVault refuses the GLOBAL vault and never unlinks it', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'global vault exists');
+    assert.throws(() => store.deleteVault(vs.GLOBAL_ID), (e) => e instanceof vs.VaultStateError);
+    assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'the global vault file is still there');
+    // The literal 'global' resolves to GLOBAL_ID and is refused just the same.
+    assert.throws(() => store.deleteVault('global'), (e) => e instanceof vs.VaultStateError);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('hasVault is true for a jar with a saved vault, false otherwise', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    assert.equal(store.hasVault('work'), false, 'no vault before any save');
+    store.saveItem('work', loginItem({ title: 'Work' }));
+    assert.equal(store.hasVault('work'), true, 'vault present after a save');
+    // The global vault exists from setup.
+    assert.equal(store.hasVault('global'), true);
   } finally {
     rm(dir);
   }

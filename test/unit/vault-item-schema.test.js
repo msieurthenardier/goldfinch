@@ -68,6 +68,20 @@ test('metadataOf.hasTotp reflects only totp PRESENCE (a boolean, never the seed)
   assert.equal(metadataOf({ id: 'c', type: 'card', number: 'x' }).hasTotp, false);
 });
 
+test('metadataOf surfaces matchMode as a LOGIN-only derived flag (like hasTotp), default exact', () => {
+  // Explicit opt-in round-trips.
+  assert.equal(metadataOf({ id: 'a', type: 'login', matchMode: 'registrable-domain' }).matchMode, 'registrable-domain');
+  // Absent / legacy → exact (positive-test default).
+  assert.equal(metadataOf({ id: 'b', type: 'login' }).matchMode, 'exact');
+  // Any other value coerces to exact (never widens by accident).
+  assert.equal(metadataOf({ id: 'c', type: 'login', matchMode: 'wat' }).matchMode, 'exact');
+  // matchMode is NOT in the login nonSecret text-field taxonomy (never renders a text input).
+  assert.equal(nonSecretFieldsFor('login').includes('matchMode'), false);
+  // Login-only: card / note never carry matchMode.
+  assert.equal('matchMode' in metadataOf({ id: 'd', type: 'card' }), false);
+  assert.equal('matchMode' in metadataOf({ id: 'e', type: 'note' }), false);
+});
+
 test('metadataOf is a POSITIVE whitelist — a stray unknown/secret key on the item is dropped', () => {
   const meta = metadataOf({ id: 'x', type: 'note', title: 'T', body: 'secret', evil: '<img>', password: 'nope' });
   assert.deepEqual(Object.keys(meta).sort(), ['hasTotp', 'id', 'title', 'type']);

@@ -291,6 +291,24 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // keyId } (main → chrome → sheet) for the read-only, dismiss-disabled accesskey-show sheet.
   onVaultRequestMint: (cb) => ipcRenderer.on('vault-request-mint', (_e, d) => cb(d)),
   onVaultAccessKeyShow: (cb) => ipcRenderer.on('vault-accesskey-show', (_e, d) => cb(d)),
+  // Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). Main forwards a
+  // BARE trigger (no secret; the destination target + the bundle are held main-side) → the chrome
+  // opens the vault-import-unlock sheet, whose secret entry rides the dedicated Buffer channel.
+  onVaultRequestImport: (cb) => ipcRenderer.on('vault-request-import', () => cb()),
+  // Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). Main forwards BARE
+  // triggers (no secret) → the chrome opens the matching sheet: rotate-recovery reuses vault-stepup
+  // (master-pw step-up); change-master opens vault-change-master; recover opens vault-recover. The
+  // new one-time recovery key from a rotation is shown via the EXISTING onVaultRecoveryShow (setup's
+  // path, reused). Every secret + one-time display rides the chrome-owned sheet, never these triggers.
+  onVaultRequestRotateRecovery: (cb) => ipcRenderer.on('vault-request-rotate-recovery', () => cb()),
+  onVaultRequestChangeMaster: (cb) => ipcRenderer.on('vault-request-change-master', () => cb()),
+  onVaultRequestRecover: (cb) => ipcRenderer.on('vault-request-recover', () => cb()),
+  // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
+  // onVaultRequestRotateAdmin is a BARE trigger (no secret) → the chrome opens the vault-stepup
+  // sheet in mode 'rotate-admin'. onVaultAdminKeyShow carries the NEW { adminPrivateKey } (main →
+  // chrome → sheet) for the read-only, dismiss-disabled adminkey-show sheet.
+  onVaultRequestRotateAdmin: (cb) => ipcRenderer.on('vault-request-rotate-admin', () => cb()),
+  onVaultAdminKeyShow: (cb) => ipcRenderer.on('vault-adminkey-show', (_e, d) => cb(d)),
   // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): the toolbar lock
   // indicator subscribes to every transition push, then fetches the initial
   // state once. Payload `{ setUp, unlocked }` — non-secret projection of the

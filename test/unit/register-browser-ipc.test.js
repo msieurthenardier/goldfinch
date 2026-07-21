@@ -84,6 +84,14 @@ test('browser registrar preserves channel inventory and owner-routed media forwa
     // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
     // non-secret target), registered alongside the other request triggers.
     'internal-vault-request-mint',
+    // M12 F4 Leg 2 (key-rotation): the cross-renderer rotate-recovery / change-master / recover
+    // triggers (bare, no secret), registered alongside the other request triggers.
+    'internal-vault-request-rotate-recovery',
+    // M12 F4 Leg 3 (admin-key-provision): the cross-renderer rotate-admin trigger (bare, no secret),
+    // registered immediately after rotate-recovery.
+    'internal-vault-request-rotate-admin',
+    'internal-vault-request-change-master',
+    'internal-vault-request-recover',
     'internal-open-tab-in-jar',
   ]);
   assert.equal(h.handlers.has('privacy-cookies'), true);
