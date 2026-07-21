@@ -104,6 +104,17 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
     return { setUp: store.isSetUp(), unlocked, vaults };
   });
 
+  // Explicit global LOCK (M12 F5 HAT batch 1, I6). The vault page's "Lock now" button
+  // invokes this to zeroize ALL vault keys immediately. `lockNow()` is global (clears every
+  // vaultKey + the MRK) and idempotent — a no-op when already locked — and its onLock hook
+  // ALREADY broadcasts `vault-lock-state` to every chrome + internal page, so this handler
+  // must NOT re-broadcast (double-broadcast). Carries NO secret in either direction;
+  // registerInternalHandler rejects any non-internal sender before the body runs.
+  registerInternalHandler(ipcMain, 'internal-vault-lock', () => {
+    getVaultStore().lockNow();
+    return { ok: true };
+  });
+
   // Per-jar vault-file presence (M12 F4 Leg 6). Answers "does THIS jar have a
   // `.gfvault` file" so the jars page's Delete confirm can decide whether to surface
   // the export-first offer. `internal-vault-state` cannot answer this — it enumerates

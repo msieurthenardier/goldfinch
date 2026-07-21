@@ -608,6 +608,15 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * fill-picker continuation, distinct from the guest-gesture unlock). */
     requestUnlock: () => ipcRenderer.invoke('internal-vault-request-unlock'),
 
+    /**
+     * Explicit global LOCK (M12 F5 HAT batch 1, I6). Zeroizes ALL vault keys immediately —
+     * global (not per-vault) and idempotent. Carries NO secret. The page moves to the locked
+     * view off the `vault-lock-state` broadcast the store's onLock hook already emits (this
+     * call does not re-broadcast). Resolves { ok: true }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    lockVault: () => ipcRenderer.invoke('internal-vault-lock'),
+
     // Access-key management (M12 Flight 3, Leg 5 / flight DD5, mission durable-grant step-up).
     // These are the vault-store `access` ENVELOPES — NOT the MCP automation transport tokens.
     // List + revoke ride internal channels (no secret ever crosses either — keyIds are

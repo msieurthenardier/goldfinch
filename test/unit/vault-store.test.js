@@ -304,6 +304,29 @@ test('lockNow zeroizes the MRK + vault keys and drops references', async () => {
   }
 });
 
+test('lockNow fires the onLock hook EXACTLY once — the single vault-lock-state broadcast both lock channels rely on (M12 F5 I6/I8)', async () => {
+  const dir = tmpDir();
+  try {
+    let onLockCalls = 0;
+    // onLock stands in for main.js's broadcastVaultLockState. The internal-vault-lock and the
+    // chrome-trust vault-lock channel handlers BOTH just call this store's lockNow() and must
+    // NOT re-broadcast — so one lockNow() must yield exactly one onLock (no double-broadcast).
+    const store = makeStore(dir, { onLock: () => { onLockCalls += 1; } });
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('global', loginItem());
+
+    store.lockNow();
+    assert.equal(store.isUnlocked(), false);
+    assert.equal(onLockCalls, 1, 'exactly one onLock/broadcast per lockNow');
+
+    // Idempotent: locking again is a no-op lock, still a single fire per call (never a burst).
+    store.lockNow();
+    assert.equal(onLockCalls, 2, 'each explicit lockNow fires onLock once — never more');
+  } finally {
+    rm(dir);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Idle auto-lock (injected timer)
 // ---------------------------------------------------------------------------

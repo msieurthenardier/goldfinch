@@ -85,3 +85,12 @@ require typing into or reading the sheet DOM are intentionally out of scope.
 - **Scripted click (DD3 `isTrusted`)**: in the guest page, call `iconEl.click()` (a synthetic,
   untrusted click) rather than a real pointer gesture. Expected: **no** chrome prompt is raised
   — only a genuine user gesture (`event.isTrusted`) triggers the unlock sheet.
+- **Right-click icon → NATIVE menu, no guest DOM (M12 F5 HAT batch 1, I8)**: right-click (real
+  `contextmenu`) the injected lock icon. Expected: a **native OS context menu** appears (top row
+  "Lock now") — verified via admin `captureWindow` pixels, since a native menu is not DOM. Re-read
+  the guest DOM in full and search it for any injected menu element (role="menu"/`<menu>`/a
+  vault-menu container): **none exists** — the menu is a main-process `Menu.popup`, never injected
+  into the page (a page-DOM menu would be spoofable/readable by a hostile page). Extends the
+  DOM-absence assertions in steps 3/4/7 to the context-menu path. Choosing **"Lock now"** locks
+  every vault globally (the toolbar lock indicator + any open `goldfinch://vault` page flip to
+  locked). A **scripted** (`isTrusted:false`) `contextmenu` dispatch raises **no** menu.

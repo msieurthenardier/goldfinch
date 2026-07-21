@@ -167,10 +167,11 @@ function createContainerAndOpenTab(rawName) { return pageActions.createContainer
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with seven static role="menuitem" items
-// (New window, Settings, Downloads, Cookie jars, Passwords, Print…, Exit) + roving
-// tabindex + arrow-nav. Count and order track `kebabModel` below — the single source
-// of truth; if you add an item there, this line is stale until you edit it too.
+// APG menu-button: role="menu" popup with seven role="menuitem" items — New window,
+// then Settings/Downloads/Cookie jars/Passwords, then Print…/Exit — divided into three
+// bands by two role="separator" rows (skipped by the roving tabindex/arrow-nav, no
+// role="menuitem"). Count and order track `kebabModel` below — the single source of
+// truth; if you add an item there, this line is stale until you edit it too.
 //
 // All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
 // chrome keeps the trigger, open stimuli, model building, and action execution;

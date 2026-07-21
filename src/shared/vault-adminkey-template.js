@@ -1,5 +1,7 @@
 // @ts-check
 
+import { buildCopyIcon } from './copy-icon.js';
+
 // DOM builder for the menu-overlay sheet's `vault-adminkey-show` template (M12 Flight 4
 // Leg 3 admin-key-provision, flight DD4 / mission durable-grant step-up) — the ONE-TIME,
 // read-only display of a freshly-minted admin PRIVATE key. Extracted as a pure, document-
@@ -72,12 +74,17 @@ export function buildVaultAdminKeyCard(document) {
 
   const actions = document.createElement('div');
   actions.className = 'new-container-actions';
+  // Copy = gold PRIMARY button with a leading copy glyph (I2–I4). The label stays
+  // textContent-only; the icon is prepended via the safe createElementNS builder (never
+  // innerHTML). Set the label BEFORE inserting the icon so the icon survives (a
+  // textContent write replaces child nodes).
   const copy = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  copy.className = 'text-btn small';
+  copy.className = 'text-btn primary vault-sheet-btn vault-copy-btn';
   copy.type = 'button';
   copy.textContent = 'Copy';
+  copy.insertBefore(buildCopyIcon(document), copy.firstChild);
   const acknowledge = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  acknowledge.className = 'text-btn small';
+  acknowledge.className = 'text-btn vault-sheet-btn';
   acknowledge.type = 'button';
   acknowledge.textContent = "I've saved it";
   actions.appendChild(copy);

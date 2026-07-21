@@ -26,6 +26,7 @@ function registerBrowserIpc({
   shields,
   getVaultHuman,
   vaultImportBegin,
+  popupVaultIconMenu,
   random = Math.random,
   logger = console,
 }) {
@@ -96,6 +97,20 @@ function registerBrowserIpc({
   ipcMain.on('guest-vault-gesture', (event) => {
     const wcId = event.sender.id;
     chromeForTab(wcId)?.send('vault-gesture', { wcId });
+  });
+
+  // Vault fill-icon CONTEXT menu (M12 F5 HAT batch 1, I8): a TRUSTED right-click on the
+  // injected lock icon arrives here carrying NO payload (bare — no secret). Derive the trusted
+  // wcId from event.sender.id (never renderer-supplied) and resolve the owning window from the
+  // registry, then hand off to the injected delegate which builds a NATIVE Electron Menu and
+  // pops it over that window (Menu.popup). NO menu DOM is ever injected into the guest page — a
+  // page-DOM menu would be spoofable/readable by a hostile page. The delegate is injected so
+  // this module stays Electron-free (offline tests may omit it → the icon menu no-ops). Nothing
+  // is sent back to the guest wc.
+  ipcMain.on('guest-vault-icon-menu', (event) => {
+    const wcId = event.sender.id;
+    const win = registry.getWindowForGuest(wcId)?.win;
+    popupVaultIconMenu?.({ wcId, win });
   });
 
   // Vault capture (M12 F2 Leg 4, DD7/DD9): a submitted login form's credential arrives

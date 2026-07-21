@@ -59,6 +59,18 @@ test('acknowledge is the LAST actions button — the a11y-audit dismiss-locked b
   assert.equal(actions.children[actions.children.length - 1], card.acknowledge);
 });
 
+test('Copy is a gold PRIMARY button carrying a decorative copy glyph, label stays textContent-only', () => {
+  const document = createDocument();
+  const card = buildVaultAccessKeyCard(document);
+  const classes = card.copy.className.split(' ');
+  assert.ok(classes.includes('primary'), 'Copy is the gold primary button (I2–I4)');
+  assert.ok(classes.includes('vault-copy-btn'));
+  const icon = card.copy.children.find((c) => c.tagName === 'SVG');
+  assert.ok(icon, 'a copy glyph svg is present in the Copy button');
+  assert.equal(icon.attributes.get('aria-hidden'), 'true', 'the glyph is decorative');
+  assert.equal(card.copy.textContent, 'Copy');
+});
+
 test('each buildVaultAccessKeyCard call yields a fresh, independent node tree', () => {
   const document = createDocument();
   const a = buildVaultAccessKeyCard(document);

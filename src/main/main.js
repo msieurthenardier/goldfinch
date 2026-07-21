@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -1073,6 +1073,9 @@ const { rerollSeed } = registerBrowserIpc({
   // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
   // hold). Gated — offline register-browser-ipc tests omit it.
   vaultImportBegin: vaultImportBeginFromFile,
+  // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
+  // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
+  popupVaultIconMenu,
   random: Math.random,
   logger: console
 });
@@ -1272,6 +1275,35 @@ registerOverlayIpc({
 // The indicator subscribes to the `vault-lock-state` broadcast FIRST, then calls
 // this once for the initial state; a push that already arrived wins.
 ipcMain.handle('vault-lock-state-get', () => computeVaultLockState());
+
+// Explicit global LOCK — chrome-trust surface (M12 F5 HAT batch 1, I8). The fill-icon
+// native context menu's "Lock now" runs in the chrome/main trust domain (it can't reach the
+// internal-origin `internal-vault-lock` channel), so this bare `ipcMain.handle` mirrors
+// `vault-lock-state-get` (file:// chrome trust; no secret in or out). `lockNow()` is global
+// + idempotent and its onLock hook ALREADY broadcasts `vault-lock-state` — so this must NOT
+// re-broadcast. `vaultLockNow` is the shared body the native icon menu's Lock-now item calls.
+function vaultLockNow() {
+  getVaultStore().lockNow();
+  return { ok: true };
+}
+ipcMain.handle('vault-lock', () => vaultLockNow());
+
+// Native OS context menu for the guest-injected fill icon (M12 F5 HAT batch 1, I8). The icon
+// is a decorative, spoofable guest-DOM `<div>`; its menu MUST be a native main-process `Menu`
+// popped via `menu.popup` — NEVER DOM injected into the guest page (a page-DOM menu would be
+// spoofable/readable by a hostile page). `guest-vault-icon-menu` (bare, no payload) arrives in
+// register-browser-ipc, which derives the trusted wcId + owning window and calls this. Top row
+// is the required global "Lock now"; a "Fill login…" shortcut mirrors the left-click gesture
+// (the same bare vault-gesture forward). Both act only on main-trusted data.
+function popupVaultIconMenu({ wcId, win }) {
+  if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return;
+  const menu = Menu.buildFromTemplate([
+    { label: 'Lock now', click: () => { vaultLockNow(); } },
+    { type: 'separator' },
+    { label: 'Fill login…', click: () => { chromeForTab(wcId)?.send('vault-gesture', { wcId }); } },
+  ]);
+  menu.popup({ window: win });
+}
 
 // M12 F2 Leg 3 (pick-and-fill): the two chrome-facing human fill invokes (bare
 // ipcMain.handle — file:// chrome trust domain, the same class as vault-lock-state-get

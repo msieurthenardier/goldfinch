@@ -315,6 +315,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // vault-store's MRK-present state.
   onVaultLockState: (cb) => ipcRenderer.on('vault-lock-state', (_e, d) => cb(d)),
   getVaultLockState: () => ipcRenderer.invoke('vault-lock-state-get'),
+  // Explicit global LOCK (M12 F5 HAT batch 1, I8): the chrome-trust trigger for the fill-icon
+  // native menu's "Lock now". Global + idempotent; carries no secret. The onLock hook already
+  // broadcasts vault-lock-state, so no re-broadcast follows.
+  vaultLock: () => ipcRenderer.invoke('vault-lock'),
   // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the picker's reachable-items read
   // (metadata only — never a password) and the human fill dispatch (returns
   // { filled, reason? } — the password is resolved + sent ONLY in main). Both are

@@ -44,6 +44,20 @@ test('vault-recovery card is a modal dialog with a read-only key display, Copy +
   assert.equal(hasInput, false, 'a recovery-show card must contain no input field');
 });
 
+test('Copy is a gold PRIMARY button carrying a decorative copy glyph, label stays textContent-only', () => {
+  const document = createDocument();
+  const card = buildVaultRecoveryCard(document);
+  const classes = card.copy.className.split(' ');
+  assert.ok(classes.includes('primary'), 'Copy is the gold primary button (I2–I4)');
+  assert.ok(classes.includes('vault-copy-btn'));
+  // The glyph is a decorative SVG node prepended via createElementNS (no innerHTML), and the
+  // accessible label is still the plain "Copy" text (textContent-only).
+  const icon = card.copy.children.find((c) => c.tagName === 'SVG');
+  assert.ok(icon, 'a copy glyph svg is present in the Copy button');
+  assert.equal(icon.attributes.get('aria-hidden'), 'true', 'the glyph is decorative');
+  assert.equal(card.copy.textContent, 'Copy');
+});
+
 test('each buildVaultRecoveryCard call yields a fresh, independent node tree', () => {
   const document = createDocument();
   const a = buildVaultRecoveryCard(document);

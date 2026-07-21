@@ -222,6 +222,37 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Gold PRIMARY text button (chrome `.vault-btn.primary` / `.text-btn.active` parity) —
+   the vault one-time-display sheets' Copy button (I2–I4). Dark label on gold, matching
+   `.cm-default`'s color-on-accent. */
+.text-btn.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.text-btn.primary:hover {
+  background: var(--accent); /* keep the gold fill; brighten instead of the dark hover bg */
+  filter: brightness(1.08);
+}
+/* Vault sheet action buttons (I2–I4): consistent larger sizing + the app's gold hover
+   outline (chrome `.vault-btn:hover` parity — dark buttons brighten their border to gold). */
+.vault-sheet-btn {
+  padding: 7px 14px;
+  font-size: 12px;
+  transition: border-color 0.1s, filter 0.1s, background 0.1s;
+}
+.vault-sheet-btn:hover {
+  border-color: var(--accent);
+}
+/* Copy button = icon + label; align the glyph with the text and space them. */
+.vault-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vault-copy-icon {
+  flex: 0 0 auto;
+}
 
 /* ---------- input-dialog template (new-container) ----------
    Chrome .new-container-dialog parity, GUEST-REGION-scoped (DD12 accepted
@@ -319,6 +350,16 @@ body {
 }
 .vault-set-error:empty {
   color: transparent;
+}
+/* Dark-theme the one-time-display cards (I2–I4). `.new-container-inner` gives the dark
+   card background but sets no text color, so the heading / lede / field-label / mono
+   value nodes inherited the UA default (black) — the "gray background + black text" the
+   HAT saw on recovery-show / adminkey-show. Setting the card's text to `--fg` restores
+   the dark theme for all three display sheets (accesskey-show shares the structure). */
+.vault-recovery-inner,
+.vault-accesskey-inner,
+.vault-adminkey-inner {
+  color: var(--fg);
 }
 .vault-recovery-inner {
   max-width: 360px;

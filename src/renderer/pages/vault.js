@@ -175,6 +175,17 @@ function init() {
   function buildUnlocked(vaults) {
     const wrap = el('div', 'vault-unlocked');
 
+    // Explicit global "Lock now" (M12 F5 HAT batch 1, I6) — top-level, since locking is
+    // GLOBAL (zeroizes every vault key at once). No confirm: locking is non-destructive and
+    // reversible via unlock. The page re-renders to the locked view off the vault-lock-state
+    // broadcast the store's onLock hook emits — this button neither re-broadcasts nor mutates
+    // the page directly. Carries no secret.
+    const globalActions = el('div', 'vault-global-actions');
+    globalActions.appendChild(button('Lock now', 'vault-btn', () => {
+      Promise.resolve(bridge.lockVault()).catch(() => {});
+    }));
+    wrap.appendChild(globalActions);
+
     // Manager-wide auto-lock setting (M12 F3 Leg 5) — once, above the per-vault sections.
     wrap.appendChild(buildAutoLockSection());
 

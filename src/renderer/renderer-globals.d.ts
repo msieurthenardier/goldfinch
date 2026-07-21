@@ -374,6 +374,9 @@ interface GoldfinchBridge {
   // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): subscribe + init-time fetch.
   onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): void;
   getVaultLockState(): Promise<{ setUp: boolean; unlocked: boolean }>;
+  // Explicit global LOCK (M12 F5 HAT batch 1, I8): chrome-trust trigger for the fill-icon
+  // native menu's "Lock now". Global + idempotent, no secret; onLock broadcasts, no re-broadcast.
+  vaultLock(): Promise<{ ok: boolean }>;
   // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
   // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
   // a password — it is resolved and sent to the guest ONLY in main.
@@ -503,6 +506,9 @@ interface GoldfinchInternalBridge {
   requestSetup(): Promise<{ ok: boolean }>;
   /** Request the chrome-owned unlock sheet (vault-unlock) — no fill-picker continuation. */
   requestUnlock(): Promise<{ ok: boolean }>;
+  /** Explicit global LOCK (M12 F5 HAT batch 1, I6): zeroize ALL vault keys now (idempotent,
+   * no secret). The page reacts to the vault-lock-state broadcast; this does not re-broadcast. */
+  lockVault(): Promise<{ ok: boolean }>;
   // Access-key management (M12 F3 Leg 5 / flight DD5, mission durable-grant step-up). List +
   // revoke ride internal channels (no secret — keyIds are plaintext fingerprints); MINT rides
   // the chrome-owned vault-stepup sheet via requestMint (no secret crosses here).

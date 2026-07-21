@@ -78,7 +78,7 @@ async function realHarness() {
 const CRUD_CHANNELS = ['internal-vault-list', 'internal-vault-reveal', 'internal-vault-item-save', 'internal-vault-item-delete'];
 const ACCESSKEY_CHANNELS = ['internal-vault-accesskey-list', 'internal-vault-accesskey-revoke'];
 
-test('registerVaultIpc registers the state read + the vault-presence probe + the four item CRUD channels + live-totp + the two access-key channels', () => {
+test('registerVaultIpc registers the state read + the vault-presence probe + the four item CRUD channels + live-totp + the two access-key channels + the global lock', () => {
   const ipcMain = wire();
   assert.deepEqual(
     Object.keys(ipcMain._handlers).sort(),
@@ -89,11 +89,61 @@ test('registerVaultIpc registers the state read + the vault-presence probe + the
       'internal-vault-item-delete',
       'internal-vault-item-save',
       'internal-vault-list',
+      'internal-vault-lock',
       'internal-vault-reveal',
       'internal-vault-state',
       'internal-vault-totp-code'
     ]
   );
+});
+
+// ---------------------------------------------------------------------------
+// Global LOCK (M12 F5 HAT batch 1, I6) — internal-vault-lock. A bare internal handler that
+// calls the store's global lockNow() and returns { ok: true }; it must NOT re-broadcast (the
+// store's onLock hook already emits vault-lock-state), and it carries no secret.
+// ---------------------------------------------------------------------------
+
+test('internal-vault-lock: an internal sender calls the store lockNow() exactly once and returns { ok: true }', () => {
+  const calls = [];
+  const store = { ...makeStore(), lockNow: () => calls.push('lockNow') };
+  const ipcMain = wire({ store });
+  const res = ipcMain.invoke('internal-vault-lock', vaultEvent());
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(calls, ['lockNow'], 'exactly one lockNow, no re-broadcast side-channel');
+});
+
+test('internal-vault-lock rejects a non-internal sender (forbidden) — no lock', () => {
+  const calls = [];
+  const store = { ...makeStore(), lockNow: () => calls.push('lockNow') };
+  const ipcMain = wire({ store });
+  const webEvent = {
+    senderFrame: { origin: 'https://evil.test', url: 'https://evil.test/' },
+    sender: { session: { __goldfinchInternal: true } } // right session, wrong origin
+  };
+  assert.throws(
+    () => ipcMain.invoke('internal-vault-lock', webEvent),
+    (err) => err instanceof Error && err.message.includes('forbidden')
+  );
+  assert.deepEqual(calls, [], 'a rejected sender never reaches lockNow');
+});
+
+test('internal-vault-lock drives the REAL store lockNow → onLock (the single vault-lock-state broadcast) fires EXACTLY once', async () => {
+  const dir = tmpDir();
+  try {
+    let broadcasts = 0;
+    const store = vs.load(dir, {
+      scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS,
+      onLock: () => { broadcasts += 1; }, // stands in for broadcastVaultLockState
+    });
+    await store.setup({ masterPassword: MASTER }); // set up + unlocked
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS } });
+
+    const res = ipcMain.invoke('internal-vault-lock', vaultEvent());
+    assert.deepEqual(res, { ok: true });
+    assert.equal(store.isUnlocked(), false, 'the store is now locked');
+    assert.equal(broadcasts, 1, 'the store onLock (broadcast) fired exactly once — no double-broadcast');
+  } finally { rm(dir); }
 });
 
 test('internal-vault-state returns setUp/unlocked + Global-first labels with UNLOCKED item counts', () => {

@@ -165,6 +165,14 @@ main {
   margin: 0;
 }
 
+/* ── Unlocked: global actions row (I6 "Lock now") ── */
+.vault-global-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
 /* ── Unlocked: per-vault sections + item list ── */
 .vault-section-head {
   display: flex;
@@ -440,8 +448,19 @@ textarea.vault-input {
 
 /* ── Access keys + auto-lock (Leg 5, flight DD5) ── */
 .vault-accesskeys {
-  margin: 4px 0 20px;
-  padding-top: 12px;
+  /* I7 (HAT batch 1): the divider that used to sit here (a border-top WITHIN the jar's
+     section, splitting the jar's secrets from its own access keys) moved UP to a
+     jar-boundary rule on `.vault-section + .vault-section` — the access-key block is part
+     of the SAME jar's config, so no rule divides it from the item list above it. */
+  margin: 12px 0 20px;
+}
+
+/* Jar-boundary divider (I7): separates one jar's WHOLE config from the next jar's.
+   Adjacent-sibling so the first jar section — and the single not-set-up / locked
+   `.vault-section` — carries no leading rule; only jar-after-jar draws the line. */
+.vault-section + .vault-section {
+  margin-top: 24px;
+  padding-top: 24px;
   border-top: 1px solid var(--border);
 }
 .vault-accesskeys-head {

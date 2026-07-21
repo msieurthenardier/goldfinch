@@ -266,6 +266,25 @@ function onIconClick(e) {
   }
 }
 
+// Right-click on the decorative fill icon (M12 F5 HAT batch 1, I8): request the NATIVE main-
+// process context menu (Menu.popup), never a guest-DOM menu. preventDefault() suppresses BOTH
+// the OS default menu AND the app's page-context sheet (Blink sends no ShowContextMenu IPC
+// when the page handles contextmenu), so there is no double-menu; stopPropagation keeps a
+// hostile page's own bubble-phase listeners from observing it. The captured-isTrusted guard
+// mirrors onIconClick — a scripted `dispatchEvent`/synthetic contextmenu is ignored. The IPC
+// is BARE (no payload, no secret) — main derives the trusted wcId from the sender id.
+function onIconContextMenu(e) {
+  const trusted = isTrustedGet ? isTrustedGet.call(e) : e.isTrusted;
+  if (!trusted) return; // synthetic/scripted contextmenu → ignored (no menu)
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    ipcRenderer.send('guest-vault-icon-menu'); // NO payload — wcId derived in main
+  } catch {
+    /* page navigated away mid-gesture */
+  }
+}
+
 function createVaultIcon() {
   const el = document.createElement('div');
   el.setAttribute('data-goldfinch-vault-lock', '');
@@ -284,6 +303,7 @@ function createVaultIcon() {
   s.userSelect = 'none';
   s.pointerEvents = 'auto';
   el.addEventListener('click', onIconClick);
+  el.addEventListener('contextmenu', onIconContextMenu);
   return el;
 }
 
