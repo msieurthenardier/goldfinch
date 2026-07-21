@@ -1,6 +1,6 @@
 # Flight: Portability + Rotation + Hardening + Docs
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Built-in Password Manager](../../mission.md)
 
 ## Contributing to Criteria

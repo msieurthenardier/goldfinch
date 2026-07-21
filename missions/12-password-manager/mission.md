@@ -327,7 +327,7 @@ Resolved at the owning flight, not blocking mission approval:
       the `saveItem` merge-on-update fix, TOTP enrollment + live rotating display, a password
       generator, access-key management UI (list/mint-with-step-up/revoke), the auto-lock duration
       setting, and the reserved-id single-source-of-truth guard.
-- [ ] Flight 4: **Portability + rotation + hardening + docs** — per-vault export/import (the
+- [x] Flight 4: **Portability + rotation + hardening + docs** — per-vault export/import (the
       MRK-bundle format — a `.gfvault` alone isn't independently unlockable), recovery-key
       rotation, master-password change, admin-key rotation (eager one-pass re-seal), the
       registrable-domain PSL-hardened per-credential fill opt-in, the audit-origin fix, the
