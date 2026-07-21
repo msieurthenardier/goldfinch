@@ -35,7 +35,14 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
 // closed-set rule"). Growing the seam requires an FD ruling AND this
 // constant's update — enforcement by design (AC4).
-const SEAM_COUNT = 19;
+// M12 F3 Leg 4 (first-run-setup, DD9): +2 for openVaultSetOverlayForAudit /
+// openVaultRecoveryShowOverlayForAudit — the SHEET_STATES 'sheet:vault-set' /
+// 'sheet:vault-recovery-show' a11y drivers (a leg-authorized seam addition, the M09 F5
+// openTabContextMenuForAudit precedent).
+// M12 F3 Leg 5 (access-keys, DD9): +2 for openVaultStepupOverlayForAudit /
+// openVaultAccessKeyShowOverlayForAudit — the SHEET_STATES 'sheet:vault-stepup' /
+// 'sheet:vault-accesskey-show' a11y drivers (same leg-authorized seam-addition precedent).
+const SEAM_COUNT = 23;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

@@ -296,6 +296,127 @@ body {
   color: transparent;
 }
 
+/* ---------- vault-set + vault-recovery-show templates (M12 Flight 3 Leg 4 first-run-
+   setup, DD5) ----------
+   Both reuse the input-dialog card chrome (.new-container-inner / -input / .text-btn) +
+   the centered backdrop (mirrors #sheet-vault-unlock). vault-set adds the same aria-live
+   error line as vault-unlock; vault-recovery-show is a read-only, dismiss-disabled card
+   showing the one-time recovery key (monospace, selectable) + Copy + acknowledge. */
+#sheet-vault-set,
+#sheet-vault-recovery {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-set-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on first error */
+  line-height: 15px;
+}
+.vault-set-error:empty {
+  color: transparent;
+}
+.vault-recovery-inner {
+  max-width: 360px;
+}
+.vault-recovery-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-recovery-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-recovery-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+  user-select: all;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.vault-recovery-key:focus-visible {
+  outline: 2px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
+/* ---------- vault-stepup + vault-accesskey-show templates (M12 Flight 3 Leg 5 access-
+   keys, DD5) ----------
+   vault-stepup mirrors vault-set (a single master-password re-auth field + aria-live error
+   line); vault-accesskey-show mirrors vault-recovery-show (a read-only, dismiss-disabled
+   one-time minted-secret display + keyId reference + Copy + acknowledge). Both reuse the
+   input-dialog card chrome + the centered backdrop. */
+#sheet-vault-stepup,
+#sheet-vault-accesskey {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault-stepup-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-stepup-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-stepup-error {
+  font-size: 12px;
+  color: #ff6b6b;
+  min-height: 15px; /* reserve the line so the card doesn't jump on first error */
+  line-height: 15px;
+}
+.vault-stepup-error:empty {
+  color: transparent;
+}
+.vault-accesskey-inner {
+  max-width: 360px;
+}
+.vault-accesskey-heading {
+  font-weight: 600;
+  font-size: 14px;
+}
+.vault-accesskey-lede {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 0;
+}
+.vault-accesskey-fieldlabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+.vault-accesskey-keyid,
+.vault-accesskey-secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+  user-select: all;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.vault-accesskey-keyid:focus-visible,
+.vault-accesskey-secret:focus-visible {
+  outline: 2px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
 /* ---------- vault-picker template (M12 Flight 2 Leg 3 pick-and-fill, DD5/DD6) ----------
    A centered backdrop + role="menu" card (mirrors #sheet-vault-unlock / #sheet-dialog)
    listing badged credential rows — the gesture carries no anchor. Each row shows a

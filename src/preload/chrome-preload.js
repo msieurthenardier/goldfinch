@@ -277,6 +277,20 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // click as { wcId } (the trusted, main-derived tab id) — carries no secret.
   // The pick-and-fill leg's consumer raises the chrome-owned unlock/pick prompt.
   onVaultGesture: (cb) => ipcRenderer.on('vault-gesture', (_e, d) => cb(d)),
+  // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
+  // forwards the goldfinch://vault page's requestSetup / requestUnlock (via chromeForTab)
+  // as BARE triggers (no secret) → the chrome opens the vault-set / vault-unlock sheet.
+  // onVaultRecoveryShow carries the recovery key ONLY (admin key deferred to F4) for the
+  // read-only, dismiss-disabled recovery-show sheet.
+  onVaultRequestSetup: (cb) => ipcRenderer.on('vault-request-setup', () => cb()),
+  onVaultRequestUnlock: (cb) => ipcRenderer.on('vault-request-unlock', () => cb()),
+  onVaultRecoveryShow: (cb) => ipcRenderer.on('vault-recovery-show', (_e, d) => cb(d)),
+  // Access-key mint cross-renderer triggers (M12 F3 Leg 5, DD5). onVaultRequestMint carries
+  // the NON-SECRET { target } vault id (the vault page's Mint CTA, via chromeForTab) → the
+  // chrome opens the vault-stepup sheet. onVaultAccessKeyShow carries the minted { secret,
+  // keyId } (main → chrome → sheet) for the read-only, dismiss-disabled accesskey-show sheet.
+  onVaultRequestMint: (cb) => ipcRenderer.on('vault-request-mint', (_e, d) => cb(d)),
+  onVaultAccessKeyShow: (cb) => ipcRenderer.on('vault-accesskey-show', (_e, d) => cb(d)),
   // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): the toolbar lock
   // indicator subscribes to every transition push, then fetches the initial
   // state once. Payload `{ setUp, unlocked }` — non-secret projection of the

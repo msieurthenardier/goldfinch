@@ -394,6 +394,107 @@ test('an access key opens ONLY its own vault; revoke takes effect immediately', 
 });
 
 // ---------------------------------------------------------------------------
+// listAccessKeys (M12 F3 Leg 5) — keyIds ONLY (no secret), MRK-gated, allowlisted.
+// ---------------------------------------------------------------------------
+
+test('listAccessKeys returns minted grants by keyId ONLY — no secret — and filters the mrk sentinel', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('work', loginItem({ title: 'Work' }));
+
+    // No access keys yet — but the mrk envelope is filtered out, so the list is empty.
+    assert.deepEqual(store.listAccessKeys('work'), []);
+
+    const { secret, keyId } = await store.mintAccessKey('work', { masterPassword: MASTER });
+    const { keyId: keyId2 } = await store.mintAccessKey('work', { masterPassword: MASTER });
+
+    const keys = store.listAccessKeys('work');
+    assert.deepEqual(keys.map((k) => k.keyId).sort(), [keyId, keyId2].sort());
+    // keyId ONLY — never a secret, and never the mrk sentinel.
+    for (const k of keys) {
+      assert.deepEqual(Object.keys(k), ['keyId']);
+      assert.notEqual(k.keyId, 'mrk');
+    }
+    const json = JSON.stringify(keys);
+    assert.equal(json.includes(secret), false, 'the minted secret must NEVER appear in listAccessKeys');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('listAccessKeys is MRK-gated (locked → VaultLockedError) and allowlist-resolved (burner/unknown rejected)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+
+    // An uncreated but ALLOWLISTED vault lists as empty (no file yet).
+    assert.deepEqual(store.listAccessKeys('personal'), []);
+    // The manager-wide global vault is reachable via the sentinel.
+    assert.deepEqual(store.listAccessKeys('global'), []);
+
+    // A burner/unknown target is rejected by _resolveTarget (no raw-path construction).
+    assert.throws(() => store.listAccessKeys('burner-xyz'), (e) => e instanceof vs.VaultStateError);
+    assert.throws(() => store.listAccessKeys('../../etc/passwd'), (e) => e instanceof vs.VaultStateError);
+
+    // Locked → VaultLockedError (policy MRK-gate — uniform locked-routing).
+    store.lockNow();
+    assert.throws(() => store.listAccessKeys('work'), (e) => e instanceof vs.VaultLockedError);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('resolveTarget is the PUBLIC allowlist passthrough for the revoke handler (validated id or throw)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    assert.equal(store.resolveTarget('work'), 'work');
+    assert.equal(store.resolveTarget('global'), 'global');
+    assert.throws(() => store.resolveTarget('burner-xyz'), (e) => e instanceof vs.VaultStateError);
+    // Needs no MRK — the allowlist is manager-lock-independent.
+    store.lockNow();
+    assert.equal(store.resolveTarget('work'), 'work');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('mintAccessKey accepts a Buffer step-up master password (no widening) and mints a usable key', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('work', loginItem({ title: 'Work' }));
+
+    // The chrome-sheet path hands the password as a zeroizable Buffer (the vault-stepup-mint
+    // channel's Buffer.from copy). mintAccessKey has no string guard — it accepts it natively.
+    const buf = Buffer.from(MASTER, 'utf8');
+    const { secret, keyId } = await store.mintAccessKey('work', { masterPassword: buf });
+    assert.equal(typeof secret, 'string');
+    assert.equal(typeof keyId, 'string');
+
+    // The minted key genuinely opens its vault (a Buffer step-up is a real re-auth).
+    const reader = makeStore(dir);
+    const workKey = reader.unlockVaultWithAccessKey('work', secret);
+    const workDoc = vc.parseVault(fs.readFileSync(vaultPath(dir, 'work')));
+    assert.deepEqual(vc.decryptItems(workDoc.items, workKey).map((i) => i.title), ['Work']);
+
+    // A WRONG Buffer step-up password refuses (VaultAuthError) and mints nothing.
+    await assert.rejects(
+      store.mintAccessKey('work', { masterPassword: Buffer.from('wrong', 'utf8') }),
+      (e) => e instanceof vs.VaultAuthError
+    );
+    assert.equal(store.listAccessKeys('work').length, 1, 'the wrong-password attempt minted nothing');
+  } finally {
+    rm(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Defense-in-depth: a jar id colliding with GLOBAL_ID cannot alias the manager-
 // wide global vault (M12 F1 security review). jars.js now reserves `global`
 // (isReservedId) so a container can no longer mint that id, but a store written

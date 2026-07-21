@@ -6,6 +6,7 @@ export function buildKebabModel() {
     { id: 'settings', label: 'Settings' },
     { id: 'downloads', label: 'Downloads' },
     { id: 'jars', label: 'Cookie jars' },
+    { id: 'vault', label: 'Passwords' },
     { id: 'print', label: 'Print…' },
     { id: 'exit', label: 'Exit' }
   ];
@@ -98,6 +99,10 @@ export function createChromePageActions({
     createTab('goldfinch://jars', null, { trusted: true });
   }
 
+  function openVaultPage() {
+    createTab('goldfinch://vault', null, { trusted: true });
+  }
+
   function siteInfoInternalFlag(tab) {
     return !!tab && (isInternalTab(tab) || isInternalPageUrl(tab.url));
   }
@@ -133,5 +138,5 @@ export function createChromePageActions({
     if (container) createTab(currentHomePage(), container);
   }
 
-  return { openDownloads, openJarsPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };
+  return { openDownloads, openJarsPage, openVaultPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };
 }

@@ -39,8 +39,19 @@ const crypto = require('node:crypto');
 const vc = require('./vault-crypto');
 const { writeFileAtomic } = require('./atomic-write');
 
-// The global (non-jar) vault's stable id / filename base.
-const GLOBAL_ID = 'global';
+// The global (non-jar) vault's stable id / filename base. Single-sourced in
+// src/shared/reserved-ids.js (M12 F3 DD8) so this sentinel and jars.js's
+// `isReservedId` `'global'` can never drift. reserved-ids.js is a dependency-free
+// plain-CJS constant, so importing it keeps this store Electron-free / app-db-free.
+const { GLOBAL_ID } = require('../../shared/reserved-ids');
+
+// Per-type secret/non-secret taxonomy (M12 F3 Leg 2 / DD3, DD6, DD10). The SINGLE
+// SOURCE both the metadata projection (`listItemsMeta` → `metadataOf`, a positive
+// whitelist) and the preserving save-merge (`saveItemPreservingSecrets` →
+// `secretFieldsFor`) consume as complements — so a field can never drift into a
+// leak (metadata) or a drop (save). Plain-CJS shared constant; keeps the store
+// Electron-free / app-db-free (the reserved-ids.js precedent).
+const { metadataOf, secretFieldsFor } = require('../../shared/vault-item-schema');
 
 // The manager document format id + version (vault-store OWNS this format).
 const MANAGER_FORMAT = 'gfmanager';
@@ -368,14 +379,20 @@ class VaultStore {
    * global vault (its key wrapped under the MRK). Leaves the manager UNLOCKED.
    * Returns the recovery-key display + admin private key EXACTLY once — neither is
    * persisted.
-   * @param {{ masterPassword: string }} args
+   * @param {{ masterPassword: string | Buffer }} args
    * @returns {Promise<{ recoveryKeyDisplay: string, adminPrivateKeyB64: string }>}
    */
   async setup({ masterPassword } = /** @type {any} */ ({})) {
     if (this.isSetUp()) {
       throw new VaultStateError('vault-store: already set up');
     }
-    if (typeof masterPassword !== 'string' || masterPassword.length === 0) {
+    // Accept a non-empty STRING (the F1 API) OR a non-empty Buffer (M12 F3 Leg 4: the
+    // chrome-owned vault-set sheet submits the master password as a zeroizable Buffer
+    // over menu-overlay:vault-setup — scrypt/deriveMasterKey accepts a Buffer password,
+    // exactly as the unlock path already does, so no crypto change).
+    const isNonEmptyString = typeof masterPassword === 'string' && masterPassword.length > 0;
+    const isNonEmptyBuffer = Buffer.isBuffer(masterPassword) && masterPassword.length > 0;
+    if (!isNonEmptyString && !isNonEmptyBuffer) {
       throw new VaultStateError('vault-store: masterPassword is required');
     }
     this._ensureVaultsDir();
@@ -562,6 +579,22 @@ class VaultStore {
   }
 
   /**
+   * PUBLIC allowlist resolution for a vault target — the exact `_resolveTarget`
+   * check surfaced for handlers that must validate a caller-supplied target BEFORE
+   * calling a raw-`vaultId` store method. `revokeAccessKey` (unlike mint/list) takes
+   * a raw vaultId; the internal-IPC revoke handler resolves the target through this
+   * first (M12 F3 Leg 5), so a burner/unknown/traversal target is rejected with no
+   * raw-path construction — the same main-side authority mint/list get internally.
+   * Returns the validated vaultId (the target unchanged for a valid one) or throws
+   * VaultStateError. Needs no MRK (the allowlist is manager-lock-independent).
+   * @param {string} target
+   * @returns {string}
+   */
+  resolveTarget(target) {
+    return this._resolveTarget(target);
+  }
+
+  /**
    * Get a vault key: from the in-memory cache, else unwrap it from the parsed
    * document's `mrk` envelope and cache it.
    * @param {string} vaultId
@@ -618,6 +651,15 @@ class VaultStore {
    * Save (upsert by id) an item into a vault, lazy-creating the vault on first
    * save. Requires the manager unlocked. Refuses a burner/unknown jar with no
    * file created.
+   *
+   * FULL-REPLACE CONTRACT (M12 F3 DD3): on update this writes the supplied item
+   * WHOLESALE — only `createdAt` is carried over from the existing record; every
+   * other field (secret or not) is taken verbatim from `item`. This is correct and
+   * lossless for the full-item vault-page editor (which holds every field and lets
+   * the user CLEAR one — a blind merge could not). The durable rule for the class
+   * is: **partial-update callers must read-merge first** (F2 capture does; verified
+   * by vault-capture.test.js). The vault page's masked-untouched secret fields are
+   * resolved BEFORE this call by `saveItemPreservingSecrets` — never inside here.
    * @param {string} target  `'global'` or a persistent jar id.
    * @param {any} item
    * @returns {VaultItem}
@@ -670,6 +712,135 @@ class VaultStore {
     if (doc === null) return [];
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
     return /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+  }
+
+  /**
+   * All-types METADATA-ONLY list for the vault management page (M12 F3 DD10). Maps
+   * each item through `metadataOf` — a POSITIVE WHITELIST that emits only the type's
+   * non-secret fields plus `id`/`type`/`hasTotp`, tagged with `vaultId`. NO secret
+   * (password / totp / note `body` / card `number`/`cvv` / any `notes`) can appear.
+   * Requires the manager unlocked; an uncreated vault lists as empty. Also backs
+   * leg-1's deferred item counts.
+   * @param {string} target
+   * @returns {Array<{ vaultId: string, id: any, type: string, hasTotp: boolean, [k: string]: any }>}
+   */
+  listItemsMeta(target) {
+    this._requireMrk();
+    const vaultId = this._resolveTarget(target);
+    this._touch();
+    const doc = this._readVault(vaultId);
+    if (doc === null) return [];
+    const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    return items.map((it) => ({ vaultId, ...metadataOf(it) }));
+  }
+
+  /**
+   * Reveal a SINGLE item in full (including its secrets) by id — the DD6 explicit-
+   * reveal path. Requires the manager unlocked; exact-scope by id (never the whole
+   * vault). Returns null for a missing id or an uncreated vault.
+   * @param {string} target
+   * @param {string} itemId
+   * @returns {VaultItem | null}
+   */
+  revealItem(target, itemId) {
+    this._requireMrk();
+    const vaultId = this._resolveTarget(target);
+    this._touch();
+    const doc = this._readVault(vaultId);
+    if (doc === null) return null;
+    const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    return items.find((it) => it.id === itemId) ?? null;
+  }
+
+  /**
+   * Delete an item by id (filter out + atomic re-write). Requires the manager
+   * unlocked. Returns false (no write) on a missing id or an uncreated vault —
+   * never throws for absence.
+   * @param {string} target
+   * @param {string} itemId
+   * @returns {boolean} true if an item was removed.
+   */
+  deleteItem(target, itemId) {
+    this._requireMrk();
+    const vaultId = this._resolveTarget(target);
+    this._touch();
+    const doc = this._readVault(vaultId);
+    if (doc === null) return false;
+    const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
+    const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
+    const kept = items.filter((it) => it.id !== itemId);
+    if (kept.length === items.length) return false;
+    this._writeVault(vaultId, {
+      kdf: doc.kdf,
+      envelopes: doc.envelopes,
+      items: vc.encryptItems(kept, vaultKey),
+    });
+    return true;
+  }
+
+  /**
+   * Save a full item from the vault-page editor while PRESERVING the secret fields
+   * the user never revealed/edited (M12 F3 DD3/DD6). The masked-untouched fields
+   * arrive OUT-OF-BAND in `unchangedFields` (never an in-band magic string); their
+   * values are pulled from the EXISTING item here (plaintext + schema live in the
+   * store, not the IPC handler), then the merged item goes through the unchanged
+   * full-replace `saveItem`. A field NOT named in `unchangedFields` is taken
+   * verbatim from `item` — including an explicit empty string, so field-clearing
+   * still works.
+   *
+   * Guards: every name in `unchangedFields` must be ∈ `secretFieldsFor(item.type)`
+   * (a non-secret or unknown field is rejected — it can never be used to smuggle a
+   * non-secret preserve). CREATE-DEFENSE: if there is no existing item (a new id)
+   * and `unchangedFields` is non-empty → throw; a create has nothing to preserve
+   * and must never persist a placeholder secret.
+   * @param {string} target
+   * @param {any} item
+   * @param {string[]} [unchangedFields]
+   * @returns {VaultItem}
+   */
+  saveItemPreservingSecrets(target, item, unchangedFields = []) {
+    this._requireMrk();
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new VaultStateError('vault-store: item must be an object');
+    }
+    if (!ITEM_TYPES.has(item.type)) {
+      throw new VaultStateError(
+        `vault-store: item.type must be one of login|card|note (got "${item.type}")`
+      );
+    }
+    const unchanged = Array.isArray(unchangedFields) ? unchangedFields : [];
+    const secret = new Set(secretFieldsFor(item.type));
+    for (const name of unchanged) {
+      if (!secret.has(name)) {
+        throw new VaultStateError(
+          `vault-store: "${name}" is not a secret field of ${item.type} — cannot preserve`
+        );
+      }
+    }
+
+    // Find the existing record (read-merge source). listItems handles MRK/resolve/
+    // uncreated-vault ([]); an unknown/burner jar throws VaultStateError here.
+    const existing = typeof item.id === 'string' && item.id.length > 0
+      ? this.listItems(target).find((it) => it.id === item.id)
+      : undefined;
+
+    if (!existing) {
+      // CREATE-DEFENSE: a new item has no existing secret to preserve.
+      if (unchanged.length > 0) {
+        throw new VaultStateError(
+          'vault-store: cannot preserve secrets on a new item (create-defense)'
+        );
+      }
+      return this.saveItem(target, item);
+    }
+
+    const merged = { ...item };
+    for (const name of unchanged) {
+      merged[name] = existing[name];
+    }
+    return this.saveItem(target, merged);
   }
 
   /**
@@ -729,6 +900,29 @@ class VaultStore {
   // -------------------------------------------------------------------------
   // Access keys (per-jar automation grants — DD6 step-up)
   // -------------------------------------------------------------------------
+
+  /**
+   * List a vault's access-key grants by keyId ONLY — NEVER a secret (keyIds are the
+   * plaintext envelope fingerprints, safe to surface; an access secret exists only at
+   * mint time). MRK-gated as a POLICY choice (uniform locked-routing for the
+   * management page — not a crypto necessity), then allowlist-resolved via
+   * `_resolveTarget` (excludes burner/unknown targets, no raw-target path
+   * construction), read, and filtered to the non-`mrk` (i.e. `access`) envelopes via
+   * the sentinel idiom (`TYPE_ACCESS` is not exported from vault-crypto). An uncreated
+   * vault lists as empty.
+   * @param {string} target
+   * @returns {Array<{ keyId: string }>}
+   */
+  listAccessKeys(target) {
+    this._requireMrk();
+    const vaultId = this._resolveTarget(target);
+    this._touch();
+    const doc = this._readVault(vaultId);
+    if (doc === null) return [];
+    return vc.listEnvelopeKeyIds(doc)
+      .filter((keyId) => keyId !== 'mrk')
+      .map((keyId) => ({ keyId }));
+  }
 
   /**
    * Mint a per-jar access key. STEP-UP (DD6): refuses unless the supplied master
@@ -902,6 +1096,9 @@ function load(userDataPath, deps = {}) {
 module.exports = {
   load,
   VaultStore,
+  // Re-exported (M12 F3 DD8) so the reserved-id cross-module test can assert this
+  // store's global sentinel ∈ jars' reserved ids without re-typing the literal.
+  GLOBAL_ID,
   VaultLockedError,
   VaultStateError,
   // Re-exported for callers/tests that catch the crypto-layer errors.

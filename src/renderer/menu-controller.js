@@ -114,13 +114,22 @@ const menuController = (() => {
 document.addEventListener('pointerdown', (e) => {
   const cur = menuController.current;
   if (!cur) return;
+  // M12 F3 Leg 4 (DD5): a non-dismissible entry (vault-recovery-show) ignores outside-
+  // click — its one-time recovery key must not be lost by a casual backdrop/chrome click.
+  if (cur.dismissible === false) return;
   const t = /** @type {Node} */ (e.target);
   if (cur.menu.contains(t) || cur.trigger.contains(t)) return;
   menuController.closeAll();
 });
 // Page/webview clicks (a separate web-contents the chrome document can't see) and
 // app-switch both fire window blur → close any open menu (DD1, spike-confirmed).
-window.addEventListener('blur', () => menuController.closeAll());
+// EXCEPT a non-dismissible entry (vault-recovery-show, DD5) — window-blur must not close
+// it (app switch would otherwise lose the unrecoverable one-time key).
+window.addEventListener('blur', () => {
+  const cur = menuController.current;
+  if (cur && cur.dismissible === false) return;
+  menuController.closeAll();
+});
 
 /** @param {HTMLElement[]} items @param {number} i */
 function focusItem(items, i) {

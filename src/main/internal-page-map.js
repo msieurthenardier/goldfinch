@@ -43,6 +43,21 @@ function createInternalPageMap({ baseDir, path }) {
       '/jars-confirm-modal.js': rendererPage('jars-confirm-modal.js'),
       '/jars-cookies-panel.js': rendererPage('jars-cookies-panel.js'),
       '/jars-sitedata-panel.js': rendererPage('jars-sitedata-panel.js')
+    },
+    // Password-vault management page (M12 Flight 3). The strict internal CSP has no
+    // directory passthrough, so every shared module the page imports needs its own
+    // exact entry here (the three-point onboarding seam). Leg 1 imports only the pure
+    // state model; later legs add the editor/generator/totp modules with their routes.
+    vault: {
+      '/': rendererPage('vault.html'),
+      '/vault.css': rendererPage('vault.css'),
+      '/vault.js': rendererPage('vault.js'),
+      '/vault-page-model.js': shared('vault-page-model.js'),
+      // Leg 2: the pure editor logic (unchanged-secret assembly + mask/reveal state
+      // + http/https origin-link guard) the page imports as a flat ESM specifier.
+      '/vault-editor-model.js': shared('vault-editor-model.js'),
+      // Leg 3: the pure password generator (DD7) the editor imports as a flat specifier.
+      '/password-generator.js': shared('password-generator.js')
     }
   };
 }

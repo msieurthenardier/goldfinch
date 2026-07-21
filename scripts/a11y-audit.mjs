@@ -45,7 +45,7 @@
 //   (Endpoint override: GOLDFINCH_MCP_URL / GOLDFINCH_MCP_PORT, default :49707 —
 //   same contract as scripts/mcp-example-client.mjs.)
 //
-// The default sweep (5 chrome states + 5 menu-overlay SHEET states) needs the
+// The default sweep (5 chrome states + 10 menu-overlay SHEET states) needs the
 // ADMIN key (getChromeTarget is admin-only, and the sheet's wcId resolves only
 // under the admin relaxation — it is deliberately not in tabViews, DD8);
 // `--target` guest mode uses a jar key (or admin). NOTE: `goldfinch://settings`
@@ -243,15 +243,27 @@ async function findSheetWcId(client) {
 // Escape keydown on the OPEN template node, evaluated IN THE SHEET document.
 // That drives the sheet's own dismissal path (capture-phase 'escape' attribution
 // → controller close → dismissed{escape} → main close → chrome refocus).
+// The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
+// first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
+// SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
+const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey'];
 const SHEET_DISMISS_EXPR = `(() => {
-  const open = ['sheet-menu', 'sheet-popup', 'sheet-dialog']
-    .map((id) => document.getElementById(id))
-    .find((el) => el && !el.classList.contains('hidden'));
+  const ids = ${JSON.stringify(SHEET_NODE_IDS)};
+  const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
   if (!open) return 'none-open';
+  // vault-recovery-show and vault-accesskey-show are DISMISS-DISABLED (Escape / backdrop /
+  // blur are inert — the one-time recovery key / minted access secret is unrecoverable);
+  // only the explicit acknowledge ("I've saved it", the last actions button) closes them.
+  // Every other sheet dismisses on Escape.
+  if (open.id === 'sheet-vault-recovery' || open.id === 'sheet-vault-accesskey') {
+    const ack = open.querySelector('.new-container-actions button:last-child');
+    if (ack) { ack.click(); return 'escaped'; }
+    return 'no-ack';
+  }
   open.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   return 'escaped';
 })()`;
-const SHEET_CLOSED_EXPR = `['sheet-menu', 'sheet-popup', 'sheet-dialog']
+const SHEET_CLOSED_EXPR = `${JSON.stringify(SHEET_NODE_IDS)}
   .every((id) => { const el = document.getElementById(id); return !el || el.classList.contains('hidden'); })`;
 
 // Evaluate an expression in the target tab's main world via the eval tool. The
@@ -407,7 +419,21 @@ async function main() {
         // M09 Flight 5 Leg 1: the tab context menu. The audit hook builds a
         // representative synthetic model (items-to-right + non-empty stack) so
         // all five items render, mirroring the page-context hook's synthetic params.
-        { label: 'sheet:tab-context', open: 'openTabContextMenuForAudit()' }
+        { label: 'sheet:tab-context', open: 'openTabContextMenuForAudit()' },
+        // M12 F3 Leg 4 (first-run-setup, DD9): the two new setup sheets. vault-set is the
+        // master-password entry (dialog-style, Escape-dismissible); vault-recovery-show is
+        // the read-only, DISMISS-DISABLED one-time key display (SHEET_DISMISS_EXPR clicks
+        // its acknowledge). Both raise no chrome-side trigger element — the audit hooks
+        // open them directly (openVault*OverlayForAudit, the evaluate-seam additions).
+        { label: 'sheet:vault-set', open: 'openVaultSetOverlayForAudit()' },
+        { label: 'sheet:vault-recovery-show', open: 'openVaultRecoveryShowOverlayForAudit()' },
+        // M12 F3 Leg 5 (access-keys, DD9): the two new access-key sheets. vault-stepup is the
+        // step-up master-password re-auth (dialog-style, Escape-dismissible); vault-accesskey-
+        // show is the read-only, DISMISS-DISABLED one-time minted-secret display
+        // (SHEET_DISMISS_EXPR clicks its acknowledge). Both raise no chrome-side trigger — the
+        // audit hooks open them directly (openVault*OverlayForAudit, the evaluate-seam additions).
+        { label: 'sheet:vault-stepup', open: 'openVaultStepupOverlayForAudit()' },
+        { label: 'sheet:vault-accesskey-show', open: 'openVaultAccessKeyShowOverlayForAudit()' }
       ];
       let sheetWcId = null;
       for (const state of SHEET_STATES) {

@@ -69,7 +69,7 @@ test('menu models and chrome-to-sheet anchor conversion retain exact shapes', as
   const { buildKebabModel, chromePointToSheet, leftSheetAnchor, rightSheetAnchor } =
     await import('../../src/renderer/chrome/overlay-menus.js');
   assert.deepEqual(buildKebabModel().map((item) => item.id), [
-    'new-window', 'settings', 'downloads', 'jars', 'print', 'exit'
+    'new-window', 'settings', 'downloads', 'jars', 'vault', 'print', 'exit'
   ]);
   const webviews = { left: 100, top: 40 };
   const trigger = { left: 90, right: 250 };

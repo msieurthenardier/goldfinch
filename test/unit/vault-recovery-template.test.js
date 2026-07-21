@@ -1,0 +1,53 @@
+'use strict';
+
+// Unit tests for the vault-recovery-show sheet template DOM/aria structure (M12 Flight 3
+// Leg 4 first-run-setup, DD5). Built by the pure, document-injected buildVaultRecoveryCard
+// so its structure/aria contract is testable against the fake-document helper without a
+// live sheet. Behavior (render the key text, Copy, acknowledge, drop-on-close, and the
+// dismiss-DISABLED wiring) is in menu-overlay.js; the dismiss-disabled invariant is also
+// pinned by the modal-card-controller characterization suite.
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const { createDocument } = require('./helpers/jars-page-dom');
+const { buildVaultRecoveryCard } = require('../../src/shared/vault-recovery-template.js');
+
+test('vault-recovery card is a modal dialog with a read-only key display, Copy + acknowledge', () => {
+  const document = createDocument();
+  const card = buildVaultRecoveryCard(document);
+
+  assert.equal(card.node.id, 'sheet-vault-recovery');
+  assert.equal(card.node.classList.contains('hidden'), true);
+
+  assert.equal(card.card.attributes.get('role'), 'dialog');
+  assert.equal(card.card.attributes.get('aria-modal'), 'true');
+  assert.equal(card.card.attributes.get('aria-label'), 'Save your recovery key');
+
+  // The key value is a READ-ONLY display element — NOT an input (nothing to submit).
+  assert.equal(card.keyValue.tagName, 'DIV');
+  assert.equal(card.keyValue.attributes.get('aria-readonly'), 'true');
+  assert.equal(card.keyValue.attributes.get('aria-label'), 'Recovery key');
+  assert.equal(card.keyValue.textContent, '', 'no key material baked into the built card');
+
+  // Copy + acknowledge are the only controls; both type=button.
+  assert.equal(card.copy.type, 'button');
+  assert.equal(card.copy.textContent, 'Copy');
+  assert.equal(card.acknowledge.type, 'button');
+  assert.equal(card.acknowledge.textContent, "I've saved it");
+
+  // No input element anywhere in the card (the recovery key is display-only).
+  const hasInput = (function find(node) {
+    if (node.tagName === 'INPUT') return true;
+    return node.children.some(find);
+  })(card.card);
+  assert.equal(hasInput, false, 'a recovery-show card must contain no input field');
+});
+
+test('each buildVaultRecoveryCard call yields a fresh, independent node tree', () => {
+  const document = createDocument();
+  const a = buildVaultRecoveryCard(document);
+  const b = buildVaultRecoveryCard(document);
+  assert.notEqual(a.node, b.node);
+  assert.notEqual(a.keyValue, b.keyValue);
+});

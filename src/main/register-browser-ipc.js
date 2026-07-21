@@ -124,6 +124,40 @@ function registerBrowserIpc({
     if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
   });
 
+  // Vault cross-renderer triggers (M12 F3 Leg 4, first-run-setup, DD5). The internal
+  // goldfinch://vault page cannot call chrome-trust menuOverlay.* directly, so its
+  // not-set-up CTA (requestSetup) and locked affordance (requestUnlock) invoke these
+  // origin-gated channels. Main resolves the OWNING window's chrome via
+  // chromeForTab(event.sender.id) — the internal tab is in tabViews, so getWindowForGuest
+  // resolves it — and forwards a BARE trigger (no secret), the onVaultGesture →
+  // vault-gesture idiom. registerInternalHandler rejects any non-internal sender before
+  // the body runs. The distinct channels drive the DISTINCT chrome handlers: setup opens
+  // vault-set; unlock opens vault-unlock WITHOUT F2's pendingVaultFlow fill-picker
+  // continuation. Placed here (not registerVaultIpc) because this file has chromeForTab.
+  registerInternalHandler(ipcMain, 'internal-vault-request-setup', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-setup');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-unlock', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-unlock');
+    return { ok: true };
+  });
+
+  // Vault access-key MINT trigger (M12 F3 Leg 5, flight DD5 / mission durable-grant
+  // step-up). Mirrors internal-vault-request-setup — a BARE cross-renderer trigger with
+  // NO secret — but EXTENDED with the NON-SECRET target vault id so the chrome opens the
+  // vault-stepup sheet scoped to that vault. The step-up master password is entered on the
+  // chrome-owned sheet and the minted secret is shown on the chrome-owned vault-accesskey
+  // sheet — never the page DOM (DD5). Main resolves the OWNING window's chrome via
+  // chromeForTab(event.sender.id) (the internal tab is in tabViews). registerInternalHandler
+  // rejects any non-internal sender before the body runs; the target is re-validated
+  // main-side by the store's _resolveTarget when mintAccessKey runs (a compromised sheet
+  // cannot mint against a burner/unknown target).
+  registerInternalHandler(ipcMain, 'internal-vault-request-mint', (event, target) => {
+    chromeForTab(event.sender.id)?.send('vault-request-mint', { target });
+    return { ok: true };
+  });
+
   ipcMain.on('guest-media-list', (event, mediaList) => {
     const wcId = event.sender.id;
     chromeForTab(wcId)?.send('tab-media-list', { wcId, mediaList });

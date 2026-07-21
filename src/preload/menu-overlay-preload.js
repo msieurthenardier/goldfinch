@@ -27,6 +27,18 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // sheet preload (a reviewed upgrade over DD4's literal `send`): the wrong-
   // password re-prompt needs the { ok } result back to keep the sheet open.
   unlockVault: (payload) => ipcRenderer.invoke('menu-overlay:vault-unlock', payload),
+  // M12 F3 Leg 4 (first-run-setup): the vault-set sheet's master-password SETUP channel.
+  // Mirrors unlockVault byte-for-byte — `secret` is a Uint8Array, NEVER sendActivated
+  // (string-only / 24-char capped); the sheet needs the { ok } result back to re-prompt.
+  setupVault: (payload) => ipcRenderer.invoke('menu-overlay:vault-setup', payload),
+  // M12 F3 Leg 5 (access-keys): the vault-stepup sheet's step-up MINT channel. Mirrors
+  // setupVault — `secret` is a Uint8Array, NEVER sendActivated — but adds the NON-SECRET
+  // `target` vault id. Returns { ok }; false re-prompts (wrong step-up password), true closes
+  // it (main also opens vault-accesskey-show with the minted secret).
+  stepupMint: (payload) => ipcRenderer.invoke('menu-overlay:vault-stepup-mint', payload),
+  // M12 F3 Leg 4: the recovery-show Copy — main owns the OS clipboard (string-only, the
+  // chrome-clipboard-write precedent); a one-way send, sender-validated main-side.
+  copyText: (text) => ipcRenderer.send('menu-overlay:copy-text', { text }),
   // DD7 (M12 F2 capture-save): the sheet's Save reports the chosen vaultId + the
   // stashed captureId (+ token). It rides an invoke like unlockVault (the sheet needs
   // the { saved } result back to re-prompt on a lock race). The CAPTURED PASSWORD is

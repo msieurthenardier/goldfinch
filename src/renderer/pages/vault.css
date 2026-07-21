@@ -1,0 +1,492 @@
+/* Vault (Passwords) page — Chrome-style shell (M12 Flight 3, Leg 1). Self-contained:
+   no @import. Mirrors downloads.css / settings.css brand tokens, dark/gold chrome,
+   and focus-ring conventions. */
+
+/* ── Brand tokens (authoritative chrome values from src/renderer/styles.css) ── */
+:root {
+  --accent: #f5c518;
+  --accent-fg: #1e1f25;
+  --bg: #1e1f25;
+  --bg-2: #282a32;
+  --bg-3: #32343d;
+  --fg: #e6e7ea;
+  --fg-dim: #9a9ca6;
+  --border: #3a3c46;
+  --ok: #6dff8f;
+  --err: #ff8c7a;
+}
+
+/* ── Reset ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Main content column ── */
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 48px 64px;
+}
+
+/* ── Header: title ── */
+.vault-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vault-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+
+/* ── State regions ── */
+.vault-section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--fg);
+}
+
+.vault-lede {
+  color: var(--fg-dim);
+  margin: 0 0 16px;
+}
+
+/* ── Shared button ── */
+.vault-btn {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.1s, filter 0.1s;
+}
+
+.vault-btn:hover {
+  border-color: var(--accent);
+}
+
+.vault-btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.vault-btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+.vault-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Inline stub/marker notice (setup + unlock affordances are stubbed in leg 1) ── */
+.vault-stub-note {
+  margin-top: 12px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.vault-stub-note:empty {
+  display: none;
+}
+
+/* ── Locked banner ── */
+.vault-locked-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.vault-locked-banner p {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-dim);
+}
+
+/* ── Vault list (labels only — item counts land in leg 2) ── */
+.vault-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vault-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.vault-name {
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.vault-empty {
+  color: var(--fg-dim);
+  padding: 24px 0;
+  margin: 0;
+}
+
+/* ── Unlocked: per-vault sections + item list ── */
+.vault-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.vault-section-head h2 {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.vault-type-select {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.vault-type-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.vault-item-list {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+
+.vault-item-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vault-item-open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.vault-item-open:hover .vault-item-title {
+  color: var(--accent);
+}
+.vault-item-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.vault-item-title {
+  font-weight: 600;
+  word-break: break-word;
+}
+.vault-item-type {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex: 0 0 auto;
+}
+.vault-item-sub {
+  color: var(--fg-dim);
+  font-size: 13px;
+  word-break: break-word;
+}
+.vault-item-origin {
+  color: var(--fg-dim);
+  font-size: 12px;
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.vault-item-origin:hover {
+  color: var(--accent);
+}
+
+/* ── Editor ── */
+.vault-editor-host {
+  margin-bottom: 24px;
+}
+.vault-editor {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.vault-editor-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  text-transform: capitalize;
+}
+
+.vault-field {
+  display: block;
+  margin-bottom: 12px;
+}
+.vault-field-secret {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 8px;
+}
+.vault-field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-bottom: 4px;
+}
+.vault-field-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.vault-input {
+  width: 100%;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+textarea.vault-input {
+  min-height: 60px;
+  resize: vertical;
+}
+.vault-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.vault-btn.small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.vault-btn.danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+.vault-btn.danger:hover {
+  background: var(--err);
+  color: var(--accent-fg);
+}
+
+/* ── Password generator (Leg 3, DD7) ── */
+.vault-generator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.vault-gen-len {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-gen-len-input {
+  width: 60px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+.vault-gen-len-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.vault-gen-class {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-gen-status {
+  color: var(--err);
+  font-size: 12px;
+}
+.vault-gen-status:empty {
+  display: none;
+}
+
+/* ── Live TOTP code widget (Leg 3, DD4) ── */
+.vault-totp-widget {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -4px 0 12px;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.vault-totp-label {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-totp-code {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.vault-totp-count {
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.vault-editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.vault-editor-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--err);
+}
+.vault-editor-status:empty {
+  display: none;
+}
+
+/* ── Access keys + auto-lock (Leg 5, flight DD5) ── */
+.vault-accesskeys {
+  margin: 4px 0 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.vault-accesskeys-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.vault-accesskeys-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 14px;
+}
+.vault-accesskey-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vault-accesskey-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.vault-accesskey-id {
+  flex: 1 1 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  word-break: break-all;
+  color: var(--fg);
+}
+
+.vault-autolock-section {
+  margin-bottom: 24px;
+}
+.vault-autolock-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vault-autolock-label {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.vault-autolock-input {
+  width: 96px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.vault-autolock-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-autolock-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-autolock-status:empty {
+  display: none;
+}

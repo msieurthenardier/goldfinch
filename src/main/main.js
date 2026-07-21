@@ -57,6 +57,7 @@ const { registerTabIpc } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
+const { registerVaultIpc } = require('./register-vault-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
 const { registerAppLifecycle } = require('./app-lifecycle');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
@@ -1083,7 +1084,39 @@ registerOverlayIpc({
   // record by captureId, re-checks unlock, and persists via saveItem — the captured
   // password lives ONLY in that record (never crosses to the sheet). Returns
   // { saved, reason? }; the handler closes the sheet on saved.
-  vaultCaptureSave: ({ captureId, vaultId }) => getVaultHuman().captureSave({ captureId, vaultId })
+  vaultCaptureSave: ({ captureId, vaultId }) => getVaultHuman().captureSave({ captureId, vaultId }),
+  // M12 F3 Leg 4 (first-run-setup): the vault-set sheet's setup delegate. Mirrors the
+  // vaultUnlock injection — the memoized getVaultStore() singleton; setup() accepts the
+  // zeroizable Buffer master password (the widened :389 guard). Broadcasts the lock-state
+  // AFTER a successful setup (setup() sets the MRK directly, not via _installMrk's
+  // onUnlock, so the transition would otherwise not project to the chrome indicator /
+  // the vault page). Returns setup's { recoveryKeyDisplay, adminPrivateKeyB64 } UNCHANGED;
+  // the handler forwards ONLY the recovery key to chrome (admin key deferred to F4).
+  vaultSetup: async (buf) => {
+    const res = await getVaultStore().setup({ masterPassword: buf });
+    broadcastVaultLockState();
+    return res;
+  },
+  // M12 F3 Leg 5 (access-keys): the vault-stepup sheet's MINT delegate. Follows the
+  // vaultUnlock pattern (catch VaultAuthError → { ok:false }) so a WRONG step-up password
+  // is a normal { ok:false } (the sheet re-prompts, nothing minted) rather than a rejected
+  // invoke; any other error propagates (the handler still dual-zeroizes in its finally).
+  // Adapts to the store's POSITIONAL target: mintAccessKey(target, { masterPassword }) —
+  // no Buffer widening needed (mintAccessKey has no string guard; the password flows to
+  // unwrapMaster→deriveMasterKey→scrypt, all string|Buffer). Returns { ok, secret, keyId }
+  // on success; the handler forwards secret+keyId to the chrome vault-accesskey-show sheet.
+  vaultMintAccessKey: async (buf, target) => {
+    try {
+      const { secret, keyId } = await getVaultStore().mintAccessKey(target, { masterPassword: buf });
+      return { ok: true, secret, keyId };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F3 Leg 4: the recovery-show Copy delegate — main owns the OS clipboard string
+  // write (the chrome-clipboard-write precedent). Sender-validated in the handler.
+  writeClipboard: (text) => clipboard.writeText(String(text))
 });
 
 // DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
@@ -1280,6 +1313,18 @@ registerSettingsIpc({
   revokeAdminKey,
   getMcpServer: () => mcpServer,
   adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN
+});
+
+// Vault management surface (M12 Flight 3, Leg 1 / DD2). registerInternalHandler-gated,
+// mirroring registerSettingsIpc above. getVaultStore is passed as an accessor (not the
+// eagerly-constructed singleton) so the handler reads live lock/setup state and never
+// forces the store's construction at module-load time; `jars` is injected because the
+// store has no public vault-enumeration method (the handler composes 'global' + jars.list()).
+registerVaultIpc({
+  ipcMain,
+  registerInternalHandler,
+  getVaultStore,
+  jars
 });
 
 registerAppLifecycle({

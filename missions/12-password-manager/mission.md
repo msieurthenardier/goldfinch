@@ -167,11 +167,16 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       keys do not linger. **[behavior-test]**
 - [ ] **`goldfinch://vault` is a first-class trusted internal page:** it follows the
       full four-gate checklist with `registerInternalHandler`-wrapped IPC and strict
-      CSP, and passes `npm run a11y` (via the chrome-state driving path internal pages
-      require) for its states. It offers item CRUD with reveal/copy, per-vault
-      export/import, recovery-key rotation, master-password change, the auto-lock
-      duration setting, per-vault access-key management (mint/list/revoke), and a
-      password generator for new logins.
+      CSP. **a11y coverage (amended 2026-07-21 after the F3 design review):** internal
+      pages cannot be `npm run a11y`-audited even by an admin key (the MCP eval tools carry
+      an op-local internal-session refusal — a pre-existing gap shared with
+      `goldfinch://settings/downloads/jars`), so the vault page's a11y is covered the same
+      way theirs is — the vault's chrome-owned **sheet** states are axe-audited via the
+      chrome-state path, and the **page** DOM is covered by unit DOM/aria tests + the F5 HAT
+      keyboard/focus pass. It offers item CRUD with reveal/copy, per-vault export/import,
+      recovery-key rotation, master-password change, the auto-lock duration setting,
+      per-vault access-key management (mint/list/revoke), and a password generator for new
+      logins.
 - [ ] **Docs reflect the feature:** the architecture section (`CLAUDE.md`) and a
       `docs/` page covering the vault file format and threat model are updated,
       including the user-facing property that losing both the master password and the
@@ -309,12 +314,25 @@ Resolved at the owning flight, not blocking mission approval:
       injection (decorative/spoofable), the chrome-owned unlock prompt + picker on the
       menu-overlay sheet, the gesture-only / origin-matched / top-frame fill flow, and
       the chrome-rendered capture (save/update) prompt. *(Landed 2026-07-20; debrief pending.)*
-- [ ] Flight 3: **Management surface + portability** — `goldfinch://vault` internal
-      page (four gates, `registerInternalHandler`, CSP, a11y), item CRUD with
-      reveal/copy, TOTP enrollment + live display, per-vault export/import,
-      recovery-key rotation, master-password change, access-key management UI, a
-      password generator, the auto-lock duration setting, and the wipe-spares /
-      delete-removes lifecycle hooks, plus the docs + threat-model update.
-- [ ] Flight 4 *(optional)*: **HAT + alignment** — guided human-acceptance-test
-      session exercising the real feature end-to-end, with iterative fixes for
-      outstanding issues from F1–F3.
+> **F3 split (2026-07-20, operator-approved):** the original single "Management surface +
+> portability" flight spanned two distinct design/risk domains — the management-page UI vs.
+> export-format + key-rotation crypto — so it was split into F3 (management page) + F4
+> (portability + rotation + hardening + docs), and the HAT moved to F5. Most F1 crypto/store
+> primitives already exist unwired; the split isolates the durable-credential + export-format
+> crypto (F4) behind its own planning conversation and review gate.
+
+- [x] Flight 3: **Vault management page** — the `goldfinch://vault` internal page (four gates,
+      `registerInternalHandler`, strict CSP, chrome-state-path a11y), first-run setup UI (choose
+      master password + show recovery key once), item CRUD (login/card/note) with reveal/copy and
+      the `saveItem` merge-on-update fix, TOTP enrollment + live rotating display, a password
+      generator, access-key management UI (list/mint-with-step-up/revoke), the auto-lock duration
+      setting, and the reserved-id single-source-of-truth guard.
+- [ ] Flight 4: **Portability + rotation + hardening + docs** — per-vault export/import (the
+      MRK-bundle format — a `.gfvault` alone isn't independently unlockable), recovery-key
+      rotation, master-password change, admin-key rotation (eager one-pass re-seal), the
+      registrable-domain PSL-hardened per-credential fill opt-in, the audit-origin fix, the
+      jar-delete → vault-removal (offer-export-first) lifecycle hook, and the docs + threat-model
+      page.
+- [ ] Flight 5 *(optional)*: **HAT + alignment** — guided human-acceptance-test session
+      exercising the real feature end-to-end (incl. the deferred live-GUI steps from F2/F3), with
+      iterative fixes for outstanding issues from F1–F4.

@@ -158,6 +158,7 @@ function applyToolbarPins(pins) { return windowController.applyToolbarPins(pins)
 function dispatchChromeAction(action) { return shortcutController.dispatchChromeAction(action); }
 function openDownloads() { return pageActions.openDownloads(); }
 function openJarsPage() { return pageActions.openJarsPage(); }
+function openVaultPage() { return pageActions.openVaultPage(); }
 function openSiteSettingsTab() { return pageActions.openSiteSettingsTab(); }
 function siteInfoModel(tab) { return pageActions.siteInfoModel(tab); }
 function createContainerAndOpenTab(rawName) { return pageActions.createContainerAndOpenTab(rawName); }
@@ -166,10 +167,10 @@ function createContainerAndOpenTab(rawName) { return pageActions.createContainer
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// APG menu-button: role="menu" popup with six static role="menuitem" items
-// (New window, Settings, Downloads, Cookie jars, Print…, Exit) + roving tabindex
-// + arrow-nav. Count and order track `kebabModel` below — the single source of
-// truth; if you add an item there, this line is stale until you edit it too.
+// APG menu-button: role="menu" popup with seven static role="menuitem" items
+// (New window, Settings, Downloads, Cookie jars, Passwords, Print…, Exit) + roving
+// tabindex + arrow-nav. Count and order track `kebabModel` below — the single source
+// of truth; if you add an item there, this line is stale until you edit it too.
 //
 // All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
 // chrome keeps the trigger, open stimuli, model building, and action execution;
@@ -194,6 +195,9 @@ function kebabActionDownloads() {
 function kebabActionJars() {
   openJarsPage();
 }
+function kebabActionVault() {
+  openVaultPage();
+}
 function kebabActionPrint() {
   const t = activeTab();
   if (t && !isInternalTab(t) && t.wcId != null) window.goldfinch.print({ webContentsId: t.wcId });
@@ -207,6 +211,7 @@ const KEBAB_ACTIONS = {
   settings: kebabActionSettings,
   downloads: kebabActionDownloads,
   jars: kebabActionJars,
+  vault: kebabActionVault,
   print: kebabActionPrint,
   exit: kebabActionExit
 };
@@ -266,6 +271,36 @@ const overlayMenus = {
   // target and no trigger refocus (the guest owns focus). handleOverlayClosed drops the
   // held record on a non-save close.
   'vault-capture': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // First-run setup sheets (M12 F3 Leg 4 first-run-setup, DD5). Both are raised from the
+  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — there is
+  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-set
+  // is the master-password entry; vault-recovery-show is the DISMISS-DISABLED one-time key
+  // display (opened with { dismissible: false }).
+  'vault-set': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-recovery-show': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Access-key sheets (M12 F3 Leg 5 access-keys, DD5). Both are raised from the
+  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) —
+  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-stepup
+  // is the master-password re-auth; vault-accesskey-show is the DISMISS-DISABLED one-time
+  // minted-secret display (opened with { dismissible: false }).
+  'vault-stepup': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-accesskey-show': {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => null,
     refocus() {}
@@ -433,6 +468,23 @@ const openSiteInfoOverlay = () => openOverlayMenu('site-info', siteInfoModel(act
 // New-container dialog (AC4): the template ignores the anchor (centered via CSS)
 // but the open path stays uniform (fresh token, aria on the ▾ refocus trigger).
 const openNewContainerOverlay = () => openOverlayMenu('new-container', [], containerAnchor(), 0);
+// M12 F3 Leg 4 (first-run-setup, DD5/DD9): a11y SHEET_STATES hooks for the two new setup
+// sheets (scripts/a11y-audit.mjs). vault-set opens empty; vault-recovery-show opens with a
+// synthetic NON-SECRET placeholder key so its read-only display + Copy + acknowledge
+// render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
+// FD-authorized seam additions per the leg's "add both to SHEET_STATES" deliverable — the
+// M09 F5 openTabContextMenuForAudit precedent.
+const openVaultSetOverlayForAudit = () => openOverlayMenu('vault-set', [], null, 0);
+const openVaultRecoveryShowOverlayForAudit = () =>
+  openOverlayMenu('vault-recovery-show', { recoveryKey: 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX' }, null, 0, { dismissible: false });
+// M12 F3 Leg 5 (access-keys, DD5/DD9): a11y SHEET_STATES hooks for the two new access-key
+// sheets. vault-stepup opens with a synthetic NON-SECRET target; vault-accesskey-show opens
+// with a synthetic NON-SECRET placeholder secret+keyId so its read-only display + Copy +
+// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes
+// it). Same evaluate-seam precedent as leg 4's openVault{Set,RecoveryShow}OverlayForAudit.
+const openVaultStepupOverlayForAudit = () => openOverlayMenu('vault-stepup', { target: 'global' }, null, 0);
+const openVaultAccessKeyShowOverlayForAudit = () =>
+  openOverlayMenu('vault-accesskey-show', { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' }, null, 0, { dismissible: false });
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -564,6 +616,21 @@ function dispatchOverlayActivation({ menuType, id, value }) {
           }
         })
         .catch(() => {});
+      break;
+    }
+    case 'vault-recovery-show': {
+      // First-run recovery-key acknowledge (M12 F3 Leg 4). The only activation is
+      // id:'ack' — the deliberate "I've saved it". Main already closed the sheet and the
+      // vault page already moved to unlocked off the setup lock-state broadcast, so there
+      // is nothing more to do here (no secret ever reaches this dispatch — the key lived
+      // only on the sheet).
+      break;
+    }
+    case 'vault-accesskey-show': {
+      // Minted access-key acknowledge (M12 F3 Leg 5). The only activation is id:'ack' — the
+      // deliberate "I've saved it". Main already closed the sheet; the vault page refreshes
+      // its access-key list off its own post-mint path. Nothing reaches this dispatch (the
+      // minted secret lived only on the sheet — never in the page or this chrome dispatch).
       break;
     }
     case 'page-context': {
@@ -1220,6 +1287,46 @@ window.goldfinch.onVaultGesture(({ wcId }) => {
   }
 });
 
+// First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). The
+// goldfinch://vault page can't call chrome-trust menuOverlay.* directly, so its not-set-up
+// CTA / locked affordance route page → main (internal-vault-request-*) → chrome (here).
+// Mirrors onVaultGesture — a bare trigger, no secret.
+window.goldfinch.onVaultRequestSetup(() => {
+  // Open the master-password setup sheet. On success main drives vault-recovery-show and
+  // fires the lock-state broadcast → the page moves to unlocked.
+  openOverlayMenu('vault-set', [], null, 0);
+});
+window.goldfinch.onVaultRequestUnlock(() => {
+  // DISTINCT from onVaultGesture's locked branch: open the F2 unlock sheet WITHOUT setting
+  // pendingVaultFlow — the page's unlock must NOT spring the fill picker on success (that
+  // continuation is gated on pendingVaultFlow.phase === 'unlocking', left null here). The
+  // page refreshes off the lock-state broadcast.
+  openOverlayMenu('vault-unlock', [], null, 0);
+});
+// Setup-success → open the read-only recovery-show sheet (M12 F3 Leg 4). Main forwards the
+// recovery key ONLY (admin key deferred to F4). Opened DISMISS-DISABLED so a casual
+// dismiss can't lose the unrecoverable one-time key (Escape/backdrop/blur all inert;
+// only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
+window.goldfinch.onVaultRecoveryShow(({ recoveryKey }) => {
+  openOverlayMenu('vault-recovery-show', { recoveryKey }, null, 0, { dismissible: false });
+});
+
+// Access-key mint cross-renderer triggers (M12 F3 Leg 5 access-keys, DD5). The vault page's
+// Mint CTA routes page → main (internal-vault-request-mint carrying the NON-SECRET target) →
+// chrome (here). Open the vault-stepup sheet scoped to that vault; on a successful step-up
+// main drives vault-accesskey-show and the page refreshes its list. Mirrors onVaultRequestSetup
+// (a bare trigger), extended with the target vault id.
+window.goldfinch.onVaultRequestMint(({ target }) => {
+  openOverlayMenu('vault-stepup', { target }, null, 0);
+});
+// Mint-success → open the read-only accesskey-show sheet with the minted { secret, keyId }.
+// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time secret
+// (Escape/backdrop/blur all inert; only acknowledge closes). The secret lives only
+// main → chrome → sheet, never in the page.
+window.goldfinch.onVaultAccessKeyShow(({ secret, keyId }) => {
+  openOverlayMenu('vault-accesskey-show', { secret, keyId }, null, 0, { dismissible: false });
+});
+
 // Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
 // model } after a login-form submit in a set-up, unlocked, persistent-jar tab (model =
 // origin/username/mode/defaultVaultId/choices — NEVER a password; the captured password
@@ -1357,14 +1464,18 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 19-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 23-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 19 is
+// do not grow it without an FD ruling — an evaluate caller outside these 23 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
-// the flight's Checkpoints.)
+// the flight's Checkpoints. M12 F3 Leg 4: added openVaultSetOverlayForAudit +
+// openVaultRecoveryShowOverlayForAudit for the sheet:vault-set / vault-recovery-show
+// a11y states per the leg's DD9 SHEET_STATES deliverable. M12 F3 Leg 5: added
+// openVaultStepupOverlayForAudit + openVaultAccessKeyShowOverlayForAudit for the
+// sheet:vault-stepup / vault-accesskey-show a11y states.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1387,5 +1498,9 @@ Object.assign(/** @type {any} */ (globalThis), {
   openSiteInfoOverlay,
   openNewContainerOverlay,
   openPageContextMenuForAudit,
-  openTabContextMenuForAudit // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  openTabContextMenuForAudit, // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  openVaultSetOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-set' (DD9 addition)
+  openVaultRecoveryShowOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-recovery-show' (DD9 addition)
+  openVaultStepupOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-stepup' (DD9 addition)
+  openVaultAccessKeyShowOverlayForAudit // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-accesskey-show' (DD9 addition)
 });

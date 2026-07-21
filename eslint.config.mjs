@@ -14,7 +14,7 @@ export default [
     // the src/shared/** module block below ignores them so this binding survives
     // later-wins — that keeps the lint parse guard (an `export` in a preload-reachable
     // file must FAIL lint, the leg-1 blocker class).
-    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/shared/reserved-ids.js', 'src/shared/vault-item-schema.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
@@ -60,7 +60,15 @@ export default [
       'src/shared/automation-dev.js',
       'src/shared/internal-page.js',
       'src/shared/dev-profile.js',
-      'src/shared/guest-forward-allowlist.js'
+      'src/shared/guest-forward-allowlist.js',
+      // reserved-ids.js is the DD8 SSOT constant, consumed only main-side (vault-store,
+      // jars, register-vault-ipc) and deliberately plain CJS (never coupled to app-db) —
+      // it binds commonjs in the src/main/** block above; this entry keeps that binding.
+      'src/shared/reserved-ids.js',
+      // vault-item-schema.js is the M12 F3 Leg 2 secret/non-secret SSOT, consumed
+      // main-side (vault-store, register-vault-ipc) as plain CJS (the reserved-ids
+      // precedent — main-only, no require(esm) at app boot). Keep its commonjs binding.
+      'src/shared/vault-item-schema.js'
     ],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
@@ -134,6 +142,9 @@ export default [
       'src/renderer/pages/jars-tabs.js',
       'src/renderer/pages/jars-confirm-modal.js',
       'src/renderer/pages/settings.js',
+      // vault.js (M12 Flight 3, Leg 1) is the goldfinch://vault page controller — a
+      // real ES module importing its pure state-model via a flat serving-path specifier.
+      'src/renderer/pages/vault.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

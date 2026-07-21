@@ -56,6 +56,9 @@ const appDb = require('./app-db');
 // domain. Re-exported below (not moved) — consumers keep requiring it from here.
 const { isSafeColor } = require('../shared/safe-color');
 const { BURNER } = require('../shared/burner');
+// DD8 (M12 F3): the reserved `global` sentinel is single-sourced so it can never
+// drift from vault-store's GLOBAL_ID. Same value, one home.
+const { GLOBAL_ID } = require('../shared/reserved-ids');
 
 const FILE_NAME = 'containers.json';
 const SCHEMA_VERSION = 2;
@@ -114,7 +117,7 @@ function isReservedId(id) {
     id === 'admin' ||
     id === 'internal' ||
     id === 'default' ||
-    id === 'global'
+    id === GLOBAL_ID
   );
 }
 

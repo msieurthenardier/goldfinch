@@ -772,6 +772,74 @@ function totp(base32Secret, opts, timestampMs) {
   return String(binary % 10 ** digits).padStart(digits, '0');
 }
 
+// The TOTP parameter ranges a stored/enrolled secret must satisfy (M12 F3 Leg 3).
+// Out-of-range params are what crash `totp()` — period 0 divides by zero, an absurd
+// digits count overflows `10 ** digits` — so enrollment MUST reject them before a
+// value ever reaches `totp()` (this op AND F1's automation `vaultTotp` read).
+const TOTP_ALGORITHMS = new Set(['SHA1', 'SHA256', 'SHA512']);
+const TOTP_DIGITS = new Set([6, 7, 8]);
+
+/**
+ * Seconds until the current TOTP window rolls over, for the live countdown display
+ * (M12 F3 Leg 3 / DD4). Pure: `period - (⌊now/1000⌋ mod period)`, always in
+ * `[1, period]` (never 0 — a fresh window reports the full `period`). The main-side
+ * live-code op returns this beside the code; the page counts DOWN locally from it and
+ * re-fetches when it hits 0 (per-period, not per-second — a full-vault decrypt/call).
+ * @param {number} period  the TOTP step in seconds (integer ≥ 1).
+ * @param {number} timestampMs  epoch time in milliseconds.
+ * @returns {number}
+ */
+function totpSecondsRemaining(period, timestampMs) {
+  if (!Number.isInteger(period) || period < 1) {
+    throw new VaultFormatError(`totpSecondsRemaining: period must be an integer >= 1 (got ${period})`);
+  }
+  if (!Number.isFinite(timestampMs)) {
+    throw new VaultFormatError('totpSecondsRemaining: timestampMs must be a finite number');
+  }
+  return period - (Math.floor(timestampMs / 1000) % period);
+}
+
+/**
+ * Normalize an enrolled TOTP secret (an `otpauth://totp/…` URI OR a bare base32
+ * secret) to the CANONICAL `otpauth://totp/…` URI STRING the store persists
+ * (M12 F3 Leg 3, Architect-ruled: `item.totp` stays a bare STRING, so the sole
+ * value-reader — F1's automation `vault-context.js` `parseOtpauth(item.totp)` — is
+ * unchanged and legacy items keep working).
+ *
+ * `parseOtpauth(raw)` (throws {@link VaultFormatError} on malformed input) →
+ * RANGE-VALIDATE (`period` an integer ≥ 1, `digits` ∈ {6,7,8}, `algorithm` ∈
+ * {SHA1,SHA256,SHA512}; a bad range throws {@link VaultFormatError}) → re-serialize
+ * to a canonical URI that round-trips through `parseOtpauth`. A hostile/fat-finger
+ * otpauth (`period=0`, `digits=99`, bad algorithm) can therefore never be persisted
+ * or reach `totp()` — hardening BOTH this leg's live-code op and F1's un-try/catch'd
+ * automation read.
+ * @param {string} raw  the pasted otpauth URI or bare base32 secret.
+ * @returns {string}  the canonical `otpauth://totp/…` URI string.
+ */
+function normalizeTotpField(raw) {
+  const p = parseOtpauth(raw); // VaultFormatError on malformed URI / bad base32.
+  const algorithm = String(p.algorithm).toUpperCase();
+  if (!Number.isInteger(p.period) || p.period < 1) {
+    throw new VaultFormatError(`normalizeTotpField: period must be an integer >= 1 (got ${p.period})`);
+  }
+  if (!TOTP_DIGITS.has(p.digits)) {
+    throw new VaultFormatError(`normalizeTotpField: digits must be one of 6, 7, 8 (got ${p.digits})`);
+  }
+  if (!TOTP_ALGORITHMS.has(algorithm)) {
+    throw new VaultFormatError(`normalizeTotpField: algorithm must be SHA1/SHA256/SHA512 (got ${p.algorithm})`);
+  }
+  const params = new URLSearchParams();
+  params.set('secret', p.secret);
+  params.set('algorithm', algorithm);
+  params.set('digits', String(p.digits));
+  params.set('period', String(p.period));
+  if (p.issuer) params.set('issuer', p.issuer);
+  // The label is the URI path segment; percent-encode it so any character (incl. a
+  // colon issuer-prefix or spaces) round-trips through `parseOtpauth`'s new URL().
+  const label = p.label != null ? p.label : (p.issuer || '');
+  return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
 /**
  * Parse an `otpauth://totp/...` URI (or a bare base32 secret) into its TOTP
  * parameters. base32 decode is local; percent-encoding is honored.
@@ -865,4 +933,6 @@ module.exports = {
   // TOTP
   totp,
   parseOtpauth,
+  normalizeTotpField,
+  totpSecondsRemaining,
 };

@@ -76,7 +76,16 @@ function makeHarness() {
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
   const h = makeHarness();
-  assert.deepEqual([...h.internal.keys()], ['internal-open-tab-in-jar']);
+  assert.deepEqual([...h.internal.keys()], [
+    // M12 F3 Leg 4 (first-run-setup): the cross-renderer setup/unlock request triggers
+    // (registered alongside the other guest-vault-* handlers, ahead of open-tab-in-jar).
+    'internal-vault-request-setup',
+    'internal-vault-request-unlock',
+    // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
+    // non-secret target), registered alongside the other request triggers.
+    'internal-vault-request-mint',
+    'internal-open-tab-in-jar',
+  ]);
   assert.equal(h.handlers.has('privacy-cookies'), true);
   assert.equal(h.listeners.has('guest-media-list'), true);
   h.listeners.get('guest-media-list')({ sender: { id: 5 } }, ['song']);

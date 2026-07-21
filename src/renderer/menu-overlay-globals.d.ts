@@ -46,6 +46,18 @@ interface MenuOverlayBridge {
    * chosen vaultId + the stashed captureId (+ token) — NEVER the captured password
    * (held only in the main-side record). Returns { saved }; false re-prompts the sheet. */
   captureSave(payload: { token: number; captureId: string; vaultId?: string }): Promise<{ saved: boolean; reason?: string }>;
+  /** sheet → main: the DEDICATED vault-set master-password setup channel (M12 F3 Leg 4).
+   * Mirrors unlockVault — the password rides as a Uint8Array. Returns { ok }; false
+   * re-prompts the sheet, true closes it (main also opens vault-recovery-show). */
+  setupVault(payload: { token: number; secret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED vault-stepup access-key MINT channel (M12 F3 Leg 5).
+   * Mirrors setupVault — the master password rides as a Uint8Array — plus the NON-SECRET
+   * target vault id. Returns { ok }; false re-prompts (wrong step-up password), true closes
+   * it (main also opens vault-accesskey-show with the minted secret). */
+  stepupMint(payload: { token: number; secret: Uint8Array; target?: string }): Promise<{ ok: boolean }>;
+  /** sheet → main: copy a string to the OS clipboard (M12 F3 Leg 4 recovery-show Copy).
+   * One-way; sender-validated main-side. */
+  copyText(text: string): void;
 }
 
 interface Window {

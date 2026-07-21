@@ -1,6 +1,6 @@
 # Flight: Human Fill Trust Boundary
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Built-in Password Manager](../../mission.md)
 
 ## Contributing to Criteria
