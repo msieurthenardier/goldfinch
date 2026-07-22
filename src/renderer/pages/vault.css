@@ -198,6 +198,7 @@ main {
    subsections a consistent vertical rhythm; per-subsection margins are not needed. ── */
 .vault-subsection {
   margin-top: 24px;
+  padding-left: 16px; /* indent under the "Settings" heading, mirroring .vault-child-section */
 }
 .vault-subsection-title {
   font-size: 14px;
@@ -635,6 +636,11 @@ textarea.vault-input {
   margin-top: 24px;
   padding-top: 24px;
   border-top: 1px solid var(--border);
+}
+/* Extra breathing room above the Vaults group (operator HAT feedback) — on top of the
+   inter-section divider/padding. id selector so it wins over the sibling rule's margin. */
+#vault-vaults {
+  margin-top: 40px;
 }
 .vault-accesskeys-head {
   display: flex;
