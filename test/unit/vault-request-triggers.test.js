@@ -140,14 +140,20 @@ test('an unresolvable owning chrome no-ops gracefully (still returns ok)', () =>
 });
 
 // ---------------------------------------------------------------------------
-// Import request trigger (M12 Flight 4 Leg 1 export-import, DD1/DD2) — GATED on the
-// vaultImportBegin injection; forwards a BARE vault-request-import ONLY on { ok }.
+// Import (M12 Flight 4 Leg 1 export-import; SPLIT for the F5 HAT page modal, I14). The old atomic
+// request-import (pick+forward in ONE call) is split into three page-invoked channels so the page's
+// Import modal owns destination+file selection BEFORE the secret sheet opens:
+//   • pickImportFile          — dialog+read+HOLD, returns { ok, path } | { canceled } | { error }; NO forward.
+//   • beginImportUnlock       — the BARE vault-request-import forward (unconditional; needs only chromeForTab).
+//   • clearPendingImport      — drops the held record (L1) on modal dismiss.
+// pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport.
 // ---------------------------------------------------------------------------
 
 function makeImportHarness({ beginResult } = {}) {
   const wrapped = new Map();
   const sends = [];
   const beginCalls = [];
+  let clearCalls = 0;
   const chrome = { send: (channel, payload) => sends.push([channel, payload]) };
   registerBrowserIpc({
     ipcMain: { handle: (channel, fn) => wrapped.set(channel, fn), on: () => {} },
@@ -171,45 +177,72 @@ function makeImportHarness({ beginResult } = {}) {
     getVaultHuman: () => ({}),
     vaultImportBegin: async (destinationTarget) => {
       beginCalls.push(destinationTarget);
-      return beginResult || { ok: true };
+      return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle' };
     },
+    clearPendingVaultImport: () => { clearCalls += 1; },
   });
-  return { wrapped, sends, beginCalls };
+  return { wrapped, sends, beginCalls, clearCallsCount: () => clearCalls };
 }
 
-test('the import trigger is GATED on the vaultImportBegin injection (the default harness omits it)', () => {
-  const { wrapped } = makeCapturingHarness(); // no vaultImportBegin
-  assert.equal(wrapped.has('internal-vault-request-import'), false);
+test('pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport; beginImportUnlock is unconditional', () => {
+  const { wrapped } = makeCapturingHarness(); // neither injection
+  assert.equal(wrapped.has('internal-vault-pick-import-file'), false);
+  assert.equal(wrapped.has('internal-vault-clear-pending-import'), false);
+  assert.equal(wrapped.has('internal-vault-begin-import-unlock'), true, 'the bare forward needs only chromeForTab');
   const withDep = makeImportHarness();
-  assert.equal(withDep.wrapped.has('internal-vault-request-import'), true);
+  assert.equal(withDep.wrapped.has('internal-vault-pick-import-file'), true);
+  assert.equal(withDep.wrapped.has('internal-vault-clear-pending-import'), true);
 });
 
-test('internal sender: request-import runs vaultImportBegin then forwards a BARE vault-request-import on { ok }', async () => {
+test('internal sender: pickImportFile runs vaultImportBegin (dialog+read+hold) and returns { ok, path } WITHOUT forwarding', async () => {
   const { wrapped, sends, beginCalls } = makeImportHarness();
-  const res = await wrapped.get('internal-vault-request-import')(internalEvent(5), 'work');
-  assert.deepEqual(res, { ok: true });
+  const res = await wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
+  assert.deepEqual(res, { ok: true, path: '/x/bundle.gfvaultbundle' });
   assert.deepEqual(beginCalls, ['work'], 'the destination target is passed to the file-open delegate');
+  assert.deepEqual(sends, [], 'picking a file opens NO sheet — the forward is a separate step');
+});
+
+test('internal sender: beginImportUnlock forwards a BARE vault-request-import to the owning chrome', () => {
+  const { wrapped, sends } = makeImportHarness();
+  const res = wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5));
+  assert.deepEqual(res, { ok: true });
   assert.deepEqual(sends, [['vault-request-import', undefined]], 'a BARE trigger — no secret, no target');
 });
 
-test('a canceled / failed file-open does NOT open the sheet (no forward)', async () => {
+test('a canceled / failed pick holds nothing and does not forward', async () => {
   const canceled = makeImportHarness({ beginResult: { canceled: true } });
-  await canceled.wrapped.get('internal-vault-request-import')(internalEvent(5), 'work');
-  assert.deepEqual(canceled.sends, [], 'a canceled dialog opens no sheet');
+  const cres = await canceled.wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
+  assert.deepEqual(cres, { canceled: true });
+  assert.deepEqual(canceled.sends, [], 'a canceled dialog forwards nothing');
 
   const errored = makeImportHarness({ beginResult: { error: 'unreadable' } });
-  const res = await errored.wrapped.get('internal-vault-request-import')(internalEvent(5), 'work');
-  assert.deepEqual(res, { error: 'unreadable' });
-  assert.deepEqual(errored.sends, [], 'an unreadable bundle opens no sheet');
+  const eres = await errored.wrapped.get('internal-vault-pick-import-file')(internalEvent(5), 'work');
+  assert.deepEqual(eres, { error: 'unreadable' });
+  assert.deepEqual(errored.sends, [], 'an unreadable bundle forwards nothing');
 });
 
-test('non-internal sender is REJECTED before the import body runs (no file open, no forward)', () => {
+test('internal sender: clearPendingImport drops the held record (L1)', () => {
+  const h = makeImportHarness();
+  const res = h.wrapped.get('internal-vault-clear-pending-import')(internalEvent(5));
+  assert.deepEqual(res, { ok: true });
+  assert.equal(h.clearCallsCount(), 1);
+});
+
+test('non-internal sender is REJECTED for each import channel (no delegate run, no forward)', () => {
   const { wrapped, sends, beginCalls } = makeImportHarness();
-  // The origin gate throws SYNCHRONOUSLY in the registerInternalHandler wrapper, before the
-  // async body is entered (the same shape as the setup/unlock/mint rejections above).
+  // The origin gate throws SYNCHRONOUSLY in the registerInternalHandler wrapper, before any body
+  // runs (the same shape as the setup/unlock/mint rejections above).
   assert.throws(
-    () => wrapped.get('internal-vault-request-import')(webEvent(9), 'work'),
-    /forbidden: non-internal sender for internal-vault-request-import/,
+    () => wrapped.get('internal-vault-pick-import-file')(webEvent(9), 'work'),
+    /forbidden: non-internal sender for internal-vault-pick-import-file/,
+  );
+  assert.throws(
+    () => wrapped.get('internal-vault-begin-import-unlock')(webEvent(9)),
+    /forbidden: non-internal sender for internal-vault-begin-import-unlock/,
+  );
+  assert.throws(
+    () => wrapped.get('internal-vault-clear-pending-import')(webEvent(9)),
+    /forbidden: non-internal sender for internal-vault-clear-pending-import/,
   );
   assert.deepEqual(beginCalls, [], 'the file-open delegate never runs for a foreign sender');
   assert.deepEqual(sends, []);

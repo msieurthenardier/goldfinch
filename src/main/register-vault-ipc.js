@@ -70,12 +70,18 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  * @param {{ list: () => Array<{ id: string, name: string }> }} args.jars
  *        Injected because the store exposes no public vault-enumeration method — the
  *        handler composes the vault list itself as `'global' + jars.list()`.
- * @param {((bundle: any) => Promise<{ ok?: boolean, canceled?: boolean, path?: string }>)} [args.vaultSaveBundle]
- *        Main-side export delegate (M12 F4 Leg 1): given a ciphertext-only bundle, runs the
- *        save dialog + writes the chosen path. Injected because this module has no Electron
- *        `dialog` / `fs` handle. Gated — offline tests that omit it skip `internal-vault-export`.
+ * @param {((bundle: any, savePath?: string) => Promise<{ ok?: boolean, canceled?: boolean, path?: string }>)} [args.vaultSaveBundle]
+ *        Main-side export delegate (M12 F4 Leg 1): given a ciphertext-only bundle, writes it —
+ *        with a pre-chosen `savePath` (the page Export modal) directly, else runs the save dialog
+ *        (the jars delete-first offer). Injected because this module has no Electron `dialog` /
+ *        `fs` handle. Gated — offline tests that omit it skip `internal-vault-export`.
+ * @param {((target: string) => Promise<{ path?: string, canceled?: boolean }>)} [args.vaultPickSavePath]
+ *        Main-side save-location picker (M12 F5 HAT, I14): runs the save dialog ONLY (no write) so
+ *        the page Export modal can choose a location up front, then bind source→path at submit.
+ *        Only needs Electron `dialog`. Gated — offline tests that omit it skip
+ *        `internal-vault-pick-save-path`.
  */
-function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jars, vaultSaveBundle }) {
+function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jars, vaultSaveBundle, vaultPickSavePath }) {
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
   // a metadata-only item `count` (via listItemsMeta — no secret, no plaintext); when
@@ -218,15 +224,31 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
   // VaultLockedError is mapped here explicitly (the async wrapper would swallow catchLocked's
   // synchronous try/catch). Gated on the vaultSaveBundle injection (offline tests omit it).
   if (vaultSaveBundle) {
-    registerInternalHandler(ipcMain, 'internal-vault-export', async (_event, target) => {
+    registerInternalHandler(ipcMain, 'internal-vault-export', async (_event, target, savePath) => {
       let bundle;
       try {
+        // L3: the STORE's exportVault stays single-arg — the target-only build is the invariant a
+        // unit test pins. The pre-chosen save PATH is handled entirely by the main-side save
+        // delegate, never threaded into the store.
         bundle = getVaultStore().exportVault(target);
       } catch (err) {
         if (err instanceof VaultLockedError) return { locked: true };
         throw err;
       }
-      return await vaultSaveBundle(bundle);
+      // Dual-mode (M12 F5 HAT, I14): with a pre-chosen savePath (the page Export modal picked the
+      // location up front) write directly; without one (the jars delete-first offer) run the dialog.
+      return await vaultSaveBundle(bundle, typeof savePath === 'string' ? savePath : undefined);
+    });
+  }
+
+  // Save-location PICK (M12 F5 HAT, I14). The page's Export modal picks a location up front via the
+  // save dialog (main-side) BEFORE binding a source vault — it holds NO main-side state (unlike
+  // import): the chosen path round-trips to the page and back on submit (bound source→path in the
+  // export handler above). Runs the save dialog ONLY — no bundle build, no write. Gated on the
+  // vaultPickSavePath injection (offline tests omit it).
+  if (vaultPickSavePath) {
+    registerInternalHandler(ipcMain, 'internal-vault-pick-save-path', async (_event, target) => {
+      return await vaultPickSavePath(target);
     });
   }
 }

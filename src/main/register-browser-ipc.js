@@ -26,6 +26,7 @@ function registerBrowserIpc({
   shields,
   getVaultHuman,
   vaultImportBegin,
+  clearPendingVaultImport,
   popupVaultIconMenu,
   random = Math.random,
   logger = console,
@@ -174,20 +175,38 @@ function registerBrowserIpc({
     return { ok: true };
   });
 
-  // Vault IMPORT request (M12 F4 Leg 1 export-import, DD1/DD2). Distinct from the setup/mint
-  // triggers: import needs a FILE first, so this awaits the injected main-side `vaultImportBegin`
-  // delegate — it runs the open dialog, reads + parses the bundle (ciphertext), and HOLDS
-  // { bundle, destinationTarget } main-side. ONLY on { ok } do we forward the BARE
-  // `vault-request-import` trigger to the owning chrome (chromeForTab(event.sender.id) — the
-  // internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
-  // secret is entered on that sheet and never touches this channel or the page. A canceled
-  // dialog / unreadable file returns without opening the sheet. Gated on the injection so
-  // offline harnesses that omit it never register it.
+  // Vault IMPORT (M12 F4 Leg 1 export-import, DD1/DD2; SPLIT for the M12 F5 HAT page modal, I14).
+  // Import is a two-surface flow driven by the page's Import modal, so the atomic pick+forward is
+  // split into three page-invoked channels — none of which ever carries a secret:
+  //
+  //  1. internal-vault-pick-import-file (pickImportFile) — awaits the injected `vaultImportBegin`
+  //     delegate: it runs the open dialog, reads + parses the bundle (ciphertext) and HOLDS
+  //     { bundle, destinationTarget } main-side, returning { ok, path } | { canceled } | { error }.
+  //     It does NOT forward — the sheet opens only when the operator submits the modal. A canceled
+  //     dialog / unreadable file holds nothing (the delegate only sets the record on { ok }).
+  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — forwards the BARE
+  //     vault-request-import trigger to the owning chrome (chromeForTab(event.sender.id) — the
+  //     internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
+  //     held bundle is consumed there with the sheet's secret; the secret never touches this
+  //     channel or the page. Bare forward — needs only chromeForTab, so it is unconditional
+  //     (mirrors internal-vault-request-setup), NOT gated on an injection.
+  //  3. internal-vault-clear-pending-import (clearPendingImport) — drops the held record (L1) when
+  //     the operator dismisses the modal after a pick. Always safe to call.
+  //
+  // registerInternalHandler rejects any non-internal sender before each body runs.
   if (vaultImportBegin) {
-    registerInternalHandler(ipcMain, 'internal-vault-request-import', async (event, destinationTarget) => {
-      const res = await vaultImportBegin(destinationTarget);
-      if (res && res.ok) chromeForTab(event.sender.id)?.send('vault-request-import');
-      return res;
+    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (_event, destinationTarget) => {
+      return await vaultImportBegin(destinationTarget);
+    });
+  }
+  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-import');
+    return { ok: true };
+  });
+  if (clearPendingVaultImport) {
+    registerInternalHandler(ipcMain, 'internal-vault-clear-pending-import', () => {
+      clearPendingVaultImport();
+      return { ok: true };
     });
   }
 

@@ -98,6 +98,105 @@ function init() {
     return b;
   }
 
+  /**
+   * A self-contained kebab (overflow) menu: a ⋮ trigger button + a popup menu of
+   * actions, used to fold a subsection's action buttons off the page to cut noise
+   * (operator, M12 F5 HAT). Keyboard + a11y: `aria-haspopup="menu"` / `aria-expanded`
+   * on the trigger, `role="menu"`/`menuitem` on the popup, Escape closes + restores
+   * focus, arrow/Home/End move between items, and it closes on outside-pointerdown or
+   * a selection. The document listener is added only while open and removed on close,
+   * so nothing leaks past a page re-render (which closes the menu by removing the DOM).
+   * The glyph is inline SVG (three dots), not an emoji — same reason as the fill icon.
+   * @param {{ ariaLabel: string, items: Array<{ label: string, onSelect: () => void }> }} opts
+   * @returns {HTMLElement}
+   */
+  function buildKebabMenu(opts) {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const wrap = el('div', 'vault-kebab');
+    const btn = /** @type {HTMLButtonElement} */ (el('button', 'vault-kebab-btn'));
+    btn.type = 'button';
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', opts.ariaLabel);
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    for (const cy of [6, 12, 18]) {
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('cx', '12');
+      dot.setAttribute('cy', String(cy));
+      dot.setAttribute('r', '1.7');
+      svg.appendChild(dot);
+    }
+    btn.appendChild(svg);
+
+    const menu = el('div', 'vault-kebab-menu');
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+
+    /** @type {HTMLButtonElement[]} */
+    const itemEls = [];
+    for (const item of opts.items) {
+      const mi = /** @type {HTMLButtonElement} */ (el('button', 'vault-kebab-item', item.label));
+      mi.type = 'button';
+      mi.setAttribute('role', 'menuitem');
+      mi.addEventListener('click', () => { close(); item.onSelect(); });
+      menu.appendChild(mi);
+      itemEls.push(mi);
+    }
+
+    /** @type {((ev: Event) => void)|null} */
+    let onDocPointer = null;
+    const isOpen = () => !menu.hidden;
+    function open() {
+      if (isOpen()) return;
+      menu.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      onDocPointer = (ev) => {
+        if (!wrap.contains(/** @type {Node} */ (ev.target))) close();
+      };
+      document.addEventListener('pointerdown', onDocPointer, true);
+      if (itemEls[0]) itemEls[0].focus();
+    }
+    /** @param {boolean} [restoreFocus] */
+    function close(restoreFocus) {
+      if (!isOpen()) return;
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      if (onDocPointer) {
+        document.removeEventListener('pointerdown', onDocPointer, true);
+        onDocPointer = null;
+      }
+      if (restoreFocus) btn.focus();
+    }
+    btn.addEventListener('click', () => { if (isOpen()) close(); else open(); });
+    wrap.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && isOpen()) { ev.preventDefault(); close(true); return; }
+      if (!isOpen()) {
+        if (ev.target === btn && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+          ev.preventDefault();
+          open();
+        }
+        return;
+      }
+      const n = itemEls.length;
+      const idx = itemEls.indexOf(/** @type {any} */ (ev.target));
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); itemEls[(idx + 1 + n) % n].focus(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); itemEls[(idx - 1 + n) % n].focus(); }
+      else if (ev.key === 'Home') { ev.preventDefault(); itemEls[0].focus(); }
+      else if (ev.key === 'End') { ev.preventDefault(); itemEls[n - 1].focus(); }
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    return wrap;
+  }
+
   // Editor-scoped teardown (M12 F3 Leg 3): the live TOTP widget arms timers +
   // document/window listeners that MUST be torn down when the editor closes or the
   // page re-renders — otherwise a per-period `vaultTotpCode` poll (a full-vault
@@ -133,6 +232,275 @@ function init() {
     for (const fn of accessKeyRefreshers) {
       try { fn(); } catch { /* a refresh must never throw */ }
     }
+  }
+
+  // ── Page-level modal (M12 F5 HAT, I14) ──
+  // The single reusable Import / Export dialog, built INLINE here (not a served module — vault.js
+  // is well under the extraction threshold and this avoids the internal-page-map onboarding). It
+  // mirrors the proven page-modal pattern in jars-confirm-modal.js: a fixed backdrop + a dialog
+  // card (role="dialog" aria-modal aria-labelledby), a Tab focus-trap over the modal's focusables,
+  // Escape + backdrop-click dismiss, and focus RETURN to the invoking button on close. All text via
+  // textContent (strict CSP). NO master-equivalent secret ever enters this modal or the page DOM
+  // (DD2/DD5) — import's source secret stays on the chrome-owned vault-import-unlock sheet.
+  //
+  // M5: the modal lives on document.body, so it SURVIVES a #vault-root re-render. render() calls
+  // closeActivePageModal() so an idle auto-lock mid-modal (onVaultLockState → refresh) can't orphan
+  // a stale unlocked-context modal. Only ONE page modal is open at a time (module-scoped ref).
+  /** @type {{ close: () => void } | null} */
+  let activePageModal = null;
+  function closeActivePageModal() {
+    if (activePageModal) activePageModal.close();
+  }
+
+  /**
+   * A page-level notice surfaced on the NEXT render (M12 F5 HAT, I14). Set before a refresh() that
+   * tears the page down (e.g. an export that raced an idle auto-lock → { locked }); render() shows
+   * it once at the top of #vault-root then clears it. `textContent`-only.
+   * @type {string|null}
+   */
+  let pendingNotice = null;
+
+  /**
+   * Open the single page-level modal. `body` is the caller-built content (selects, file-pick
+   * controls); the shell adds the title, a status line (role="status"), and a Cancel/Submit
+   * actions row. The Submit button starts disabled unless `submitEnabled` is true. Returns a handle
+   * to close it, toggle Submit, and set the status line. Dismissal (Cancel / Escape / backdrop)
+   * runs the optional `onCancel` (L1 held-state clear) before closing; the M5 render-triggered
+   * close() does NOT (it is not an operator dismissal).
+   * @param {{ title: string, body: HTMLElement, submitLabel: string, onSubmit: () => void, submitEnabled?: boolean, onCancel?: () => void }} opts
+   * @returns {{ close: () => void, setSubmitEnabled: (on: boolean) => void, setStatus: (text: string) => void }}
+   */
+  function openModal(opts) {
+    // Single page-modal at a time — close any prior one first (also removes its document.body node).
+    closeActivePageModal();
+    // The invoking button is document.activeElement at open time (the browser focuses a button on
+    // click before its handler runs); restore focus to it on close, never stranding focus on <body>.
+    const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    const backdrop = el('div', 'vault-modal-backdrop');
+    const card = el('div', 'vault-modal-card');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    const titleId = 'vault-modal-title';
+    card.setAttribute('aria-labelledby', titleId);
+    const titleEl = el('h2', 'vault-modal-title', opts.title);
+    titleEl.id = titleId;
+    card.appendChild(titleEl);
+
+    const bodyWrap = el('div', 'vault-modal-body');
+    bodyWrap.appendChild(opts.body);
+    card.appendChild(bodyWrap);
+
+    const status = el('p', 'vault-modal-status');
+    status.setAttribute('role', 'status');
+    card.appendChild(status);
+
+    const actions = el('div', 'vault-modal-actions');
+    const cancelBtn = button('Cancel', 'vault-btn', () => dismiss());
+    const submitBtn = button(opts.submitLabel, 'vault-btn primary', () => opts.onSubmit());
+    submitBtn.disabled = opts.submitEnabled !== true;
+    actions.appendChild(cancelBtn);
+    actions.appendChild(submitBtn);
+    card.appendChild(actions);
+
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    let closed = false;
+    function close() {
+      if (closed) return;
+      closed = true;
+      backdrop.remove();
+      if (activePageModal === handle) activePageModal = null;
+      if (invoker && invoker.isConnected) invoker.focus();
+    }
+    function dismiss() {
+      if (opts.onCancel) { try { opts.onCancel(); } catch { /* a cancel hook must never throw out */ } }
+      close();
+    }
+
+    backdrop.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); dismiss(); return; }
+      if (e.key === 'Tab') {
+        const focusables = /** @type {HTMLElement[]} */ (Array.from(card.querySelectorAll(
+          'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href]'
+        )));
+        if (!focusables.length) return;
+        e.preventDefault();
+        const i = focusables.indexOf(/** @type {any} */ (document.activeElement));
+        const n = (i + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
+        focusables[n].focus();
+      }
+    });
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) dismiss(); });
+
+    const handle = {
+      close,
+      setSubmitEnabled: (/** @type {boolean} */ on) => { submitBtn.disabled = !on; },
+      setStatus: (/** @type {string} */ text) => { status.textContent = text; },
+    };
+    activePageModal = handle;
+
+    // Default focus: the first focusable in the body (a select), else Cancel — never <body>.
+    const firstBody = bodyWrap.querySelector('button, select, input, textarea');
+    if (firstBody instanceof HTMLElement) firstBody.focus();
+    else cancelBtn.focus();
+
+    return handle;
+  }
+
+  /**
+   * Build a source/destination vault `<select>` for a modal — global + each persistent jar, the
+   * same options the old export/import selects built. `textContent`-only.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
+   * @param {string} ariaLabel
+   * @returns {HTMLSelectElement}
+   */
+  function buildVaultSelect(vaults, ariaLabel) {
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
+    select.setAttribute('aria-label', ariaLabel);
+    for (const v of vaults) {
+      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
+      opt.value = v.vaultId;
+      select.appendChild(opt);
+    }
+    return select;
+  }
+
+  /**
+   * The Export modal (M12 F5 HAT, I14). Body: a SOURCE-vault select, a "Choose location…" button +
+   * a path display, driven off the modal's status line. Export (submit) is DISABLED until a save
+   * location is chosen. "Choose location…" runs `pickSavePath` (main-side save dialog ONLY, no
+   * write) — export binds source→path at submit, so changing the source after choosing a location
+   * is fine (no held main-side state). Submit runs `exportVault(target, savePath)` fully main-side
+   * (ciphertext-only bundle; never transits the page). L2: a { locked } (idle-lock race) closes the
+   * modal, refreshes the page, and surfaces a brief notice; a write error shows on the status line —
+   * neither is silently swallowed. { ok } closes the modal.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
+   */
+  function openExportModal(vaults) {
+    /** @type {string|null} */
+    let savePath = null;
+    const body = el('div', 'vault-modal-form');
+
+    const field = el('label', 'vault-settings-field');
+    field.appendChild(el('span', 'vault-settings-label', 'Vault'));
+    const select = buildVaultSelect(vaults, 'Export source vault');
+    field.appendChild(select);
+    body.appendChild(field);
+
+    const fileRow = el('div', 'vault-modal-file-row');
+    const pathDisplay = el('span', 'vault-modal-path');
+    fileRow.appendChild(button('Choose location…', 'vault-btn', () => {
+      Promise.resolve(bridge.pickSavePath(select.value)).then((res) => {
+        if (res && res.path) {
+          savePath = res.path;
+          pathDisplay.textContent = res.path;
+          handle.setSubmitEnabled(true);
+        }
+      }).catch(() => {});
+    }));
+    fileRow.appendChild(pathDisplay);
+    body.appendChild(fileRow);
+
+    const handle = openModal({
+      title: 'Export a vault',
+      body,
+      submitLabel: 'Export',
+      submitEnabled: false,
+      onSubmit: () => {
+        if (!savePath) return;
+        handle.setSubmitEnabled(false);
+        handle.setStatus('Exporting…');
+        Promise.resolve(bridge.exportVault(select.value, savePath)).then((res) => {
+          if (res && res.locked) {
+            pendingNotice = 'The manager locked — export canceled. Unlock and try again.';
+            handle.close();
+            refresh();
+            return;
+          }
+          if (res && res.ok) { handle.close(); return; }
+          if (res && res.canceled) { handle.setStatus('Export canceled.'); handle.setSubmitEnabled(true); return; }
+          handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true);
+        }).catch(() => { handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true); });
+      },
+    });
+  }
+
+  /**
+   * The Import modal (M12 F5 HAT, I14). Body: a DESTINATION-vault select, a "Choose file…" button +
+   * a path display. Continue (submit) is DISABLED until a bundle is picked FOR the currently-shown
+   * destination. "Choose file…" runs `pickImportFile(destination)` — main opens + reads + HOLDS the
+   * bundle for that destination and returns { ok, path } | { canceled } | { error }. NO secret is
+   * entered here: Continue runs `beginImportUnlock()`, forwarding to the chrome-owned
+   * vault-import-unlock sheet where the held bundle is consumed with the source master password /
+   * recovery key (DD2/DD5).
+   *
+   * H1: the held _pendingVaultImport.destinationTarget is bound at pick time. If the operator
+   * changes the destination select AFTER a successful pick, invalidate it — clear the path, drop the
+   * held bundle (clearPendingImport), disable Continue, and require a re-pick — so the held
+   * destination can never drift from the one the modal shows.
+   *
+   * L1: on dismiss (Cancel / Escape / backdrop) after a pick, drop the held bundle via
+   * clearPendingImport so an abandoned import never lingers.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
+   */
+  function openImportModal(vaults) {
+    let picked = false;
+    const body = el('div', 'vault-modal-form');
+
+    const field = el('label', 'vault-settings-field');
+    field.appendChild(el('span', 'vault-settings-label', 'Vault'));
+    const select = buildVaultSelect(vaults, 'Import destination vault');
+    field.appendChild(select);
+    body.appendChild(field);
+
+    const fileRow = el('div', 'vault-modal-file-row');
+    const pathDisplay = el('span', 'vault-modal-path');
+    fileRow.appendChild(button('Choose file…', 'vault-btn', () => {
+      Promise.resolve(bridge.pickImportFile(select.value)).then((res) => {
+        if (res && res.ok) {
+          picked = true;
+          pathDisplay.textContent = res.path || '';
+          handle.setStatus('');
+          handle.setSubmitEnabled(true);
+        } else if (res && res.error) {
+          picked = false;
+          pathDisplay.textContent = '';
+          handle.setStatus('Could not read that bundle file.');
+          handle.setSubmitEnabled(false);
+        }
+        // { canceled } → do nothing (keep any prior pick).
+      }).catch(() => {});
+    }));
+    fileRow.appendChild(pathDisplay);
+    body.appendChild(fileRow);
+
+    // H1: a destination change after a successful pick invalidates the held bundle.
+    select.addEventListener('change', () => {
+      if (!picked) return;
+      picked = false;
+      pathDisplay.textContent = '';
+      handle.setStatus('');
+      handle.setSubmitEnabled(false);
+      Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+    });
+
+    const handle = openModal({
+      title: 'Import a vault',
+      body,
+      submitLabel: 'Continue',
+      submitEnabled: false,
+      onSubmit: () => {
+        if (!picked) return;
+        Promise.resolve(bridge.beginImportUnlock()).catch(() => {});
+        handle.close();
+      },
+      onCancel: () => {
+        // L1: drop any held bundle when the operator dismisses the modal.
+        if (picked) Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+      },
+    });
   }
 
   // ── not-set-up + locked states (leg 1 shell; setup/unlock flows land in leg 4) ──
@@ -217,11 +585,12 @@ function init() {
     section.appendChild(buildAutoLockSection(unlocked));
 
     if (unlocked) {
-      // Portable import — picks a destination then routes to the chrome-owned secret sheet.
-      section.appendChild(buildImportSection(view.vaults));
-      // Master-key management — change master / rotate recovery / admin rotate-provision /
-      // export. Each routes to a chrome-owned sheet; NO master-equivalent secret here (DD5).
-      section.appendChild(buildMasterKeySection(view.vaults));
+      // Import / Export — two buttons, each opening a page-level modal that selects the vault +
+      // file location (import then hands off to the chrome-owned secret sheet; DD2/DD5).
+      section.appendChild(buildImportExportSection(view.vaults));
+      // Master-key management — change master / rotate recovery / admin rotate-provision. Each
+      // routes to a chrome-owned sheet; NO master-equivalent secret here (DD5).
+      section.appendChild(buildMasterKeySection());
     }
     return section;
   }
@@ -337,112 +706,58 @@ function init() {
   }
 
   /**
-   * Portable import control (M12 F4 Leg 1 export-import, DD1/DD2). A destination `<select>`
-   * (global + each persistent jar) + an Import button. The button routes to main
-   * (requestImport → the main-side bundle-file open) then the chrome-owned vault-import-unlock
-   * secret sheet — NO secret is entered here; the source master password / recovery key live
-   * only on the sheet. `textContent`-only.
+   * The "Import / Export" Settings subsection (M12 F5 HAT, I14). A heading + a one-line lede + EXACTLY
+   * two buttons: "Import…" and "Export…". Each opens a page-level modal that selects the vault
+   * (destination for import / source for export) AND the file location, ending in a Cancel/Submit
+   * combo. NO master-equivalent secret is entered on this page — import's source secret stays on the
+   * chrome-owned vault-import-unlock sheet; export is ciphertext-only + fully main-side (DD2/DD5).
+   * `textContent`-only.
    * @param {Array<{ vaultId: string, label: string }>} vaults
    * @returns {HTMLElement}
    */
-  function buildImportSection(vaults) {
-    const section = el('div', 'vault-subsection vault-import-section');
-    const h3 = el('h3', 'vault-subsection-title', 'Import a vault bundle');
-    section.appendChild(h3);
+  function buildImportExportSection(vaults) {
+    const section = el('div', 'vault-subsection vault-importexport-section');
+    section.appendChild(el('h3', 'vault-subsection-title', 'Import / Export'));
     section.appendChild(el('p', 'vault-lede',
-      'Import a portable bundle into a destination vault. You’ll enter the source master password or recovery key on a secure prompt.'));
+      'Import a portable vault bundle, or export one to a file. You’ll pick the vault and file location in a dialog; for import you’ll enter the source master password or recovery key on a secure prompt.'));
 
     const row = el('div', 'vault-settings-row');
-    const field = el('label', 'vault-settings-field');
-    field.appendChild(el('span', 'vault-settings-label', 'Destination'));
-    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
-    select.setAttribute('aria-label', 'Import destination vault');
-    for (const v of vaults) {
-      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
-      opt.value = v.vaultId;
-      select.appendChild(opt);
-    }
-    field.appendChild(select);
-    row.appendChild(field);
-
-    const status = el('p', 'vault-settings-status');
-    status.setAttribute('role', 'status');
-
-    // "Import…" sits INLINE on the destination row (mirrors auto-lock's "Lock now"), not on
-    // a separate line below the picker.
-    row.appendChild(button('Import…', 'vault-btn', () => {
-      const target = select.value;
-      if (!target) return;
-      status.textContent = '';
-      Promise.resolve(bridge.requestImport(target)).then((res) => {
-        if (res && res.error) status.textContent = 'Could not read that bundle file.';
-      }).catch(() => { status.textContent = 'Import could not start.'; });
-    }));
+    row.appendChild(button('Import…', 'vault-btn', () => openImportModal(vaults)));
+    row.appendChild(button('Export…', 'vault-btn', () => openExportModal(vaults)));
     section.appendChild(row);
-    section.appendChild(status);
     return section;
   }
 
   /**
    * Master-key management (M12 F5 HAT hat-page-sidebar) — a Settings SUBSECTION grouping every
    * operator-secret action: change master password, rotate recovery key, provision/rotate admin
-   * key (M12 F4 Leg 2/3, DD3/DD4), and portable export (M12 F4 Leg 1, relocated here from the
-   * per-vault header per the operator design). Each routes page → main → chrome to a chrome-owned
-   * sheet; NO master-equivalent secret is entered or shown here — every secret entry + the one-time
-   * recovery/admin displays live on the sheet (DD2/DD5). `textContent`-only.
-   * @param {Array<{ vaultId: string, label: string }>} vaults
+   * key (M12 F4 Leg 2/3, DD3/DD4). Each routes page → main → chrome to a chrome-owned sheet; NO
+   * master-equivalent secret is entered or shown here — every secret entry + the one-time
+   * recovery/admin displays live on the sheet (DD2/DD5). Export moved to the "Import / Export"
+   * subsection (M12 F5 HAT, I14). `textContent`-only.
    * @returns {HTMLElement}
    */
-  function buildMasterKeySection(vaults) {
+  function buildMasterKeySection() {
     const section = el('div', 'vault-subsection vault-masterkey-section');
-    const h3 = el('h3', 'vault-subsection-title', 'Master-key management');
-    section.appendChild(h3);
+    // The three operator-secret actions are folded into a kebab beside the heading to cut
+    // page noise (operator, M12 F5 HAT) — each still routes page → main → chrome sheet; the
+    // sheet owns every secret entry + one-time display (DD5). Change master → the
+    // vault-change-master sheet; Rotate recovery → the vault-stepup sheet (new key shown once on
+    // the recovery-show sheet); Provision/rotate admin (M12 F4 Leg 3, DD4) → the vault-stepup
+    // sheet (mode 'rotate-admin'), which provisions from scratch or rotates + invalidates the prior key.
+    const head = el('div', 'vault-subsection-head');
+    head.appendChild(el('h3', 'vault-subsection-title', 'Master-key management'));
+    head.appendChild(buildKebabMenu({
+      ariaLabel: 'Master-key actions',
+      items: [
+        { label: 'Change master password', onSelect: () => { Promise.resolve(bridge.requestChangeMaster()).catch(() => {}); } },
+        { label: 'Rotate recovery key', onSelect: () => { Promise.resolve(bridge.requestRotateRecovery()).catch(() => {}); } },
+        { label: 'Provision / rotate admin key', onSelect: () => { Promise.resolve(bridge.requestRotateAdmin()).catch(() => {}); } }
+      ]
+    }));
+    section.appendChild(head);
     section.appendChild(el('p', 'vault-lede',
-      'Change your master password, rotate your recovery or admin key, or export a vault bundle. You’ll confirm on a secure prompt — nothing secret is typed on this page.'));
-
-    const actions = el('div', 'vault-rotation-actions');
-    // Change the master password → the chrome-owned vault-change-master sheet (old + new + confirm).
-    actions.appendChild(button('Change master password', 'vault-btn', () => {
-      Promise.resolve(bridge.requestChangeMaster()).catch(() => {});
-    }));
-    // Rotate the recovery key → the chrome-owned vault-stepup step-up sheet; the new key is shown
-    // once on the recovery-show sheet (never here).
-    actions.appendChild(button('Rotate recovery key', 'vault-btn', () => {
-      Promise.resolve(bridge.requestRotateRecovery()).catch(() => {});
-    }));
-    // Provision / rotate the admin key (M12 F4 Leg 3, DD4) → the chrome-owned vault-stepup step-up
-    // sheet (mode 'rotate-admin'); the new admin private key is shown once on the adminkey-show sheet
-    // (never here). Same op provisions from scratch (setup's key was discarded) or rotates an existing
-    // admin key — the prior key is invalidated.
-    actions.appendChild(button('Provision / rotate admin key', 'vault-btn', () => {
-      Promise.resolve(bridge.requestRotateAdmin()).catch(() => {});
-    }));
-    section.appendChild(actions);
-
-    // Portable export (M12 F4 Leg 1, DD1) — relocated from the per-vault header into a source
-    // picker + Export button. Builds the ciphertext-only bundle + runs the save dialog fully in
-    // main — NO password prompt, NO secret in the page. A locked manager (idle-lock race)
-    // surfaces { locked } → refresh to the locked view.
-    const exportRow = el('div', 'vault-settings-row');
-    const exportField = el('label', 'vault-settings-field');
-    exportField.appendChild(el('span', 'vault-settings-label', 'Export'));
-    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
-    select.setAttribute('aria-label', 'Export source vault');
-    for (const v of vaults) {
-      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
-      opt.value = v.vaultId;
-      select.appendChild(opt);
-    }
-    exportField.appendChild(select);
-    exportRow.appendChild(exportField);
-    exportRow.appendChild(button('Export…', 'vault-btn', () => {
-      const target = select.value;
-      if (!target) return;
-      Promise.resolve(bridge.exportVault(target)).then((res) => {
-        if (res && res.locked) refresh();
-      }).catch(() => {});
-    }));
-    section.appendChild(exportRow);
+      'Change your master password, or rotate your recovery or admin key. You’ll confirm on a secure prompt — nothing secret is typed on this page.'));
     return section;
   }
 
@@ -1038,9 +1353,22 @@ function init() {
     runEditorCleanups(); // clearing #vault-root orphans any live TOTP widget's timers.
     activeEditorHost = null; // the per-section hosts are rebuilt below; drop the stale reference.
     accessKeyRefreshers = []; // clearing #vault-root drops the prior sections' refreshers.
+    // M5: an Import/Export modal lives on document.body (not #vault-root) so it survives this
+    // re-render. Close it here — otherwise an idle auto-lock mid-modal fires onVaultLockState →
+    // refresh → render and would strand a stale unlocked-context modal over the now-locked page.
+    closeActivePageModal();
     const view = selectVaultView(state);
     root.textContent = '';
     root.dataset.mode = view.mode;
+
+    // A pending page notice (e.g. an export that raced an idle auto-lock → { locked }): show it once
+    // at the top of #vault-root, then clear it so it does not persist across later renders.
+    if (pendingNotice) {
+      const notice = el('p', 'vault-page-notice', pendingNotice);
+      notice.setAttribute('role', 'status');
+      root.appendChild(notice);
+      pendingNotice = null;
+    }
 
     if (view.mode === 'not-set-up') {
       nav.render([]);

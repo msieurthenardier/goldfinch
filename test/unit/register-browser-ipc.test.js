@@ -92,6 +92,10 @@ test('browser registrar preserves channel inventory and owner-routed media forwa
     // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
     // non-secret target), registered alongside the other request triggers.
     'internal-vault-request-mint',
+    // M12 F5 HAT (I14, import split): the BARE vault-request-import forward (beginImportUnlock) is
+    // UNCONDITIONAL — it needs only chromeForTab. The pickImportFile + clearPendingImport channels
+    // are GATED on their injections (this harness omits them), so only this one appears here.
+    'internal-vault-begin-import-unlock',
     // M12 F4 Leg 2 (key-rotation): the cross-renderer rotate-recovery / change-master / recover
     // triggers (bare, no secret), registered alongside the other request triggers.
     'internal-vault-request-rotate-recovery',

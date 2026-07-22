@@ -518,18 +518,31 @@ interface GoldfinchInternalBridge {
   vaultAccessKeyRevoke(payload: { vaultId: string; keyId: string }): Promise<{ revoked?: boolean; locked?: boolean }>;
   /** Request the chrome-owned access-key MINT sheet (vault-stepup) scoped to `target`. */
   requestMint(target: string): Promise<{ ok: boolean }>;
-  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A). Export is fully main-side (save
-  // dialog + write); import opens the bundle file main-side then the chrome-owned
-  // vault-import-unlock secret sheet. NO secret crosses either channel.
-  /** Export a vault to a portable bundle file (save dialog in main). { ok, path }, { canceled },
+  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT, I14).
+  // Export is fully main-side (build + write); the page Export modal picks a location via
+  // pickSavePath then binds source→path via exportVault(target, savePath), while the jars offer
+  // calls exportVault(target) with no path. Import: pickImportFile opens + holds the bundle,
+  // beginImportUnlock opens the chrome-owned secret sheet, clearPendingImport drops the held
+  // bundle on dismiss. NO secret crosses any of these channels.
+  /** Export a vault to a portable bundle file. With `savePath` main writes directly (the page
+   * modal); without one main runs the save dialog (the jars offer). { ok, path }, { canceled },
    * or { locked }. */
-  exportVault(target: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean }>;
+  exportVault(target: string, savePath?: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean }>;
+  /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
+   * { canceled }. */
+  pickSavePath(target: string): Promise<{ path?: string; canceled?: boolean }>;
   /** Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars page's Delete
    * confirm surface the export-first offer only for a vault-bearing jar. */
   hasVault(vaultId: string): Promise<{ present: boolean }>;
-  /** Begin an import for a destination target: open a bundle file (dialog + read in main) then
-   * open the chrome-owned secret sheet. { ok }, { canceled }, or { error }. */
-  requestImport(destinationTarget: string): Promise<{ ok?: boolean; canceled?: boolean; error?: string }>;
+  /** Pick a bundle file for a destination target: open + read + HOLD the bundle main-side (no sheet
+   * opened). { ok, path }, { canceled }, or { error }. The page re-picks if the destination changes
+   * (H1). */
+  pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; error?: string }>;
+  /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
+   * Continue). Bare trigger — no secret. { ok }. */
+  beginImportUnlock(): Promise<{ ok: boolean }>;
+  /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Always safe. { ok }. */
+  clearPendingImport(): Promise<{ ok: boolean }>;
   // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
   // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
   /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */

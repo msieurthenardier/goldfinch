@@ -607,28 +607,54 @@ function broadcastVaultLockState() {
 /** @type {{ bundle: any, destinationTarget: string } | null} */
 let _pendingVaultImport = null;
 
-// Build a ciphertext-only export bundle → save dialog → write the chosen path (fully main-side;
-// the bundle never transits to the page). No parent window (a top-level modal) keeps this
-// reachable from the internal-handler without a registry lookup. Returns { ok, path } |
-// { canceled }.
-async function vaultSaveBundleToFile(bundle) {
+// Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
+// The vault page's Export modal calls this to choose a location up front, then binds
+// source→path at submit time via vaultSaveBundleToFile(bundle, savePath). Holds NO main-side
+// state (unlike import) — the picked path is returned to the page and round-trips back on
+// submit. No parent window (a top-level modal). Returns { path } | { canceled }.
+async function vaultPickSavePath(target) {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: 'Export vault bundle',
-    defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
+    defaultPath: `vault-${typeof target === 'string' && target ? target : 'export'}.gfvaultbundle`,
     filters: [
       { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
       { name: 'All files', extensions: ['*'] },
     ],
   });
   if (canceled || !filePath) return { canceled: true };
+  return { path: filePath };
+}
+
+// Build a ciphertext-only export bundle → write it (fully main-side; the bundle never transits
+// to the page). Dual-mode: with a pre-chosen `savePath` (the vault page's Export modal, which
+// picked the location up front via vaultPickSavePath) write directly, NO dialog; without one
+// (the jars delete-first export offer) run the save dialog then write. No parent window keeps
+// this reachable from the internal-handler without a registry lookup. Returns { ok, path } |
+// { canceled }.
+async function vaultSaveBundleToFile(bundle, savePath) {
+  let filePath = typeof savePath === 'string' && savePath ? savePath : null;
+  if (!filePath) {
+    const { canceled, filePath: picked } = await dialog.showSaveDialog({
+      title: 'Export vault bundle',
+      defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
+      filters: [
+        { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !picked) return { canceled: true };
+    filePath = picked;
+  }
   fs.writeFileSync(filePath, JSON.stringify(bundle), 'utf8');
   return { ok: true, path: filePath };
 }
 
 // Open a bundle file (main-side dialog + read + JSON parse) and HOLD { bundle, destinationTarget }
-// for the sheet's secret step. Returns { ok } | { canceled } | { error } (never throws into the
-// internal handler). The destination target is validated as a non-empty string; the bundle's
-// deeper crypto validation happens in importVault at unlock time (loud there).
+// for the sheet's secret step. Returns { ok, path } | { canceled } | { error } (never throws into
+// the internal handler). The chosen `path` is echoed back so the page's Import modal can display it
+// and gate its Continue button on a successful pick FOR the shown destination (H1: the page
+// re-picks if the destination changes). The destination target is validated as a non-empty string;
+// the bundle's deeper crypto validation happens in importVault at unlock time (loud there).
 async function vaultImportBeginFromFile(destinationTarget) {
   if (typeof destinationTarget !== 'string' || destinationTarget.length === 0) {
     return { error: 'bad-target' };
@@ -649,7 +675,15 @@ async function vaultImportBeginFromFile(destinationTarget) {
     return { error: 'unreadable' };
   }
   _pendingVaultImport = { bundle, destinationTarget };
-  return { ok: true };
+  return { ok: true, path: filePaths[0] };
+}
+
+// Clear the held import record (L1). The page's Import modal calls this on Cancel / Escape /
+// backdrop-dismiss AFTER a successful file pick so a bundle held for a modal the operator
+// abandoned never lingers to be consumed by a later unrelated unlock. Always safe to call
+// (a no-op when nothing is held).
+function clearPendingVaultImport() {
+  _pendingVaultImport = null;
 }
 
 // The `menu-overlay:vault-import` delegate: consume the held { bundle, destinationTarget } and
@@ -1071,8 +1105,12 @@ const { rerollSeed } = registerBrowserIpc({
   shields,
   getVaultHuman,
   // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
-  // hold). Gated — offline register-browser-ipc tests omit it.
+  // hold). Gated — offline register-browser-ipc tests omit it. M12 F5 HAT (I14): the pick-file
+  // step is now SPLIT from the sheet forward — pickImportFile does dialog+read+hold and returns
+  // { ok, path }; beginImportUnlock forwards the bare vault-request-import; clearPendingImport
+  // drops the held record on modal dismiss (L1).
   vaultImportBegin: vaultImportBeginFromFile,
+  clearPendingVaultImport,
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,
@@ -1512,8 +1550,12 @@ registerVaultIpc({
   jars,
   // M12 F4 Leg 1 (export-import): the main-side export delegate (save dialog + write). The
   // internal-vault-export handler builds the ciphertext-only bundle from the store, then hands
-  // it here. Gated — offline register-vault-ipc tests omit it.
-  vaultSaveBundle: vaultSaveBundleToFile
+  // it here. Gated — offline register-vault-ipc tests omit it. M12 F5 HAT (I14): dual-mode —
+  // with a pre-chosen savePath (the page Export modal) write directly, no dialog; without one
+  // (the jars delete-first offer) run the dialog. vaultPickSavePath runs the save dialog ONLY
+  // (no write) so the page modal can pick a location up front.
+  vaultSaveBundle: vaultSaveBundleToFile,
+  vaultPickSavePath
 });
 
 registerAppLifecycle({

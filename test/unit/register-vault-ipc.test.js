@@ -445,3 +445,51 @@ test('internal-vault-export on a LOCKED manager returns { locked: true } (never 
     assert.equal(called, 0, 'the save dialog is never reached when locked');
   } finally { rm(dir); }
 });
+
+test('internal-vault-export with a pre-chosen savePath forwards it to vaultSaveBundle (write-direct branch)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => REAL_JARS });
+    await store.setup({ masterPassword: MASTER });
+    store.saveItem('global', { type: 'login', title: 'X', username: 'u', password: 'hunter2' });
+
+    const calls = [];
+    const ipcMain = makeFakeIpcMain();
+    registerVaultIpc({
+      ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => REAL_JARS },
+      // The dual-mode save delegate: a pre-chosen savePath skips the dialog and writes directly.
+      vaultSaveBundle: async (bundle, savePath) => { calls.push({ bundle, savePath }); return { ok: true, path: savePath }; },
+    });
+
+    const res = await ipcMain.invoke('internal-vault-export', vaultEvent(), 'global', '/chosen/out.gfvaultbundle');
+    assert.deepEqual(res, { ok: true, path: '/chosen/out.gfvaultbundle' });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].savePath, '/chosen/out.gfvaultbundle', 'the pre-chosen path is forwarded to the save delegate');
+    // L3: the STORE's exportVault stays single-arg — the pre-chosen path is handled entirely by the
+    // main-side save delegate, never threaded into the store.
+    assert.equal(store.exportVault.length, 1);
+  } finally { rm(dir); }
+});
+
+// ---------------------------------------------------------------------------
+// Save-location PICK (M12 F5 HAT, I14) — internal-vault-pick-save-path. GATED on the
+// vaultPickSavePath injection; runs the save dialog ONLY (no build, no write), holds no state.
+// ---------------------------------------------------------------------------
+
+test('internal-vault-pick-save-path is GATED on the vaultPickSavePath injection', () => {
+  const ipcMain = wire(); // no vaultPickSavePath
+  assert.equal('internal-vault-pick-save-path' in ipcMain._handlers, false);
+});
+
+test('internal-vault-pick-save-path runs the save-location picker ONLY and returns its result', async () => {
+  const store = makeStore({ setUp: true, unlocked: true });
+  const picks = [];
+  const ipcMain = makeFakeIpcMain();
+  registerVaultIpc({
+    ipcMain, registerInternalHandler, getVaultStore: () => store, jars: { list: () => [] },
+    vaultPickSavePath: async (target) => { picks.push(target); return { path: '/picked/vault-global.gfvaultbundle' }; },
+  });
+  const res = await ipcMain.invoke('internal-vault-pick-save-path', vaultEvent(), 'global');
+  assert.deepEqual(res, { path: '/picked/vault-global.gfvaultbundle' });
+  assert.deepEqual(picks, ['global'], 'the target is forwarded to seed the default filename');
+});

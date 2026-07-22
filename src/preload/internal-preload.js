@@ -644,20 +644,36 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * minted secret is shown on the chrome-owned vault-accesskey-show sheet, never the page. */
     requestMint: (target) => ipcRenderer.invoke('internal-vault-request-mint', target),
 
-    // Portable export / import (M12 Flight 4, Leg 1 / DD1 — Option A). Export is fully main-side:
-    // the handler builds the ciphertext-only bundle from the store + runs the save dialog + writes
-    // the file — the bundle never crosses to the page (the sandboxed page can't write files anyway).
-    // Import is a two-step page flow: requestImport picks a destination + opens the bundle file
-    // (main-side dialog + read + hold), then main opens the chrome-owned vault-import-unlock sheet
-    // for the secret. NO secret ever crosses either channel.
+    // Portable export / import (M12 Flight 4, Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT,
+    // I14). Export is fully main-side: the handler builds the ciphertext-only bundle from the store
+    // + writes the file — the bundle never crosses to the page (the sandboxed page can't write files
+    // anyway). The page's Export modal picks a save location up front via pickSavePath (save dialog
+    // in main, no write) then binds source→path at submit via exportVault(target, savePath); the
+    // jars delete-first offer calls exportVault(target) with no path (main runs the dialog). Import
+    // is a page-modal flow: pickImportFile opens + holds the bundle for a destination (main-side
+    // dialog + read + hold), then beginImportUnlock opens the chrome-owned vault-import-unlock sheet
+    // for the secret; clearPendingImport drops the held bundle on modal dismiss. NO secret ever
+    // crosses any of these channels.
 
     /**
-     * Export a vault to a portable bundle file (save dialog runs in main). Resolves
-     * { ok, path }, { canceled }, or the structured { locked: true } (a locked manager).
+     * Export a vault to a portable bundle file. With an optional pre-chosen `savePath` main writes
+     * directly (the page Export modal, which picked via pickSavePath); without one main runs the
+     * save dialog (the jars delete-first offer). Resolves { ok, path }, { canceled }, or the
+     * structured { locked: true } (a locked manager).
      * @param {string} target  `'global'` or a persistent jar id.
+     * @param {string} [savePath]  a pre-chosen destination path (from pickSavePath).
      * @returns {Promise<{ ok?: boolean, path?: string, canceled?: boolean, locked?: boolean }>}
      */
-    exportVault: (target) => ipcRenderer.invoke('internal-vault-export', target),
+    exportVault: (target, savePath) => ipcRenderer.invoke('internal-vault-export', target, savePath),
+
+    /**
+     * Pick a save location for an export bundle — runs the save dialog in main ONLY (no build, no
+     * write). The page Export modal calls this to choose a location up front, then passes the path
+     * to exportVault at submit. Resolves { path } or { canceled }.
+     * @param {string} target  `'global'` or a persistent jar id (seeds the default filename).
+     * @returns {Promise<{ path?: string, canceled?: boolean }>}
+     */
+    pickSavePath: (target) => ipcRenderer.invoke('internal-vault-pick-save-path', target),
 
     /**
      * Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars
@@ -669,13 +685,30 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     hasVault: (vaultId) => ipcRenderer.invoke('internal-vault-has', vaultId),
 
     /**
-     * Begin an import: open a bundle file (main-side dialog + read) for the given DESTINATION
-     * target, then main opens the chrome-owned vault-import-unlock secret sheet. Resolves
-     * { ok } (sheet opening), { canceled } (dialog dismissed), or { error }.
+     * Pick a bundle file for an import DESTINATION: main runs the open dialog, reads + parses the
+     * bundle (ciphertext), and HOLDS { bundle, destinationTarget } main-side — it does NOT open the
+     * secret sheet (that is beginImportUnlock, on submit). Resolves { ok, path } (held for the shown
+     * destination), { canceled } (dialog dismissed), or { error } (unreadable). The page must
+     * re-pick if the destination changes after a successful pick (H1: the held target is bound here).
      * @param {string} destinationTarget  `'global'` or a persistent jar id.
-     * @returns {Promise<{ ok?: boolean, canceled?: boolean, error?: string }>}
+     * @returns {Promise<{ ok?: boolean, path?: string, canceled?: boolean, error?: string }>}
      */
-    requestImport: (destinationTarget) => ipcRenderer.invoke('internal-vault-request-import', destinationTarget),
+    pickImportFile: (destinationTarget) => ipcRenderer.invoke('internal-vault-pick-import-file', destinationTarget),
+
+    /**
+     * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (consumed there
+     * with the sheet's secret). Call on the Import modal's Continue submit, AFTER a successful
+     * pickImportFile. A BARE trigger — NO secret crosses here. Resolves { ok }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    beginImportUnlock: () => ipcRenderer.invoke('internal-vault-begin-import-unlock'),
+
+    /**
+     * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop
+     * dismiss AFTER a pick so an abandoned bundle never lingers. Always safe to call. Resolves { ok }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    clearPendingImport: () => ipcRenderer.invoke('internal-vault-clear-pending-import'),
 
     // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
     // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever

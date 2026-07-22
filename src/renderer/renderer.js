@@ -1394,9 +1394,11 @@ window.goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
 window.goldfinch.onVaultRequestMint(({ target }) => {
   openOverlayMenu('vault-stepup', { target }, null, 0);
 });
-// Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). The vault page's
-// Import CTA routes page → main (internal-vault-request-import → the main-side file open) →
-// chrome (here). Open the vault-import-unlock sheet; the destination target + the bundle are held
+// Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2; page-modal split M12
+// F5 HAT, I14). The vault page's Import modal picks the destination + bundle file first (page → main
+// internal-vault-pick-import-file: the main-side file open + hold), then on Continue routes page →
+// main (internal-vault-begin-import-unlock) → chrome (here) via the UNCHANGED vault-request-import
+// forward. Open the vault-import-unlock sheet; the destination target + the bundle are held
 // main-side, so the model is an empty array (the sheet collects only the secret + secretKind).
 // On a successful import main closes the sheet + broadcasts lock-state → the page re-renders.
 window.goldfinch.onVaultRequestImport(() => {

@@ -709,11 +709,82 @@ textarea.vault-input {
    (defined with the Settings subsections above) — the per-control row/label/select rules
    that used to live here are gone. Their subsections keep even rhythm via .vault-subsection. */
 
-/* ── Operator-secret rotation (M12 F4 Leg 2 key-rotation, DD3) ── */
-.vault-rotation-actions {
+/* ── Subsection head: heading + a trailing kebab (overflow) menu on the same row.
+   The master-key management actions live in the kebab to cut page noise (M12 F5 HAT). ── */
+.vault-subsection-head {
   display: flex;
-  gap: 8px; /* matches .vault-settings-row so the button row and the export row below it align */
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vault-subsection-head .vault-subsection-title {
+  margin-bottom: 0;
+}
+
+/* Kebab trigger + popup menu (self-contained; built in vault.js buildKebabMenu). */
+.vault-kebab {
+  position: relative;
+  flex: 0 0 auto;
+}
+.vault-kebab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.vault-kebab-btn:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.vault-kebab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vault-kebab-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+.vault-kebab-menu[hidden] {
+  display: none;
+}
+.vault-kebab-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.vault-kebab-item:hover {
+  background: var(--bg-3);
+}
+.vault-kebab-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 /* The locked-view "Forgot master password? Recover" affordance — a low-emphasis text link
    beside the Unlock button. */
@@ -727,4 +798,100 @@ textarea.vault-input {
 .vault-link-btn:hover {
   background: var(--bg-3, var(--bg-2));
   border-color: transparent;
+}
+
+/* ── Page-level Import / Export modal (M12 F5 HAT, I14) ─────────────────────────────────
+   The single reusable dialog opened by the "Import / Export" subsection's two buttons. vault
+   serves only vault.css, so it cannot inherit jars' .jar-modal-* rules — these are its own
+   .vault-modal-* rules, matching the dark theme + accent variables at the top of this file.
+   No motion (instant show/hide) — same discipline as the rest of the page. */
+.vault-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 55%);
+}
+.vault-modal-card {
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+.vault-modal-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--fg);
+}
+.vault-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* A stacked field group inside the modal body (the vault select sits on its own line above the
+   file-pick row so a long jar label never crowds the button). */
+.vault-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.vault-modal-form .vault-settings-field {
+  align-items: baseline;
+}
+/* The "Choose location…" / "Choose file…" button beside its path display — wraps rather than
+   overflowing the card when the path is long. */
+.vault-modal-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vault-modal-path {
+  font-size: 12px;
+  color: var(--fg-dim);
+  word-break: break-all;
+}
+.vault-modal-path:empty {
+  display: none;
+}
+.vault-modal-status {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-modal-status:empty {
+  display: none;
+}
+.vault-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.vault-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.vault-btn:disabled:hover {
+  border-color: var(--border);
+  filter: none;
+}
+
+/* Transient page notice (e.g. an export that raced an idle auto-lock → { locked }). */
+.vault-page-notice {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg);
+  font-size: 13px;
 }
