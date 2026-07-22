@@ -191,6 +191,30 @@ function assembleSave({ type, id, nonSecretValues = {}, secretStates = {}, match
 }
 
 /**
+ * Partition a vault's item list into per-type buckets for the typed subsections
+ * (M12 F5 HAT). DEFENSIVE by design: an item is bucketed ONLY when its `type` is a
+ * known editor type (EDITOR_TYPES: login/card/note — the same taxonomy pinned to the
+ * main-side security schema by the drift guard). An item with a missing/unknown type
+ * is NOT silently dropped — it goes into the separate `unknown` bucket so the page can
+ * SURFACE it (a visible row + a console warning). Order within a bucket is the input
+ * order (a stable list read). Returns a record keyed by every known type plus `unknown`.
+ * @param {Array<any>} items
+ * @returns {{ login: any[], card: any[], note: any[], unknown: any[] }}
+ */
+function partitionItemsByType(items) {
+  /** @type {Record<string, any[]>} */
+  const buckets = { unknown: [] };
+  for (const type of EDITOR_TYPES) buckets[type] = [];
+  const known = new Set(EDITOR_TYPES);
+  for (const item of Array.isArray(items) ? items : []) {
+    const type = item && typeof item.type === 'string' ? item.type : null;
+    if (type && known.has(/** @type {any} */ (type))) buckets[type].push(item);
+    else buckets.unknown.push(item);
+  }
+  return /** @type {{ login: any[], card: any[], note: any[], unknown: any[] }} */ (buckets);
+}
+
+/**
  * Validate a value as an http/https URL for rendering an `origin` as a link. A
  * `javascript:` (or any non-http/https) origin executes when set as an href even
  * without innerHTML, so only http/https round-trips; anything else → null (render
@@ -221,5 +245,6 @@ export {
   edit,
   initialSecretStates,
   assembleSave,
+  partitionItemsByType,
   safeHttpUrl,
 };

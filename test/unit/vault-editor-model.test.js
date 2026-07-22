@@ -113,6 +113,50 @@ test('hide (clear-on-hide/blur/save) wipes the value and re-masks back to untouc
   assert.deepEqual(hidden, { value: '', revealed: false, touched: false });
 });
 
+/* ------------------------------------------------------- partitionItemsByType */
+
+test('partitionItemsByType buckets known types (login/card/note) in input order', () => {
+  const items = [
+    { id: 'a', type: 'login', title: 'A' },
+    { id: 'b', type: 'note', title: 'B' },
+    { id: 'c', type: 'login', title: 'C' },
+    { id: 'd', type: 'card', title: 'D' },
+  ];
+  const p = m.partitionItemsByType(items);
+  assert.deepEqual(p.login.map((i) => i.id), ['a', 'c'], 'login order preserved');
+  assert.deepEqual(p.card.map((i) => i.id), ['d']);
+  assert.deepEqual(p.note.map((i) => i.id), ['b']);
+  assert.deepEqual(p.unknown, [], 'no unknowns');
+});
+
+test('partitionItemsByType SURFACES unknown/missing types in the unknown bucket (never drops)', () => {
+  const weird = { id: 'w', type: 'wormhole', title: 'W' };
+  const missing = { id: 'n', title: 'N' }; // no type
+  const nullType = { id: 'z', type: null };
+  const p = m.partitionItemsByType([
+    { id: 'a', type: 'login' },
+    weird,
+    missing,
+    nullType,
+  ]);
+  assert.deepEqual(p.login.map((i) => i.id), ['a']);
+  // Every non-known item is preserved in `unknown` — nothing is silently dropped.
+  assert.deepEqual(p.unknown.map((i) => i.id), ['w', 'n', 'z']);
+});
+
+test('partitionItemsByType degrades safely on a non-array / empty input', () => {
+  for (const bad of [undefined, null, {}, 'x', 0]) {
+    const p = m.partitionItemsByType(/** @type {any} */ (bad));
+    assert.deepEqual(p, { login: [], card: [], note: [], unknown: [] });
+  }
+});
+
+test('partitionItemsByType always returns a bucket for every editor type', () => {
+  const p = m.partitionItemsByType([]);
+  for (const type of m.EDITOR_TYPES) assert.ok(Array.isArray(p[type]), `${type} bucket present`);
+  assert.ok(Array.isArray(p.unknown));
+});
+
 /* ----------------------------------------------------------------- safeHttpUrl */
 
 test('safeHttpUrl admits http/https and REJECTS javascript: and other schemes', () => {

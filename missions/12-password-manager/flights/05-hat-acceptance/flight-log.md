@@ -409,3 +409,93 @@ coverage added/rewritten), `npm run typecheck` clean,
 `npm run lint` clean. DD5 grep-verified: no master-equivalent secret on the page path (the modal handles only
 vault ids, file paths, and status strings). Dev instance must be **restarted** (main + preload changed) to
 verify live.
+
+## Developer note — I15 Secrets page: typed subsections + modal item editor (2026-07-22)
+
+**I15 (`hat-vault-item-organization` — HIGH-risk, design-reviewed leg, IMPLEMENTED, PENDING operator live
+review).** Reworked each vault's section on the Secrets page from a flat list + type-`<select>` + inline editor
+into a **typed master-detail**: a title row (jar color dot / Global globe + name), **per-type subsections**
+(Logins / Cards / Notes each with its own list + Add), an **Access keys** jar-only subsection (Add = Mint),
+**per-row Edit + Delete** (Delete confirmed via a modal), and the **add/edit form moved into a modal** (the
+inline `editorHost` is gone). Renderer-only — no main/preload change, so a **tab reload suffices** (no restart).
+
+**THE LOAD-BEARING SECURITY FIX (DD6, design-review HIGH) — editor-modal teardown via `editorCleanups`.**
+`openModal`'s `close()` runs neither `onCancel` nor a secret wipe, and the idle-lock path reaches it via
+`render()` → `closeActivePageModal()`. A wipe wired only to `onCancel` would be **skipped on idle-lock**,
+stranding a revealed secret in the detached-but-live input. Fix: the editor registers
+`() => wipeSecretInputs(secretInputs)` into the `editorCleanups` registry at build time (mirroring
+buildTotpWidget's cleanup). Teardown is then routed through the registry on **all five exit paths**, each
+zeroing every secret input **and** draining the TOTP poll/listeners:
+- **Save success** — sync `wipeSecretInputs` pre-roundtrip, then `runEditorCleanups()` → `handle.close()` →
+  `refresh()`.
+- **Save `{ locked }`** — `runEditorCleanups()` → `close()` → `refresh()`.
+- **Cancel / Esc / backdrop** — `onCancel` runs `runEditorCleanups()` (openModal's `dismiss()` calls it BEFORE
+  its `close()`).
+- **Idle-lock re-render** — `render()` calls `runEditorCleanups()` BEFORE `closeActivePageModal()`, while the
+  modal is still attached.
+- **Preemption (opening a second editor)** — `openEditor`'s leading `runEditorCleanups()` runs BEFORE
+  `openModal`'s preempting `closeActivePageModal()`, so a prior editor is never detached with un-drained
+  cleanups.
+`handle.close()` is used ONLY for backdrop-removal + focus-return — it is never relied on for teardown (it
+drains nothing).
+
+**Other DD6 invariants preserved (new container, same behavior):** masked-until-reveal via `buildSecretField`
+(inputs start empty w/ MASK placeholder; value only on explicit Reveal; a pure reveal clears on blur);
+per-field Reveal/Copy; `assembleSave` + the out-of-band `unchangedSecrets` signal (unrevealed secrets survive a
+save); `textContent`-only for every label/title/username; the origin renders as a link ONLY when `safeHttpUrl`
+accepts the scheme, else inert text; access-key secrets never touch the page (Add = Mint → chrome step-up
+sheet; keyId is a non-secret fingerprint).
+
+**Structure / mechanics:**
+- **Partition helper (the one cleanly unit-testable new piece):** `partitionItemsByType(items)` added to
+  `src/shared/vault-editor-model.js` (the page-served ESM; its `EDITOR_TYPES` is pinned to the main-side
+  `vault-item-schema.js` taxonomy by the existing drift guard). **Defensive** (design-review LOW): buckets only
+  known types (login/card/note); any unknown/missing `type` lands in a separate `unknown` bucket, surfaced on
+  the page as an "Other items" subsection + a `console.warn` — never silently dropped. Unit-tested in
+  `test/unit/vault-editor-model.test.js` (4 new tests: known-type order-preserving bucketing, unknown/missing
+  surfacing, non-array degradation, every-type-bucket-present).
+- **buildVaultSection** rewrite: title row uses the entry's own `color`/`kind` (no re-derive from `jarRows`) —
+  jar dot via `isSafeColor(color) ? color : fallback`, Global via an inline globe (ICON_GLOBE idiom). ONE
+  `bridge.vaultList` read, partitioned client-side; subsections render empty then populate (DD-A: empty
+  subsections still show heading + empty state + Add so Add is always reachable). Type `<select>` and inline
+  `editorHost` removed.
+- **renderItems** → per-row: info spans (title/sub/scheme-guarded origin link, all textContent) + a row-actions
+  group (**Edit** opens the edit modal; **Delete** opens a confirm modal) sitting together with no divider.
+- **openEditor** → editor-in-modal: the same rich form (non-secret fields, secret fields, TOTP widget, login
+  matchMode + generator) rendered as `openModal`'s `body`; the in-editor **Delete** is gone (delete lives on
+  the row). Save = modal submit; Cancel/Esc/backdrop = `onCancel`.
+- **Delete/Revoke confirm modals** (DD-C): reuse `openModal` with a new `danger` submit variant (red submit);
+  a naming message body (item title / keyId via textContent) + a danger submit. Access-key **Revoke** gains a
+  confirm (DD-B); **Mint** relabeled "Add" (aria-label kept "Mint access key").
+- **`closeEditor` and the `activeEditorHost` single-open machinery removed** — `openModal`'s `activePageModal`
+  already enforces single-open.
+- **CSS:** title-row dot/globe + name; per-type subsection heads (h4 + Add); item-row info + right-aligned
+  Edit/Delete actions (flush, no divider); confirm-message; `.vault-editor` demoted from an inset card to a
+  plain form (the modal card supplies chrome + scroll via its existing `max-height`/`overflow-y`); dead
+  inline-editor/type-select/item-open rules removed.
+
+**Files touched:** `src/renderer/pages/vault.js` (buildVaultSection + subsections + renderItems + openEditor
+modal + delete/revoke confirms + openModal `danger` variant; closeEditor/activeEditorHost removed),
+`src/renderer/pages/vault.css`, `src/shared/vault-editor-model.js` (`partitionItemsByType`),
+`test/unit/vault-editor-model.test.js` (partition tests). No changes to `vault-page-model` /
+`vault-accesskey-template` and no force-edits to existing editor-model tests (they stayed green unchanged).
+
+Results: `npm test` **2680 pass / 0 fail** (+4 partition tests), `npm run typecheck` clean, `npm run lint`
+clean. DD6 traced across all five exit paths (each zeroes every secret input + drains TOTP). Renderer-only — a
+**tab reload** suffices; the Flight Director handles any restart.
+
+**Operator live-review polish (FD-applied inline, same leg):**
+- **Item-row separators + header hierarchy** — the per-row `border-bottom` was dropped (rows now read as a
+  clean list) and the type headers (Logins/Cards/Notes/Access keys), scoped so the Settings subsections are
+  untouched, were tuned to be the DOMINANT label in their group (bold 14px `--fg`) with item titles lighter
+  (`font-weight: 500`) — after an over-correction to small-gray-uppercase read "inverted."
+- **Icon buttons** — Add (＋), Edit (✎), Delete/Revoke (🗑, red on hover) replaced the text buttons on the
+  item rows, the per-type Add, the access-key Add(=Mint), and Revoke; each keeps its `aria-label` + `title`.
+- **In-field Reveal/Copy** — the secret fields' Reveal/Copy became in-field icon buttons surfaced on
+  hover/`:focus-within` (Reveal is an eye ↔ eye-off toggle; Copy still writes straight to the OS clipboard,
+  never the DOM), with an input-matching backing so a revealed secret can't peek through the glyphs. The
+  mask/reveal/hide/blur/copy logic is byte-identical — presentation only. `partitionItemsByType` refactor
+  shared a `buildIconSvg` helper.
+
+**Operator VERIFIED LIVE** (typed subsections, modal editor, per-row Edit/Delete + confirm, icon buttons,
+in-field reveal/copy). Leg **landed**. 2680 tests; typecheck + lint clean. Committed on flight/05.

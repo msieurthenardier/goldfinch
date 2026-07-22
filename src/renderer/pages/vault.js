@@ -3,7 +3,7 @@
 // @ts-ignore — serving-path vs disk-path mismatch
 import { selectVaultView, vaultNavEntries } from './vault-page-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch
-import { MASK, EDITOR_LAYOUT, initialSecretStates, reveal as revealState, hide as hideState, edit as editState, assembleSave, safeHttpUrl } from './vault-editor-model.js';
+import { MASK, EDITOR_LAYOUT, initialSecretStates, reveal as revealState, hide as hideState, edit as editState, assembleSave, partitionItemsByType, safeHttpUrl } from './vault-editor-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { generatePassword, CLASS_NAMES } from './password-generator.js';
 // @ts-ignore — serving-path vs disk-path mismatch
@@ -98,6 +98,65 @@ function init() {
     return b;
   }
 
+  // Inline-SVG icon path sets (stroke-based, 24x24 viewBox) for the row/section icon buttons —
+  // no emoji (the guest tofu lesson; matches the nav-controller icon convention).
+  /** @type {Record<string, string[]>} */
+  const ICON_PATHS = {
+    add: ['M12 5v14', 'M5 12h14'],
+    edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z'],
+    trash: ['M3 6h18', 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2', 'M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14', 'M10 11v6', 'M14 11v6'],
+    eye: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
+    'eye-off': ['M17.9 17.9A10.4 10.4 0 0 1 12 20c-7 0-10-8-10-8a18.8 18.8 0 0 1 5.1-6M9.9 4.2A9.5 9.5 0 0 1 12 4c7 0 10 8 10 8a18.9 18.9 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 0 1-4.2-4.2', 'M2 2l20 20'],
+    copy: ['M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
+  };
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Build an inline-SVG glyph (stroke=currentColor, aria-hidden) from an ICON_PATHS key.
+   * @param {string} iconKey
+   * @returns {SVGSVGElement}
+   */
+  function buildIconSvg(iconKey) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    for (const d of ICON_PATHS[iconKey]) {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', d);
+      svg.appendChild(p);
+    }
+    return svg;
+  }
+
+  /**
+   * Build a square ICON button: an inline-SVG glyph whose accessible name comes from `ariaLabel`
+   * (the icon replaces the visible text). `danger` tints it destructive.
+   * @param {string} iconKey
+   * @param {string} ariaLabel
+   * @param {() => void} onClick
+   * @param {{ danger?: boolean }} [opts]
+   * @returns {HTMLButtonElement}
+   */
+  function iconButton(iconKey, ariaLabel, onClick, opts) {
+    const b = /** @type {HTMLButtonElement} */
+      (el('button', 'vault-icon-btn' + (opts && opts.danger ? ' danger' : '')));
+    b.type = 'button';
+    b.setAttribute('aria-label', ariaLabel);
+    b.title = ariaLabel;
+    b.appendChild(buildIconSvg(iconKey));
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
   /**
    * A self-contained kebab (overflow) menu: a ⋮ trigger button + a popup menu of
    * actions, used to fold a subsection's action buttons off the page to cut noise
@@ -111,7 +170,6 @@ function init() {
    * @returns {HTMLElement}
    */
   function buildKebabMenu(opts) {
-    const SVG_NS = 'http://www.w3.org/2000/svg';
     const wrap = el('div', 'vault-kebab');
     const btn = /** @type {HTMLButtonElement} */ (el('button', 'vault-kebab-btn'));
     btn.type = 'button';
@@ -197,12 +255,14 @@ function init() {
     return wrap;
   }
 
-  // Editor-scoped teardown (M12 F3 Leg 3): the live TOTP widget arms timers +
-  // document/window listeners that MUST be torn down when the editor closes or the
-  // page re-renders — otherwise a per-period `vaultTotpCode` poll (a full-vault
-  // decrypt each call) outlives the closed editor. Every widget registers its
-  // cleanup here; the single choke points below (openEditor / closeEditor / render)
-  // drain it.
+  // Editor-scoped teardown (M12 F3 Leg 3; extended for the modal editor, M12 F5 HAT
+  // hat-vault-item-organization): the live TOTP widget arms timers + document/window listeners,
+  // AND (DD6) the editor registers a secret-input WIPE here — both MUST be torn down on every
+  // editor-modal exit or page re-render, otherwise a per-period `vaultTotpCode` poll (a full-vault
+  // decrypt each call) outlives the closed editor and/or a revealed secret survives in a detached
+  // input. Every widget/editor registers its cleanup here; the choke points below drain it:
+  // openEditor (before openModal preempts a prior editor), the modal's onSubmit/onCancel (before
+  // handle.close(), which drains NOTHING), and render() (before closeActivePageModal on idle-lock).
   /** @type {Array<() => void>} */
   let editorCleanups = [];
   function runEditorCleanups() {
@@ -212,14 +272,6 @@ function init() {
       try { fn(); } catch { /* a cleanup must never throw out of teardown */ }
     }
   }
-
-  // Single-open enforcement (M12 F5 acceptance): each vault section now owns its own
-  // INLINE editor host (so Add/Edit renders within the section that triggered it,
-  // not a shared host floated to the top of the page). The old shared-host model gave
-  // single-open for free — with per-section hosts we track the currently-open one and
-  // clear it when an editor opens elsewhere. Reset per render (the hosts are rebuilt).
-  /** @type {HTMLElement|null} */
-  let activeEditorHost = null;
 
   // Access-key list refreshers (M12 F3 Leg 5). Each unlocked vault section registers a
   // cheap re-fetch of its access-key list here (a metadata-only read — envelope keyIds, no
@@ -267,7 +319,9 @@ function init() {
    * to close it, toggle Submit, and set the status line. Dismissal (Cancel / Escape / backdrop)
    * runs the optional `onCancel` (L1 held-state clear) before closing; the M5 render-triggered
    * close() does NOT (it is not an operator dismissal).
-   * @param {{ title: string, body: HTMLElement, submitLabel: string, onSubmit: () => void, submitEnabled?: boolean, onCancel?: () => void }} opts
+   * A `danger` submit renders the primary action in the destructive (red) style — used by
+   * the delete/revoke confirm modals; it defaults to the accent "primary" style otherwise.
+   * @param {{ title: string, body: HTMLElement, submitLabel: string, onSubmit: () => void, submitEnabled?: boolean, onCancel?: () => void, danger?: boolean }} opts
    * @returns {{ close: () => void, setSubmitEnabled: (on: boolean) => void, setStatus: (text: string) => void }}
    */
   function openModal(opts) {
@@ -297,7 +351,7 @@ function init() {
 
     const actions = el('div', 'vault-modal-actions');
     const cancelBtn = button('Cancel', 'vault-btn', () => dismiss());
-    const submitBtn = button(opts.submitLabel, 'vault-btn primary', () => opts.onSubmit());
+    const submitBtn = button(opts.submitLabel, opts.danger ? 'vault-btn danger' : 'vault-btn primary', () => opts.onSubmit());
     submitBtn.disabled = opts.submitEnabled !== true;
     actions.appendChild(cancelBtn);
     actions.appendChild(submitBtn);
@@ -761,12 +815,100 @@ function init() {
     return section;
   }
 
+  // The typed item subsections a vault splits into (M12 F5 HAT hat-vault-item-organization).
+  // Logins / Cards / Notes are the item-editor types; each renders its OWN list + an Add button
+  // that opens a blank editor modal OF THAT TYPE (the old type <select> is gone — each Add knows
+  // its type). Access keys is a jar-only fourth subsection, built separately (its Add mints).
+  const ITEM_SUBSECTIONS = [
+    { type: 'login', title: 'Logins', empty: 'No logins yet.' },
+    { type: 'card', title: 'Cards', empty: 'No cards yet.' },
+    { type: 'note', title: 'Notes', empty: 'No notes yet.' },
+  ];
+
+  // Fallback dot color when a jar carries no safe color — the nav-dot idiom
+  // (vault-nav-controller.js: `color && isSafeColor(color) ? color : fallbackColor`).
+  const TITLE_DOT_FALLBACK = '#9aa0ac';
+
+  // The Global vault's title marker — the globe (ICON_GLOBE idiom, vault-nav-controller.js),
+  // inlined here for the title row. `aria-hidden`; the heading's name span carries the label.
+  function buildGlobeMarker() {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.classList.add('vault-title-globe');
+    const shapes = [
+      { tag: 'circle', attrs: { cx: '12', cy: '12', r: '9' } },
+      { tag: 'path', attrs: { d: 'M3 12h18' } },
+      { tag: 'path', attrs: { d: 'M12 3c2.5 2.5 3.8 5.7 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.7-3.8-9S9.5 5.5 12 3Z' } }
+    ];
+    for (const shape of shapes) {
+      const node = document.createElementNS(SVG_NS, shape.tag);
+      for (const key of Object.keys(shape.attrs)) node.setAttribute(key, shape.attrs[key]);
+      svg.appendChild(node);
+    }
+    return /** @type {any} */ (svg);
+  }
+
   /**
-   * A per-vault section while the manager is UNLOCKED — the vault's item list + an INLINE
-   * editor host, plus (jars only) its access keys. Carries the section id `vault-<vaultId>`
-   * so the nav entry jumps here. Export moved to Settings > master-key management (per the
-   * operator design).
-   * @param {{ id: string, kind: string, label: string, count?: number }} entry
+   * Build one typed item subsection: a head (h4 + an Add button that opens a blank editor
+   * modal OF THIS TYPE) + an empty list the caller fills after the partitioned vaultList read.
+   * @param {string} vaultId
+   * @param {{ type: string, title: string, empty: string }} sub
+   * @returns {{ subsection: HTMLElement, list: HTMLElement }}
+   */
+  function buildTypeSubsection(vaultId, sub) {
+    const subsection = el('section', 'vault-subsection vault-type-subsection');
+    const headingId = `vault-sub-${vaultId}-${sub.type}`;
+    subsection.setAttribute('aria-labelledby', headingId);
+    const head = el('div', 'vault-subsection-head');
+    const h4 = el('h4', 'vault-subsection-title', sub.title);
+    h4.id = headingId;
+    head.appendChild(h4);
+    head.appendChild(iconButton('add', `Add ${sub.type}`, () => {
+      openEditor({ vaultId, meta: null, type: sub.type });
+    }));
+    subsection.appendChild(head);
+
+    const list = el('ul', 'vault-item-list');
+    list.setAttribute('role', 'list');
+    list.setAttribute('aria-label', sub.title);
+    subsection.appendChild(list);
+    return { subsection, list };
+  }
+
+  /**
+   * The defensive "Other items" subsection — surfaces any item whose `type` the page does not
+   * recognize (partitionItemsByType's `unknown` bucket) rather than silently dropping it. Hidden
+   * until such an item appears.
+   * @returns {{ subsection: HTMLElement, list: HTMLElement }}
+   */
+  function buildUnknownSubsection() {
+    const subsection = el('section', 'vault-subsection vault-type-subsection vault-unknown-subsection');
+    subsection.hidden = true;
+    const head = el('div', 'vault-subsection-head');
+    head.appendChild(el('h4', 'vault-subsection-title', 'Other items'));
+    subsection.appendChild(head);
+    const list = el('ul', 'vault-item-list');
+    list.setAttribute('role', 'list');
+    list.setAttribute('aria-label', 'Other items');
+    subsection.appendChild(list);
+    return { subsection, list };
+  }
+
+  /**
+   * A per-vault section while the manager is UNLOCKED — a title row (jar color dot / Global
+   * globe + name) + per-type item subsections (Logins / Cards / Notes) each with its own list +
+   * Add, plus (jars only) an Access keys subsection. Carries the section id `vault-<vaultId>` so
+   * the nav entry jumps here. ONE metadata-only vaultList read is partitioned by type client-side.
+   * @param {{ id: string, kind: string, label: string, count?: number, color?: string|null }} entry
    */
   function buildVaultSection(entry) {
     const vaultId = entry.id;
@@ -776,52 +918,75 @@ function init() {
     const headingId = `vault-h-${vaultId}`;
     section.setAttribute('aria-labelledby', headingId);
 
+    // Title row: a jar color dot (Global: the globe icon) + the vault name. The entry carries
+    // its OWN color/kind (vault-page-model.js), so there is no re-derivation from jarRows.
     const header = el('div', 'vault-section-head');
-    const h3 = el('h3', 'vault-section-title',
-      typeof entry.count === 'number' ? `${entry.label} (${entry.count})` : entry.label);
+    const h3 = el('h3', 'vault-section-title vault-title-row');
     h3.id = headingId;
-    header.appendChild(h3);
-
-    // Per-section INLINE editor host (M12 F5 acceptance): Add/Edit renders HERE, within the
-    // section that triggered it — not into a shared host floated to the page top. Sits right
-    // after the add-row and before the item list. Single-open across sections is enforced in
-    // openEditor (which clears any other section's open host).
-    const editorHost = el('div', 'vault-editor-host');
-    editorHost.hidden = true;
-
-    // Add-item control: a type picker + Add button → a blank editor in THIS section's host.
-    const picker = /** @type {HTMLSelectElement} */ (el('select', 'vault-type-select'));
-    picker.setAttribute('aria-label', `New item type for ${entry.label}`);
-    for (const [type] of Object.entries(EDITOR_LAYOUT)) {
-      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, type[0].toUpperCase() + type.slice(1)));
-      opt.value = type;
-      picker.appendChild(opt);
+    if (entry.kind === 'jar') {
+      const dot = el('span', 'vault-title-dot');
+      dot.style.background =
+        typeof entry.color === 'string' && isSafeColor(entry.color) ? entry.color : TITLE_DOT_FALLBACK;
+      h3.appendChild(dot);
+    } else {
+      h3.appendChild(buildGlobeMarker());
     }
-    header.appendChild(picker);
-    header.appendChild(button('Add', 'vault-btn', () => {
-      openEditor(editorHost, { vaultId, meta: null, type: picker.value });
-    }));
+    h3.appendChild(el('span', 'vault-title-name', entry.label));
+    header.appendChild(h3);
     section.appendChild(header);
-    section.appendChild(editorHost);
 
-    const list = el('ul', 'vault-item-list');
-    list.setAttribute('role', 'list');
-    list.setAttribute('aria-label', `${entry.label} items`);
-    section.appendChild(list);
+    // Per-type subsections, built empty then populated below (DD-A: an empty subsection still
+    // renders heading + empty state + Add, so Add is always reachable).
+    /** @type {Record<string, HTMLElement>} */
+    const lists = {};
+    for (const sub of ITEM_SUBSECTIONS) {
+      const built = buildTypeSubsection(vaultId, sub);
+      lists[sub.type] = built.list;
+      section.appendChild(built.subsection);
+    }
+    const unknown = buildUnknownSubsection();
+    section.appendChild(unknown.subsection);
 
-    // Populate the list from the metadata-only read (no secret ever).
+    // One metadata-only read (no secret ever), partitioned by type client-side (defensively —
+    // an unknown type surfaces in "Other items", never dropped).
     bridge.vaultList(vaultId).then((res) => {
       if (!res || res.locked) { refresh(); return; }
-      renderItems(list, res.items || [], vaultId, editorHost);
+      const buckets = partitionItemsByType(res.items || []);
+      for (const sub of ITEM_SUBSECTIONS) {
+        renderItems(lists[sub.type], buckets[sub.type], vaultId, sub.empty);
+      }
+      renderUnknownItems(unknown, buckets.unknown);
     }).catch(() => {});
 
-    // Access-key management (M12 F3 Leg 5): list by keyId + Mint + per-row Revoke. Access keys are
-    // a JAR concept — the manager-wide Global vault has none, so it gets no access-key subsection.
+    // Access-key management (M12 F3 Leg 5): a jar-only fourth subsection — Add(=Mint) + list +
+    // per-row Revoke. The manager-wide Global vault has none.
     if (entry.kind === 'jar') {
       section.appendChild(buildAccessKeysSection({ vaultId, label: entry.label }));
     }
 
     return section;
+  }
+
+  /**
+   * Render the defensive "Other items" subsection: a visible row per unknown-type item + a
+   * console warning, so nothing the partition could not bucket is silently lost.
+   * @param {{ subsection: HTMLElement, list: HTMLElement }} sub
+   * @param {Array<any>} items
+   */
+  function renderUnknownItems(sub, items) {
+    sub.list.textContent = '';
+    if (!items || !items.length) { sub.subsection.hidden = true; return; }
+    sub.subsection.hidden = false;
+    for (const meta of items) {
+      console.warn('vault: unknown item type surfaced, not dropped:', meta && meta.type);
+      const li = el('li', 'vault-item-row');
+      const info = el('div', 'vault-item-info');
+      info.appendChild(el('span', 'vault-item-title', (meta && meta.title) || '(untitled)'));
+      info.appendChild(el('span', 'vault-item-sub',
+        `Unknown item${meta && meta.type ? ` (${meta.type})` : ''}`));
+      li.appendChild(info);
+      sub.list.appendChild(li);
+    }
   }
 
   /**
@@ -842,9 +1007,11 @@ function init() {
     const h3 = el('h3', 'vault-accesskeys-title', 'Access keys');
     h3.id = headingId;
     head.appendChild(h3);
-    // Mint → the chrome-owned vault-stepup sheet (page → main → chrome). NO secret is entered
-    // or shown here; the minted secret appears only on the chrome-owned accesskey-show sheet.
-    head.appendChild(button('Mint access key', 'vault-btn', () => {
+    // Add = Mint (DD-B label uniformity: every subsection's create control reads "Add"; the
+    // aria-label stays "Mint access key" for the true action). Routes to the chrome-owned
+    // vault-stepup sheet (page → main → chrome). NO secret is entered or shown here; the minted
+    // secret appears only on the chrome-owned accesskey-show sheet.
+    head.appendChild(iconButton('add', 'Mint access key', () => {
       Promise.resolve(bridge.requestMint(v.vaultId)).catch(() => {});
     }));
     akSection.appendChild(head);
@@ -867,7 +1034,8 @@ function init() {
 
   /**
    * Render a vault's access-key rows (keyId + Revoke). keyId via textContent only (a
-   * plaintext envelope fingerprint — no secret). Revoke is immediate; the list re-fetches.
+   * plaintext envelope fingerprint — no secret). Revoke now requires a confirm modal (DD-B —
+   * revoking breaks live automation); on confirm the list re-fetches.
    * @param {HTMLElement} list
    * @param {Array<{ keyId: string }>} keys
    * @param {string} vaultId
@@ -883,49 +1051,113 @@ function init() {
       const li = el('li', 'vault-accesskey-row');
       li.dataset.keyId = k.keyId;
       li.appendChild(el('span', 'vault-accesskey-id', k.keyId));
-      li.appendChild(button('Revoke', 'vault-btn danger small', () => {
-        Promise.resolve(bridge.vaultAccessKeyRevoke({ vaultId, keyId: k.keyId })).then((res) => {
-          if (!res || res.locked) { refresh(); return; }
-          refreshKeys();
-        }).catch(() => {});
-      }));
+      li.appendChild(iconButton('trash', `Revoke access key ${k.keyId}`, () => {
+        openRevokeConfirm({ vaultId, keyId: k.keyId, refreshKeys });
+      }, { danger: true }));
       list.appendChild(li);
     }
   }
 
   /**
+   * The delete-item confirm modal (DD-C: reuse openModal, a message body + a danger submit). The
+   * per-row Delete opens this DIRECTLY (no editor open at the time — no modal nesting). Only on
+   * confirm does it call vaultItemDelete; a { locked } race closes the modal + refreshes.
+   * @param {{ vaultId: string, itemId: string, title: string }} args
+   */
+  function openDeleteConfirm({ vaultId, itemId, title }) {
+    const body = el('div', 'vault-modal-form');
+    const msg = el('p', 'vault-confirm-message');
+    msg.appendChild(document.createTextNode('Permanently delete '));
+    msg.appendChild(el('strong', 'vault-confirm-name', title)); // attacker-influenced → textContent
+    msg.appendChild(document.createTextNode('? This can’t be undone.'));
+    body.appendChild(msg);
+
+    const handle = openModal({
+      title: 'Delete item',
+      body,
+      submitLabel: 'Delete',
+      submitEnabled: true,
+      danger: true,
+      onSubmit: () => {
+        handle.setSubmitEnabled(false);
+        Promise.resolve(bridge.vaultItemDelete({ vaultId, itemId })).then((res) => {
+          if (!res || res.locked) { handle.close(); refresh(); return; }
+          handle.close();
+          refresh();
+        }).catch(() => {
+          handle.setStatus('Could not delete the item.');
+          handle.setSubmitEnabled(true);
+        });
+      },
+    });
+  }
+
+  /**
+   * The revoke-access-key confirm modal (DD-B). Same shape as the delete confirm: a naming
+   * message + a danger "Revoke" submit; on confirm calls vaultAccessKeyRevoke and re-fetches the
+   * list (a { locked } race refreshes the page).
+   * @param {{ vaultId: string, keyId: string, refreshKeys: () => void }} args
+   */
+  function openRevokeConfirm({ vaultId, keyId, refreshKeys }) {
+    const body = el('div', 'vault-modal-form');
+    const msg = el('p', 'vault-confirm-message');
+    msg.appendChild(document.createTextNode('Revoke access key '));
+    msg.appendChild(el('strong', 'vault-confirm-name', keyId));
+    msg.appendChild(document.createTextNode('? Any automation using it will stop working.'));
+    body.appendChild(msg);
+
+    const handle = openModal({
+      title: 'Revoke access key',
+      body,
+      submitLabel: 'Revoke',
+      submitEnabled: true,
+      danger: true,
+      onSubmit: () => {
+        handle.setSubmitEnabled(false);
+        Promise.resolve(bridge.vaultAccessKeyRevoke({ vaultId, keyId })).then((res) => {
+          if (!res || res.locked) { handle.close(); refresh(); return; }
+          handle.close();
+          refreshKeys();
+        }).catch(() => {
+          handle.setStatus('Could not revoke the access key.');
+          handle.setSubmitEnabled(true);
+        });
+      },
+    });
+  }
+
+  /**
+   * Render ONE typed subsection's item rows (M12 F5 HAT). `items` is already partitioned to a
+   * single type. Each row shows its info (title, sub, scheme-guarded origin link — all
+   * textContent) plus a row-actions group: an Edit button (opens the edit modal) + a Delete
+   * button (opens a confirm modal). Delete lives on the row now, OFF the editor. DD-A: an empty
+   * subsection still renders its empty state (Add stays reachable in the head above).
    * @param {HTMLElement} list
    * @param {Array<any>} items
    * @param {string} vaultId
-   * @param {HTMLElement} editorHost
+   * @param {string} emptyText
    */
-  function renderItems(list, items, vaultId, editorHost) {
+  function renderItems(list, items, vaultId, emptyText) {
     list.textContent = '';
-    if (!items.length) {
-      list.appendChild(el('li', 'vault-empty', 'No items yet.'));
+    if (!items || !items.length) {
+      list.appendChild(el('li', 'vault-empty', emptyText || 'No items yet.'));
       return;
     }
     for (const meta of items) {
       const li = el('li', 'vault-item-row');
       li.dataset.itemId = meta.id;
 
-      const openBtn = /** @type {HTMLButtonElement} */ (el('button', 'vault-item-open'));
-      openBtn.type = 'button';
-      openBtn.appendChild(el('span', 'vault-item-title', meta.title || '(untitled)'));
-      openBtn.appendChild(el('span', 'vault-item-type', meta.type));
+      // Item info (textContent-only). No open-button now — Edit opens the editor modal.
+      const info = el('div', 'vault-item-info');
+      info.appendChild(el('span', 'vault-item-title', meta.title || '(untitled)'));
       const sub = meta.type === 'login'
         ? (meta.username || '')
         : (meta.type === 'card' ? (meta.last4 ? `•••• ${meta.last4}` : '') : '');
-      if (sub) openBtn.appendChild(el('span', 'vault-item-sub', sub));
-      openBtn.addEventListener('click', () => {
-        openEditor(editorHost, { vaultId, meta, type: meta.type });
-      });
-      li.appendChild(openBtn);
+      if (sub) info.appendChild(el('span', 'vault-item-sub', sub));
 
-      // The origin is an attacker-influenced string: render it as a link ONLY when
-      // its scheme is http/https (a `javascript:` href executes even without
-      // innerHTML); otherwise render it as inert text. Kept OUTSIDE the open button
-      // (an anchor must not nest inside a button).
+      // The origin is an attacker-influenced string: render it as a link ONLY when its scheme
+      // is http/https (a `javascript:` href executes even without innerHTML); otherwise render
+      // it as inert text. Kept OUTSIDE any button (an anchor must not nest inside a button).
       if (meta.type === 'login' && meta.origin) {
         const href = safeHttpUrl(meta.origin);
         if (href) {
@@ -933,30 +1165,54 @@ function init() {
           a.href = href;
           a.rel = 'noreferrer noopener';
           a.target = '_blank';
-          li.appendChild(a);
+          info.appendChild(a);
         } else {
-          li.appendChild(el('span', 'vault-item-origin', meta.origin));
+          info.appendChild(el('span', 'vault-item-origin', meta.origin));
         }
       }
+      li.appendChild(info);
+
+      // Row actions: Edit + Delete sit together with NO divider (CSS). Edit opens the edit
+      // modal; Delete opens a confirm modal (delete moved OFF the editor).
+      const actions = el('div', 'vault-item-actions');
+      actions.appendChild(iconButton('edit', `Edit ${meta.title || 'item'}`, () => {
+        openEditor({ vaultId, meta, type: meta.type });
+      }));
+      actions.appendChild(iconButton('trash', `Delete ${meta.title || 'item'}`, () => {
+        openDeleteConfirm({ vaultId, itemId: meta.id, title: meta.title || '(untitled)' });
+      }, { danger: true }));
+      li.appendChild(actions);
+
       list.appendChild(li);
     }
   }
 
   /**
-   * Render the full-item editor into the given section's INLINE host.
-   * @param {HTMLElement} host
+   * Open the full-item editor AS A MODAL (M12 F5 HAT hat-vault-item-organization). The rich form
+   * (non-secret fields, masked secret fields via buildSecretField, the TOTP widget, login
+   * matchMode + password generator) renders in openModal's body; Save is the modal submit,
+   * Cancel/Esc/backdrop the dismiss. Delete now lives on the row, NOT in the editor.
+   *
+   * DD6 SECURITY (design-review HIGH — trace ALL FIVE exit paths: Save-success, Cancel, Esc,
+   * backdrop, idle-lock re-render). openModal's own close() drains NOTHING (no onCancel, no wipe),
+   * and the idle-lock path reaches it via render()→closeActivePageModal(). So teardown is routed
+   * through the `editorCleanups` REGISTRY — the same choke point render() drains BEFORE it closes
+   * the modal (while it is still attached):
+   *   - a `() => wipeSecretInputs(secretInputs)` cleanup is registered at build time (alongside
+   *     the TOTP widget's own registered cleanup) — so every drain zeroes every secret input;
+   *   - onSubmit (after a successful save) and onCancel (Esc/backdrop/Cancel) call
+   *     runEditorCleanups() — draining the wipe + the TOTP poll/listeners — and then close;
+   *   - the leading runEditorCleanups() below runs BEFORE openModal's preempting
+   *     closeActivePageModal(), so a prior editor modal can never be detached with un-drained
+   *     cleanups; render()'s existing runEditorCleanups() (before closeActivePageModal) covers
+   *     the idle-lock path. handle.close() is ONLY the backdrop-removal + focus-return.
    * @param {{ vaultId: string, meta: any, type: string }} args
    */
-  function openEditor(host, { vaultId, meta, type }) {
-    runEditorCleanups(); // tear down any prior editor's live TOTP widget before reopening.
-    // Single-open: if an editor is open in another section, clear its host first (the shared-host
-    // model gave this for free; per-section hosts need it explicit). runEditorCleanups above has
-    // already drained that editor's timers/listeners.
-    if (activeEditorHost && activeEditorHost !== host) {
-      activeEditorHost.textContent = '';
-      activeEditorHost.hidden = true;
-    }
-    activeEditorHost = host;
+  function openEditor({ vaultId, meta, type }) {
+    // Drain any prior editor's live TOTP widget + registered secret-wipe BEFORE openModal's
+    // preempting closeActivePageModal() detaches it (close() drains nothing). openModal enforces
+    // single-open thereafter.
+    runEditorCleanups();
     const isNew = !meta;
     const itemType = isNew ? type : meta.type;
     const layout = EDITOR_LAYOUT[itemType];
@@ -969,14 +1225,11 @@ function init() {
     /** @type {Record<string, HTMLInputElement>} */
     const nonSecretInputs = {};
 
-    host.textContent = '';
-    host.hidden = false;
-
     const form = /** @type {HTMLFormElement} */ (el('form', 'vault-editor'));
     form.setAttribute('aria-label', isNew ? `New ${itemType}` : `Edit ${itemType}`);
+    // A page-nav-free submit: openModal's Save is the real action; this only stops an Enter
+    // keypress in a text field from reloading the served page.
     form.addEventListener('submit', (e) => e.preventDefault());
-
-    form.appendChild(el('h3', 'vault-editor-title', isNew ? `New ${itemType}` : `Edit ${itemType}`));
 
     // Non-secret fields (from metadata; blank for a new item).
     for (const spec of layout.nonSecret) {
@@ -1010,53 +1263,47 @@ function init() {
       form.appendChild(row);
     }
 
-    // Secret fields (masked; per-field reveal + copy on an existing item).
+    // Secret fields (masked; per-field reveal + copy on an existing item). buildTotpWidget (for an
+    // existing login with a seed) pushes its own poll/listener teardown into editorCleanups.
     const hasTotp = !isNew && itemType === 'login' && !!(meta && meta.hasTotp);
     for (const spec of layout.secret) {
       form.appendChild(buildSecretField(spec, { vaultId, isNew, itemId: meta && meta.id, secretStates, secretInputs, hasTotp }));
     }
 
-    // Actions.
-    const actions = el('div', 'vault-editor-actions');
-    const status = el('p', 'vault-editor-status');
-    status.setAttribute('role', 'status');
+    // DD6 crux: register the secret-input WIPE into the editorCleanups registry (today it was
+    // only called imperatively in Save/Cancel). Now EVERY drain — onSubmit, onCancel, AND the
+    // render()/idle-lock path (which runs runEditorCleanups() while the modal is still attached,
+    // before closeActivePageModal()) — zeroes the inputs.
+    editorCleanups.push(() => wipeSecretInputs(secretInputs));
 
-    actions.appendChild(button('Save', 'vault-btn primary', () => {
-      const nonSecretValues = {};
-      for (const [name, input] of Object.entries(nonSecretInputs)) nonSecretValues[name] = input.value;
-      const matchMode = matchModeCheckbox && matchModeCheckbox.checked ? 'registrable-domain' : 'exact';
-      const { item, unchangedSecrets } = assembleSave({
-        type: itemType, id: meta && meta.id, nonSecretValues, secretStates, matchMode,
-      });
-      wipeSecretInputs(secretInputs); // clear-on-save DOM hygiene
-      bridge.vaultItemSave({ vaultId, item, unchangedSecrets }).then((res) => {
-        if (!res || res.locked) { refresh(); return; }
-        closeEditor(host);
-        refresh();
-      }).catch(() => { status.textContent = 'Could not save.'; });
-    }));
-
-    if (!isNew) {
-      actions.appendChild(button('Delete', 'vault-btn danger', () => {
-        bridge.vaultItemDelete({ vaultId, itemId: meta.id }).then((res) => {
-          if (!res || res.locked) { refresh(); return; }
-          closeEditor(host);
+    const handle = openModal({
+      title: isNew ? `New ${itemType}` : `Edit ${itemType}`,
+      body: form,
+      submitLabel: 'Save',
+      submitEnabled: true,
+      onSubmit: () => {
+        const nonSecretValues = {};
+        for (const [name, input] of Object.entries(nonSecretInputs)) nonSecretValues[name] = input.value;
+        const matchMode = matchModeCheckbox && matchModeCheckbox.checked ? 'registrable-domain' : 'exact';
+        const { item, unchangedSecrets } = assembleSave({
+          type: itemType, id: meta && meta.id, nonSecretValues, secretStates, matchMode,
+        });
+        // Synchronous pre-roundtrip wipe (shrinks the reveal window) — IN ADDITION to the
+        // registered cleanup drained just below on success.
+        wipeSecretInputs(secretInputs);
+        Promise.resolve(bridge.vaultItemSave({ vaultId, item, unchangedSecrets })).then((res) => {
+          if (!res || res.locked) { runEditorCleanups(); handle.close(); refresh(); return; }
+          runEditorCleanups(); // drain the registered wipe + TOTP teardown BEFORE close.
+          handle.close();
           refresh();
-        }).catch(() => { status.textContent = 'Could not delete.'; });
-      }));
-    }
-
-    actions.appendChild(button('Cancel', 'vault-btn', () => {
-      wipeSecretInputs(secretInputs);
-      closeEditor(host);
-    }));
-
-    form.appendChild(actions);
-    form.appendChild(status);
-    host.appendChild(form);
-    host.scrollIntoView({ block: 'nearest' });
-    const firstInput = form.querySelector('input, textarea');
-    if (firstInput) /** @type {HTMLElement} */ (firstInput).focus();
+        }).catch(() => { handle.setStatus('Could not save.'); });
+      },
+      onCancel: () => {
+        // Esc / backdrop / Cancel: drain the registry (the registered wipe zeroes every secret
+        // input; the TOTP cleanup stops the poll + removes its listeners) BEFORE openModal closes.
+        runEditorCleanups();
+      },
+    });
   }
 
   /**
@@ -1096,17 +1343,28 @@ function init() {
       }
     });
 
-    row.appendChild(input);
+    // The input + its in-field controls share a relative wrapper so Reveal/Copy overlay the
+    // input's right edge and surface on hover / keyboard focus (CSS :hover / :focus-within).
+    const wrap = el('div', 'vault-secret-wrap' + (multiline ? ' multiline' : ''));
+    wrap.appendChild(input);
 
     /** @type {HTMLButtonElement|null} */
     let revealBtn = null;
+    // Toggle the reveal button's GLYPH (eye ↔ eye-off) + its accessible name/tooltip. Named
+    // setRevealLabel because buildGeneratorControls passes it as the post-generate relabel hook.
     function setRevealLabel() {
-      if (revealBtn) revealBtn.textContent = ctx.secretStates[name].revealed ? 'Hide' : 'Reveal';
+      if (!revealBtn) return;
+      const revealed = ctx.secretStates[name].revealed;
+      revealBtn.replaceChildren(buildIconSvg(revealed ? 'eye-off' : 'eye'));
+      const lbl = revealed ? 'Hide' : 'Reveal';
+      revealBtn.setAttribute('aria-label', lbl);
+      revealBtn.title = lbl;
     }
 
     if (!ctx.isNew) {
-      const controls = el('div', 'vault-field-controls');
-      revealBtn = button('Reveal', 'vault-btn small', () => {
+      wrap.classList.add('has-controls');
+      const controls = el('div', 'vault-secret-controls');
+      revealBtn = iconButton('eye', 'Reveal', () => {
         const st = ctx.secretStates[name];
         if (st.revealed) {
           // Hide → clear plaintext from the DOM + re-mask.
@@ -1128,15 +1386,17 @@ function init() {
 
       // Copy fetches the current stored secret and writes it to the OS clipboard
       // WITHOUT putting it in the DOM (reuses the existing clipboard:write sink).
-      controls.appendChild(button('Copy', 'vault-btn small', () => {
+      controls.appendChild(iconButton('copy', 'Copy', () => {
         bridge.vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId }).then((res) => {
           if (!res || res.locked) { refresh(); return; }
           const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
           bridge.clipboardWrite(secret);
         }).catch(() => {});
       }));
-      row.appendChild(controls);
+      wrap.appendChild(controls);
     }
+
+    row.appendChild(wrap);
 
     // A secret field may carry extra affordances BELOW its input row: the password
     // field gets a Generate control; an existing login's totp field gets a live code
@@ -1315,14 +1575,6 @@ function init() {
     }
   }
 
-  /** @param {HTMLElement} host */
-  function closeEditor(host) {
-    runEditorCleanups();
-    host.textContent = '';
-    host.hidden = true;
-    if (activeEditorHost === host) activeEditorHost = null;
-  }
-
   /**
    * The "Vaults" group header section (M12 F5 HAT batch). A short top-level section that titles
    * the group of per-vault subsections that follow it as siblings — the nav's "Vaults" parent
@@ -1350,8 +1602,11 @@ function init() {
    * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown }} state
    */
   function render(state) {
-    runEditorCleanups(); // clearing #vault-root orphans any live TOTP widget's timers.
-    activeEditorHost = null; // the per-section hosts are rebuilt below; drop the stale reference.
+    // DD6 (design-review HIGH): drain the editor-cleanup registry BEFORE closeActivePageModal()
+    // below, while any open editor modal is STILL attached — this zeroes its secret inputs (the
+    // registered wipe) and stops its TOTP poll on the idle-lock re-render path (openModal's own
+    // close() runs neither onCancel nor a wipe, so this is the only teardown on that path).
+    runEditorCleanups(); // also: clearing #vault-root would orphan any live TOTP widget's timers.
     accessKeyRefreshers = []; // clearing #vault-root drops the prior sections' refreshers.
     // M5: an Import/Export modal lives on document.body (not #vault-root) so it survives this
     // re-render. Close it here — otherwise an idle auto-lock mid-modal fires onVaultLockState →

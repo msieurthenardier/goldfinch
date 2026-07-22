@@ -361,68 +361,118 @@ main {
   margin: 0;
 }
 
-.vault-type-select {
-  background: var(--bg-2);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 13px;
-  font-family: inherit;
+/* Title row (M12 F5 HAT hat-vault-item-organization): a jar color dot (or the Global globe icon)
+   + the vault name, replacing the old "Label (count)" heading. */
+.vault-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.vault-type-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.vault-title-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.vault-title-globe {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--fg-dim);
+}
+.vault-title-name {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Per-type item subsections (Logins / Cards / Notes / Other items) under a vault's title row.
+   They reuse .vault-subsection rhythm but sit flush-left within the already-indented vault
+   section (no second indent). */
+.vault-type-subsection {
+  margin-top: 18px;
+  padding-left: 0;
 }
 
 .vault-item-list {
   list-style: none;
-  margin: 0 0 20px;
+  margin: 8px 0 0;
   padding: 0;
 }
 
+/* Item rows read as a clean list — NO per-row separator line (it made rows look like the type
+   header). Distinction comes from the type header's label styling + the item title weight. */
 .vault-item-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 7px 0;
 }
 
-.vault-item-open {
+/* Scope ONLY the per-type subsection heads (Logins / Cards / Notes / Access keys / Other) —
+   NOT the Settings subsections. The type header is the DOMINANT label in its group (bold,
+   full-color); the item titles below it are lighter (see .vault-item-title) so the group reads
+   header → entries, not the reverse. */
+.vault-type-subsection > .vault-subsection-head > .vault-subsection-title,
+.vault-accesskeys > .vault-accesskeys-head > .vault-accesskeys-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+/* Left side: the item's info (title, sub, scheme-guarded origin link) — grows to fill; the
+   row-actions group sits flush right. */
+.vault-item-info {
   flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 10px;
-  min-width: 0;
-  background: none;
-  border: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  padding: 12px 0;
+  flex-wrap: wrap;
+}
+
+/* Row actions: Edit + Delete sit TOGETHER with no divider between them (operator design). */
+.vault-item-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Icon buttons (Add / Edit / Delete / Revoke) — a square glyph button with a subtle hover,
+   mirroring the kebab-button treatment. The visible label is the SVG; the accessible name is
+   the aria-label/title set in iconButton(). `danger` tints the destructive ones red. */
+.vault-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
-.vault-item-open:hover .vault-item-title {
-  color: var(--accent);
+.vault-icon-btn:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+  border-color: var(--accent);
 }
-.vault-item-open:focus-visible {
+.vault-icon-btn.danger:hover {
+  color: var(--err);
+  border-color: var(--err);
+}
+.vault-icon-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .vault-item-title {
-  font-weight: 600;
+  font-weight: 500;
   word-break: break-word;
-}
-.vault-item-type {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--accent-fg);
-  background: var(--accent);
-  border-radius: 4px;
-  padding: 1px 6px;
-  flex: 0 0 auto;
 }
 .vault-item-sub {
   color: var(--fg-dim);
@@ -442,33 +492,12 @@ a.vault-item-origin:hover {
   color: var(--accent);
 }
 
-/* ── Editor ── */
-/* The inline editor host lives INSIDE the vault section that triggered it (M12 F5 acceptance):
-   Add/Edit renders here, between the add-row and the item list, not in a shared host floated to
-   the page top. Empty until opened; the margin only applies while it holds a form. */
-.vault-editor-host {
-  margin: 4px 0 16px;
-}
-.vault-editor-host:empty {
-  margin: 0;
-}
-/* A self-contained card, constrained so its fields don't stretch the full content column.
-   bg-2 over the section's bg reads as a distinct inset panel; the subtle shadow lifts it. */
+/* ── Editor (now a MODAL body — M12 F5 HAT hat-vault-item-organization) ──
+   The item editor renders as the body of openModal (no more inline host). It is a plain form:
+   the modal card supplies the panel chrome, the title, scrolling (max-height + overflow-y on the
+   card), and the Save/Cancel actions row — so the form drops its former inset-card styling. */
 .vault-editor {
-  max-width: 460px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 18px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-.vault-editor-title {
-  margin: 0 0 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 15px;
-  font-weight: 600;
-  text-transform: capitalize;
+  display: block;
 }
 
 .vault-field {
@@ -476,10 +505,7 @@ a.vault-item-origin:hover {
   margin-bottom: 14px;
 }
 .vault-field-secret {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: 8px;
+  display: block;
 }
 .vault-field-label {
   display: block;
@@ -487,9 +513,48 @@ a.vault-item-origin:hover {
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
-.vault-field-controls {
+
+/* Secret input + its in-field Reveal/Copy icon controls (operator design). The controls overlay
+   the input's right edge and appear on hover / keyboard focus (focus-within) so a resting field
+   reads clean; each control carries an input-matching backing so a revealed secret never shows
+   through the glyphs. */
+.vault-secret-wrap {
+  position: relative;
+}
+.vault-secret-wrap.has-controls .vault-input {
+  padding-right: 62px;
+}
+.vault-secret-controls {
+  position: absolute;
+  top: 0;
+  right: 5px;
+  height: 100%;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+.vault-secret-wrap.multiline .vault-secret-controls {
+  height: auto;
+  top: 5px;
+}
+.vault-secret-wrap:hover .vault-secret-controls,
+.vault-secret-wrap:focus-within .vault-secret-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+.vault-secret-controls .vault-icon-btn {
+  width: 26px;
+  height: 26px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+}
+.vault-secret-controls .vault-icon-btn:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 /* Per-credential match-mode toggle (M12 F4 Leg 4 / DD5) — a checkbox + label + hint. */
@@ -637,20 +702,6 @@ textarea.vault-input {
   font-size: 12px;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
-}
-
-.vault-editor-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-}
-.vault-editor-status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--err);
-}
-.vault-editor-status:empty {
-  display: none;
 }
 
 /* ── Access keys + auto-lock (Leg 5, flight DD5) ── */
@@ -842,6 +893,19 @@ textarea.vault-input {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* Delete / Revoke confirm modal body: a single naming message (the item title / keyId is
+   attacker-influenced → rendered via textContent). Paired with a danger submit. */
+.vault-confirm-message {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.vault-confirm-name {
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-word;
 }
 .vault-modal-form .vault-settings-field {
   align-items: baseline;
