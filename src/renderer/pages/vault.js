@@ -114,6 +114,14 @@ function init() {
     }
   }
 
+  // Single-open enforcement (M12 F5 acceptance): each vault section now owns its own
+  // INLINE editor host (so Add/Edit renders within the section that triggered it,
+  // not a shared host floated to the top of the page). The old shared-host model gave
+  // single-open for free — with per-section hosts we track the currently-open one and
+  // clear it when an editor opens elsewhere. Reset per render (the hosts are rebuilt).
+  /** @type {HTMLElement|null} */
+  let activeEditorHost = null;
+
   // Access-key list refreshers (M12 F3 Leg 5). Each unlocked vault section registers a
   // cheap re-fetch of its access-key list here (a metadata-only read — envelope keyIds, no
   // item decrypt). A single window-focus listener (below) drains them so the list refreshes
@@ -439,13 +447,13 @@ function init() {
   }
 
   /**
-   * A per-vault section while the manager is UNLOCKED — the vault's item list + editor host, plus
-   * (jars only) its access keys. Carries the section id `vault-<vaultId>` so the nav entry jumps
-   * here. Export moved to Settings > master-key management (per the operator design).
+   * A per-vault section while the manager is UNLOCKED — the vault's item list + an INLINE
+   * editor host, plus (jars only) its access keys. Carries the section id `vault-<vaultId>`
+   * so the nav entry jumps here. Export moved to Settings > master-key management (per the
+   * operator design).
    * @param {{ id: string, kind: string, label: string, count?: number }} entry
-   * @param {HTMLElement} editorHost
    */
-  function buildVaultSection(entry, editorHost) {
+  function buildVaultSection(entry) {
     const vaultId = entry.id;
     const section = el('section', 'vault-section vault-child-section');
     section.id = `vault-${vaultId}`;
@@ -459,7 +467,14 @@ function init() {
     h3.id = headingId;
     header.appendChild(h3);
 
-    // Add-item control: a type picker + Add button → a blank editor.
+    // Per-section INLINE editor host (M12 F5 acceptance): Add/Edit renders HERE, within the
+    // section that triggered it — not into a shared host floated to the page top. Sits right
+    // after the add-row and before the item list. Single-open across sections is enforced in
+    // openEditor (which clears any other section's open host).
+    const editorHost = el('div', 'vault-editor-host');
+    editorHost.hidden = true;
+
+    // Add-item control: a type picker + Add button → a blank editor in THIS section's host.
     const picker = /** @type {HTMLSelectElement} */ (el('select', 'vault-type-select'));
     picker.setAttribute('aria-label', `New item type for ${entry.label}`);
     for (const [type] of Object.entries(EDITOR_LAYOUT)) {
@@ -472,6 +487,7 @@ function init() {
       openEditor(editorHost, { vaultId, meta: null, type: picker.value });
     }));
     section.appendChild(header);
+    section.appendChild(editorHost);
 
     const list = el('ul', 'vault-item-list');
     list.setAttribute('role', 'list');
@@ -612,12 +628,20 @@ function init() {
   }
 
   /**
-   * Render the full-item editor into the shared host.
+   * Render the full-item editor into the given section's INLINE host.
    * @param {HTMLElement} host
    * @param {{ vaultId: string, meta: any, type: string }} args
    */
   function openEditor(host, { vaultId, meta, type }) {
     runEditorCleanups(); // tear down any prior editor's live TOTP widget before reopening.
+    // Single-open: if an editor is open in another section, clear its host first (the shared-host
+    // model gave this for free; per-section hosts need it explicit). runEditorCleanups above has
+    // already drained that editor's timers/listeners.
+    if (activeEditorHost && activeEditorHost !== host) {
+      activeEditorHost.textContent = '';
+      activeEditorHost.hidden = true;
+    }
+    activeEditorHost = host;
     const isNew = !meta;
     const itemType = isNew ? type : meta.type;
     const layout = EDITOR_LAYOUT[itemType];
@@ -832,6 +856,13 @@ function init() {
   function buildGeneratorControls(input, secretStates, name, afterSet) {
     const gen = el('div', 'vault-generator');
 
+    // The character-class toggles are populated in row 2 below; declared up here so the
+    // Generate handler in row 1 can read them (they are set before any click can fire).
+    /** @type {Record<string, HTMLInputElement>} */
+    const classToggles = {};
+
+    // Row 1: Length on the left, Generate on the right — the two "actions" of the widget.
+    const topRow = el('div', 'vault-gen-row');
     const lenLabel = el('label', 'vault-gen-len');
     lenLabel.appendChild(el('span', 'vault-gen-len-label', 'Length'));
     const lenInput = /** @type {HTMLInputElement} */ (el('input', 'vault-gen-len-input'));
@@ -840,26 +871,12 @@ function init() {
     lenInput.max = '128';
     lenInput.value = '20';
     lenLabel.appendChild(lenInput);
-    gen.appendChild(lenLabel);
-
-    /** @type {Record<string, HTMLInputElement>} */
-    const classToggles = {};
-    const CLASS_LABELS = { lower: 'a-z', upper: 'A-Z', digits: '0-9', symbols: '!@#' };
-    for (const cls of CLASS_NAMES) {
-      const wrap = el('label', 'vault-gen-class');
-      const cb = /** @type {HTMLInputElement} */ (el('input'));
-      cb.type = 'checkbox';
-      cb.checked = true;
-      classToggles[cls] = cb;
-      wrap.appendChild(cb);
-      wrap.appendChild(el('span', undefined, CLASS_LABELS[cls] || cls));
-      gen.appendChild(wrap);
-    }
+    topRow.appendChild(lenLabel);
 
     const status = el('span', 'vault-gen-status');
     status.setAttribute('role', 'status');
 
-    gen.appendChild(button('Generate', 'vault-btn small', () => {
+    topRow.appendChild(button('Generate', 'vault-btn small', () => {
       const opts = { length: Number(lenInput.value) };
       for (const cls of CLASS_NAMES) opts[cls] = classToggles[cls].checked;
       let generated;
@@ -875,6 +892,24 @@ function init() {
       secretStates[name] = editState(secretStates[name], generated);
       afterSet();
     }));
+    gen.appendChild(topRow);
+
+    // Row 2: the character-class toggles, grouped on one line so the four checkboxes read
+    // as a single "include" control rather than four loose boxes wrapping among buttons.
+    const classRow = el('div', 'vault-gen-classes');
+    classRow.appendChild(el('span', 'vault-gen-classes-label', 'Include'));
+    const CLASS_LABELS = { lower: 'a-z', upper: 'A-Z', digits: '0-9', symbols: '!@#' };
+    for (const cls of CLASS_NAMES) {
+      const wrap = el('label', 'vault-gen-class');
+      const cb = /** @type {HTMLInputElement} */ (el('input'));
+      cb.type = 'checkbox';
+      cb.checked = true;
+      classToggles[cls] = cb;
+      wrap.appendChild(cb);
+      wrap.appendChild(el('span', undefined, CLASS_LABELS[cls] || cls));
+      classRow.appendChild(wrap);
+    }
+    gen.appendChild(classRow);
     gen.appendChild(status);
     return gen;
   }
@@ -970,6 +1005,7 @@ function init() {
     runEditorCleanups();
     host.textContent = '';
     host.hidden = true;
+    if (activeEditorHost === host) activeEditorHost = null;
   }
 
   /**
@@ -1000,6 +1036,7 @@ function init() {
    */
   function render(state) {
     runEditorCleanups(); // clearing #vault-root orphans any live TOTP widget's timers.
+    activeEditorHost = null; // the per-section hosts are rebuilt below; drop the stale reference.
     accessKeyRefreshers = []; // clearing #vault-root drops the prior sections' refreshers.
     const view = selectVaultView(state);
     root.textContent = '';
@@ -1018,16 +1055,12 @@ function init() {
     // Settings section first.
     root.appendChild(buildSettingsSection(view));
 
-    // A single editor host reused by every unlocked vault section; hidden until opened.
-    const editorHost = el('div', 'vault-editor-host');
-    editorHost.hidden = true;
-    if (view.mode === 'unlocked') root.appendChild(editorHost);
-
     // The Vaults group header, then one subsection per vault (the group entry's children).
+    // Each unlocked vault section builds its OWN inline editor host (M12 F5 acceptance).
     root.appendChild(buildVaultsGroupSection());
     const group = entries.find((e) => e.kind === 'group');
     for (const child of (group && group.children) || []) {
-      if (view.mode === 'unlocked') root.appendChild(buildVaultSection(child, editorHost));
+      if (view.mode === 'unlocked') root.appendChild(buildVaultSection(child));
       else root.appendChild(buildLockedVaultSection(child));
     }
 

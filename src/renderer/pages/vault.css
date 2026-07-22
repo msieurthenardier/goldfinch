@@ -443,24 +443,37 @@ a.vault-item-origin:hover {
 }
 
 /* ── Editor ── */
+/* The inline editor host lives INSIDE the vault section that triggered it (M12 F5 acceptance):
+   Add/Edit renders here, between the add-row and the item list, not in a shared host floated to
+   the page top. Empty until opened; the margin only applies while it holds a form. */
 .vault-editor-host {
-  margin-bottom: 24px;
+  margin: 4px 0 16px;
 }
+.vault-editor-host:empty {
+  margin: 0;
+}
+/* A self-contained card, constrained so its fields don't stretch the full content column.
+   bg-2 over the section's bg reads as a distinct inset panel; the subtle shadow lifts it. */
 .vault-editor {
+  max-width: 460px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px 20px;
+  padding: 18px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 .vault-editor-title {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
   font-size: 15px;
+  font-weight: 600;
   text-transform: capitalize;
 }
 
 .vault-field {
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .vault-field-secret {
   display: grid;
@@ -531,17 +544,25 @@ textarea.vault-input {
   color: var(--accent-fg);
 }
 
-/* ── Password generator (Leg 3, DD7) ── */
+/* ── Password generator (Leg 3, DD7) ──
+   Two tidy rows inside one inset panel: (1) Length + Generate, spaced apart; (2) the four
+   character-class toggles grouped behind an "Include" label. Regrouped from the old single
+   wrapping row — the busiest part of the editor now reads as a clean, self-contained widget. */
 .vault-generator {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: -4px 0 12px;
-  padding: 8px 10px;
+  flex-direction: column;
+  gap: 10px;
+  margin: -4px 0 14px;
+  padding: 10px 12px;
   background: var(--bg-3);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+.vault-gen-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .vault-gen-len {
   display: flex;
@@ -551,7 +572,7 @@ textarea.vault-input {
   color: var(--fg-dim);
 }
 .vault-gen-len-input {
-  width: 60px;
+  width: 64px;
   background: var(--bg-2);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -564,12 +585,23 @@ textarea.vault-input {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+.vault-gen-classes {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.vault-gen-classes-label {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
 .vault-gen-class {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 12px;
   color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
 }
 .vault-gen-status {
   color: var(--err);
