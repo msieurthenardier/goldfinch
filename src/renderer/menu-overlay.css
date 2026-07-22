@@ -269,6 +269,10 @@ body {
 }
 .new-container-inner {
   background: var(--bg-3);
+  color: var(--fg); /* root-cause dark-theme fix (HAT): the card bg is dark but text had no
+                       color → uncolored children (headings/ledes) inherited UA-default black.
+                       Fixes ALL modal sheets at once (step-up, set, unlock, change-master,
+                       recover, import) — supersedes the per-display-sheet patches below. */
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px 16px;
