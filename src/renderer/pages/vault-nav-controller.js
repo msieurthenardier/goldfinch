@@ -249,7 +249,12 @@ export function createVaultNav(deps) {
           return;
         }
       }
-    }, { rootMargin: '0px 0px -50% 0px', threshold: 0 });
+      // Top inset (-48px) must exceed .vault-section's scroll-margin-top (24px in
+      // vault.css): an anchor jump lands the target's top ~24px down, leaving the
+      // PREVIOUS section's bottom sliver in the top band — with a 0 top inset that
+      // earlier-in-DOM sliver wins the topmost-visible loop and the nav highlights the
+      // entry ABOVE the clicked one. Insetting past the scroll-margin excludes it.
+    }, { rootMargin: '-48px 0px -50% 0px', threshold: 0 });
     for (const section of sections) scrollObserver.observe(section);
   }
 
