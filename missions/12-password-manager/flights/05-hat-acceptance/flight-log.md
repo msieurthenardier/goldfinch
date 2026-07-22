@@ -198,6 +198,28 @@ guest-DOM absence of the native menu is asserted in the `vault-human-fill-bounda
   "should master-change also issue a new recovery key (like init)?" — left as a deliberate design decision
   to revisit (current decoupling is intentional; the MRK payoff). *(operator, B9)*
 
+- **I10 (F2 human-fill icon — BUG, fixed live) — the autofill icon was busted + wrong behavior.** The
+  injected icon was a `🔒` **emoji** that rendered as a **tofu box `□`** in the guest (no emoji font),
+  placed **only on the password field**, shown **always**. Operator wanted: a proper icon in **both**
+  username + password fields, **only on focus**. Fixed (commit `a3e40d8`): extracted an electron-free
+  `src/preload/vault-fill-icon.js` (unit-testable), replaced the emoji with an **inline-SVG padlock**
+  (`createElementNS`, path+rect+circle, no innerHTML), placed per-field, shown on `focusin`/hidden on
+  `focusout` (with `mousedown`-preventDefault + deferred-hide so the icon click isn't lost to blur). All
+  F2 security invariants preserved (isTrusted-guarded click → bare `guest-vault-gesture` → chrome flow;
+  decorative/no-secret; I8 contextmenu/Lock-now intact). **FD-verified live**: on `focusin` the icon is an
+  actual `<svg>` (namespaced, path+rect+circle, empty textContent) at the focused field's right edge,
+  follows focus between username↔password (single icon), renders as a padlock (screenshot). 2667 tests.
+  *(operator finding + FD-verified, 2026-07-22)*
+
+- **I11 (F2 credential picker — UX redesign, fixed) — the picker was bare.** Operator wanted a
+  modern-password-manager look (ref: 1Password/Chrome). Redesigned (commit `6466299`): each row now has an
+  inline-SVG credential icon (left; no favicon fetch — privacy), stacked title/username (middle), and the
+  **jar chicklet moved top-right + colored by the jar's color** (`row.badgeColor = jar.color` via
+  `isSafeColor`; Global = neutral), plus a separated **"Manage passwords"** footer → `openVaultPage()`.
+  Security invariants preserved: METADATA-ONLY (no password in the picker DOM — unit-asserted),
+  textContent-only, the `role=menuitem`/`data-pick-index` selection → fill flow, the `widened` badge.
+  2671 tests. Needs an app restart to view (menu-overlay renderer). *(operator finding, 2026-07-22)*
+
 **Verified live (positives):**
 - **Registrable-domain widen (F4 DD5) — VERIFIED LIVE, FD-driven.** Used `lvh.me`/`*.lvh.me` (public
   wildcard DNS → 127.0.0.1, so no `/etc/hosts` needed; PSL treats them as sharing registrable domain
