@@ -40,7 +40,9 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.deepEqual(Object.keys(map.vault).sort(), [
     '/',
     '/password-generator.js',
+    '/safe-color.js',
     '/vault-editor-model.js',
+    '/vault-nav-controller.js',
     '/vault-page-model.js',
     '/vault.css',
     '/vault.js'
@@ -51,6 +53,8 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
   assert.equal(map.vault['/vault-page-model.js'], '/app/src/main/../shared/vault-page-model.js');
   assert.equal(map.vault['/vault-editor-model.js'], '/app/src/main/../shared/vault-editor-model.js');
   assert.equal(map.vault['/password-generator.js'], '/app/src/main/../shared/password-generator.js');
+  assert.equal(map.vault['/safe-color.js'], '/app/src/main/../shared/safe-color.js');
+  assert.equal(map.vault['/vault-nav-controller.js'], '/app/src/main/../renderer/pages/vault-nav-controller.js');
 });
 
 test('the existing resolver serves exact map entries and rejects traversal/wrong paths', () => {

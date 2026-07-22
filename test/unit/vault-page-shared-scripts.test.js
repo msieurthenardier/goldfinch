@@ -83,6 +83,12 @@ test('the vault controller and its shared imports have exact internal routes', (
   // Leg 3: the pure password generator the editor imports also needs its exact route.
   assert.equal(map['/password-generator.js'], path.join(SHARED_DIR, 'password-generator.js'));
   assert.ok(fs.existsSync(map['/password-generator.js']));
+  // M12 F5 HAT (nav+main restructure): the injection-safe color validator (shared) + the
+  // mirrored nav controller (page-local) the page now imports.
+  assert.equal(map['/safe-color.js'], path.join(SHARED_DIR, 'safe-color.js'));
+  assert.ok(fs.existsSync(map['/safe-color.js']));
+  assert.equal(map['/vault-nav-controller.js'], path.join(PAGES_DIR, 'vault-nav-controller.js'));
+  assert.ok(fs.existsSync(map['/vault-nav-controller.js']));
   // No directory passthrough: a disk-relative or wrong path stays unmapped.
   assert.equal(map['/pages/vault.js'], undefined);
 });

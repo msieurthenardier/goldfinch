@@ -8,7 +8,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { selectVaultView } = require('../../src/shared/vault-page-model.js');
+const { selectVaultView, vaultNavEntries, SETTINGS_ID } = require('../../src/shared/vault-page-model.js');
 
 const rows = [
   { vaultId: 'global', label: 'Global' },
@@ -59,4 +59,63 @@ test('vault rows are normalized to { vaultId, label }; a missing label falls bac
     { vaultId: 'global', label: 'Global' },
     { vaultId: 'work', label: 'work' }
   ]);
+});
+
+// ── vaultNavEntries: the master-detail left-nav entry model (M12 F5 HAT hat-page-sidebar) ──
+
+const jars = [
+  { id: 'personal', name: 'Personal', color: '#4caf50' },
+  { id: 'work', name: 'Work', color: '#2196f3' }
+];
+
+test('nav entries = a fixed Settings entry then one entry per vault, in order', () => {
+  const entries = vaultNavEntries(
+    [
+      { vaultId: 'global', label: 'Global' },
+      { vaultId: 'personal', label: 'Personal' },
+      { vaultId: 'work', label: 'Work' }
+    ],
+    jars
+  );
+  assert.deepEqual(entries.map((e) => [e.id, e.kind]), [
+    [SETTINGS_ID, 'settings'],
+    ['global', 'global'],
+    ['personal', 'jar'],
+    ['work', 'jar']
+  ]);
+});
+
+test('the global vault (not a persistent jar) is kind "global"; jars are kind "jar" with their color', () => {
+  const entries = vaultNavEntries(
+    [
+      { vaultId: 'global', label: 'Global', count: 2 },
+      { vaultId: 'personal', label: 'Personal', count: 5 }
+    ],
+    jars
+  );
+  const global = entries.find((e) => e.id === 'global');
+  const personal = entries.find((e) => e.id === 'personal');
+  assert.equal(global.kind, 'global');
+  assert.equal(global.color, undefined); // globe, no dot
+  assert.equal(global.count, 2);
+  assert.equal(personal.kind, 'jar');
+  assert.equal(personal.color, '#4caf50');
+  assert.equal(personal.count, 5);
+});
+
+test('a jar with no color joins to null (the controller applies the fallback)', () => {
+  const entries = vaultNavEntries(
+    [{ vaultId: 'work', label: 'Work' }],
+    [{ id: 'work', name: 'Work' }] // no color
+  );
+  assert.equal(entries[1].kind, 'jar');
+  assert.equal(entries[1].color, null);
+});
+
+test('empty vaults → just the Settings entry; malformed inputs degrade safely', () => {
+  assert.deepEqual(vaultNavEntries([], jars).map((e) => e.id), [SETTINGS_ID]);
+  assert.deepEqual(vaultNavEntries(undefined, undefined).map((e) => e.id), [SETTINGS_ID]);
+  // a vault row missing its id is dropped
+  const entries = vaultNavEntries([{ label: 'orphan' }, { vaultId: 'work', label: 'Work' }], jars);
+  assert.deepEqual(entries.map((e) => e.id), [SETTINGS_ID, 'work']);
 });

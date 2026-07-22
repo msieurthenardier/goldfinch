@@ -1,11 +1,15 @@
 // goldfinch://vault serves imports through an exact flat allowlist. These
 // specifiers intentionally describe serving paths rather than disk paths.
 // @ts-ignore — serving-path vs disk-path mismatch
-import { selectVaultView } from './vault-page-model.js';
+import { selectVaultView, vaultNavEntries } from './vault-page-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { MASK, EDITOR_LAYOUT, initialSecretStates, reveal as revealState, hide as hideState, edit as editState, assembleSave, safeHttpUrl } from './vault-editor-model.js';
 // @ts-ignore — serving-path vs disk-path mismatch
 import { generatePassword, CLASS_NAMES } from './password-generator.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { isSafeColor } from './safe-color.js';
+// @ts-ignore — serving-path vs disk-path mismatch
+import { createVaultNav } from './vault-nav-controller.js';
 
 /**
  * vault.js — the goldfinch://vault internal page controller (M12 Flight 3).
@@ -18,6 +22,13 @@ import { generatePassword, CLASS_NAMES } from './password-generator.js';
  * the totp secret field (normalized to the canonical otpauth:// string in main) plus
  * a LIVE code widget (code + local countdown, computed in main, seed stays in main) —
  * and adds a pure password generator (DD7) to the login password field.
+ *
+ * M12 F5 HAT (hat-page-sidebar) restructures the page into a master-detail nav+main matching
+ * the cookie-jars page and renames it "Secrets Management": a left nav (a top "Settings" entry
+ * + one entry per vault — Global with a globe icon, each jar with its color dot) driven by the
+ * pure `vaultNavEntries` model, and a stacked, scroll-spied section list. The manager-wide
+ * controls (lock, auto-lock, import, master-key management incl. export) are RELOCATED under
+ * the Settings section — buttons only; DD5 is preserved (no master-equivalent secret in the DOM).
  *
  * CSP: served as a same-origin subresource under default-src 'self' (no
  * 'unsafe-inline'). NO inline event handlers; NO dynamic <script>/<style> injection.
@@ -38,7 +49,25 @@ function init() {
   if (!bridge) return;
 
   const root = /** @type {HTMLElement|null} */ (document.getElementById('vault-root'));
-  if (!root) return;
+  const navEl = /** @type {HTMLElement|null} */ (document.getElementById('vault-nav'));
+  if (!root || !navEl) return;
+
+  // Master-detail nav (M12 F5 HAT hat-page-sidebar): the jars-page rail, mirrored.
+  // Built from the vault-state rows + jarsList on every refresh; the scroll-spy sets
+  // aria-current on the visible section's entry.
+  const nav = createVaultNav({
+    document,
+    Node,
+    navEl,
+    IntersectionObserver,
+    isSafeColor,
+    fallbackColor: '#9aa0ac'
+  });
+
+  // Cached jar rows (id/name/color) for the nav dots — a non-secret metadata read,
+  // refreshed alongside vault state. `[]` until the first fetch resolves.
+  /** @type {Array<{ id?: unknown, color?: unknown }>} */
+  let jarRows = [];
 
   /**
    * Create an element with a className and text set via textContent (never
@@ -121,92 +150,98 @@ function init() {
     return section;
   }
 
-  /**
-   * @param {Array<{ vaultId: string, label: string, count?: number }>} vaults
-   */
-  function buildLocked(vaults) {
-    const section = el('section', 'vault-section');
-    section.setAttribute('aria-labelledby', 'vault-locked-heading');
-    const h2 = el('h2', undefined, 'Vault locked');
-    h2.id = 'vault-locked-heading';
-    section.appendChild(h2);
+  // ── Settings section (M12 F5 HAT hat-page-sidebar) ──
+  // The top "Settings" nav entry's section groups the manager-wide controls under one
+  // heading with subsections: lock/unlock, auto-lock, import, and master-key management.
+  // These RELOCATE the existing sheet-triggering wiring (DD5: buttons only — every
+  // master-equivalent secret still lives on the chrome sheets over the Buffer channel).
 
+  /**
+   * The locked-state unlock/recover banner — extracted so the Settings section can host
+   * it while locked (Unlock + the recover-after-forgotten-master affordance). NO secret
+   * is entered here; both route page → main → chrome to a chrome-owned sheet.
+   * @returns {HTMLElement}
+   */
+  function buildLockedBanner() {
     const banner = el('div', 'vault-locked-banner');
     banner.appendChild(el('p', undefined, 'Unlock the manager to view and edit items.'));
-    const note = el('p', 'vault-stub-note');
-    note.setAttribute('role', 'status');
+    // M12 F3 Leg 4: request the F2 chrome-owned unlock sheet (page → main → chrome). A
+    // DISTINCT trigger from the guest-gesture unlock — no fill-picker continuation. The
+    // page refreshes to unlocked off the vault-lock-state broadcast on success.
     banner.appendChild(button('Unlock', 'vault-btn primary', () => {
-      // M12 F3 Leg 4: request the F2 chrome-owned unlock sheet (page → main → chrome). A
-      // DISTINCT trigger from the guest-gesture unlock — no fill-picker continuation. The
-      // page refreshes to unlocked off the vault-lock-state broadcast on success.
       root.dataset.unlockRequested = 'true';
       Promise.resolve(bridge.requestUnlock()).catch(() => {});
     }));
-    // M12 F4 Leg 2 (key-rotation): the RECOVER-after-forgotten-master affordance — reachable FROM
-    // the LOCKED state (the recovery key is its own step-up + installs the MRK). Routes to the
-    // chrome-owned vault-recover sheet (page → main → chrome); NO secret is entered here. On
-    // success the store installs the MRK and the page moves to unlocked off the lock-state
-    // broadcast. The recovery key + new master live only on the sheet.
+    // M12 F4 Leg 2 (key-rotation): the RECOVER-after-forgotten-master affordance — reachable
+    // FROM the LOCKED state (the recovery key is its own step-up + installs the MRK). Routes
+    // to the chrome-owned vault-recover sheet; NO secret is entered here.
     banner.appendChild(button('Forgot master password? Recover', 'vault-btn vault-link-btn', () => {
       Promise.resolve(bridge.requestRecover()).catch(() => {});
     }));
-    section.appendChild(banner);
-    section.appendChild(note);
+    return banner;
+  }
 
-    // Labels only while locked — no counts, no items (those need the MRK).
-    const ul = el('ul', 'vault-list');
-    ul.setAttribute('role', 'list');
-    ul.setAttribute('aria-label', 'Vaults');
-    for (const v of vaults) {
-      const li = el('li', 'vault-row');
-      li.dataset.vaultId = v.vaultId;
-      li.appendChild(el('span', 'vault-name', v.label));
-      ul.appendChild(li);
+  /**
+   * The "Settings" section: manager-wide controls, state-gated. While UNLOCKED: Lock now +
+   * auto-lock + import + master-key management. While LOCKED: unlock/recover banner +
+   * auto-lock (settingsGet works without the MRK). Carries the reserved section id
+   * `vault-settings` (the nav's top entry jumps here).
+   * @param {{ mode: string, vaults: Array<{ vaultId: string, label: string }> }} view
+   * @returns {HTMLElement}
+   */
+  function buildSettingsSection(view) {
+    const unlocked = view.mode === 'unlocked';
+    const section = el('section', 'vault-section vault-settings-section');
+    section.id = 'vault-settings';
+    section.setAttribute('aria-labelledby', 'vault-settings-heading');
+    const h2 = el('h2', undefined, 'Settings');
+    h2.id = 'vault-settings-heading';
+    section.appendChild(h2);
+
+    if (unlocked) {
+      // Explicit global "Lock now" (M12 F5 HAT batch 1, I6) — top of Settings, since locking
+      // is GLOBAL (zeroizes every vault key at once). No confirm: locking is non-destructive
+      // and reversible via unlock. The page re-renders to the locked view off the
+      // vault-lock-state broadcast the store's onLock hook emits. Carries no secret.
+      const globalActions = el('div', 'vault-global-actions');
+      globalActions.appendChild(button('Lock now', 'vault-btn', () => {
+        Promise.resolve(bridge.lockVault()).catch(() => {});
+      }));
+      section.appendChild(globalActions);
+    } else {
+      section.appendChild(buildLockedBanner());
     }
-    section.appendChild(vaults.length ? ul : el('p', 'vault-empty', 'No vaults yet.'));
+
+    // Manager-wide auto-lock — both states (a plain settings read/write; needs no MRK).
+    section.appendChild(buildAutoLockSection());
+
+    if (unlocked) {
+      // Portable import — picks a destination then routes to the chrome-owned secret sheet.
+      section.appendChild(buildImportSection(view.vaults));
+      // Master-key management — change master / rotate recovery / admin rotate-provision /
+      // export. Each routes to a chrome-owned sheet; NO master-equivalent secret here (DD5).
+      section.appendChild(buildMasterKeySection(view.vaults));
+    }
     return section;
   }
 
-  // ── unlocked state: item list + editor ──
-
   /**
-   * @param {Array<{ vaultId: string, label: string, count?: number }>} vaults
+   * A per-vault section while the manager is LOCKED — heading + an unlock prompt, no items
+   * (those need the MRK). Carries the section id `vault-<vaultId>` so the nav entry jumps here.
+   * @param {{ id: string, label: string }} entry
+   * @returns {HTMLElement}
    */
-  function buildUnlocked(vaults) {
-    const wrap = el('div', 'vault-unlocked');
-
-    // Explicit global "Lock now" (M12 F5 HAT batch 1, I6) — top-level, since locking is
-    // GLOBAL (zeroizes every vault key at once). No confirm: locking is non-destructive and
-    // reversible via unlock. The page re-renders to the locked view off the vault-lock-state
-    // broadcast the store's onLock hook emits — this button neither re-broadcasts nor mutates
-    // the page directly. Carries no secret.
-    const globalActions = el('div', 'vault-global-actions');
-    globalActions.appendChild(button('Lock now', 'vault-btn', () => {
-      Promise.resolve(bridge.lockVault()).catch(() => {});
-    }));
-    wrap.appendChild(globalActions);
-
-    // Manager-wide auto-lock setting (M12 F3 Leg 5) — once, above the per-vault sections.
-    wrap.appendChild(buildAutoLockSection());
-
-    // Portable import (M12 F4 Leg 1 export-import) — once, above the per-vault sections. Picks a
-    // destination target then routes to the chrome-owned secret sheet (page → main → chrome).
-    wrap.appendChild(buildImportSection(vaults));
-
-    // Operator-secret rotation (M12 F4 Leg 2 key-rotation, DD3) — once, above the per-vault
-    // sections. Change the master password / rotate the recovery key; each routes to a chrome-owned
-    // step-up sheet (page → main → chrome). NO secret is entered here.
-    wrap.appendChild(buildRotationSection());
-
-    // A single editor host reused by every vault section; hidden until opened.
-    const editorHost = el('div', 'vault-editor-host');
-    editorHost.hidden = true;
-    wrap.appendChild(editorHost);
-
-    for (const v of vaults) {
-      wrap.appendChild(buildVaultSection(v, editorHost));
-    }
-    return wrap;
+  function buildLockedVaultSection(entry) {
+    const section = el('section', 'vault-section');
+    section.id = `vault-${entry.id}`;
+    section.dataset.vaultId = entry.id;
+    const headingId = `vault-h-${entry.id}`;
+    section.setAttribute('aria-labelledby', headingId);
+    const h2 = el('h2', undefined, entry.label);
+    h2.id = headingId;
+    section.appendChild(h2);
+    section.appendChild(el('p', 'vault-empty', 'Unlock the manager to view this vault’s items.'));
+    return section;
   }
 
   /**
@@ -219,11 +254,11 @@ function init() {
    * @returns {HTMLElement}
    */
   function buildAutoLockSection() {
-    const section = el('section', 'vault-section vault-autolock-section');
-    section.setAttribute('aria-labelledby', 'vault-autolock-heading');
-    const h2 = el('h2', undefined, 'Auto-lock');
-    h2.id = 'vault-autolock-heading';
-    section.appendChild(h2);
+    // A Settings SUBSECTION (M12 F5 HAT hat-page-sidebar): a div + h3 nested under the
+    // single "Settings" heading, not its own top-level section.
+    const section = el('div', 'vault-subsection vault-autolock-section');
+    const h3 = el('h3', 'vault-subsection-title', 'Auto-lock');
+    section.appendChild(h3);
     section.appendChild(el('p', 'vault-lede',
       'Automatically lock the manager after this many minutes of inactivity (1–1440).'));
 
@@ -268,11 +303,9 @@ function init() {
    * @returns {HTMLElement}
    */
   function buildImportSection(vaults) {
-    const section = el('section', 'vault-section vault-import-section');
-    section.setAttribute('aria-labelledby', 'vault-import-heading');
-    const h2 = el('h2', undefined, 'Import a vault bundle');
-    h2.id = 'vault-import-heading';
-    section.appendChild(h2);
+    const section = el('div', 'vault-subsection vault-import-section');
+    const h3 = el('h3', 'vault-subsection-title', 'Import a vault bundle');
+    section.appendChild(h3);
     section.appendChild(el('p', 'vault-lede',
       'Import a portable bundle into a destination vault. You’ll enter the source master password or recovery key on a secure prompt.'));
 
@@ -304,22 +337,21 @@ function init() {
   }
 
   /**
-   * Operator-secret rotation controls (M12 F4 Leg 2 key-rotation, DD3/DD2; M12 F4 Leg 3 admin-key-
-   * provision, DD4). Actions — Change master password (an old-password step-up), Rotate recovery key
-   * and Provision / rotate admin key (each a master-password step-up) — each routing page → main →
-   * chrome to a chrome-owned sheet. NO secret is entered
-   * or shown here: every master-equivalent secret entry + the new one-time recovery display lives
-   * on the sheet (DD2). `textContent`-only.
+   * Master-key management (M12 F5 HAT hat-page-sidebar) — a Settings SUBSECTION grouping every
+   * operator-secret action: change master password, rotate recovery key, provision/rotate admin
+   * key (M12 F4 Leg 2/3, DD3/DD4), and portable export (M12 F4 Leg 1, relocated here from the
+   * per-vault header per the operator design). Each routes page → main → chrome to a chrome-owned
+   * sheet; NO master-equivalent secret is entered or shown here — every secret entry + the one-time
+   * recovery/admin displays live on the sheet (DD2/DD5). `textContent`-only.
+   * @param {Array<{ vaultId: string, label: string }>} vaults
    * @returns {HTMLElement}
    */
-  function buildRotationSection() {
-    const section = el('section', 'vault-section vault-rotation-section');
-    section.setAttribute('aria-labelledby', 'vault-rotation-heading');
-    const h2 = el('h2', undefined, 'Master password & recovery key');
-    h2.id = 'vault-rotation-heading';
-    section.appendChild(h2);
+  function buildMasterKeySection(vaults) {
+    const section = el('div', 'vault-subsection vault-masterkey-section');
+    const h3 = el('h3', 'vault-subsection-title', 'Master-key management');
+    section.appendChild(h3);
     section.appendChild(el('p', 'vault-lede',
-      'Change your master password or rotate your recovery key. You’ll confirm on a secure prompt — nothing is typed on this page.'));
+      'Change your master password, rotate your recovery or admin key, or export a vault bundle. You’ll confirm on a secure prompt — nothing secret is typed on this page.'));
 
     const actions = el('div', 'vault-rotation-actions');
     // Change the master password → the chrome-owned vault-change-master sheet (old + new + confirm).
@@ -339,28 +371,56 @@ function init() {
       Promise.resolve(bridge.requestRotateAdmin()).catch(() => {});
     }));
     section.appendChild(actions);
+
+    // Portable export (M12 F4 Leg 1, DD1) — relocated from the per-vault header into a source
+    // picker + Export button. Builds the ciphertext-only bundle + runs the save dialog fully in
+    // main — NO password prompt, NO secret in the page. A locked manager (idle-lock race)
+    // surfaces { locked } → refresh to the locked view.
+    const exportRow = el('label', 'vault-export-row');
+    exportRow.appendChild(el('span', 'vault-export-label', 'Export'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-export-select'));
+    select.setAttribute('aria-label', 'Export source vault');
+    for (const v of vaults) {
+      const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
+      opt.value = v.vaultId;
+      select.appendChild(opt);
+    }
+    exportRow.appendChild(select);
+    exportRow.appendChild(button('Export…', 'vault-btn', () => {
+      const target = select.value;
+      if (!target) return;
+      Promise.resolve(bridge.exportVault(target)).then((res) => {
+        if (res && res.locked) refresh();
+      }).catch(() => {});
+    }));
+    section.appendChild(exportRow);
     return section;
   }
 
   /**
-   * @param {{ vaultId: string, label: string, count?: number }} v
+   * A per-vault section while the manager is UNLOCKED — the vault's item list + editor host, plus
+   * (jars only) its access keys. Carries the section id `vault-<vaultId>` so the nav entry jumps
+   * here. Export moved to Settings > master-key management (per the operator design).
+   * @param {{ id: string, kind: string, label: string, count?: number }} entry
    * @param {HTMLElement} editorHost
    */
-  function buildVaultSection(v, editorHost) {
+  function buildVaultSection(entry, editorHost) {
+    const vaultId = entry.id;
     const section = el('section', 'vault-section');
-    section.dataset.vaultId = v.vaultId;
-    const headingId = `vault-h-${v.vaultId}`;
+    section.id = `vault-${vaultId}`;
+    section.dataset.vaultId = vaultId;
+    const headingId = `vault-h-${vaultId}`;
     section.setAttribute('aria-labelledby', headingId);
 
     const header = el('div', 'vault-section-head');
     const h2 = el('h2', undefined,
-      typeof v.count === 'number' ? `${v.label} (${v.count})` : v.label);
+      typeof entry.count === 'number' ? `${entry.label} (${entry.count})` : entry.label);
     h2.id = headingId;
     header.appendChild(h2);
 
     // Add-item control: a type picker + Add button → a blank editor.
     const picker = /** @type {HTMLSelectElement} */ (el('select', 'vault-type-select'));
-    picker.setAttribute('aria-label', `New item type for ${v.label}`);
+    picker.setAttribute('aria-label', `New item type for ${entry.label}`);
     for (const [type] of Object.entries(EDITOR_LAYOUT)) {
       const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, type[0].toUpperCase() + type.slice(1)));
       opt.value = type;
@@ -368,31 +428,26 @@ function init() {
     }
     header.appendChild(picker);
     header.appendChild(button('Add', 'vault-btn', () => {
-      openEditor(editorHost, { vaultId: v.vaultId, meta: null, type: picker.value });
-    }));
-    // Portable export (M12 F4 Leg 1 export-import, DD1). Builds the ciphertext-only bundle + runs
-    // the save dialog fully in main — NO password prompt, NO secret in the page. A locked manager
-    // (idle-lock race) surfaces { locked } → refresh to the locked view.
-    header.appendChild(button('Export…', 'vault-btn', () => {
-      Promise.resolve(bridge.exportVault(v.vaultId)).then((res) => {
-        if (res && res.locked) refresh();
-      }).catch(() => {});
+      openEditor(editorHost, { vaultId, meta: null, type: picker.value });
     }));
     section.appendChild(header);
 
     const list = el('ul', 'vault-item-list');
     list.setAttribute('role', 'list');
-    list.setAttribute('aria-label', `${v.label} items`);
+    list.setAttribute('aria-label', `${entry.label} items`);
     section.appendChild(list);
 
     // Populate the list from the metadata-only read (no secret ever).
-    bridge.vaultList(v.vaultId).then((res) => {
+    bridge.vaultList(vaultId).then((res) => {
       if (!res || res.locked) { refresh(); return; }
-      renderItems(list, res.items || [], v.vaultId, editorHost);
+      renderItems(list, res.items || [], vaultId, editorHost);
     }).catch(() => {});
 
-    // Access-key management (M12 F3 Leg 5): list by keyId + Mint + per-row Revoke.
-    section.appendChild(buildAccessKeysSection(v));
+    // Access-key management (M12 F3 Leg 5): list by keyId + Mint + per-row Revoke. Access keys are
+    // a JAR concept — the manager-wide Global vault has none, so it gets no access-key subsection.
+    if (entry.kind === 'jar') {
+      section.appendChild(buildAccessKeysSection({ vaultId, label: entry.label }));
+    }
 
     return section;
   }
@@ -877,7 +932,10 @@ function init() {
   }
 
   /**
-   * Render exactly one state region from the page view.
+   * Render the nav+main master-detail (M12 F5 HAT hat-page-sidebar): a left nav (Settings +
+   * one entry per vault) driven by the pure entry model, and a stacked section list in
+   * #vault-root that the nav scroll-spies. not-set-up short-circuits to the setup CTA with an
+   * empty nav (there are no vaults yet).
    * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown }} state
    */
   function render(state) {
@@ -886,19 +944,53 @@ function init() {
     const view = selectVaultView(state);
     root.textContent = '';
     root.dataset.mode = view.mode;
+
     if (view.mode === 'not-set-up') {
+      nav.render([]);
+      nav.observe([]);
       root.appendChild(buildNotSetUp());
-    } else if (view.mode === 'locked') {
-      root.appendChild(buildLocked(/** @type {any} */ (view.vaults)));
-    } else {
-      root.appendChild(buildUnlocked(/** @type {any} */ (view.vaults)));
+      return;
     }
+
+    const entries = vaultNavEntries(view.vaults, jarRows);
+    nav.render(entries);
+
+    // Settings section first, then one section per vault (skip the fixed Settings entry).
+    root.appendChild(buildSettingsSection(view));
+
+    // A single editor host reused by every unlocked vault section; hidden until opened.
+    const editorHost = el('div', 'vault-editor-host');
+    editorHost.hidden = true;
+
+    if (view.mode === 'unlocked') root.appendChild(editorHost);
+
+    for (const entry of entries) {
+      if (entry.kind === 'settings') continue;
+      if (view.mode === 'unlocked') root.appendChild(buildVaultSection(entry, editorHost));
+      else root.appendChild(buildLockedVaultSection(entry));
+    }
+
+    // Scroll-spy over every rendered section (Settings + per-vault) → aria-current.
+    const sectionEls = Array.from(root.children).filter(
+      (child) => child instanceof HTMLElement && child.id.startsWith('vault-')
+    );
+    nav.observe(/** @type {HTMLElement[]} */ (sectionEls));
+    if (entries.length) nav.setActive(nav.sectionIdFor(entries[0].id));
   }
 
-  /** Fetch the current vault state and render. */
+  /**
+   * Fetch the current vault state + jar rows (for the nav dots) and render. Both are
+   * non-secret metadata reads; jarsList works regardless of vault lock state.
+   */
   function refresh() {
     if (!window.goldfinchInternal) return;
-    window.goldfinchInternal.vaultState().then(render).catch(() => {});
+    Promise.all([
+      window.goldfinchInternal.vaultState(),
+      Promise.resolve(window.goldfinchInternal.jarsList()).catch(() => [])
+    ]).then(([state, jars]) => {
+      jarRows = Array.isArray(jars) ? jars : [];
+      render(state);
+    }).catch(() => {});
   }
 
   // M12 F3 Leg 4: refresh on every vault lock-state transition (setup / unlock / auto-lock)
@@ -915,6 +1007,9 @@ function init() {
   // (metadata-only reads); a no-op while not-set-up / locked (no refreshers registered).
   window.addEventListener('focus', refreshAccessKeyLists);
   window.addEventListener('pagehide', () => window.removeEventListener('focus', refreshAccessKeyLists), { once: true });
+
+  // Tear down the nav's scroll-spy observer on unload (mirrors jars.js's jarsNav.destroy()).
+  window.addEventListener('pagehide', () => nav.destroy(), { once: true });
 
   refresh();
 }

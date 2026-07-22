@@ -2,7 +2,7 @@ const BLUR_REOPEN_SUPPRESS_MS = 300;
 
 export function buildKebabModel() {
   // Two separators group the menu into three bands: window-scoped (New window) /
-  // internal-page destinations (Settings…Passwords) / app actions (Print, Exit).
+  // internal-page destinations (Settings…Secrets Management) / app actions (Print, Exit).
   // The sheet renders `type:'separator'` as role="separator" (menu-overlay.js) and
   // the roving-tabindex/arrow-nav skips it for free (no role="menuitem"), the same
   // idiom the page-context menu uses.
@@ -12,7 +12,7 @@ export function buildKebabModel() {
     { id: 'settings', label: 'Settings' },
     { id: 'downloads', label: 'Downloads' },
     { id: 'jars', label: 'Cookie jars' },
-    { id: 'vault', label: 'Passwords' },
+    { id: 'vault', label: 'Secrets Management' },
     { type: 'separator' },
     { id: 'print', label: 'Print…' },
     { id: 'exit', label: 'Exit' }

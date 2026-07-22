@@ -14,6 +14,8 @@
   --border: #3a3c46;
   --ok: #6dff8f;
   --err: #ff8c7a;
+  --nav-w: 220px;
+  --nav-top: 0px;
 }
 
 /* ── Reset ── */
@@ -27,6 +29,8 @@ html {
   height: 100%;
 }
 
+/* ── Scroll container: <body> owns the scroll (NOT <main>) — mirrors jars.css/settings.css.
+   The nav is the one element with its own overflow (sticky + self-scrolling). ── */
 body {
   margin: 0;
   min-height: 100%;
@@ -35,13 +39,98 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ── Left nav (sticky sidebar) — the jars rail, mirrored (M12 F5 HAT hat-page-sidebar) ── */
+nav[aria-label="Secrets Management"] {
+  flex: 0 0 var(--nav-w);
+  position: sticky;
+  top: var(--nav-top);
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+}
+
+nav[aria-label="Secrets Management"] ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+nav[aria-label="Secrets Management"] li {
+  margin: 0;
+}
+
+nav[aria-label="Secrets Management"] a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+  transition: background 0.1s, color 0.1s;
+}
+
+nav[aria-label="Secrets Management"] a:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
+nav[aria-label="Secrets Management"] a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Active section highlight (set by the scroll-spy in vault-nav-controller.js). */
+nav[aria-label="Secrets Management"] a[aria-current="true"] {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--bg-3);
+}
+
+/* Nav entry markers: a color dot per jar, a globe/gear icon for Global/Settings. */
+.vault-nav-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.vault-nav-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+.vault-nav-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Main content column ── */
 main {
-  max-width: 760px;
-  margin: 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 32px 48px 64px;
+  max-width: 760px;
 }
 
 /* ── Header: title ── */
@@ -63,11 +152,51 @@ main {
 }
 
 /* ── State regions ── */
+.vault-section {
+  scroll-margin-top: 24px; /* clears the sticky nav on anchor jumps */
+}
 .vault-section h2 {
   font-size: 16px;
   font-weight: 600;
   margin: 0 0 8px;
   color: var(--fg);
+}
+
+/* ── Settings subsections (auto-lock / import / master-key management) grouped under the
+   single "Settings" heading (M12 F5 HAT hat-page-sidebar) ── */
+.vault-subsection {
+  margin-top: 20px;
+}
+.vault-subsection-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--fg);
+}
+
+/* Export source picker in master-key management (mirrors the import row layout). */
+.vault-export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.vault-export-label {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.vault-export-select {
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.vault-export-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .vault-lede {
@@ -448,16 +577,15 @@ textarea.vault-input {
 
 /* ── Access keys + auto-lock (Leg 5, flight DD5) ── */
 .vault-accesskeys {
-  /* I7 (HAT batch 1): the divider that used to sit here (a border-top WITHIN the jar's
-     section, splitting the jar's secrets from its own access keys) moved UP to a
-     jar-boundary rule on `.vault-section + .vault-section` — the access-key block is part
-     of the SAME jar's config, so no rule divides it from the item list above it. */
+  /* The access-key block is part of the SAME jar's config, so no rule divides it from the
+     item list above it (the M12 F5 nav+main restructure subsumes the old flat per-jar I7
+     divider — each vault is now its own nav section). */
   margin: 12px 0 20px;
 }
 
-/* Jar-boundary divider (I7): separates one jar's WHOLE config from the next jar's.
-   Adjacent-sibling so the first jar section — and the single not-set-up / locked
-   `.vault-section` — carries no leading rule; only jar-after-jar draws the line. */
+/* Per-section divider: separates one top-level section's whole config from the next
+   (Settings → Global → each jar). Adjacent-sibling so the first section — and the single
+   not-set-up `.vault-section` — carries no leading rule. */
 .vault-section + .vault-section {
   margin-top: 24px;
   padding-top: 24px;

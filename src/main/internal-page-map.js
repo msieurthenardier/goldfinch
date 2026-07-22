@@ -57,7 +57,12 @@ function createInternalPageMap({ baseDir, path }) {
       // + http/https origin-link guard) the page imports as a flat ESM specifier.
       '/vault-editor-model.js': shared('vault-editor-model.js'),
       // Leg 3: the pure password generator (DD7) the editor imports as a flat specifier.
-      '/password-generator.js': shared('password-generator.js')
+      '/password-generator.js': shared('password-generator.js'),
+      // M12 F5 HAT hat-page-sidebar (nav+main restructure): the pure nav-entry model lives in
+      // vault-page-model.js (already routed above); the page also imports the injection-safe
+      // color validator (for jar-dot colors) and the mirrored nav controller.
+      '/safe-color.js': shared('safe-color.js'),
+      '/vault-nav-controller.js': rendererPage('vault-nav-controller.js')
     }
   };
 }

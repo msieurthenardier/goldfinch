@@ -150,6 +150,9 @@ export default [
       // vault.js (M12 Flight 3, Leg 1) is the goldfinch://vault page controller — a
       // real ES module importing its pure state-model via a flat serving-path specifier.
       'src/renderer/pages/vault.js',
+      // vault-nav-controller.js (M12 F5 HAT hat-page-sidebar) is vault.js's mirrored
+      // master-detail nav rail — a real ES module, the jars-nav-controller.js precedent.
+      'src/renderer/pages/vault-nav-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

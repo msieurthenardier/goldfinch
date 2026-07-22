@@ -221,3 +221,37 @@ highest live-only *design* risk to watch is the **cross-machine master-password 
 copy misleads them toward the destination password, the UX is broken though the crypto is correct). The
 new behavior test's fixture-origin premise (PSL-known `/etc/hosts` aliases) is called out prominently — a
 `.test` alias would fail closed and silently invalidate the positive case.
+
+## Developer note — hat-page-sidebar first cut (2026-07-21)
+
+**Leg `hat-page-sidebar` — first cut implemented, PENDING operator live review (leg stays `in-flight`).**
+Restructured `goldfinch://vault` into a master-detail **nav+main** matching the cookie-jars page and renamed
+it **"Secrets Management"** (kebab item + page title/`<h1>`; internal URL `goldfinch://vault` unchanged). Left
+nav = a top **Settings** entry (gear) + one entry **per vault** — **Global** with a new `ICON_GLOBE`, each
+**jar** with its color dot (joined from `jarsList`, `isSafeColor` backstop). New pure model `vaultNavEntries`
+(in `vault-page-model.js`) + a mirrored `vault-nav-controller.js` (aria-current scroll-spy, native-anchor
+keyboard model — the jars rail, mirrored). Settings groups the RELOCATED wiring under subsections: lock/unlock,
+auto-lock, import, and master-key management (change master / rotate recovery / admin rotate-provision /
+**export moved here** from the per-vault header). **DD5 preserved** — trigger-only page, `textContent`-only, no
+master-equivalent secret in the DOM (grep-verified). Subsumes the `hat-fixes-01` I7 divider (expected).
+
+Results: `npm test` **2655 pass / 0 fail** (baseline 2646 + 9 new vault nav/model tests), `npm run typecheck`
+clean, `npm run lint` clean. Seam/channel pins untouched (no new evaluate-seam entries or channels).
+
+**Design points left open for the operator's live review:**
+- **"Lock now"** placed at the **top of the Settings section** (unlocked). Global affordance; alternative would
+  be top-of-nav.
+- **Export** relocated into **Settings > master-key management** as a source-vault picker + Export button (the
+  leg lists export under master-key management), REMOVING the per-vault Export button. Confirm this vs. keeping
+  export per-vault.
+- **Recover-after-forgotten-master** shown only in the **locked** Settings banner (it's meaningless while
+  unlocked); the leg lumped it under "master-key management" — flagging the state-gating choice.
+- **Locked mode**: nav renders Settings + all vault entries; per-vault sections show an "Unlock to view items"
+  placeholder (items need the MRK). Settings while locked = Unlock/Recover banner + auto-lock only.
+- **not-set-up mode**: nav is empty (no vaults yet); main shows the setup CTA.
+- **Global**: globe icon, no color dot, **no access-key subsection** (access keys are a jar concept).
+- Minor: the Settings section id is `vault-settings`; a hypothetical jar with id `settings` would collide with
+  it. Jar ids don't normally take that value — noted, not handled.
+
+Dev instance must be **restarted** (`npm run dev:automation`) to pick up the new page — the internal page is
+served from disk but the running instance has the old bundle cached.
