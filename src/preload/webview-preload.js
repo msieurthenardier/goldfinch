@@ -9,6 +9,7 @@
 
 const { ipcRenderer } = require('electron');
 const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-fill-fields');
+const { createVaultIconController } = require('./vault-fill-icon');
 
 function absUrl(src) {
   if (!src) return null;
@@ -218,31 +219,6 @@ if (IS_TOP_FRAME) {
   }
 }
 
-// Every injected icon node is tracked here so the MEDIA observer can filter out
-// icon-only DOM/style mutations before scheduleScan — otherwise appending an icon
-// (childList) and positioning it via `.style` (style attr, which the media
-// observer watches) would re-fire scheduleScan → collect() forever (HIGH).
-const iconNodes = new WeakSet();
-// Icons currently in the DOM, for pruning (WeakSet isn't iterable). Each icon
-// carries `_anchor` (its form, or the form-less password field) for reverse lookup.
-const placedIcons = new Set();
-// anchor (form | password field) → icon element, so re-scans reposition rather
-// than stack. WeakMap keys are DOM nodes → a removed form/field can be GC'd.
-const iconByAnchor = new WeakMap();
-
-// True iff a mutation is purely icon bookkeeping (icon append/remove, or an icon's
-// own style/attr change) — such mutations must NOT trigger the media rescan.
-function isIconOnlyMutation(m) {
-  if (m.type === 'attributes') return iconNodes.has(m.target);
-  if (m.type === 'childList') {
-    const added = Array.from(m.addedNodes);
-    const removed = Array.from(m.removedNodes);
-    if (!added.length && !removed.length) return false;
-    return added.every((n) => iconNodes.has(n)) && removed.every((n) => iconNodes.has(n));
-  }
-  return false;
-}
-
 // Capture the genuine isTrusted getter ONCE at init. contextIsolation is off, so
 // a hostile page can override Event.prototype's isTrusted getter; reading the
 // captured getter is annoyance-hardening only (a determined page can still raise
@@ -256,137 +232,47 @@ const isTrustedGet = (() => {
   }
 })();
 
-function onIconClick(e) {
-  const trusted = isTrustedGet ? isTrustedGet.call(e) : e.isTrusted;
-  if (!trusted) return; // scripted iconEl.click() / synthetic dispatch → ignored
-  try {
-    ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
-  } catch {
-    /* page navigated away mid-click */
-  }
-}
+// The decorative fill-icon subsystem (SVG glyph, both-field placement, focus
+// gating, isTrusted-guarded click/contextmenu → bare IPCs) lives in the
+// electron-free `vault-fill-icon` core so it unit-tests headlessly. All DOM /
+// electron coupling is injected here; F2 invariants are enforced inside it.
+const vaultIcons = createVaultIconController({
+  document,
+  window,
+  ipcRenderer,
+  isTrustedGet,
+  findAllLoginFields,
+  getEnabled: () => vaultEligible && IS_TOP_FRAME,
+});
 
-// Right-click on the decorative fill icon (M12 F5 HAT batch 1, I8): request the NATIVE main-
-// process context menu (Menu.popup), never a guest-DOM menu. preventDefault() suppresses BOTH
-// the OS default menu AND the app's page-context sheet (Blink sends no ShowContextMenu IPC
-// when the page handles contextmenu), so there is no double-menu; stopPropagation keeps a
-// hostile page's own bubble-phase listeners from observing it. The captured-isTrusted guard
-// mirrors onIconClick — a scripted `dispatchEvent`/synthetic contextmenu is ignored. The IPC
-// is BARE (no payload, no secret) — main derives the trusted wcId from the sender id.
-function onIconContextMenu(e) {
-  const trusted = isTrustedGet ? isTrustedGet.call(e) : e.isTrusted;
-  if (!trusted) return; // synthetic/scripted contextmenu → ignored (no menu)
-  e.preventDefault();
-  e.stopPropagation();
-  try {
-    ipcRenderer.send('guest-vault-icon-menu'); // NO payload — wcId derived in main
-  } catch {
-    /* page navigated away mid-gesture */
-  }
-}
-
-function createVaultIcon() {
-  const el = document.createElement('div');
-  el.setAttribute('data-goldfinch-vault-lock', '');
-  el.setAttribute('role', 'img');
-  el.setAttribute('aria-label', 'Fill login from vault');
-  el.textContent = '🔒'; // 🔒
-  const s = el.style;
-  s.position = 'absolute';
-  s.zIndex = '2147483647';
-  s.cursor = 'pointer';
-  s.fontSize = '14px';
-  s.lineHeight = '16px';
-  s.width = '16px';
-  s.height = '16px';
-  s.textAlign = 'center';
-  s.userSelect = 'none';
-  s.pointerEvents = 'auto';
-  el.addEventListener('click', onIconClick);
-  el.addEventListener('contextmenu', onIconContextMenu);
-  return el;
-}
-
-function positionVaultIcon(icon, rect) {
-  const top = rect.top + (window.scrollY || 0) + (rect.height - 16) / 2;
-  const left = rect.left + (window.scrollX || 0) + rect.width - 20;
-  icon.style.top = `${Math.max(0, top)}px`;
-  icon.style.left = `${Math.max(0, left)}px`;
-}
-
-// A field is a valid anchor only if it's actually rendered — zero-size / display:none
-// honeypots (0×0 rect, or offsetParent null) get NO icon (else a 0×0 icon lands at
-// the page's top-left corner).
-function isFieldVisible(field) {
-  if (typeof field.getBoundingClientRect !== 'function') return null;
-  const rect = field.getBoundingClientRect();
-  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
-  if (field.offsetParent === null) return null;
-  return rect;
-}
-
-function placeVaultIcons() {
-  if (!vaultEligible || !IS_TOP_FRAME) return;
-  const parent = document.body || document.documentElement;
-  if (!parent) return;
-
-  const activeAnchors = new Set();
-  const seenAnchors = new Set();
-  for (const entry of findAllLoginFields(document)) {
-    // One icon per FORM (a form-less password field is its own anchor).
-    const anchor = entry.form || entry.password;
-    if (seenAnchors.has(anchor)) continue;
-    seenAnchors.add(anchor);
-
-    const rect = isFieldVisible(entry.password);
-    if (!rect) continue; // zero-rect / non-visible → skip (icon pruned below)
-
-    activeAnchors.add(anchor);
-    let icon = iconByAnchor.get(anchor);
-    if (!icon || !icon.isConnected) {
-      icon = createVaultIcon();
-      icon._anchor = anchor;
-      iconByAnchor.set(anchor, icon);
-      iconNodes.add(icon);
-      placedIcons.add(icon);
-      parent.appendChild(icon);
-    }
-    positionVaultIcon(icon, rect);
-  }
-
-  // Prune icons whose form/field vanished or went non-visible this pass.
-  for (const icon of placedIcons) {
-    if (!activeAnchors.has(icon._anchor)) {
-      icon.remove();
-      placedIcons.delete(icon);
-      iconByAnchor.delete(icon._anchor);
-    }
-  }
-}
-
-/** @type {ReturnType<typeof setTimeout> | null} */
-let iconTimer = null;
-function scheduleIconPlacement(delay = 300) {
-  if (!vaultEligible || !IS_TOP_FRAME) return;
-  clearTimeout(iconTimer);
-  iconTimer = setTimeout(placeVaultIcons, delay);
+// The icon appears ONLY while its field is focused (problem 3): a username or
+// password field's focusin shows ITS icon; focusout hides it (deferred so a
+// click on the icon — which keeps focus via mousedown preventDefault — is never
+// eaten). Icons are placed on BOTH the username and password field (problem 2).
+if (IS_TOP_FRAME && vaultEligible) {
+  document.addEventListener('focusin', vaultIcons.handleFocusIn);
+  document.addEventListener('focusout', vaultIcons.handleFocusOut);
+  // Keep the shown icon glued to its field across layout shifts (a focused
+  // field can move under scroll/resize/zoom without a DOM mutation firing).
+  window.addEventListener('scroll', () => vaultIcons.placeVaultIcons(), true);
+  window.addEventListener('resize', () => vaultIcons.placeVaultIcons());
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   scheduleScan(150);
-  scheduleIconPlacement(150);
+  vaultIcons.scheduleIconPlacement(150);
 });
 window.addEventListener('load', () => {
   scheduleScan(300);
-  scheduleIconPlacement(300);
+  vaultIcons.scheduleIconPlacement(300);
 });
 
 const observer = new MutationObserver((mutations) => {
   // Icon-only mutations (our own append/reposition) must not re-arm the media
   // rescan or the scan would never settle (HIGH — DD3 feedback loop).
-  if (mutations.every(isIconOnlyMutation)) return;
+  if (mutations.every(vaultIcons.isIconOnlyMutation)) return;
   scheduleScan(600);
-  scheduleIconPlacement(600);
+  vaultIcons.scheduleIconPlacement(600);
 });
 if (document.documentElement) {
   observer.observe(document.documentElement, {

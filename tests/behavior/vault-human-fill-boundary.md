@@ -52,9 +52,9 @@ require typing into or reading the sheet DOM are intentionally out of scope.
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Open a tab in the fixture jar and navigate it to the normal login fixture page. Wait for the login form to render. | Page loads; a `<input type=password>` and its username field are present in the guest DOM. |
-| 2 | Read the guest DOM. Confirm the injected decorative lock icon is present and anchored near the password field. | An injected lock-icon element is present near the login form. It carries no credential text/value. |
+| 2 | Focus the username field, then the password field (each is shown on focus). Read the guest DOM after each focus. Confirm the injected decorative lock icon appears anchored near the **focused** field. | The icon is an **inline SVG** lock glyph (renders correctly — no `🔒` tofu box), carrying `role="img"` + `aria-label="Fill login from vault"` + `data-goldfinch-vault-lock`. It appears **only while its field is focused** and is anchored near that field's right edge — for **both** the username and the password field. It carries no credential text/value. Blurring to a non-login element hides it. |
 | 3 | Read the guest DOM in full and search it for any master-password prompt, unlock dialog, or vault picker. | **No** unlock prompt, master-password input, or picker node exists anywhere in page DOM (the prompt is chrome-owned, not in content). |
-| 4 | Click the injected lock icon (guest `click`). Then capture the window via admin `captureWindow`. | The click triggers a **chrome-owned** prompt: the screenshot shows a master-password / unlock sheet rendered over the guest region. The guest DOM (re-read) still contains no prompt node and the password field is still empty. |
+| 4 | Focus the password field so its icon is shown, then click the injected lock icon (guest `click`). Then capture the window via admin `captureWindow`. | The click triggers a **chrome-owned** prompt: the screenshot shows a master-password / unlock sheet rendered over the guest region. The click still lands even though the icon is shown-on-focus (the icon's mousedown keeps the field focused). The guest DOM (re-read) still contains no prompt node and the password field is still empty. |
 | 5 | While the chrome prompt is up, read the guest DOM and evaluate `document.activeElement` and the password field value. | The guest page has **not** received focus of any master-password field and the login password field remains empty — the master password is being entered (if at all) only in the chrome sheet, invisible to the page. |
 | 6 | Dismiss the flow (press Escape targeting the chrome, or trigger a window blur). Re-read the guest DOM and the password field. | The prompt closes; the guest login form is unchanged and unfilled — dismissing without completing the chrome flow fills nothing. |
 | 7 | In the guest page, evaluate a script that **removes / hides / replaces** the injected lock icon (simulate a hostile page defacing it). Then re-read the DOM and confirm no credential or vault state leaked into the page. | Removing/faking the icon changes nothing observable to the page: no credential, vault key, item list, or master password is present anywhere in page-accessible JS/DOM. The icon is decorative (DD1). |
@@ -77,7 +77,8 @@ require typing into or reading the sheet DOM are intentionally out of scope.
 ## Variants (optional)
 
 - **Multi-form page**: repeat steps 1–4 on the multi-form fixture; confirm a decorative icon
-  is placed per detected login form and each triggers the chrome-owned flow.
+  appears on focus for the username and password field of each detected login form, and each
+  triggers the chrome-owned flow.
 - **Burner tab (DD9 suppression)**: open the same login fixture in a **burner** (non-persistent)
   partition and read the guest DOM. Expected: **no** lock icon is injected, and clicking where
   the icon would be (or dispatching a synthetic gesture) raises **no** chrome prompt — burner
