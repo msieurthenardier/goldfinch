@@ -28,14 +28,18 @@ test('COMPLEMENT invariant: nonSecret ∩ secret = ∅ for every type', () => {
   }
 });
 
-test('taxonomy matches the flight Context: notes is a secret on EVERY type; note body is secret', () => {
-  for (const type of ITEM_TYPES) {
+test('taxonomy matches the flight Context: notes is a secret annotations field on login+card; a note has NO notes field (its content IS its body)', () => {
+  // `notes` is a secret annotations field on the CREDENTIAL types (login, card) only.
+  for (const type of ['login', 'card']) {
     assert.ok(secretFieldsFor(type).includes('notes'), `${type}: notes must be secret`);
   }
+  // A note carries NO generic `notes` field — a note showing both "Note" and "Notes" was redundant.
+  assert.ok(!secretFieldsFor('note').includes('notes'), 'note has NO redundant notes field');
   assert.ok(secretFieldsFor('note').includes('body'), 'note body is secret');
   assert.ok(!nonSecretFieldsFor('note').includes('body'), 'note body is NOT metadata');
   assert.deepEqual(secretFieldsFor('login'), ['password', 'totp', 'notes']);
   assert.deepEqual(secretFieldsFor('card'), ['number', 'cvv', 'expiry', 'notes']);
+  assert.deepEqual(secretFieldsFor('note'), ['body']);
 });
 
 test('metadataOf emits NO secret key for any type, even when the item carries secrets', () => {

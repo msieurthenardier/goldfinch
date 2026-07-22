@@ -97,6 +97,25 @@ class VaultStateError extends Error {
   }
 }
 
+/**
+ * A DISTINGUISHABLE import-collision: a vault already exists at the resolved import destination
+ * and `overwrite` was not passed (M12 F5 HAT tail). importVault throws VaultStateError for
+ * SEVERAL other reasons (bad bundle/secret args, an unknown/burner destination target), so the
+ * import path must NOT message-match to tell "already exists" apart from those or from a
+ * wrong-secret VaultAuthError. This subclass (a `code` marker + `instanceof VaultStateError`
+ * still holding, so existing catchers are unaffected) lets the sheet surface a truthful "a vault
+ * already exists" message rather than a misleading "check the secret" one.
+ */
+class VaultCollisionError extends VaultStateError {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'VaultCollisionError';
+    /** @type {'vault-collision'} */
+    this.code = 'vault-collision';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Typedefs
 // ---------------------------------------------------------------------------
@@ -844,7 +863,11 @@ class VaultStore {
       this._requireMrk(); // must be unlocked (VaultLockedError → catchLocked at the IPC layer).
       const dest = this.resolveTarget(destinationTarget ?? '');
       if (fs.existsSync(this._vaultPath(dest)) && !overwrite) {
-        throw new VaultStateError(
+        // CODED collision (M12 F5 HAT tail): a dedicated subclass so the import path can tell this
+        // apart from the other VaultStateError causes above (bundle/secret guards, unknown target)
+        // and from a wrong-secret VaultAuthError — WITHOUT message-matching. ONLY this :846
+        // destination-collision gets the code.
+        throw new VaultCollisionError(
           `vault-store: a vault already exists for "${dest}" — pass overwrite to replace it`
         );
       }
@@ -1483,6 +1506,9 @@ module.exports = {
   GLOBAL_ID,
   VaultLockedError,
   VaultStateError,
+  // The coded import-collision (M12 F5 HAT tail) — re-exported so main/tests distinguish an
+  // "already exists" refusal from a wrong-secret / bad-target failure.
+  VaultCollisionError,
   // Re-exported for callers/tests that catch the crypto-layer errors.
   VaultAuthError: vc.VaultAuthError,
   VaultFormatError: vc.VaultFormatError,

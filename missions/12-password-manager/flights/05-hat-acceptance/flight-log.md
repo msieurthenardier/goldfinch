@@ -518,3 +518,110 @@ clean. DD6 traced across all five exit paths (each zeroes every secret input + d
 
 **Operator VERIFIED LIVE** (typed subsections, modal editor, per-row Edit/Delete + confirm, icon buttons,
 in-field reveal/copy). Leg **landed**. 2680 tests; typecheck + lint clean. Committed on flight/05.
+
+## Developer note — I17 Import-over-existing fix + file-uploader modals (2026-07-22)
+
+**I17 (import-over-existing BUG + file-uploader UX, design-reviewed, IMPLEMENTED, PENDING operator live
+review — uncommitted on flight/05).** Operator exported a vault, deleted its items, then re-imported the
+bundle into the SAME set-up+unlocked profile with the CORRECT master password — and it FAILED reading as
+"check the secret." **Root cause was NOT the password.** Crypto unwraps fine (right password); the
+existing-profile branch then hit the collision guard (`vault-store.js:846`) because deleting items REWRITES
+`global.gfvault` (doesn't remove it) so the file still exists, import was hardcoded `overwrite:false`, and
+the sheet blanketed EVERY failure as "Could not open the bundle. Check the secret and type." — so a
+collision masqueraded as a wrong password.
+
+**Three-part fix:**
+
+- **PART A — import-over-existing with an explicit "Replace existing vault" confirm + overwrite threading.**
+  1. *Coded collision (review HIGH-1).* New `VaultCollisionError extends VaultStateError` (`code:
+     'vault-collision'`) thrown ONLY at the `:846` destination-collision — distinguishable from the other
+     VaultStateError causes (bundle/secret guards, unknown/burner target) and from a wrong-secret
+     VaultAuthError, WITHOUT message-matching, while still `instanceof VaultStateError` (pre-existing
+     catchers unaffected). Exported from vault-store.
+  2. *Overwrite bound at CONTINUE, not file-pick (review MEDIUM-3).* The Import modal probes
+     `hasVault(dest)`; when the destination already holds a vault it shows a red warning + a **REQUIRED**
+     "Replace the existing vault" checkbox and Continue stays disabled until it's checked (no checkbox for
+     an empty destination). Continue calls `beginImportUnlock(overwrite)` with the checkbox's FINAL state →
+     `internal-vault-begin-import-unlock` binds it onto the held record via `setPendingVaultImportOverwrite`
+     (strict-boolean coerced — overwrite DESTROYS a vault, so only explicit true enables it) → main's
+     `vaultImportFromSheet` reads `pending.overwrite` and passes it to `importVault`. **Exact binding
+     point: `register-browser-ipc.js` `internal-vault-begin-import-unlock` handler → main.js
+     `setPendingVaultImportOverwrite` → `_pendingVaultImport.overwrite`, consumed in
+     `vaultImportFromSheet`.** On destination `change`: re-probe hasVault, reset the checkbox, AND keep the
+     H1 pick-invalidation (clear path + `clearPendingImport`). Crypto-before-write preserved — overwrite
+     gates ONLY `:846`, downstream of all crypto, so it can never bypass secret entry (DD5).
+  3. *Collision surfaced truthfully (review HIGH-1 + MEDIUM-4).* `vaultImportFromSheet` maps the coded
+     collision to `{ ok:false, reason:'collision' }` (a RETURN, not a throw — keeps the overlay handler's
+     dual-zeroize uniform); VaultAuthError still → `{ ok:false }` (wrong-secret re-prompt); other errors
+     throw. `register-overlay-ipc.js` forwards the non-secret reason (bare `{ ok:false }` when none —
+     preserves the wrong-secret shape). `menu-overlay.js submitVaultImport` branches: `reason==='collision'`
+     → a FIXED "A vault already exists at the destination." (NEVER echoes the store message, which embeds
+     the dest/jar id). With the upfront checkbox a sheet-level collision is normally unreachable — kept as
+     defense-in-depth for the rare race.
+
+- **PART B — file-uploader UX on both modals.** Replaced the bare "Choose file…" / "Choose location…"
+  button + path `<span>` with a **file-uploader row**: a path text input + an **open-folder icon button**
+  (new `ICON_PATHS.folder`, reusing `iconButton`/`buildIconSvg`) that triggers the native dialog.
+  - *Import path field — READ-ONLY display, read stays dialog-bound (review HIGH-2/3).* The field only
+    DISPLAYS the dialog-picked path; the bundle READ remains bound to the dialog result (main reads
+    `filePaths[0]`). A typed/pasted path can never drive main's read — no arbitrary-read oracle.
+  - *Export path field — PASTEABLE, main-side VALIDATED (review HIGH-2).* **Decision: validated-pasteable**
+    (the operator explicitly asked to paste a path). New electron-free `src/main/vault/export-path.js`
+    `validateExportPath` gates a renderer-supplied path BEFORE the write: canonicalize (`path.resolve`),
+    require a `.gfvaultbundle`/`.json` extension, refuse an existing directory, require the parent dir to
+    exist + be writable. `vaultSaveBundleToFile` validates only the renderer-supplied `savePath` branch
+    (the dialog branch stays trusted) and returns `{ ok:false, error:'invalid-path', reason }` on failure;
+    the modal surfaces it on its status line. *Rationale for validated-pasteable over readOnly-display:* the
+    operator wanted a real-uploader paste affordance, and the write-anywhere latent risk is fully closed by
+    main-side validation — no reason to degrade UX to readOnly.
+
+- **PART C — banked (NOT built).** The marquee FRESH-profile adopt path (`vault-store.js:823-841`) is still
+  UI-unreachable: Import renders only in the unlocked Settings view, and `buildNotSetUp` (`vault.js:562`)
+  offers only "Set up". Needs a not-set-up "Import a vault bundle" entry + a destination-less modal variant
+  (fresh branch ignores the destination, forces GLOBAL_ID, no collision/overwrite, different lede). Small,
+  UI-only, its own leg — **drafted as `legs/hat-fresh-profile-import.md` (status planning), NOT
+  implemented here.**
+
+**Security invariants held:** DD5/DD2 — no master-equivalent secret in any page modal (import's source
+secret stays on the chrome vault-import-unlock sheet; export is ciphertext-only + fully main-side).
+Overwrite never bypasses secret entry (crypto runs before any write — verified, gate is downstream).
+Overwrite is gated behind the explicit required checkbox, never silent; H1/L1 held-state discipline
+preserved (destination-change invalidates the pick + resets the checkbox; dismiss clears). `textContent`-
+only; the fixed collision string echoes no store-supplied identifier.
+
+**Files touched:** `src/main/vault/vault-store.js` (VaultCollisionError + coded throw + export),
+`src/main/vault/export-path.js` (NEW validator), `src/main/main.js` (validate export path;
+`_pendingVaultImport.overwrite`; `setPendingVaultImportOverwrite`; collision → `{reason:'collision'}`;
+write try/catch), `src/main/register-browser-ipc.js` (`internal-vault-begin-import-unlock` binds overwrite),
+`src/main/register-overlay-ipc.js` (forward the non-secret reason), `src/preload/internal-preload.js`
+(`beginImportUnlock(overwrite)`), `src/preload/menu-overlay-preload.js` (comment), `src/renderer/menu-
+overlay.js` (collision branch), `src/renderer/pages/vault.js` (file-uploader rows + Replace checkbox +
+hasVault probe + overwrite binding; folder icon), `src/renderer/pages/vault.css` (path-input + replace-row
+styling), `src/renderer/renderer-globals.d.ts` + `src/renderer/menu-overlay-globals.d.ts` (widened result
+shapes). Tests: `test/unit/vault-export-import.test.js` (coded-collision + overwrite-replaces asserts),
+`test/unit/vault-export-path.test.js` (NEW — validator: extension/traversal/parent-dir/is-directory/empty),
+`test/unit/vault-request-triggers.test.js` (overwrite-binding at Continue), `test/unit/vault-import-
+handler.test.js` (collision-reason passthrough + dual-zeroize).
+
+Results: `npm test` **2689 pass / 0 fail** (+9: 7 export-path, 1 overwrite-binding, 1 collision-reason),
+`npm run typecheck` clean, `npm run lint` clean. **Spans renderer + menu-overlay renderer (sheet) + main +
+preload → the app must be RESTARTED to verify live (main + preload changed).** FD-restarted with the admin
+gate (token preserved). **Operator VERIFIED LIVE: "worked!"** — the export → delete-items → re-import
+restore path now works via the "Replace existing vault" confirm. *(operator, debrief-found bug + fix,
+2026-07-22)*
+
+## I18 — Note item's redundant "Notes" field (BUG, fixed live)
+
+Found by the operator while testing I17: *"for testing I added a note, and the notes have a note."* A **note**
+item showed TWO note-like fields in the editor — `body` (label **"Note"**, the content) AND the generic
+`notes` (label **"Notes"**) that the security schema carried on EVERY item type as an annotations field. On a
+credential (login/card) that generic annotations field is meaningful ("notes ON this login"); on a NOTE item
+it's redundant (the note's content IS its body), so the editor read "Note" + "Notes." **Fix:** dropped `notes`
+from the `note` type in BOTH `src/shared/vault-item-schema.js` (the main-side security taxonomy — source of
+truth) and `src/shared/vault-editor-model.js` `EDITOR_LAYOUT` (they are kept in exact sync by the drift-guard
+test). A note is now `title` + `body` only; login + card keep their `notes` annotations field. Updated the
+three tests that pinned the old "notes on EVERY type" taxonomy (`vault-item-schema.test.js`,
+`vault-item-management.test.js`, `register-vault-ipc.test.js` — the note preserve/clear test reworked onto
+`body`). Renderer sees the fix on a tab reload (editor-model); the schema change is main-side (inert until
+restart, harmless — the editor no longer sends the field). `npm test` **2689 / 0**, typecheck + lint clean.
+**Operator-found + FD-fixed.** *(operator, 2026-07-22)*

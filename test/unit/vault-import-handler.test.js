@@ -116,6 +116,23 @@ test('WRONG secret → { ok:false }: sheet NOT closed (re-prompt); both arrays s
   assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized on refusal');
 });
 
+test('COLLISION reason → { ok:false, reason:"collision" }: sheet NOT closed (surfaces "already exists"); both arrays zeroed (M12 F5 HAT tail)', async () => {
+  // The main.js delegate maps a coded VaultCollisionError to { ok:false, reason:'collision' } (a
+  // RETURN, not a throw) so the handler forwards the NON-SECRET reason and the dual-zeroize runs
+  // uniformly — distinguishing a destination collision from a wrong secret at the sheet.
+  const { handler, sheetSender, closeCalls, chromeSends, captured } =
+    makeHarness({ importResult: { ok: false, reason: 'collision' } });
+  const secret = new TextEncoder().encode('correct horse battery staple');
+
+  const res = await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'master' });
+
+  assert.deepEqual(res, { ok: false, reason: 'collision' });
+  assert.deepEqual(closeCalls, [], 'the sheet stays open to surface the collision message');
+  assert.deepEqual(chromeSends, []);
+  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on collision');
+  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized on collision');
+});
+
 test('a delegate THROW (non-auth error, e.g. collision) rejects the invoke but still zeroizes both arrays; sheet not closed', async () => {
   const err = new Error('vault-store: a vault already exists for "work"');
   const { handler, sheetSender, closeCalls, captured } = makeHarness({ importThrows: err });

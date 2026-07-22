@@ -915,21 +915,63 @@ textarea.vault-input {
 .vault-modal-form .vault-settings-field {
   align-items: baseline;
 }
-/* The "Choose location…" / "Choose file…" button beside its path display — wraps rather than
-   overflowing the card when the path is long. */
+/* File-uploader row (M12 F5 HAT tail): a path text input that grows to fill the row + an
+   open-folder icon button that triggers the native dialog. The input is READ-ONLY on the import
+   modal (dialog-picked path, display only) and pasteable on the export modal (main-side validated). */
 .vault-modal-file-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
-.vault-modal-path {
-  font-size: 12px;
+.vault-modal-path-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  text-overflow: ellipsis;
+}
+.vault-modal-path-input:read-only {
   color: var(--fg-dim);
-  word-break: break-all;
+  cursor: default;
 }
-.vault-modal-path:empty {
-  display: none;
+.vault-modal-path-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.vault-modal-file-row .vault-icon-btn {
+  flex: 0 0 auto;
+}
+
+/* Replace-existing confirmation (M12 F5 HAT tail): a warning line + a REQUIRED checkbox, shown
+   only when the import destination already holds a vault (importing DESTROYS it). */
+.vault-modal-replace-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--err, #c0392b);
+  border-radius: 6px;
+  background: rgba(192, 57, 43, 0.08);
+}
+.vault-modal-warn {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.vault-modal-replace-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
 }
 .vault-modal-status {
   margin: 12px 0 0;

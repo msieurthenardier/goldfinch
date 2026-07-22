@@ -1290,6 +1290,14 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     if (res && res.ok) {
       report.sent = true; // suppress the trailing dismissed; main closes the sheet.
       menuController.close(vaultImportEntry);
+    } else if (res && res.reason === 'collision') {
+      // M12 F5 HAT tail (review HIGH-1 / MEDIUM-4): a destination COLLISION is not a secret
+      // failure — surface a truthful, FIXED string (never echo the store message, which embeds the
+      // destination/jar id). Defense-in-depth: the page's upfront Replace-existing checkbox makes a
+      // sheet-level collision normally unreachable, but a rare race can still land here.
+      vaultImport.error.textContent = 'A vault already exists at the destination.';
+      vaultImport.input.value = '';
+      vaultImport.input.focus();
     } else {
       vaultImport.error.textContent = 'Could not open the bundle. Check the secret and type.';
       vaultImport.input.value = '';

@@ -39,7 +39,8 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret channel. Mirrors
   // setupVault — `secret` is a Uint8Array, NEVER sendActivated — plus the NON-SECRET
   // `secretKind` (master | recovery). The destination target + the bundle are held main-side.
-  // Returns { ok }; false re-prompts (wrong secret), true closes it (main runs the import).
+  // Returns { ok, reason? }; ok:false re-prompts (wrong secret) or, with reason:'collision' (M12 F5
+  // HAT tail), surfaces a truthful "already exists" message; ok:true closes it (main runs the import).
   importVault: (payload) => ipcRenderer.invoke('menu-overlay:vault-import', payload),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION channel (used when the
   // stepup sheet is in mode 'rotate-recovery'). Mirrors setupVault — `secret` (the master password)

@@ -108,6 +108,9 @@ function init() {
     eye: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
     'eye-off': ['M17.9 17.9A10.4 10.4 0 0 1 12 20c-7 0-10-8-10-8a18.8 18.8 0 0 1 5.1-6M9.9 4.2A9.5 9.5 0 0 1 12 4c7 0 10 8 10 8a18.9 18.9 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 0 1-4.2-4.2', 'M2 2l20 20'],
     copy: ['M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
+    // Open-folder — the file-uploader row's "browse" affordance (M12 F5 HAT tail): opens the
+    // native dialog (pickImportFile / pickSavePath) and populates the path field.
+    folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
   };
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -422,19 +425,20 @@ function init() {
   }
 
   /**
-   * The Export modal (M12 F5 HAT, I14). Body: a SOURCE-vault select, a "Choose location…" button +
-   * a path display, driven off the modal's status line. Export (submit) is DISABLED until a save
-   * location is chosen. "Choose location…" runs `pickSavePath` (main-side save dialog ONLY, no
-   * write) — export binds source→path at submit, so changing the source after choosing a location
-   * is fine (no held main-side state). Submit runs `exportVault(target, savePath)` fully main-side
-   * (ciphertext-only bundle; never transits the page). L2: a { locked } (idle-lock race) closes the
-   * modal, refreshes the page, and surfaces a brief notice; a write error shows on the status line —
-   * neither is silently swallowed. { ok } closes the modal.
+   * The Export modal (M12 F5 HAT, I14; file-uploader row + validated pasteable path M12 F5 HAT
+   * tail). Body: a SOURCE-vault select, then a file-uploader ROW — a text input showing the save
+   * path + an open-folder icon button that runs `pickSavePath` (main-side save dialog ONLY, no
+   * write) and populates the field. The field is EDITABLE/PASTEABLE (operator ask — the path looks
+   * like a real uploader); the actual write is gated MAIN-SIDE by validateExportPath (canonical
+   * extension + existing writable parent, not a directory), so a typed path can never be a
+   * write-anywhere primitive (review HIGH-2). Export (submit) is DISABLED until the field is
+   * non-empty. Submit runs `exportVault(target, savePath)` fully main-side (ciphertext-only bundle;
+   * never transits the page). L2: a { locked } (idle-lock race) closes the modal, refreshes, and
+   * surfaces a brief notice; an invalid-path / write error shows on the status line — none is
+   * silently swallowed. { ok } closes the modal.
    * @param {Array<{ vaultId: string, label: string }>} vaults
    */
   function openExportModal(vaults) {
-    /** @type {string|null} */
-    let savePath = null;
     const body = el('div', 'vault-modal-form');
 
     const field = el('label', 'vault-settings-field');
@@ -443,18 +447,26 @@ function init() {
     field.appendChild(select);
     body.appendChild(field);
 
+    // File-uploader row: a pasteable path input + an open-folder icon button (native save dialog).
     const fileRow = el('div', 'vault-modal-file-row');
-    const pathDisplay = el('span', 'vault-modal-path');
-    fileRow.appendChild(button('Choose location…', 'vault-btn', () => {
+    const pathInput = /** @type {HTMLInputElement} */ (el('input', 'vault-modal-path-input'));
+    pathInput.type = 'text';
+    pathInput.placeholder = 'Choose or type a .gfvaultbundle path';
+    pathInput.setAttribute('aria-label', 'Export file location');
+    pathInput.addEventListener('input', () => {
+      handle.setStatus('');
+      handle.setSubmitEnabled(pathInput.value.trim().length > 0);
+    });
+    fileRow.appendChild(pathInput);
+    fileRow.appendChild(iconButton('folder', 'Choose a save location', () => {
       Promise.resolve(bridge.pickSavePath(select.value)).then((res) => {
         if (res && res.path) {
-          savePath = res.path;
-          pathDisplay.textContent = res.path;
+          pathInput.value = res.path;
+          handle.setStatus('');
           handle.setSubmitEnabled(true);
         }
       }).catch(() => {});
     }));
-    fileRow.appendChild(pathDisplay);
     body.appendChild(fileRow);
 
     const handle = openModal({
@@ -463,6 +475,7 @@ function init() {
       submitLabel: 'Export',
       submitEnabled: false,
       onSubmit: () => {
+        const savePath = pathInput.value.trim();
         if (!savePath) return;
         handle.setSubmitEnabled(false);
         handle.setStatus('Exporting…');
@@ -474,6 +487,11 @@ function init() {
             return;
           }
           if (res && res.ok) { handle.close(); return; }
+          if (res && res.error === 'invalid-path') {
+            handle.setStatus('That location can’t be used. Pick a .gfvaultbundle or .json path in an existing folder.');
+            handle.setSubmitEnabled(true);
+            return;
+          }
           if (res && res.canceled) { handle.setStatus('Export canceled.'); handle.setSubmitEnabled(true); return; }
           handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true);
         }).catch(() => { handle.setStatus('Could not export the vault.'); handle.setSubmitEnabled(true); });
@@ -482,18 +500,28 @@ function init() {
   }
 
   /**
-   * The Import modal (M12 F5 HAT, I14). Body: a DESTINATION-vault select, a "Choose file…" button +
-   * a path display. Continue (submit) is DISABLED until a bundle is picked FOR the currently-shown
-   * destination. "Choose file…" runs `pickImportFile(destination)` — main opens + reads + HOLDS the
-   * bundle for that destination and returns { ok, path } | { canceled } | { error }. NO secret is
-   * entered here: Continue runs `beginImportUnlock()`, forwarding to the chrome-owned
-   * vault-import-unlock sheet where the held bundle is consumed with the source master password /
-   * recovery key (DD2/DD5).
+   * The Import modal (M12 F5 HAT, I14; file-uploader row + Replace-existing confirm M12 F5 HAT
+   * tail). Body: a DESTINATION-vault select, a file-uploader ROW (a READ-ONLY path field showing
+   * the dialog-picked path + an open-folder icon button), and a Replace-existing affordance shown
+   * ONLY when the destination already holds a vault.
    *
-   * H1: the held _pendingVaultImport.destinationTarget is bound at pick time. If the operator
-   * changes the destination select AFTER a successful pick, invalidate it — clear the path, drop the
-   * held bundle (clearPendingImport), disable Continue, and require a re-pick — so the held
-   * destination can never drift from the one the modal shows.
+   * The bundle READ stays DIALOG-BOUND: the folder button runs `pickImportFile(destination)` — main
+   * opens + reads + HOLDS the bundle for that destination (main reads filePaths[0]) and returns
+   * { ok, path } | { canceled } | { error }. The path field is READ-ONLY (it only DISPLAYS the
+   * dialog path) so a typed/pasted path can never drive main's read — no arbitrary-read oracle
+   * (review HIGH-2/3). NO secret is entered here: Continue runs `beginImportUnlock(overwrite)`,
+   * forwarding to the chrome-owned vault-import-unlock sheet where the held bundle is consumed with
+   * the source master password / recovery key (DD2/DD5).
+   *
+   * REPLACE-EXISTING (review HIGH-1 / MEDIUM-3): on open + on every destination change we probe
+   * `hasVault(dest)`. When the destination already holds a vault, importing REPLACES (destroys) it,
+   * so a REQUIRED "Replace the existing vault" checkbox appears and Continue stays disabled until it
+   * is checked. No checkbox is shown for an empty destination. `overwrite` is bound at the Continue
+   * step from the checkbox's FINAL state — never silently, never at file-pick.
+   *
+   * H1: the held _pendingVaultImport.destinationTarget is bound at pick time. A destination change
+   * AFTER a successful pick invalidates it — clear the path, drop the held bundle
+   * (clearPendingImport), reset the Replace checkbox, disable Continue, re-probe, force a re-pick.
    *
    * L1: on dismiss (Cancel / Escape / backdrop) after a pick, drop the held bundle via
    * clearPendingImport so an abandoned import never lingers.
@@ -501,6 +529,8 @@ function init() {
    */
   function openImportModal(vaults) {
     let picked = false;
+    let collision = false;        // the current destination already holds a vault
+    let replaceConfirmed = false; // the "Replace the existing vault" checkbox state
     const body = el('div', 'vault-modal-form');
 
     const field = el('label', 'vault-settings-field');
@@ -509,35 +539,78 @@ function init() {
     field.appendChild(select);
     body.appendChild(field);
 
+    // File-uploader row: a READ-ONLY path field (dialog-picked path, display only) + folder button.
     const fileRow = el('div', 'vault-modal-file-row');
-    const pathDisplay = el('span', 'vault-modal-path');
-    fileRow.appendChild(button('Choose file…', 'vault-btn', () => {
+    const pathInput = /** @type {HTMLInputElement} */ (el('input', 'vault-modal-path-input'));
+    pathInput.type = 'text';
+    pathInput.readOnly = true;
+    pathInput.placeholder = 'No file chosen';
+    pathInput.setAttribute('aria-label', 'Selected bundle file');
+    fileRow.appendChild(pathInput);
+    fileRow.appendChild(iconButton('folder', 'Choose a bundle file', pickFile));
+    body.appendChild(fileRow);
+
+    // Replace-existing confirmation — shown ONLY when the destination already holds a vault.
+    const replaceRow = el('div', 'vault-modal-replace-row');
+    replaceRow.hidden = true;
+    replaceRow.appendChild(el('p', 'vault-modal-warn',
+      'A vault already exists here — importing will REPLACE it, permanently destroying the current vault.'));
+    const replaceLabel = el('label', 'vault-modal-replace-label');
+    const replaceCheckbox = /** @type {HTMLInputElement} */ (el('input'));
+    replaceCheckbox.type = 'checkbox';
+    replaceLabel.appendChild(replaceCheckbox);
+    replaceLabel.appendChild(el('span', undefined, 'Replace the existing vault'));
+    replaceRow.appendChild(replaceLabel);
+    body.appendChild(replaceRow);
+
+    function updateContinueEnabled() {
+      handle.setSubmitEnabled(picked && (!collision || replaceConfirmed));
+    }
+
+    replaceCheckbox.addEventListener('change', () => {
+      replaceConfirmed = replaceCheckbox.checked;
+      updateContinueEnabled();
+    });
+
+    // Probe whether a destination already holds a vault → show/hide the Replace affordance.
+    function probeCollision(dest) {
+      return Promise.resolve(bridge.hasVault(dest)).then((r) => {
+        collision = !!(r && r.present);
+        replaceRow.hidden = !collision;
+        if (!collision) { replaceConfirmed = false; replaceCheckbox.checked = false; }
+        updateContinueEnabled();
+      }).catch(() => {});
+    }
+
+    function pickFile() {
       Promise.resolve(bridge.pickImportFile(select.value)).then((res) => {
         if (res && res.ok) {
           picked = true;
-          pathDisplay.textContent = res.path || '';
+          pathInput.value = res.path || '';
           handle.setStatus('');
-          handle.setSubmitEnabled(true);
+          updateContinueEnabled();
         } else if (res && res.error) {
           picked = false;
-          pathDisplay.textContent = '';
+          pathInput.value = '';
           handle.setStatus('Could not read that bundle file.');
-          handle.setSubmitEnabled(false);
+          updateContinueEnabled();
         }
         // { canceled } → do nothing (keep any prior pick).
       }).catch(() => {});
-    }));
-    fileRow.appendChild(pathDisplay);
-    body.appendChild(fileRow);
+    }
 
-    // H1: a destination change after a successful pick invalidates the held bundle.
+    // H1: a destination change after a successful pick invalidates the held bundle; always re-probe
+    // the new destination's collision state and reset the Replace checkbox.
     select.addEventListener('change', () => {
-      if (!picked) return;
-      picked = false;
-      pathDisplay.textContent = '';
-      handle.setStatus('');
-      handle.setSubmitEnabled(false);
-      Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+      replaceConfirmed = false;
+      replaceCheckbox.checked = false;
+      if (picked) {
+        picked = false;
+        pathInput.value = '';
+        handle.setStatus('');
+        Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+      }
+      probeCollision(select.value);
     });
 
     const handle = openModal({
@@ -546,8 +619,9 @@ function init() {
       submitLabel: 'Continue',
       submitEnabled: false,
       onSubmit: () => {
-        if (!picked) return;
-        Promise.resolve(bridge.beginImportUnlock()).catch(() => {});
+        if (!picked || (collision && !replaceConfirmed)) return;
+        // Bind overwrite from the checkbox FINAL state at Continue (review MEDIUM-3).
+        Promise.resolve(bridge.beginImportUnlock(replaceConfirmed)).catch(() => {});
         handle.close();
       },
       onCancel: () => {
@@ -555,6 +629,9 @@ function init() {
         if (picked) Promise.resolve(bridge.clearPendingImport()).catch(() => {});
       },
     });
+
+    // Initial probe for the default-selected destination.
+    probeCollision(select.value);
   }
 
   // ── not-set-up + locked states (leg 1 shell; setup/unlock flows land in leg 4) ──

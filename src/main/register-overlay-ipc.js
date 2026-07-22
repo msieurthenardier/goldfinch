@@ -228,12 +228,17 @@ function registerOverlayIpc({
       const kind = secretKind === 'recovery' ? 'recovery' : 'master';
       const buf = Buffer.from(secret);
       try {
-        const res = await vaultImport(buf, kind); // { ok }
+        const res = await vaultImport(buf, kind); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
           return { ok: true };
         }
-        return { ok: false };
+        // M12 F5 HAT tail (review HIGH-1 / MEDIUM-4): forward the NON-SECRET failure reason so the
+        // sheet can distinguish a destination collision ('collision') from a wrong secret. The
+        // delegate already converted the coded collision from a throw to a return, so the finally
+        // dual-zeroize runs uniformly on every path. A plain wrong-secret refusal keeps its bare
+        // { ok:false } shape (no reason key).
+        return res && res.reason ? { ok: false, reason: res.reason } : { ok: false };
       } finally {
         buf.fill(0);
         secret.fill?.(0);

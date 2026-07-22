@@ -27,6 +27,7 @@ function registerBrowserIpc({
   getVaultHuman,
   vaultImportBegin,
   clearPendingVaultImport,
+  setPendingVaultImportOverwrite,
   popupVaultIconMenu,
   random = Math.random,
   logger = console,
@@ -184,12 +185,13 @@ function registerBrowserIpc({
   //     { bundle, destinationTarget } main-side, returning { ok, path } | { canceled } | { error }.
   //     It does NOT forward — the sheet opens only when the operator submits the modal. A canceled
   //     dialog / unreadable file holds nothing (the delegate only sets the record on { ok }).
-  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — forwards the BARE
-  //     vault-request-import trigger to the owning chrome (chromeForTab(event.sender.id) — the
+  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — binds `overwrite` (the modal's
+  //     Replace-existing checkbox, M12 F5 HAT tail) onto the held import record, then forwards the
+  //     BARE vault-request-import trigger to the owning chrome (chromeForTab(event.sender.id) — the
   //     internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
   //     held bundle is consumed there with the sheet's secret; the secret never touches this
-  //     channel or the page. Bare forward — needs only chromeForTab, so it is unconditional
-  //     (mirrors internal-vault-request-setup), NOT gated on an injection.
+  //     channel or the page. Only `overwrite` (a boolean) crosses. Needs only chromeForTab, so it
+  //     is unconditional (mirrors internal-vault-request-setup), NOT gated on an injection.
   //  3. internal-vault-clear-pending-import (clearPendingImport) — drops the held record (L1) when
   //     the operator dismisses the modal after a pick. Always safe to call.
   //
@@ -199,7 +201,11 @@ function registerBrowserIpc({
       return await vaultImportBegin(destinationTarget);
     });
   }
-  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event) => {
+  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event, overwrite) => {
+    // M12 F5 HAT tail (review MEDIUM-3): bind `overwrite` from the modal's Replace-existing
+    // checkbox FINAL state at the Continue step — BEFORE the sheet opens — so the held import
+    // record carries the operator's explicit replace decision. Strict-boolean coerced main-side.
+    setPendingVaultImportOverwrite?.(overwrite === true);
     chromeForTab(event.sender.id)?.send('vault-request-import');
     return { ok: true };
   });

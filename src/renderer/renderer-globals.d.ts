@@ -527,7 +527,7 @@ interface GoldfinchInternalBridge {
   /** Export a vault to a portable bundle file. With `savePath` main writes directly (the page
    * modal); without one main runs the save dialog (the jars offer). { ok, path }, { canceled },
    * or { locked }. */
-  exportVault(target: string, savePath?: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean }>;
+  exportVault(target: string, savePath?: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
   /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
    * { canceled }. */
   pickSavePath(target: string): Promise<{ path?: string; canceled?: boolean }>;
@@ -539,8 +539,9 @@ interface GoldfinchInternalBridge {
    * (H1). */
   pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; error?: string }>;
   /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
-   * Continue). Bare trigger — no secret. { ok }. */
-  beginImportUnlock(): Promise<{ ok: boolean }>;
+   * Continue). Bare trigger — no secret; the only payload is `overwrite` (the Replace-existing
+   * checkbox, M12 F5 HAT tail), bound onto the held record main-side. { ok }. */
+  beginImportUnlock(overwrite?: boolean): Promise<{ ok: boolean }>;
   /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Always safe. { ok }. */
   clearPendingImport(): Promise<{ ok: boolean }>;
   // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned

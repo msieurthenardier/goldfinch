@@ -262,19 +262,25 @@ test('EXISTING profile import: refuse-on-collision unless overwrite; unknown tar
     // First import lands the vault at 'work'.
     await store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' });
 
-    // Collision: a second import to 'work' refuses (VaultStateError) unless overwrite:true.
+    // Collision: a second import to 'work' refuses unless overwrite:true. The refusal is a CODED
+    // VaultCollisionError (M12 F5 HAT tail) — distinguishable from the other VaultStateError causes
+    // and from a wrong-secret VaultAuthError — while STILL an instanceof VaultStateError (so the
+    // pre-existing catchers are unaffected).
     await assert.rejects(
       store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
-      (e) => e instanceof vs.VaultStateError
+      (e) => e instanceof vs.VaultCollisionError
+        && e instanceof vs.VaultStateError
+        && e.code === 'vault-collision'
     );
-    // overwrite:true succeeds.
+    // overwrite:true succeeds (REPLACES the destination vault).
     const ok = await store.importVault(bundle, { destinationTarget: 'work', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master', overwrite: true });
     assert.equal(ok.vaultId, 'work');
 
-    // Unknown / non-persistent destination target is refused by the allowlist (VaultStateError).
+    // Unknown / non-persistent destination target is refused by the allowlist — a VaultStateError
+    // that is NOT the coded collision (only the :846 destination-collision carries the code).
     await assert.rejects(
       store.importVault(bundle, { destinationTarget: 'no-such-jar', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
-      (e) => e instanceof vs.VaultStateError
+      (e) => e instanceof vs.VaultStateError && !(e instanceof vs.VaultCollisionError)
     );
 
     // Wrong secret to a fresh target → VaultAuthError, and no file is written for it.

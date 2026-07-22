@@ -136,12 +136,12 @@ test('preserving save: NOTE body preserved; CARD number/cvv preserved when uncha
   const dir = tmpDir();
   try {
     const store = await makeStore(dir);
-    const note = store.saveItem('global', { type: 'note', title: 'N', body: 'the body', notes: 'meta' });
-    store.saveItemPreservingSecrets('global', { id: note.id, type: 'note', title: 'N2', body: '', notes: '' }, ['body', 'notes']);
+    // A note has ONLY title + body (no redundant generic `notes` field).
+    const note = store.saveItem('global', { type: 'note', title: 'N', body: 'the body' });
+    store.saveItemPreservingSecrets('global', { id: note.id, type: 'note', title: 'N2', body: '' }, ['body']);
     const nf = store.revealItem('global', note.id);
     assert.equal(nf.title, 'N2');
     assert.equal(nf.body, 'the body', 'note body preserved');
-    assert.equal(nf.notes, 'meta', 'note notes preserved');
 
     const card = store.saveItem('global', { type: 'card', title: 'C', cardholder: 'Me', brand: 'visa', last4: '4242', number: '4111111111111111', cvv: '321', expiry: '01/29', notes: '' });
     store.saveItemPreservingSecrets('global', { id: card.id, type: 'card', title: 'C2', cardholder: 'Me', brand: 'visa', last4: '4242', number: '', cvv: '', expiry: '', notes: '' }, ['number', 'cvv', 'expiry', 'notes']);

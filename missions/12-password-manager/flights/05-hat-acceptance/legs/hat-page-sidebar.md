@@ -1,6 +1,6 @@
 # Leg: hat-page-sidebar — Secrets Management page restructure
 
-**Status**: in-flight
+**Status**: landed
 **Flight**: [HAT + Alignment — End-to-End Acceptance](../flight.md)
 
 ## Objective

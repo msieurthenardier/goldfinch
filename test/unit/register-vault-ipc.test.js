@@ -292,22 +292,21 @@ test('internal-vault-item-save PRESERVES an unrevealed password AND notes; retur
   } finally { rm(dir); }
 });
 
-test('internal-vault-item-save with a note preserves body; an explicit clear removes a field', async () => {
+test('internal-vault-item-save with a note preserves body; an explicit clear removes it', async () => {
   const { dir, store, ipcMain } = await realHarness();
   try {
-    const note = store.saveItem('global', { type: 'note', title: 'N', body: 'the body', notes: 'keep' });
-    // Preserve body + notes.
+    // A note has ONLY title + body (no redundant generic `notes` field).
+    const note = store.saveItem('global', { type: 'note', title: 'N', body: 'the body' });
+    // Preserve body (masked-untouched → named in unchangedSecrets).
     ipcMain.invoke('internal-vault-item-save', vaultEvent(), {
-      vaultId: 'global', item: { id: note.id, type: 'note', title: 'N2', body: '', notes: '' }, unchangedSecrets: ['body', 'notes']
+      vaultId: 'global', item: { id: note.id, type: 'note', title: 'N2', body: '' }, unchangedSecrets: ['body']
     });
     assert.equal(store.revealItem('global', note.id).body, 'the body');
-    // Explicit clear of notes (omit from unchangedSecrets, send '').
+    // Explicit clear of body (omit from unchangedSecrets, send '').
     ipcMain.invoke('internal-vault-item-save', vaultEvent(), {
-      vaultId: 'global', item: { id: note.id, type: 'note', title: 'N3', body: '', notes: '' }, unchangedSecrets: ['body']
+      vaultId: 'global', item: { id: note.id, type: 'note', title: 'N3', body: '' }, unchangedSecrets: []
     });
-    const full = store.revealItem('global', note.id);
-    assert.equal(full.body, 'the body', 'body still preserved');
-    assert.equal(full.notes, '', 'notes explicitly cleared');
+    assert.equal(store.revealItem('global', note.id).body, '', 'body explicitly cleared');
   } finally { rm(dir); }
 });
 

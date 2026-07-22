@@ -34,6 +34,10 @@ const downloads = require('./downloads-store');
 // readVaultItems — none of which mutate the store's human lock state. The human
 // unlock UI / IPC is a separate concern (later legs).
 const vaultStoreModule = require('./vault/vault-store');
+// M12 F5 HAT tail: validate a renderer-supplied (typed/pasted) export save path BEFORE the
+// direct fs.writeFileSync — the Export modal honors a typed path, so main must gate it (no
+// write-anywhere primitive). Electron-free / unit-tested.
+const { validateExportPath } = require('./vault/export-path');
 // M12 F2 Leg 3 (pick-and-fill): the Electron-free human fill orchestration — the
 // reachable-items picker read + the origin/scope-rechecked human fill that hands
 // the credential to F1's fill delegate (in main only; the password never returns
@@ -604,7 +608,7 @@ function broadcastVaultLockState() {
 // on the page, never on the sheet — and consumed by the `menu-overlay:vault-import` handler's
 // `vaultImport` delegate. A later request overwrites a stale pending record (ciphertext-only,
 // low risk); a successful import clears it.
-/** @type {{ bundle: any, destinationTarget: string } | null} */
+/** @type {{ bundle: any, destinationTarget: string, overwrite: boolean } | null} */
 let _pendingVaultImport = null;
 
 // Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
@@ -633,7 +637,15 @@ async function vaultPickSavePath(target) {
 // { canceled }.
 async function vaultSaveBundleToFile(bundle, savePath) {
   let filePath = typeof savePath === 'string' && savePath ? savePath : null;
-  if (!filePath) {
+  if (filePath) {
+    // M12 F5 HAT tail: a renderer-supplied path (the page Export modal now honors a typed/pasted
+    // path) is UNTRUSTED — validate before the direct write (canonical extension + existing,
+    // writable parent dir; not a directory) so this is never a write-anywhere primitive. The
+    // no-path branch below stays dialog-bound (Electron's showSaveDialog is the trusted picker).
+    const v = validateExportPath(filePath);
+    if (!v.ok) return { ok: false, error: 'invalid-path', reason: v.reason };
+    filePath = v.path;
+  } else {
     const { canceled, filePath: picked } = await dialog.showSaveDialog({
       title: 'Export vault bundle',
       defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
@@ -645,7 +657,11 @@ async function vaultSaveBundleToFile(bundle, savePath) {
     if (canceled || !picked) return { canceled: true };
     filePath = picked;
   }
-  fs.writeFileSync(filePath, JSON.stringify(bundle), 'utf8');
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(bundle), 'utf8');
+  } catch {
+    return { ok: false, error: 'write-failed' };
+  }
   return { ok: true, path: filePath };
 }
 
@@ -674,8 +690,19 @@ async function vaultImportBeginFromFile(destinationTarget) {
   } catch {
     return { error: 'unreadable' };
   }
-  _pendingVaultImport = { bundle, destinationTarget };
+  // overwrite starts FALSE; it is bound at the modal's Continue step from the "Replace existing
+  // vault" checkbox (setPendingVaultImportOverwrite), never here at file-pick time (review MEDIUM-3).
+  _pendingVaultImport = { bundle, destinationTarget, overwrite: false };
   return { ok: true, path: filePaths[0] };
+}
+
+// Bind the import's `overwrite` from the modal's "Replace existing vault" checkbox FINAL state, at
+// the Continue step (not at file-pick). Called by the internal-vault-begin-import-unlock forward
+// just before the chrome sheet opens (M12 F5 HAT tail, review MEDIUM-3). A no-op when nothing is
+// held (a canceled/unread pick leaves no record). Coerced to a strict boolean — overwrite DESTROYS
+// a vault, so only an explicit true enables it.
+function setPendingVaultImportOverwrite(overwrite) {
+  if (_pendingVaultImport) _pendingVaultImport.overwrite = overwrite === true;
 }
 
 // Clear the held import record (L1). The page's Import modal calls this on Cancel / Escape /
@@ -700,13 +727,21 @@ async function vaultImportFromSheet(buf, secretKind) {
       destinationTarget: pending.destinationTarget,
       secret: buf,
       secretKind,
-      overwrite: false,
+      // Bound at Continue from the "Replace existing vault" checkbox (review MEDIUM-3). overwrite
+      // gates ONLY the :846 destination-collision, downstream of ALL crypto — a wrong secret still
+      // throws VaultAuthError before any write, so overwrite can never bypass secret entry (DD5).
+      overwrite: pending.overwrite === true,
     });
     _pendingVaultImport = null;
     broadcastVaultLockState();
     return { ok: true };
   } catch (e) {
+    // Wrong secret → { ok:false } (the sheet re-prompts, nothing written). A CODED collision → a
+    // distinguishable { reason:'collision' } so the sheet shows a truthful "already exists" message
+    // instead of "check the secret" (review HIGH-1 / MEDIUM-4). Converting the collision from a
+    // throw to a return keeps the overlay handler's dual-zeroize uniform. Other errors propagate.
     if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+    if (e instanceof vaultStoreModule.VaultCollisionError) return { ok: false, reason: 'collision' };
     throw e;
   }
 }
@@ -1111,6 +1146,9 @@ const { rerollSeed } = registerBrowserIpc({
   // drops the held record on modal dismiss (L1).
   vaultImportBegin: vaultImportBeginFromFile,
   clearPendingVaultImport,
+  // M12 F5 HAT tail (review MEDIUM-3): bind the import `overwrite` from the modal's Replace
+  // checkbox at the Continue step (the internal-vault-begin-import-unlock forward), never at pick.
+  setPendingVaultImportOverwrite,
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,

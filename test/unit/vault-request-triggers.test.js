@@ -153,6 +153,7 @@ function makeImportHarness({ beginResult } = {}) {
   const wrapped = new Map();
   const sends = [];
   const beginCalls = [];
+  const overwriteCalls = [];
   let clearCalls = 0;
   const chrome = { send: (channel, payload) => sends.push([channel, payload]) };
   registerBrowserIpc({
@@ -180,8 +181,9 @@ function makeImportHarness({ beginResult } = {}) {
       return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle' };
     },
     clearPendingVaultImport: () => { clearCalls += 1; },
+    setPendingVaultImportOverwrite: (v) => { overwriteCalls.push(v); },
   });
-  return { wrapped, sends, beginCalls, clearCallsCount: () => clearCalls };
+  return { wrapped, sends, beginCalls, overwriteCalls, clearCallsCount: () => clearCalls };
 }
 
 test('pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport; beginImportUnlock is unconditional', () => {
@@ -207,6 +209,21 @@ test('internal sender: beginImportUnlock forwards a BARE vault-request-import to
   const res = wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5));
   assert.deepEqual(res, { ok: true });
   assert.deepEqual(sends, [['vault-request-import', undefined]], 'a BARE trigger — no secret, no target');
+});
+
+test('beginImportUnlock binds `overwrite` (the Replace checkbox) onto the held record before forwarding (M12 F5 HAT tail)', () => {
+  // overwrite:true (Replace confirmed) → the delegate is called with strict true.
+  const yes = makeImportHarness();
+  yes.wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5), true);
+  assert.deepEqual(yes.overwriteCalls, [true]);
+  assert.deepEqual(yes.sends, [['vault-request-import', undefined]], 'still a bare forward — only a boolean crosses');
+
+  // overwrite absent / false / truthy-but-not-true → coerced to strict false (overwrite DESTROYS).
+  for (const arg of [undefined, false, 'true', 1]) {
+    const h = makeImportHarness();
+    h.wrapped.get('internal-vault-begin-import-unlock')(internalEvent(5), arg);
+    assert.deepEqual(h.overwriteCalls, [false], `overwrite=${JSON.stringify(arg)} → strict false`);
+  }
 });
 
 test('a canceled / failed pick holds nothing and does not forward', async () => {

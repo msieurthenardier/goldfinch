@@ -52,10 +52,12 @@ const EDITOR_LAYOUT = {
     ],
   },
   note: {
+    // A note item's content IS its body — it carries NO separate generic "Notes" annotations
+    // field (that redundant second field made a note show both "Note" and "Notes"). login/card
+    // keep their `notes` field for annotations ON a credential; a note doesn't need one.
     nonSecret: [{ name: 'title', label: 'Name' }],
     secret: [
       { name: 'body', label: 'Note', multiline: true },
-      { name: 'notes', label: 'Notes', multiline: true },
     ],
   },
 };

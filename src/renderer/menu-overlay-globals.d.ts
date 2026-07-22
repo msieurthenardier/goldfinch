@@ -58,8 +58,9 @@ interface MenuOverlayBridge {
   /** sheet → main: the DEDICATED vault-import bundle-unlock channel (M12 F4 Leg 1). Mirrors
    * setupVault — the secret rides as a Uint8Array — plus the NON-SECRET secretKind
    * (master | recovery). The destination target + the bundle are held main-side. Returns
-   * { ok }; false re-prompts (wrong secret), true closes it (main runs the import). */
-  importVault(payload: { token: number; secret: Uint8Array; secretKind: 'master' | 'recovery' }): Promise<{ ok: boolean }>;
+   * { ok, reason? }; ok:false re-prompts (wrong secret) or, with reason:'collision' (M12 F5 HAT
+   * tail), surfaces a truthful "already exists" message; ok:true closes it (main runs the import). */
+  importVault(payload: { token: number; secret: Uint8Array; secretKind: 'master' | 'recovery' }): Promise<{ ok: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED recovery-key ROTATION channel (M12 F4 Leg 2). Used when the
    * reused vault-stepup sheet is in mode 'rotate-recovery'; the master password rides as a
    * Uint8Array. Returns { ok }; false re-prompts (wrong master password), true closes it (main

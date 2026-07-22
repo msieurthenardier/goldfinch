@@ -698,10 +698,13 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
     /**
      * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (consumed there
      * with the sheet's secret). Call on the Import modal's Continue submit, AFTER a successful
-     * pickImportFile. A BARE trigger — NO secret crosses here. Resolves { ok }.
+     * pickImportFile. A BARE trigger — NO secret crosses here; the only payload is `overwrite`, the
+     * "Replace existing vault" checkbox's FINAL state (M12 F5 HAT tail), which main binds onto the
+     * held import record before the sheet opens. Resolves { ok }.
+     * @param {boolean} [overwrite]  replace an existing vault at the destination (checkbox state).
      * @returns {Promise<{ ok: boolean }>}
      */
-    beginImportUnlock: () => ipcRenderer.invoke('internal-vault-begin-import-unlock'),
+    beginImportUnlock: (overwrite) => ipcRenderer.invoke('internal-vault-begin-import-unlock', overwrite === true),
 
     /**
      * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop

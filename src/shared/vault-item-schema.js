@@ -28,14 +28,15 @@
 // Per the flight Context taxonomy (Architect-flagged linchpin):
 //   login — non-secret: title/username/origin; secret: password/totp/notes
 //   card  — non-secret: title/cardholder/brand/last4; secret: number/cvv/expiry/notes
-//   note  — non-secret: title; secret: body/notes
-// `notes` is a secret free-text field on EVERY type (the F2 capture test proves it
-// holds secrets and must survive edits).
+//   note  — non-secret: title; secret: body
+// `notes` is a secret free-text ANNOTATIONS field on login + card (the F2 capture test proves it
+// holds secrets and must survive edits). A NOTE carries NO `notes` field — its content IS its
+// `body`, so a second generic "Notes" field on a note was redundant (it showed both Note + Notes).
 /** @type {Record<ItemType, TypeSchema>} */
 const SCHEMA = {
   login: { nonSecret: ['title', 'username', 'origin'], secret: ['password', 'totp', 'notes'] },
   card: { nonSecret: ['title', 'cardholder', 'brand', 'last4'], secret: ['number', 'cvv', 'expiry', 'notes'] },
-  note: { nonSecret: ['title'], secret: ['body', 'notes'] },
+  note: { nonSecret: ['title'], secret: ['body'] },
 };
 
 /** @type {ItemType[]} */
