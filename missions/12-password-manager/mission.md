@@ -333,6 +333,11 @@ Resolved at the owning flight, not blocking mission approval:
       registrable-domain PSL-hardened per-credential fill opt-in, the audit-origin fix, the
       jar-delete → vault-removal (offer-export-first) lifecycle hook, and the docs + threat-model
       page.
-- [ ] Flight 5 *(optional)*: **HAT + alignment** — guided human-acceptance-test session
+- [x] Flight 5 *(optional)*: **HAT + alignment** — guided human-acceptance-test session
       exercising the real feature end-to-end (incl. the deferred live-GUI steps from F2/F3), with
-      iterative fixes for outstanding issues from F1–F4.
+      iterative fixes for outstanding issues from F1–F4. **Landed 2026-07-22** — live-verified core
+      paths (setup, rotation B9/B10, automation fill, TOTP, registrable-domain widen, human-fill flow)
+      + a large inline UX/feature pass (I1–I16: sheet-family styling, Secrets page nav+sidebar restructure,
+      typed subsections + modal item editor, unified Import/Export modals, button-system parity). Banked
+      follow-ups: cross-profile export/import round-trip, the Witnessed behavior-test suite, `npm run a11y`
+      on the sheet states, jar-delete lifecycle live check.

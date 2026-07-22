@@ -1,6 +1,6 @@
 # Flight: HAT + Alignment — End-to-End Acceptance
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Built-in Password Manager](../../mission.md)
 
 ## Contributing to Criteria
