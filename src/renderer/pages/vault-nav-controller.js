@@ -3,16 +3,20 @@
 // precedent), so it needs only its own route in internal-page-map.js.
 
 /**
- * Owns the dynamic Secrets-Management sidebar and its section scroll-spy (M12 F5 HAT
+ * Owns the dynamic Secrets sidebar and its section scroll-spy (M12 F5 HAT
  * hat-page-sidebar). A sibling to jars-nav-controller.js's createJarsNav, MIRRORED
- * rather than reused: the vault nav is heterogeneous (a fixed "Settings" gear entry,
- * a globe "Global" entry, and one color-dot entry per jar), where the jars nav is a
- * homogeneous jar list — so a shared abstraction would be mostly branches.
+ * rather than reused: the vault nav is heterogeneous AND two-level (a fixed "Settings"
+ * gear entry, then a "Vaults" group parent whose indented children are a globe "Global"
+ * entry and one color-dot entry per jar), where the jars nav is a flat homogeneous jar
+ * list — so a shared abstraction would be mostly branches.
  *
- * Nav entries are plain anchors (`#vault-<id>`); selecting one jumps to its section
- * and the IntersectionObserver scroll-spy sets `aria-current` on the visible
+ * Nav entries are plain anchors (`#vault-<id>`), the group's children nested in a
+ * `<ul class="vault-nav-sublist">` inside the group `<li>`; selecting one jumps to its
+ * section and the IntersectionObserver scroll-spy sets `aria-current` on the visible
  * section's entry — the exact keyboard/active-state model the jars rail uses (native
- * Tab through anchors, Enter activates, no custom roving).
+ * Tab through anchors across both levels, Enter activates, no custom roving). Every
+ * entry (top-level and indented child) is registered flat in `navMap` by id, so
+ * `setActive`/scroll-spy address the children directly.
  *
  * @param {{
  *   document: Document,
@@ -82,28 +86,35 @@ export function createVaultNav(deps) {
     return 'vault-' + id;
   }
 
-  /** @param {{ id: string, kind: string, label: string, color?: string|null }} entry */
+  /**
+   * Build one nav entry's `<li><a>marker? name</a></li>` record — a single (non-group)
+   * entry OR a group's own header anchor. A group carries no marker (a bare header); a
+   * jar carries a color dot; global/settings carry an inline icon.
+   * @param {{ id: string, kind: string, label: string, color?: string|null }} entry
+   */
   function buildNavEntry(entry) {
     const li = document.createElement('li');
     const a = document.createElement('a');
     a.href = '#' + sectionIdFor(entry.id);
 
-    /** @type {HTMLElement} */
-    let marker;
+    /** @type {HTMLElement|null} */
+    let marker = null;
     if (entry.kind === 'jar') {
       marker = document.createElement('span');
       marker.className = 'vault-nav-dot';
-    } else {
-      marker = /** @type {any} */ (buildIcon(entry.kind === 'global' ? ICON_GLOBE : ICON_SETTINGS));
+    } else if (entry.kind === 'global') {
+      marker = /** @type {any} */ (buildIcon(ICON_GLOBE));
+    } else if (entry.kind === 'settings') {
+      marker = /** @type {any} */ (buildIcon(ICON_SETTINGS));
     }
-    a.appendChild(marker);
+    if (marker) a.appendChild(marker);
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'vault-nav-name';
     a.appendChild(nameSpan);
 
     li.appendChild(a);
-    const record = { li, a, marker, nameSpan, kind: entry.kind };
+    const record = { li, a, marker, nameSpan, kind: entry.kind, sublist: /** @type {any} */ (null) };
     updateNavEntry(record, entry);
     return record;
   }
@@ -117,45 +128,90 @@ export function createVaultNav(deps) {
     }
   }
 
-  /** @param {Array<{ id: string, kind: string, label: string, color?: string|null }>} entries */
+  /**
+   * Full rebuild: clear the nav and rebuild every top-level entry, nesting a group's
+   * children into a `<ul class="vault-nav-sublist">` inside the group's `<li>`. Every
+   * entry — top-level and child — is registered in `navMap` by id (flat keyspace), so
+   * `setActive`/scroll-spy address the indented children directly.
+   * @param {Array<any>} entries
+   */
+  function rebuild(entries) {
+    navEl.textContent = '';
+    navMap.clear();
+    for (const entry of entries) {
+      const record = buildNavEntry(entry);
+      navMap.set(entry.id, record);
+      navEl.appendChild(record.li);
+      if (entry.kind === 'group') {
+        const sublist = document.createElement('ul');
+        sublist.className = 'vault-nav-sublist';
+        sublist.setAttribute('role', 'list');
+        record.li.appendChild(sublist);
+        record.sublist = sublist;
+        record.li.classList.add('vault-nav-group');
+        for (const child of entry.children || []) {
+          const childRecord = buildNavEntry(child);
+          navMap.set(child.id, childRecord);
+          sublist.appendChild(childRecord.li);
+        }
+      }
+    }
+  }
+
+  /**
+   * Render the two-level nav (Settings + a Vaults group with indented children).
+   *
+   * When focus lives inside the nav, patch in place rather than rebuild (the shared
+   * caret/focus-preservation house rule): the top-level shape is fixed (Settings + the
+   * Vaults group), so only the group's children set changes — reconcile it within the
+   * group's sublist by id, preserving the focused anchor. Any unexpected top-level
+   * shape change falls back to a full rebuild.
+   * @param {Array<any>} entries
+   */
   function render(entries) {
     const focusedInNav = document.activeElement instanceof Node && navEl.contains(document.activeElement);
-
-    if (!focusedInNav) {
-      navEl.textContent = '';
-      navMap.clear();
-      for (const entry of entries) {
-        const record = buildNavEntry(entry);
-        navMap.set(entry.id, record);
-        navEl.appendChild(record.li);
-      }
+    if (!focusedInNav || navMap.size === 0) {
+      rebuild(entries);
       return;
     }
 
-    // Focus lives inside the nav — patch in place, never rebuild (the shared
-    // caret/focus-preservation house rule). A given id's kind never changes, so an
-    // update only rewrites the label text + the jar dot color.
-    const ids = new Set(entries.map((entry) => entry.id));
+    const settingsEntry = entries.find((e) => e.kind === 'settings');
+    const groupEntry = entries.find((e) => e.kind === 'group');
+    const groupRecord = groupEntry && navMap.get(groupEntry.id);
+    if (!settingsEntry || !navMap.get(settingsEntry.id) || !groupRecord || !groupRecord.sublist) {
+      rebuild(entries);
+      return;
+    }
+
+    updateNavEntry(navMap.get(settingsEntry.id), settingsEntry);
+    updateNavEntry(groupRecord, groupEntry);
+
+    const children = groupEntry.children || [];
+    const childIds = new Set(children.map((c) => c.id));
+    // Drop children no longer present (never the fixed top-level Settings/group records).
     for (const id of Array.from(navMap.keys())) {
-      if (!ids.has(id)) {
+      if (id === settingsEntry.id || id === groupEntry.id) continue;
+      if (!childIds.has(id)) {
         navMap.get(id).li.remove();
         navMap.delete(id);
       }
     }
 
     let previous = null;
-    for (const entry of entries) {
-      let record = navMap.get(entry.id);
+    for (const child of children) {
+      let record = navMap.get(child.id);
       if (!record) {
-        record = buildNavEntry(entry);
-        navMap.set(entry.id, record);
+        record = buildNavEntry(child);
+        navMap.set(child.id, record);
       } else {
-        updateNavEntry(record, entry);
+        updateNavEntry(record, child);
       }
       if (previous == null) {
-        if (navEl.firstChild !== record.li) navEl.insertBefore(record.li, navEl.firstChild);
+        if (groupRecord.sublist.firstChild !== record.li) {
+          groupRecord.sublist.insertBefore(record.li, groupRecord.sublist.firstChild);
+        }
       } else if (previous.nextSibling !== record.li) {
-        navEl.insertBefore(record.li, previous.nextSibling);
+        groupRecord.sublist.insertBefore(record.li, previous.nextSibling);
       }
       previous = record.li;
     }

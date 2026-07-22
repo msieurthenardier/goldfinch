@@ -8,7 +8,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { selectVaultView, vaultNavEntries, SETTINGS_ID } = require('../../src/shared/vault-page-model.js');
+const { selectVaultView, vaultNavEntries, SETTINGS_ID, VAULTS_ID } = require('../../src/shared/vault-page-model.js');
 
 const rows = [
   { vaultId: 'global', label: 'Global' },
@@ -61,14 +61,17 @@ test('vault rows are normalized to { vaultId, label }; a missing label falls bac
   ]);
 });
 
-// ── vaultNavEntries: the master-detail left-nav entry model (M12 F5 HAT hat-page-sidebar) ──
+// ── vaultNavEntries: the two-level master-detail left-nav entry model (M12 F5 HAT batch) ──
 
 const jars = [
   { id: 'personal', name: 'Personal', color: '#4caf50' },
   { id: 'work', name: 'Work', color: '#2196f3' }
 ];
 
-test('nav entries = a fixed Settings entry then one entry per vault, in order', () => {
+// Convenience: the Vaults group's children (the per-vault entries).
+const childrenOf = (entries) => entries.find((e) => e.kind === 'group').children;
+
+test('nav entries = a Settings entry then a Vaults group whose children are the vaults, in order', () => {
   const entries = vaultNavEntries(
     [
       { vaultId: 'global', label: 'Global' },
@@ -77,8 +80,14 @@ test('nav entries = a fixed Settings entry then one entry per vault, in order', 
     ],
     jars
   );
+  // Two top-level entries: Settings, then the Vaults group.
   assert.deepEqual(entries.map((e) => [e.id, e.kind]), [
     [SETTINGS_ID, 'settings'],
+    [VAULTS_ID, 'group']
+  ]);
+  assert.equal(entries[1].label, 'Vaults');
+  // Each vault is an indented child of the Vaults group, in order.
+  assert.deepEqual(childrenOf(entries).map((e) => [e.id, e.kind]), [
     ['global', 'global'],
     ['personal', 'jar'],
     ['work', 'jar']
@@ -93,8 +102,9 @@ test('the global vault (not a persistent jar) is kind "global"; jars are kind "j
     ],
     jars
   );
-  const global = entries.find((e) => e.id === 'global');
-  const personal = entries.find((e) => e.id === 'personal');
+  const children = childrenOf(entries);
+  const global = children.find((e) => e.id === 'global');
+  const personal = children.find((e) => e.id === 'personal');
   assert.equal(global.kind, 'global');
   assert.equal(global.color, undefined); // globe, no dot
   assert.equal(global.count, 2);
@@ -108,14 +118,17 @@ test('a jar with no color joins to null (the controller applies the fallback)', 
     [{ vaultId: 'work', label: 'Work' }],
     [{ id: 'work', name: 'Work' }] // no color
   );
-  assert.equal(entries[1].kind, 'jar');
-  assert.equal(entries[1].color, null);
+  const children = childrenOf(entries);
+  assert.equal(children[0].kind, 'jar');
+  assert.equal(children[0].color, null);
 });
 
-test('empty vaults → just the Settings entry; malformed inputs degrade safely', () => {
-  assert.deepEqual(vaultNavEntries([], jars).map((e) => e.id), [SETTINGS_ID]);
-  assert.deepEqual(vaultNavEntries(undefined, undefined).map((e) => e.id), [SETTINGS_ID]);
-  // a vault row missing its id is dropped
+test('empty vaults → Settings + an empty Vaults group; malformed inputs degrade safely', () => {
+  assert.deepEqual(vaultNavEntries([], jars).map((e) => e.id), [SETTINGS_ID, VAULTS_ID]);
+  assert.deepEqual(childrenOf(vaultNavEntries([], jars)), []);
+  assert.deepEqual(vaultNavEntries(undefined, undefined).map((e) => e.id), [SETTINGS_ID, VAULTS_ID]);
+  assert.deepEqual(childrenOf(vaultNavEntries(undefined, undefined)), []);
+  // a vault row missing its id is dropped from the group's children
   const entries = vaultNavEntries([{ label: 'orphan' }, { vaultId: 'work', label: 'Work' }], jars);
-  assert.deepEqual(entries.map((e) => e.id), [SETTINGS_ID, 'work']);
+  assert.deepEqual(childrenOf(entries).map((e) => e.id), ['work']);
 });

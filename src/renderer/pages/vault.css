@@ -51,7 +51,7 @@ body {
 }
 
 /* ── Left nav (sticky sidebar) — the jars rail, mirrored (M12 F5 HAT hat-page-sidebar) ── */
-nav[aria-label="Secrets Management"] {
+nav[aria-label="Secrets"] {
   flex: 0 0 var(--nav-w);
   position: sticky;
   top: var(--nav-top);
@@ -65,17 +65,17 @@ nav[aria-label="Secrets Management"] {
   flex-direction: column;
 }
 
-nav[aria-label="Secrets Management"] ul {
+nav[aria-label="Secrets"] ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-nav[aria-label="Secrets Management"] li {
+nav[aria-label="Secrets"] li {
   margin: 0;
 }
 
-nav[aria-label="Secrets Management"] a {
+nav[aria-label="Secrets"] a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -87,18 +87,18 @@ nav[aria-label="Secrets Management"] a {
   transition: background 0.1s, color 0.1s;
 }
 
-nav[aria-label="Secrets Management"] a:hover {
+nav[aria-label="Secrets"] a:hover {
   background: var(--bg-3);
   color: var(--fg);
 }
 
-nav[aria-label="Secrets Management"] a:focus-visible {
+nav[aria-label="Secrets"] a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 /* Active section highlight (set by the scroll-spy in vault-nav-controller.js). */
-nav[aria-label="Secrets Management"] a[aria-current="true"] {
+nav[aria-label="Secrets"] a[aria-current="true"] {
   color: var(--accent);
   border-left-color: var(--accent);
   background: var(--bg-3);
@@ -123,6 +123,22 @@ nav[aria-label="Secrets Management"] a[aria-current="true"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Two-level nav (M12 F5 HAT batch): the "Vaults" group header + its indented child list.
+   The group anchor reads as a section header; its children sit in a nested <ul> indented
+   under it. Both levels are native anchors — Tab moves through them in DOM order. */
+.vault-nav-group > a .vault-nav-name {
+  font-weight: 600;
+}
+.vault-nav-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* Indent the child anchors past the group header's icon column so they read as nested. */
+.vault-nav-sublist a {
+  padding-left: 32px;
 }
 
 /* ── Main content column ── */
@@ -160,6 +176,21 @@ main {
   font-weight: 600;
   margin: 0 0 8px;
   color: var(--fg);
+}
+
+/* Per-vault subsection heading (M12 F5 HAT batch): an h3 nested under the "Vaults" group
+   header, styled at the same weight/size as a top-level section heading. */
+.vault-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--fg);
+}
+
+/* Per-vault subsections indent under the "Vaults" group header so they read as its children
+   (the two-level nav's main-content counterpart). */
+.vault-child-section {
+  padding-left: 16px;
 }
 
 /* ── Settings subsections (auto-lock / import / master-key management) grouped under the
@@ -294,14 +325,6 @@ main {
   margin: 0;
 }
 
-/* ── Unlocked: global actions row (I6 "Lock now") ── */
-.vault-global-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
 /* ── Unlocked: per-vault sections + item list ── */
 .vault-section-head {
   display: flex;
@@ -310,7 +333,7 @@ main {
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.vault-section-head h2 {
+.vault-section-head .vault-section-title {
   flex: 1 1 auto;
   margin: 0;
 }
@@ -625,17 +648,23 @@ textarea.vault-input {
 .vault-autolock-section {
   margin-bottom: 24px;
 }
+/* The dropdown + its inline "Lock now" (M12 F5 HAT batch) sit on one row. */
 .vault-autolock-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+.vault-autolock-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .vault-autolock-label {
   color: var(--fg-dim);
   font-size: 13px;
 }
-.vault-autolock-input {
-  width: 96px;
+.vault-autolock-select {
   background: var(--bg-2);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -644,7 +673,7 @@ textarea.vault-input {
   font-size: 13px;
   font-family: inherit;
 }
-.vault-autolock-input:focus-visible {
+.vault-autolock-select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

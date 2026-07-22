@@ -1,10 +1,12 @@
 'use strict';
 
-// Unit tests for src/renderer/pages/vault-nav-controller.js (M12 F5 HAT hat-page-sidebar),
-// mirroring test/unit/jars-nav-controller.test.js. The vault nav is heterogeneous — a fixed
-// Settings gear entry, a globe Global entry, and one color-dot entry per jar — driven by the
-// pure `vaultNavEntries` model; these tests cover the render/patch, marker selection, dot
-// color, and the scroll-spy aria-current wiring without a real DOM.
+// Unit tests for src/renderer/pages/vault-nav-controller.js (M12 F5 HAT hat-page-sidebar;
+// two-level per the M12 F5 HAT batch), mirroring test/unit/jars-nav-controller.test.js. The
+// vault nav is heterogeneous AND two-level — a fixed Settings gear entry, then a "Vaults" group
+// parent whose indented children are a globe Global entry and one color-dot entry per jar —
+// driven by the pure `vaultNavEntries` model; these tests cover the nested render/patch, marker
+// selection, dot color, and the scroll-spy aria-current wiring (including indented children)
+// without a real DOM.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -107,26 +109,42 @@ async function create(h) {
 
 const ENTRIES = [
   { id: 'settings', kind: 'settings', label: 'Settings' },
-  { id: 'global', kind: 'global', label: 'Global' },
-  { id: 'personal', kind: 'jar', label: 'Personal', color: '#4caf50' }
+  {
+    id: 'vaults', kind: 'group', label: 'Vaults', children: [
+      { id: 'global', kind: 'global', label: 'Global' },
+      { id: 'personal', kind: 'jar', label: 'Personal', color: '#4caf50' }
+    ]
+  }
 ];
 
-// li → a → [marker, nameSpan]
+// li → a → [marker?, nameSpan]. The group's li is a → nameSpan, then a nested <ul> sublist.
 const anchorOf = (li) => li.children[0];
 const markerOf = (li) => anchorOf(li).children[0];
-const nameOf = (li) => anchorOf(li).children[1];
+// nameSpan is always the anchor's LAST child (present with or without a leading marker).
+const nameOf = (li) => { const a = anchorOf(li); return a.children[a.children.length - 1]; };
+const sublistOf = (groupLi) => groupLi.children[1];
 
-test('renders a Settings gear, a Global globe, and a jar color-dot in order', async () => {
+test('renders a Settings gear at top, then a Vaults group with indented globe/dot children', async () => {
   const h = harness();
   const nav = await create(h);
   nav.render(ENTRIES);
-  assert.equal(h.navEl.children.length, 3);
+  // Two top-level entries: Settings and the Vaults group.
+  assert.equal(h.navEl.children.length, 2);
 
-  const [settings, global, jar] = h.navEl.children;
+  const [settings, group] = h.navEl.children;
   assert.equal(markerOf(settings).tagName, 'SVG'); // gear icon, not a dot
   assert.equal(nameOf(settings).textContent, 'Settings');
   assert.equal(anchorOf(settings).href, '#vault-settings');
 
+  // The group is a header anchor (no marker) + a nested sublist.
+  assert.equal(nameOf(group).textContent, 'Vaults');
+  assert.equal(anchorOf(group).href, '#vault-vaults');
+  const sublist = sublistOf(group);
+  assert.equal(sublist.tagName, 'UL');
+  assert.equal(sublist.attributes.get('role'), 'list');
+  assert.equal(sublist.children.length, 2);
+
+  const [global, jar] = sublist.children;
   assert.equal(markerOf(global).tagName, 'SVG'); // globe icon
   assert.equal(anchorOf(global).href, '#vault-global');
 
@@ -139,53 +157,79 @@ test('an unsafe jar color falls back; a null color falls back', async () => {
   const h = harness();
   const nav = await create(h);
   nav.render([
-    { id: 'bad', kind: 'jar', label: 'Bad', color: 'url(x)' },
-    { id: 'none', kind: 'jar', label: 'None', color: null }
+    { id: 'settings', kind: 'settings', label: 'Settings' },
+    {
+      id: 'vaults', kind: 'group', label: 'Vaults', children: [
+        { id: 'bad', kind: 'jar', label: 'Bad', color: 'url(x)' },
+        { id: 'none', kind: 'jar', label: 'None', color: null }
+      ]
+    }
   ]);
-  assert.equal(markerOf(h.navEl.children[0]).style.background, '#9aa0ac');
-  assert.equal(markerOf(h.navEl.children[1]).style.background, '#9aa0ac');
+  const sublist = sublistOf(h.navEl.children[1]);
+  assert.equal(markerOf(sublist.children[0]).style.background, '#9aa0ac');
+  assert.equal(markerOf(sublist.children[1]).style.background, '#9aa0ac');
 });
 
-test('a focused nav entry is patched in place (label rewritten), never replaced', async () => {
+test('a focused indented child is patched in place (label rewritten), never replaced', async () => {
   const h = harness();
   const nav = await create(h);
   nav.render(ENTRIES);
-  const originalJar = h.navEl.children[2];
+  const originalJar = sublistOf(h.navEl.children[1]).children[1]; // Personal
   h.document.activeElement = anchorOf(originalJar);
   nav.render([
     ENTRIES[0],
-    ENTRIES[1],
-    { id: 'personal', kind: 'jar', label: 'Renamed', color: '#123456' }
+    {
+      id: 'vaults', kind: 'group', label: 'Vaults', children: [
+        { id: 'global', kind: 'global', label: 'Global' },
+        { id: 'personal', kind: 'jar', label: 'Renamed', color: '#123456' }
+      ]
+    }
   ]);
-  assert.equal(h.navEl.children[2], originalJar); // same node
+  const sublistAfter = sublistOf(h.navEl.children[1]);
+  assert.equal(sublistAfter.children[1], originalJar); // same node
   assert.equal(nameOf(originalJar).textContent, 'Renamed');
   assert.equal(markerOf(originalJar).style.background, '#123456');
 });
 
-test('setActive sets aria-current on exactly the matching entry', async () => {
+test('setActive sets aria-current on exactly the matching entry, including indented children', async () => {
   const h = harness();
   const nav = await create(h);
   nav.render(ENTRIES);
+  const [settings, group] = h.navEl.children;
+  const sublist = sublistOf(group);
+
   nav.setActive('vault-global');
-  assert.equal(anchorOf(h.navEl.children[0]).attributes.get('aria-current'), undefined);
-  assert.equal(anchorOf(h.navEl.children[1]).attributes.get('aria-current'), 'true');
+  assert.equal(anchorOf(settings).attributes.get('aria-current'), undefined);
+  assert.equal(anchorOf(group).attributes.get('aria-current'), undefined);
+  assert.equal(anchorOf(sublist.children[0]).attributes.get('aria-current'), 'true'); // Global
+
   nav.setActive('vault-personal');
-  assert.equal(anchorOf(h.navEl.children[1]).attributes.get('aria-current'), undefined);
-  assert.equal(anchorOf(h.navEl.children[2]).attributes.get('aria-current'), 'true');
+  assert.equal(anchorOf(sublist.children[0]).attributes.get('aria-current'), undefined);
+  assert.equal(anchorOf(sublist.children[1]).attributes.get('aria-current'), 'true'); // Personal
+
+  nav.setActive('vault-vaults'); // the group parent itself
+  assert.equal(anchorOf(sublist.children[1]).attributes.get('aria-current'), undefined);
+  assert.equal(anchorOf(group).attributes.get('aria-current'), 'true');
+
+  nav.setActive('vault-settings');
+  assert.equal(anchorOf(group).attributes.get('aria-current'), undefined);
+  assert.equal(anchorOf(settings).attributes.get('aria-current'), 'true');
 });
 
-test('observe drives aria-current from the topmost visible section and disconnects on re-observe/destroy', async () => {
+test('observe drives aria-current from the topmost visible section (incl. indented children) and disconnects on re-observe/destroy', async () => {
   const h = harness();
   const nav = await create(h);
   nav.render(ENTRIES);
   const secSettings = Object.assign(new El('section'), { id: 'vault-settings' });
+  const secVaults = Object.assign(new El('section'), { id: 'vault-vaults' });
   const secGlobal = Object.assign(new El('section'), { id: 'vault-global' });
-  nav.observe([secSettings, secGlobal]);
+  nav.observe([secSettings, secVaults, secGlobal]);
   assert.equal(Observer.instances.length, 1);
-  assert.deepEqual(Observer.instances[0].observed, [secSettings, secGlobal]);
+  assert.deepEqual(Observer.instances[0].observed, [secSettings, secVaults, secGlobal]);
 
   Observer.instances[0].callback([{ target: secGlobal, isIntersecting: true }]);
-  assert.equal(anchorOf(h.navEl.children[1]).attributes.get('aria-current'), 'true');
+  const sublist = sublistOf(h.navEl.children[1]);
+  assert.equal(anchorOf(sublist.children[0]).attributes.get('aria-current'), 'true'); // Global child
 
   nav.observe([secSettings]); // re-observe disconnects the prior observer
   assert.equal(Observer.instances[0].disconnected, true);

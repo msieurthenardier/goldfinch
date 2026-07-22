@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Secrets Management — Goldfinch</title>
+    <title>Secrets — Goldfinch</title>
     <link rel="stylesheet" href="vault.css" />
     <!-- Fully-module page (settings/jars precedent): vault.js is a real ES module
          (type="module") that imports its pure state-model + nav controller via flat
@@ -16,12 +16,12 @@
          nav+main. vault.js rebuilds #vault-nav (Settings + one entry per vault) and
          the #vault-root sections from vault state + jarsList on every refresh. The
          nav is the jars-page rail (aria-current active state, scroll-spy). -->
-    <nav aria-label="Secrets Management">
+    <nav aria-label="Secrets">
       <ul id="vault-nav" role="list"></ul>
     </nav>
     <main>
       <div class="vault-header">
-        <h1>Secrets Management</h1>
+        <h1>Secrets</h1>
       </div>
 
       <!-- The controller renders the section list into #vault-root from vaultState().

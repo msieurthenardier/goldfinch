@@ -19,7 +19,11 @@
 /**
  * @typedef {{ vaultId: string, label: string, count?: number }} VaultRow
  * @typedef {{ mode: 'not-set-up' | 'locked' | 'unlocked', vaults: VaultRow[] }} VaultView
- * @typedef {{ id: string, kind: 'settings' | 'global' | 'jar', label: string, count?: number, color?: string|null }} VaultNavEntry
+ * @typedef {{ id: string, kind: 'global' | 'jar', label: string, count?: number, color?: string|null }} VaultChildEntry
+ * @typedef {(
+ *   { id: string, kind: 'settings', label: string } |
+ *   { id: string, kind: 'group', label: string, children: VaultChildEntry[] }
+ * )} VaultNavEntry
  */
 
 // The stable id of the top "Settings" nav entry / its section (M12 F5 HAT
@@ -27,6 +31,10 @@
 // controls (lock, auto-lock, import, master-key management), so it needs its own
 // reserved section id distinct from every vault's id.
 const SETTINGS_ID = 'settings';
+
+// The stable id of the top "Vaults" group nav entry / its header section (M12 F5 HAT
+// batch). A group PARENT whose children are the per-vault entries — not a vault id.
+const VAULTS_ID = 'vaults';
 
 /**
  * Select the page view from the raw `internal-vault-state` payload. Defensive:
@@ -59,10 +67,12 @@ function selectVaultView(state) {
 }
 
 /**
- * Build the left-nav entry list for the nav+main layout (M12 F5 HAT
- * hat-page-sidebar): a fixed "Settings" entry followed by one entry per vault.
+ * Build the TWO-LEVEL left-nav entry model for the nav+main layout (M12 F5 HAT
+ * hat-page-sidebar; two-level per the M12 F5 HAT batch): a fixed top "Settings" entry,
+ * then a top "Vaults" group whose `children` are one entry per vault — the vaults are
+ * indented under the group rather than sitting flat beside Settings.
  *
- * A vault is a JAR entry when its id is a persistent jar (present in `jars`) and a
+ * A vault child is a JAR entry when its id is a persistent jar (present in `jars`) and a
  * GLOBAL entry otherwise — the manager-wide global vault is never a persistent jar,
  * so it never appears in `jars.list()` (register-vault-ipc prepends it to the vault
  * rows under the reserved `global` sentinel). This "is it backed by a persistent
@@ -85,17 +95,21 @@ function vaultNavEntries(vaults, jars) {
     }
   }
 
-  /** @type {VaultNavEntry[]} */
-  const entries = [{ id: SETTINGS_ID, kind: 'settings', label: 'Settings' }];
+  /** @type {VaultChildEntry[]} */
+  const children = [];
   for (const v of Array.isArray(vaults) ? vaults : []) {
     if (!v || typeof v.vaultId !== 'string' || !v.vaultId) continue;
     if (colorById.has(v.vaultId)) {
-      entries.push({ id: v.vaultId, kind: 'jar', label: v.label, count: v.count, color: colorById.get(v.vaultId) });
+      children.push({ id: v.vaultId, kind: 'jar', label: v.label, count: v.count, color: colorById.get(v.vaultId) });
     } else {
-      entries.push({ id: v.vaultId, kind: 'global', label: v.label, count: v.count });
+      children.push({ id: v.vaultId, kind: 'global', label: v.label, count: v.count });
     }
   }
-  return entries;
+
+  return [
+    { id: SETTINGS_ID, kind: 'settings', label: 'Settings' },
+    { id: VAULTS_ID, kind: 'group', label: 'Vaults', children }
+  ];
 }
 
-export { selectVaultView, vaultNavEntries, SETTINGS_ID };
+export { selectVaultView, vaultNavEntries, SETTINGS_ID, VAULTS_ID };

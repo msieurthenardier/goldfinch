@@ -24,11 +24,12 @@ import { createVaultNav } from './vault-nav-controller.js';
  * and adds a pure password generator (DD7) to the login password field.
  *
  * M12 F5 HAT (hat-page-sidebar) restructures the page into a master-detail nav+main matching
- * the cookie-jars page and renames it "Secrets Management": a left nav (a top "Settings" entry
- * + one entry per vault — Global with a globe icon, each jar with its color dot) driven by the
- * pure `vaultNavEntries` model, and a stacked, scroll-spied section list. The manager-wide
- * controls (lock, auto-lock, import, master-key management incl. export) are RELOCATED under
- * the Settings section — buttons only; DD5 is preserved (no master-equivalent secret in the DOM).
+ * the cookie-jars page and renames it "Secrets": a TWO-LEVEL left nav (a top "Settings" entry +
+ * a top "Vaults" group whose indented children are one entry per vault — Global with a globe
+ * icon, each jar with its color dot) driven by the pure `vaultNavEntries` model, and a stacked,
+ * scroll-spied section list. The manager-wide controls (lock/auto-lock incl. an inline "Lock now",
+ * import, master-key management incl. export) live under the Settings section — buttons only; DD5
+ * is preserved (no master-equivalent secret in the DOM).
  *
  * CSP: served as a same-origin subresource under default-src 'self' (no
  * 'unsafe-inline'). NO inline event handlers; NO dynamic <script>/<style> injection.
@@ -198,22 +199,14 @@ function init() {
     h2.id = 'vault-settings-heading';
     section.appendChild(h2);
 
-    if (unlocked) {
-      // Explicit global "Lock now" (M12 F5 HAT batch 1, I6) — top of Settings, since locking
-      // is GLOBAL (zeroizes every vault key at once). No confirm: locking is non-destructive
-      // and reversible via unlock. The page re-renders to the locked view off the
-      // vault-lock-state broadcast the store's onLock hook emits. Carries no secret.
-      const globalActions = el('div', 'vault-global-actions');
-      globalActions.appendChild(button('Lock now', 'vault-btn', () => {
-        Promise.resolve(bridge.lockVault()).catch(() => {});
-      }));
-      section.appendChild(globalActions);
-    } else {
+    if (!unlocked) {
       section.appendChild(buildLockedBanner());
     }
 
     // Manager-wide auto-lock — both states (a plain settings read/write; needs no MRK).
-    section.appendChild(buildAutoLockSection());
+    // "Lock now" now lives INLINE beside the auto-lock dropdown (unlocked only — locking
+    // is global and needs an unlocked manager), so the old top-of-Settings actions row is gone.
+    section.appendChild(buildAutoLockSection(unlocked));
 
     if (unlocked) {
       // Portable import — picks a destination then routes to the chrome-owned secret sheet.
@@ -232,62 +225,104 @@ function init() {
    * @returns {HTMLElement}
    */
   function buildLockedVaultSection(entry) {
-    const section = el('section', 'vault-section');
+    const section = el('section', 'vault-section vault-child-section');
     section.id = `vault-${entry.id}`;
     section.dataset.vaultId = entry.id;
     const headingId = `vault-h-${entry.id}`;
     section.setAttribute('aria-labelledby', headingId);
-    const h2 = el('h2', undefined, entry.label);
-    h2.id = headingId;
-    section.appendChild(h2);
+    const h3 = el('h3', 'vault-section-title', entry.label);
+    h3.id = headingId;
+    section.appendChild(h3);
     section.appendChild(el('p', 'vault-empty', 'Unlock the manager to view this vault’s items.'));
     return section;
   }
 
+  // The fixed auto-lock choices (minutes). Every value is a valid integer in the settings
+  // validator's [1, 1440] range, so a write never rejects for range.
+  const AUTOLOCK_OPTIONS = [1, 2, 5, 10, 15];
+  const AUTOLOCK_DEFAULT = 10;
+
   /**
-   * The manager-wide idle auto-lock duration (M12 F3 Leg 5). A number input (1–1440) bound
-   * to the EXISTING settingsGet/settingsSet('vaultAutoLockMinutes') bridge — NO new IPC. An
-   * out-of-range / non-integer write throws the settings validator's TypeError → the invoke
-   * rejects → surfaced inline. A change arms the NEXT idle timer (the store re-reads
+   * Snap an arbitrary stored minutes value to the nearest offered option (ties → the smaller
+   * option, since the options list is ascending and the first strictly-smaller diff wins). A
+   * non-number / non-finite value falls back to the default. Purely presentational — the stored
+   * setting is NOT rewritten on seed; the operator's own pick persists it.
+   * @param {number} value
+   * @returns {number}
+   */
+  function nearestAutoLockOption(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return AUTOLOCK_DEFAULT;
+    let best = AUTOLOCK_OPTIONS[0];
+    let bestDiff = Math.abs(best - value);
+    for (const opt of AUTOLOCK_OPTIONS) {
+      const diff = Math.abs(opt - value);
+      if (diff < bestDiff) { best = opt; bestDiff = diff; }
+    }
+    return best;
+  }
+
+  /**
+   * The manager-wide idle auto-lock duration (M12 F3 Leg 5; dropdown per M12 F5 HAT batch).
+   * A `<select>` (1/2/5/10/15 minutes) bound to the EXISTING settingsGet/settingsSet
+   * ('vaultAutoLockMinutes') bridge — NO new IPC. A stored value outside the five options snaps
+   * to the nearest (default 10 if absent/invalid); the write never rejects for range since every
+   * option is a valid integer. A change arms the NEXT idle timer (the store re-reads
    * getAutoLockMinutes() per op; a currently-pending timer keeps the old value until the next
-   * vault op — accepted).
+   * vault op — accepted). "Lock now" sits INLINE to the right (unlocked only).
+   * @param {boolean} unlocked  whether the manager is unlocked (gates the inline Lock now).
    * @returns {HTMLElement}
    */
-  function buildAutoLockSection() {
+  function buildAutoLockSection(unlocked) {
     // A Settings SUBSECTION (M12 F5 HAT hat-page-sidebar): a div + h3 nested under the
     // single "Settings" heading, not its own top-level section.
     const section = el('div', 'vault-subsection vault-autolock-section');
     const h3 = el('h3', 'vault-subsection-title', 'Auto-lock');
     section.appendChild(h3);
     section.appendChild(el('p', 'vault-lede',
-      'Automatically lock the manager after this many minutes of inactivity (1–1440).'));
+      'Automatically lock the manager after a period of inactivity.'));
 
-    const row = el('label', 'vault-autolock-row');
-    row.appendChild(el('span', 'vault-autolock-label', 'Minutes'));
-    const input = /** @type {HTMLInputElement} */ (el('input', 'vault-autolock-input'));
-    input.type = 'number';
-    input.min = '1';
-    input.max = '1440';
-    input.step = '1';
-    row.appendChild(input);
+    const row = el('div', 'vault-autolock-row');
+    const field = el('label', 'vault-autolock-field');
+    field.appendChild(el('span', 'vault-autolock-label', 'Auto-lock after'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-autolock-select'));
+    select.setAttribute('aria-label', 'Auto-lock after this many minutes of inactivity');
+    for (const minutes of AUTOLOCK_OPTIONS) {
+      const opt = /** @type {HTMLOptionElement} */
+        (el('option', undefined, minutes === 1 ? '1 minute' : `${minutes} minutes`));
+      opt.value = String(minutes);
+      select.appendChild(opt);
+    }
+    field.appendChild(select);
+    row.appendChild(field);
+
+    // "Lock now" — relocated INLINE beside the auto-lock dropdown (M12 F5 HAT batch). Unlocked
+    // only: locking is GLOBAL (zeroizes every vault key at once), non-destructive, and reversible
+    // via unlock, so no confirm. Same wiring — the internal-vault-lock bridge call — as before;
+    // the page re-renders to the locked view off the vault-lock-state broadcast the store's onLock
+    // hook emits. Carries no secret.
+    if (unlocked) {
+      row.appendChild(button('Lock now', 'vault-btn', () => {
+        Promise.resolve(bridge.lockVault()).catch(() => {});
+      }));
+    }
     section.appendChild(row);
 
     const status = el('p', 'vault-autolock-status');
     status.setAttribute('role', 'status');
     section.appendChild(status);
 
-    // Seed the current value from the existing settings bridge.
+    // Seed the selection from the existing settings bridge, snapping to the nearest option.
     Promise.resolve(bridge.settingsGet('vaultAutoLockMinutes')).then((v) => {
-      if (typeof v === 'number') input.value = String(v);
-    }).catch(() => {});
+      select.value = String(nearestAutoLockOption(/** @type {number} */ (v)));
+    }).catch(() => { select.value = String(AUTOLOCK_DEFAULT); });
 
-    // Persist on change; surface the validator's out-of-range/non-integer rejection.
-    input.addEventListener('change', () => {
-      const minutes = Number(input.value);
+    // Persist on change. Every option is in range, so a rejection is unexpected — surface it inline.
+    select.addEventListener('change', () => {
+      const minutes = Number(select.value);
       Promise.resolve(bridge.settingsSet('vaultAutoLockMinutes', minutes)).then(() => {
         status.textContent = 'Saved.';
       }).catch(() => {
-        status.textContent = 'Enter a whole number of minutes between 1 and 1440.';
+        status.textContent = 'Could not save the auto-lock setting.';
       });
     });
     return section;
@@ -406,17 +441,17 @@ function init() {
    */
   function buildVaultSection(entry, editorHost) {
     const vaultId = entry.id;
-    const section = el('section', 'vault-section');
+    const section = el('section', 'vault-section vault-child-section');
     section.id = `vault-${vaultId}`;
     section.dataset.vaultId = vaultId;
     const headingId = `vault-h-${vaultId}`;
     section.setAttribute('aria-labelledby', headingId);
 
     const header = el('div', 'vault-section-head');
-    const h2 = el('h2', undefined,
+    const h3 = el('h3', 'vault-section-title',
       typeof entry.count === 'number' ? `${entry.label} (${entry.count})` : entry.label);
-    h2.id = headingId;
-    header.appendChild(h2);
+    h3.id = headingId;
+    header.appendChild(h3);
 
     // Add-item control: a type picker + Add button → a blank editor.
     const picker = /** @type {HTMLSelectElement} */ (el('select', 'vault-type-select'));
@@ -932,10 +967,29 @@ function init() {
   }
 
   /**
-   * Render the nav+main master-detail (M12 F5 HAT hat-page-sidebar): a left nav (Settings +
-   * one entry per vault) driven by the pure entry model, and a stacked section list in
-   * #vault-root that the nav scroll-spies. not-set-up short-circuits to the setup CTA with an
-   * empty nav (there are no vaults yet).
+   * The "Vaults" group header section (M12 F5 HAT batch). A short top-level section that titles
+   * the group of per-vault subsections that follow it as siblings — the nav's "Vaults" parent
+   * entry jumps here. Carries the reserved section id `vault-vaults`.
+   * @returns {HTMLElement}
+   */
+  function buildVaultsGroupSection() {
+    const section = el('section', 'vault-section vault-vaults-section');
+    section.id = 'vault-vaults';
+    section.setAttribute('aria-labelledby', 'vault-vaults-heading');
+    const h2 = el('h2', undefined, 'Vaults');
+    h2.id = 'vault-vaults-heading';
+    section.appendChild(h2);
+    section.appendChild(el('p', 'vault-lede', 'Manage the items stored in each vault.'));
+    return section;
+  }
+
+  /**
+   * Render the nav+main master-detail (M12 F5 HAT hat-page-sidebar): a TWO-LEVEL left nav
+   * (a top "Settings" entry + a top "Vaults" group with one indented child per vault) driven by
+   * the pure entry model, and a stacked section list in #vault-root that the nav scroll-spies
+   * (Settings, the Vaults header, then each per-vault subsection — all siblings so the scroll-spy
+   * resolves the topmost-visible one unambiguously). not-set-up short-circuits to the setup CTA
+   * with an empty nav (there are no vaults yet).
    * @param {{ setUp?: unknown, unlocked?: unknown, vaults?: unknown }} state
    */
   function render(state) {
@@ -955,22 +1009,23 @@ function init() {
     const entries = vaultNavEntries(view.vaults, jarRows);
     nav.render(entries);
 
-    // Settings section first, then one section per vault (skip the fixed Settings entry).
+    // Settings section first.
     root.appendChild(buildSettingsSection(view));
 
     // A single editor host reused by every unlocked vault section; hidden until opened.
     const editorHost = el('div', 'vault-editor-host');
     editorHost.hidden = true;
-
     if (view.mode === 'unlocked') root.appendChild(editorHost);
 
-    for (const entry of entries) {
-      if (entry.kind === 'settings') continue;
-      if (view.mode === 'unlocked') root.appendChild(buildVaultSection(entry, editorHost));
-      else root.appendChild(buildLockedVaultSection(entry));
+    // The Vaults group header, then one subsection per vault (the group entry's children).
+    root.appendChild(buildVaultsGroupSection());
+    const group = entries.find((e) => e.kind === 'group');
+    for (const child of (group && group.children) || []) {
+      if (view.mode === 'unlocked') root.appendChild(buildVaultSection(child, editorHost));
+      else root.appendChild(buildLockedVaultSection(child));
     }
 
-    // Scroll-spy over every rendered section (Settings + per-vault) → aria-current.
+    // Scroll-spy over every rendered section (Settings + Vaults header + per-vault) → aria-current.
     const sectionEls = Array.from(root.children).filter(
       (child) => child instanceof HTMLElement && child.id.startsWith('vault-')
     );
