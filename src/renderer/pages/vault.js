@@ -281,10 +281,10 @@ function init() {
     section.appendChild(el('p', 'vault-lede',
       'Automatically lock the manager after a period of inactivity.'));
 
-    const row = el('div', 'vault-autolock-row');
-    const field = el('label', 'vault-autolock-field');
-    field.appendChild(el('span', 'vault-autolock-label', 'Auto-lock after'));
-    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-autolock-select'));
+    const row = el('div', 'vault-settings-row');
+    const field = el('label', 'vault-settings-field');
+    field.appendChild(el('span', 'vault-settings-label', 'Auto-lock after'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     select.setAttribute('aria-label', 'Auto-lock after this many minutes of inactivity');
     for (const minutes of AUTOLOCK_OPTIONS) {
       const opt = /** @type {HTMLOptionElement} */
@@ -307,7 +307,7 @@ function init() {
     }
     section.appendChild(row);
 
-    const status = el('p', 'vault-autolock-status');
+    const status = el('p', 'vault-settings-status');
     status.setAttribute('role', 'status');
     section.appendChild(status);
 
@@ -344,22 +344,25 @@ function init() {
     section.appendChild(el('p', 'vault-lede',
       'Import a portable bundle into a destination vault. You’ll enter the source master password or recovery key on a secure prompt.'));
 
-    const row = el('label', 'vault-import-row');
-    row.appendChild(el('span', 'vault-import-label', 'Destination'));
-    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-import-select'));
+    const row = el('div', 'vault-settings-row');
+    const field = el('label', 'vault-settings-field');
+    field.appendChild(el('span', 'vault-settings-label', 'Destination'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     select.setAttribute('aria-label', 'Import destination vault');
     for (const v of vaults) {
       const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
       opt.value = v.vaultId;
       select.appendChild(opt);
     }
-    row.appendChild(select);
-    section.appendChild(row);
+    field.appendChild(select);
+    row.appendChild(field);
 
-    const status = el('p', 'vault-import-status');
+    const status = el('p', 'vault-settings-status');
     status.setAttribute('role', 'status');
 
-    section.appendChild(button('Import…', 'vault-btn', () => {
+    // "Import…" sits INLINE on the destination row (mirrors auto-lock's "Lock now"), not on
+    // a separate line below the picker.
+    row.appendChild(button('Import…', 'vault-btn', () => {
       const target = select.value;
       if (!target) return;
       status.textContent = '';
@@ -367,6 +370,7 @@ function init() {
         if (res && res.error) status.textContent = 'Could not read that bundle file.';
       }).catch(() => { status.textContent = 'Import could not start.'; });
     }));
+    section.appendChild(row);
     section.appendChild(status);
     return section;
   }
@@ -411,16 +415,18 @@ function init() {
     // picker + Export button. Builds the ciphertext-only bundle + runs the save dialog fully in
     // main — NO password prompt, NO secret in the page. A locked manager (idle-lock race)
     // surfaces { locked } → refresh to the locked view.
-    const exportRow = el('label', 'vault-export-row');
-    exportRow.appendChild(el('span', 'vault-export-label', 'Export'));
-    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-export-select'));
+    const exportRow = el('div', 'vault-settings-row');
+    const exportField = el('label', 'vault-settings-field');
+    exportField.appendChild(el('span', 'vault-settings-label', 'Export'));
+    const select = /** @type {HTMLSelectElement} */ (el('select', 'vault-settings-select'));
     select.setAttribute('aria-label', 'Export source vault');
     for (const v of vaults) {
       const opt = /** @type {HTMLOptionElement} */ (el('option', undefined, v.label));
       opt.value = v.vaultId;
       select.appendChild(opt);
     }
-    exportRow.appendChild(select);
+    exportField.appendChild(select);
+    exportRow.appendChild(exportField);
     exportRow.appendChild(button('Export…', 'vault-btn', () => {
       const target = select.value;
       if (!target) return;

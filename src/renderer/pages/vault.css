@@ -146,7 +146,7 @@ main {
   flex: 1 1 auto;
   min-width: 0;
   padding: 32px 48px 64px;
-  max-width: 760px;
+  max-width: 720px; /* matches settings.css — constrains the content column so the Settings area doesn't sprawl */
 }
 
 /* ── Header: title ── */
@@ -194,9 +194,10 @@ main {
 }
 
 /* ── Settings subsections (auto-lock / import / master-key management) grouped under the
-   single "Settings" heading (M12 F5 HAT hat-page-sidebar) ── */
+   single "Settings" heading (M12 F5 HAT hat-page-sidebar). One even top margin gives the
+   subsections a consistent vertical rhythm; per-subsection margins are not needed. ── */
 .vault-subsection {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 .vault-subsection-title {
   font-size: 14px;
@@ -205,18 +206,27 @@ main {
   color: var(--fg);
 }
 
-/* Export source picker in master-key management (mirrors the import row layout). */
-.vault-export-row {
+/* ── Settings control rows (auto-lock / import / export) ────────────────────────────
+   One aligned-row idiom mirroring settings.css .settings-row: a label+control field with
+   the row's action button as a sibling on the same line. Shared by all three Settings
+   subsections so their controls sit on a common left edge with consistent spacing. */
+.vault-settings-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
 }
-.vault-export-label {
+.vault-settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vault-settings-label {
   color: var(--fg-dim);
   font-size: 13px;
 }
-.vault-export-select {
+.vault-settings-select {
   background: var(--bg-2);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -225,14 +235,26 @@ main {
   font-size: 13px;
   font-family: inherit;
 }
-.vault-export-select:focus-visible {
+.vault-settings-select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.vault-settings-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.vault-settings-status:empty {
+  display: none;
+}
 
+/* Helper/description text under a section or subsection heading — smaller + secondary
+   (mirrors settings.css .muted / section p), tightened so the controls sit close below. */
 .vault-lede {
   color: var(--fg-dim);
-  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0 0 10px;
 }
 
 /* ── Shared button ── */
@@ -645,89 +667,14 @@ textarea.vault-input {
   color: var(--fg);
 }
 
-.vault-autolock-section {
-  margin-bottom: 24px;
-}
-/* The dropdown + its inline "Lock now" (M12 F5 HAT batch) sit on one row. */
-.vault-autolock-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.vault-autolock-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.vault-autolock-label {
-  color: var(--fg-dim);
-  font-size: 13px;
-}
-.vault-autolock-select {
-  background: var(--bg-2);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 13px;
-  font-family: inherit;
-}
-.vault-autolock-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.vault-autolock-status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--fg-dim);
-}
-.vault-autolock-status:empty {
-  display: none;
-}
-
-/* Portable import (M12 Flight 4 Leg 1 export-import). Mirrors the auto-lock row layout. */
-.vault-import-section {
-  margin-bottom: 24px;
-}
-.vault-import-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.vault-import-label {
-  color: var(--fg-dim);
-  font-size: 13px;
-}
-.vault-import-select {
-  background: var(--bg-2);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 13px;
-  font-family: inherit;
-}
-.vault-import-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.vault-import-status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--fg-dim);
-}
-.vault-import-status:empty {
-  display: none;
-}
+/* Auto-lock, import, and export control rows now share the .vault-settings-row idiom
+   (defined with the Settings subsections above) — the per-control row/label/select rules
+   that used to live here are gone. Their subsections keep even rhythm via .vault-subsection. */
 
 /* ── Operator-secret rotation (M12 F4 Leg 2 key-rotation, DD3) ── */
-.vault-rotation-section {
-  margin-bottom: 24px;
-}
 .vault-rotation-actions {
   display: flex;
-  gap: 12px;
+  gap: 8px; /* matches .vault-settings-row so the button row and the export row below it align */
   flex-wrap: wrap;
 }
 /* The locked-view "Forgot master password? Recover" affordance — a low-emphasis text link
