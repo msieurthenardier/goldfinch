@@ -58,6 +58,23 @@ test('Copy is a gold PRIMARY button carrying a decorative copy glyph, label stay
   assert.equal(card.copy.textContent, 'Copy');
 });
 
+test('replacing-lede line is built hidden by default (setup case) and carries the rotation warning', () => {
+  const document = createDocument();
+  const card = buildVaultRecoveryCard(document);
+
+  // The rotate-recovery warning line exists but is HIDDEN by default — the first-run setup
+  // case has no prior key to replace (HAT I9). textContent-only, never markup.
+  assert.ok(card.replacingLede, 'a replacing-lede node ref is exposed');
+  assert.equal(card.replacingLede.tagName, 'P');
+  assert.equal(card.replacingLede.hidden, true, 'hidden by default (setup case shows no line)');
+  assert.equal(
+    card.replacingLede.textContent,
+    'This replaces your previous recovery key — the old one no longer works.'
+  );
+  // It lives inside the card so the reveal path (menu-overlay.js) can toggle it in place.
+  assert.ok(card.card.children.includes(card.replacingLede));
+});
+
 test('each buildVaultRecoveryCard call yields a fresh, independent node tree', () => {
   const document = createDocument();
   const a = buildVaultRecoveryCard(document);

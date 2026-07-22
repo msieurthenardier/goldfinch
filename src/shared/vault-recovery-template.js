@@ -25,6 +25,7 @@ import { buildCopyIcon } from './copy-icon.js';
  *   node: HTMLElement,
  *   card: HTMLElement,
  *   keyValue: HTMLElement,
+ *   replacingLede: HTMLElement,
  *   copy: HTMLButtonElement,
  *   acknowledge: HTMLButtonElement,
  * }}
@@ -51,6 +52,18 @@ export function buildVaultRecoveryCard(document) {
   lede.textContent =
     'This is shown once. Write it down and keep it somewhere safe — it recovers your vault if you forget your master password. It cannot be shown again.';
   card.appendChild(lede);
+
+  // Second lede line for the ROTATE-RECOVERY case only (HAT I9): a fresh recovery key
+  // INVALIDATES the previous one, so a user who rotates must be told the old key is now
+  // dead. Built once but HIDDEN by default (the first-run setup case has no prior key to
+  // replace); menu-overlay.js reveals it when the sheet is populated with `replacing:true`.
+  // textContent-only, like every other label on this DD5 sheet.
+  const replacingLede = document.createElement('p');
+  replacingLede.className = 'vault-recovery-lede vault-recovery-replacing';
+  replacingLede.textContent =
+    'This replaces your previous recovery key — the old one no longer works.';
+  replacingLede.hidden = true;
+  card.appendChild(replacingLede);
 
   // Read-only key display. A non-editable element (not an input) — there is nothing to
   // submit; the key is displayed, copied, and acknowledged. aria-readonly + a role/label
@@ -84,5 +97,5 @@ export function buildVaultRecoveryCard(document) {
   actions.appendChild(acknowledge);
   card.appendChild(actions);
 
-  return { node, card, keyValue, copy, acknowledge };
+  return { node, card, keyValue, replacingLede, copy, acknowledge };
 }

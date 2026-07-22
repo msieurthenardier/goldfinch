@@ -81,7 +81,11 @@ test('rotate-recovery: valid step-up → { ok:true }; Buffer hand-off; array zer
   assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
   assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
   assert.deepEqual(closeCalls, [['activated', 7]]);
-  assert.deepEqual(chromeSends, [['vault-recovery-show', { recoveryKey: 'NEW-RECOVERY-KEY-DISPLAY' }]]);
+  // The rotate send carries `replacing: true` (HAT I9) — the new key kills the previous one,
+  // so the recovery-show sheet reveals the "this replaces your previous recovery key" line.
+  assert.deepEqual(chromeSends, [
+    ['vault-recovery-show', { recoveryKey: 'NEW-RECOVERY-KEY-DISPLAY', replacing: true }],
+  ]);
 });
 
 test('rotate-recovery: WRONG master → { ok:false }: no recovery-show, sheet not closed; array still zeroed', async () => {

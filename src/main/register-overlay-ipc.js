@@ -266,8 +266,12 @@ function registerOverlayIpc({
           rec.sheet.closeMenuOverlay('activated', current.token);
           // The new one-time recovery key — main→chrome→sheet (channel-3 init carries the model).
           // Shown ONCE on the dismiss-locked vault-recovery-show sheet, opened AFTER the write.
+          // `replacing: true` (rotate-only; the setup send omits it) tells the sheet to reveal
+          // the "this replaces your previous recovery key" line — the rotation INVALIDATES the
+          // old key, a footgun if unstated (HAT I9). NON-SECRET flag; the key rides as before.
           chromeForAttachment(rec.win)?.send('vault-recovery-show', {
             recoveryKey: res.recoveryKeyDisplay,
+            replacing: true,
           });
           return { ok: true };
         }

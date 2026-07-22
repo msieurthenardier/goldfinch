@@ -949,10 +949,14 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
 
   /** Render the recovery key into the read-only display (textContent only) + stash it for
    * Copy. Re-reads the model each init, so a model-replace never re-emits a stale key.
+   * The `replacing` flag (rotate-recovery only; setup omits it) reveals the "this replaces
+   * your previous recovery key" line — the rotation kills the old key (HAT I9). Re-read each
+   * init so a subsequent setup-case open (no flag) hides it again.
    * @param {any} model */
   function renderRecovery(model) {
     recoveryKey = model && typeof model.recoveryKey === 'string' ? model.recoveryKey : '';
     recovery.keyValue.textContent = recoveryKey || '';
+    recovery.replacingLede.hidden = !(model && model.replacing === true);
   }
 
   /* -------------------------------------------------------- template: vault-stepup */

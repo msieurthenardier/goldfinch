@@ -1367,8 +1367,10 @@ window.goldfinch.onVaultRequestUnlock(() => {
 // recovery key ONLY (admin key deferred to F4). Opened DISMISS-DISABLED so a casual
 // dismiss can't lose the unrecoverable one-time key (Escape/backdrop/blur all inert;
 // only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
-window.goldfinch.onVaultRecoveryShow(({ recoveryKey }) => {
-  openOverlayMenu('vault-recovery-show', { recoveryKey }, null, 0, { dismissible: false });
+window.goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
+  // `replacing` (rotate-recovery only; setup omits it) reveals the sheet's "this replaces
+  // your previous recovery key" line — the rotation kills the old key (HAT I9). Non-secret.
+  openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, { dismissible: false });
 });
 
 // Access-key mint cross-renderer triggers (M12 F3 Leg 5 access-keys, DD5). The vault page's

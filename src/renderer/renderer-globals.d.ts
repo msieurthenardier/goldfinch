@@ -352,7 +352,7 @@ interface GoldfinchBridge {
   // recovery-show carries the recovery key ONLY (admin key deferred to F4).
   onVaultRequestSetup(cb: () => void): void;
   onVaultRequestUnlock(cb: () => void): void;
-  onVaultRecoveryShow(cb: (d: { recoveryKey: string }) => void): void;
+  onVaultRecoveryShow(cb: (d: { recoveryKey: string; replacing?: boolean }) => void): void;
   // Access-key mint cross-renderer triggers (M12 F3 Leg 5, DD5). onVaultRequestMint carries
   // the NON-SECRET target vault id; onVaultAccessKeyShow carries the minted secret + keyId.
   onVaultRequestMint(cb: (d: { target: string }) => void): void;
