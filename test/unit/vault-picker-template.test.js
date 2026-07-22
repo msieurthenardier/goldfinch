@@ -12,8 +12,20 @@ const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
-  buildVaultPickerCard, renderVaultPickerRows, pickId, parsePickIndex, badgeLabelFor,
+  buildVaultPickerCard, renderVaultPickerRows, pickId, parsePickIndex, badgeLabelFor, MANAGE_ID,
 } = require('../../src/shared/vault-picker-template.js');
+
+// Row layout: [icon(svg), text(title+username), badges(chicklet [+ widened])].
+const iconOf = (row) => row.children[0];
+const textOf = (row) => row.children[1];
+const titleOf = (row) => textOf(row).children[0];
+const usernameOf = (row) => textOf(row).children[1];
+const badgesOf = (row) => row.children[2];
+const chickletOf = (row) => badgesOf(row).children[0];
+const chickletLabel = (row) => chickletOf(row).children[chickletOf(row).children.length - 1].textContent;
+// The Manage-passwords footer is the last focusable item returned; the card holds a
+// separator immediately before it.
+const manageBtn = (rows) => rows[rows.length - 1];
 
 test('buildVaultPickerCard is a centered backdrop + a role="menu" card', () => {
   const document = createDocument();
@@ -26,7 +38,7 @@ test('buildVaultPickerCard is a centered backdrop + a role="menu" card', () => {
   assert.equal(card.parentNode, node);
 });
 
-test('renderVaultPickerRows: badged rows (title + dimmed username + source-vault badge), index-stamped', () => {
+test('renderVaultPickerRows: icon + stacked title/username + source-vault chicklet, index-stamped', () => {
   const document = createDocument();
   const { card } = buildVaultPickerCard(document);
   const model = [
@@ -35,36 +47,118 @@ test('renderVaultPickerRows: badged rows (title + dimmed username + source-vault
   ];
   const rows = renderVaultPickerRows(document, card, model);
 
-  assert.equal(rows.length, 2);
-  // Each row is a role=menuitem button, non-focusable by default (roving assigns tabindex).
-  rows.forEach((btn, i) => {
+  // Two credential rows + the Manage-passwords footer (always appended).
+  assert.equal(rows.length, 3);
+  const credRows = rows.slice(0, 2);
+  // Each credential row is a role=menuitem button, non-focusable by default (roving
+  // assigns tabindex), with the index stamped on data-pick-index.
+  credRows.forEach((btn, i) => {
     assert.equal(btn.tagName, 'BUTTON');
     assert.equal(btn.attributes.get('role'), 'menuitem');
     assert.equal(btn.tabIndex, -1);
     assert.equal(btn.dataset.pickIndex, String(i));
   });
-  // Row 0 (global): title + username + "Global" badge.
-  const [title0, user0, badge0] = rows[0].children;
-  assert.equal(title0.textContent, 'GitHub');
-  assert.equal(title0.className, 'vault-picker-title');
-  assert.equal(user0.textContent, 'me@a');
-  assert.equal(user0.className, 'vault-picker-username');
-  assert.equal(badge0.textContent, 'Global');
-  assert.equal(badge0.className, 'vault-picker-badge');
-  // Row 1 (work): the enriched jar name badge.
-  assert.equal(rows[1].children[2].textContent, 'Work');
+
+  // Icon-left: a decorative inline SVG (built via createElementNS), aria-hidden, no
+  // remote favicon. Same glyph on every row.
+  credRows.forEach((btn) => {
+    const icon = iconOf(btn);
+    assert.equal(icon.tagName, 'SVG');
+    assert.equal(icon.attributes.get('class'), 'vault-picker-icon');
+    assert.equal(icon.attributes.get('aria-hidden'), 'true');
+    assert.ok(icon.children.length >= 1); // path/rect geometry
+  });
+
+  // Row 0 (global): stacked title + username; the source-vault chicklet reads "Global".
+  assert.equal(titleOf(rows[0]).textContent, 'GitHub');
+  assert.equal(titleOf(rows[0]).className, 'vault-picker-title');
+  assert.equal(usernameOf(rows[0]).textContent, 'me@a');
+  assert.equal(usernameOf(rows[0]).className, 'vault-picker-username');
+  assert.equal(chickletLabel(rows[0]), 'Global');
+  // Row 1 (work): the enriched jar-name chicklet.
+  assert.equal(chickletLabel(rows[1]), 'Work');
 
   // METADATA ONLY: nothing on the rows carries a password (there is no password in
   // the model; assert no leakage even if one slipped into an unexpected field).
   assert.ok(!JSON.stringify(model).includes('password'));
 });
 
-test('renderVaultPickerRows: empty model → a single non-focusable note, returns []', () => {
+test('renderVaultPickerRows: jar-colored chicklet when badgeColor is present, neutral otherwise', () => {
+  const document = createDocument();
+  const { card } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, card, [
+    { vaultId: 'work', id: 'i1', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#ff8800' },
+    { vaultId: 'global', id: 'i2', title: 'GitHub', username: 'me@a' }, // Global → no color
+    { vaultId: 'evil', id: 'i3', title: 'X', username: 'x', badgeLabel: 'Evil', badgeColor: 'url(javascript:alert(1))' }, // unsafe → ignored
+  ]);
+
+  // Colored: the chicklet carries the -colored modifier and an inline-tinted dot.
+  const chicklet0 = chickletOf(rows[0]);
+  assert.ok(chicklet0.classList.contains('vault-picker-badge-colored'));
+  const dot0 = chicklet0.children[0];
+  assert.equal(dot0.className, 'vault-picker-badge-dot');
+  assert.equal(dot0.style.backgroundColor, '#ff8800');
+
+  // Global (no badgeColor): neutral chip — no -colored modifier, no dot.
+  const chicklet1 = chickletOf(rows[1]);
+  assert.ok(!chicklet1.classList.contains('vault-picker-badge-colored'));
+  assert.equal(chicklet1.children.length, 1); // label only, no dot
+  assert.equal(chickletLabel(rows[1]), 'Global');
+
+  // Unsafe color (fails isSafeColor): treated as neutral, never reaches a style.
+  const chicklet2 = chickletOf(rows[2]);
+  assert.ok(!chicklet2.classList.contains('vault-picker-badge-colored'));
+  assert.equal(chicklet2.children.length, 1);
+});
+
+test('renderVaultPickerRows: the widened (subdomain-match) badge still renders', () => {
+  const document = createDocument();
+  const { card } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, card, [
+    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', widened: true },
+  ]);
+  const badges = badgesOf(rows[0]);
+  // chicklet + widened badge.
+  assert.equal(badges.children.length, 2);
+  const widened = badges.children[1];
+  assert.ok(widened.className.split(' ').includes('vault-picker-badge-widened'));
+  assert.equal(widened.textContent, 'Subdomain match');
+});
+
+test('renderVaultPickerRows: a separated, focusable "Manage passwords" footer is always present', () => {
+  const document = createDocument();
+  const { card } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, card, [
+    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
+  ]);
+  // The footer is the last returned focusable item (so roving reaches it by keyboard).
+  const manage = manageBtn(rows);
+  assert.equal(manage.tagName, 'BUTTON');
+  assert.equal(manage.attributes.get('role'), 'menuitem');
+  assert.equal(manage.tabIndex, -1);
+  assert.equal(manage.dataset.manage, 'true');
+  assert.equal(manage.dataset.pickIndex, undefined); // NOT a pick row
+  assert.equal(manage.children[0].textContent, 'Manage passwords');
+
+  // A divider separates it from the item rows: card = [row, separator, manage].
+  const sep = card.children[card.children.length - 2];
+  assert.equal(sep.attributes.get('role'), 'separator');
+  assert.equal(sep.className, 'vault-picker-separator');
+  assert.equal(card.children[card.children.length - 1], manage);
+
+  // MANAGE_ID is the dispatch id the chrome routes to openVaultPage() — never a pick index.
+  assert.equal(parsePickIndex(MANAGE_ID), null);
+});
+
+test('renderVaultPickerRows: empty model → non-focusable note + the Manage footer only', () => {
   const document = createDocument();
   const { card } = buildVaultPickerCard(document);
   const rows = renderVaultPickerRows(document, card, []);
-  assert.deepEqual(rows, []);
-  assert.equal(card.children.length, 1);
+  // Even with no logins, the footer is present so the operator can reach the vault page.
+  assert.equal(rows.length, 1);
+  assert.equal(manageBtn(rows).dataset.manage, 'true');
+  // card = [note, separator, manage].
+  assert.equal(card.children.length, 3);
   const note = card.children[0];
   assert.equal(note.textContent, 'No saved logins for this site');
   assert.equal(note.attributes.get('aria-disabled'), 'true');
@@ -77,9 +171,10 @@ test('renderVaultPickerRows replaces prior content on re-render', () => {
   const { card } = buildVaultPickerCard(document);
   renderVaultPickerRows(document, card, [{ vaultId: 'global', id: 'i1', title: 'A', username: 'a' }]);
   const rows = renderVaultPickerRows(document, card, [{ vaultId: 'global', id: 'i2', title: 'B', username: 'b' }]);
-  assert.equal(rows.length, 1);
-  assert.equal(card.children.length, 1);
-  assert.equal(rows[0].children[0].textContent, 'B');
+  // One credential row + the footer; the card was fully rebuilt (row, separator, manage).
+  assert.equal(rows.length, 2);
+  assert.equal(card.children.length, 3);
+  assert.equal(titleOf(rows[0]).textContent, 'B');
 });
 
 test('row falls back to username, then "Login", when title is absent', () => {
@@ -89,8 +184,26 @@ test('row falls back to username, then "Login", when title is absent', () => {
     { vaultId: 'global', id: 'i1', username: 'only-user@a' },
     { vaultId: 'global', id: 'i2' },
   ]);
-  assert.equal(rows[0].children[0].textContent, 'only-user@a');
-  assert.equal(rows[1].children[0].textContent, 'Login');
+  assert.equal(titleOf(rows[0]).textContent, 'only-user@a');
+  assert.equal(titleOf(rows[1]).textContent, 'Login');
+});
+
+test('NO password field anywhere in the rendered picker DOM', () => {
+  const document = createDocument();
+  const { node, card } = buildVaultPickerCard(document);
+  renderVaultPickerRows(document, card, [
+    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
+    { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#0a0' },
+  ]);
+  // Walk the whole subtree; no input carries a password type, and no text/attr mentions
+  // "password" (metadata only — the picker never holds a secret).
+  const walk = (el, visit) => { visit(el); el.children.forEach((c) => walk(c, visit)); };
+  walk(node, (el) => {
+    assert.notEqual((el.attributes.get('type') || '').toLowerCase(), 'password');
+    assert.equal(el.tagName === 'INPUT', false);
+    const text = (el.textContent || '').toLowerCase();
+    if (el.children.length === 0) assert.ok(!text.includes('password') || text === 'manage passwords');
+  });
 });
 
 test('pickId / parsePickIndex round-trip; the id→index mapping is the dispatch contract', () => {

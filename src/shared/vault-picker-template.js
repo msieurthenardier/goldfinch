@@ -18,9 +18,54 @@
 // SECURITY: the model is METADATA ONLY (title / username / ids / badge). No password
 // / TOTP secret is ever in the model, a row, or the reported selection.
 
+import { isSafeColor } from './safe-color.js';
+
 // The selection id namespace. `id` (not `value`) carries the index — `value` is
 // main-side capped at 24 chars by sanitizeActivatedValue; `id` is not.
 export const PICK_PREFIX = 'pick:';
+
+// The selection id for the separated "Manage passwords" footer link. NOT a `pick:<i>`
+// index — the chrome dispatch routes it to openVaultPage() (a navigation, no secret).
+export const MANAGE_ID = 'manage-passwords';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Build the generic, per-row credential glyph (a padlock) as inline SVG — same icon
+ * for every row. Built via createElementNS/setAttribute (NO innerHTML): this is a
+ * privacy browser and rows never fetch a remote favicon. Decorative (aria-hidden);
+ * the row's textContent carries the accessible name.
+ * @param {Document} document
+ * @returns {SVGElement}
+ */
+function buildCredentialIcon(document) {
+  const svg = /** @type {any} */ (document.createElementNS(SVG_NS, 'svg'));
+  svg.setAttribute('class', 'vault-picker-icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const body = document.createElementNS(SVG_NS, 'rect');
+  body.setAttribute('x', '3');
+  body.setAttribute('y', '11');
+  body.setAttribute('width', '18');
+  body.setAttribute('height', '11');
+  body.setAttribute('rx', '2');
+  body.setAttribute('ry', '2');
+  svg.appendChild(body);
+
+  const shackle = document.createElementNS(SVG_NS, 'path');
+  shackle.setAttribute('d', 'M7 11V7a5 5 0 0 1 10 0v4');
+  svg.appendChild(shackle);
+
+  return svg;
+}
 
 /**
  * The selection id for row `i`.
@@ -82,24 +127,101 @@ export function buildVaultPickerCard(document) {
 }
 
 /**
+ * Build the separated "Manage passwords" footer button (a role="menuitem" so the
+ * shared roving contract reaches it by keyboard). It is NOT a `pick:<i>` row — it has
+ * no `data-pick-index`; the chrome dispatch routes its `MANAGE_ID` selection to
+ * openVaultPage(). A navigation, no secret. Returned so the caller can wire its click.
+ * @param {Document} document
+ * @returns {{ separator: HTMLElement, btn: HTMLElement }}
+ */
+function buildManageFooter(document) {
+  const separator = document.createElement('div');
+  separator.className = 'vault-picker-separator';
+  separator.setAttribute('role', 'separator');
+
+  const btn = document.createElement('button');
+  btn.className = 'cm-item vault-picker-manage';
+  btn.type = 'button';
+  btn.setAttribute('role', 'menuitem');
+  btn.tabIndex = -1;
+  btn.dataset.manage = 'true';
+
+  const label = document.createElement('span');
+  label.className = 'vault-picker-manage-label';
+  label.textContent = 'Manage passwords';
+  btn.appendChild(label);
+
+  return { separator, btn };
+}
+
+/**
+ * Build one row's trailing badges cluster (rendered in the row's top-right): the
+ * source-vault chicklet — tinted with the jar's `badgeColor` when present and SAFE
+ * (isSafeColor guard; an unsafe/absent color falls back to the neutral chip, e.g. the
+ * Global vault) — plus, when `widened`, the distinct subdomain-match badge. All labels
+ * via textContent.
+ * @param {Document} document
+ * @param {{ vaultId?: string, badgeLabel?: string, badgeColor?: string|null, widened?: boolean }} item
+ * @returns {HTMLElement}
+ */
+function buildRowBadges(document, item) {
+  const badges = document.createElement('span');
+  badges.className = 'vault-picker-badges';
+
+  const badge = document.createElement('span');
+  badge.className = 'vault-picker-badge';
+  const color = item && item.badgeColor;
+  if (color && isSafeColor(color)) {
+    badge.classList.add('vault-picker-badge-colored');
+    const dot = document.createElement('span');
+    dot.className = 'vault-picker-badge-dot';
+    // Guarded above — never a raw color into style without isSafeColor.
+    dot.style.backgroundColor = color;
+    badge.appendChild(dot);
+  }
+  const badgeLabel = document.createElement('span');
+  badgeLabel.className = 'vault-picker-badge-label';
+  badgeLabel.textContent = badgeLabelFor(item || {});
+  badge.appendChild(badgeLabel);
+  badges.appendChild(badge);
+
+  // A registrable-domain widen (subdomain match, not exact origin): a distinct badge
+  // so the operator sees this offer is not exact-origin (M12 F4 Leg 4 / DD5).
+  if (item && item.widened) {
+    const widened = document.createElement('span');
+    widened.className = 'vault-picker-badge vault-picker-badge-widened';
+    widened.textContent = 'Subdomain match';
+    badges.appendChild(widened);
+  }
+  return badges;
+}
+
+/**
  * Render the picker rows into `card` from the metadata model, replacing any prior
- * content. Each row is a role="menuitem" button showing title + dimmed username +
- * a source-vault badge; the row's index is stamped on `data-pick-index`. An EMPTY
- * model renders a single NON-focusable note ("No saved logins for this site") and
- * returns [] — the caller's roving contract then has no items to focus.
+ * content. Each row is a role="menuitem" button laid out like a modern password
+ * manager: a generic credential icon on the left, the title + dimmed username stacked
+ * to its right, and the source-vault chicklet (jar-colored when a safe `badgeColor` is
+ * present, neutral for Global) in the top-right. The row's index is stamped on
+ * `data-pick-index`. An EMPTY model renders a single NON-focusable note ("No saved
+ * logins for this site") in place of rows.
  *
- * Returns the focusable row buttons in order (the menu-controller's items getter).
+ * A separated "Manage passwords" footer (divider + a distinct role="menuitem" button,
+ * `data-manage`) is ALWAYS appended — even in the empty state — so the operator can
+ * always reach the vault page.
+ *
+ * Returns the focusable menuitems in roving order: the row buttons (if any) followed by
+ * the Manage-passwords footer button (the menu-controller's items getter).
  * @param {Document} document
  * @param {HTMLElement} card
- * A row whose `widened` flag is true (a registrable-domain match on a subdomain, not
- * the exact origin — M12 F4 Leg 4 / DD5) gets an ADDITIONAL distinct badge so the
- * operator sees the offer is not exact-origin. `textContent`-only, like every label.
- * @param {Array<{ vaultId?: string, id?: string, title?: string|null, username?: string|null, hasTotp?: boolean, badgeLabel?: string, widened?: boolean }>} model
+ * @param {Array<{ vaultId?: string, id?: string, title?: string|null, username?: string|null, hasTotp?: boolean, badgeLabel?: string, badgeColor?: string|null, widened?: boolean }>} model
  * @returns {HTMLElement[]}
  */
 export function renderVaultPickerRows(document, card, model) {
   card.textContent = '';
   const rows = Array.isArray(model) ? model : [];
+
+  /** @type {HTMLElement[]} */
+  const buttons = [];
 
   if (!rows.length) {
     const note = document.createElement('div');
@@ -107,11 +229,8 @@ export function renderVaultPickerRows(document, card, model) {
     note.setAttribute('aria-disabled', 'true');
     note.textContent = 'No saved logins for this site';
     card.appendChild(note);
-    return [];
   }
 
-  /** @type {HTMLElement[]} */
-  const buttons = [];
   rows.forEach((item, i) => {
     const btn = document.createElement('button');
     btn.className = 'cm-item vault-picker-row';
@@ -120,35 +239,35 @@ export function renderVaultPickerRows(document, card, model) {
     btn.tabIndex = -1;
     btn.dataset.pickIndex = String(i);
 
+    btn.appendChild(buildCredentialIcon(document));
+
+    const text = document.createElement('span');
+    text.className = 'vault-picker-text';
+
     const title = document.createElement('span');
     title.className = 'vault-picker-title';
     const titleText = item && item.title != null && item.title !== ''
       ? item.title
       : (item && item.username != null && item.username !== '' ? item.username : 'Login');
     title.textContent = String(titleText);
-    btn.appendChild(title);
+    text.appendChild(title);
 
     const username = document.createElement('span');
     username.className = 'vault-picker-username';
     username.textContent = String(item && item.username != null ? item.username : '');
-    btn.appendChild(username);
+    text.appendChild(username);
 
-    const badge = document.createElement('span');
-    badge.className = 'vault-picker-badge';
-    badge.textContent = badgeLabelFor(item || {});
-    btn.appendChild(badge);
-
-    // A registrable-domain widen (subdomain match, not exact origin): a distinct badge
-    // so the operator sees this offer is not exact-origin (M12 F4 Leg 4 / DD5).
-    if (item && item.widened) {
-      const widened = document.createElement('span');
-      widened.className = 'vault-picker-badge vault-picker-badge-widened';
-      widened.textContent = 'Subdomain match';
-      btn.appendChild(widened);
-    }
+    btn.appendChild(text);
+    btn.appendChild(buildRowBadges(document, item || {}));
 
     card.appendChild(btn);
     buttons.push(btn);
   });
+
+  const { separator, btn: manageBtn } = buildManageFooter(document);
+  card.appendChild(separator);
+  card.appendChild(manageBtn);
+  buttons.push(manageBtn);
+
   return buttons;
 }

@@ -616,31 +616,78 @@ body {
   max-height: 70vh;
   overflow-y: auto;
   padding: 8px;
+  min-width: 280px;
 }
 .vault-picker-row {
-  /* .cm-item gives the flex/hover/focus base; stack the title over the username and
-     push the badge to the trailing edge */
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  /* .cm-item gives the flex/hover/focus base. Modern password-manager row: a credential
+     icon on the left, the stacked title/username in the middle, and the source-vault
+     chicklet in the top-right. align-items:flex-start floats the badges to the top-right
+     corner; the icon re-centers itself against the two-line text. */
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+}
+.vault-picker-icon {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--accent, var(--fg));
+  opacity: 0.9;
+}
+.vault-picker-text {
+  /* the middle column: title over username, taking the free width so the badges sit at
+     the trailing top-right edge */
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 .vault-picker-title {
-  flex: 1 1 auto;
   font-weight: 500;
   color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vault-picker-username {
-  flex: 1 1 100%;
   color: var(--fg-dim);
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-picker-badges {
+  /* top-right cluster: the jar chicklet + (optionally) the subdomain-match badge */
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 45%;
 }
 .vault-picker-badge {
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--fg-dim);
   font-size: 10px;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: 999px;
+  padding: 1px 8px;
   white-space: nowrap;
+}
+.vault-picker-badge-colored {
+  /* a jar-colored chicklet: the jar's color rides an inline dot (guarded by isSafeColor
+     before it reaches the DOM); the chip itself stays theme-legible */
+  color: var(--fg);
+  border-color: var(--border-strong, var(--border));
+}
+.vault-picker-badge-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  /* background-color is set inline from the jar's isSafeColor-guarded color */
 }
 .vault-picker-badge-widened {
   /* a registrable-domain widen (subdomain match, not exact origin — M12 F4 Leg 4 / DD5):
@@ -651,6 +698,22 @@ body {
 .vault-picker-note {
   color: var(--fg-dim);
   padding: 10px 8px;
+}
+.vault-picker-separator {
+  /* divider between the credential rows and the Manage-passwords footer */
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+.vault-picker-manage {
+  /* the separated footer link (Chrome's "Manage passwords…") — a focusable menuitem,
+     visually distinct from the item rows via the gold accent */
+  justify-content: center;
+  color: var(--accent, var(--fg));
+  font-weight: 500;
+}
+.vault-picker-manage-label {
+  color: inherit;
 }
 
 /* ---------- vault-capture template (M12 Flight 2 Leg 4 capture-save, DD7) ----------

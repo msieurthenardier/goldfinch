@@ -8,7 +8,7 @@ import { BURNER } from '../shared/burner.js';
 import { buildContainerModel } from '../shared/container-menu.js';
 import { buildAutomationIndicatorModel } from '../shared/automation-indicator-model.js';
 import { buildVaultIndicatorModel } from '../shared/vault-indicator-model.js';
-import { parsePickIndex } from '../shared/vault-picker-template.js';
+import { parsePickIndex, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { isSafeColor } from '../shared/safe-color.js';
 import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
 import { keydownToAction } from '../shared/keydown-action.js';
@@ -657,6 +657,15 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // and hands it to F1's channel — the return carries no password). On a lock
       // between pick and fill (`reason:'locked'`), re-raise the unlock prompt →
       // onVaultLockState re-opens the picker (re-pick), rather than erroring.
+      //
+      // The separated "Manage passwords" footer is not a row: it navigates to the
+      // Secrets page (openVaultPage — a trusted goldfinch://vault tab). No secret, no
+      // fill; clear any pending flow so a later gesture starts clean.
+      if (id === MANAGE_ID) {
+        pendingVaultFlow = null;
+        openVaultPage();
+        break;
+      }
       const idx = parsePickIndex(id);
       const item = idx != null ? lastPickerModel[idx] : null;
       const wcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
@@ -1328,6 +1337,10 @@ async function openVaultPicker(wcId) {
     if (row && row.vaultId && row.vaultId !== 'global') {
       const jar = jarsClient.containers.find((c) => c.id === row.vaultId);
       row.badgeLabel = jar ? jar.name : row.vaultId;
+      // The jar's dot color tints the sheet's top-right chicklet. Guard the raw color
+      // through isSafeColor before it ever reaches a style (never trust it into CSS);
+      // Global (skipped here) and colorless/unsafe jars get the neutral chip.
+      row.badgeColor = jar && isSafeColor(jar.color) ? jar.color : null;
     }
   }
   openOverlayMenu('vault-picker', lastPickerModel, null, 0);

@@ -46,7 +46,7 @@
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
-import { buildVaultPickerCard, renderVaultPickerRows, pickId } from '../shared/vault-picker-template.js';
+import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
 import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
@@ -674,11 +674,15 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
    * @param {any[]} model */
   function renderPicker(model) {
     pickerRows = renderVaultPickerRows(document, pickerCard, model);
-    pickerRows.forEach((btn, i) => {
+    pickerRows.forEach((btn) => {
       btn.addEventListener('click', () => {
-        // Index selection — activation wins over the onClose dismissal (one report
-        // per token). The password is NEVER on this path; `pick:<i>` is an index.
-        if (sendActivatedOnce({ id: pickId(i) })) menuController.close(pickerEntry);
+        // A credential row reports its INDEX (`pick:<i>`, from data-pick-index); the
+        // separated footer (no data-pick-index) reports MANAGE_ID → chrome routes it to
+        // openVaultPage() (a navigation, no secret). Activation wins over the onClose
+        // dismissal (one report per token). The password is NEVER on this path.
+        const pi = btn.dataset.pickIndex;
+        const id = pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
+        if (sendActivatedOnce({ id })) menuController.close(pickerEntry);
       });
     });
   }
