@@ -259,19 +259,23 @@ main {
 }
 
 /* ── Shared button ── */
+/* ── Shared text button — mirrors the //settings button system: a gold-filled PRIMARY
+   (settings.css .settings-btn / #home-page-save) + a dark, gold-hover-outline SECONDARY
+   (settings.css .pager-btn). Same 14px sizing, 6px radius, 6px/14px padding, brightness-on-hover
+   primary, and disabled treatment. (Icon buttons — .vault-icon-btn — are intentionally separate.) ── */
 .vault-btn {
   background: var(--bg-2);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.1s, filter 0.1s;
 }
 
-.vault-btn:hover {
+.vault-btn:not(:disabled):hover {
   border-color: var(--accent);
 }
 
@@ -281,8 +285,9 @@ main {
   border-color: var(--accent);
 }
 
-.vault-btn.primary:hover {
+.vault-btn.primary:not(:disabled):hover {
   filter: brightness(1.1);
+  border-color: var(--accent);
 }
 
 .vault-btn:focus-visible {
@@ -597,8 +602,8 @@ textarea.vault-input {
 }
 
 .vault-btn.small {
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 5px 12px;
+  font-size: 13px;
 }
 .vault-btn.danger {
   border-color: var(--err);
@@ -942,11 +947,7 @@ textarea.vault-input {
 }
 .vault-btn:disabled {
   opacity: 0.5;
-  cursor: default;
-}
-.vault-btn:disabled:hover {
-  border-color: var(--border);
-  filter: none;
+  cursor: not-allowed;
 }
 
 /* Transient page notice (e.g. an export that raced an idle auto-lock → { locked }). */

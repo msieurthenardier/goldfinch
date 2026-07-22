@@ -62,11 +62,11 @@ export function buildVaultUnlockCard(document) {
   const actions = document.createElement('div');
   actions.className = 'new-container-actions';
   const unlock = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  unlock.className = 'text-btn small';
+  unlock.className = 'text-btn primary vault-sheet-btn';
   unlock.type = 'button';
   unlock.textContent = 'Unlock';
   const cancel = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  cancel.className = 'text-btn small';
+  cancel.className = 'text-btn vault-sheet-btn';
   cancel.type = 'button';
   cancel.textContent = 'Cancel';
   actions.appendChild(unlock);

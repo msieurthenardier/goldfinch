@@ -69,11 +69,11 @@ export function buildVaultCaptureCard(document) {
   const actions = document.createElement('div');
   actions.className = 'new-container-actions';
   const save = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  save.className = 'text-btn small';
+  save.className = 'text-btn primary vault-sheet-btn';
   save.type = 'button';
   save.textContent = 'Save';
   const cancel = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  cancel.className = 'text-btn small';
+  cancel.className = 'text-btn vault-sheet-btn';
   cancel.type = 'button';
   cancel.textContent = 'Cancel';
   actions.appendChild(save);

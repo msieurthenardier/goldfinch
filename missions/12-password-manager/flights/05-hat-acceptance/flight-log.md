@@ -238,6 +238,25 @@ guest-DOM absence of the native menu is asserted in the `vault-human-fill-bounda
   pass**, not a one-off — **accepted for now**, deferred to a dedicated styling-cleanup leg/flight that
   reconciles the sheet button styles against the canonical settings-page dark-button rule globally.
   *(operator finding + deferral, 2026-07-22)*
+  → **RESOLVED (I16, 2026-07-22).** See I16 below — the vault-page buttons were aligned to the `//settings`
+  button system and the interactive chrome sheets brought to parity with the one-time-display sheets.
+
+- **I16 (button styling holistic pass — FIXED live, resolves I13).** Three parts, operator-verified:
+  1. **Vault-page text buttons → `//settings` parity.** `.vault-btn` aligned to `settings.css`'s system —
+     gold-filled PRIMARY (`.settings-btn`/`#home-page-save`) + dark, gold-hover-outline SECONDARY
+     (`.pager-btn`): 14px sizing, matched padding/radius, `:not(:disabled):hover`, `cursor: not-allowed`
+     disabled. Icon buttons (`.vault-icon-btn`) intentionally left as-is. **Lock now** promoted to gold
+     (`.vault-btn primary`) at the operator's call.
+  2. **Interactive chrome sheets → sibling-sheet parity.** The one-time-display sheets (recovery/adminkey/
+     accesskey) already had `text-btn primary vault-sheet-btn` (Copy) + `text-btn vault-sheet-btn`
+     (acknowledge) from I2–I4, but the seven INTERACTIVE sheets still used plain `text-btn small` (no gold
+     primary, no gold hover outline) — the "still unstyled" report. Brought **unlock / change-master /
+     stepup (rotate-recovery/rotate-admin/mint) / set / recover / import / capture** to parity: submit →
+     `text-btn primary vault-sheet-btn` (gold), cancel → `text-btn vault-sheet-btn` (dark + gold hover).
+     className-only (no secret-flow change); the sheets load in the menu-overlay renderer → app restart to
+     view (FD-restarted with the admin gate, token preserved).
+  3. **Result:** 2680 tests, typecheck + lint clean. **Operator: "pass."** *(operator finding + FD-fixed,
+     2026-07-22)*
 
 **Verified live (positives):**
 - **F2 human-fill flow — VERIFIED LIVE (operator-driven, FD-observed).** With the I10/I11 redesigns:

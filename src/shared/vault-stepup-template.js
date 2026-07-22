@@ -74,11 +74,11 @@ export function buildVaultStepupCard(document) {
   const actions = document.createElement('div');
   actions.className = 'new-container-actions';
   const submit = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  submit.className = 'text-btn small';
+  submit.className = 'text-btn primary vault-sheet-btn';
   submit.type = 'button';
   submit.textContent = 'Mint access key';
   const cancel = /** @type {HTMLButtonElement} */ (document.createElement('button'));
-  cancel.className = 'text-btn small';
+  cancel.className = 'text-btn vault-sheet-btn';
   cancel.type = 'button';
   cancel.textContent = 'Cancel';
   actions.appendChild(submit);

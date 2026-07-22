@@ -732,7 +732,7 @@ function init() {
     // the page re-renders to the locked view off the vault-lock-state broadcast the store's onLock
     // hook emits. Carries no secret.
     if (unlocked) {
-      row.appendChild(button('Lock now', 'vault-btn', () => {
+      row.appendChild(button('Lock now', 'vault-btn primary', () => {
         Promise.resolve(bridge.lockVault()).catch(() => {});
       }));
     }
