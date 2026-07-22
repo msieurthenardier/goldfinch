@@ -366,7 +366,7 @@ body {
   color: var(--fg);
 }
 .vault-recovery-inner {
-  max-width: 360px;
+  max-width: 460px; /* fit the fixed-length recovery key on one line (HAT) */
 }
 .vault-recovery-heading {
   font-weight: 600;
@@ -381,7 +381,8 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
   letter-spacing: 0.04em;
-  word-break: break-all;
+  white-space: nowrap; /* keep the key on one line (HAT) — cards widened to fit */
+  overflow-x: auto; /* safety: scroll rather than overflow if ever wider than the card */
   user-select: all;
   padding: 8px 10px;
   border-radius: 6px;
@@ -512,7 +513,7 @@ body {
 }
 
 .vault-accesskey-inner {
-  max-width: 360px;
+  max-width: 480px; /* fit the one-line minted secret (HAT) */
 }
 .vault-accesskey-heading {
   font-weight: 600;
@@ -534,7 +535,8 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
   letter-spacing: 0.04em;
-  word-break: break-all;
+  white-space: nowrap; /* keep the key on one line (HAT) — cards widened to fit */
+  overflow-x: auto; /* safety: scroll rather than overflow if ever wider than the card */
   user-select: all;
   padding: 8px 10px;
   border-radius: 6px;
@@ -560,7 +562,7 @@ body {
   justify-content: center;
 }
 .vault-adminkey-inner {
-  max-width: 360px;
+  max-width: 480px; /* fit the one-line base64 admin key (HAT) */
 }
 .vault-adminkey-heading {
   font-weight: 600;
@@ -581,7 +583,8 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
   letter-spacing: 0.04em;
-  word-break: break-all;
+  white-space: nowrap; /* keep the key on one line (HAT) — cards widened to fit */
+  overflow-x: auto; /* safety: scroll rather than overflow if ever wider than the card */
   user-select: all;
   padding: 8px 10px;
   border-radius: 6px;
