@@ -185,10 +185,56 @@ path (register-browser-ipc — no guest send), and the Copy-glyph templates. `np
 must be re-run after the dev instance restart — the restyle only improves contrast, so it should stay green. The
 guest-DOM absence of the native menu is asserted in the `vault-human-fill-boundary` behavior spec (new variant).
 
+- **I9 (UX / messaging — NOT a crypto bug) — recovery-key lifecycle is confusing.** Operator hit a
+  recover failure after: setup (recovery key #1) → rotate-recovery (key #2, which silently invalidates #1)
+  → change-master → recover. Root cause = using an invalidated earlier key, compounded by the mental model
+  that master-change stales the recovery key (it does NOT — the MRK design decouples them; verified in
+  code + `vault-key-rotation.test.js:151,164`). The **crypto is correct and tested**; the gap is messaging:
+  (a) the rotate-recovery one-time display ("Save your recovery key… shown once…") does **not** say it
+  **replaces/invalidates the previous recovery key**; (b) nothing conveys that changing the master leaves
+  the recovery key valid; (c) holding several keys across setup + rotations is confusing. **Fix (bank):**
+  on the rotate-recovery display, add "This replaces your previous recovery key — the old one no longer
+  works." Consider a note on master-change that the recovery key is unchanged. Operator design question —
+  "should master-change also issue a new recovery key (like init)?" — left as a deliberate design decision
+  to revisit (current decoupling is intentional; the MRK payoff). *(operator, B9)*
+
 **Verified live (positives):**
+- **Registrable-domain widen (F4 DD5) — VERIFIED LIVE, FD-driven.** Used `lvh.me`/`*.lvh.me` (public
+  wildcard DNS → 127.0.0.1, so no `/etc/hosts` needed; PSL treats them as sharing registrable domain
+  `lvh.me`). Operator created a `http://lvh.me:8099` item with "Match any subdomain" ON. FD-driven matrix:
+  (1) **widen** — `vaultFill` the lvh.me item on `accounts.lvh.me:8099` → `filled:true`, fields got
+  `bob@example.com` + 20-char pw (widen fired: same registrable domain + same scheme); (2) **exact must
+  not widen** — the exact-mode `127.0.0.1:8099` item on `accounts.lvh.me` → refused `origin-mismatch`;
+  (3) **IP fail-closed** — the lvh.me item on the raw-IP origin `127.0.0.1:8099` → refused (IP literal →
+  `registrableDomainSafe`=null → fall back to exact → mismatch). The multi-tenant negative (github.io
+  tenants distinct) is unit-covered (`psl.test.js`) — can't wildcard a public-suffix domain to localhost
+  without `/etc/hosts` (sudo unavailable); scheme-mismatch guard also unit-covered. *(FD-driven, 2026-07-22)*
+- **A4 TOTP (F1) — VERIFIED LIVE, FD-driven + cross-checked.** Operator enrolled the base32 secret
+  `JBSWY3DPEHPK3PXP` on the Work item; `hasTotp` flipped true (the secret never appears in `vaultList`).
+  `vaultTotp`→ `410791`; goldfinch's own `totp()` computed against the same secret at the same instant =
+  `410791` (prev/next windows `842456`/`174345` differ → genuine RFC-6238 match, not coincidence). The
+  TOTP secret never crosses the wire — only the 6-digit code. *(FD-driven, 2026-07-22)*
+- **A3 automation fill (F1) — VERIFIED LIVE, FD-driven via admin MCP.** With admin transport (dev-mint
+  gate) + the vault admin private key, the FD drove the full canonical surface: `vaultUnlock`(admin key)→
+  unlocked global+work; `vaultList`→ metadata only (title/origin/username/hasTotp), **no password over the
+  wire**; `vaultFill`(work item, matching origin `http://127.0.0.1:8099`)→ `{filled:true, id, origin}` —
+  no password returned; the guest form received `alice@example.com` + a 20-char password, and a global/DOM
+  leak-scan found **no** vault/credential state (only the standard `credentialless` Chromium global);
+  `vaultFill` on `example.com`→ **refused** `{filled:false, reason:origin-mismatch}`. Fill-only +
+  origin-bound + no-wire-leak all hold live. The audit-origin fix (F4) confirmed: the resolved origin is
+  returned on the fill result (non-secret). *(FD-driven, 2026-07-22)*
+- **B9 rotation — VERIFIED LIVE (+ code/test).** Operator's clean 3-step confirmation all pass: (1) rotate
+  recovery → lock → recover-with-new-key works; (2) relock → same recovery key works; (3) change master →
+  lock → same recovery key works. The step-up + new-key displays render correctly post modal-fix (dark
+  card, light text, gold Copy+icon, dismiss-locked). Matches the crypto: `changeMasterPassword` rewrites
+  ONLY `mrk.master` (re-wraps the same MRK); recovery + admin envelopes and ALL `.gfvault` files + access
+  keys untouched (MRK never re-keyed); recovery key survives a master change; a rotated recovery key
+  invalidates the prior one — all asserted in `vault-key-rotation.test.js`. **B9a/B9b/B9c PASS.**
+- **B10/admin rotation — PASS (operator)** — provision/rotate admin key: step-up → new admin private key
+  one-time display renders correctly (themed, dismiss-locked). Segment B (rotation surface) complete.
 - **A2/lock lifecycle (partial)** — lock-on-quit was exercised by the clean-out SIGTERM (keys zeroized on
-  quit); the unlock sheet works (setup + the initial "Vault locked" state). **Explicit Lock-now
-  UNVERIFIABLE — the affordance is missing (I6);** idle-timeout not actively waited out this run.
+  quit); the unlock sheet works (setup + the initial "Vault locked" state). Explicit Lock-now wired in
+  hat-fixes-01 (I6) — live-confirmed via the B9c recover flow (Lock now → recover); idle-timeout not waited out.
 - **A1/setup + trust-boundary** — first-run setup runs on a **chrome sheet**; the master-password ENTRY
   sheet is backdrop-dismissible (fine — re-enterable, not a one-time secret), while the **recovery-key and
   admin-key one-time displays are DISMISS-LOCKED** (backdrop click does NOT dismiss — you must
