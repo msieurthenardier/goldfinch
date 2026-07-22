@@ -220,7 +220,32 @@ guest-DOM absence of the native menu is asserted in the `vault-human-fill-bounda
   textContent-only, the `role=menuitem`/`data-pick-index` selection → fill flow, the `widened` badge.
   2671 tests. Needs an app restart to view (menu-overlay renderer). *(operator finding, 2026-07-22)*
 
+- **I12 (Secrets nav off-by-one — BUG, fixed live) — clicking a left-nav vault highlighted the entry
+  ABOVE it.** Root cause in `vault-nav-controller.js` `observe()`: the scroll-spy `IntersectionObserver`
+  used `rootMargin: '0px 0px -50% 0px'` (active band = top half of viewport, top inset 0), but
+  `.vault-section` carries `scroll-margin-top: 24px` (vault.css). An anchor jump lands the target's top
+  ~24px down, leaving the PREVIOUS section's bottom sliver inside the top band; the topmost-visible loop
+  runs in DOM order, so that earlier sliver won the `aria-current` — the nav highlighted the vault above
+  the clicked one. Fixed: top inset `-48px` (exceeds the 24px scroll-margin) so the previous section's
+  post-jump sliver falls outside the band. Renderer-only (tab reload); 5/5 nav-controller unit tests pass.
+  *(operator finding + FD-fixed, 2026-07-22)*
+
+- **I13 (modal/sheet action buttons — styling, ACCEPTED/banked, not fixed) — chrome-sheet buttons are
+  mis-styled.** The centered dark modal dialogs (step-up master-password confirm, recovery/admin one-time
+  displays, etc.) have action buttons that don't match the settings-page "dark button" treatment — wrong
+  size and missing the gold/accent outline on hover (operator ref screenshot: the "Mint access key" /
+  "Cancel" step-up dialog). Operator's call: this is part of **mixed-up styling that needs a holistic
+  pass**, not a one-off — **accepted for now**, deferred to a dedicated styling-cleanup leg/flight that
+  reconciles the sheet button styles against the canonical settings-page dark-button rule globally.
+  *(operator finding + deferral, 2026-07-22)*
+
 **Verified live (positives):**
+- **F2 human-fill flow — VERIFIED LIVE (operator-driven, FD-observed).** With the I10/I11 redesigns:
+  focus a login field → the SVG padlock appears in that field → click it → the redesigned chrome-owned
+  **picker** (icon-left, title/username, jar-colored chicklet top-right, "Manage passwords" footer) → pick
+  the credential → the form fills. Operator: "looks great and works as expected." The picker is chrome-
+  owned (never page DOM), metadata-only; the fill routes through the chrome flow. *(operator-confirmed,
+  2026-07-22)*
 - **Registrable-domain widen (F4 DD5) — VERIFIED LIVE, FD-driven.** Used `lvh.me`/`*.lvh.me` (public
   wildcard DNS → 127.0.0.1, so no `/etc/hosts` needed; PSL treats them as sharing registrable domain
   `lvh.me`). Operator created a `http://lvh.me:8099` item with "Match any subdomain" ON. FD-driven matrix:
@@ -323,3 +348,64 @@ clean, `npm run lint` clean. Seam/channel pins untouched (no new evaluate-seam e
 
 Dev instance must be **restarted** (`npm run dev:automation`) to pick up the new page — the internal page is
 served from disk but the running instance has the old bundle cached.
+
+## Developer note — I14 Import / Export unified into page modals (2026-07-22)
+
+**I14 (Secrets page — Import/Export consolidation, IMPLEMENTED, PENDING operator live review).** Replaced the
+two separate Settings controls (the standalone "Import a vault bundle" subsection + the Export block under
+Master-key management) with a **single "Import / Export" Settings subsection** holding **exactly two buttons**
+("Import…", "Export…"). Each opens a **page-level modal** that selects the vault (destination for import /
+source for export) **and** the file location, ending in a **Cancel / Submit** combo.
+
+**Security boundary preserved (DD2/DD5):** NO master-equivalent secret ever enters a page modal or the page
+DOM. For **import**, the modal only selects destination + bundle file, then hands off to the **unchanged**
+chrome-owned `vault-import-unlock` sheet (via the unchanged `vault-request-import` forward) where the source
+master password / recovery key is entered and the held bundle is consumed. **Export** stays ciphertext-only
+and fully main-side — the bundle never transits to the page. All DOM text via `textContent`; the modal is
+built inline in `vault.js` (no served-module extraction — vault.js is well under the threshold).
+
+**Key mechanics / mitigations:**
+- **exportVault dual-mode (L3):** the page modal picks a save location up front via a new `pickSavePath`
+  (main-side `showSaveDialog` ONLY — no write, no held state), then binds source→path at submit via
+  `exportVault(target, savePath)` (write-direct, no dialog). The **jars delete-first offer keeps calling
+  `exportVault(target)` with no path** (main runs the dialog) — the no-path branch is retained for that
+  consumer. **The STORE's `exportVault` stays single-arg** — the pre-chosen path lives in the main-side save
+  delegate, never threaded into the store (the `store.exportVault.length === 1` pin holds).
+- **Import split:** the old atomic `internal-vault-request-import` (pick+forward in one call) is split into
+  `pickImportFile` (dialog+read+HOLD, returns `{ok,path}`, NO forward), `beginImportUnlock` (the bare
+  `vault-request-import` forward, unconditional — needs only `chromeForTab`), and `clearPendingImport` (drops
+  the held `_pendingVaultImport`).
+- **H1 (held-state binding):** the held import destination is bound at pick time; changing the destination
+  `<select>` after a successful pick **invalidates** it (clears the path, drops the held bundle via
+  `clearPendingImport`, disables Continue, forces a re-pick) so the held destination can never drift from what
+  the modal shows.
+- **L1:** modal Cancel / Esc / backdrop after a pick calls `clearPendingImport` so an abandoned import never
+  lingers.
+- **L2:** export `{ locked }` (idle-lock race) closes the modal, refreshes to the locked view, and surfaces a
+  brief page notice; a write error shows on the modal status line — neither is silently swallowed.
+- **M5 (modal teardown):** the modal lives on `document.body`, so it survives a `#vault-root` re-render;
+  `render()` now closes any open Import/Export modal (module-scoped ref) so an idle auto-lock mid-modal can't
+  orphan a stale unlocked-context modal.
+- Modal infra is a reusable inline `openModal({ title, body, submitLabel, onSubmit, submitEnabled, onCancel })`
+  mirroring `jars-confirm-modal.js`: `role="dialog"`/`aria-modal`/`aria-labelledby`, Tab focus-trap, Escape +
+  backdrop dismiss, focus-return to the invoking button. Own `.vault-modal-*` CSS (vault serves only
+  vault.css — cannot inherit jars' `.jar-modal-*`).
+
+**Files touched:** `src/renderer/pages/vault.js` (modal infra + Import/Export subsection + both modals; export
+removed from master-key section; `buildImportSection` deleted), `src/renderer/pages/vault.css` (`.vault-modal-*`
++ `.vault-page-notice` + disabled-button styles), `src/main/main.js` (`vaultPickSavePath`; `vaultSaveBundleToFile`
+dual-mode; `vaultImportBeginFromFile` returns `path`; `clearPendingVaultImport`; wiring), `src/main/register-
+vault-ipc.js` (export accepts optional `savePath`; `internal-vault-pick-save-path`), `src/main/register-browser-
+ipc.js` (import split into pick / begin-unlock / clear), `src/preload/internal-preload.js` +
+`src/renderer/renderer-globals.d.ts` (bridge surface: `exportVault(target,savePath?)`, `pickSavePath`,
+`pickImportFile`, `beginImportUnlock`, `clearPendingImport`; `requestImport` removed),
+`src/renderer/renderer.js` (chrome import-trigger comment updated — the `vault-request-import` forward itself is
+unchanged). Tests: `test/unit/vault-request-triggers.test.js` (rewritten for the import split),
+`test/unit/register-vault-ipc.test.js` (export savePath branch + `pickSavePath`),
+`test/unit/register-browser-ipc.test.js` (channel-inventory + `internal-vault-begin-import-unlock`).
+
+Results: `npm test` **2676 pass / 0 fail** (all suites green; import-split + export-savePath + pickSavePath
+coverage added/rewritten), `npm run typecheck` clean,
+`npm run lint` clean. DD5 grep-verified: no master-equivalent secret on the page path (the modal handles only
+vault ids, file paths, and status strings). Dev instance must be **restarted** (main + preload changed) to
+verify live.
