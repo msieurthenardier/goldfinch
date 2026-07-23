@@ -15,6 +15,7 @@ const IDS = {
   lightboxZoomReset: 'lightbox-zoom-reset', togglePrivacy: 'toggle-privacy',
   toggleDevtools: 'toggle-devtools', privacyCount: 'privacy-count', privacyPanel: 'privacy-panel',
   privacyBody: 'privacy-body', privacyClose: 'privacy-close', privacyRefresh: 'privacy-refresh',
+  downloadsIndicator: 'downloads-indicator', downloadsIndicatorBadge: 'downloads-indicator-badge',
   player: 'player', playerAudio: 'player-audio', playerTitle: 'player-title',
   playerProgress: 'player-progress', playerSeek: 'player-seek', playerCur: 'player-cur',
   playerDur: 'player-dur', playerPlay: 'player-play', playerPrev: 'player-prev',

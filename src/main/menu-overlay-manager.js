@@ -56,7 +56,8 @@
 //     DD5 restore must run once). A provided token that mismatches the current
 //     menu is a STALE sheet report — dropped (the open-token discipline closing
 //     the same-menuType keyboard-re-open race). Emits channel 7, calls
-//     focusChrome() for 'escape'/'activated' only, runs restoreFindOverlay(reason).
+//     focusChrome() for 'escape'/'activated'/'input-empty' (the last covers an
+//     automatically emptied focused sheet), runs restoreFindOverlay(reason).
 //   - There is deliberately NO main→sheet close channel: the hidden sheet keeps
 //     its rendered menu DOM; the next menu-overlay:init rebuilds it, and the
 //     page's late dismissed{blur} is dropped by the stale-token check.
@@ -320,10 +321,14 @@ function createMenuOverlayManager({
     sendToChrome('menu-overlay-closed', { menuType: closed.menuType, reason, token: closed.token }, att ? att.win : null);
     // Reason-resolved refocus, main-side half: escape/activated move keyboard
     // focus back to the chrome view (webContents-level); chrome then focuses the
-    // trigger element on channel 7. Every other reason moves NO focus ('toggle'
+    // appropriate DOM target on channel 7. `input-empty` also restores chrome:
+    // downloads can auto-close a focused sheet after cancellation/expiry. Every
+    // other reason moves NO focus ('toggle'
     // — the physical click already OS-focused chrome; 'blur' — never steal focus
     // from the other app; tab lifecycle/teardown — the incoming guest keeps it).
-    if (reason === 'escape' || reason === 'activated') focusChrome(att ? att.win : null);
+    if (reason === 'escape' || reason === 'activated' || reason === 'input-empty') {
+      focusChrome(att ? att.win : null);
+    }
     restoreFindOverlay(reason);
   }
 

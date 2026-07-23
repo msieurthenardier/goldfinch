@@ -246,7 +246,7 @@ async function findSheetWcId(client) {
 // The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
 // first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
 // SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey'];
+const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey'];
 const SHEET_DISMISS_EXPR = `(() => {
   const ids = ${JSON.stringify(SHEET_NODE_IDS)};
   const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
@@ -397,6 +397,15 @@ async function main() {
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
 
+      // 5b) Downloads indicator button visible (M11 F1 Leg 3). The button is
+      // .hidden until a download is in-flight/recent; showDownloadsIndicatorForAudit()
+      // injects a synthetic completed entry (the forceShowForAudit seam, mirroring
+      // the devtools-button pin above) so axe can exercise the button's static a11y:
+      // accessible name + aria-haspopup="dialog" + aria-expanded="false".
+      await evaluate(client, wcId, 'showDownloadsIndicatorForAudit()');
+      await sleep(200);
+      allViolations.push(...(await runAxe(client, wcId, axeSource, 'downloads-button')));
+
       // 6-10) Menu-overlay SHEET states (M05 F8 cutover, DD6). Every popup menu
       // renders in the transparent sheet WebContentsView, so each state opens
       // from the CHROME (evaluate on the chrome's own top-level open paths —
@@ -449,13 +458,27 @@ async function main() {
         // DISMISS-DISABLED (SHEET_DISMISS_EXPR clicks its acknowledge); the master-password step-up
         // reuses vault-stepup (already covered above). Raises no chrome-side trigger — the audit hook
         // opens it directly.
-        { label: 'sheet:vault-adminkey-show', open: 'openVaultAdminKeyShowOverlayForAudit()' }
+        { label: 'sheet:vault-adminkey-show', open: 'openVaultAdminKeyShowOverlayForAudit()' },
+        // M11 Flight 1 Leg 3: the downloads popup. openDownloadsOverlayForAudit()
+        // force-shows a capped synthetic completed list then opens the role="dialog"
+        // popup (filename-open + folder buttons, a keyboard-scrollable overflow
+        // region, and the footer).
+        // role="dialog" content raises no region advisory (info-popup/input-dialog
+        // precedent), so no ACCEPTED entry is expected.
+        { label: 'sheet:downloads', open: 'openDownloadsOverlayForAudit()' }
       ];
       let sheetWcId = null;
       for (const state of SHEET_STATES) {
         await evaluate(client, wcId, state.open);
         await sleep(400);
         if (sheetWcId == null) sheetWcId = await findSheetWcId(client); // once — stable across states
+        // Force the capped downloads list into its short-window overflow state.
+        // The product's 900x600 minimum reaches this naturally; the audit rig's
+        // current window is taller and would otherwise leave all 25 rows unscrolled.
+        if (state.label === 'sheet:downloads') {
+          await evaluate(client, sheetWcId,
+            "document.getElementById('sheet-downloads').style.maxHeight = '320px'");
+        }
         allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
         const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
         if (dismissed !== 'escaped') {

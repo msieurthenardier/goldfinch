@@ -19,7 +19,7 @@ or download **v${version}** directly:
 
 | Platform | Installer |
 |----------|-----------|
-| **Windows** | [Goldfinch Setup ${version}.exe](${base}/Goldfinch.Setup.${version}.exe) |
+| **Windows** | [Goldfinch Setup ${version}.exe](${base}/Goldfinch-Setup-${version}.exe) |
 | **macOS** (Apple Silicon) | [Goldfinch-${version}-arm64.dmg](${base}/Goldfinch-${version}-arm64.dmg) · [.zip](${base}/Goldfinch-${version}-arm64-mac.zip) |
 | **Linux** | [Goldfinch-${version}.AppImage](${base}/Goldfinch-${version}.AppImage) · [.deb](${base}/goldfinch_${version}_amd64.deb) |
 

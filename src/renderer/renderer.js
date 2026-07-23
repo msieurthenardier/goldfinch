@@ -23,6 +23,7 @@ import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's re
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
+import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
 import { createMediaController } from './chrome/media-controller.js';
 import { createNavigationController } from './chrome/navigation-controller.js';
@@ -217,11 +218,16 @@ const KEBAB_ACTIONS = {
   exit: kebabActionExit
 };
 
-/* ---- kebab (and every menu below) over the menu-overlay sheet (DD4 protocol) ---- */
+let overlayMenuClient;
+const downloadsController = createDownloadsController({
+  els, goldfinch: window.goldfinch, openDownloadsPage: openDownloads, rightSheetAnchor,
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args),
+  closeOverlayMenu: (reason) => overlayMenuClient.close(reason),
+  triggerOverlayMenu: (menuType, open) => overlayMenuClient.trigger(menuType, open)
+});
+const { showDownloadsIndicatorForAudit, openDownloadsOverlayForAudit } = downloadsController;
 
-// Chrome-minted monotonic open-token, carried in channel 1 and echoed in
-// channels 4/5/7 — the stale-close discipline (round-2 design lock). Shared
-// across menu types (all five surfaces mint from the same counter).
+/* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
 const overlayMenus = {
   kebab: fixedTriggerMenu(() => els.kebab),
   container: fixedTriggerMenu(() => els.newTabMenu),
@@ -341,13 +347,16 @@ const overlayMenus = {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => null,
     refocus() {}
-  }
+  },
+  downloads: downloadsController.overlayState
 };
-const overlayMenuClient = createOverlayMenus({
+overlayMenuClient = createOverlayMenus({
   bridge: window.goldfinch,
   states: overlayMenus,
   now: () => performance.now(),
-  onActivated: dispatchOverlayActivation,
+  onActivated: (payload) => {
+    if (!downloadsController.handleActivation(payload)) dispatchOverlayActivation(payload);
+  },
   onClosed: handleOverlayClosed
 });
 
@@ -1581,18 +1590,25 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 23-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 29-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 23 is
+// do not grow it without an FD ruling — an evaluate caller outside these 29 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
-// the flight's Checkpoints. M12 F3 Leg 4: added openVaultSetOverlayForAudit +
-// openVaultRecoveryShowOverlayForAudit for the sheet:vault-set / vault-recovery-show
-// a11y states per the leg's DD9 SHEET_STATES deliverable. M12 F3 Leg 5: added
-// openVaultStepupOverlayForAudit + openVaultAccessKeyShowOverlayForAudit for the
-// sheet:vault-stepup / vault-accesskey-show a11y states.)
+// the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
+// showDownloadsIndicatorForAudit + openDownloadsOverlayForAudit for the new
+// downloads-button + sheet:downloads a11y states. M12 F3 Leg 4: added
+// openVaultSetOverlayForAudit + openVaultRecoveryShowOverlayForAudit for the
+// sheet:vault-set / vault-recovery-show a11y states per the leg's DD9 SHEET_STATES
+// deliverable. M12 F3 Leg 5: added openVaultStepupOverlayForAudit +
+// openVaultAccessKeyShowOverlayForAudit for the sheet:vault-stepup /
+// vault-accesskey-show a11y states. M12 F4 Legs 1-3: added
+// openVaultImportUnlockOverlayForAudit, openVaultChangeMasterOverlayForAudit,
+// openVaultRecoverOverlayForAudit + openVaultAdminKeyShowOverlayForAudit for the
+// sheet:vault-import-unlock / vault-change-master / vault-recover / vault-adminkey-show
+// a11y states.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1616,6 +1632,8 @@ Object.assign(/** @type {any} */ (globalThis), {
   openNewContainerOverlay,
   openPageContextMenuForAudit,
   openTabContextMenuForAudit, // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
+  showDownloadsIndicatorForAudit, // M11 F1 Leg 3 — chrome state 'downloads-button' (FD-ruled addition)
+  openDownloadsOverlayForAudit, // M11 F1 Leg 3 — SHEET_STATES 'sheet:downloads' (FD-ruled addition)
   openVaultSetOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-set' (DD9 addition)
   openVaultRecoveryShowOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-recovery-show' (DD9 addition)
   openVaultStepupOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-stepup' (DD9 addition)

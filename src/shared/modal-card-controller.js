@@ -46,6 +46,14 @@ export function createSheetReport(bridge) {
     silence() {
       token = null;
     },
+    /** Silently adopt a superseding token WITHOUT resetting the once-guard or flavor —
+     * the in-place downloads repaint path (M11 F1 Leg 4): the sheet stays open and
+     * nothing has activated/dismissed it, so `sent` / `lastStimulus` carry forward
+     * (unlike `begin`, which resets them). Keeps a later dismissal reporting against
+     * the CURRENT token rather than the stale one it superseded. */
+    adoptToken(/** @type {number} */ t) {
+      token = t;
+    },
     get token() {
       return token;
     },

@@ -39,6 +39,21 @@ test('createSheetReport: begin adopts the token and resets the once-guard + flav
   assert.equal(report.lastStimulus, 'blur');
 });
 
+test('createSheetReport: adoptToken swaps the token WITHOUT resetting the once-guard or flavor', () => {
+  const bridge = makeBridge();
+  const report = createSheetReport(bridge);
+  report.begin(7);
+  report.lastStimulus = 'escape';
+  // The in-place downloads-repaint path: a superseding token arrives while the sheet
+  // stays open — unlike begin, sent + lastStimulus carry forward.
+  report.adoptToken(11);
+  assert.equal(report.token, 11);
+  assert.equal(report.lastStimulus, 'escape', 'flavor is preserved (not reset to blur)');
+  // A subsequent dismissal reports against the ADOPTED token, not the superseded one.
+  report.reportDismissed();
+  assert.deepEqual(bridge.dismissed, [{ reason: 'escape', token: 11 }]);
+});
+
 test('createSheetReport: exactly one of activated/dismissed per token — activation wins', () => {
   const bridge = makeBridge();
   const report = createSheetReport(bridge);

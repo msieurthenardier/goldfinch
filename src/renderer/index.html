@@ -27,6 +27,22 @@
         </button>
       </div>
       <div id="tabstrip-drag"></div>
+      <!-- Downloads indicator (M11 F1 Leg 2, DD1/DD5). App-scoped top-bar button, NOT
+           a tab-scoped toolbar pin: it lives in #tabstrip (like #window-controls), is
+           never touched by applyToolbarPins/toolbarPins, and stays clickable inside the
+           strip's drag region via -webkit-app-region:no-drag. Hidden until a download is
+           in-flight or recently completed; the downloads-controller self-manages
+           .hidden / .downloads-active / .downloads-recent and the badge from the pure
+           downloads-indicator-model (mirrors #automation-indicator). Icon: Lucide
+           download (ISC). -->
+      <button id="downloads-indicator" class="icon-btn hidden" type="button"
+              title="Downloads" aria-label="Downloads" aria-haspopup="dialog" aria-expanded="false">
+        <svg class="tb-glyph" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+        </svg>
+        <span id="downloads-indicator-badge" class="tb-badge hidden" aria-hidden="true"></span>
+      </button>
       <div id="window-controls">
         <button id="win-min" class="icon-btn win-ctrl" title="Minimize" aria-label="Minimize"></button>
         <button
