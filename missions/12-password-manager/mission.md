@@ -1,6 +1,9 @@
 # Mission: Built-in Password Manager
 
-**Status**: active
+**Status**: completed
+
+> **Completed 2026-07-22.** All 5 flights landed; all 14 success criteria met (capability-framed).
+> Full assessment, residuals, and banked follow-ups in [mission-debrief.md](mission-debrief.md).
 
 > Source feature request: [goldfinch#100](https://github.com/msieurthenardier/goldfinch/issues/100).
 > Operator pre-authorized autonomous execution at mission design (2026-07-20): the Flight
@@ -105,39 +108,39 @@ Criteria are capability-framed and binary. Several are only observable against t
 real running app (fill into live pages, chrome-owned prompts, MCP round-trips);
 those are marked **[behavior-test]** and the owning flight plans the spec.
 
-- [ ] **First-run setup** establishes the manager: the operator chooses a master
+- [x] **First-run setup** establishes the manager: the operator chooses a master
       password and is shown a printable recovery key exactly once; each vault key is
       independently unlockable by *either* secret — verified by recovering a vault
       with the recovery key after a forgotten master password forces a new one.
-- [ ] **Vaults are encrypted at rest and reveal no plaintext secret** anywhere on
+- [x] **Vaults are encrypted at rest and reveal no plaintext secret** anywhere on
       disk (including logs), remain self-contained per file, and add **zero new
       runtime dependencies**. A wrong key fails authenticated decryption rather than
       returning garbage.
-- [ ] **Compartmentalization is structural:** unlocking in jar A leaves jar B's
+- [x] **Compartmentalization is structural:** unlocking in jar A leaves jar B's
       vault locked; the fill surface for a tab shows only that jar's vault plus the
       global vault, each badged — never a sibling jar's credentials. Burner and
       internal partitions have no vaults at all.
-- [ ] **Fill is gesture-gated and origin-bound:** credentials fill only after an
+- [x] **Fill is gesture-gated and origin-bound:** credentials fill only after an
       explicit user action, only for an origin-matched login (exact origin by
       default; registrable-domain matching as a per-credential opt-in), top-frame
       only — never automatically on load and never into a cross-origin iframe. The
       registrable-domain opt-in uses hardened matching, not the tracker-classification
       suffix set, so it never shares a credential across an unrelated ccTLD sibling.
       **[behavior-test]**
-- [ ] **No vault secret is entered into or readable from web content** except the
+- [x] **No vault secret is entered into or readable from web content** except the
       single credential being filled into its owning origin: the master password,
       recovery key, and picker all render in chrome-owned UI; the injected lock icon
       is decorative and gains a hostile page nothing if faked or hidden.
       **[behavior-test]**
-- [ ] **Locking is comprehensive:** idle timeout, an explicit "Lock now", app quit,
+- [x] **Locking is comprehensive:** idle timeout, an explicit "Lock now", app quit,
       and jar wipe all re-lock; unlocked keys live only in main-process memory and
       are never persisted. Jar **wipe spares** the vault; jar **delete removes** it
       after offering an export first.
-- [ ] **TOTP works end-to-end:** a login enrolls a TOTP secret by pasting an
+- [x] **TOTP works end-to-end:** a login enrolls a TOTP secret by pasting an
       `otpauth://` URI or base32 secret; the manager shows the live rotating code
       with a countdown and offers it for fill or copy after a login fill; generated
       codes match a reference implementation.
-- [ ] **Capture offers to save:** submitting a login form raises a chrome-rendered
+- [x] **Capture offers to save:** submitting a login form raises a chrome-rendered
       save-or-update prompt (update when origin+username already exists), defaulting
       to the active jar's vault with the global vault selectable, only when the
       manager is set up. **[behavior-test]**
@@ -148,12 +151,12 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       `hat-import-destination-safety`): a jar vault currently flattens to Global on fresh adopt and an
       existing-profile import gives no wrong-vault warning — a fidelity/safety enhancement, not a
       criterion failure.*
-- [ ] **Durable-grant operations demand step-up re-auth:** minting any access key and
+- [x] **Durable-grant operations demand step-up re-auth:** minting any access key and
       rotating the recovery key each require a fresh master-password confirmation
       even while the vault is unlocked, and a wrong password refuses the operation;
       ordinary unlock-window operations (fill, reveal/copy, TOTP display, encrypted
       export) are not re-prompted.
-- [ ] **Access-key delegation is cryptographic, not policy:** an access key mints
+- [x] **Access-key delegation is cryptographic, not policy:** an access key mints
       only while its target vault is unlocked; a per-jar key unlocks its own jar's
       vault and **cannot** unlock the global vault or a sibling jar's — verified as
       an *absent-envelope* property, not a runtime check (the test inspects the vault
@@ -161,7 +164,7 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       refused" from the wire — the two are otherwise indistinguishable); the admin key
       unlocks every vault including a jar vault created *after* the admin key was
       minted; revocation (envelope deletion) takes effect immediately. **[behavior-test]**
-- [ ] **The MCP wire stays fill-only:** no tool at any tier returns a stored password
+- [x] **The MCP wire stays fill-only:** no tool at any tier returns a stored password
       over the channel; `vaultList` returns metadata only; `vaultTotp` returns only
       the current code; every unlock, fill, and TOTP issuance lands in the audit log
       and reflects on the automation-activity indicator. Automation unlock state is
@@ -169,7 +172,7 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       client may hold no long-lived stream to signal an ungraceful drop — the idle
       auto-lock timer is the belt-and-suspenders guarantee that an abandoned session's
       keys do not linger. **[behavior-test]**
-- [ ] **`goldfinch://vault` is a first-class trusted internal page:** it follows the
+- [x] **`goldfinch://vault` is a first-class trusted internal page:** it follows the
       full four-gate checklist with `registerInternalHandler`-wrapped IPC and strict
       CSP. **a11y coverage (amended 2026-07-21 after the F3 design review):** internal
       pages cannot be `npm run a11y`-audited even by an admin key (the MCP eval tools carry
@@ -181,7 +184,7 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       recovery-key rotation, master-password change, the auto-lock duration setting,
       per-vault access-key management (mint/list/revoke), and a password generator for new
       logins.
-- [ ] **Docs reflect the feature:** the architecture section (`CLAUDE.md`) and a
+- [x] **Docs reflect the feature:** the architecture section (`CLAUDE.md`) and a
       `docs/` page covering the vault file format and threat model are updated,
       including the user-facing property that losing both the master password and the
       recovery key makes the vault cryptographically unrecoverable by design.
@@ -280,7 +283,8 @@ Resolved at the owning flight, not blocking mission approval:
 
 ## Known Issues
 
-- [ ] **MRK shifts single-file portability to an export bundle** — discovered in Flight 1
+- [x] **MRK shifts single-file portability to an export bundle** *(resolved F4 — export bundles the
+      `manager.json` MRK envelope set; verified live F5)* — discovered in Flight 1
       (Leg 2 `vault-store`), affects Flight 3 (export/import). The adopted Manager Root Key
       composition (one MRK wrapped under master/recovery/admin in `manager.json`; each vault
       key wrapped under the MRK — the faithful realization of the mission's *manager-wide*
@@ -290,7 +294,8 @@ Resolved at the owning flight, not blocking mission approval:
       exported vault key under fresh master/recovery envelopes at export time**, so the
       "imports on a fresh profile and unlocks with the master password or recovery key"
       criterion still holds. No network egress; still file-based. See Flight 1 log Decisions.
-- [ ] **Audit trail records the vault *event* but not the *origin*** — discovered in Flight 1
+- [x] **Audit trail records the vault *event* but not the *origin*** *(resolved F4 — result-aware
+      detail hook records the resolved fill origin + unlock count, never a secret)* — discovered in Flight 1
       (debrief), affects the MCP-wire criterion + F2/F3. `deriveAuditDetail` is args-only, but the
       resolved fill origin lives in the tool result, so `vaultFill`/`vaultTotp` audit `item=<id>` only
       and `vaultUnlock`/`vaultList` derive a null origin. Every unlock/fill/TOTP *event* is audited
