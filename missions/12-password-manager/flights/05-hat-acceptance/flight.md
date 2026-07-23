@@ -1,7 +1,13 @@
 # Flight: HAT + Alignment — End-to-End Acceptance
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Built-in Password Manager](../../mission.md)
+
+> **Reopened then closed 2026-07-22**: after the debrief the operator added one more leg —
+> `hat-fresh-profile-import` — to make the marquee file-based portability criterion (`mission.md:144`, import
+> on a FRESH profile) reachable and verify it live. It PASSED (fresh-profile adopt → unlock by master AND
+> recovery), closing the criterion. A destination-safety gap found at the gate (a jar vault flattens to
+> Global; no wrong-vault warning) was banked as `hat-import-destination-safety` (I20). Flight completed.
 
 ## Contributing to Criteria
 

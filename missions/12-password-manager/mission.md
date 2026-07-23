@@ -141,9 +141,13 @@ those are marked **[behavior-test]** and the owning flight plans the spec.
       save-or-update prompt (update when origin+username already exists), defaulting
       to the active jar's vault with the global vault selectable, only when the
       manager is set up. **[behavior-test]**
-- [ ] **Portability is file-based:** an exported vault imports on a fresh profile and
+- [x] **Portability is file-based:** an exported vault imports on a fresh profile and
       unlocks with the master password and, independently, with the recovery key —
-      with no network egress at any point.
+      with no network egress at any point. **VERIFIED LIVE (F5 `hat-fresh-profile-import`,
+      2026-07-22)** — fresh-profile adopt → unlock by master AND recovery. *Follow-up (banked,
+      `hat-import-destination-safety`): a jar vault currently flattens to Global on fresh adopt and an
+      existing-profile import gives no wrong-vault warning — a fidelity/safety enhancement, not a
+      criterion failure.*
 - [ ] **Durable-grant operations demand step-up re-auth:** minting any access key and
       rotating the recovery key each require a fresh master-password confirmation
       even while the vault is unlocked, and a wrong password refuses the operation;

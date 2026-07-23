@@ -295,6 +295,16 @@ main {
   outline-offset: 2px;
 }
 
+/* ── not-set-up entry points (M12 F5 HAT, hat-fresh-profile-import) ──
+   "Set up the password manager" (primary) + "Import a vault bundle" (secondary), side by side. */
+.vault-setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
 /* ── Inline stub/marker notice (setup + unlock affordances are stubbed in leg 1) ── */
 .vault-stub-note {
   margin-top: 12px;

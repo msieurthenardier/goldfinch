@@ -625,3 +625,89 @@ three tests that pinned the old "notes on EVERY type" taxonomy (`vault-item-sche
 `body`). Renderer sees the fix on a tab reload (editor-model); the schema change is main-side (inert until
 restart, harmless — the editor no longer sends the field). `npm test` **2689 / 0**, typecheck + lint clean.
 **Operator-found + FD-fixed.** *(operator, 2026-07-22)*
+
+## Flight Director Notes — reopened for hat-fresh-profile-import (2026-07-22)
+
+**Reopened the flight (`landed` → `in-flight`).** The F5 debrief confirmed the mission's file-based
+portability criterion (`mission.md:144` — import on a FRESH profile, unlock by source master AND recovery)
+is unverified: the fresh-adopt store path (`vault-store.js:823-841`) is correct + unit-tested but
+UI-unreachable (Import renders only in the unlocked Settings view; `buildNotSetUp` offers only "Set up").
+The operator chose to add one more leg — **`hat-fresh-profile-import`** — to make it reachable and verify
+the round-trip live, rather than carry it as a mission residual.
+
+**Risk-tier: MEDIUM (FD call).** The leg is UI-only — a not-set-up "Import a vault bundle" entry + a
+destination-less Import modal variant. The security-sensitive surface it exposes (the fresh-adopt lifecycle:
+adopting a foreign manager on a not-set-up profile) is ALREADY implemented, design-reviewed, and unit-tested
+in F4; this leg adds no store/crypto/IPC change and reuses the fully-reviewed import flow + the chrome
+`vault-import-unlock` sheet unchanged. So: no separate per-leg design-review spawn — implement directly,
+gate on the FD diff-review + the operator's live fresh-profile round-trip (the marquee-criterion check).
+DD2/DD5 unchanged (source secret only on the chrome sheet; page modal carries a file path + status only).
+
+## I19 — hat-fresh-profile-import: not-set-up "Import a vault bundle" entry + fresh-mode modal (IMPLEMENTED, uncommitted)
+
+**Leg `hat-fresh-profile-import` implemented — renderer-only, UNCOMMITTED on flight/05, PENDING the operator
+live fresh-profile round-trip.** Made the marquee fresh-adopt path (`vault-store.js:823-841`) reachable from
+the UI, closing the last entry-point gap on `mission.md:144`. NO store / crypto / IPC change — reuses
+`pickImportFile` / `beginImportUnlock` / `clearPendingImport` and the chrome `vault-import-unlock` sheet
+unchanged (the sheet already offers master-password OR recovery-key, covering both criterion variants).
+
+- **Not-set-up entry** — `buildNotSetUp` now renders a `.vault-setup-actions` row with **"Set up the password
+  manager"** (PRIMARY `.vault-btn primary`, unchanged wiring) + a SECONDARY **"Import a vault bundle"**
+  (`.vault-btn`) → `openImportModal([], { fresh: true })`.
+- **Fresh-mode modal via a `{ fresh }` param on `openImportModal`** (chosen over a sibling function so the
+  shared modal shell + file-uploader row + held-state/dismiss/`clearPendingImport` logic stays single-sourced,
+  per the leg's guidance). Fresh mode OMITS the destination-vault select, the `hasVault` probe, AND the Replace
+  checkbox (a fresh profile has no destination and the fresh branch never collides); adds a restore lede
+  ("Restore a vault exported from another device…"); keeps the read-only file-uploader row + dialog-bound
+  `pickImportFile`; threads the fixed **`GLOBAL_VAULT_ID` ('global', a local literal — not an import, to keep
+  the main-only sentinel off this page-served module)** into the pick (the fresh branch discards it, but
+  `vaultImportBeginFromFile`'s guard needs a non-empty string); Continue → `beginImportUnlock(false)` (overwrite
+  always false — fresh never collides). Post-adopt re-render is automatic via the existing `onVaultLockState` →
+  `refresh` path (no new page wiring).
+- **Signature deviation from the leg's literal call** — the leg wrote `openImportModal({ fresh: true })`; I kept
+  `vaults` as the first positional arg and added a second `opts` object (`openImportModal(vaults, opts)`), so the
+  existing set-up caller `openImportModal(vaults)` in `buildImportExportSection` is **byte-for-byte unchanged**
+  (`fresh` defaults falsy = today's behavior exactly, zero regression). The not-set-up call passes
+  `openImportModal([], { fresh: true })`.
+- **Tests** — NONE added: `vault.js` (the page controller) is DD9 — never imported by any unit test, and the
+  fresh-mode branch is reachable only through DOM code with no pure page-model/helper seam (mirrors the existing
+  set-up import modal, which is also DOM-only). Per the leg, the regression net is the **live HAT fresh-profile
+  round-trip**; the store fresh-adopt path is already covered by `test/unit/vault-export-import.test.js` "FRESH
+  profile" tests — not duplicated. No existing test needed force-editing.
+
+**Security invariants held (DD2/DD5):** no master-equivalent secret enters the page modal or DOM — the source
+master password / recovery key are entered only on the chrome-owned sheet; the fresh modal carries a file path +
+status strings only, `textContent`-only, no `innerHTML`. Dismiss-after-pick still calls `clearPendingImport`.
+
+**Files touched:** `src/renderer/pages/vault.js` (`GLOBAL_VAULT_ID` const; `buildNotSetUp` import entry +
+`.vault-setup-actions` row; `openImportModal` `{ fresh }` param branching the select/probe/checkbox + restore
+lede + `GLOBAL_VAULT_ID` pick target + `beginImportUnlock(false)`), `src/renderer/pages/vault.css`
+(`.vault-setup-actions` flex row). Renderer-only — a **tab reload** suffices to view; the FD drives the live
+fresh-profile round-trip (a second `userDataPath` + an exported bundle). Do NOT restart the app.
+
+Results: `npm test` **2689 pass / 0 fail** (unchanged baseline — no new unit seam), `npm run typecheck` clean,
+`npm run lint` clean. Uncommitted for the Flight Director.
+
+## I19 — VERIFIED LIVE + the marquee criterion CLOSED (2026-07-22)
+
+**Operator drove the fresh-profile round-trip and it PASSED.** FD moved the dev profile aside (reversible
+backup `~/.config/goldfinch-dev.bak-fresh-<ts>`) and relaunched a genuinely NOT-SET-UP profile (no
+`manager.json`). From the not-set-up Secrets page: **"Import a vault bundle"** appeared → the destination-less
+modal (restore lede, no select, no Replace checkbox) → pick the bundle exported from the primary profile →
+enter the SOURCE **master password** on the chrome sheet → **adopted + landed unlocked with the items**. Then
+Lock → unlock with the SOURCE **recovery key** → works. **This closes `mission.md:144` (file-based
+portability: an exported vault imports on a fresh profile and unlocks by master AND, independently, by
+recovery).** *(operator-verified live, 2026-07-22 — "pass".)*
+
+## I20 — Import destination safety gap (BANKED, operator-deferred at F5 close)
+
+Operator caught a real gap at the gate: **the import does NOT match on vault name.** A **jar** vault exported
+then imported on a fresh profile **flattens to Global** (the fresh-adopt branch hardcodes `GLOBAL_ID` and the
+bundle carries the vault + manager but NOT the jar's definition), and on an existing profile the destination
+is the operator-selected `<select>` value with **no match, no mismatch warning** — so a bundle can silently
+land in the wrong vault. The bundle DOES carry `sourceVaultId` but nothing surfaces or uses it. **Operator
+decision: BANK both and close F5** (the fresh-profile criterion itself passed — this is a fidelity/safety
+follow-up, not a criterion failure). Recorded as `legs/hat-import-destination-safety.md`: **Part A** — surface
+the bundle's source vault + default-match the destination + warn on mismatch + state the fresh→Global landing
+(scoped safety leg); **Part B** — extend the bundle format to restore a jar AS a jar (mission-level, its own
+flight). Carried to the mission action items. *(operator, 2026-07-22)*

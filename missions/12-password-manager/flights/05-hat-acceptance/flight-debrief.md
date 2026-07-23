@@ -59,8 +59,14 @@ Advanced the live-verification of the criteria F1–F4 could only approximate ag
 4. **Add a pre-land acceptance checkpoint to the HAT model** — "every mission criterion verified live or explicitly deferred with disposition" — so a marquee criterion cannot land unverified inside a build-heavy HAT.
 5. **Update `docs/vault.md`** for the new Secrets page + the `editorCleanups` teardown pattern; confirm the post-I16 `npm run a11y` is green (the sheet restyles touched many sheet kinds).
 
+## Post-Debrief Addendum (2026-07-22)
+
+After this debrief the operator reopened the flight for one more leg — **`hat-fresh-profile-import`** — rather than carry the marquee criterion as a residual. It landed and was **verified live**: on a genuinely fresh (not-set-up) profile, "Import a vault bundle" → adopt → unlock by the **source master password**, and independently by the **source recovery key**. **`mission.md:144` (file-based portability) is now verified.** At the gate the operator found a destination-safety gap — a **jar** vault flattens to **Global** on a fresh adopt, and an existing-profile import has no wrong-vault warning (the bundle carries `sourceVaultId` but nothing uses it). Both were **banked** as `hat-import-destination-safety` (Part A: surface source + match/warn; Part B: restore-jar-as-jar, a format-level change). The flight is now **completed**.
+
 ## Action Items
-- [ ] Implement `hat-fresh-profile-import` (not-set-up import entry + destination-less modal variant) — closes the marquee criterion. Owner: next planning conversation / `/routine-maintenance` scope.
+- [x] Implement `hat-fresh-profile-import` (not-set-up import entry + destination-less modal variant) — **DONE, criterion verified live 2026-07-22.**
+- [ ] `hat-import-destination-safety` Part A — surface the bundle's source vault in the import modal + default-match the destination + warn on mismatch + state the fresh→Global landing. Scoped safety leg.
+- [ ] `hat-import-destination-safety` Part B — extend the bundle format to restore a jar AS a jar (recreate the jar on fresh adopt). Mission-level; size as its own flight at `/mission-debrief`.
 - [ ] Provision the DD4 apparatus: fresh second `userDataPath`, extend `tests/behavior/fixtures/vault-login/build-fixtures.mjs` for multi-origin + matchMode, fold the `lvh.me` wildcard-DNS trick into fixtures.
 - [ ] Extract the page-modal system + item editor out of `vault.js` (mirror `jars-confirm-modal.js`); make the 5-path secret wipe unit-testable.
 - [ ] Author the four banked behavior-test specs and run the two never-run Witnessed suites.

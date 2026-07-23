@@ -115,6 +115,14 @@ function init() {
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
+  // The manager-wide global vault id (vault-store.js's GLOBAL_ID). Used ONLY as the fixed target
+  // threaded into pickImportFile from the fresh-profile import modal (M12 F5 HAT,
+  // hat-fresh-profile-import): the store's fresh-adopt branch ignores the target and writes GLOBAL_ID
+  // unconditionally, but vaultImportBeginFromFile's guard requires a non-empty string. The literal
+  // is used (not an import) to avoid threading the main-only sentinel module into this page-served
+  // module — the same rationale vault-page-model.js records for keeping GLOBAL_ID off the page side.
+  const GLOBAL_VAULT_ID = 'global';
+
   /**
    * Build an inline-SVG glyph (stroke=currentColor, aria-hidden) from an ICON_PATHS key.
    * @param {string} iconKey
@@ -525,19 +533,43 @@ function init() {
    *
    * L1: on dismiss (Cancel / Escape / backdrop) after a pick, drop the held bundle via
    * clearPendingImport so an abandoned import never lingers.
-   * @param {Array<{ vaultId: string, label: string }>} vaults
+   *
+   * FRESH-PROFILE MODE (M12 F5 HAT, hat-fresh-profile-import): when `opts.fresh` is true the
+   * modal is opened from the NOT-SET-UP page to reach the store's fresh-adopt branch
+   * (vault-store.js:823-841) — the marquee cross-machine restore. On a fresh profile there is NO
+   * destination vault (view.vaults is empty) and the fresh branch IGNORES the destination (writes
+   * GLOBAL_ID unconditionally — no collision, no overwrite). So fresh mode OMITS the destination
+   * select, the hasVault probe, AND the Replace checkbox; it shows a restore-oriented lede and
+   * threads the fixed GLOBAL_ID target into pickImportFile (vaultImportBeginFromFile's guard needs a
+   * non-empty string; the fresh branch discards it) with overwrite=false. The read stays
+   * dialog-bound and NO secret enters the page — Continue hands off to the SAME chrome-owned
+   * vault-import-unlock sheet, which already offers the master-password OR recovery-key choice
+   * (DD2/DD5). On a successful adopt the store leaves the profile set-up + UNLOCKED and broadcasts
+   * the lock-state, so the existing onVaultLockState → refresh path re-renders not-set-up → unlocked
+   * (no extra page wiring here). Default (opts omitted / fresh falsy) = today's set-up behavior.
+   * @param {Array<{ vaultId: string, label: string }>} vaults  Destination options (empty when fresh).
+   * @param {{ fresh?: boolean }} [opts]
    */
-  function openImportModal(vaults) {
+  function openImportModal(vaults, opts) {
+    const fresh = !!(opts && opts.fresh);
     let picked = false;
-    let collision = false;        // the current destination already holds a vault
-    let replaceConfirmed = false; // the "Replace the existing vault" checkbox state
+    let collision = false;        // the current destination already holds a vault (never in fresh mode)
+    let replaceConfirmed = false; // the "Replace the existing vault" checkbox state (unused in fresh mode)
     const body = el('div', 'vault-modal-form');
 
+    // Fresh mode: a restore lede in place of a destination select — there is no destination on a
+    // not-set-up profile and the fresh-adopt branch ignores the target entirely.
+    if (fresh) {
+      body.appendChild(el('p', 'vault-lede',
+        'Restore a vault exported from another device. You’ll enter its master password or recovery key on a secure prompt.'));
+    }
+
+    // Destination-vault select — set-up profiles only (a fresh profile has no destination vault).
     const field = el('label', 'vault-settings-field');
     field.appendChild(el('span', 'vault-settings-label', 'Vault'));
     const select = buildVaultSelect(vaults, 'Import destination vault');
     field.appendChild(select);
-    body.appendChild(field);
+    if (!fresh) body.appendChild(field);
 
     // File-uploader row: a READ-ONLY path field (dialog-picked path, display only) + folder button.
     const fileRow = el('div', 'vault-modal-file-row');
@@ -550,7 +582,8 @@ function init() {
     fileRow.appendChild(iconButton('folder', 'Choose a bundle file', pickFile));
     body.appendChild(fileRow);
 
-    // Replace-existing confirmation — shown ONLY when the destination already holds a vault.
+    // Replace-existing confirmation — set-up profiles only; shown ONLY when the destination already
+    // holds a vault. A fresh profile never collides, so the affordance is omitted entirely.
     const replaceRow = el('div', 'vault-modal-replace-row');
     replaceRow.hidden = true;
     replaceRow.appendChild(el('p', 'vault-modal-warn',
@@ -561,7 +594,7 @@ function init() {
     replaceLabel.appendChild(replaceCheckbox);
     replaceLabel.appendChild(el('span', undefined, 'Replace the existing vault'));
     replaceRow.appendChild(replaceLabel);
-    body.appendChild(replaceRow);
+    if (!fresh) body.appendChild(replaceRow);
 
     function updateContinueEnabled() {
       handle.setSubmitEnabled(picked && (!collision || replaceConfirmed));
@@ -582,8 +615,14 @@ function init() {
       }).catch(() => {});
     }
 
+    // The target threaded into pickImportFile. Fresh mode has no select and the fresh branch
+    // discards the target, but vaultImportBeginFromFile's guard needs a non-empty string → GLOBAL_ID.
+    function pickTarget() {
+      return fresh ? GLOBAL_VAULT_ID : select.value;
+    }
+
     function pickFile() {
-      Promise.resolve(bridge.pickImportFile(select.value)).then((res) => {
+      Promise.resolve(bridge.pickImportFile(pickTarget())).then((res) => {
         if (res && res.ok) {
           picked = true;
           pathInput.value = res.path || '';
@@ -600,18 +639,21 @@ function init() {
     }
 
     // H1: a destination change after a successful pick invalidates the held bundle; always re-probe
-    // the new destination's collision state and reset the Replace checkbox.
-    select.addEventListener('change', () => {
-      replaceConfirmed = false;
-      replaceCheckbox.checked = false;
-      if (picked) {
-        picked = false;
-        pathInput.value = '';
-        handle.setStatus('');
-        Promise.resolve(bridge.clearPendingImport()).catch(() => {});
-      }
-      probeCollision(select.value);
-    });
+    // the new destination's collision state and reset the Replace checkbox. (Set-up mode only — the
+    // fresh modal has no destination select.)
+    if (!fresh) {
+      select.addEventListener('change', () => {
+        replaceConfirmed = false;
+        replaceCheckbox.checked = false;
+        if (picked) {
+          picked = false;
+          pathInput.value = '';
+          handle.setStatus('');
+          Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+        }
+        probeCollision(select.value);
+      });
+    }
 
     const handle = openModal({
       title: 'Import a vault',
@@ -620,7 +662,8 @@ function init() {
       submitEnabled: false,
       onSubmit: () => {
         if (!picked || (collision && !replaceConfirmed)) return;
-        // Bind overwrite from the checkbox FINAL state at Continue (review MEDIUM-3).
+        // Bind overwrite from the checkbox FINAL state at Continue (review MEDIUM-3). Fresh mode
+        // never collides → overwrite is always false (replaceConfirmed stays false).
         Promise.resolve(bridge.beginImportUnlock(replaceConfirmed)).catch(() => {});
         handle.close();
       },
@@ -630,8 +673,9 @@ function init() {
       },
     });
 
-    // Initial probe for the default-selected destination.
-    probeCollision(select.value);
+    // Initial probe for the default-selected destination (set-up mode only — no destination or
+    // collision on a fresh profile).
+    if (!fresh) probeCollision(select.value);
   }
 
   // ── not-set-up + locked states (leg 1 shell; setup/unlock flows land in leg 4) ──
@@ -647,13 +691,27 @@ function init() {
 
     const note = el('p', 'vault-stub-note');
     note.setAttribute('role', 'status');
-    section.appendChild(button('Set up the password manager', 'vault-btn primary', () => {
+
+    // The two not-set-up entry points, side by side: "Set up" stays the PRIMARY CTA; "Import a
+    // vault bundle" is a SECONDARY affordance that reaches the store's fresh-adopt branch (the
+    // marquee cross-machine restore — M12 F5 HAT, hat-fresh-profile-import). The import path enters
+    // NO secret here: it opens the destination-less fresh-mode modal, which hands off to the
+    // chrome-owned vault-import-unlock sheet (DD2/DD5). On a successful adopt the store leaves the
+    // profile set-up + UNLOCKED and broadcasts the lock-state → the page re-renders to unlocked.
+    const actions = el('div', 'vault-setup-actions');
+    actions.appendChild(button('Set up the password manager', 'vault-btn primary', () => {
       // M12 F3 Leg 4: request the chrome-owned setup sheet (page → main → chrome → the
       // vault-set card). NO password is entered here — it lives only on the sheet + in
       // main; the page moves to unlocked off the vault-lock-state broadcast on success.
       root.dataset.setupRequested = 'true';
       Promise.resolve(bridge.requestSetup()).catch(() => {});
     }));
+    actions.appendChild(button('Import a vault bundle', 'vault-btn', () => {
+      // Fresh-profile restore: a destination-less import modal (no vault select, no Replace
+      // checkbox) that adopts a bundle exported from another device. No destination exists yet.
+      openImportModal([], { fresh: true });
+    }));
+    section.appendChild(actions);
     section.appendChild(note);
     return section;
   }
