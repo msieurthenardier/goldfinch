@@ -735,6 +735,17 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     trigger: captureNode,
     menu: captureNode,
     // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    // dismissible: false — but NOT for the one-time-key reason. The capture offer is SPAWNED BY a
+    // login-form submit, which also navigates the page; when the submitted page finishes loading it
+    // pulls focus back into the guest view, blurring this sheet. Without the opt-out the menu-
+    // controller's window-blur → closeAll would tear the "Save password?" prompt down before the
+    // operator can act (the prompt flashes and vanishes). This skips ONLY the incidental window-blur
+    // (and outside-click) in the sheet controller; Escape / Cancel / backdrop still dismiss it via
+    // attachModalCard's direct close below, and a real whole-window app-switch still closes it main-
+    // side (currentDismissible stays true — the open call does NOT pass dismissible:false), so the
+    // decline paths are unaffected. The captured credential lives main-side under captureId with a
+    // 2-min safety timeout, so persisting the sheet across the spawning navigation is safe.
+    dismissible: false,
     onOpen() {
       captureBusy = false;
       captureNode.classList.remove('hidden');
