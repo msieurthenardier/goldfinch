@@ -24,23 +24,23 @@ class FakeContents extends EventEmitter {
     this.navigationHistory = {
       getAllEntries: () => [{ url: this.url }],
       getActiveIndex: () => 0,
-      restore: (value) => { log.push(['restore', id, value]); return Promise.resolve(); }
+      restore: (value) => { log.push(['restore', id, value]); return Promise.resolve(); },
+      canGoBack: () => true,
+      canGoForward: () => false,
+      goBack: () => { this.log.push(['back', this.id]); },
+      goForward: () => { this.log.push(['forward', this.id]); }
     };
   }
   isDestroyed() { return this.destroyed; }
   destroy() { this.destroyed = true; this.log.push(['destroy', this.id]); }
   getURL() { return this.url; }
   getTitle() { return `Tab ${this.id}`; }
-  canGoBack() { return true; }
-  canGoForward() { return false; }
   isFocused() { return this.focused; }
   focus() { this.log.push(['focus-wc', this.id]); }
   send(channel, payload) { this.log.push(['send', this.id, channel, payload]); }
   loadURL(url) { this.log.push(['load', this.id, url]); return Promise.resolve(); }
   reload() { this.log.push(['reload', this.id]); }
   stop() { this.log.push(['stop', this.id]); }
-  goBack() { this.log.push(['back', this.id]); }
-  goForward() { this.log.push(['forward', this.id]); }
   findInPage(text, options) { this.log.push(['find', this.id, text, options]); }
   stopFindInPage(action) { this.log.push(['stop-find', this.id, action]); }
 }

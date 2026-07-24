@@ -65,7 +65,7 @@ async function navigate(wcId, url, deps) {
  *
  * Electron treats goBack() as a no-op when there is no back history — this is
  * acceptable for v1. If a "nothing to go back to" signal is needed later, add
- * a canGoBack() guard.
+ * a navigationHistory.canGoBack() guard.
  *
  * Op-local internal-session guard (DD6): runs AFTER resolveContents so it fires
  * even under admin's allowInternal:true.
@@ -79,7 +79,7 @@ function goBack(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: goBack — internal-session excluded');
   }
-  return wc.goBack();
+  return wc.navigationHistory.goBack();
 }
 
 /**
@@ -99,7 +99,7 @@ function goForward(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: goForward — internal-session excluded');
   }
-  return wc.goForward();
+  return wc.navigationHistory.goForward();
 }
 
 /**

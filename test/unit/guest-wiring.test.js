@@ -14,12 +14,14 @@ class FakeContents extends EventEmitter {
     this.url = 'https://example.test/page';
     this.openHandler = null;
     this.printCalls = 0;
+    this.navigationHistory = {
+      canGoBack: () => true,
+      canGoForward: () => false
+    };
   }
   setWindowOpenHandler(fn) { this.openHandler = fn; }
   isDestroyed() { return this.destroyed; }
   getURL() { return this.url; }
-  canGoBack() { return true; }
-  canGoForward() { return false; }
   print(_opts, cb) { this.printCalls++; cb(true); }
 }
 
