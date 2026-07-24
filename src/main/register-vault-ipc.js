@@ -64,7 +64,7 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  * @param {object} args
  * @param {{ handle: (channel: string, fn: (...a: any[]) => any) => void }} args.ipcMain
  * @param {(ipcMain: any, channel: string, handler: (...a: any[]) => any) => void} args.registerInternalHandler
- * @param {() => import('./vault/vault-store').VaultStore} args.getVaultStore
+ * @param {() => InstanceType<typeof import('./vault/vault-store').VaultStore>} args.getVaultStore
  *        Accessor for the memoized vault-store singleton (resolved per call so the
  *        handler always reads live lock/setup state).
  * @param {{ list: () => Array<{ id: string, name: string }> }} args.jars
