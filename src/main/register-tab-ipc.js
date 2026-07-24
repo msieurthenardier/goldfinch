@@ -476,8 +476,8 @@ function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
   queueChromeSend(target, () => ['adopt-tab', buildAdoptPayload(p, wc)]);
   queueChromeSend(target, () => ['tab-nav-state', {
     wcId: p.wcId,
-    canGoBack: !wc.isDestroyed() && wc.canGoBack(),
-    canGoForward: !wc.isDestroyed() && wc.canGoForward(),
+    canGoBack: !wc.isDestroyed() && wc.navigationHistory.canGoBack(),
+    canGoForward: !wc.isDestroyed() && wc.navigationHistory.canGoForward(),
   }]);
   // Both records' active tab just changed, so both windows' captions did (DD8).
   // Synchronous sends, and AFTER the pair — never between it.
@@ -658,9 +658,9 @@ ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
   } else if (verb === 'stop') {
     wc.stop();
   } else if (verb === 'goBack') {
-    wc.goBack();
+    wc.navigationHistory.goBack();
   } else if (verb === 'goForward') {
-    wc.goForward();
+    wc.navigationHistory.goForward();
   }
 });
 

@@ -148,12 +148,12 @@ function createGuestWiring(deps) {
 
     wc.on('did-navigate', guard(() => {
       sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
       getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
     }));
     wc.on('did-navigate-in-page', guard(() => {
       sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
       getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
     }));
     wc.on('page-title-updated', guard((_event, title) => {
@@ -172,7 +172,7 @@ function createGuestWiring(deps) {
     }));
     wc.on('did-finish-load', guard(() => {
       sendToChrome('tab-did-finish-load', { wcId });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.canGoBack(), canGoForward: wc.canGoForward() });
+      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
     }));
     wc.on('dom-ready', guard(() => {
       sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });

@@ -21,7 +21,7 @@ const { navigate, goBack, goForward, reload } = require('../../src/main/automati
  * loadURL records calls and returns a resolved promise.
  */
 function makeGuestWc(id) {
-  return {
+  const wc = {
     id,
     session: { __goldfinchInternal: false },
     isDestroyed() { return false; },
@@ -31,12 +31,15 @@ function makeGuestWc(id) {
       return Promise.resolve();
     },
     goBackCalled: false,
-    goBack() { this.goBackCalled = true; },
     goForwardCalled: false,
-    goForward() { this.goForwardCalled = true; },
+    navigationHistory: {
+      goBack() { wc.goBackCalled = true; },
+      goForward() { wc.goForwardCalled = true; }
+    },
     reloadCalled: false,
     reload() { this.reloadCalled = true; }
   };
+  return wc;
 }
 
 /**
@@ -44,7 +47,7 @@ function makeGuestWc(id) {
  * Records every nav method so admin-path tests can assert NO side effect fired.
  */
 function makeInternalWc(id) {
-  return {
+  const wc = {
     id,
     session: { __goldfinchInternal: true },
     isDestroyed() { return false; },
@@ -54,12 +57,15 @@ function makeInternalWc(id) {
       return Promise.resolve();
     },
     goBackCalled: false,
-    goBack() { this.goBackCalled = true; },
     goForwardCalled: false,
-    goForward() { this.goForwardCalled = true; },
+    navigationHistory: {
+      goBack() { wc.goBackCalled = true; },
+      goForward() { wc.goForwardCalled = true; }
+    },
     reloadCalled: false,
     reload() { this.reloadCalled = true; }
   };
+  return wc;
 }
 
 /**
