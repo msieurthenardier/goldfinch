@@ -392,8 +392,9 @@ interface GoldfinchBridge {
   vaultFillHuman(payload: { wcId: number; vaultId: string; itemId: string }): Promise<{ filled: boolean; reason?: string }>;
   // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
   // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.
-  onVaultCaptureOffer(cb: (d: { captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update'; defaultVaultId: string; choices: string[] } }) => void): void;
+  onVaultCaptureOffer(cb: (d: { captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update' | 'locked'; defaultVaultId?: string; choices?: string[] } }) => void): void;
   vaultCaptureDismiss(captureId: string): Promise<void>;
+  vaultCaptureFinalize(captureId: string): Promise<{ captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update'; defaultVaultId: string; choices: string[] } } | null>;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 

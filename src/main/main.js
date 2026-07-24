@@ -599,7 +599,20 @@ function computeVaultLockState() {
   return { setUp: store.isSetUp(), unlocked: store.isUnlocked() };
 }
 function broadcastVaultLockState() {
-  broadcastToChromeAndInternal('vault-lock-state', computeVaultLockState());
+  const state = computeVaultLockState();
+  broadcastToChromeAndInternal('vault-lock-state', state);
+  // Also push a MINIMAL locked flag to guest tabs so the decorative in-field lock icon
+  // reflects the state live (unlock / lock / idle auto-lock) without a page reload. Guests
+  // are excluded from broadcastToChromeAndInternal by design (no privileged app-state); this
+  // sends ONLY the boolean, which is non-secret — the chrome indicator already shows it.
+  for (const record of registry.records()) {
+    for (const entry of record.tabViews.values()) {
+      const wc = entry.view && entry.view.webContents;
+      if (wc && !wc.isDestroyed()) {
+        try { wc.send('vault-lock-changed', { unlocked: state.unlocked }); } catch { /* view torn down mid-send */ }
+      }
+    }
+  }
 }
 
 // Portable vault IMPORT held state (M12 F4 Leg 1 export-import, DD1/DD2). The import is a
@@ -1180,6 +1193,9 @@ const { rerollSeed } = registerBrowserIpc({
   hostnameOf,
   shields,
   getVaultHuman,
+  // Vault lock state for the in-field icon glyph (returned by the vault-eligible query so the
+  // decorative lock icon can seed open/closed). Non-secret boolean; the chrome indicator shows it.
+  isVaultUnlocked: () => getVaultStore().isUnlocked(),
   // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
   // hold). Gated — offline register-browser-ipc tests omit it. M12 F5 HAT (I14): the pick-file
   // step is now SPLIT from the sheet forward — pickImportFile does dialog+read+hold and returns

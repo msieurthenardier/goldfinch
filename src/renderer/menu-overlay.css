@@ -615,6 +615,13 @@ body {
   gap: 2px;
   max-height: 70vh;
   overflow-y: auto;
+  /* overflow-x:hidden is REQUIRED, not cosmetic: this sheet document has no global
+     `box-sizing:border-box` reset (that lives in styles.css, not menu-overlay.css), so
+     `.cm-item { width:100% }` + its horizontal padding overflows the content box by a few
+     px. Setting overflow-y:auto makes overflow-x compute from visible to auto, surfacing
+     that as a spurious horizontal scrollbar along the bottom — most visible in the empty
+     state. Nothing here scrolls sideways (titles/usernames ellipsize, badges wrap), so clip. */
+  overflow-x: hidden;
   padding: 8px;
   min-width: 280px;
 }

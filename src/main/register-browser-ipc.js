@@ -25,6 +25,7 @@ function registerBrowserIpc({
   hostnameOf,
   shields,
   getVaultHuman,
+  isVaultUnlocked,
   vaultImportBegin,
   clearPendingVaultImport,
   setPendingVaultImportOverwrite,
@@ -89,7 +90,13 @@ function registerBrowserIpc({
   // resolve the tab entry from the registry, never from renderer-supplied data.
   ipcMain.on('vault-eligible', (event) => {
     const entry = registry.getWindowForGuest(event.sender.id)?.tabViews.get(event.sender.id);
-    event.returnValue = Boolean(entry && resolvePersistJar(entry, jars.list()));
+    const eligible = Boolean(entry && resolvePersistJar(entry, jars.list()));
+    // Return { eligible, unlocked } so the preload can also seed the lock-icon glyph's
+    // state (open/green when unlocked, closed/amber when locked). The boolean is non-secret
+    // (the chrome indicator already shows it). `isVaultUnlocked` is injection-gated — absent
+    // (offline tests) → unlocked:false, the safe/locked default.
+    const unlocked = typeof isVaultUnlocked === 'function' ? isVaultUnlocked() === true : false;
+    event.returnValue = { eligible, unlocked };
   });
 
   // Vault gesture (M12 F2 Leg 1, DD1/DD3): a TRUSTED click on the injected lock
@@ -140,6 +147,17 @@ function registerBrowserIpc({
   // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
   ipcMain.handle('vault-capture-dismiss', (_event, captureId) => {
     if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
+  });
+
+  // Vault capture FINALIZE (unlock-to-save continuation): after a login-form submit into a
+  // LOCKED vault, capture() held the credential (mode 'locked') and the chrome raised an
+  // unlock prompt. On a successful unlock the chrome invokes this to compute the deferred
+  // save/update disposition and open the vault-capture sheet. Returns { captureId, model } or
+  // null (record gone / still locked / tab re-jarred). Same chrome-trust bare handle as
+  // dismiss; the captureId is an opaque main-minted handle, the model carries NO password.
+  ipcMain.handle('vault-capture-finalize', (_event, captureId) => {
+    if (!getVaultHuman || typeof captureId !== 'string') return null;
+    return getVaultHuman().captureFinalize(captureId);
   });
 
   // Vault cross-renderer triggers (M12 F3 Leg 4, first-run-setup, DD5). The internal

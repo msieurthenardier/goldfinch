@@ -208,12 +208,21 @@ function scheduleScan(delay = 400) {
 // cross-origin iframe login must never raise the prompt via the shared tab wcId).
 const IS_TOP_FRAME = (typeof window === 'undefined') || window.top === window;
 
-// Eligibility: main answers `true` only when this tab's session resolves to a
-// PERSISTENT jar (resolvePersistJar). Mirrors the `shields-farble` sync-IPC idiom.
+// Eligibility: main answers when this tab's session resolves to a PERSISTENT jar
+// (resolvePersistJar). Mirrors the `shields-farble` sync-IPC idiom. Main now returns
+// `{ eligible, unlocked }` so the icon can also seed its lock-state glyph; a bare
+// boolean is tolerated (back-compat). `vaultLocked` defaults to true (safe/closed).
 let vaultEligible = false;
+let vaultLocked = true;
 if (IS_TOP_FRAME) {
   try {
-    vaultEligible = !!ipcRenderer.sendSync('vault-eligible');
+    const res = ipcRenderer.sendSync('vault-eligible');
+    if (res && typeof res === 'object') {
+      vaultEligible = !!res.eligible;
+      vaultLocked = res.unlocked !== true; // unlocked:true → not locked
+    } else {
+      vaultEligible = !!res;
+    }
   } catch {
     /* main not ready / not eligible → no icons */
   }
@@ -243,6 +252,7 @@ const vaultIcons = createVaultIconController({
   isTrustedGet,
   findAllLoginFields,
   getEnabled: () => vaultEligible && IS_TOP_FRAME,
+  getVaultLocked: () => vaultLocked,
 });
 
 // The icon appears ONLY while its field is focused (problem 3): a username or
@@ -256,6 +266,12 @@ if (IS_TOP_FRAME && vaultEligible) {
   // field can move under scroll/resize/zoom without a DOM mutation firing).
   window.addEventListener('scroll', () => vaultIcons.placeVaultIcons(), true);
   window.addEventListener('resize', () => vaultIcons.placeVaultIcons());
+  // Live vault lock-state push from main (unlock / lock / idle auto-lock): flip the
+  // in-field icon glyph + color WITHOUT a page reload. Non-secret boolean only.
+  ipcRenderer.on('vault-lock-changed', (_e, payload) => {
+    vaultLocked = !(payload && payload.unlocked === true);
+    vaultIcons.setVaultLocked(vaultLocked);
+  });
 }
 
 window.addEventListener('DOMContentLoaded', () => {
