@@ -45,8 +45,18 @@ test('vault-unlock card is a modal dialog with a password input, aria-live error
   assert.equal(card.cancel.type, 'button');
   assert.equal(card.cancel.textContent, 'Cancel');
 
-  // DOM order inside the card: label → input → error → actions(Unlock, Cancel).
-  const [label, input, error, actions] = card.card.children;
+  // A header (title + accessible close X) over a padded body — the shared vault-sheet chrome.
+  const [header, body] = card.card.children;
+  assert.equal(header.className, 'vault-sheet-header');
+  assert.equal(header.children[0].className, 'vault-sheet-title');
+  assert.equal(header.children[0].textContent, 'Unlock password manager');
+  assert.equal(card.close.tagName, 'BUTTON');
+  assert.equal(card.close.type, 'button');
+  assert.equal(card.close.attributes.get('aria-label'), 'Close');
+
+  // DOM order inside the body: label → input → error → actions(Unlock, Cancel).
+  assert.equal(body.className, 'vault-sheet-body');
+  const [label, input, error, actions] = body.children;
   assert.equal(label.tagName, 'LABEL');
   assert.equal(label.htmlFor, 'sheet-vault-password'); // the label points at the input
   assert.equal(input, card.input);

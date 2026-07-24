@@ -949,6 +949,16 @@ function handleOverlayClosed({ menuType, reason }) {
     && !lockState.unlocked) {
     pendingVaultFlow = null;
   }
+  // Unlock-to-save abandoned: the unlock prompt raised for a locked-vault capture was
+  // dismissed WITHOUT unlocking (Cancel/Escape/outside-click) → drop the held credential now
+  // rather than waiting for the 2-min safety timeout. On a SUCCESSFUL unlock, onVaultLockState
+  // already cleared pendingCaptureUnlock (and lockState.unlocked is true), so this is skipped.
+  if (menuType === 'vault-unlock' && pendingCaptureUnlock && !lockState.unlocked) {
+    const captureId = pendingCaptureUnlock;
+    pendingCaptureUnlock = null;
+    pendingCaptureId = null;
+    Promise.resolve(window.goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
+  }
   // Human vault capture (M12 F2 Leg 4, DD7 — the dismiss-drop path, HIGH): the
   // save/update sheet closed. Tell main to drop+zeroize the held record NOW (not just
   // on the 2-min timeout) UNLESS this was a save. 'activated' = a successful save (main
@@ -1326,6 +1336,10 @@ let lastPickerModel = [];
 /** @type {string | null} the held capture's id (Leg 4) — the dismiss-drop path needs
  * it when the vault-capture sheet closes without a save. */
 let pendingCaptureId = null;
+/** @type {string | null} the held capture awaiting an unlock-to-save (locked-vault submit):
+ * onVaultLockState finalizes the save/update offer for it on a successful unlock. Cleared on
+ * finalize OR on an abandoned unlock (the unlock sheet dismissed while still locked). */
+let pendingCaptureUnlock = null;
 
 /** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
  * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
@@ -1460,7 +1474,10 @@ window.goldfinch.onVaultRequestRecover(() => {
 // reads it in handleOverlayClosed), enrich the SAVE choices with jar display labels
 // (Global vs the jar's name), and open the chrome-owned vault-capture sheet. The Save
 // invoke originates in the SHEET (window.menuOverlay.captureSave); chrome only opens it.
-window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
+// Open the vault-capture sheet from a resolved save/update offer (shared by the immediate
+// unlocked path and the unlock-to-save finalize below). Enriches the SAVE choices with jar
+// display labels; captureId rides INSIDE the model so the sheet's Save invoke carries it back.
+function openCaptureSheet(captureId, model) {
   pendingCaptureId = captureId;
   const choices = Array.isArray(model.choices)
     ? model.choices.map((vaultId) => {
@@ -1469,8 +1486,20 @@ window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
         return { vaultId, label: jar ? jar.name : vaultId };
       })
     : [];
-  // captureId rides INSIDE the model so the sheet's Save invoke can carry it back.
   openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
+}
+
+window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
+  // Unlock-to-save (locked vault): the credential is held main-side; raise the unlock prompt
+  // first and stash the captureId so onVaultLockState finalizes the save/update offer on a
+  // successful unlock. pendingCaptureId is set too so an ABANDONED unlock still drops the record.
+  if (model && model.mode === 'locked') {
+    pendingCaptureId = captureId;
+    pendingCaptureUnlock = captureId;
+    openOverlayMenu('vault-unlock', [], null, 0);
+    return;
+  }
+  openCaptureSheet(captureId, model);
 });
 
 // Vault lock indicator (M12 F2 Leg 2 chrome-unlock, DD10). A PURE projection of
@@ -1507,6 +1536,17 @@ window.goldfinch.onVaultLockState((state) => {
   if (pendingVaultFlow && pendingVaultFlow.phase === 'unlocking' && state.unlocked) {
     pendingVaultFlow.phase = 'picking';
     openVaultPicker(pendingVaultFlow.wcId);
+  }
+  // Unlock-to-save continuation: a login-form submit into a LOCKED vault held the credential
+  // and raised this unlock prompt; on success finalize the save/update offer and open the
+  // capture sheet. Cleared here so an unrelated later unlock can't re-fire it. A null model
+  // (record timed out / tab re-jarred) simply shows nothing.
+  if (pendingCaptureUnlock && state.unlocked) {
+    const captureId = pendingCaptureUnlock;
+    pendingCaptureUnlock = null;
+    Promise.resolve(window.goldfinch.vaultCaptureFinalize(captureId))
+      .then((offer) => { if (offer && offer.model) openCaptureSheet(offer.captureId, offer.model); })
+      .catch(() => {});
   }
 });
 window.goldfinch.getVaultLockState()

@@ -610,13 +610,88 @@ body {
   align-items: center;
   justify-content: center;
 }
+/* ---------- shared vault-sheet chrome (header + body): picker + unlock ---------- */
+/* A fixed header (title + close/X) over the sheet body, so the sheet reads as a real
+   modal with an obvious close affordance. Applied to both the picker and the unlock
+   prompt for a consistent, less-cramped experience. */
+.vault-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.vault-sheet-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.vault-sheet-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px -4px 0; /* pull the hit-target to the card's top-right edge */
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.vault-sheet-close:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+.vault-sheet-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--fg);
+}
+/* The padded body under the header (the unlock dialog's fields/actions; the picker uses
+   its own scrollable list below). */
+.vault-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.vault-unlock-inner {
+  /* match the picker: zero the .new-container-inner padding so the header rule is full-bleed;
+     the .vault-sheet-body provides the field/action padding. */
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  min-width: 320px;
+  max-width: 380px;
+}
+
+/* ---------- vault-picker: full-bleed header over a scrollable roving list ---------- */
 .vault-picker-inner {
-  /* the card is the roving-list host — a tighter gap than the input dialogs */
+  /* override .new-container-inner: zero padding so the header rule spans full width; the
+     header + list own their padding. overflow:hidden clips the header to the rounded card. */
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  min-width: 320px;
+  max-width: 380px;
+}
+.vault-picker-list {
+  /* the roving-list host — scrolls independently of the fixed header. overflow-x:hidden is
+     REQUIRED, not cosmetic: this sheet document has no global box-sizing:border-box reset
+     (that lives in styles.css, not menu-overlay.css), so `.cm-item { width:100% }` + padding
+     overflows by a few px, and overflow-y:auto makes overflow-x compute to auto → a spurious
+     bottom scrollbar. Nothing scrolls sideways (titles ellipsize, badges wrap), so clip. */
+  display: flex;
+  flex-direction: column;
   gap: 2px;
-  max-height: 70vh;
+  max-height: 60vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
-  min-width: 280px;
 }
 .vault-picker-row {
   /* .cm-item gives the flex/hover/focus base. Modern password-manager row: a credential
@@ -696,8 +771,11 @@ body {
   border-color: var(--accent, var(--border));
 }
 .vault-picker-note {
+  /* the empty state — centered with generous breathing room so it doesn't read as cramped */
   color: var(--fg-dim);
-  padding: 10px 8px;
+  text-align: center;
+  padding: 24px 16px 20px;
+  font-size: 12px;
 }
 .vault-picker-separator {
   /* divider between the credential rows and the Manage-passwords footer */
@@ -711,6 +789,7 @@ body {
   justify-content: center;
   color: var(--accent, var(--fg));
   font-weight: 500;
+  padding: 9px 8px;
 }
 .vault-picker-manage-label {
   color: inherit;

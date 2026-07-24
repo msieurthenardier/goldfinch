@@ -86,7 +86,9 @@ function originOf(url) {
  * @property {string} origin  derived in main from the sender URL (never guest-supplied).
  * @property {string | null} username
  * @property {Buffer} password
- * @property {'save' | 'update'} mode
+ * @property {string} jarId  the tab's persistent jar id (fixed at capture; disposition uses it).
+ * @property {'save' | 'update' | 'locked'} mode  'locked' = held pending an unlock; the save/update
+ *   disposition is deferred to `captureFinalize` (it needs the vault unlocked).
  * @property {string} [vaultId]  update: the existing item's fixed vault.
  * @property {string} [itemId]  update: the existing item's fixed id.
  * @property {string[]} choices  save: the selectable vault ids ([jar.id, 'global']).
@@ -234,15 +236,48 @@ function createVaultHuman(deps) {
    * @param {{ wcId: number, username: any, passwordBytes: any }} arg
    * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } } | null}
    */
+  /**
+   * Compute the save/update disposition for a held record against the NOW-UNLOCKED vault,
+   * mutating the record (mode / choices / vaultId / itemId) and returning the sheet model.
+   * Shared by the immediate (already-unlocked) `capture` path and the deferred
+   * `captureFinalize` (after an unlock-to-save). Prefers an active-jar username match over a
+   * global one on a tie (reachableLoginItems iterates global FIRST, so a naive .find would
+   * target global). REQUIRES the vault unlocked (reachableLoginItems reads it).
+   * @param {CaptureRecord} rec
+   * @returns {{ origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] }}
+   */
+  function disposeCapture(rec) {
+    const reachable = deps.getVaultStore().reachableLoginItems(rec.jarId, rec.origin);
+    const jarMatch = reachable.find(
+      (/** @type {any} */ r) => r.vaultId === rec.jarId && normUsername(r.username) === rec.username
+    );
+    const globalMatch = reachable.find(
+      (/** @type {any} */ r) => r.vaultId === 'global' && normUsername(r.username) === rec.username
+    );
+    const match = jarMatch || globalMatch;
+    if (match) {
+      rec.mode = 'update';
+      rec.vaultId = match.vaultId;
+      rec.itemId = match.id;
+      rec.choices = [];
+      return { origin: rec.origin, username: rec.username, mode: 'update', defaultVaultId: match.vaultId, choices: [] };
+    }
+    rec.mode = 'save';
+    rec.choices = [rec.jarId, 'global'];
+    return { origin: rec.origin, username: rec.username, mode: 'save', defaultVaultId: rec.jarId, choices: [rec.jarId, 'global'] };
+  }
+
   function capture({ wcId, username, passwordBytes }) {
     const store = deps.getVaultStore();
 
-    // GATE — set up AND unlocked (Leg 4 v1 scope; DD7) AND a persistent jar (DD9). Any
-    // miss drops with no offer; the incoming bytes are still wiped below.
+    // GATE — set up AND a persistent jar (DD9) AND an origin. Unlocked is NO LONGER required:
+    // a LOCKED vault now HOLDS the credential and asks the chrome to prompt an unlock first,
+    // then saves (mode 'locked'). Not-set-up / no-jar / no-origin still drop with no offer.
+    // A miss wipes the incoming bytes below.
     const bytes = passwordBytes instanceof Uint8Array ? passwordBytes : null;
     const origin = tabOriginFor(wcId);
     const jar = tabJarFor(wcId);
-    if (!store.isSetUp() || !store.isUnlocked() || !jar || !origin) {
+    if (!store.isSetUp() || !jar || !origin) {
       if (bytes) bytes.fill(0);
       return null;
     }
@@ -254,18 +289,6 @@ function createVaultHuman(deps) {
     }
 
     const normUser = normUsername(username);
-
-    // Disposition: prefer an active-jar username match over a global one on a tie
-    // (reachableLoginItems iterates global FIRST, so a naive .find would target global).
-    const reachable = store.reachableLoginItems(jar.id, origin);
-    const jarMatch = reachable.find(
-      (/** @type {any} */ r) => r.vaultId === jar.id && normUsername(r.username) === normUser
-    );
-    const globalMatch = reachable.find(
-      (/** @type {any} */ r) => r.vaultId === 'global' && normUsername(r.username) === normUser
-    );
-    const match = jarMatch || globalMatch;
-
     const captureId = crypto.randomBytes(12).toString('hex');
     const password = bytes ? Buffer.from(bytes) : Buffer.alloc(0);
     if (bytes) bytes.fill(0); // the incoming deserialized array is a separate allocation.
@@ -277,25 +300,45 @@ function createVaultHuman(deps) {
       origin,
       username: normUser,
       password,
-      mode: match ? 'update' : 'save',
-      choices: match ? [] : [jar.id, 'global'],
+      jarId: jar.id,
+      mode: 'save', // provisional — set by disposeCapture (unlocked) or 'locked' below.
+      choices: [],
       timer: null,
       capturedAt: _now(),
     };
-    let model;
-    if (match) {
-      rec.vaultId = match.vaultId;
-      rec.itemId = match.id;
-      model = { origin, username: normUser, mode: /** @type {'update'} */ ('update'), defaultVaultId: match.vaultId, choices: /** @type {string[]} */ ([]) };
-    } else {
-      model = { origin, username: normUser, mode: /** @type {'save'} */ ('save'), defaultVaultId: jar.id, choices: [jar.id, 'global'] };
-    }
-
     rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
     if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
     captures.set(captureId, rec);
 
-    return { captureId, model };
+    // LOCKED: hold the credential and ask the chrome to raise an unlock prompt first. The
+    // save/update disposition needs the vault unlocked, so it is deferred to captureFinalize
+    // (called by the chrome after a successful unlock).
+    if (!store.isUnlocked()) {
+      rec.mode = 'locked';
+      return { captureId, model: { origin, username: normUser, mode: /** @type {'locked'} */ ('locked') } };
+    }
+
+    // UNLOCKED: compute the disposition now and return the save/update model.
+    return { captureId, model: disposeCapture(rec) };
+  }
+
+  /**
+   * Finalize a held 'locked' capture AFTER a successful unlock (the chrome's unlock-to-save
+   * continuation): compute the deferred save/update disposition and return `{ captureId, model }`
+   * so the chrome opens the vault-capture sheet. Returns null when the record is gone
+   * (timeout / superseded), the vault is still locked (unlock didn't take / re-locked), or the
+   * tab's jar no longer resolves the SAME jar (tab closed / re-jarred) — the record is dropped
+   * in that last case so the captured password never lingers.
+   * @param {string} captureId
+   * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } } | null}
+   */
+  function captureFinalize(captureId) {
+    const rec = captures.get(captureId);
+    if (!rec) return null;
+    if (!deps.getVaultStore().isUnlocked()) return null; // unlock didn't take / raced a re-lock
+    const jar = tabJarFor(rec.wcId);
+    if (!jar || jar.id !== rec.jarId) { dropCapture(captureId); return null; }
+    return { captureId, model: disposeCapture(rec) };
   }
 
   /**
@@ -391,7 +434,7 @@ function createVaultHuman(deps) {
     dropCapture(captureId);
   }
 
-  return { reachableItems, fillHuman, capture, captureSave, captureDismiss };
+  return { reachableItems, fillHuman, capture, captureFinalize, captureSave, captureDismiss };
 }
 
 module.exports = { createVaultHuman, originOf };

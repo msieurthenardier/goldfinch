@@ -15,6 +15,8 @@
 // `.new-container-*` / `.text-btn` classes for visual parity; the `.vault-unlock-*`
 // hooks carry the error-line + password-specific styling.
 
+import { buildVaultSheetHeader } from './vault-sheet-header.js';
+
 /**
  * Build the vault-unlock card DOM.
  * @param {Document} document
@@ -25,6 +27,7 @@
  *   error: HTMLElement,
  *   unlock: HTMLButtonElement,
  *   cancel: HTMLButtonElement,
+ *   close: HTMLButtonElement,
  * }}
  */
 export function buildVaultUnlockCard(document) {
@@ -38,6 +41,11 @@ export function buildVaultUnlockCard(document) {
   card.setAttribute('aria-modal', 'true');
   card.setAttribute('aria-label', 'Unlock password manager');
   node.appendChild(card);
+
+  // Shared header (title + close/X) — consistent chrome with the picker. menu-overlay.js
+  // wires `close` (a deliberate dismiss, alongside Cancel/Escape).
+  const { header, close } = buildVaultSheetHeader(document, 'Unlock password manager');
+  card.appendChild(header);
 
   const label = document.createElement('label');
   label.className = 'new-container-label';
@@ -72,10 +80,15 @@ export function buildVaultUnlockCard(document) {
   actions.appendChild(unlock);
   actions.appendChild(cancel);
 
-  card.appendChild(label);
-  card.appendChild(input);
-  card.appendChild(error);
-  card.appendChild(actions);
+  // Body wrapper (padded) so the header above can be full-bleed with a bottom rule —
+  // consistent chrome with the picker's fixed header over its scrollable list.
+  const body = document.createElement('div');
+  body.className = 'vault-sheet-body';
+  body.appendChild(label);
+  body.appendChild(input);
+  body.appendChild(error);
+  body.appendChild(actions);
+  card.appendChild(body);
 
-  return { node, card, input, error, unlock, cancel };
+  return { node, card, input, error, unlock, cancel, close };
 }

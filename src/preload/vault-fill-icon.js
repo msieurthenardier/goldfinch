@@ -20,28 +20,43 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICON_ATTR = 'data-goldfinch-vault-lock';
 
+// Glyph colors (drive currentColor → shackle stroke + body fill). Amber when LOCKED
+// (an action — unlock — is needed before a fill), green when UNLOCKED (ready to fill).
+// Both read on the light chip background AND on light/dark form fields.
+const COLOR_LOCKED = '#b06000';
+const COLOR_UNLOCKED = '#137333';
+
 /**
  * Build the decorative lock glyph as an INLINE SVG (never innerHTML, never an
  * emoji — the guest has no emoji font, so `🔒` renders as a tofu box `□`). A
  * ~16px padlock: a currentColor shackle + body inside a light rounded chip, so
  * it stays legible on both light and dark form fields. Carries role="img",
  * aria-label and the `data-goldfinch-vault-lock` marker.
+ *
+ * State (the vault lock indicator): when `locked` the shackle is CLOSED (both legs
+ * into the body) and the label says the vault must be unlocked; when unlocked the
+ * shackle is OPEN (the right leg lifts free of the body) and the label offers the
+ * fill. Color is applied by the controller (createIcon) via the chip's `color`.
  * @param {any} doc  a `document`-like object exposing createElementNS.
+ * @param {boolean} [locked]  vault lock state (default true — the safe/closed default).
  * @returns {any} the `<svg>` icon element.
  */
-function buildVaultLockIcon(doc) {
+function buildVaultLockIcon(doc, locked = true) {
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute(ICON_ATTR, '');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Fill login from vault');
+  // State in the accessible name + a marker attribute (also lets tests/CSS see the state).
+  svg.setAttribute('aria-label', locked ? 'Unlock vault to fill login' : 'Fill login from vault');
+  svg.setAttribute('data-locked', locked ? 'true' : 'false');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('width', '16');
   svg.setAttribute('height', '16');
   svg.setAttribute('focusable', 'false');
 
-  // Shackle (the arc): stroked, no fill.
+  // Shackle (the arc): stroked, no fill. CLOSED → both legs reach the body (…V11);
+  // OPEN → the right leg lifts free (no trailing …V11), reading as an open hasp.
   const shackle = doc.createElementNS(SVG_NS, 'path');
-  shackle.setAttribute('d', 'M8 11 V8 a4 4 0 0 1 8 0 V11');
+  shackle.setAttribute('d', locked ? 'M8 11 V8 a4 4 0 0 1 8 0 V11' : 'M8 11 V8 a4 4 0 0 1 8 0');
   shackle.setAttribute('fill', 'none');
   shackle.setAttribute('stroke', 'currentColor');
   shackle.setAttribute('stroke-width', '2');
@@ -96,6 +111,7 @@ function isFieldVisible(field) {
  * @param {any} deps.isTrustedGet  captured Event.prototype.isTrusted getter (or null)
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} deps.findAllLoginFields
  * @param {() => boolean} deps.getEnabled  true iff top-frame AND vault-eligible
+ * @param {() => boolean} [deps.getVaultLocked]  initial vault lock state (default true — locked).
  * @param {() => number} [deps.now]  clock for the gesture-target TTL (default Date.now).
  */
 function createVaultIconController({
@@ -105,9 +121,14 @@ function createVaultIconController({
   isTrustedGet,
   findAllLoginFields,
   getEnabled,
+  getVaultLocked,
   now,
 }) {
   const clock = typeof now === 'function' ? now : Date.now;
+  // Vault lock state driving the icon glyph + color (open/green when unlocked, closed/amber
+  // when locked). Seeded from getVaultLocked() (the preload's init query) and updated live via
+  // setVaultLocked() (a main push) — the icon must reflect an unlock/lock without a page reload.
+  let vaultLocked = typeof getVaultLocked === 'function' ? getVaultLocked() !== false : true;
   // The password field the user's LAST trusted lock-icon gesture targeted, bound
   // for the round-trip to the chrome-owned picker and back (PR#112 finding 9). The
   // fill is delivered on `vault-fill`; the preload consumes THIS to fill the clicked
@@ -210,7 +231,7 @@ function createVaultIconController({
   }
 
   function createIcon() {
-    const el = buildVaultLockIcon(doc);
+    const el = buildVaultLockIcon(doc, vaultLocked);
     const s = el.style;
     s.position = 'absolute';
     s.zIndex = '2147483647';
@@ -218,8 +239,9 @@ function createVaultIconController({
     s.boxSizing = 'border-box';
     s.width = '16px';
     s.height = '16px';
-    // Light chip + dark glyph reads on both light AND dark form fields.
-    s.color = '#3c4043';
+    // Light chip; the glyph is color-coded by lock state (amber=locked, green=unlocked) and
+    // reads on both light AND dark form fields against the near-white chip.
+    s.color = vaultLocked ? COLOR_LOCKED : COLOR_UNLOCKED;
     s.background = 'rgba(255,255,255,0.9)';
     s.border = '1px solid rgba(0,0,0,0.2)';
     s.borderRadius = '3px';
@@ -229,6 +251,25 @@ function createVaultIconController({
     el.addEventListener('click', onIconClick);
     el.addEventListener('contextmenu', onIconContextMenu);
     return el;
+  }
+
+  /**
+   * Update the vault lock state (a main push after unlock/lock/idle-auto-lock) and, if an
+   * icon is currently shown, re-render it so the glyph + color flip WITHOUT a page reload.
+   * A no-op when the state is unchanged.
+   * @param {boolean} locked
+   */
+  function setVaultLocked(locked) {
+    const next = locked !== false; // bias to LOCKED (safe) on anything but an explicit false
+    if (next === vaultLocked) return;
+    vaultLocked = next;
+    // Drop any placed icon so placeVaultIcons rebuilds it with the new glyph/color.
+    for (const icon of placedIcons) {
+      icon.remove();
+      placedIcons.delete(icon);
+      iconByAnchor.delete(icon._anchor);
+    }
+    placeVaultIcons();
   }
 
   function positionIcon(icon, rect) {
@@ -336,6 +377,7 @@ function createVaultIconController({
     handleFocusIn,
     handleFocusOut,
     consumeFillTarget,
+    setVaultLocked,
   };
 }
 

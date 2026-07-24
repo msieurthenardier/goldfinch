@@ -126,13 +126,14 @@ function bodyIcon(doc) {
 
 test('buildVaultLockIcon: an inline SVG element (not an emoji), correctly labelled', () => {
   const doc = makeDoc([]);
-  const icon = buildVaultLockIcon(doc);
+  const icon = buildVaultLockIcon(doc); // default: locked
 
   assert.equal(icon.tagName, 'svg');
   assert.equal(icon.namespaceURI, SVG_NS, 'built in the SVG namespace via createElementNS');
   assert.equal(icon.getAttribute(ICON_ATTR), '', 'carries the data-goldfinch-vault-lock marker');
   assert.equal(icon.getAttribute('role'), 'img');
-  assert.equal(icon.getAttribute('aria-label'), 'Fill login from vault');
+  assert.equal(icon.getAttribute('aria-label'), 'Unlock vault to fill login', 'the locked default label');
+  assert.equal(icon.getAttribute('data-locked'), 'true');
   assert.equal(icon.getAttribute('width'), '16');
   // No emoji / tofu glyph anywhere.
   assert.equal(icon.textContent, '', 'no text glyph — the lock is drawn, never typed');
@@ -140,6 +141,21 @@ test('buildVaultLockIcon: an inline SVG element (not an emoji), correctly labell
   // Drawn from real SVG child shapes, all in the SVG namespace.
   assert.ok(icon.children.length >= 2, 'has shape children (shackle + body)');
   for (const child of icon.children) assert.equal(child.namespaceURI, SVG_NS);
+});
+
+test('buildVaultLockIcon: locked vs unlocked glyph + label + marker', () => {
+  const doc = makeDoc([]);
+  const shackleD = (icon) => icon.children.find((c) => c.tagName === 'path').getAttribute('d');
+
+  const locked = buildVaultLockIcon(doc, true);
+  assert.equal(locked.getAttribute('data-locked'), 'true');
+  assert.equal(locked.getAttribute('aria-label'), 'Unlock vault to fill login');
+  assert.ok(/V11$/.test(shackleD(locked)), 'closed shackle: both legs reach the body (…V11)');
+
+  const unlocked = buildVaultLockIcon(doc, false);
+  assert.equal(unlocked.getAttribute('data-locked'), 'false');
+  assert.equal(unlocked.getAttribute('aria-label'), 'Fill login from vault');
+  assert.ok(!/V11$/.test(shackleD(unlocked)), 'open shackle: the right leg lifts free (no trailing …V11)');
 });
 
 // --- placement: both fields, focus-gated ----------------------------------
@@ -330,7 +346,32 @@ test('the icon is decorative: it holds no credential value or text a hostile pag
   assert.equal(icon.value, undefined, 'not a form control — no .value');
   // The only attributes are presentational/marker — none carries a secret.
   const attrKeys = Object.keys(icon.attributes).sort();
-  assert.deepEqual(attrKeys, ['aria-label', 'focusable', 'height', 'role', 'viewBox', 'width', ICON_ATTR].sort());
+  assert.deepEqual(attrKeys, ['aria-label', 'data-locked', 'focusable', 'height', 'role', 'viewBox', 'width', ICON_ATTR].sort());
+});
+
+test('setVaultLocked flips the shown icon glyph + color live (no reload)', () => {
+  const user = new FakeInput('text', 'username');
+  const pass = new FakeInput('password', 'password');
+  const doc = makeDoc([new FakeForm([user, pass])]);
+  // Start LOCKED (the safe default when getVaultLocked is absent).
+  const ctl = makeController(doc, []);
+  ctl.handleFocusIn({ target: pass });
+
+  let icon = bodyIcon(doc);
+  assert.equal(icon.getAttribute('data-locked'), 'true', 'starts locked (amber/closed)');
+  assert.equal(icon.style.color, '#b06000', 'locked → amber');
+
+  // Main pushes an unlock → the shown icon is re-rendered open/green.
+  ctl.setVaultLocked(false);
+  icon = bodyIcon(doc);
+  assert.ok(icon, 'an icon is still shown for the focused field');
+  assert.equal(icon.getAttribute('data-locked'), 'false', 'now unlocked (open)');
+  assert.equal(icon.style.color, '#137333', 'unlocked → green');
+
+  // A repeat of the same state is a no-op (no re-render churn).
+  const before = icon;
+  ctl.setVaultLocked(false);
+  assert.equal(bodyIcon(doc), before, 'same-state setVaultLocked does not rebuild the icon');
 });
 
 // --- media-observer feedback guard ----------------------------------------

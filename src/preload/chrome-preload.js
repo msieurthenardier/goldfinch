@@ -338,6 +338,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // the 2-min timeout). The captured password never crosses to chrome.
   onVaultCaptureOffer: (cb) => ipcRenderer.on('vault-capture-offer', (_e, d) => cb(d)),
   vaultCaptureDismiss: (captureId) => ipcRenderer.invoke('vault-capture-dismiss', captureId),
+  // Unlock-to-save continuation: when the offer arrives with mode 'locked', the chrome raises
+  // an unlock prompt; on a successful unlock it calls this to compute the deferred save/update
+  // offer and open the vault-capture sheet. Resolves { captureId, model } | null.
+  vaultCaptureFinalize: (captureId) => ipcRenderer.invoke('vault-capture-finalize', captureId),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
   // The internal partition string (single source of truth, src/shared/internal-page.js),

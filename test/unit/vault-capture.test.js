@@ -168,14 +168,55 @@ test('capture GATE: not set up → null (no offer), incoming array still zeroize
   } finally { rm(dir); }
 });
 
-test('capture GATE: locked → null (no offer)', async () => {
+test('capture LOCKED: holds the credential + returns a mode:locked offer (unlock-to-save), incoming array wiped', async () => {
   const dir = tmpDir();
   try {
     const { store, human } = await makeHarness(dir);
     store.lockNow();
     const bytes = bytesOf('pw');
-    assert.equal(human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytes }), null);
+    const offer = human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytes });
+    assert.ok(offer && typeof offer.captureId === 'string', 'a record is held even while locked');
+    assert.equal(offer.model.mode, 'locked', 'the chrome is told to prompt an unlock first');
+    assert.equal(offer.model.origin, A);
+    assert.equal(offer.model.username, 'me@a');
+    // No disposition (save/update) is computed while locked — it is deferred to finalize.
+    assert.equal(offer.model.defaultVaultId, undefined);
+    // The incoming deserialized array is still wiped (the password is COPIED into the held record).
     assert.ok(bytes.every((b) => b === 0));
+  } finally { rm(dir); }
+});
+
+test('captureFinalize: after unlock, resolves the deferred SAVE/UPDATE offer; then captureSave persists', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.lockNow();
+    const locked = human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytesOf('the-pass') });
+    assert.equal(locked.model.mode, 'locked');
+
+    // Still locked → finalize refuses (nothing to show yet).
+    assert.equal(human.captureFinalize(locked.captureId), null, 'finalize is null while still locked');
+
+    // Unlock, then finalize → a normal SAVE offer (no saved login for this origin).
+    await store.unlock(MASTER);
+    const final = human.captureFinalize(locked.captureId);
+    assert.equal(final.captureId, locked.captureId);
+    assert.equal(final.model.mode, 'save');
+    assert.equal(final.model.defaultVaultId, 'work');
+    assert.deepEqual(final.model.choices, ['work', 'global']);
+
+    // The Save then persists the held credential as a new login.
+    assert.deepEqual(human.captureSave({ captureId: locked.captureId, vaultId: 'work' }), { saved: true });
+    const saved = store.listItems('work').find((i) => i.username === 'me@a');
+    assert.ok(saved && saved.password === 'the-pass', 'the held password was persisted after unlock');
+  } finally { rm(dir); }
+});
+
+test('captureFinalize: unknown / already-dropped captureId → null', async () => {
+  const dir = tmpDir();
+  try {
+    const { human } = await makeHarness(dir);
+    assert.equal(human.captureFinalize('nope'), null);
   } finally { rm(dir); }
 });
 
