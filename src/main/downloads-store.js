@@ -86,7 +86,7 @@ function validateRecord(r) {
   // Coerce/clamp the rest to sane shapes; missing/odd values get safe defaults.
   const received = Number.isFinite(r.received) && r.received >= 0 ? r.received : 0;
   const total = Number.isFinite(r.total) && r.total >= 0 ? r.total : 0;
-  /** @type {object} */
+  /** @type {{ id: number, url: string, filename: string, savePath: string | null, state: string, received: number, total: number, startTime: number, endTime: number, mime?: string, error?: string }} */
   const out = {
     id: r.id,
     url: typeof r.url === 'string' ? r.url : '',

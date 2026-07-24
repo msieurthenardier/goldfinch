@@ -9,6 +9,7 @@
     "moduleResolution": "bundler",
     "strict": false,
     "skipLibCheck": true,
+    "maxNodeModuleJsDepth": 0,
     "types": ["node"]
   },
   "include": ["src/**/*.js", "src/**/*.d.ts"]

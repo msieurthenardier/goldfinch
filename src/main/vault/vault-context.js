@@ -119,7 +119,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   // manager's admin pubkey changed) drops the affected live keys IMMEDIATELY — not only at
   // teardown/idle. Without this, revocation/rotation prevents only FUTURE unlocks; an already
   // -unlocked session kept filling/listing/TOTP-ing until it happened to expire.
-  /** @type {Map<string, { mode: 'access', keyId: string } | { mode: 'admin', adminPub: string }>} */
+  /** @type {Map<string, { mode: 'access', keyId: string } | { mode: 'admin', adminPub: string | null }>} */
   const grants = new Map();
   /** @type {any} */
   let timer = null;
@@ -212,6 +212,9 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    * same id (a re-unlock).
    * @param {string} vaultId
    * @param {Buffer} key
+   * @param {{ mode: 'access', keyId: string } | { mode: 'admin', adminPub: string | null }} [grant]
+   *        what authorized this key (revalidate() checks it later); omitted on the
+   *        keyless fallback path, which records no grant.
    */
   function setKey(vaultId, key, grant) {
     const prev = keys.get(vaultId);
