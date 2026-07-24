@@ -539,6 +539,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
   const vaultError = vault.error;
   const vaultUnlockBtn = vault.unlock;
   const vaultCancelBtn = vault.cancel;
+  const vaultCloseBtn = vault.close;
   root.appendChild(vaultNode);
 
   // Guards a concurrent submit (double-Enter / Enter+click) from firing two
@@ -612,19 +613,23 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     report.lastStimulus = 'escape';
     menuController.close(vaultEntry);
   });
+  // Header close (X): a deliberate dismiss, same as Cancel/Escape.
+  vaultCloseBtn.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultEntry);
+  });
   vaultInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       void submitVault();
     }
   });
-  // Dialog-local Escape + Tab-cycle (input → Unlock → Cancel → input) + backdrop dismiss
-  // via the SHARED, unit-tested modal-card helper (M12 F3 Leg 4, DD5 refactor — replaces
-  // the former inline keydown/backdrop blocks byte-for-byte; the controller's menu-keydown
-  // no-ops here, !entry.items). dismissible defaults true.
+  // Dialog-local Escape + Tab-cycle (close → input → Unlock → Cancel → close) + backdrop
+  // dismiss via the SHARED, unit-tested modal-card helper (M12 F3 Leg 4, DD5 refactor). The
+  // header X joins the Tab cycle so it is keyboard-reachable. dismissible defaults true.
   attachModalCard({
     node: vaultNode,
-    getCycle: () => [vaultInput, vaultUnlockBtn, vaultCancelBtn],
+    getCycle: () => [vaultCloseBtn, vaultInput, vaultUnlockBtn, vaultCancelBtn],
     close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultEntry); },
   });
 
@@ -640,7 +645,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
 
   const picker = buildVaultPickerCard(document);
   const pickerNode = picker.node;
-  const pickerCard = picker.card;
+  const pickerList = picker.list; // the role="menu" roving host (rows render here)
   root.appendChild(pickerNode);
 
   // The focusable rows for the current render (rebuilt per init) — the controller's
@@ -653,9 +658,9 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     // trigger === menu === pickerNode (the backdrop): opens are programmatic (per
     // init), so the controller skips its trigger-keydown opener — CRITICAL, since an
     // opener on the same node would fire on the roving list's own Arrow/Enter keys and
-    // closeAll() it mid-navigation. The roving `items` live inside pickerCard; their
+    // closeAll() it mid-navigation. The roving `items` live inside pickerList; their
     // keydowns bubble up to pickerNode's menu-keydown listener (the shared APG roving
-    // contract), and pickerCard carries role="menu"/menuitem for a11y. Outside-click
+    // contract), and pickerList carries role="menu"/menuitem for a11y. Outside-click
     // is the local backdrop handler below (the controller's pointerdown sees
     // pickerNode.contains(target) === true for every in-sheet click — parity with the
     // input-dialog / vault-unlock backdrops).
@@ -667,7 +672,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       pickerNode.classList.remove('hidden');
       const list = pickerItems();
       if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
-      else pickerCard.focus(); // empty (note) state — focus the card so Escape/Tab work
+      else pickerList.focus(); // empty (note) state — focus the list so Escape/Tab work
     },
     onClose() {
       pickerNode.classList.add('hidden');
@@ -676,10 +681,17 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     focusReturn: () => {}
   });
 
+  // The header's close (X) is a deliberate dismiss — parity with Escape/backdrop. A mouse
+  // affordance the empty state previously lacked; keyboard users still use Escape.
+  picker.close.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(pickerEntry);
+  });
+
   /** Render the picker rows from the metadata model + wire per-row selection.
    * @param {any[]} model */
   function renderPicker(model) {
-    pickerRows = renderVaultPickerRows(document, pickerCard, model);
+    pickerRows = renderVaultPickerRows(document, pickerList, model);
     pickerRows.forEach((btn) => {
       btn.addEventListener('click', () => {
         // A credential row reports its INDEX (`pick:<i>`, from data-pick-index); the

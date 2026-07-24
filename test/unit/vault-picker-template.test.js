@@ -27,25 +27,35 @@ const chickletLabel = (row) => chickletOf(row).children[chickletOf(row).children
 // separator immediately before it.
 const manageBtn = (rows) => rows[rows.length - 1];
 
-test('buildVaultPickerCard is a centered backdrop + a role="menu" card', () => {
+test('buildVaultPickerCard: centered backdrop + header (title + close) over a role="menu" list', () => {
   const document = createDocument();
-  const { node, card } = buildVaultPickerCard(document);
+  const { node, card, list, close } = buildVaultPickerCard(document);
   assert.equal(node.id, 'sheet-vault-picker');
   assert.equal(node.classList.contains('hidden'), true);
-  assert.equal(card.attributes.get('role'), 'menu');
-  assert.equal(card.attributes.get('aria-label'), 'Choose a saved login to fill');
-  assert.equal(card.tabIndex, -1);
   assert.equal(card.parentNode, node);
+  // The menu semantics live on the roving LIST host (moved off the card so the fixed header
+  // is not a menuitem and does not scroll away).
+  assert.equal(list.attributes.get('role'), 'menu');
+  assert.equal(list.attributes.get('aria-label'), 'Choose a saved login to fill');
+  assert.equal(list.tabIndex, -1);
+  assert.equal(list.parentNode, card);
+  // A fixed header: a title + an accessible close (X) button.
+  const header = card.children[0];
+  assert.equal(header.className, 'vault-sheet-header');
+  assert.equal(header.children[0].className, 'vault-sheet-title');
+  assert.equal(header.children[0].textContent, 'Saved logins');
+  assert.equal(close.tagName, 'BUTTON');
+  assert.equal(close.attributes.get('aria-label'), 'Close');
 });
 
 test('renderVaultPickerRows: icon + stacked title/username + source-vault chicklet, index-stamped', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
+  const { list } = buildVaultPickerCard(document);
   const model = [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', hasTotp: false },
     { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', hasTotp: true, badgeLabel: 'Work' },
   ];
-  const rows = renderVaultPickerRows(document, card, model);
+  const rows = renderVaultPickerRows(document, list, model);
 
   // Two credential rows + the Manage-passwords footer (always appended).
   assert.equal(rows.length, 3);
@@ -85,8 +95,8 @@ test('renderVaultPickerRows: icon + stacked title/username + source-vault chickl
 
 test('renderVaultPickerRows: jar-colored chicklet when badgeColor is present, neutral otherwise', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  const rows = renderVaultPickerRows(document, card, [
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'work', id: 'i1', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#ff8800' },
     { vaultId: 'global', id: 'i2', title: 'GitHub', username: 'me@a' }, // Global → no color
     { vaultId: 'evil', id: 'i3', title: 'X', username: 'x', badgeLabel: 'Evil', badgeColor: 'url(javascript:alert(1))' }, // unsafe → ignored
@@ -113,8 +123,8 @@ test('renderVaultPickerRows: jar-colored chicklet when badgeColor is present, ne
 
 test('renderVaultPickerRows: the widened (subdomain-match) badge still renders', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  const rows = renderVaultPickerRows(document, card, [
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', widened: true },
   ]);
   const badges = badgesOf(rows[0]);
@@ -127,8 +137,8 @@ test('renderVaultPickerRows: the widened (subdomain-match) badge still renders',
 
 test('renderVaultPickerRows: a separated, focusable "Manage passwords" footer is always present', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  const rows = renderVaultPickerRows(document, card, [
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
   ]);
   // The footer is the last returned focusable item (so roving reaches it by keyboard).
@@ -140,11 +150,11 @@ test('renderVaultPickerRows: a separated, focusable "Manage passwords" footer is
   assert.equal(manage.dataset.pickIndex, undefined); // NOT a pick row
   assert.equal(manage.children[0].textContent, 'Manage passwords');
 
-  // A divider separates it from the item rows: card = [row, separator, manage].
-  const sep = card.children[card.children.length - 2];
+  // A divider separates it from the item rows: list = [row, separator, manage].
+  const sep = list.children[list.children.length - 2];
   assert.equal(sep.attributes.get('role'), 'separator');
   assert.equal(sep.className, 'vault-picker-separator');
-  assert.equal(card.children[card.children.length - 1], manage);
+  assert.equal(list.children[list.children.length - 1], manage);
 
   // MANAGE_ID is the dispatch id the chrome routes to openVaultPage() — never a pick index.
   assert.equal(parsePickIndex(MANAGE_ID), null);
@@ -152,14 +162,14 @@ test('renderVaultPickerRows: a separated, focusable "Manage passwords" footer is
 
 test('renderVaultPickerRows: empty model → non-focusable note + the Manage footer only', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  const rows = renderVaultPickerRows(document, card, []);
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, []);
   // Even with no logins, the footer is present so the operator can reach the vault page.
   assert.equal(rows.length, 1);
   assert.equal(manageBtn(rows).dataset.manage, 'true');
   // card = [note, separator, manage].
-  assert.equal(card.children.length, 3);
-  const note = card.children[0];
+  assert.equal(list.children.length, 3);
+  const note = list.children[0];
   assert.equal(note.textContent, 'No saved logins for this site');
   assert.equal(note.attributes.get('aria-disabled'), 'true');
   // A note is not a menuitem → the roving items getter excludes it (no role).
@@ -168,19 +178,19 @@ test('renderVaultPickerRows: empty model → non-focusable note + the Manage foo
 
 test('renderVaultPickerRows replaces prior content on re-render', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  renderVaultPickerRows(document, card, [{ vaultId: 'global', id: 'i1', title: 'A', username: 'a' }]);
-  const rows = renderVaultPickerRows(document, card, [{ vaultId: 'global', id: 'i2', title: 'B', username: 'b' }]);
+  const { list } = buildVaultPickerCard(document);
+  renderVaultPickerRows(document, list, [{ vaultId: 'global', id: 'i1', title: 'A', username: 'a' }]);
+  const rows = renderVaultPickerRows(document, list, [{ vaultId: 'global', id: 'i2', title: 'B', username: 'b' }]);
   // One credential row + the footer; the card was fully rebuilt (row, separator, manage).
   assert.equal(rows.length, 2);
-  assert.equal(card.children.length, 3);
+  assert.equal(list.children.length, 3);
   assert.equal(titleOf(rows[0]).textContent, 'B');
 });
 
 test('row falls back to username, then "Login", when title is absent', () => {
   const document = createDocument();
-  const { card } = buildVaultPickerCard(document);
-  const rows = renderVaultPickerRows(document, card, [
+  const { list } = buildVaultPickerCard(document);
+  const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', username: 'only-user@a' },
     { vaultId: 'global', id: 'i2' },
   ]);
@@ -190,8 +200,8 @@ test('row falls back to username, then "Login", when title is absent', () => {
 
 test('NO password field anywhere in the rendered picker DOM', () => {
   const document = createDocument();
-  const { node, card } = buildVaultPickerCard(document);
-  renderVaultPickerRows(document, card, [
+  const { node, list } = buildVaultPickerCard(document);
+  renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
     { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#0a0' },
   ]);

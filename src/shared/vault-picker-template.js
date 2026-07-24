@@ -19,6 +19,7 @@
 // / TOTP secret is ever in the model, a row, or the reported selection.
 
 import { isSafeColor } from './safe-color.js';
+import { buildVaultSheetHeader } from './vault-sheet-header.js';
 
 // The selection id namespace. `id` (not `value`) carries the index — `value` is
 // main-side capped at 24 chars by sanitizeActivatedValue; `id` is not.
@@ -106,10 +107,13 @@ export function badgeLabelFor(item) {
 }
 
 /**
- * Build the vault-picker card DOM: a centered backdrop node + a role="menu" card
- * (roving list host). Rows are rendered separately by renderVaultPickerRows.
+ * Build the vault-picker card DOM: a centered backdrop node + a card with a fixed HEADER
+ * (title + close/X button) over a scrollable role="menu" `list` (the roving host). Rows are
+ * rendered into `list` separately by renderVaultPickerRows. The header gives the sheet a clear
+ * title and an OBVIOUS close affordance (the empty state previously offered only a non-obvious
+ * click-outside). menu-overlay.js wires the returned `close` button.
  * @param {Document} document
- * @returns {{ node: HTMLElement, card: HTMLElement }}
+ * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, close: HTMLButtonElement }}
  */
 export function buildVaultPickerCard(document) {
   const node = document.createElement('div');
@@ -118,12 +122,21 @@ export function buildVaultPickerCard(document) {
 
   const card = document.createElement('div');
   card.className = 'new-container-inner vault-picker-inner';
-  card.setAttribute('role', 'menu');
-  card.setAttribute('aria-label', 'Choose a saved login to fill');
-  card.tabIndex = -1;
   node.appendChild(card);
 
-  return { node, card };
+  const { header, close } = buildVaultSheetHeader(document, 'Saved logins');
+  card.appendChild(header);
+
+  // The roving list host carries the menu semantics (moved off the card so the fixed header
+  // is not a menuitem and does not scroll away). Rows render here via renderVaultPickerRows.
+  const list = document.createElement('div');
+  list.className = 'vault-picker-list';
+  list.setAttribute('role', 'menu');
+  list.setAttribute('aria-label', 'Choose a saved login to fill');
+  list.tabIndex = -1;
+  card.appendChild(list);
+
+  return { node, card, list, close };
 }
 
 /**
