@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "a11y": "node scripts/a11y-audit.mjs"
+    "a11y": "node scripts/a11y-audit.mjs",
+    "version": "node scripts/update-readme.mjs && git add README.md"
   },
   "engines": {
     "node": ">=22"
