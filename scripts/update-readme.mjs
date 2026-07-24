@@ -1,11 +1,14 @@
-// Regenerate the README download section for a given release version.
-// Usage: node scripts/update-readme.mjs <version|vX.Y.Z>
-// Run automatically by the release workflow on each v* tag.
+// Regenerate the README download section for a release version.
+// Usage: node scripts/update-readme.mjs [version|vX.Y.Z]
+// With no argument, uses the current package.json version — this is how the `version`
+// npm-lifecycle hook runs it during RELEASE-PREP, folding the download-link bump into the
+// same commit that bumps the version (see docs/RELEASING.md). No longer run by CI.
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const version = (process.argv[2] || '').replace(/^v/, '').trim();
+const argVersion = (process.argv[2] || '').replace(/^v/, '').trim();
+const version = argVersion || JSON.parse(readFileSync('package.json', 'utf8')).version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) {
-  console.error('usage: update-readme.mjs <version>  (e.g. 0.2.0)');
+  console.error('usage: update-readme.mjs [version]  (e.g. 0.2.0); with no arg, uses package.json version');
   process.exit(1);
 }
 
