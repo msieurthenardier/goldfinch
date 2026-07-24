@@ -316,8 +316,11 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   Defaults to a no-op so headless tests need no Electron.
  * @param {{
  *   unlockVaultWithAccessKey: (vaultId: string, secret: string) => Buffer,
+ *   openVaultWithAccessKey: (vaultId: string, secret: string) => { key: Buffer, keyId: string },
  *   openAllWithAdminKey: (privB64: string) => Map<string, Buffer>,
  *   readVaultItems: (vaultId: string, key: Buffer) => any[],
+ *   accessEnvelopeExists: (vaultId: string, keyId: string) => boolean,
+ *   adminPublicKey: () => string,
  * }} [opts.vaultStore]  the STATELESS vault-store methods (M12 F1 Leg 3) the
  *   per-session vault context dispatches to — never the human-lock singleton.
  *   Absent (engine-only tests) → vault ops degrade to "nothing unlocks".
@@ -473,8 +476,8 @@ function createMcpServer(opts = {}) {
     const boundVault = {
       unlock: (/** @type {string} */ accessKey) => vaultCtx.unlock(identity, accessKey),
       list: () => vaultCtx.list(),
-      totp: (/** @type {string} */ itemId) => vaultCtx.totp(itemId),
-      fill: (/** @type {{ wcId: number, itemId: string }} */ target) =>
+      totp: (/** @type {string} */ itemId, /** @type {string=} */ vaultId) => vaultCtx.totp(itemId, vaultId),
+      fill: (/** @type {{ wcId: number, itemId: string, vaultId?: string }} */ target) =>
         vaultCtx.fill(identity, target, scopeCtx || {}),
     };
     const registry = buildToolRegistry(

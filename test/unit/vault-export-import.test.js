@@ -61,6 +61,59 @@ async function makeSource() {
 }
 
 // ---------------------------------------------------------------------------
+// Import hardening (PR#112 finding 4) — bounded KDF schema + decrypted item array
+// ---------------------------------------------------------------------------
+
+test('validateImportedKdf: rejects absent fields (the silent Node-scrypt-default downgrade) and exhausting values', () => {
+  // The exact scenario the reviewer demonstrated: only { algo:'scrypt' } → Node defaults.
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt' }), (e) => e instanceof vs.VaultFormatError);
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 12, r: 8, p: 1 }), /maxmem/); // maxmem absent
+  assert.throws(() => vs.validateImportedKdf(null), (e) => e instanceof vs.VaultFormatError);
+  assert.throws(() => vs.validateImportedKdf({ algo: 'pbkdf2', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /algo/);
+  // Resource exhaustion: N far above the cap, or a non-power-of-two N.
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 30, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /N/);
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 100000, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }), /N/);
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 12, r: 8, p: 999, maxmem: 64 * 1024 * 1024 }), /p/);
+  // maxmem below scrypt's 128*N*r floor is refused up front (would otherwise throw deep in derive).
+  assert.throws(() => vs.validateImportedKdf({ algo: 'scrypt', N: 2 ** 17, r: 8, p: 1, maxmem: 1024 }), /maxmem/);
+  // The production params AND the fast test params both pass.
+  assert.doesNotThrow(() => vs.validateImportedKdf(vc.SCRYPT_PARAMS));
+  assert.doesNotThrow(() => vs.validateImportedKdf(FAST_SCRYPT));
+});
+
+test('validateImportedItems: rejects a non-array, a bad type, an absent id, and duplicate ids', () => {
+  assert.throws(() => vs.validateImportedItems({ not: 'an array' }), /item array/);
+  assert.throws(() => vs.validateImportedItems('nope'), /item array/);
+  assert.throws(() => vs.validateImportedItems([{ type: 'bogus', id: 'a' }]), /invalid type/);
+  assert.throws(() => vs.validateImportedItems([{ type: 'login' }]), /string id/);
+  assert.throws(() => vs.validateImportedItems([{ type: 'login', id: 'x' }, { type: 'login', id: 'x' }]), /duplicate item id/);
+  // A well-formed array passes and is returned unchanged.
+  const ok = [{ type: 'login', id: 'a' }, { type: 'note', id: 'b' }];
+  assert.equal(vs.validateImportedItems(ok), ok);
+});
+
+test('importVault rejects a bundle with downgraded/absent KDF params before persisting (finding 4)', async () => {
+  const src = await makeSource();
+  const bundle = roundTrip(src.store.exportVault('global'));
+  // Tamper: strip the KDF down to the algo tag (the Node-default-downgrade vector).
+  bundle.kdf = { algo: 'scrypt' };
+
+  const freshDir = tmpDir();
+  try {
+    const store = vs.load(freshDir, { scryptParams: FAST_SCRYPT, listJars: () => [] });
+    await assert.rejects(
+      () => store.importVault(bundle, { destinationTarget: 'global', secret: Buffer.from(MASTER, 'utf8'), secretKind: 'master' }),
+      (e) => e instanceof vs.VaultFormatError
+    );
+    // Nothing was written — the profile is still unset (fail-closed before persistence).
+    assert.equal(store.isSetUp(), false, 'a rejected import persists nothing');
+  } finally {
+    rm(freshDir);
+    rm(src.dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // exportVault — no password, ciphertext-only, all three mrk envelopes
 // ---------------------------------------------------------------------------
 

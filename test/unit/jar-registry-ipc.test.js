@@ -394,7 +394,7 @@ function fakeVaultStore(getEvents, { throws = false } = {}) {
   };
 }
 
-test('jars-remove calls deleteVault(removed.id) AFTER revokeJarKey and reports vaultRemoved:true', async (t) => {
+test('jars-remove deletes the vault FIRST (before freeing the id) and reports vaultRemoved:true (PR#112 finding 8)', async (t) => {
   let h;
   const vaultStore = fakeVaultStore(() => h.events);
   h = makeHarness(t, { getVaultStore: () => vaultStore });
@@ -402,40 +402,33 @@ test('jars-remove calls deleteVault(removed.id) AFTER revokeJarKey and reports v
 
   assert.equal(result.ok, true);
   assert.equal(result.vaultRemoved, true);
-  // The vault removal slots in AFTER revokeJarKey and BEFORE the two broadcasts.
+  // The vault is removed FIRST — the id is not freed until its secrets are gone —
+  // then the partition wipe, revoke, and the two broadcasts.
   assert.deepEqual(h.events.map((e) => e.fn), [
+    'deleteVault',
     'clearStorageData',
     'clearCache',
     'rerollSeed',
     'revokeJarKey',
-    'deleteVault',
     'broadcast',
     'broadcast'
   ]);
   assert.equal(h.events.find((e) => e.fn === 'deleteVault').jarId, 'personal');
 });
 
-test('jars-remove is FAIL-SOFT on a deleteVault throw: { ok:true, vaultRemoved:false }, revoke+broadcasts still run', async (t) => {
+test('jars-remove is FAIL-CLOSED on a deleteVault throw: { ok:false }, the jar is KEPT and nothing else runs (finding 8)', async (t) => {
   let h;
   const vaultStore = fakeVaultStore(() => h.events, { throws: true });
   h = makeHarness(t, { getVaultStore: () => vaultStore });
   const result = await h.invoke('jars-remove', { id: 'personal' });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.vaultRemoved, false);
-  // The throw is contained: revoke already ran, and both broadcasts still fire.
-  assert.deepEqual(h.events.map((e) => e.fn), [
-    'clearStorageData',
-    'clearCache',
-    'rerollSeed',
-    'revokeJarKey',
-    'deleteVault',
-    'broadcast',
-    'broadcast'
-  ]);
-  assert.equal(h.events[5].channel, 'settings-changed');
-  assert.equal(h.events[6].channel, 'jars-changed');
-  assert.deepEqual(h.jars.list().map((c) => c.id), ['work']); // registry removal stuck
+  // The delete is REFUSED — the identity is never reported deleted while its secrets remain.
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'vault-delete-failed');
+  // Only the (failed) vault-delete attempt ran; no wipe / revoke / broadcast.
+  assert.deepEqual(h.events.map((e) => e.fn), ['deleteVault']);
+  // The jar (and its reusable id/partition) is retained so secrets never orphan under it.
+  assert.deepEqual(h.jars.list().map((c) => c.id).sort(), ['personal', 'work']);
 });
 
 test('jars-remove without a vault-store injection skips the step (vaultRemoved:false), delete still succeeds', async (t) => {

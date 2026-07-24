@@ -545,13 +545,14 @@ interface GoldfinchInternalBridge {
   /** Pick a bundle file for a destination target: open + read + HOLD the bundle main-side (no sheet
    * opened). { ok, path }, { canceled }, or { error }. The page re-picks if the destination changes
    * (H1). */
-  pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; error?: string }>;
+  pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
   /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
-   * Continue). Bare trigger — no secret; the only payload is `overwrite` (the Replace-existing
-   * checkbox, M12 F5 HAT tail), bound onto the held record main-side. { ok }. */
-  beginImportUnlock(overwrite?: boolean): Promise<{ ok: boolean }>;
-  /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Always safe. { ok }. */
-  clearPendingImport(): Promise<{ ok: boolean }>;
+   * Continue). Bare trigger — no secret; the payload is `{ overwrite, handle }` (the Replace-existing
+   * checkbox + the pickImportFile importHandle, PR#112 finding 5), bound onto the held record main-side. { ok }. */
+  beginImportUnlock(overwrite?: boolean, handle?: string): Promise<{ ok: boolean }>;
+  /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Pass the pickImportFile
+   * importHandle so only this window's transaction is dropped (finding 5). Always safe. { ok }. */
+  clearPendingImport(handle?: string): Promise<{ ok: boolean }>;
   // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
   // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
   /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */

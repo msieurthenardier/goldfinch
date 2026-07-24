@@ -690,28 +690,34 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * secret sheet (that is beginImportUnlock, on submit). Resolves { ok, path } (held for the shown
      * destination), { canceled } (dialog dismissed), or { error } (unreadable). The page must
      * re-pick if the destination changes after a successful pick (H1: the held target is bound here).
+     * On { ok } the result carries an opaque `importHandle` (PR#112 finding 5) the page echoes on
+     * the mutating steps below — a per-transaction guard atop the per-window record keying.
      * @param {string} destinationTarget  `'global'` or a persistent jar id.
-     * @returns {Promise<{ ok?: boolean, path?: string, canceled?: boolean, error?: string }>}
+     * @returns {Promise<{ ok?: boolean, path?: string, importHandle?: string, canceled?: boolean, error?: string }>}
      */
     pickImportFile: (destinationTarget) => ipcRenderer.invoke('internal-vault-pick-import-file', destinationTarget),
 
     /**
      * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (consumed there
      * with the sheet's secret). Call on the Import modal's Continue submit, AFTER a successful
-     * pickImportFile. A BARE trigger — NO secret crosses here; the only payload is `overwrite`, the
-     * "Replace existing vault" checkbox's FINAL state (M12 F5 HAT tail), which main binds onto the
-     * held import record before the sheet opens. Resolves { ok }.
+     * pickImportFile. A BARE trigger — NO secret crosses here; the payload is `{ overwrite, handle }`:
+     * `overwrite` is the "Replace existing vault" checkbox's FINAL state (M12 F5 HAT tail), `handle`
+     * is the opaque token from pickImportFile (finding 5). Main binds them onto the held import record
+     * before the sheet opens. Resolves { ok }.
      * @param {boolean} [overwrite]  replace an existing vault at the destination (checkbox state).
+     * @param {string} [handle]  the importHandle from pickImportFile.
      * @returns {Promise<{ ok: boolean }>}
      */
-    beginImportUnlock: (overwrite) => ipcRenderer.invoke('internal-vault-begin-import-unlock', overwrite === true),
+    beginImportUnlock: (overwrite, handle) => ipcRenderer.invoke('internal-vault-begin-import-unlock', { overwrite: overwrite === true, handle }),
 
     /**
      * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop
-     * dismiss AFTER a pick so an abandoned bundle never lingers. Always safe to call. Resolves { ok }.
+     * dismiss AFTER a pick so an abandoned bundle never lingers. Always safe to call. Pass the
+     * pickImportFile `importHandle` (finding 5) so only THIS transaction's record is dropped.
+     * @param {string} [handle]  the importHandle from pickImportFile.
      * @returns {Promise<{ ok: boolean }>}
      */
-    clearPendingImport: () => ipcRenderer.invoke('internal-vault-clear-pending-import'),
+    clearPendingImport: (handle) => ipcRenderer.invoke('internal-vault-clear-pending-import', handle),
 
     // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
     // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever

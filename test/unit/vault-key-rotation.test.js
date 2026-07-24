@@ -313,3 +313,77 @@ test('recoverMasterPassword: accepts a Buffer new master password', async () => 
     rm(dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Concurrency + generation guard (PR#112 finding 3): serialized manager mutations
+// don't lose a slot update, and a lockNow() mid-derive never persists an envelope
+// wrapping a zeroized MRK.
+// ---------------------------------------------------------------------------
+
+test('concurrent rotateRecovery + rotateAdminKey both take effect (no lost slot update, finding 3)', async () => {
+  const dir = tmpDir();
+  try {
+    const store = makeStore(dir);
+    const { recoveryKeyDisplay } = await store.setup({ masterPassword: MASTER });
+
+    // Fire both manager mutations without awaiting between them — the mutex serializes them
+    // so neither reads the pre-write manager and clobbers the other's slot. Both step up with
+    // the SAME master (neither changes it), so both legitimately succeed.
+    const [newRecovery, newAdminPriv] = await Promise.all([
+      store.rotateRecovery({ masterPassword: MASTER }),
+      store.rotateAdminKey({ masterPassword: MASTER }),
+    ]);
+
+    // BOTH slot updates survived a cold reload: the NEW recovery unlocks AND the NEW admin key unlocks.
+    const s1 = makeStore(dir);
+    s1.unlockWithRecovery(newRecovery);
+    assert.equal(s1.isUnlocked(), true, 'the new recovery key works');
+
+    const s2 = makeStore(dir);
+    s2.unlockWithAdmin(newAdminPriv);
+    assert.equal(s2.isUnlocked(), true, 'the new admin key works');
+
+    // The OLD recovery no longer works (it was genuinely rotated, not clobbered back by admin's write).
+    const s3 = makeStore(dir);
+    assert.throws(() => s3.unlockWithRecovery(recoveryKeyDisplay), (e) => e instanceof vs.VaultAuthError);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('lockNow() during a rotateRecovery derive is caught: nothing is written, the recovery slot is intact (finding 3)', async () => {
+  const dir = tmpDir();
+  try {
+    // A store whose scrypt derive we can interleave a lockNow() into: wrap unwrapMaster so
+    // the lock fires WHILE the step-up derive is in flight (before the recovery wrap).
+    const store = makeStore(dir);
+    const { recoveryKeyDisplay } = await store.setup({ masterPassword: MASTER });
+    const managerBefore = readManager(dir);
+
+    // Monkeypatch the crypto step-up used inside rotateRecovery to lock mid-derive.
+    const realUnwrap = vc.unwrapMaster;
+    vc.unwrapMaster = async (...args) => {
+      const mrk = await realUnwrap(...args);
+      store.lockNow(); // zeroizes + bumps the generation while we're "inside" the op
+      return mrk;
+    };
+    try {
+      await assert.rejects(
+        () => store.rotateRecovery({ masterPassword: MASTER }),
+        (e) => e instanceof vs.VaultLockedError,
+        'a lock mid-derive is refused, not persisted'
+      );
+    } finally {
+      vc.unwrapMaster = realUnwrap;
+    }
+
+    // manager.json is byte-unchanged: no recovery slot wrapping a zeroized MRK was written.
+    assert.deepEqual(readManager(dir), managerBefore, 'the manager is untouched after the refused rotation');
+    // The ORIGINAL recovery key still unlocks (the slot was never corrupted).
+    const s = makeStore(dir);
+    s.unlockWithRecovery(recoveryKeyDisplay);
+    assert.equal(s.isUnlocked(), true, 'the original recovery key still works');
+  } finally {
+    rm(dir);
+  }
+});

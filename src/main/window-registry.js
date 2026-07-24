@@ -200,6 +200,26 @@ function createWindowRegistry() {
     return getWindowForChrome(wc) != null;
   }
 
+  /**
+   * "Is this the menu-overlay SHEET webContents of any window" (PR#112 finding 1).
+   * The sheet hosts the chrome-owned vault SECRET sheets (setup / unlock / step-up /
+   * import / one-time recovery-key + admin-key + access-key displays). It is a
+   * separate overlay webContents whose id `enumerateWindows` surfaces, so the
+   * automation resolver uses this to refuse it OUTRIGHT — at EVERY tier including
+   * admin — closing the keylog / secret-textContent-read vector.
+   * @param {any} wc
+   * @returns {boolean}
+   */
+  function isSheetContents(wc) {
+    if (!wc) return false;
+    for (const rec of records()) {
+      const view = rec && rec.sheet && typeof rec.sheet.getView === 'function' ? rec.sheet.getView() : null;
+      const swc = view && view.webContents;
+      if (swc && !(typeof swc.isDestroyed === 'function' && swc.isDestroyed()) && swc === wc) return true;
+    }
+    return false;
+  }
+
   return {
     create,
     get,
@@ -213,6 +233,7 @@ function createWindowRegistry() {
     getChromeForTab,
     isTabViewWcId,
     isChromeContents,
+    isSheetContents,
   };
 }
 

@@ -22,9 +22,19 @@
 //             asset (not an npm package) preserves goldfinch's zero-runtime-dep ethos.
 //   REFRESH:  the list drifts as registries change. Re-fetch periodically from the URL
 //             above (and ONLY that URL) and overwrite src/main/vault/public_suffix_list.dat;
-//             the parser rebuilds its index at module load. A stale list only ever fails
-//             CLOSED (an as-yet-unlisted new suffix resolves to null → exact fill), never
-//             open — so staleness is a UX gap, never a credential leak.
+//             the parser rebuilds its index (and re-reads the snapshot date) at module load.
+//
+// STALENESS IS NOT PURELY FAIL-CLOSED (corrected, PR#112 finding 10). An UNLISTED suffix
+// resolves to null → exact fill (safe). BUT a NEW PRIVATE SUFFIX introduced beneath an
+// already-known TLD is different: while the list predates it, two tenants under that new
+// multi-tenant platform (`alice.newplatform.example`, `bob.newplatform.example`) both
+// collapse to the same registrable domain (`newplatform.example`), WIDENING a
+// `matchMode:'registrable-domain'` credential across unrelated tenants — an OPEN failure a
+// stale list CAN cause. It is bounded here by an EXPIRY GATE: once the vendored snapshot is
+// older than PSL_MAX_AGE_MS, `registrableDomainSafe` returns null unconditionally, disabling
+// ALL registrable-domain widening (every fill degrades to exact origin) until the list is
+// refreshed. So staleness within the window is a small, bounded residual; staleness beyond
+// it is fail-closed by force. Keep the .dat current (the REFRESH note above).
 //
 // FAIL-CLOSED DEVIATION FROM THE STANDARD PSL ALGORITHM: the reference algorithm
 // applies an implicit `*` default rule when no rule matches (treating an unknown TLD's
@@ -106,7 +116,43 @@ function buildIndex(text) {
   return { rules, wildcards, exceptions };
 }
 
-const INDEX = buildIndex(fs.readFileSync(DAT_PATH, 'utf8'));
+const DAT_TEXT = fs.readFileSync(DAT_PATH, 'utf8');
+const INDEX = buildIndex(DAT_TEXT);
+
+// Expiry policy (PR#112 finding 10). The vendored .dat carries a `// VERSION:
+// YYYY-MM-DD_HH-MM-SS_UTC` header; parse its date so a too-old snapshot can disable
+// registrable-domain widening (a stale list can OPEN a cross-tenant leak via a newly
+// introduced private suffix — see the header). 365 days is the supported window; past
+// it, every widen falls back to exact origin until the .dat is refreshed.
+const PSL_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Parse the snapshot epoch (ms) from the .dat's `// VERSION: YYYY-MM-DD_…_UTC` header,
+ * or null when absent/unparseable (a list with no readable date is treated as NON-stale
+ * — it fails toward today's behavior, not toward disabling fills, since the header is
+ * ours to keep well-formed on refresh).
+ * @param {string} text
+ * @returns {number | null}
+ */
+function parseSnapshotMs(text) {
+  const m = /^\/\/\s*VERSION:\s*(\d{4})-(\d{2})-(\d{2})/m.exec(text);
+  if (!m) return null;
+  const ms = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+const SNAPSHOT_MS = parseSnapshotMs(DAT_TEXT);
+
+/**
+ * Is the vendored PSL snapshot older than the supported window as of `now`? An
+ * unparseable snapshot date is treated as NOT stale (see parseSnapshotMs). Exported
+ * so the fill layer / tests can reason about the expiry gate.
+ * @param {number} [now]  epoch ms (default Date.now()).
+ * @returns {boolean}
+ */
+function isPslStale(now = Date.now()) {
+  return SNAPSHOT_MS != null && (now - SNAPSHOT_MS) > PSL_MAX_AGE_MS;
+}
 
 /**
  * The registrable domain (eTLD+1) for a host, or **null** when it cannot be resolved
@@ -120,10 +166,16 @@ const INDEX = buildIndex(fs.readFileSync(DAT_PATH, 'utf8'));
  *   - otherwise the longest matching normal / wildcard (`*` = exactly one label) rule
  *     wins; if NONE match → null (no implicit `*` default — never widen an unknown).
  *
+ * EXPIRY GATE (finding 10): when the vendored snapshot is older than the supported
+ * window (`isPslStale(now)`), this returns null unconditionally — disabling every
+ * registrable-domain widen so an over-stale list cannot open a cross-tenant leak. The
+ * `now` is injectable for tests; the fill layer passes none (uses Date.now()).
  * @param {string} host  a hostname (as from URL.hostname — punycode for IDN); lowercased here.
+ * @param {{ now?: number }} [opts]
  * @returns {string | null}
  */
-function registrableDomainSafe(host) {
+function registrableDomainSafe(host, { now } = {}) {
+  if (isPslStale(now == null ? Date.now() : now)) return null; // over-stale → no widening (fail-closed)
   if (typeof host !== 'string') return null;
   let h = host.trim().toLowerCase();
   if (h.endsWith('.')) h = h.slice(0, -1); // absolute-form trailing dot
@@ -175,4 +227,4 @@ function registrableDomainSafe(host) {
   return labels.slice(n - (suffixLen + 1)).join('.');
 }
 
-module.exports = { registrableDomainSafe };
+module.exports = { registrableDomainSafe, isPslStale, PSL_MAX_AGE_MS, SNAPSHOT_MS };

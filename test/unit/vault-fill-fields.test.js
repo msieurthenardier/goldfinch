@@ -9,7 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findLoginFields, findAllLoginFields, fillLoginForm } = require('../../src/preload/vault-fill-fields');
+const { findLoginFields, findAllLoginFields, fillLoginForm, isLivePasswordField } = require('../../src/preload/vault-fill-fields');
 
 class FakeInput {
   // `type` omitted models a no-type input (a real <input>.type is 'text').
@@ -214,6 +214,55 @@ test('findAllLoginFields: two password fields in ONE form (signup/confirm) → t
 test('findAllLoginFields: null/garbage doc → empty array (pure, no throw)', () => {
   assert.deepEqual(findAllLoginFields(null), []);
   assert.deepEqual(findAllLoginFields({}), []);
+});
+
+// --- targetPassword binding (PR#112 finding 9): the clicked form's field wins ---
+
+test('targetPassword fills the SECOND login form, not the document-first (finding 9)', () => {
+  const userA = new FakeInput('text', 'user-a');
+  const passA = new FakeInput('password', 'pass-a');
+  const formA = new FakeForm([userA, passA]);
+  const userB = new FakeInput('email', 'user-b');
+  const passB = new FakeInput('password', 'pass-b');
+  const formB = new FakeForm([userB, passB]);
+  const doc = makeDoc([formA, formB]);
+
+  // The gesture targeted form B's password field — fill THAT form, not the first.
+  const result = fillLoginForm(doc, { username: 'bob@example.com', password: 'hunter2' }, passB);
+
+  assert.deepEqual(result, { filled: true });
+  assert.equal(passB.value, 'hunter2', 'the clicked form B is filled');
+  assert.equal(userB.value, 'bob@example.com');
+  assert.equal(passA.value, '', 'the document-first form A is NOT filled');
+  assert.equal(userA.value, '');
+});
+
+test('a null / stale targetPassword falls back to the first-field heuristic (MCP path)', () => {
+  const userA = new FakeInput('text', 'user-a');
+  const passA = new FakeInput('password', 'pass-a');
+  const passB = new FakeInput('password', 'pass-b');
+  const doc = makeDoc([new FakeForm([userA, passA]), new FakeForm([passB])]);
+
+  // Null target → first field (unchanged MCP behavior).
+  fillLoginForm(doc, { username: 'alice', password: 'pw' }, null);
+  assert.equal(passA.value, 'pw', 'null target → first password field');
+
+  // A detached/foreign field not in the doc → treated as stale → first field.
+  passA.value = '';
+  const foreign = new FakeInput('password', 'foreign');
+  fillLoginForm(doc, { username: 'alice', password: 'pw2' }, foreign);
+  assert.equal(passA.value, 'pw2', 'foreign target is not present in doc → falls back to first');
+  assert.equal(foreign.value, '', 'the foreign field is never filled');
+});
+
+test('isLivePasswordField: true only for a password input present in the doc', () => {
+  const pass = new FakeInput('password', 'p');
+  const text = new FakeInput('text', 't');
+  const doc = makeDoc([new FakeForm([text, pass])]);
+  assert.equal(isLivePasswordField(doc, pass), true);
+  assert.equal(isLivePasswordField(doc, text), false, 'a text input is not a live password field');
+  assert.equal(isLivePasswordField(doc, new FakeInput('password', 'x')), false, 'a detached field is not live');
+  assert.equal(isLivePasswordField(null, pass), false);
 });
 
 test('top-frame guard: never fills inside an iframe (window.top !== window)', () => {

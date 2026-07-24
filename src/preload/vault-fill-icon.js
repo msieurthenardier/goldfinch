@@ -96,6 +96,7 @@ function isFieldVisible(field) {
  * @param {any} deps.isTrustedGet  captured Event.prototype.isTrusted getter (or null)
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} deps.findAllLoginFields
  * @param {() => boolean} deps.getEnabled  true iff top-frame AND vault-eligible
+ * @param {() => number} [deps.now]  clock for the gesture-target TTL (default Date.now).
  */
 function createVaultIconController({
   document: doc,
@@ -104,7 +105,46 @@ function createVaultIconController({
   isTrustedGet,
   findAllLoginFields,
   getEnabled,
+  now,
 }) {
+  const clock = typeof now === 'function' ? now : Date.now;
+  // The password field the user's LAST trusted lock-icon gesture targeted, bound
+  // for the round-trip to the chrome-owned picker and back (PR#112 finding 9). The
+  // fill is delivered on `vault-fill`; the preload consumes THIS to fill the clicked
+  // form's field rather than the document's first. SINGLE-USE (cleared on consume)
+  // and TTL-bounded so a stale binding can never redirect a much-later / unrelated
+  // fill — an expired/absent binding falls back to the first-field heuristic. Held
+  // guest-side because contextIsolation is off (the guest already round-trips the
+  // gesture): a main-side token would be no more trustworthy and adds no security —
+  // this is fill-target INTEGRITY for the user's own page, not a cross-process secret.
+  /** @type {{ password: any, expiresAt: number } | null} */
+  let pendingFillTarget = null;
+  const FILL_TARGET_TTL_MS = 60 * 1000;
+
+  // Resolve the password field to fill for a focused anchor (username OR password
+  // of a detected login form): find the entry the anchor belongs to and take its
+  // password field. Null when the anchor is not part of any detected login entry.
+  function passwordForAnchor(anchor) {
+    if (!anchor) return null;
+    for (const entry of findAllLoginFields(doc)) {
+      if (entry.password === anchor || entry.username === anchor) return entry.password || null;
+    }
+    return null;
+  }
+
+  /**
+   * Consume the pending gesture fill-target (single-use, TTL-checked). Returns the
+   * bound password field when still valid, else null (the fill falls back to the
+   * first-field heuristic). Always clears the binding.
+   * @returns {any}
+   */
+  function consumeFillTarget() {
+    const t = pendingFillTarget;
+    pendingFillTarget = null;
+    if (!t) return null;
+    if (clock() > t.expiresAt) return null;
+    return t.password;
+  }
   // Every injected icon node is tracked so the MEDIA observer can filter out
   // icon-only DOM/style mutations before scheduleScan — otherwise appending an
   // icon (childList) and positioning it via `.style` would re-fire the media
@@ -131,6 +171,12 @@ function createVaultIconController({
 
   function onIconClick(e) {
     if (!readTrusted(e)) return; // scripted iconEl.click() / synthetic dispatch → ignored
+    // Bind the CLICKED form's password field for the fill round-trip (finding 9) so the
+    // eventual `vault-fill` lands on THIS form, not the document's first. The icon's anchor
+    // (`_anchor`, set at placement) is the focused username/password field it decorates.
+    const anchor = (e && e.currentTarget && e.currentTarget._anchor) || focusedField;
+    const password = passwordForAnchor(anchor);
+    pendingFillTarget = password ? { password, expiresAt: clock() + FILL_TARGET_TTL_MS } : null;
     try {
       ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
     } catch {
@@ -289,6 +335,7 @@ function createVaultIconController({
     isIconOnlyMutation,
     handleFocusIn,
     handleFocusOut,
+    consumeFillTarget,
   };
 }
 

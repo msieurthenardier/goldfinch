@@ -292,7 +292,11 @@ ipcRenderer.on('rescan-media', () => send());
 // and webContents.send targets the main frame, so a cross-origin iframe is never
 // filled. page JS cannot register a rogue 'vault-fill' listener — the guest runs
 // nodeIntegration:false, so it has no ipcRenderer (DD7).
-ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred));
+// A gesture-initiated fill lands on the CLICKED form's field (finding 9): consume the
+// single-use, TTL-bound target the icon controller recorded on the trusted click. A
+// non-gesture fill (MCP automation) has no pending target → consumeFillTarget() is null
+// → fillLoginForm falls back to the first-password-field heuristic (unchanged behavior).
+ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred, vaultIcons.consumeFillTarget()));
 
 // Vault capture (M12 F2 Leg 4, DD7): a capturing `submit` listener on detected login
 // forms (top-frame + vault-eligible only — the same gate as the lock icon; burner /

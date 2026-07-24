@@ -196,22 +196,31 @@ function registerBrowserIpc({
   //     the operator dismisses the modal after a pick. Always safe to call.
   //
   // registerInternalHandler rejects any non-internal sender before each body runs.
+  // PR#112 finding 5: the held import record is keyed by the OWNING CHROME id, so window A's
+  // pick can never be read/mutated/cleared/consumed by window B. Every step resolves the same
+  // window key via chromeForTab(event.sender.id) — the internal page tab's owning chrome — which
+  // is also the identity the secret sheet submits under. The opaque `handle` (returned by the
+  // pick) is echoed by the page on the mutating steps as a per-transaction guard within the window.
   if (vaultImportBegin) {
-    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (_event, destinationTarget) => {
-      return await vaultImportBegin(destinationTarget);
+    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (event, destinationTarget) => {
+      return await vaultImportBegin(destinationTarget, chromeForTab(event.sender.id)?.id);
     });
   }
-  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event, overwrite) => {
+  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event, payload) => {
     // M12 F5 HAT tail (review MEDIUM-3): bind `overwrite` from the modal's Replace-existing
     // checkbox FINAL state at the Continue step — BEFORE the sheet opens — so the held import
     // record carries the operator's explicit replace decision. Strict-boolean coerced main-side.
-    setPendingVaultImportOverwrite?.(overwrite === true);
+    // The page now passes `{ overwrite, handle }`; a bare boolean is tolerated for back-compat.
+    const overwrite = payload && typeof payload === 'object' ? payload.overwrite : payload;
+    const handle = payload && typeof payload === 'object' ? payload.handle : undefined;
+    const chromeId = chromeForTab(event.sender.id)?.id;
+    setPendingVaultImportOverwrite?.(chromeId, overwrite === true, handle);
     chromeForTab(event.sender.id)?.send('vault-request-import');
     return { ok: true };
   });
   if (clearPendingVaultImport) {
-    registerInternalHandler(ipcMain, 'internal-vault-clear-pending-import', () => {
-      clearPendingVaultImport();
+    registerInternalHandler(ipcMain, 'internal-vault-clear-pending-import', (event, handle) => {
+      clearPendingVaultImport(chromeForTab(event.sender.id)?.id, handle);
       return { ok: true };
     });
   }

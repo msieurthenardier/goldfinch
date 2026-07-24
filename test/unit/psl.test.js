@@ -10,7 +10,28 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { registrableDomainSafe: rd } = require('../../src/main/vault/psl');
+const { registrableDomainSafe: rd, isPslStale, SNAPSHOT_MS, PSL_MAX_AGE_MS } = require('../../src/main/vault/psl');
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// --- Expiry gate (PR#112 finding 10): a too-stale snapshot disables widening -----
+
+test('the vendored snapshot exposes a parseable date and is not stale near its own date', () => {
+  assert.equal(typeof SNAPSHOT_MS, 'number', 'the // VERSION: header date parsed');
+  assert.equal(isPslStale(SNAPSHOT_MS + 10 * DAY_MS), false, 'fresh within the window');
+  assert.equal(isPslStale(SNAPSHOT_MS + PSL_MAX_AGE_MS - DAY_MS), false, 'just inside the window');
+  assert.equal(isPslStale(SNAPSHOT_MS + PSL_MAX_AGE_MS + DAY_MS), true, 'just past the window is stale');
+});
+
+test('registrableDomainSafe returns null (no widening) once the snapshot is over-stale', () => {
+  const fresh = SNAPSHOT_MS + 10 * DAY_MS;
+  const stale = SNAPSHOT_MS + PSL_MAX_AGE_MS + DAY_MS;
+  // Fresh: normal resolution.
+  assert.equal(rd('accounts.example.com', { now: fresh }), 'example.com');
+  // Over-stale: EVERY host resolves to null → the fill layer degrades to exact origin.
+  assert.equal(rd('accounts.example.com', { now: stale }), null);
+  assert.equal(rd('example.co.uk', { now: stale }), null);
+});
 
 test('normal registrable domains: (suffix) + one label', () => {
   assert.equal(rd('example.com'), 'example.com');

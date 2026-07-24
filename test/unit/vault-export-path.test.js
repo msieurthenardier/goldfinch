@@ -74,6 +74,43 @@ test('rejects when the target itself is an existing directory', () => {
   } finally { rm(dir); }
 });
 
+test('rejects an existing regular file by default → reason exists (no silent clobber, PR#112 finding 7)', () => {
+  const dir = tmpDir();
+  try {
+    // Simulate a typed path that names an existing writable .json (e.g. a project package.json).
+    const p = path.join(dir, 'package.json');
+    fs.writeFileSync(p, '{"name":"victim"}', 'utf8');
+    assert.deepEqual(validateExportPath(p), { ok: false, reason: 'exists' });
+    // The file is untouched by the validator.
+    assert.equal(fs.readFileSync(p, 'utf8'), '{"name":"victim"}');
+  } finally { rm(dir); }
+});
+
+test('allowOverwrite:true permits an existing regular file', () => {
+  const dir = tmpDir();
+  try {
+    const p = path.join(dir, 'old.gfvaultbundle');
+    fs.writeFileSync(p, 'stale', 'utf8');
+    const res = validateExportPath(p, { allowOverwrite: true });
+    assert.equal(res.ok, true);
+    assert.equal(res.path, path.resolve(p));
+  } finally { rm(dir); }
+});
+
+test('rejects an existing symlink even with allowOverwrite (never write through a redirect)', () => {
+  const dir = tmpDir();
+  try {
+    const realTarget = path.join(dir, 'real-secret.json');
+    fs.writeFileSync(realTarget, 'secret', 'utf8');
+    const link = path.join(dir, 'link.gfvaultbundle');
+    fs.symlinkSync(realTarget, link);
+    assert.deepEqual(validateExportPath(link), { ok: false, reason: 'symlink' });
+    assert.deepEqual(validateExportPath(link, { allowOverwrite: true }), { ok: false, reason: 'symlink' });
+    // The symlink's target is never written through.
+    assert.equal(fs.readFileSync(realTarget, 'utf8'), 'secret');
+  } finally { rm(dir); }
+});
+
 test('the resolved path collapses traversal to a canonical absolute path when the parent exists', () => {
   const dir = tmpDir();
   try {

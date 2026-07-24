@@ -57,8 +57,11 @@ function originOf(url) {
  * @typedef {Object} VaultContextDeps
  * @property {{
  *   unlockVaultWithAccessKey: (vaultId: string, secret: string) => Buffer,
+ *   openVaultWithAccessKey: (vaultId: string, secret: string) => { key: Buffer, keyId: string },
  *   openAllWithAdminKey: (privB64: string) => Map<string, Buffer>,
  *   readVaultItems: (vaultId: string, key: Buffer) => any[],
+ *   accessEnvelopeExists: (vaultId: string, keyId: string) => boolean,
+ *   adminPublicKey: () => string,
  * }} vaultStore  the STATELESS vault-store methods (no MRK / no singleton).
  * @property {(arg: { wcId: number, credential: any }) => any} fillDelegate  the
  *   main→preload fill effect (Leg 4 injects the real one; Leg 3 tests inject a fake).
@@ -90,8 +93,8 @@ function originOf(url) {
  * @returns {{
  *   unlock: (identity: string, accessKey: string) => { unlocked: string[] },
  *   list: () => Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>,
- *   totp: (itemId: string) => { id: string, code: string|null },
- *   fill: (identity: string, target: { wcId: number, itemId: string }, engineDeps?: FillEngineDeps) => { filled: boolean, id?: string, reason?: string },
+ *   totp: (itemId: string, vaultId?: string) => { id: string, code: string|null },
+ *   fill: (identity: string, target: { wcId: number, itemId: string, vaultId?: string }, engineDeps?: FillEngineDeps) => { filled: boolean, id?: string, reason?: string },
  *   touch: () => void,
  *   zeroize: () => void,
  * }}
@@ -110,6 +113,14 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   const keys = new Map();
   /** @type {Set<string>} unlocked vault ids (mirrors keys.keys()). */
   const unlockedIds = new Set();
+  // Per-vault GRANT that opened each key (PR#112 finding 2): `{ mode:'access', keyId }`
+  // for a per-jar access key, or `{ mode:'admin', adminPub }` for the admin key. Revalidated
+  // per operation so a REVOKED access key (its envelope deleted) or a ROTATED admin key (the
+  // manager's admin pubkey changed) drops the affected live keys IMMEDIATELY — not only at
+  // teardown/idle. Without this, revocation/rotation prevents only FUTURE unlocks; an already
+  // -unlocked session kept filling/listing/TOTP-ing until it happened to expire.
+  /** @type {Map<string, { mode: 'access', keyId: string } | { mode: 'admin', adminPub: string }>} */
+  const grants = new Map();
   /** @type {any} */
   let timer = null;
 
@@ -131,6 +142,55 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     }
     keys.clear();
     unlockedIds.clear();
+    grants.clear();
+  }
+
+  /**
+   * Drop a single vault's session key (zeroize + forget its grant). Used by revalidate()
+   * when a grant no longer holds, and shared with setKey's re-unlock path.
+   * @param {string} vaultId
+   */
+  function dropVault(vaultId) {
+    const buf = keys.get(vaultId);
+    if (buf) { try { buf.fill(0); } catch { /* ignore */ } }
+    keys.delete(vaultId);
+    unlockedIds.delete(vaultId);
+    grants.delete(vaultId);
+  }
+
+  /**
+   * Revalidate every unlocked vault against its GRANT (PR#112 finding 2), dropping any
+   * whose authorization no longer holds ON DISK:
+   *   - `access` grant → the opening `access` envelope must still exist (a revoked key
+   *     had its envelope deleted → drop);
+   *   - `admin` grant → the manager's admin pubkey must be UNCHANGED (a rotateAdminKey
+   *     overwrote it → the session's admin-derived keys are stale → drop).
+   * Any read error (deleted vault / gone manager) is treated as "no longer authorized" →
+   * drop. Called at the top of every vault op so revocation/rotation takes effect on the
+   * NEXT operation, never lingering until teardown/idle.
+   */
+  function revalidate() {
+    for (const vaultId of [...unlockedIds]) {
+      const grant = grants.get(vaultId);
+      let stillValid;
+      try {
+        if (grant && grant.mode === 'access') {
+          // A store without the probe (a minimal test fake) cannot be revalidated → keep.
+          stillValid = typeof vaultStore.accessEnvelopeExists === 'function'
+            ? vaultStore.accessEnvelopeExists(vaultId, grant.keyId)
+            : true;
+        } else if (grant && grant.mode === 'admin') {
+          stillValid = typeof vaultStore.adminPublicKey === 'function'
+            ? vaultStore.adminPublicKey() === grant.adminPub
+            : true;
+        } else {
+          stillValid = true; // no grant recorded (older path) → nothing to revalidate against.
+        }
+      } catch {
+        stillValid = false; // manager/vault unreadable → fail-closed, drop the key.
+      }
+      if (!stillValid) dropVault(vaultId);
+    }
   }
 
   /**
@@ -153,13 +213,14 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    * @param {string} vaultId
    * @param {Buffer} key
    */
-  function setKey(vaultId, key) {
+  function setKey(vaultId, key, grant) {
     const prev = keys.get(vaultId);
     if (prev && prev !== key) {
       try { prev.fill(0); } catch { /* ignore */ }
     }
     keys.set(vaultId, key);
     unlockedIds.add(vaultId);
+    if (grant) grants.set(vaultId, grant); // finding 2: remember what authorized this key.
   }
 
   /**
@@ -179,13 +240,23 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     try {
       if (identity === 'admin') {
         const map = vaultStore.openAllWithAdminKey(accessKey);
+        // Capture the admin pubkey ONCE as the grant marker (finding 2): a rotateAdminKey
+        // overwrites it, so per-op revalidation drops these admin-derived keys after rotation.
+        const adminPub = typeof vaultStore.adminPublicKey === 'function' ? vaultStore.adminPublicKey() : null;
         for (const [vaultId, key] of map) {
-          setKey(vaultId, key);
+          setKey(vaultId, key, { mode: 'admin', adminPub });
           opened.push(vaultId);
         }
       } else {
-        const key = vaultStore.unlockVaultWithAccessKey(identity, accessKey);
-        setKey(identity, key);
+        // Record the opening access-envelope keyId as the grant (finding 2): revoking THAT
+        // key (envelope deletion) drops this session's key on its next op. A minimal fake
+        // store without openVaultWithAccessKey falls back to the keyless unlock (no grant).
+        if (typeof vaultStore.openVaultWithAccessKey === 'function') {
+          const { key, keyId } = vaultStore.openVaultWithAccessKey(identity, accessKey);
+          setKey(identity, key, { mode: 'access', keyId });
+        } else {
+          setKey(identity, vaultStore.unlockVaultWithAccessKey(identity, accessKey));
+        }
         opened.push(identity);
       }
     } catch {
@@ -224,6 +295,7 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    */
   function list() {
     touch();
+    revalidate(); // finding 2: drop any key whose grant (access envelope / admin pubkey) no longer holds.
     const rows = [];
     for (const { vaultId, item } of unlockedItems()) {
       if (!item || item.type !== 'login') continue;
@@ -240,20 +312,49 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   }
 
   /**
-   * Return ONLY the current TOTP code for a named unlocked item — never the
-   * secret. `code` is null when the item is absent / not unlocked / has no TOTP.
+   * Resolve a login/TOTP item by its COMPOSITE identity across this session's
+   * unlocked vaults (PR#112 finding 6). Item ids are unique only WITHIN a vault —
+   * importing the same bundle into two destinations makes `id` collide across
+   * vaults — so a bare `itemId` is ambiguous in a multi-vault (e.g. admin) session.
+   *   - `vaultId` supplied → match the exact (vaultId, itemId) pair (unambiguous).
+   *   - `vaultId` absent + exactly one vault holds the id → that item (back-compat
+   *     for single-vault sessions).
+   *   - `vaultId` absent + the id is in >1 unlocked vault → `{ ambiguous: true }`,
+   *     so the caller refuses rather than silently filling the WRONG credential.
    * @param {string} itemId
+   * @param {string} [vaultId]
+   * @param {(item: any) => boolean} [accept]  extra predicate (e.g. type === 'login').
+   * @returns {{ item: any, vaultId?: string, ambiguous?: boolean }}
    */
-  function totp(itemId) {
-    touch();
-    for (const { item } of unlockedItems()) {
-      if (item && item.id === itemId && item.totp) {
-        const params = vc.parseOtpauth(item.totp);
-        const code = vc.totp(params.secret, params, now());
-        return { id: itemId, code };
-      }
+  function resolveItem(itemId, vaultId, accept) {
+    /** @type {{ item: any, vaultId?: string, ambiguous?: boolean } | null} */
+    let found = null;
+    for (const { vaultId: vid, item } of unlockedItems()) {
+      if (!item || item.id !== itemId) continue;
+      if (accept && !accept(item)) continue;
+      if (vaultId != null && vid !== vaultId) continue;
+      if (found) return { item: null, ambiguous: true };
+      found = { item, vaultId: vid };
     }
-    return { id: itemId, code: null };
+    return found || { item: null };
+  }
+
+  /**
+   * Return ONLY the current TOTP code for a named unlocked item — never the
+   * secret. `code` is null when the item is absent / not unlocked / has no TOTP /
+   * ambiguous across vaults without a `vaultId` (finding 6). When resolved, echoes
+   * the item's `vaultId` so the caller can disambiguate a subsequent fill.
+   * @param {string} itemId
+   * @param {string} [vaultId]  optional composite qualifier (from vaultList).
+   */
+  function totp(itemId, vaultId) {
+    touch();
+    revalidate(); // finding 2: revoked/rotated grants drop their keys before this reads them.
+    const hit = resolveItem(itemId, vaultId, (item) => !!item.totp);
+    if (!hit.item) return { id: itemId, code: null };
+    const params = vc.parseOtpauth(hit.item.totp);
+    const code = vc.totp(params.secret, params, now());
+    return { id: itemId, code };
   }
 
   /**
@@ -304,23 +405,27 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
    *   7. return `{ filled: true, id, origin }` — the credential/password is NEVER
    *      returned; `origin` is the resolved (non-secret) top-frame origin.
    * @param {string} identity  jarId | 'admin'
-   * @param {{ wcId: number, itemId: string }} target
+   * @param {{ wcId: number, itemId: string, vaultId?: string }} target  `vaultId`
+   *   disambiguates a duplicated item id across unlocked vaults (finding 6).
    * @param {FillEngineDeps} [engineDeps]
    * @returns {{ filled: boolean, id?: string, origin?: string, reason?: string }}
    */
-  function fill(identity, { wcId, itemId }, engineDeps = {}) {
+  function fill(identity, { wcId, itemId, vaultId }, engineDeps = {}) {
     touch();
+    revalidate(); // finding 2: a revoked access key / rotated admin key drops its key BEFORE a fill.
     if (keys.size === 0) return { filled: false, reason: 'locked' };
 
     // (3) reachability + membership — throws automation: out-of-jar on a foreign tab.
     const wc = resolveTarget(identity, wcId, engineDeps);
     const tabOrigin = originOf(typeof wc.getURL === 'function' ? wc.getURL() : '');
 
-    // (4) find the login item by id in an unlocked reachable vault.
-    let found = null;
-    for (const { item } of unlockedItems()) {
-      if (item && item.id === itemId && item.type === 'login') { found = item; break; }
-    }
+    // (4) resolve the login item by its COMPOSITE identity (finding 6). A bare
+    // itemId duplicated across unlocked vaults (same bundle imported twice) is
+    // AMBIGUOUS — refuse rather than fill the wrong vault's credential; the caller
+    // passes `vaultId` (from vaultList) to select the intended one.
+    const hit = resolveItem(itemId, vaultId, (item) => item.type === 'login');
+    if (hit.ambiguous) return { filled: false, reason: 'ambiguous' };
+    const found = hit.item;
     if (!found) return { filled: false, reason: 'no-match' };
 
     // (5) top-frame origin match — exact by default, widened to the registrable domain

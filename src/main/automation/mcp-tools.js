@@ -647,16 +647,19 @@ const VAULT_TOOLS = [
   {
     name: 'vaultTotp',
     description: 'Return ONLY the current TOTP code for a named unlocked item: { id, code }. ' +
-      'code is null when the item is absent, not in an unlocked vault, or has no TOTP. The TOTP secret itself is never returned.',
+      'code is null when the item is absent, not in an unlocked vault, has no TOTP, or is AMBIGUOUS — an item id can repeat ' +
+      'across vaults (e.g. the same bundle imported twice), so in a multi-vault session pass the item\'s vaultId (from vaultList) ' +
+      'to select the intended one. The TOTP secret itself is never returned.',
     inputSchema: {
       type: 'object',
       properties: {
         itemId: { type: 'string', description: 'the vault item id (from vaultList) whose current TOTP code to compute' },
+        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
       },
       required: ['itemId'],
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.totp(args.itemId),
+    call: (engine, args, vault) => vault.totp(args.itemId, args.vaultId),
   },
   {
     name: 'vaultFill',
@@ -665,17 +668,20 @@ const VAULT_TOOLS = [
       'against the item, then performs the fill via Goldfinch\'s internal fill effect. ' +
       'The credential/password is NEVER returned — the result is { filled: true, id, origin } on success (origin = the resolved top-frame ' +
       'origin the fill matched against; non-secret, no credential/password), or a NORMAL { filled: false, reason } ' +
-      '(reason "locked" / "no-match" / "origin-mismatch") when nothing was filled. Requires wcId.',
+      '(reason "locked" / "no-match" / "origin-mismatch" / "ambiguous") when nothing was filled. "ambiguous" means the item id ' +
+      'exists in more than one unlocked vault (e.g. the same bundle imported twice) — pass the intended vaultId (from vaultList) ' +
+      'to disambiguate. Requires wcId.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab to fill into' },
         itemId: { type: 'string', description: 'the login item id (from vaultList) to fill' },
+        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
       },
       required: ['wcId', 'itemId'],
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId }),
+    call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
   },
 ];
 

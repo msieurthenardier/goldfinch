@@ -153,6 +153,8 @@ function makeImportHarness({ beginResult } = {}) {
   const wrapped = new Map();
   const sends = [];
   const beginCalls = [];
+  const beginChromeIds = [];
+  const clearArgs = [];
   const overwriteCalls = [];
   let clearCalls = 0;
   const chrome = { send: (channel, payload) => sends.push([channel, payload]) };
@@ -176,14 +178,15 @@ function makeImportHarness({ beginResult } = {}) {
     hostnameOf: (u) => new URL(u).hostname,
     shields: { active: () => false },
     getVaultHuman: () => ({}),
-    vaultImportBegin: async (destinationTarget) => {
+    vaultImportBegin: async (destinationTarget, chromeId) => {
       beginCalls.push(destinationTarget);
+      beginChromeIds.push(chromeId); // finding 5: the owning-chrome id is threaded in.
       return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle' };
     },
-    clearPendingVaultImport: () => { clearCalls += 1; },
-    setPendingVaultImportOverwrite: (v) => { overwriteCalls.push(v); },
+    clearPendingVaultImport: (chromeId, handle) => { clearCalls += 1; clearArgs.push([chromeId, handle]); },
+    setPendingVaultImportOverwrite: (chromeId, overwrite) => { overwriteCalls.push(overwrite); },
   });
-  return { wrapped, sends, beginCalls, overwriteCalls, clearCallsCount: () => clearCalls };
+  return { wrapped, sends, beginCalls, beginChromeIds, clearArgs, overwriteCalls, clearCallsCount: () => clearCalls };
 }
 
 test('pickImportFile is GATED on vaultImportBegin; clearPendingImport on clearPendingVaultImport; beginImportUnlock is unconditional', () => {

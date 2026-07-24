@@ -228,7 +228,12 @@ function registerOverlayIpc({
       const kind = secretKind === 'recovery' ? 'recovery' : 'master';
       const buf = Buffer.from(secret);
       try {
-        const res = await vaultImport(buf, kind); // { ok, reason? }
+        // PR#112 finding 5: consume THIS window's held import record. The secret sheet is its OWN
+        // overlay webContents (distinct from the chrome), so we key by the window's CHROME contents
+        // id — chromeForAttachment(rec.win) — which is the SAME object the page's pick step keyed
+        // under (chromeForTab(pageTabId)). A window can only ever import its own picked bundle.
+        const chromeId = chromeForAttachment(rec.win)?.id;
+        const res = await vaultImport(chromeId, buf, kind); // { ok, reason? }
         if (res && res.ok) {
           rec.sheet.closeMenuOverlay('activated', current.token);
           return { ok: true };

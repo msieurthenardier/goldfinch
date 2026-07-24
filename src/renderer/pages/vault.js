@@ -553,6 +553,7 @@ function init() {
   function openImportModal(vaults, opts) {
     const fresh = !!(opts && opts.fresh);
     let picked = false;
+    let importHandle = null;      // opaque per-transaction token from pickImportFile (PR#112 finding 5)
     let collision = false;        // the current destination already holds a vault (never in fresh mode)
     let replaceConfirmed = false; // the "Replace the existing vault" checkbox state (unused in fresh mode)
     const body = el('div', 'vault-modal-form');
@@ -625,11 +626,13 @@ function init() {
       Promise.resolve(bridge.pickImportFile(pickTarget())).then((res) => {
         if (res && res.ok) {
           picked = true;
+          importHandle = res.importHandle || null; // finding 5: bind this transaction's token.
           pathInput.value = res.path || '';
           handle.setStatus('');
           updateContinueEnabled();
         } else if (res && res.error) {
           picked = false;
+          importHandle = null;
           pathInput.value = '';
           handle.setStatus('Could not read that bundle file.');
           updateContinueEnabled();
@@ -649,7 +652,8 @@ function init() {
           picked = false;
           pathInput.value = '';
           handle.setStatus('');
-          Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+          Promise.resolve(bridge.clearPendingImport(importHandle)).catch(() => {});
+          importHandle = null;
         }
         probeCollision(select.value);
       });
@@ -664,12 +668,12 @@ function init() {
         if (!picked || (collision && !replaceConfirmed)) return;
         // Bind overwrite from the checkbox FINAL state at Continue (review MEDIUM-3). Fresh mode
         // never collides → overwrite is always false (replaceConfirmed stays false).
-        Promise.resolve(bridge.beginImportUnlock(replaceConfirmed)).catch(() => {});
+        Promise.resolve(bridge.beginImportUnlock(replaceConfirmed, importHandle)).catch(() => {});
         handle.close();
       },
       onCancel: () => {
         // L1: drop any held bundle when the operator dismisses the modal.
-        if (picked) Promise.resolve(bridge.clearPendingImport()).catch(() => {});
+        if (picked) Promise.resolve(bridge.clearPendingImport(importHandle)).catch(() => {});
       },
     });
 

@@ -242,6 +242,49 @@ test('click: a trusted gesture sends the BARE guest-vault-gesture IPC; a scripte
   assert.deepEqual(sends[0].payload, {}, 'bare payload — main derives the wcId from the sender');
 });
 
+test('a trusted gesture binds the clicked form\'s password as the single-use, TTL-bound fill target (PR#112 finding 9)', () => {
+  const userA = new FakeInput('text', 'user-a');
+  const passA = new FakeInput('password', 'pass-a');
+  const userB = new FakeInput('email', 'user-b');
+  const passB = new FakeInput('password', 'pass-b');
+  const doc = makeDoc([new FakeForm([userA, passA]), new FakeForm([userB, passB])]);
+  const sends = [];
+  let clock = 1000;
+  const ctl = createVaultIconController({
+    document: doc,
+    window: { scrollX: 0, scrollY: 0 },
+    ipcRenderer: { send: (channel, payload) => sends.push({ channel, payload }) },
+    isTrustedGet: { call: (e) => !!e.isTrusted },
+    findAllLoginFields,
+    getEnabled: () => true,
+    now: () => clock,
+  });
+
+  // Nothing gestured yet → no bound target.
+  assert.equal(ctl.consumeFillTarget(), null, 'no gesture → no target');
+
+  // Focus form B's username, click its icon → bind form B's PASSWORD field.
+  ctl.handleFocusIn({ target: userB });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+  assert.equal(sends.at(-1).channel, 'guest-vault-gesture');
+
+  // The consumed target is form B's password (not the document-first passA).
+  assert.equal(ctl.consumeFillTarget(), passB, 'the clicked form B password is bound');
+  // Single-use: a second consume is null.
+  assert.equal(ctl.consumeFillTarget(), null, 'the binding is single-use');
+
+  // A scripted click binds nothing (isTrusted:false ignored).
+  ctl.handleFocusIn({ target: passA });
+  bodyIcon(doc).dispatch('click', { isTrusted: false });
+  assert.equal(ctl.consumeFillTarget(), null, 'a scripted click never binds a target');
+
+  // TTL: a gesture whose binding has aged past the window is dropped → first-field fallback.
+  ctl.handleFocusIn({ target: passA });
+  bodyIcon(doc).dispatch('click', { isTrusted: true });
+  clock += 61 * 1000; // past the 60s TTL
+  assert.equal(ctl.consumeFillTarget(), null, 'an expired binding is not returned');
+});
+
 test('contextmenu: a trusted right-click sends the BARE guest-vault-icon-menu IPC and suppresses defaults; scripted is ignored', () => {
   const user = new FakeInput('text', 'username');
   const pass = new FakeInput('password', 'password');

@@ -3,6 +3,7 @@
 const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto'); // node:crypto — randomUUID for the per-window import handle (PR#112 finding 5).
 const { pathToFileURL } = require('url');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
@@ -606,10 +607,21 @@ function broadcastVaultLockState() {
 // dialog + read), then the chrome-owned vault-import-unlock sheet collects the secret. The
 // bundle (ciphertext) + the destination target are held HERE between those two steps — never
 // on the page, never on the sheet — and consumed by the `menu-overlay:vault-import` handler's
-// `vaultImport` delegate. A later request overwrites a stale pending record (ciphertext-only,
-// low risk); a successful import clears it.
-/** @type {{ bundle: any, destinationTarget: string, overwrite: boolean } | null} */
-let _pendingVaultImport = null;
+// `vaultImport` delegate.
+//
+// PER-OWNING-WINDOW (PR#112 finding 5): previously ONE process-global record, so in a
+// multi-window session window A's pick could be overwritten by window B, and A's Continue /
+// secret submit / overwrite-flag / cancel then acted on B's record — a cross-window
+// destination/overwrite confusion. The record is now keyed by the OWNING CHROME webContents
+// id (the common identity of both the page tab — via chromeForTab(tabId) — and the secret
+// sheet, which renders IN that chrome). Every step (pick, bind-overwrite, forward, clear,
+// consume) resolves ONLY its own window's record, so windows can never touch each other's
+// import. Each record also carries an opaque `handle` minted at pick; the page echoes it on
+// the mutating steps (finding 5), a per-transaction guard against a stale record within one
+// window. The sheet submit is additionally bound by the sheet's existing open-token.
+// The window-scoped held-import store (extracted + unit-tested in vault/pending-imports.js).
+const { createPendingImportStore } = require('./vault/pending-imports');
+const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID());
 
 // Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
 // The vault page's Export modal calls this to choose a location up front, then binds
@@ -637,14 +649,20 @@ async function vaultPickSavePath(target) {
 // { canceled }.
 async function vaultSaveBundleToFile(bundle, savePath) {
   let filePath = typeof savePath === 'string' && savePath ? savePath : null;
+  // A validated typed path is written EXCLUSIVELY (flag:'wx') so it can never truncate an
+  // existing file even across the validate→write TOCTOU (PR#112 finding 7); the dialog-picked
+  // path (else branch) keeps the default overwrite flag — the native picker already confirmed it.
+  let exclusive = false;
   if (filePath) {
     // M12 F5 HAT tail: a renderer-supplied path (the page Export modal now honors a typed/pasted
-    // path) is UNTRUSTED — validate before the direct write (canonical extension + existing,
-    // writable parent dir; not a directory) so this is never a write-anywhere primitive. The
-    // no-path branch below stays dialog-bound (Electron's showSaveDialog is the trusted picker).
+    // path) is UNTRUSTED — validate before the direct write (canonical extension; not a symlink /
+    // directory; must NOT already exist; existing, writable parent dir) so this is never a
+    // write-anywhere / clobber-anywhere primitive. The no-path branch below stays dialog-bound
+    // (Electron's showSaveDialog is the trusted picker, with its own overwrite confirmation).
     const v = validateExportPath(filePath);
     if (!v.ok) return { ok: false, error: 'invalid-path', reason: v.reason };
     filePath = v.path;
+    exclusive = true;
   } else {
     const { canceled, filePath: picked } = await dialog.showSaveDialog({
       title: 'Export vault bundle',
@@ -658,8 +676,13 @@ async function vaultSaveBundleToFile(bundle, savePath) {
     filePath = picked;
   }
   try {
-    fs.writeFileSync(filePath, JSON.stringify(bundle), 'utf8');
-  } catch {
+    // Exclusive create for a typed path (finding 7): 'wx' throws EEXIST rather than truncating a
+    // file that appeared between validation and write. The dialog path keeps the default overwrite.
+    fs.writeFileSync(filePath, JSON.stringify(bundle), exclusive ? { encoding: 'utf8', flag: 'wx' } : 'utf8');
+  } catch (err) {
+    if (exclusive && err && err.code === 'EEXIST') {
+      return { ok: false, error: 'invalid-path', reason: 'exists' };
+    }
     return { ok: false, error: 'write-failed' };
   }
   return { ok: true, path: filePath };
@@ -671,10 +694,12 @@ async function vaultSaveBundleToFile(bundle, savePath) {
 // and gate its Continue button on a successful pick FOR the shown destination (H1: the page
 // re-picks if the destination changes). The destination target is validated as a non-empty string;
 // the bundle's deeper crypto validation happens in importVault at unlock time (loud there).
-async function vaultImportBeginFromFile(destinationTarget) {
+async function vaultImportBeginFromFile(destinationTarget, chromeId) {
   if (typeof destinationTarget !== 'string' || destinationTarget.length === 0) {
     return { error: 'bad-target' };
   }
+  // No resolvable owning window → refuse (finding 5): a record must belong to a window.
+  if (typeof chromeId !== 'number') return { error: 'no-window' };
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: 'Import vault bundle',
     properties: ['openFile'],
@@ -686,41 +711,53 @@ async function vaultImportBeginFromFile(destinationTarget) {
   if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
   let bundle;
   try {
+    // Cap the bundle file at 16 MiB before parsing (PR#112 finding 4): a real vault
+    // bundle is tiny; a huge file is a resource-exhaustion / malformed input, refused
+    // before JSON.parse allocates it. (MAX_IMPORT_ITEMS bounds the decrypted count too.)
+    const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;
+    const stat = fs.statSync(filePaths[0]);
+    if (stat.size > MAX_BUNDLE_BYTES) return { error: 'too-large' };
     bundle = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
   } catch {
     return { error: 'unreadable' };
   }
   // overwrite starts FALSE; it is bound at the modal's Continue step from the "Replace existing
   // vault" checkbox (setPendingVaultImportOverwrite), never here at file-pick time (review MEDIUM-3).
-  _pendingVaultImport = { bundle, destinationTarget, overwrite: false };
-  return { ok: true, path: filePaths[0] };
+  // The store mints + returns the opaque handle (finding 5); keyed by the OWNING CHROME id so no
+  // other window can see or mutate this record.
+  const handle = _pendingVaultImports.hold(chromeId, { bundle, destinationTarget });
+  return { ok: true, path: filePaths[0], importHandle: handle };
 }
 
 // Bind the import's `overwrite` from the modal's "Replace existing vault" checkbox FINAL state, at
 // the Continue step (not at file-pick). Called by the internal-vault-begin-import-unlock forward
-// just before the chrome sheet opens (M12 F5 HAT tail, review MEDIUM-3). A no-op when nothing is
-// held (a canceled/unread pick leaves no record). Coerced to a strict boolean — overwrite DESTROYS
+// just before the chrome sheet opens (M12 F5 HAT tail, review MEDIUM-3). Scoped to THIS window's
+// record (finding 5) and matched against the opaque handle when one is supplied — a no-op when the
+// window holds no record or the handle mismatches. Coerced to a strict boolean — overwrite DESTROYS
 // a vault, so only an explicit true enables it.
-function setPendingVaultImportOverwrite(overwrite) {
-  if (_pendingVaultImport) _pendingVaultImport.overwrite = overwrite === true;
+function setPendingVaultImportOverwrite(chromeId, overwrite, handle) {
+  _pendingVaultImports.setOverwrite(chromeId, overwrite === true, handle);
 }
 
-// Clear the held import record (L1). The page's Import modal calls this on Cancel / Escape /
-// backdrop-dismiss AFTER a successful file pick so a bundle held for a modal the operator
-// abandoned never lingers to be consumed by a later unrelated unlock. Always safe to call
-// (a no-op when nothing is held).
-function clearPendingVaultImport() {
-  _pendingVaultImport = null;
+// Clear THIS window's held import record (L1, finding 5). The page's Import modal calls this on
+// Cancel / Escape / backdrop-dismiss AFTER a successful file pick so a bundle held for an abandoned
+// modal never lingers. Scoped to the owning window (and its handle when supplied) so one window can
+// never clear another's transaction. Always safe to call (a no-op when this window holds nothing).
+function clearPendingVaultImport(chromeId, handle) {
+  _pendingVaultImports.clear(chromeId, handle);
 }
 
-// The `menu-overlay:vault-import` delegate: consume the held { bundle, destinationTarget } and
-// run importVault with the sheet's secret Buffer + secretKind. Follows the vaultUnlock pattern
+// The `menu-overlay:vault-import` delegate: consume THIS window's held { bundle, destinationTarget }
+// (finding 5 — keyed by the owning chrome id, so a window can only ever import its OWN picked bundle)
+// and run importVault with the sheet's secret Buffer + secretKind. Follows the vaultUnlock pattern
 // (VaultAuthError → { ok:false } so a wrong secret re-prompts the sheet, nothing written); other
 // errors propagate (the handler still dual-zeroizes). On success the record is consumed and the
 // lock-state is broadcast (the fresh-profile adopt already fires onUnlock; the existing-profile
 // re-key nudges the page to re-render its now-populated vault).
-async function vaultImportFromSheet(buf, secretKind) {
-  const pending = _pendingVaultImport;
+async function vaultImportFromSheet(chromeId, buf, secretKind) {
+  // Peek (don't consume yet): a wrong secret must leave THIS window's record intact so the sheet
+  // re-prompts without forcing a re-pick — the record is consumed only on a successful import.
+  const pending = _pendingVaultImports.peek(chromeId);
   if (!pending) return { ok: false };
   try {
     await getVaultStore().importVault(pending.bundle, {
@@ -732,7 +769,7 @@ async function vaultImportFromSheet(buf, secretKind) {
       // throws VaultAuthError before any write, so overwrite can never bypass secret entry (DD5).
       overwrite: pending.overwrite === true,
     });
-    _pendingVaultImport = null;
+    _pendingVaultImports.clear(chromeId); // consume on success only.
     broadcastVaultLockState();
     return { ok: true };
   } catch (e) {
@@ -794,6 +831,10 @@ async function startMcpServerInstance() {
       // must classify 'chrome', not 'guest').
       isTabViewWcId: (id) => registry.isTabViewWcId(id),
       isChromeContents: (wc) => registry.isChromeContents(wc),
+      // PR#112 finding 1: the vault SECRET SHEET's webContents is refused by resolveContents at
+      // EVERY tier (admin included), so no automation op can keylog / read the master password or
+      // the one-time recovery/access/admin keys rendered on it.
+      isSheetContents: (wc) => registry.isSheetContents(wc),
       // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
       // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
       // a forgotten injection restores S1 with NO test failure anywhere, which is why
@@ -1280,7 +1321,7 @@ registerOverlayIpc({
   // vaultUnlock pattern (VaultAuthError → { ok:false }) so a wrong secret re-prompts and nothing
   // is written; the held { bundle, destinationTarget } is consumed here. The handler owns the
   // Buffer copy + dual-zeroize; this delegate only runs the store op.
-  vaultImport: (buf, secretKind) => vaultImportFromSheet(buf, secretKind),
+  vaultImport: (chromeId, buf, secretKind) => vaultImportFromSheet(chromeId, buf, secretKind),
   // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
   // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
   // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-

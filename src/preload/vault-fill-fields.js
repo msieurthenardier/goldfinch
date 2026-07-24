@@ -99,20 +99,47 @@ function setFieldValue(field, value) {
 }
 
 /**
+ * Is `field` one of the password inputs CURRENTLY present in `doc`? A gesture
+ * target is validated against the live document immediately before filling
+ * (PR#112 finding 9) so a stale / detached / spoofed node can never be filled —
+ * only a real, still-present password field the icon was anchored to.
+ * @param {any} doc
+ * @param {any} field
+ * @returns {boolean}
+ */
+function isLivePasswordField(doc, field) {
+  if (!field || !doc || typeof doc.querySelectorAll !== 'function') return false;
+  const pwList = doc.querySelectorAll('input[type=password]');
+  if (!pwList || !pwList.length) return false;
+  return Array.from(pwList).includes(field);
+}
+
+/**
  * Fill the TOP-FRAME login form on `doc` with `cred` ({ username, password }).
  * Top-frame only: never fills inside an iframe (defense in depth atop the
  * main-frame-only `webContents.send`). No password field → no-op. Returns a
  * small status object — NEVER the credential.
+ *
+ * `targetPassword` (PR#112 finding 9): when the fill was initiated by a lock-icon
+ * gesture, the guest binds the CLICKED field to the round-trip and passes it here.
+ * If it is still a live password field in `doc`, that specific form's fields are
+ * filled — NOT the document's first password field (the pre-fix behavior that
+ * mis-filled the wrong form on a multi-login page). A null / stale / foreign target
+ * falls back to the first-password-field heuristic, which is exactly the MCP
+ * automation path's behavior (origin-matched top-frame login, no gesture).
  * @param {any} doc
  * @param {{ username?: string|null, password?: string|null } | null | undefined} cred
+ * @param {any} [targetPassword]  the gesture-bound password field, validated live here.
  * @returns {{ filled: boolean }}
  */
-function fillLoginForm(doc, cred) {
+function fillLoginForm(doc, cred, targetPassword) {
   // `typeof window` is 'undefined' under the headless unit test (which drives
   // this pure helper directly); in the guest main world it is the page window.
   if (typeof window !== 'undefined' && window.top !== window) return { filled: false };
-  const fields = findLoginFields(doc);
-  if (!fields) return { filled: false };
+  const fields = isLivePasswordField(doc, targetPassword)
+    ? resolveLoginEntry(targetPassword) // the clicked form's { username, password, form }
+    : findLoginFields(doc);             // first-password-field fallback (MCP / no-gesture)
+  if (!fields || !fields.password) return { filled: false };
   if (fields.username && cred && cred.username != null) {
     setFieldValue(fields.username, String(cred.username));
   }
@@ -122,4 +149,4 @@ function fillLoginForm(doc, cred) {
   return { filled: true };
 }
 
-module.exports = { findLoginFields, findAllLoginFields, fillLoginForm };
+module.exports = { findLoginFields, findAllLoginFields, fillLoginForm, isLivePasswordField };

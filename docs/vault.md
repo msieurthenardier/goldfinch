@@ -237,10 +237,18 @@ a **fail-closed** matcher (`src/shared/origin-match.js`):
   unlisted suffix can never widen a fill. It honors both the ICANN and PRIVATE sections, so
   distinct multi-tenant tenants (`*.github.io`, `s3.amazonaws.com`, …) resolve to distinct
   registrable domains and never share a credential. IP literals resolve to `null`.
-- A stale list only ever fails **closed** (a not-yet-listed suffix → exact fill), never open,
-  so staleness is a UX gap, not a credential leak. The custom PSL is used precisely because a
-  curated tracker-classification suffix subset would over-collapse unlisted suffixes and leak
-  credentials across siblings.
+- **Staleness is *mostly* — but not purely — fail-closed** (corrected, PR#112 finding 10). A
+  not-yet-listed suffix resolves to `null` → exact fill (safe). But a **new private
+  (multi-tenant) suffix introduced beneath an already-known TLD**, while the vendored `.dat`
+  predates it, over-collapses two tenants (`alice.newplatform.example`,
+  `bob.newplatform.example`) to the same registrable domain and **widens a credential across
+  them** — an *open* failure a stale list can cause. This is bounded by an **expiry gate**:
+  once the snapshot (its `// VERSION:` header date) is older than `PSL_MAX_AGE_MS` (365 days),
+  `registrableDomainSafe` returns `null` unconditionally, disabling *all* registrable-domain
+  widening (every fill degrades to exact origin) until the `.dat` is refreshed. Keep the list
+  current; staleness within the window is a small bounded residual, staleness beyond it is
+  fail-closed by force. The custom PSL is still used because a curated tracker-classification
+  suffix subset would over-collapse *unlisted* suffixes far more readily and leak across siblings.
 - **Only the picker and fill paths widen** (`widen: true`); **credential capture stays
   exact** — a subdomain submit must never disposition as an update to an eTLD+1 item.
 
@@ -326,6 +334,15 @@ no plaintext key and adding no fourth recovery route.
 - **Web content.** No vault secret is readable from a web page except the single credential a
   fill injects — and master-equivalent secrets never enter any page DOM (they route through
   the chrome-owned sheet).
+- **Automation reach into the secret sheet (PR#112 finding 1).** The chrome-owned menu-overlay
+  **sheet** — where the master password is typed and one-time recovery/access/admin keys render
+  as `textContent` — is refused by the automation resolver at **every tier, admin included**
+  (`resolveContents` throws `automation: secret-sheet` when the target is any window's sheet
+  webContents). Its wcId is still *discoverable* via `enumerateWindows` (`sheetWcId`), but no
+  automation op — `evaluate`, `readDom`, `readAxTree`, `click`, `typeText` — can resolve it, so
+  a script cannot install an input listener on it or read the secrets it renders. (Whole-window
+  **pixel** capture still shows whatever is visibly on screen, exactly as a human sees it — that
+  is the accepted limit below, not a covert channel into a hidden sheet.)
 
 **What it does NOT protect against (out of scope, stated plainly):**
 

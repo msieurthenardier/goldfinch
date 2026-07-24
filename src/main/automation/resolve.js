@@ -72,7 +72,7 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through
  *                    for callers that immediately classify the result)
@@ -95,7 +95,7 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isChromeContents }) {
+function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isChromeContents, isSheetContents }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -104,6 +104,16 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
 
   if (!wc || wc.isDestroyed?.()) {
     throw new Error('automation: no-such-contents — wcId ' + wcId + ' is not a live webContents');
+  }
+
+  // PR#112 finding 1 — ABSOLUTE, NOT lifted by admin (unlike the two relaxations below).
+  // The menu-overlay SHEET hosts the chrome-owned vault secret sheets (the master password is
+  // typed there; one-time recovery/access/admin keys render there as textContent). Its wcId is
+  // discoverable via enumerateWindows, and admin's allowInternal otherwise lets `evaluate` run
+  // arbitrary JS on it — a keylogger / secret-reader with no vault-admin key. Refuse the sheet's
+  // webContents at EVERY tier so no automation op (evaluate/DOM/AX/input/click) can ever reach it.
+  if (typeof isSheetContents === 'function' && isSheetContents(wc)) {
+    throw new Error('automation: secret-sheet — wcId ' + wcId + ' is a chrome-owned secret/overlay sheet and is never automatable (any tier)');
   }
 
   // DD5 load-bearing guard: reject internal-session contents at resolve-time.

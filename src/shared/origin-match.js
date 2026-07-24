@@ -16,6 +16,14 @@
 // origin that will not URL-parse, an opaque/empty host, a scheme mismatch, or a PSL miss
 // on EITHER host — degrades to the exact byte-for-byte origin string compare. A caller
 // that omits `widen` (or passes false) gets today's exact behavior unchanged.
+//
+// KNOWN RESIDUAL (PR#112 finding 10): registrable-domain widening is only as correct as
+// the vendored PSL snapshot. A NEW private (multi-tenant) suffix introduced beneath an
+// already-known TLD, while the .dat predates it, can over-collapse two tenants to one
+// registrable domain and WIDEN a credential across them — this matcher is NOT fail-closed
+// against that specific case. It is bounded by psl.js's EXPIRY GATE (an over-stale snapshot
+// makes registrableDomainSafe return null → this degrades to exact) and by keeping the
+// .dat current. Widening is an explicit per-credential opt-in; exact origin is the default.
 
 const { registrableDomainSafe } = require('../main/vault/psl.js');
 

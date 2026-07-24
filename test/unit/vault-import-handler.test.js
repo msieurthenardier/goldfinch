@@ -28,7 +28,7 @@ function makeHarness({ importResult, importThrows } = {}) {
   const ipcMain = makeIpc();
   const closeCalls = [];
   const chromeSends = [];
-  const sheetSender = { isDestroyed: () => false };
+  const sheetSender = { id: 42, isDestroyed: () => false }; // the sheet's OWN overlay webContents
   const win = { id: 1 };
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
@@ -37,11 +37,15 @@ function makeHarness({ importResult, importThrows } = {}) {
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
-  const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
+  // The window's CHROME contents (distinct from the sheet's own webContents); its id is the
+  // per-window import key (finding 5) — chromeForAttachment(rec.win) resolves to this.
+  const chrome = { id: 77, send: (channel, payload) => chromeSends.push([channel, payload]) };
 
-  const captured = { buffer: null, isBuffer: null, bytes: null, secretKind: undefined, called: 0 };
-  const vaultImport = async (buf, secretKind) => {
+  const captured = { chromeId: undefined, buffer: null, isBuffer: null, bytes: null, secretKind: undefined, called: 0 };
+  // finding 5: the delegate now receives the owning-chrome id FIRST (the sheet's own sender id).
+  const vaultImport = async (chromeId, buf, secretKind) => {
     captured.called += 1;
+    captured.chromeId = chromeId;
     captured.buffer = buf;
     captured.isBuffer = Buffer.isBuffer(buf);
     captured.bytes = Buffer.from(buf).toString('utf8'); // snapshot before zeroize
@@ -80,6 +84,7 @@ test('valid import → { ok:true }; Buffer + secretKind hand-off; BOTH arrays ze
   const res = await handler({ sender: sheetSender }, { token: 7, secret, secretKind: 'master' });
 
   assert.deepEqual(res, { ok: true });
+  assert.equal(captured.chromeId, 77, 'the delegate is scoped to the window CHROME id, not the sheet wc (finding 5)');
   assert.equal(captured.isBuffer, true, 'import received a Buffer, not a Uint8Array');
   assert.equal(captured.bytes, 'correct horse battery staple');
   assert.equal(captured.secretKind, 'master', 'the NON-SECRET secretKind is forwarded');

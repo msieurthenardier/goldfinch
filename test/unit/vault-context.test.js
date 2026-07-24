@@ -134,6 +134,96 @@ test('jar session with its per-jar access key reaches ONLY its own vault (cannot
   }
 });
 
+test('duplicate item id across vaults: fill/totp refuse to guess; vaultId disambiguates (PR#112 finding 6)', async () => {
+  const dir = tmpDir();
+  const setup = makeStore(dir);
+  const { adminPrivateKeyB64 } = await setup.setup({ masterPassword: MASTER });
+  // The SAME item id in two vaults (as an identical bundle imported into both would produce),
+  // each bound to a DIFFERENT origin + TOTP.
+  setup.saveItem('global', { id: 'dup', type: 'login', title: 'G', origin: 'https://global.example', username: 'guser', password: 'gpass', totp: TOTP_SECRET });
+  setup.saveItem('work', { id: 'dup', type: 'login', title: 'W', origin: 'https://work.example', username: 'wuser', password: 'wpass', totp: TOTP_SECRET });
+  setup.lockNow();
+  try {
+    const store = makeStore(dir);
+    const fill = makeFill();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    ctx.unlock('admin', adminPrivateKeyB64);
+    const world = makeWorld(); // wcId 10 = work.example, origin-matching the work 'dup'
+
+    // Bare itemId is AMBIGUOUS across the two unlocked vaults → refuse (never guess).
+    assert.deepEqual(
+      ctx.fill('admin', { wcId: 10, itemId: 'dup' }, fillDeps(world)),
+      { filled: false, reason: 'ambiguous' }
+    );
+    assert.equal(fill.calls.length, 0, 'no credential handed to the delegate on an ambiguous fill');
+    // totp is likewise fail-closed (no wrong code) without a vaultId.
+    assert.deepEqual(ctx.totp('dup'), { id: 'dup', code: null });
+
+    // vaultId selects the intended one: work's 'dup' matches the work.example tab origin.
+    const ok = ctx.fill('admin', { wcId: 10, itemId: 'dup', vaultId: 'work' }, fillDeps(world));
+    assert.deepEqual(ok, { filled: true, id: 'dup', origin: 'https://work.example' });
+    assert.deepEqual(fill.calls[0].credential, { username: 'wuser', password: 'wpass' }, 'the WORK credential is filled, not global');
+
+    // Selecting global's 'dup' at the work tab is a normal origin-mismatch (never the wrong fill).
+    const mism = ctx.fill('admin', { wcId: 10, itemId: 'dup', vaultId: 'global' }, fillDeps(world));
+    assert.equal(mism.filled, false);
+    assert.equal(mism.reason, 'origin-mismatch');
+
+    // totp with a vaultId resolves unambiguously.
+    assert.equal(typeof ctx.totp('dup', 'work').code, 'string');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('revoking a live session\'s access key drops its vault on the NEXT op (PR#112 finding 2)', async () => {
+  const dir = tmpDir();
+  const setup = makeStore(dir);
+  await setup.setup({ masterPassword: MASTER });
+  setup.saveItem('work', { id: 'w1', type: 'login', title: 'W', origin: 'https://work.example', username: 'wuser', password: 'wpass', totp: TOTP_SECRET });
+  const { secret, keyId } = await setup.mintAccessKey('work', { masterPassword: MASTER });
+  try {
+    const store = makeStore(dir); // the automation-side stateless reader
+    const fill = makeFill();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
+    assert.deepEqual(ctx.unlock('work', secret).unlocked, ['work']);
+    assert.deepEqual(ctx.list().map((r) => r.id), ['w1'], 'the live session lists its item while the key is valid');
+
+    // Revoke the access key (its `access` envelope is deleted) via the still-unlocked setup store.
+    assert.equal(setup.revokeAccessKey('work', keyId), true);
+
+    // The live session drops the key on its next op — list/totp/fill all go dead immediately.
+    assert.deepEqual(ctx.list(), [], 'the revoked session no longer lists (not lingering to teardown/idle)');
+    assert.deepEqual(ctx.totp('w1'), { id: 'w1', code: null });
+    const world = makeWorld();
+    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)), { filled: false, reason: 'locked' });
+    assert.equal(fill.calls.length, 0, 'no fill after revocation');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('rotating the admin key drops a live ADMIN session on the NEXT op (finding 2)', async () => {
+  const dir = tmpDir();
+  const setup = makeStore(dir);
+  const { adminPrivateKeyB64 } = await setup.setup({ masterPassword: MASTER });
+  setup.saveItem('global', { id: 'g1', type: 'login', title: 'G', origin: 'https://global.example', username: 'guser', password: 'gpass' });
+  try {
+    const store = makeStore(dir);
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
+    ctx.unlock('admin', adminPrivateKeyB64);
+    assert.ok(ctx.list().length >= 1, 'the admin session lists items while the admin key is valid');
+
+    // Rotate the admin key — manager.adminPublicKeyB64 is overwritten.
+    await setup.rotateAdminKey({ masterPassword: MASTER });
+
+    // The live admin session (keyed to the OLD admin pubkey) is dropped on its next op.
+    assert.deepEqual(ctx.list(), [], 'the rotated-out admin session no longer lists');
+  } finally {
+    rm(dir);
+  }
+});
+
 test('admin session with the admin private key reaches EVERY vault (seal-to-all)', async () => {
   const fx = await buildFixture();
   try {

@@ -175,6 +175,105 @@ function isNonEmptySecret(secret) {
 }
 
 // ---------------------------------------------------------------------------
+// Import hardening (PR#112 finding 4). An imported bundle is attacker-shaped
+// until proven otherwise: its `kdf` is used to derive the master-unwrap key AND,
+// on a fresh-profile adopt, PERSISTED as the new profile's KDF; its `vault`
+// decrypts to items later mapped/encrypted. Two structural gates below run BEFORE
+// any persistence:
+//   • bounded scrypt-param schema — reject absent fields (which silently collapse
+//     to Node's weak scrypt defaults, e.g. N=16384) AND reject resource-exhausting
+//     values (a huge N/r/p/maxmem the importer would then run);
+//   • decrypted item-array validation — a bundle whose ciphertext decrypts to a
+//     non-array / malformed items must never reach `items.map` / re-encryption.
+// ---------------------------------------------------------------------------
+
+// Absolute structural bounds for an imported scrypt KDF. The floor rejects the
+// degenerate/absent-field cases (a missing N/r/p defaults to Node's weak scrypt
+// params); the ceilings bound CPU (N, p) and memory (maxmem) so a crafted bundle
+// cannot pin the importer deriving a pathologically expensive key. Chosen to admit
+// both the production params (N=2^17) and the deliberately-fast test params
+// (N=2^12) while excluding downgrade-to-nothing and exhaustion.
+const KDF_N_MIN = 2 ** 12;
+const KDF_N_MAX = 2 ** 21;
+const KDF_R_MAX = 32;
+const KDF_P_MAX = 16;
+const KDF_MAXMEM_CAP = 512 * 1024 * 1024; // 512 MiB hard ceiling.
+
+/** @param {number} n @returns {boolean} positive power of two. */
+function isPowerOfTwo(n) {
+  return Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0;
+}
+
+/**
+ * Validate an imported bundle's scrypt KDF against an EXACT bounded schema. Throws
+ * VaultFormatError on any deviation (absent/extra-typed field, out-of-range value,
+ * or a maxmem too small for scrypt's `128*N*r` floor — which would otherwise throw
+ * deep in the derive). Accepting only well-formed bounded params closes both the
+ * silent-downgrade (absent N/r/p → Node defaults) and the resource-exhaustion class.
+ * @param {any} kdf
+ * @returns {void}
+ */
+function validateImportedKdf(kdf) {
+  if (!kdf || typeof kdf !== 'object' || Array.isArray(kdf)) {
+    throw new vc.VaultFormatError('vault-store: bundle kdf must be an object');
+  }
+  if (kdf.algo !== 'scrypt') {
+    throw new vc.VaultFormatError(`vault-store: unsupported bundle kdf algo "${kdf.algo}"`);
+  }
+  const { N, r, p, maxmem } = kdf;
+  if (!isPowerOfTwo(N) || N < KDF_N_MIN || N > KDF_N_MAX) {
+    throw new vc.VaultFormatError(`vault-store: bundle kdf.N out of range (${N})`);
+  }
+  if (!Number.isInteger(r) || r < 1 || r > KDF_R_MAX) {
+    throw new vc.VaultFormatError(`vault-store: bundle kdf.r out of range (${r})`);
+  }
+  if (!Number.isInteger(p) || p < 1 || p > KDF_P_MAX) {
+    throw new vc.VaultFormatError(`vault-store: bundle kdf.p out of range (${p})`);
+  }
+  if (!Number.isInteger(maxmem) || maxmem < 128 * N * r || maxmem > KDF_MAXMEM_CAP) {
+    throw new vc.VaultFormatError(`vault-store: bundle kdf.maxmem out of range (${maxmem})`);
+  }
+}
+
+// A bundle's decrypted item array is bounded so a crafted bundle cannot import an
+// absurd count/size. Generous vs. any real vault; a hard ceiling all the same.
+const MAX_IMPORT_ITEMS = 10000;
+
+/**
+ * Validate the DECRYPTED items of an imported bundle BEFORE any write. The bundle's
+ * ciphertext is GCM-authentic but its PLAINTEXT shape is still attacker-chosen: it
+ * may decrypt to a non-array (later crashing at `items.map`), or to items with a
+ * bad/absent type or a duplicate/absent id. Throws VaultFormatError on any of these.
+ * @param {any} items  the value returned by decryptItems.
+ * @returns {any[]} the same array, once validated.
+ */
+function validateImportedItems(items) {
+  if (!Array.isArray(items)) {
+    throw new vc.VaultFormatError('vault-store: bundle vault did not decrypt to an item array');
+  }
+  if (items.length > MAX_IMPORT_ITEMS) {
+    throw new vc.VaultFormatError(`vault-store: bundle vault has too many items (${items.length})`);
+  }
+  const seen = new Set();
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new vc.VaultFormatError('vault-store: bundle vault item must be an object');
+    }
+    if (!ITEM_TYPES.has(item.type)) {
+      throw new vc.VaultFormatError(`vault-store: bundle vault item has invalid type "${item.type}"`);
+    }
+    if (typeof item.id !== 'string' || item.id.length === 0) {
+      throw new vc.VaultFormatError('vault-store: bundle vault item is missing a string id');
+    }
+    if (seen.has(item.id)) {
+      throw new vc.VaultFormatError(`vault-store: bundle vault has a duplicate item id "${item.id}"`);
+    }
+    seen.add(item.id);
+  }
+  return items;
+}
+
+// ---------------------------------------------------------------------------
 // The store
 // ---------------------------------------------------------------------------
 
@@ -207,6 +306,18 @@ class VaultStore {
     this.vaultKeys = new Map();
     /** @type {any} */
     this._timer = null;
+
+    // Unlock GENERATION (PR#112 finding 3): bumped on every lock-state transition
+    // (install / lock / reset). An async manager mutation captures it before its
+    // scrypt await and re-checks after, so a lockNow()/re-unlock that fired mid-derive
+    // is detected — refusing to wrap or persist against a zeroized/replaced MRK.
+    this._mrkGen = 0;
+    // Serializes async manager.json mutations (rotations / recovery / change-master)
+    // so two concurrent ops cannot each capture the pre-write manager and clobber the
+    // other's slot update (finding 3). A single promise chain; each op runs after the
+    // prior settles (success OR failure).
+    /** @type {Promise<any>} */
+    this._managerLock = Promise.resolve();
 
     // Load-loudly: validate an existing manager.json up front so a corrupt file
     // surfaces at load(), not silently later. A missing file just means "not set
@@ -362,6 +473,7 @@ class VaultStore {
     if (this.mrk !== null) {
       this.mrk.fill(0);
       this.mrk = null;
+      this._mrkGen++; // finding 3: signal any in-flight async mutation the MRK is gone.
     }
     for (const key of this.vaultKeys.values()) {
       key.fill(0);
@@ -383,6 +495,7 @@ class VaultStore {
     if (this.mrk !== null) {
       this.mrk.fill(0);
       this.mrk = null;
+      this._mrkGen++; // finding 3: a re-unlock is also a generation change.
     }
     for (const key of this.vaultKeys.values()) {
       key.fill(0);
@@ -398,6 +511,40 @@ class VaultStore {
       throw new VaultLockedError('vault-store: manager is locked');
     }
     return this.mrk;
+  }
+
+  /**
+   * Serialize an async manager.json mutation (PR#112 finding 3). Each call runs after
+   * the prior manager mutation settles (success OR failure), so two concurrent rotations
+   * cannot both read the pre-write manager and clobber each other's slot update. Returns
+   * the op's promise; the chain advances regardless of outcome.
+   * @template T
+   * @param {() => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  _withManagerLock(fn) {
+    const result = this._managerLock.then(() => fn(), () => fn());
+    // Advance the chain on both outcomes; swallow here so one failed op never poisons
+    // the lock for the next (the caller still sees `result`'s rejection).
+    this._managerLock = result.then(() => {}, () => {});
+    return result;
+  }
+
+  /**
+   * Assert the unlock state has NOT changed since `gen` was captured (finding 3): the
+   * MRK must still be installed AND the generation unchanged. Called after every async
+   * step inside a manager mutation, BEFORE the captured MRK buffer is used to wrap/seal
+   * or the manager is written — so a lockNow()/re-unlock that fired during a scrypt
+   * derive can never persist an envelope wrapping a zeroized or replaced MRK.
+   * @param {number} gen
+   * @returns {void}
+   */
+  _assertMrkGeneration(gen) {
+    if (this.mrk === null || this._mrkGen !== gen) {
+      throw new VaultLockedError(
+        'vault-store: the manager was locked or re-keyed during the operation — retry'
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -477,6 +624,7 @@ class VaultStore {
 
     // Enter the unlocked state (we just generated the MRK).
     this.mrk = mrk;
+    this._mrkGen++; // finding 3: setup transitions locked → unlocked.
     this.vaultKeys = new Map([[GLOBAL_ID, vaultKey]]);
     this._touch();
 
@@ -559,6 +707,7 @@ class VaultStore {
   _installMrk(mrk) {
     this._resetKeys();
     this.mrk = mrk;
+    this._mrkGen++; // finding 3: an unlock/re-key is a generation change.
     this.vaultKeys = new Map();
     this._touch();
     // DD10: fire the unlock hook from the single MRK-install choke point so ALL
@@ -588,21 +737,30 @@ class VaultStore {
    * @returns {Promise<void>}
    */
   async changeMasterPassword({ oldMasterPassword, newMasterPassword } = /** @type {any} */ ({})) {
-    const mrk = this._requireMrk();
     if (!isNonEmptySecret(oldMasterPassword)) {
       throw new VaultStateError('vault-store: oldMasterPassword is required');
     }
     if (!isNonEmptySecret(newMasterPassword)) {
       throw new VaultStateError('vault-store: newMasterPassword is required');
     }
-    const manager = this._readManager();
-    // Step-up re-auth: re-unwrap the master envelope with the OLD password. A wrong old
-    // password throws VaultAuthError and rewrites NOTHING (the step-up precedes any write).
-    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
-    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
-    manager.mrk.master = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
-    this._writeManager(manager);
-    this._touch();
+    // Serialized + generation-guarded (finding 3): re-read the manager fresh inside the
+    // lock, and re-check the unlock generation after each scrypt await so a lockNow /
+    // re-unlock mid-derive never persists an envelope over a zeroized/replaced MRK.
+    return this._withManagerLock(async () => {
+      const mrk = this._requireMrk();
+      const gen = this._mrkGen;
+      const manager = this._readManager();
+      // Step-up re-auth: re-unwrap the master envelope with the OLD password. A wrong old
+      // password throws VaultAuthError and rewrites NOTHING (the step-up precedes any write).
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
+      this._assertMrkGeneration(gen); // locked/re-keyed during the step-up derive → refuse before using mrk.
+      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      this._assertMrkGeneration(gen); // and again before persisting.
+      manager.mrk.master = newMasterEnv;
+      this._writeManager(manager);
+      this._touch();
+    });
   }
 
   /**
@@ -617,20 +775,26 @@ class VaultStore {
    * @returns {Promise<string>}  the new recovery-key display (one-time).
    */
   async rotateRecovery({ masterPassword } = /** @type {any} */ ({})) {
-    const mrk = this._requireMrk();
     if (!isNonEmptySecret(masterPassword)) {
       throw new VaultStateError('vault-store: masterPassword is required');
     }
-    const manager = this._readManager();
-    // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
-    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
-    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
-    const rec = vc.generateRecoveryKey();
-    manager.mrk.recovery = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
-    this._writeManager(manager);
-    rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer.
-    this._touch();
-    return rec.display;
+    return this._withManagerLock(async () => {
+      const mrk = this._requireMrk();
+      const gen = this._mrkGen;
+      const manager = this._readManager();
+      // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
+      // finding 3: refuse if a lockNow fired during the derive — else wrapRecovery below
+      // would seal a zeroized MRK into the recovery slot (the exact reproduced defect).
+      this._assertMrkGeneration(gen);
+      const rec = vc.generateRecoveryKey();
+      manager.mrk.recovery = vc.wrapRecovery(mrk, rec.material, { version: MANAGER_VERSION });
+      this._writeManager(manager);
+      rec.material.fill(0); // the recovery is now operator-held via `display` — drop the buffer.
+      this._touch();
+      return rec.display;
+    });
   }
 
   /**
@@ -650,20 +814,24 @@ class VaultStore {
    * @returns {Promise<string>}  the new admin private key, base64 (one-time).
    */
   async rotateAdminKey({ masterPassword } = /** @type {any} */ ({})) {
-    const mrk = this._requireMrk();
     if (!isNonEmptySecret(masterPassword)) {
       throw new VaultStateError('vault-store: masterPassword is required');
     }
-    const manager = this._readManager();
-    // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
-    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
-    stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
-    const admin = vc.generateAdminKeypair();
-    manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
-    manager.adminPublicKeyB64 = admin.publicKeyB64; // BOTH — a stale pubkey mismatches the seal + corrupts export.
-    this._writeManager(manager);
-    this._touch();
-    return admin.privateKeyB64; // operator-held one-time; the KeyObjects are GC'd with `admin`.
+    return this._withManagerLock(async () => {
+      const mrk = this._requireMrk();
+      const gen = this._mrkGen;
+      const manager = this._readManager();
+      // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
+      this._assertMrkGeneration(gen); // finding 3: never seal a zeroized/replaced MRK to the new admin key.
+      const admin = vc.generateAdminKeypair();
+      manager.mrk.admin = vc.sealToAdmin(mrk, admin.publicKey, { version: MANAGER_VERSION });
+      manager.adminPublicKeyB64 = admin.publicKeyB64; // BOTH — a stale pubkey mismatches the seal + corrupts export.
+      this._writeManager(manager);
+      this._touch();
+      return admin.privateKeyB64; // operator-held one-time; the KeyObjects are GC'd with `admin`.
+    });
   }
 
   /**
@@ -685,22 +853,27 @@ class VaultStore {
     if (!isNonEmptySecret(newMasterPassword)) {
       throw new VaultStateError('vault-store: newMasterPassword is required');
     }
-    const manager = this._readManager();
-    // The recovery key IS the step-up: unwrap the MRK. Wrong key → VaultAuthError, nothing
-    // installed / written. The transient recovery material is zeroized in the finally
-    // (mirrors unlockWithRecovery).
-    const material = vc.parseRecoveryKey(recoveryDisplay);
-    let mrk;
-    try {
-      mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: MANAGER_VERSION });
-    } finally {
-      material.fill(0);
-    }
-    this._installMrk(mrk); // the user ends UNLOCKED (they recovered); fires onUnlock.
-    // Rewrap the master envelope under the new password — the recovery proof authenticated it.
-    manager.mrk.master = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
-    this._writeManager(manager);
-    this._touch();
+    return this._withManagerLock(async () => {
+      const manager = this._readManager();
+      // The recovery key IS the step-up: unwrap the MRK. Wrong key → VaultAuthError, nothing
+      // installed / written. The transient recovery material is zeroized in the finally
+      // (mirrors unlockWithRecovery).
+      const material = vc.parseRecoveryKey(recoveryDisplay);
+      let mrk;
+      try {
+        mrk = vc.unwrapRecovery(manager.mrk.recovery, material, { version: MANAGER_VERSION });
+      } finally {
+        material.fill(0);
+      }
+      this._installMrk(mrk); // the user ends UNLOCKED (they recovered); fires onUnlock — bumps the generation.
+      const gen = this._mrkGen; // capture AFTER install so a lockNow during the wrap below is caught.
+      // Rewrap the master envelope under the new password — the recovery proof authenticated it.
+      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      this._assertMrkGeneration(gen); // finding 3: refuse if locked/re-keyed mid-derive.
+      manager.mrk.master = newMasterEnv;
+      this._writeManager(manager);
+      this._touch();
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -796,9 +969,10 @@ class VaultStore {
     if (typeof bundle.adminPublicKeyB64 !== 'string') {
       throw new vc.VaultFormatError('vault-store: bundle missing adminPublicKeyB64');
     }
-    if (!bundle.kdf || typeof bundle.kdf !== 'object') {
-      throw new vc.VaultFormatError('vault-store: bundle missing kdf');
-    }
+    // Bounded scrypt-param schema (finding 4): reject absent fields (they silently
+    // collapse to Node's weak scrypt defaults) AND resource-exhausting values —
+    // BEFORE bundle.kdf is used to derive the unwrap key or persisted on adopt.
+    validateImportedKdf(bundle.kdf);
     if (!Buffer.isBuffer(secret)) {
       throw new VaultStateError('vault-store: import secret must be a Buffer');
     }
@@ -837,7 +1011,10 @@ class VaultStore {
     let vaultKey = null;
     try {
       vaultKey = vc.unwrapVaultKey(mrkEnv, mrk, mrkEnvelopeAad(vaultDoc.version));
-      const items = /** @type {VaultItem[]} */ (vc.decryptItems(vaultDoc.items, vaultKey));
+      // The ciphertext is GCM-authentic but its PLAINTEXT shape is attacker-chosen:
+      // validate the decrypted array (type / string id / uniqueness / bound) BEFORE
+      // any write or `items.map` (finding 4) — a non-array previously crashed later.
+      const items = validateImportedItems(vc.decryptItems(vaultDoc.items, vaultKey));
 
       if (!this.isSetUp()) {
         // FRESH profile: adopt the bundle's manager. Vault FIRST (to GLOBAL_ID — the sole
@@ -1370,6 +1547,21 @@ class VaultStore {
    * @returns {Buffer} the unwrapped vault key.
    */
   unlockVaultWithAccessKey(vaultId, secret) {
+    return this.openVaultWithAccessKey(vaultId, secret).key;
+  }
+
+  /**
+   * Like `unlockVaultWithAccessKey` but ALSO returns the plaintext `keyId` of the
+   * `access` envelope that opened the vault (PR#112 finding 2). A live automation
+   * session records this keyId as its GRANT and re-checks per operation that the
+   * envelope still exists — so revoking THAT access key (envelope deletion) drops the
+   * session's key immediately, not only at teardown/idle. keyIds are non-secret
+   * envelope fingerprints (already surfaced by `listAccessKeys`).
+   * @param {string} vaultId
+   * @param {string} secret
+   * @returns {{ key: Buffer, keyId: string }}
+   */
+  openVaultWithAccessKey(vaultId, secret) {
     const doc = this._readVault(vaultId);
     if (doc === null) {
       throw new VaultStateError(`vault-store: no vault for "${vaultId}"`);
@@ -1377,13 +1569,41 @@ class VaultStore {
     for (const env of doc.envelopes) {
       if (env.keyId === 'mrk') continue; // access key never touches the MRK envelope.
       try {
-        return vc.unwrapAccess(env, secret);
+        const key = vc.unwrapAccess(env, secret);
+        return { key, keyId: env.keyId };
       } catch (err) {
         if (err instanceof vc.VaultAuthError) continue;
         throw err;
       }
     }
     throw new vc.VaultAuthError(`access key does not open vault "${vaultId}"`);
+  }
+
+  /**
+   * Does a specific `access` envelope still exist on a vault? (PR#112 finding 2.) The
+   * per-op revalidation probe for a live automation session: a revoked access key had
+   * its envelope removed, so this returns false and the session drops its cached key.
+   * A no-vault jar (deleted) → false. Never decrypts — a cheap envelope-presence read.
+   * @param {string} vaultId
+   * @param {string} keyId
+   * @returns {boolean}
+   */
+  accessEnvelopeExists(vaultId, keyId) {
+    const doc = this._readVault(vaultId);
+    if (doc === null) return false;
+    return doc.envelopes.some((/** @type {any} */ e) => e.keyId === keyId && e.keyId !== 'mrk');
+  }
+
+  /**
+   * The manager's current admin PUBLIC key (base64). (PR#112 finding 2.) A live ADMIN
+   * automation session captures this at unlock and re-checks it per op — a `rotateAdminKey`
+   * overwrites it, so a mismatch means the admin key was rotated and the session must drop
+   * its keys (the rotated-out admin private key can no longer open the vaults). Reads
+   * manager.json fresh; throws (→ caller drops the session) if the manager is gone.
+   * @returns {string}
+   */
+  adminPublicKey() {
+    return this._readManager().adminPublicKeyB64;
   }
 
   /**
@@ -1512,4 +1732,8 @@ module.exports = {
   // Re-exported for callers/tests that catch the crypto-layer errors.
   VaultAuthError: vc.VaultAuthError,
   VaultFormatError: vc.VaultFormatError,
+  // Import hardening validators (PR#112 finding 4) — exported so the bounded KDF
+  // schema and the decrypted-item-array guard are unit-tested directly.
+  validateImportedKdf,
+  validateImportedItems,
 };
