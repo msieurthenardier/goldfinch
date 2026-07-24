@@ -278,6 +278,9 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
+  // Guest self-close request (issue #119): window.close() in a page, forwarded
+  // by main as { wcId, historyLength }. The renderer applies the close gate.
+  onTabSelfClose: (cb) => ipcRenderer.on('tab-self-close', (_e, d) => cb(d)),
   // Vault gesture (M12 F2 Leg 1, DD1/DD3): main forwards a TRUSTED lock-icon
   // click as { wcId } (the trusted, main-derived tab id) — carries no secret.
   // The pick-and-fill leg's consumer raises the chrome-owned unlock/pick prompt.

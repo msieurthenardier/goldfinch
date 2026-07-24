@@ -13,7 +13,8 @@
  *   container: { id: string, name: string, color: string, partition: string, burner?: boolean },
  *   btn?: HTMLElement,
  *   findOpen?: boolean,
- *   findText?: string
+ *   findText?: string,
+ *   scriptOpened?: boolean
  * }} Tab
  */
 
@@ -252,7 +253,7 @@ export function createTabController(deps) {
   // step 4); `title` is read HERE (renderer-side only, stripped of no further
   // meaning to main) to seed the initial strip title. `insertAt` lands the tab at
   // its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
-  function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null } = {}) {
+  function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false } = {}) {
     // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
     // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
     if (dnd) cancelDnd();
@@ -283,6 +284,11 @@ export function createTabController(deps) {
         ? restoreHistory.title
         : null
     });
+    // Renderer-local provenance for the window.close() gate (issue #119): true
+    // only for tabs born from a page's window.open (the onOpenTab path). Not
+    // persisted and not carried across move/adopt — a moved tab loses the flag
+    // and falls back to the stricter history-length rule (the safe direction).
+    tab.scriptOpened = scriptOpened;
 
     // M09 F4 Leg 2 (DD2 step 3): `insertAt` lands the reopened tab at its ORIGINAL
     // strip position (Chrome parity). The tab is already appended (last slot), so

@@ -279,6 +279,19 @@ function registerBrowserIpc({
     const wcId = event.sender.id;
     chromeForTab(wcId)?.send('tab-privacy-fp', { wcId, fpCounts });
   });
+  // window.close() from a web guest (issue #119 — the webview-preload shim).
+  // Electron's native path would close the owning BaseWindow; this one closes
+  // the TAB, via the chrome's normal close path (strip removal, closed-tab
+  // capture, never-zero-tabs fallback). Class-3 owner-routed push: resolved at
+  // event time; a non-tab sender resolves no chrome and no-ops. historyLength
+  // is guest-supplied — sanitized to a number, and only ever used to decide the
+  // SENDER'S own close, so a forged value cannot affect any other tab.
+  ipcMain.on('guest-window-close', (event, payload) => {
+    const wcId = event.sender.id;
+    const raw = /** @type {any} */ (payload || {}).historyLength;
+    const historyLength = typeof raw === 'number' && Number.isFinite(raw) ? raw : 1;
+    chromeForTab(wcId)?.send('tab-self-close', { wcId, historyLength });
+  });
   ipcMain.on('rescan-media', (_event, payload) => {
     const { wcId } = /** @type {any} */ (payload || {});
     if (wcId == null) return;
