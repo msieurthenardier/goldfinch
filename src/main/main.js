@@ -1,8 +1,9 @@
 'use strict';
 
-const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, session, webContents, desktopCapturer, dialog, shell, protocol, net, clipboard, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto'); // node:crypto — randomUUID for the per-window import handle (PR#112 finding 5).
 const { pathToFileURL } = require('url');
 const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
@@ -28,6 +29,21 @@ const { createInternalPageMap } = require('./internal-page-map');
 const { createBroadcasters } = require('./broadcasts');
 const settings = require('./settings-store');
 const downloads = require('./downloads-store');
+// Password vault store (Mission 12, Flight 1). Wired here only for the automation
+// surface's STATELESS read path (Leg 3): a dedicated instance the per-session MCP
+// vault context reaches via unlockVaultWithAccessKey / openAllWithAdminKey /
+// readVaultItems — none of which mutate the store's human lock state. The human
+// unlock UI / IPC is a separate concern (later legs).
+const vaultStoreModule = require('./vault/vault-store');
+// M12 F5 HAT tail: validate a renderer-supplied (typed/pasted) export save path BEFORE the
+// direct fs.writeFileSync — the Export modal honors a typed path, so main must gate it (no
+// write-anywhere primitive). Electron-free / unit-tested.
+const { validateExportPath } = require('./vault/export-path');
+// M12 F2 Leg 3 (pick-and-fill): the Electron-free human fill orchestration — the
+// reachable-items picker read + the origin/scope-rechecked human fill that hands
+// the credential to F1's fill delegate (in main only; the password never returns
+// to chrome). Constructed once from the vault-store singleton + registry idioms.
+const { createVaultHuman } = require('./vault/vault-human');
 // M09 Flight 9 (session restore): the Electron-free open-window/tab topology store
 // (leg 2) + the pure burner-allowlist snapshot builder (leg 2), wired here (leg 3).
 const sessionStore = require('./session-store');
@@ -46,6 +62,7 @@ const { registerTabIpc } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
 const { registerDownloadIpc } = require('./register-download-ipc');
 const { registerSettingsIpc } = require('./register-settings-ipc');
+const { registerVaultIpc } = require('./register-vault-ipc');
 const { registerBrowserIpc } = require('./register-browser-ipc');
 const { registerAppLifecycle } = require('./app-lifecycle');
 // F7 DD2: the pure, Electron-free row builder behind the enumerateWindows op.
@@ -551,6 +568,248 @@ async function grabWindow(windowId) {
 // is exactly what makes a live-rebind pick up a newly-saved port and keeps the
 // precedence coherent with a fresh launch. Sets bound=true on a successful bind, or
 // records the error (e.g. EADDRINUSE) and leaves bound=false on failure.
+// Lazily-constructed, memoized vault-store instance (M12 F1 Leg 3). Constructed
+// once (reads manager.json if present — no side effects otherwise), shares the
+// app's jars registry + the vaultAutoLockMinutes setting. The MCP vault context
+// uses its stateless read methods; F2 (M12) additionally drives the STATEFUL
+// human unlock() through it (DD4/DD10) and wires onLock/onUnlock so every lock-
+// state transition — human unlock, idle auto-lock — broadcasts to every chrome.
+let _vaultStore = null;
+function getVaultStore() {
+  if (_vaultStore === null) {
+    _vaultStore = vaultStoreModule.load(app.getPath('userData'), {
+      listJars: () => jars.list(),
+      getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
+      // DD10: single source of truth = the store's MRK-present state, pushed on
+      // every transition. onUnlock fires from _installMrk (all three unlock
+      // paths); onLock fires from lockNow + the idle timer. Both are guarded
+      // inside the store, so a broadcast throw can never reject unlock()/lockNow().
+      onLock: () => broadcastVaultLockState(),
+      onUnlock: () => broadcastVaultLockState(),
+    });
+  }
+  return _vaultStore;
+}
+
+// DD10 lock-state projection. `{ setUp, unlocked }` is the WHOLE truth the chrome
+// indicator needs; it is pushed on every transition (onLock/onUnlock) and also
+// fetched once at chrome init (getVaultLockState) — a fresher push always wins.
+function computeVaultLockState() {
+  const store = getVaultStore();
+  return { setUp: store.isSetUp(), unlocked: store.isUnlocked() };
+}
+function broadcastVaultLockState() {
+  broadcastToChromeAndInternal('vault-lock-state', computeVaultLockState());
+}
+
+// Portable vault IMPORT held state (M12 F4 Leg 1 export-import, DD1/DD2). The import is a
+// two-surface flow: the vault page picks a destination + triggers the file open (main-side
+// dialog + read), then the chrome-owned vault-import-unlock sheet collects the secret. The
+// bundle (ciphertext) + the destination target are held HERE between those two steps — never
+// on the page, never on the sheet — and consumed by the `menu-overlay:vault-import` handler's
+// `vaultImport` delegate.
+//
+// PER-OWNING-WINDOW (PR#112 finding 5): previously ONE process-global record, so in a
+// multi-window session window A's pick could be overwritten by window B, and A's Continue /
+// secret submit / overwrite-flag / cancel then acted on B's record — a cross-window
+// destination/overwrite confusion. The record is now keyed by the OWNING CHROME webContents
+// id (the common identity of both the page tab — via chromeForTab(tabId) — and the secret
+// sheet, which renders IN that chrome). Every step (pick, bind-overwrite, forward, clear,
+// consume) resolves ONLY its own window's record, so windows can never touch each other's
+// import. Each record also carries an opaque `handle` minted at pick; the page echoes it on
+// the mutating steps (finding 5), a per-transaction guard against a stale record within one
+// window. The sheet submit is additionally bound by the sheet's existing open-token.
+// The window-scoped held-import store (extracted + unit-tested in vault/pending-imports.js).
+const { createPendingImportStore } = require('./vault/pending-imports');
+const _pendingVaultImports = createPendingImportStore(() => crypto.randomUUID());
+
+// Pick a save location for an export bundle — runs the save dialog ONLY (no build, no write).
+// The vault page's Export modal calls this to choose a location up front, then binds
+// source→path at submit time via vaultSaveBundleToFile(bundle, savePath). Holds NO main-side
+// state (unlike import) — the picked path is returned to the page and round-trips back on
+// submit. No parent window (a top-level modal). Returns { path } | { canceled }.
+async function vaultPickSavePath(target) {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Export vault bundle',
+    defaultPath: `vault-${typeof target === 'string' && target ? target : 'export'}.gfvaultbundle`,
+    filters: [
+      { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePath) return { canceled: true };
+  return { path: filePath };
+}
+
+// Build a ciphertext-only export bundle → write it (fully main-side; the bundle never transits
+// to the page). Dual-mode: with a pre-chosen `savePath` (the vault page's Export modal, which
+// picked the location up front via vaultPickSavePath) write directly, NO dialog; without one
+// (the jars delete-first export offer) run the save dialog then write. No parent window keeps
+// this reachable from the internal-handler without a registry lookup. Returns { ok, path } |
+// { canceled }.
+async function vaultSaveBundleToFile(bundle, savePath) {
+  let filePath = typeof savePath === 'string' && savePath ? savePath : null;
+  // A validated typed path is written EXCLUSIVELY (flag:'wx') so it can never truncate an
+  // existing file even across the validate→write TOCTOU (PR#112 finding 7); the dialog-picked
+  // path (else branch) keeps the default overwrite flag — the native picker already confirmed it.
+  let exclusive = false;
+  if (filePath) {
+    // M12 F5 HAT tail: a renderer-supplied path (the page Export modal now honors a typed/pasted
+    // path) is UNTRUSTED — validate before the direct write (canonical extension; not a symlink /
+    // directory; must NOT already exist; existing, writable parent dir) so this is never a
+    // write-anywhere / clobber-anywhere primitive. The no-path branch below stays dialog-bound
+    // (Electron's showSaveDialog is the trusted picker, with its own overwrite confirmation).
+    const v = validateExportPath(filePath);
+    if (!v.ok) return { ok: false, error: 'invalid-path', reason: v.reason };
+    filePath = v.path;
+    exclusive = true;
+  } else {
+    const { canceled, filePath: picked } = await dialog.showSaveDialog({
+      title: 'Export vault bundle',
+      defaultPath: `vault-${bundle && bundle.sourceVaultId ? bundle.sourceVaultId : 'export'}.gfvaultbundle`,
+      filters: [
+        { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !picked) return { canceled: true };
+    filePath = picked;
+  }
+  try {
+    // Exclusive create for a typed path (finding 7): 'wx' throws EEXIST rather than truncating a
+    // file that appeared between validation and write. The dialog path keeps the default overwrite.
+    fs.writeFileSync(filePath, JSON.stringify(bundle), exclusive ? { encoding: 'utf8', flag: 'wx' } : 'utf8');
+  } catch (err) {
+    if (exclusive && err && err.code === 'EEXIST') {
+      return { ok: false, error: 'invalid-path', reason: 'exists' };
+    }
+    return { ok: false, error: 'write-failed' };
+  }
+  return { ok: true, path: filePath };
+}
+
+// Open a bundle file (main-side dialog + read + JSON parse) and HOLD { bundle, destinationTarget }
+// for the sheet's secret step. Returns { ok, path } | { canceled } | { error } (never throws into
+// the internal handler). The chosen `path` is echoed back so the page's Import modal can display it
+// and gate its Continue button on a successful pick FOR the shown destination (H1: the page
+// re-picks if the destination changes). The destination target is validated as a non-empty string;
+// the bundle's deeper crypto validation happens in importVault at unlock time (loud there).
+async function vaultImportBeginFromFile(destinationTarget, chromeId) {
+  if (typeof destinationTarget !== 'string' || destinationTarget.length === 0) {
+    return { error: 'bad-target' };
+  }
+  // No resolvable owning window → refuse (finding 5): a record must belong to a window.
+  if (typeof chromeId !== 'number') return { error: 'no-window' };
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Import vault bundle',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Goldfinch vault bundle', extensions: ['gfvaultbundle', 'json'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
+  let bundle;
+  try {
+    // Cap the bundle file at 16 MiB before parsing (PR#112 finding 4): a real vault
+    // bundle is tiny; a huge file is a resource-exhaustion / malformed input, refused
+    // before JSON.parse allocates it. (MAX_IMPORT_ITEMS bounds the decrypted count too.)
+    const MAX_BUNDLE_BYTES = 16 * 1024 * 1024;
+    const stat = fs.statSync(filePaths[0]);
+    if (stat.size > MAX_BUNDLE_BYTES) return { error: 'too-large' };
+    bundle = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+  } catch {
+    return { error: 'unreadable' };
+  }
+  // overwrite starts FALSE; it is bound at the modal's Continue step from the "Replace existing
+  // vault" checkbox (setPendingVaultImportOverwrite), never here at file-pick time (review MEDIUM-3).
+  // The store mints + returns the opaque handle (finding 5); keyed by the OWNING CHROME id so no
+  // other window can see or mutate this record.
+  const handle = _pendingVaultImports.hold(chromeId, { bundle, destinationTarget });
+  return { ok: true, path: filePaths[0], importHandle: handle };
+}
+
+// Bind the import's `overwrite` from the modal's "Replace existing vault" checkbox FINAL state, at
+// the Continue step (not at file-pick). Called by the internal-vault-begin-import-unlock forward
+// just before the chrome sheet opens (M12 F5 HAT tail, review MEDIUM-3). Scoped to THIS window's
+// record (finding 5) and matched against the opaque handle when one is supplied — a no-op when the
+// window holds no record or the handle mismatches. Coerced to a strict boolean — overwrite DESTROYS
+// a vault, so only an explicit true enables it.
+function setPendingVaultImportOverwrite(chromeId, overwrite, handle) {
+  _pendingVaultImports.setOverwrite(chromeId, overwrite === true, handle);
+}
+
+// Clear THIS window's held import record (L1, finding 5). The page's Import modal calls this on
+// Cancel / Escape / backdrop-dismiss AFTER a successful file pick so a bundle held for an abandoned
+// modal never lingers. Scoped to the owning window (and its handle when supplied) so one window can
+// never clear another's transaction. Always safe to call (a no-op when this window holds nothing).
+function clearPendingVaultImport(chromeId, handle) {
+  _pendingVaultImports.clear(chromeId, handle);
+}
+
+// The `menu-overlay:vault-import` delegate: consume THIS window's held { bundle, destinationTarget }
+// (finding 5 — keyed by the owning chrome id, so a window can only ever import its OWN picked bundle)
+// and run importVault with the sheet's secret Buffer + secretKind. Follows the vaultUnlock pattern
+// (VaultAuthError → { ok:false } so a wrong secret re-prompts the sheet, nothing written); other
+// errors propagate (the handler still dual-zeroizes). On success the record is consumed and the
+// lock-state is broadcast (the fresh-profile adopt already fires onUnlock; the existing-profile
+// re-key nudges the page to re-render its now-populated vault).
+async function vaultImportFromSheet(chromeId, buf, secretKind) {
+  // Peek (don't consume yet): a wrong secret must leave THIS window's record intact so the sheet
+  // re-prompts without forcing a re-pick — the record is consumed only on a successful import.
+  const pending = _pendingVaultImports.peek(chromeId);
+  if (!pending) return { ok: false };
+  try {
+    await getVaultStore().importVault(pending.bundle, {
+      destinationTarget: pending.destinationTarget,
+      secret: buf,
+      secretKind,
+      // Bound at Continue from the "Replace existing vault" checkbox (review MEDIUM-3). overwrite
+      // gates ONLY the :846 destination-collision, downstream of ALL crypto — a wrong secret still
+      // throws VaultAuthError before any write, so overwrite can never bypass secret entry (DD5).
+      overwrite: pending.overwrite === true,
+    });
+    _pendingVaultImports.clear(chromeId); // consume on success only.
+    broadcastVaultLockState();
+    return { ok: true };
+  } catch (e) {
+    // Wrong secret → { ok:false } (the sheet re-prompts, nothing written). A CODED collision → a
+    // distinguishable { reason:'collision' } so the sheet shows a truthful "already exists" message
+    // instead of "check the secret" (review HIGH-1 / MEDIUM-4). Converting the collision from a
+    // throw to a return keeps the overlay handler's dual-zeroize uniform. Other errors propagate.
+    if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+    if (e instanceof vaultStoreModule.VaultCollisionError) return { ok: false, reason: 'collision' };
+    throw e;
+  }
+}
+
+// M12 F2 Leg 3 (pick-and-fill): the human fill orchestration, memoized like the
+// store. The tab-entry lookup is the trusted Leg-1 registry idiom
+// (getWindowForGuest → tabViews.get) — never renderer-supplied partition data.
+// fillDelegate is F1's exact channel: webContents.send targets the TOP frame only,
+// so a cross-origin iframe is never reached, and the credential built inside
+// vault-human is never returned to chrome.
+let _vaultHuman = null;
+function getVaultHuman() {
+  if (_vaultHuman === null) {
+    _vaultHuman = createVaultHuman({
+      getVaultStore,
+      fromId: (id) => webContents.fromId(id),
+      getTabEntry: (id) => registry.getWindowForGuest(id)?.tabViews.get(id),
+      listJars: () => jars.list(),
+      fillDelegate: ({ wcId, credential }) => {
+        webContents.fromId(wcId)?.send('vault-fill', credential);
+      },
+      // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
+      // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle),
+      now: () => Date.now(),
+    });
+  }
+  return _vaultHuman;
+}
+
 async function startMcpServerInstance() {
   mcpServer = createMcpServer({
     // Engine accessor now takes an options bag so the per-session admin Server
@@ -572,6 +831,10 @@ async function startMcpServerInstance() {
       // must classify 'chrome', not 'guest').
       isTabViewWcId: (id) => registry.isTabViewWcId(id),
       isChromeContents: (wc) => registry.isChromeContents(wc),
+      // PR#112 finding 1: the vault SECRET SHEET's webContents is refused by resolveContents at
+      // EVERY tier (admin included), so no automation op can keylog / read the master password or
+      // the one-time recovery/access/admin keys rendered on it.
+      isSheetContents: (wc) => registry.isSheetContents(wc),
       // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
       // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
       // a forgotten injection restores S1 with NO test failure anywhere, which is why
@@ -598,6 +861,21 @@ async function startMcpServerInstance() {
     // Audit fan-out (Flight 4, Leg 3, DD8): every recorded tool call and every
     // session open/close broadcasts the new audit snapshot over the M02 channel.
     broadcast: (payload) => broadcastToChromeAndInternal('automation-activity-changed', payload),
+    // Password-vault surface (Mission 12, Flight 1, Leg 3). The per-session MCP
+    // vault context reaches the vault store's STATELESS methods only (no singleton
+    // coupling).
+    vaultStore: getVaultStore(),
+    // The REAL main→preload fill delegate (Leg 4). vault-context.fill resolves +
+    // membership/origin-checks the credential, then hands us `{ wcId, credential }`;
+    // we deliver it to the target tab's TOP-FRAME preload over the 'vault-fill'
+    // channel. webContents.send targets the main frame only, so a cross-origin
+    // iframe is never reached. The credential is NEVER returned across the MCP
+    // boundary (vault-context.fill returns `{ filled, id }` only). A tab closed
+    // mid-fill → fromId() is null → the optional-chain no-ops safely.
+    fillDelegate: ({ wcId, credential }) => {
+      webContents.fromId(wcId)?.send('vault-fill', credential);
+    },
+    getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
     // In-memory dev-enable override (DD3/DD4, Flight 8). Read LAZILY per request by
     // the auth gate so it tracks the module-scoped value. It lets a dev `dev:automation`
     // run resolve identity with the persisted toggle off, but a valid Bearer key is
@@ -901,6 +1179,20 @@ const { rerollSeed } = registerBrowserIpc({
   registrableDomain,
   hostnameOf,
   shields,
+  getVaultHuman,
+  // M12 F4 Leg 1 (export-import): the import request's main-side file step (open dialog + read +
+  // hold). Gated — offline register-browser-ipc tests omit it. M12 F5 HAT (I14): the pick-file
+  // step is now SPLIT from the sheet forward — pickImportFile does dialog+read+hold and returns
+  // { ok, path }; beginImportUnlock forwards the bare vault-request-import; clearPendingImport
+  // drops the held record on modal dismiss (L1).
+  vaultImportBegin: vaultImportBeginFromFile,
+  clearPendingVaultImport,
+  // M12 F5 HAT tail (review MEDIUM-3): bind the import `overwrite` from the modal's Replace
+  // checkbox at the Continue step (the internal-vault-begin-import-unlock forward), never at pick.
+  setPendingVaultImportOverwrite,
+  // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
+  // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
+  popupVaultIconMenu,
   random: Math.random,
   logger: console
 });
@@ -975,7 +1267,177 @@ registerOverlayIpc({
   registry,
   chromeForAttachment,
   chromeForTab,
-  sanitizeActivatedValue
+  sanitizeActivatedValue,
+  // DD4 (chrome-unlock leg): the secret handler's unlock delegate. Uses the
+  // memoized getVaultStore() singleton (not a captured ref — it may be
+  // unconstructed until first use) and the re-exported VaultAuthError. A wrong
+  // password → VaultAuthError → { ok:false } (sheet re-prompts, store stays
+  // locked); any other error propagates (the handler still zeroizes the buffer
+  // in its finally). Buffer zeroization lives in the handler, which owns the copy.
+  vaultUnlock: async (buf) => {
+    try {
+      await getVaultStore().unlock(buf);
+      return true;
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return false;
+      throw e;
+    }
+  },
+  // DD7 (capture-save leg): the sheet's Save delegate. Looks up the main-side held
+  // record by captureId, re-checks unlock, and persists via saveItem — the captured
+  // password lives ONLY in that record (never crosses to the sheet). Returns
+  // { saved, reason? }; the handler closes the sheet on saved.
+  vaultCaptureSave: ({ captureId, vaultId }) => getVaultHuman().captureSave({ captureId, vaultId }),
+  // M12 F3 Leg 4 (first-run-setup): the vault-set sheet's setup delegate. Mirrors the
+  // vaultUnlock injection — the memoized getVaultStore() singleton; setup() accepts the
+  // zeroizable Buffer master password (the widened :389 guard). Broadcasts the lock-state
+  // AFTER a successful setup (setup() sets the MRK directly, not via _installMrk's
+  // onUnlock, so the transition would otherwise not project to the chrome indicator /
+  // the vault page). Returns setup's { recoveryKeyDisplay, adminPrivateKeyB64 } UNCHANGED;
+  // the handler forwards ONLY the recovery key to chrome (admin key deferred to F4).
+  vaultSetup: async (buf) => {
+    const res = await getVaultStore().setup({ masterPassword: buf });
+    broadcastVaultLockState();
+    return res;
+  },
+  // M12 F3 Leg 5 (access-keys): the vault-stepup sheet's MINT delegate. Follows the
+  // vaultUnlock pattern (catch VaultAuthError → { ok:false }) so a WRONG step-up password
+  // is a normal { ok:false } (the sheet re-prompts, nothing minted) rather than a rejected
+  // invoke; any other error propagates (the handler still dual-zeroizes in its finally).
+  // Adapts to the store's POSITIONAL target: mintAccessKey(target, { masterPassword }) —
+  // no Buffer widening needed (mintAccessKey has no string guard; the password flows to
+  // unwrapMaster→deriveMasterKey→scrypt, all string|Buffer). Returns { ok, secret, keyId }
+  // on success; the handler forwards secret+keyId to the chrome vault-accesskey-show sheet.
+  vaultMintAccessKey: async (buf, target) => {
+    try {
+      const { secret, keyId } = await getVaultStore().mintAccessKey(target, { masterPassword: buf });
+      return { ok: true, secret, keyId };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 1 (export-import): the vault-import-unlock sheet's secret delegate. Follows the
+  // vaultUnlock pattern (VaultAuthError → { ok:false }) so a wrong secret re-prompts and nothing
+  // is written; the held { bundle, destinationTarget } is consumed here. The handler owns the
+  // Buffer copy + dual-zeroize; this delegate only runs the store op.
+  vaultImport: (chromeId, buf, secretKind) => vaultImportFromSheet(chromeId, buf, secretKind),
+  // M12 F4 Leg 2 (key-rotation): the vault-stepup sheet's RECOVERY-ROTATION delegate. Follows
+  // the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-password step-up
+  // re-prompts and NOTHING is rotated; any other error propagates (the handler still dual-
+  // zeroizes). rotateRecovery returns the NEW one-time recovery-key display — forwarded to the
+  // chrome vault-recovery-show sheet (never the invoke reply, never the page).
+  vaultRotateRecovery: async (buf) => {
+    try {
+      const recoveryKeyDisplay = await getVaultStore().rotateRecovery({ masterPassword: buf });
+      return { ok: true, recoveryKeyDisplay };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 3 (admin-key-provision): the vault-stepup sheet's ADMIN-KEY ROTATION/PROVISION
+  // delegate. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG master-
+  // password step-up re-prompts and NOTHING is rotated; any other error propagates (the handler
+  // still dual-zeroizes). rotateAdminKey returns the NEW one-time admin private key — forwarded to
+  // the chrome vault-adminkey-show sheet (never the invoke reply, never the page).
+  vaultRotateAdminKey: async (buf) => {
+    try {
+      const adminPrivateKeyB64 = await getVaultStore().rotateAdminKey({ masterPassword: buf });
+      return { ok: true, adminPrivateKeyB64 };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 2 (key-rotation): the vault-change-master sheet's delegate. Follows the vaultUnlock
+  // pattern (VaultAuthError → { ok:false }) so a WRONG old-password step-up re-prompts and NOTHING
+  // is written; any other error propagates (the handler still dual-zeroizes both buffers). Both
+  // master passwords ride as zeroizable Buffers (changeMasterPassword accepts Buffer|string).
+  vaultChangeMaster: async (oldBuf, newBuf) => {
+    try {
+      await getVaultStore().changeMasterPassword({ oldMasterPassword: oldBuf, newMasterPassword: newBuf });
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F4 Leg 2 (key-rotation): the vault-recover sheet's delegate — the recover-after-forgotten-
+  // master flow. Follows the vaultUnlock pattern (VaultAuthError → { ok:false }) so a WRONG recovery
+  // key re-prompts and NOTHING is written; any other error propagates (the handler still dual-
+  // zeroizes). The recovery secret is decoded as a STRING for parseRecoveryKey (the store contract);
+  // the new master rides as a Buffer. On success the store installs the MRK (the user ends UNLOCKED)
+  // — broadcast the lock-state so the page + chrome indicator move to unlocked.
+  vaultRecover: async (recoveryBuf, newBuf) => {
+    try {
+      await getVaultStore().recoverMasterPassword({
+        recoveryDisplay: recoveryBuf.toString('utf8'),
+        newMasterPassword: newBuf,
+      });
+      broadcastVaultLockState();
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof vaultStoreModule.VaultAuthError) return { ok: false };
+      throw e;
+    }
+  },
+  // M12 F3 Leg 4: the recovery-show Copy delegate — main owns the OS clipboard string
+  // write (the chrome-clipboard-write precedent). Sender-validated in the handler.
+  writeClipboard: (text) => clipboard.writeText(String(text))
+});
+
+// DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
+// trust domain; non-secret boolean projection only, per the bare-handle rule).
+// The indicator subscribes to the `vault-lock-state` broadcast FIRST, then calls
+// this once for the initial state; a push that already arrived wins.
+ipcMain.handle('vault-lock-state-get', () => computeVaultLockState());
+
+// Explicit global LOCK — chrome-trust surface (M12 F5 HAT batch 1, I8). The fill-icon
+// native context menu's "Lock now" runs in the chrome/main trust domain (it can't reach the
+// internal-origin `internal-vault-lock` channel), so this bare `ipcMain.handle` mirrors
+// `vault-lock-state-get` (file:// chrome trust; no secret in or out). `lockNow()` is global
+// + idempotent and its onLock hook ALREADY broadcasts `vault-lock-state` — so this must NOT
+// re-broadcast. `vaultLockNow` is the shared body the native icon menu's Lock-now item calls.
+function vaultLockNow() {
+  getVaultStore().lockNow();
+  return { ok: true };
+}
+ipcMain.handle('vault-lock', () => vaultLockNow());
+
+// Native OS context menu for the guest-injected fill icon (M12 F5 HAT batch 1, I8). The icon
+// is a decorative, spoofable guest-DOM `<div>`; its menu MUST be a native main-process `Menu`
+// popped via `menu.popup` — NEVER DOM injected into the guest page (a page-DOM menu would be
+// spoofable/readable by a hostile page). `guest-vault-icon-menu` (bare, no payload) arrives in
+// register-browser-ipc, which derives the trusted wcId + owning window and calls this. Top row
+// is the required global "Lock now"; a "Fill login…" shortcut mirrors the left-click gesture
+// (the same bare vault-gesture forward). Both act only on main-trusted data.
+function popupVaultIconMenu({ wcId, win }) {
+  if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return;
+  const menu = Menu.buildFromTemplate([
+    { label: 'Lock now', click: () => { vaultLockNow(); } },
+    { type: 'separator' },
+    { label: 'Fill login…', click: () => { chromeForTab(wcId)?.send('vault-gesture', { wcId }); } },
+  ]);
+  menu.popup({ window: win });
+}
+
+// M12 F2 Leg 3 (pick-and-fill): the two chrome-facing human fill invokes (bare
+// ipcMain.handle — file:// chrome trust domain, the same class as vault-lock-state-get
+// and the other chrome-only reads). The wcId is chrome-supplied (the trusted chrome
+// derived it from the main-forwarded gesture); trust lives in main + chrome, never
+// the guest. `vault-reachable-items` returns metadata only; `vault-fill-human`
+// returns `{ filled, reason? }` — NEVER the password (built + consumed in main).
+ipcMain.handle('vault-reachable-items', (_event, wcId) => {
+  if (typeof wcId !== 'number') return [];
+  return getVaultHuman().reachableItems(wcId);
+});
+ipcMain.handle('vault-fill-human', (_event, payload) => {
+  const { wcId, vaultId, itemId } = /** @type {any} */ (payload || {});
+  if (typeof wcId !== 'number' || typeof vaultId !== 'string' || typeof itemId !== 'string') {
+    return { filled: false, reason: 'ineligible' };
+  }
+  return getVaultHuman().fillHuman({ wcId, vaultId, itemId });
 });
 
 // Guest media-list / privacy-fp forwarding from webview-preload to chrome renderer.
@@ -1051,7 +1513,12 @@ const { broadcastJarsChanged } = registerJarIpc({
   revokeJarKey,
   settings,
   broadcast: broadcastToChromeAndInternal,
-  historyStore
+  historyStore,
+  // M12 F4 Leg 6 (DD7): handleRemove removes the deleted jar's `.gfvault` fail-soft.
+  // Passed as the memoized accessor (not the eager singleton) — mirrors register-vault-ipc.
+  // registerJarIpc runs at module scope AFTER getVaultStore is defined (main.js:573),
+  // and the accessor is only invoked at delete time, so there is no init-order risk.
+  getVaultStore
 });
 
 // Retention sweep engine + its cookie first-seen bookkeeping store (M10
@@ -1148,6 +1615,26 @@ registerSettingsIpc({
   revokeAdminKey,
   getMcpServer: () => mcpServer,
   adminEnabled: () => process.env.GOLDFINCH_AUTOMATION_ADMIN
+});
+
+// Vault management surface (M12 Flight 3, Leg 1 / DD2). registerInternalHandler-gated,
+// mirroring registerSettingsIpc above. getVaultStore is passed as an accessor (not the
+// eagerly-constructed singleton) so the handler reads live lock/setup state and never
+// forces the store's construction at module-load time; `jars` is injected because the
+// store has no public vault-enumeration method (the handler composes 'global' + jars.list()).
+registerVaultIpc({
+  ipcMain,
+  registerInternalHandler,
+  getVaultStore,
+  jars,
+  // M12 F4 Leg 1 (export-import): the main-side export delegate (save dialog + write). The
+  // internal-vault-export handler builds the ciphertext-only bundle from the store, then hands
+  // it here. Gated — offline register-vault-ipc tests omit it. M12 F5 HAT (I14): dual-mode —
+  // with a pre-chosen savePath (the page Export modal) write directly, no dialog; without one
+  // (the jars delete-first offer) run the dialog. vaultPickSavePath runs the save dialog ONLY
+  // (no write) so the page modal can pick a location up front.
+  vaultSaveBundle: vaultSaveBundleToFile,
+  vaultPickSavePath
 });
 
 registerAppLifecycle({

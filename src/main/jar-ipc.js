@@ -20,10 +20,11 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  *   revokeJarKey: (jarId: string, settings: any) => void,
  *   settings: { get: (k: string) => any, set: (k: string, v: any) => any, getAll: () => any },
  *   broadcast: (channel: string, payload: unknown) => void,
- *   historyStore: typeof import('./history-store')
+ *   historyStore: typeof import('./history-store'),
+ *   getVaultStore?: () => any
  * }} deps
  */
-function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore }) {
+function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore, getVaultStore }) {
   const cookieSeen = appDb.createCookieSeenStore();
 
   // getDefault() returns the shared frozen BURNER when no persistent jar
@@ -51,7 +52,10 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     revokeJarKey,
     settings,
     broadcast,
-    broadcastJarsChanged
+    broadcastJarsChanged,
+    // M12 F4 Leg 6 (DD7): the vault-removal step in handleRemove. Optional — offline
+    // tests omit it and the step is skipped (injection-gated precedent).
+    getVaultStore
   });
 
   registerJarDataIpc({

@@ -38,7 +38,8 @@ const appDb = require('./app-db');
  *   automationAdminKeyHash: string,
  *   automationPort: number,
  *   spellcheck: boolean,
- *   restoreSession: boolean
+ *   restoreSession: boolean,
+ *   vaultAutoLockMinutes: number
  * }} Settings
  */
 
@@ -74,7 +75,13 @@ const DEFAULTS = {
   // regression baseline). Follows the automationEnabled template — an explicit
   // strict-boolean validator (NOT spellcheck's typeof-fallback). Additive, no schema
   // version bump. Read directly by main at whenReady (startup-only, no live side-effect).
-  restoreSession: false
+  restoreSession: false,
+  // Vault idle auto-lock timeout, in minutes (Mission 12 Flight 1 / Leg 2). The
+  // password-manager MRK auto-locks after this many minutes of inactivity. Additive
+  // integer key — no schema version bump; follows the automationPort integer-range
+  // template (an explicit [1, 1440] validator, NOT the typeof fallback). Read by the
+  // vault-store's injected getAutoLockMinutes at each operation to arm the idle timer.
+  vaultAutoLockMinutes: 10
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -151,7 +158,14 @@ const VALIDATORS = {
   // Number.isInteger rejects strings, null, arrays, booleans, and non-integers —
   // no extra guards needed.
   automationPort: (v) =>
-    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535
+    typeof v === 'number' && Number.isInteger(v) && v >= 1024 && v <= 65535,
+
+  // vaultAutoLockMinutes: an integer in [1, 1440] (1 min .. 24 h). The
+  // automationPort integer-range validator is the template — Number.isInteger
+  // rejects strings, null, arrays, booleans, and non-integers; the bounds reject
+  // 0/negative and anything over a day.
+  vaultAutoLockMinutes: (v) =>
+    typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 1440
 };
 
 // ---------------------------------------------------------------------------

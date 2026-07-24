@@ -14,7 +14,7 @@ export default [
     // the src/shared/** module block below ignores them so this binding survives
     // later-wins — that keeps the lint parse guard (an `export` in a preload-reachable
     // file must FAIL lint, the leg-1 blocker class).
-    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/shared/reserved-ids.js', 'src/shared/vault-item-schema.js', 'src/shared/origin-match.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
@@ -60,7 +60,20 @@ export default [
       'src/shared/automation-dev.js',
       'src/shared/internal-page.js',
       'src/shared/dev-profile.js',
-      'src/shared/guest-forward-allowlist.js'
+      'src/shared/guest-forward-allowlist.js',
+      // reserved-ids.js is the DD8 SSOT constant, consumed only main-side (vault-store,
+      // jars, register-vault-ipc) and deliberately plain CJS (never coupled to app-db) —
+      // it binds commonjs in the src/main/** block above; this entry keeps that binding.
+      'src/shared/reserved-ids.js',
+      // vault-item-schema.js is the M12 F3 Leg 2 secret/non-secret SSOT, consumed
+      // main-side (vault-store, register-vault-ipc) as plain CJS (the reserved-ids
+      // precedent — main-only, no require(esm) at app boot). Keep its commonjs binding.
+      'src/shared/vault-item-schema.js',
+      // origin-match.js is the M12 F4 Leg 4 fill matcher, consumed main-side ONLY
+      // (vault-context, vault-human, vault-store) as plain CJS — it require()s the
+      // main-side psl.js (which reads the vendored .dat), so it can never be a page
+      // module. The guest-forward-allowlist.js precedent; keep its commonjs binding.
+      'src/shared/origin-match.js'
     ],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
@@ -79,7 +92,12 @@ export default [
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
   {
-    files: ['src/preload/webview-preload.js'], // runs in page main world: node (ipcRenderer) AND DOM
+    // webview-preload.js runs in the page main world (node ipcRenderer AND DOM);
+    // vault-fill-fields.js is its pure, testable field-selection/fill core (M12 F1
+    // Leg 4) and vault-fill-icon.js its testable decorative-icon core (M12 F2 / F5
+    // HAT) — same main-world context (uses window/document/Event/timers), CJS-required
+    // by the preload, so they carry the identical globals.
+    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-fill-icon.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },
@@ -130,6 +148,12 @@ export default [
       'src/renderer/pages/jars-tabs.js',
       'src/renderer/pages/jars-confirm-modal.js',
       'src/renderer/pages/settings.js',
+      // vault.js (M12 Flight 3, Leg 1) is the goldfinch://vault page controller — a
+      // real ES module importing its pure state-model via a flat serving-path specifier.
+      'src/renderer/pages/vault.js',
+      // vault-nav-controller.js (M12 F5 HAT hat-page-sidebar) is vault.js's mirrored
+      // master-detail nav rail — a real ES module, the jars-nav-controller.js precedent.
+      'src/renderer/pages/vault-nav-controller.js',
       'src/renderer/menu-overlay.js'
     ],
     languageOptions: { sourceType: 'module' }

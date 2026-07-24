@@ -51,6 +51,18 @@
 // isSafeColor is imported (the SAME color domain the product accepts —
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
+import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
+import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
+import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
+import { buildVaultSetCard } from '../shared/vault-set-template.js';
+import { buildVaultRecoveryCard } from '../shared/vault-recovery-template.js';
+import { buildVaultStepupCard } from '../shared/vault-stepup-template.js';
+import { buildVaultAccessKeyCard } from '../shared/vault-accesskey-template.js';
+import { buildVaultAdminKeyCard } from '../shared/vault-adminkey-template.js';
+import { buildVaultImportCard } from '../shared/vault-import-template.js';
+import { buildVaultChangeMasterCard } from '../shared/vault-change-master-template.js';
+import { buildVaultRecoverCard } from '../shared/vault-recover-template.js';
+import { createSheetReport, attachModalCard } from '../shared/modal-card-controller.js';
 
 (() => {
   const root = document.getElementById('menu-root');
@@ -58,30 +70,17 @@ import { isSafeColor } from '../shared/safe-color.js';
 
   /* ------------------------------------------------ shared per-open state (hoisted) */
 
-  /** @type {number | null} */
-  let currentToken = null; // the open token this render answers for (null = none)
-  let sent = false; // exactly one of activated/dismissed per token — first send wins
-  let lastStimulus = 'blur'; // default flavor; see header
-
-  // Report the dismissal for the live token — UNLESS an activation already
-  // reported for it (activation wins), or no token is live (silent rebuild /
-  // model-replace path). Shared by every template entry's onClose.
-  function reportDismissed() {
-    if (!sent && currentToken != null) {
-      sent = true;
-      window.menuOverlay.sendDismissed({ reason: lastStimulus, token: currentToken });
-    }
-    lastStimulus = 'blur'; // reset after every send — see header
-  }
-
-  /** One-shot activated send (first send wins over the onClose dismissal).
-   * @param {{ id: string, value?: string }} payload @returns {boolean} */
-  function sendActivatedOnce(payload) {
-    if (sent || currentToken == null) return false;
-    sent = true;
-    window.menuOverlay.sendActivated(Object.assign({}, payload, { token: currentToken }));
-    return true;
-  }
+  // The one-report-per-open-token discipline is the shared, importable createSheetReport
+  // machine (M12 F3 Leg 4, DD5 template-registry / modal-card refactor — extracted so the
+  // token/sent/lastStimulus state machine is unit-testable). A SINGLE instance preserves
+  // the module-scoped sharing the header describes across every template entry.
+  // `report.token` / `report.sent` / `report.lastStimulus` replace the former module-
+  // scoped currentToken / sent / lastStimulus; the two wrappers keep every onClose /
+  // click / submit call site unchanged.
+  const report = createSheetReport(window.menuOverlay);
+  const reportDismissed = () => report.reportDismissed();
+  /** @param {{ id: string, value?: string }} payload @returns {boolean} */
+  const sendActivatedOnce = (payload) => report.sendActivatedOnce(payload);
 
   /** Position an absolutely-positioned template node from the translated anchor
    * (DD2 nuance: toolbar anchors arrive pre-translated chrome→sheet; DD12: y
@@ -278,7 +277,7 @@ import { isSafeColor } from '../shared/safe-color.js';
   popupNode.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' || e.key === 'Tab') {
       e.preventDefault();
-      lastStimulus = 'escape'; // Tab pinned to the escape flavor (chip refocus parity)
+      report.lastStimulus = 'escape'; // Tab pinned to the escape flavor (chip refocus parity)
       menuController.close(popupEntry);
     }
   });
@@ -398,10 +397,10 @@ import { isSafeColor } from '../shared/safe-color.js';
   // send would close-without-creating — the guard MUST live here. The raw value is
   // sent (≤24 by maxlength); the chrome trims (parity with the old dialog).
   function submitDialog() {
-    if (sent || currentToken == null) return;
+    if (report.sent || report.token == null) return;
     if (!dialogInput.value.trim()) return; // whitespace-only → dialog stays open
-    sent = true;
-    window.menuOverlay.sendActivated({ id: 'create', value: dialogInput.value, token: currentToken });
+    report.sent = true;
+    window.menuOverlay.sendActivated({ id: 'create', value: dialogInput.value, token: report.token });
     menuController.close(dialogEntry);
   }
 
@@ -409,7 +408,7 @@ import { isSafeColor } from '../shared/safe-color.js';
   // Cancel is user-explicit like Escape (design decision): dismissed{reason:'escape'}
   // → chrome returns focus to the ▾ trigger.
   dialogCancel.addEventListener('click', () => {
-    lastStimulus = 'escape';
+    report.lastStimulus = 'escape';
     menuController.close(dialogEntry);
   });
   dialogInput.addEventListener('keydown', (e) => {
@@ -426,7 +425,7 @@ import { isSafeColor } from '../shared/safe-color.js';
   dialogNode.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      lastStimulus = 'escape';
+      report.lastStimulus = 'escape';
       menuController.close(dialogEntry);
     } else if (e.key === 'Tab') {
       e.preventDefault();
@@ -441,7 +440,7 @@ import { isSafeColor } from '../shared/safe-color.js';
   // (the backdrop contains every in-sheet target), so this handler owns it.
   dialogNode.addEventListener('click', (e) => {
     if (e.target === dialogNode) {
-      lastStimulus = 'outside-click';
+      report.lastStimulus = 'outside-click';
       menuController.close(dialogEntry);
     }
   });
@@ -524,6 +523,1026 @@ import { isSafeColor } from '../shared/safe-color.js';
     positionNode(suggestionsNode, anchor);
   }
 
+  /* ------------------------------------------------------- template: vault-unlock */
+  // Master-password UNLOCK prompt (M12 Flight 2 Leg 2 chrome-unlock, DD4/DD10) —
+  // a FIFTH template kind, near-cloning input-dialog (a centered backdrop + card,
+  // role="dialog" aria-modal="true", dialog-local Tab-cycle + Escape) but with a
+  // type="password" input, an aria-live error line, and — critically — the secret
+  // leaving via the DEDICATED request/response channel (menuOverlay.unlockVault),
+  // NEVER channel-4 sendActivated (string-only / 24-char capped). The sheet awaits
+  // { ok }: false re-prompts (stays open, shows the error), true closes. The card
+  // DOM is built by the shared, unit-tested buildVaultUnlockCard.
+
+  const vault = buildVaultUnlockCard(document);
+  const vaultNode = vault.node;
+  const vaultInput = vault.input;
+  const vaultError = vault.error;
+  const vaultUnlockBtn = vault.unlock;
+  const vaultCancelBtn = vault.cancel;
+  root.appendChild(vaultNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click) from firing two
+  // invokes; reset on every open.
+  let vaultBusy = false;
+
+  const vaultEntry = menuController.register({
+    trigger: vaultNode,
+    menu: vaultNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    onOpen() {
+      vaultInput.value = '';
+      vaultError.textContent = '';
+      vaultBusy = false;
+      vaultNode.classList.remove('hidden');
+      vaultInput.focus();
+    },
+    onClose() {
+      vaultNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED secret channel. Encode to a Uint8Array (never a JS
+  // string on the wire), invoke, and act on { ok }. The sheet-side copy is
+  // zeroized after the round-trip (main zeroizes its own copy + the transferred
+  // array); the input's V8 string is unscrubbable — an accepted DD4 limitation.
+  async function submitVault() {
+    if (report.sent || report.token == null || vaultBusy) return;
+    const value = vaultInput.value;
+    if (!value) {
+      // Empty → inline hint, stay open, no invoke (page-side no-op, like the
+      // input-dialog's whitespace guard).
+      vaultError.textContent = 'Enter your master password';
+      vaultInput.focus();
+      return;
+    }
+    const token = report.token;
+    const secret = new TextEncoder().encode(value);
+    vaultBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.unlockVault({ token, secret });
+    } catch {
+      // A rejected invoke (e.g. the store isn't set up) degrades to a re-prompt —
+      // never an unhandled rejection / crash (edge case: raising this prompt when
+      // not set up is prevented by the trigger, but the handler must be safe).
+      res = { ok: false };
+    } finally {
+      vaultBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moves
+    // the live token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main also closes the sheet.
+      menuController.close(vaultEntry);
+    } else {
+      vaultError.textContent = 'Incorrect master password';
+      vaultInput.value = '';
+      vaultInput.focus();
+    }
+  }
+
+  vaultUnlockBtn.addEventListener('click', () => { void submitVault(); });
+  // Cancel is user-explicit like Escape: dismissed{reason:'escape'} → chrome
+  // returns focus to the trigger (wired by the pick-and-fill leg).
+  vaultCancelBtn.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultEntry);
+  });
+  vaultInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVault();
+    }
+  });
+  // Dialog-local Escape + Tab-cycle (input → Unlock → Cancel → input) + backdrop dismiss
+  // via the SHARED, unit-tested modal-card helper (M12 F3 Leg 4, DD5 refactor — replaces
+  // the former inline keydown/backdrop blocks byte-for-byte; the controller's menu-keydown
+  // no-ops here, !entry.items). dismissible defaults true.
+  attachModalCard({
+    node: vaultNode,
+    getCycle: () => [vaultInput, vaultUnlockBtn, vaultCancelBtn],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultEntry); },
+  });
+
+  /* ------------------------------------------------------- template: vault-picker */
+  // Human vault picker (M12 Flight 2 Leg 3 pick-and-fill, DD5/DD6) — the DEDICATED
+  // SIXTH template kind (the 'menu' kind renders only a single label + dot + a
+  // hardcoded "Default" badge and cannot express title+username+source-vault rows or
+  // emit a selection value). A centered backdrop + card (role="menu") like
+  // vault-unlock — the gesture carries no anchor. Rows are a roving list via the
+  // shared menu-controller; a click reports the row INDEX as `pick:<i>` (the 'sug:'+i
+  // idiom — non-secret; `id` is not length-capped). An empty model renders a single
+  // non-focusable note "No saved logins for this site". Metadata only — no password.
+
+  const picker = buildVaultPickerCard(document);
+  const pickerNode = picker.node;
+  const pickerCard = picker.card;
+  root.appendChild(pickerNode);
+
+  // The focusable rows for the current render (rebuilt per init) — the controller's
+  // items getter. Empty for the note state, so roving/arrows no-op safely.
+  /** @type {HTMLElement[]} */
+  let pickerRows = [];
+  const pickerItems = () => pickerRows;
+
+  const pickerEntry = menuController.register({
+    // trigger === menu === pickerNode (the backdrop): opens are programmatic (per
+    // init), so the controller skips its trigger-keydown opener — CRITICAL, since an
+    // opener on the same node would fire on the roving list's own Arrow/Enter keys and
+    // closeAll() it mid-navigation. The roving `items` live inside pickerCard; their
+    // keydowns bubble up to pickerNode's menu-keydown listener (the shared APG roving
+    // contract), and pickerCard carries role="menu"/menuitem for a11y. Outside-click
+    // is the local backdrop handler below (the controller's pointerdown sees
+    // pickerNode.contains(target) === true for every in-sheet click — parity with the
+    // input-dialog / vault-unlock backdrops).
+    trigger: pickerNode,
+    menu: pickerNode,
+    items: pickerItems,
+    /** @param {number} [startIndex] */
+    onOpen(startIndex = 0) {
+      pickerNode.classList.remove('hidden');
+      const list = pickerItems();
+      if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
+      else pickerCard.focus(); // empty (note) state — focus the card so Escape/Tab work
+    },
+    onClose() {
+      pickerNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  /** Render the picker rows from the metadata model + wire per-row selection.
+   * @param {any[]} model */
+  function renderPicker(model) {
+    pickerRows = renderVaultPickerRows(document, pickerCard, model);
+    pickerRows.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // A credential row reports its INDEX (`pick:<i>`, from data-pick-index); the
+        // separated footer (no data-pick-index) reports MANAGE_ID → chrome routes it to
+        // openVaultPage() (a navigation, no secret). Activation wins over the onClose
+        // dismissal (one report per token). The password is NEVER on this path.
+        const pi = btn.dataset.pickIndex;
+        const id = pi != null && pi !== '' ? pickId(Number(pi)) : MANAGE_ID;
+        if (sendActivatedOnce({ id })) menuController.close(pickerEntry);
+      });
+    });
+  }
+
+  // Backdrop click (outside the card) dismisses — parity with input-dialog /
+  // vault-unlock (the controller's global pointerdown sees pickerNode.contains(target)
+  // === true for the backdrop, so it can't own this; this local handler does).
+  // Escape/Tab are handled by the shared controller's menu-keydown (items present →
+  // its Escape/Tab branch closes + returns focus; the empty note state has an items
+  // getter returning [], so arrows no-op safely).
+  pickerNode.addEventListener('click', (e) => {
+    if (e.target === pickerNode) {
+      report.lastStimulus = 'outside-click';
+      menuController.close(pickerEntry);
+    }
+  });
+
+  /* ------------------------------------------------------ template: vault-capture */
+  // Save / update prompt (M12 Flight 2 Leg 4 capture-save, DD7) — the DEDICATED
+  // SEVENTH template kind, a centered backdrop like vault-unlock (the submit carries
+  // no anchor). Shows the origin + username (read-only), a "Save password?" /
+  // "Update password?" heading, and — for a `save` only — a vault radio choice
+  // (default the active jar, "Global" selectable). Save reports the chosen vaultId +
+  // the stashed captureId to main via a DEDICATED invoke (menuOverlay.captureSave);
+  // the CAPTURED PASSWORD is never here — it lives only in the main-side held record.
+
+  const capture = buildVaultCaptureCard(document);
+  const captureNode = capture.node;
+  root.appendChild(captureNode);
+
+  // The captureId of the offer currently rendered (from the init model) + the render's
+  // choice radios. Set on every vault-capture init; the Save invoke carries the id back.
+  /** @type {string | null} */
+  let captureCaptureId = null;
+  /** @type {HTMLInputElement[]} */
+  let captureChoiceInputs = [];
+  // The fixed vaultId a save invoke falls back to (the update path's vault, which main
+  // ignores). Set per-init from the model's defaultVaultId.
+  /** @type {string | undefined} */
+  let captureDefaultVaultId;
+  let captureBusy = false; // guards a concurrent Save (double-Enter / Enter+click).
+
+  const captureEntry = menuController.register({
+    trigger: captureNode,
+    menu: captureNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    onOpen() {
+      captureBusy = false;
+      captureNode.classList.remove('hidden');
+      // Focus the first vault choice on a save, else the Save button (update has none).
+      if (captureChoiceInputs.length) captureChoiceInputs[0].focus();
+      else capture.save.focus();
+    },
+    onClose() {
+      captureNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Save → the DEDICATED captureSave invoke ({ token, captureId, vaultId }). The
+  // vaultId is the checked radio (save) or the fixed default (update — main ignores it,
+  // using the record's fixed vault). NO password on this path. { saved:true } → main
+  // closes the sheet (channel 7 'activated'); { saved:false } → re-prompt with an error
+  // (the held record is dropped on the eventual dismiss / the 2-min timeout).
+  async function submitCapture() {
+    if (report.sent || report.token == null || captureBusy || captureCaptureId == null) return;
+    const token = report.token;
+    const captureId = captureCaptureId;
+    const vaultId = selectedVaultId(captureChoiceInputs) || captureDefaultVaultId;
+    captureBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.captureSave({ token, captureId, vaultId });
+    } catch {
+      res = { saved: false };
+    } finally {
+      captureBusy = false;
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moved the
+    // live token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.saved) {
+      report.sent = true; // suppress the trailing dismissed; main also closes the sheet.
+      menuController.close(captureEntry);
+    } else {
+      capture.error.textContent = res && res.reason === 'locked'
+        ? 'The manager locked — unlock it and try again'
+        : 'Couldn’t save the password';
+    }
+  }
+
+  capture.save.addEventListener('click', () => { void submitCapture(); });
+  capture.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(captureEntry);
+  });
+  // Enter → Save stays a card-local keydown; Escape + Tab-cycle (choice radios → Save →
+  // Cancel) + backdrop dismiss are the SHARED modal-card helper (M12 F3 Leg 4, DD5
+  // refactor — replaces the former inline Escape/Tab/backdrop blocks byte-for-byte). The
+  // cycle getter reads captureChoiceInputs LIVE (rebuilt per render).
+  captureNode.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitCapture();
+    }
+  });
+  attachModalCard({
+    node: captureNode,
+    getCycle: () => [...captureChoiceInputs, capture.save, capture.cancel],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(captureEntry); },
+  });
+
+  /** Render the capture card from the offer model + stash the captureId + choices.
+   * @param {any} model */
+  function renderCapture(model) {
+    captureCaptureId = model && typeof model.captureId === 'string' ? model.captureId : null;
+    captureDefaultVaultId = model && model.defaultVaultId;
+    const { choiceInputs } = renderVaultCaptureCard(document, capture, model);
+    captureChoiceInputs = choiceInputs;
+  }
+
+  /* ---------------------------------------------------------- template: vault-set */
+  // First-run master-password SETUP (M12 F3 Leg 4 first-run-setup, DD5) — the EIGHTH
+  // template kind, a dialog-style card on the shared modal-card helper (like vault-unlock):
+  // password + confirm fields, a CLIENT-SIDE match check, submitting the password as a
+  // Uint8Array over the DEDICATED menu-overlay:vault-setup Buffer channel (NEVER channel-4
+  // sendActivated). The sheet awaits { ok }: false → stay open + show the error; true →
+  // close (main also closes it and drives chrome to open vault-recovery-show).
+
+  const vaultSet = buildVaultSetCard(document);
+  const vaultSetNode = vaultSet.node;
+  root.appendChild(vaultSetNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultSetBusy = false;
+
+  const vaultSetEntry = menuController.register({
+    trigger: vaultSetNode,
+    menu: vaultSetNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+    onOpen() {
+      vaultSet.input.value = '';
+      vaultSet.confirm.value = '';
+      vaultSet.error.textContent = '';
+      vaultSetBusy = false;
+      vaultSetNode.classList.remove('hidden');
+      vaultSet.input.focus();
+    },
+    onClose() {
+      vaultSetNode.classList.add('hidden');
+      // Scrub the fields' DOM values on close (best-effort — the input V8 strings
+      // themselves are unscrubbable, the accepted DD4 limitation).
+      vaultSet.input.value = '';
+      vaultSet.confirm.value = '';
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED setup channel. Client-side: empty guard + confirm-MATCH check
+  // (NO setup invoke on a mismatch). Encode to a Uint8Array (never a JS string on the
+  // wire), invoke, act on { ok }. The sheet-side copy is zeroized after the round-trip;
+  // main zeroizes its own Buffer copy + the transferred array (dual-zeroize).
+  async function submitVaultSet() {
+    if (report.sent || report.token == null || vaultSetBusy) return;
+    const value = vaultSet.input.value;
+    if (!value) {
+      vaultSet.error.textContent = 'Choose a master password';
+      vaultSet.input.focus();
+      return;
+    }
+    if (value !== vaultSet.confirm.value) {
+      vaultSet.error.textContent = 'Passwords do not match';
+      vaultSet.confirm.focus();
+      return;
+    }
+    const token = report.token;
+    const secret = new TextEncoder().encode(value);
+    vaultSetBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.setupVault({ token, secret });
+    } catch {
+      // A rejected invoke (e.g. already set up) degrades to an inline error, not a crash.
+      res = { ok: false };
+    } finally {
+      vaultSetBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moved the live
+    // token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes + opens recovery-show.
+      menuController.close(vaultSetEntry);
+    } else {
+      vaultSet.error.textContent = 'Couldn’t set up the manager. Please try again.';
+    }
+  }
+
+  vaultSet.submit.addEventListener('click', () => { void submitVaultSet(); });
+  vaultSet.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultSetEntry);
+  });
+  const vaultSetEnter = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitVaultSet(); }
+  };
+  vaultSet.input.addEventListener('keydown', vaultSetEnter);
+  vaultSet.confirm.addEventListener('keydown', vaultSetEnter);
+  attachModalCard({
+    node: vaultSetNode,
+    getCycle: () => [vaultSet.input, vaultSet.confirm, vaultSet.submit, vaultSet.cancel],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultSetEntry); },
+  });
+
+  /* ----------------------------------------------- template: vault-recovery-show */
+  // ONE-TIME recovery-key display (M12 F3 Leg 4 first-run-setup, DD5) — the NINTH template
+  // kind, read-only and DISMISS-DISABLED. The recovery key arrives in the channel-3 init
+  // model ({ recoveryKey }); it is rendered via textContent only, copied via main's
+  // OS-clipboard write, and its reference is DROPPED on close (never re-emitted on
+  // model-replace). Escape / backdrop / window-blur must NOT close it — only the explicit
+  // acknowledge (the key is unrecoverable): the entry carries dismissible:false (the
+  // menu-controller's blur/outside-click guards skip it) and attachModalCard is wired
+  // dismissible:false (Escape/backdrop inert; Tab still traps). Main honors the same opt-out.
+
+  const recovery = buildVaultRecoveryCard(document);
+  const recoveryNode = recovery.node;
+  root.appendChild(recoveryNode);
+
+  /** @type {string | null} the recovery key currently displayed — dropped on close. */
+  let recoveryKey = null;
+
+  const recoveryEntry = menuController.register({
+    trigger: recoveryNode,
+    menu: recoveryNode,
+    dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
+    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+    onOpen() {
+      recoveryNode.classList.remove('hidden');
+      recovery.keyValue.focus();
+    },
+    onClose() {
+      recoveryNode.classList.add('hidden');
+      // Drop the key reference + scrub the DOM text — never retained past the display.
+      recovery.keyValue.textContent = '';
+      recoveryKey = null;
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  recovery.copy.addEventListener('click', () => {
+    if (recoveryKey) window.menuOverlay.copyText(recoveryKey);
+  });
+  recovery.acknowledge.addEventListener('click', () => {
+    // The deliberate close — activation (id:'ack') suppresses the trailing dismissed and
+    // drives main to close the sheet. This is the ONLY path that closes recovery-show.
+    if (sendActivatedOnce({ id: 'ack' })) menuController.close(recoveryEntry);
+  });
+  attachModalCard({
+    node: recoveryNode,
+    getCycle: () => [recovery.keyValue, recovery.copy, recovery.acknowledge],
+    dismissible: false,
+    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+  });
+
+  /** Render the recovery key into the read-only display (textContent only) + stash it for
+   * Copy. Re-reads the model each init, so a model-replace never re-emits a stale key.
+   * The `replacing` flag (rotate-recovery only; setup omits it) reveals the "this replaces
+   * your previous recovery key" line — the rotation kills the old key (HAT I9). Re-read each
+   * init so a subsequent setup-case open (no flag) hides it again.
+   * @param {any} model */
+  function renderRecovery(model) {
+    recoveryKey = model && typeof model.recoveryKey === 'string' ? model.recoveryKey : '';
+    recovery.keyValue.textContent = recoveryKey || '';
+    recovery.replacingLede.hidden = !(model && model.replacing === true);
+  }
+
+  /* -------------------------------------------------------- template: vault-stepup */
+  // Step-up master-password confirmation for access-key MINT (M12 F3 Leg 5 access-keys,
+  // DD5) — a dialog-style card on the shared modal-card helper, MIRRORING vault-set but
+  // with a SINGLE password field (a re-auth, no confirm). The password submits as a
+  // Uint8Array over the DEDICATED menu-overlay:vault-stepup-mint Buffer channel — carrying
+  // the NON-SECRET target vault id (stashed from the channel-3 init model) — NEVER channel-4
+  // sendActivated. The sheet awaits { ok }: false → stay open + show the error (wrong step-up
+  // password re-prompts); true → close (main also closes it and drives chrome to open
+  // vault-accesskey-show).
+
+  const vaultStepup = buildVaultStepupCard(document);
+  const vaultStepupNode = vaultStepup.node;
+  root.appendChild(vaultStepupNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultStepupBusy = false;
+  /** @type {string | undefined} the target vault id for the mint — stashed per-init. */
+  let vaultStepupTarget;
+  /** @type {'mint' | 'rotate-recovery' | 'rotate-admin'} the step-up operation — stashed per-init
+   * (M12 F4 Leg 2/3). The vault-stepup sheet is REUSED for recovery rotation's (DD3) and admin-key
+   * rotation/provision's (DD4) master-password step-up: same single-master-password re-auth UI,
+   * different store op + one-time display. */
+  let vaultStepupMode = 'mint';
+
+  const vaultStepupEntry = menuController.register({
+    trigger: vaultStepupNode,
+    menu: vaultStepupNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+    onOpen() {
+      vaultStepup.input.value = '';
+      vaultStepup.error.textContent = '';
+      vaultStepupBusy = false;
+      vaultStepupNode.classList.remove('hidden');
+      vaultStepup.input.focus();
+    },
+    onClose() {
+      vaultStepupNode.classList.add('hidden');
+      // Scrub the field's DOM value on close (best-effort — the input V8 strings
+      // themselves are unscrubbable, the accepted DD4 limitation).
+      vaultStepup.input.value = '';
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED stepup-mint channel. Client-side: empty guard only (no confirm —
+  // this is a re-auth). Encode to a Uint8Array (never a JS string on the wire), invoke with
+  // the stashed target, act on { ok }. The sheet-side copy is zeroized after the round-trip;
+  // main zeroizes its own Buffer copy + the transferred array (dual-zeroize).
+  async function submitVaultStepup() {
+    if (report.sent || report.token == null || vaultStepupBusy) return;
+    const value = vaultStepup.input.value;
+    if (!value) {
+      vaultStepup.error.textContent = 'Enter your master password';
+      vaultStepup.input.focus();
+      return;
+    }
+    const token = report.token;
+    const target = vaultStepupTarget;
+    const mode = vaultStepupMode;
+    const secret = new TextEncoder().encode(value);
+    vaultStepupBusy = true;
+    let res;
+    try {
+      res = mode === 'rotate-recovery'
+        // M12 F4 Leg 2: recovery rotation's master-password step-up. On success main mints the
+        // new recovery key + drives vault-recovery-show (post-write). No target.
+        ? await window.menuOverlay.rotateRecovery({ token, secret })
+        : mode === 'rotate-admin'
+        // M12 F4 Leg 3: admin-key rotation/provision's master-password step-up. On success main
+        // mints the new admin keypair + drives vault-adminkey-show (post-write). No target.
+        ? await window.menuOverlay.rotateAdminKey({ token, secret })
+        : await window.menuOverlay.stepupMint({ token, secret, target });
+    } catch {
+      // A rejected invoke degrades to an inline error, not a crash.
+      res = { ok: false };
+    } finally {
+      vaultStepupBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moved the live
+    // token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes + opens the one-time display.
+      menuController.close(vaultStepupEntry);
+    } else {
+      vaultStepup.error.textContent = mode === 'rotate-recovery'
+        ? 'Wrong master password. The recovery key was not rotated.'
+        : mode === 'rotate-admin'
+        ? 'Wrong master password. The admin key was not rotated.'
+        : 'Wrong master password. Nothing was minted.';
+      vaultStepup.input.value = '';
+      vaultStepup.input.focus();
+    }
+  }
+
+  vaultStepup.submit.addEventListener('click', () => { void submitVaultStepup(); });
+  vaultStepup.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultStepupEntry);
+  });
+  vaultStepup.input.addEventListener('keydown', (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitVaultStepup(); }
+  });
+  attachModalCard({
+    node: vaultStepupNode,
+    getCycle: () => [vaultStepup.input, vaultStepup.submit, vaultStepup.cancel],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultStepupEntry); },
+  });
+
+  /** Stash the step-up mode + (for mint) the target vault id from the object model. Re-read each
+   * init so a model-replace never acts on a stale target/mode. The vault-stepup sheet is reused
+   * for recovery rotation's master-password step-up (M12 F4 Leg 2, DD3): mode 'rotate-recovery'
+   * re-labels the lede + submit and routes submit to the rotateRecovery channel; 'mint' (default)
+   * is the F3 access-key step-up.
+   * @param {any} model */
+  function renderStepup(model) {
+    vaultStepupMode = model && (model.mode === 'rotate-recovery' || model.mode === 'rotate-admin')
+      ? model.mode
+      : 'mint';
+    vaultStepupTarget = model && typeof model.target === 'string' ? model.target : undefined;
+    if (vaultStepupMode === 'rotate-recovery') {
+      vaultStepup.lede.textContent =
+        'Rotating your recovery key needs a fresh master-password confirmation, even while the manager is unlocked.';
+      vaultStepup.submit.textContent = 'Rotate recovery key';
+    } else if (vaultStepupMode === 'rotate-admin') {
+      vaultStepup.lede.textContent =
+        'Provisioning or rotating your admin key needs a fresh master-password confirmation, even while the manager is unlocked.';
+      vaultStepup.submit.textContent = 'Provision admin key';
+    } else {
+      vaultStepup.lede.textContent =
+        'Minting an access key needs a fresh master-password confirmation, even while the manager is unlocked.';
+      vaultStepup.submit.textContent = 'Mint access key';
+    }
+  }
+
+  /* -------------------------------------------- template: vault-accesskey-show */
+  // ONE-TIME minted-access-key display (M12 F3 Leg 5 access-keys, DD5) — read-only and
+  // DISMISS-DISABLED, MIRRORING vault-recovery-show. The { secret, keyId } arrive in the
+  // channel-3 init model; both are rendered via textContent only, the secret is copied via
+  // main's OS-clipboard write, and their references are DROPPED on close (never re-emitted on
+  // model-replace). Escape / backdrop / window-blur must NOT close it — only the explicit
+  // acknowledge (the secret is unrecoverable): the entry carries dismissible:false and
+  // attachModalCard is wired dismissible:false (Escape/backdrop inert; Tab still traps).
+
+  const accessKey = buildVaultAccessKeyCard(document);
+  const accessKeyNode = accessKey.node;
+  root.appendChild(accessKeyNode);
+
+  /** @type {string | null} the minted secret currently displayed — dropped on close. */
+  let accessKeySecret = null;
+
+  const accessKeyEntry = menuController.register({
+    trigger: accessKeyNode,
+    menu: accessKeyNode,
+    dismissible: false, // DD5 — the menu-controller blur/outside-click guards skip it
+    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+    onOpen() {
+      accessKeyNode.classList.remove('hidden');
+      accessKey.secretValue.focus();
+    },
+    onClose() {
+      accessKeyNode.classList.add('hidden');
+      // Drop the secret reference + scrub the DOM text — never retained past the display.
+      accessKey.secretValue.textContent = '';
+      accessKey.keyIdValue.textContent = '';
+      accessKeySecret = null;
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  accessKey.copy.addEventListener('click', () => {
+    if (accessKeySecret) window.menuOverlay.copyText(accessKeySecret);
+  });
+  accessKey.acknowledge.addEventListener('click', () => {
+    // The deliberate close — activation (id:'ack') suppresses the trailing dismissed and
+    // drives main to close the sheet. This is the ONLY path that closes accesskey-show.
+    if (sendActivatedOnce({ id: 'ack' })) menuController.close(accessKeyEntry);
+  });
+  attachModalCard({
+    node: accessKeyNode,
+    getCycle: () => [accessKey.keyIdValue, accessKey.secretValue, accessKey.copy, accessKey.acknowledge],
+    dismissible: false,
+    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+  });
+
+  /** Render the minted secret + keyId into the read-only displays (textContent only) + stash
+   * the secret for Copy. Re-reads the model each init, so a model-replace never re-emits a
+   * stale secret.
+   * @param {any} model */
+  function renderAccessKey(model) {
+    accessKeySecret = model && typeof model.secret === 'string' ? model.secret : '';
+    accessKey.secretValue.textContent = accessKeySecret || '';
+    accessKey.keyIdValue.textContent = model && typeof model.keyId === 'string' ? model.keyId : '';
+  }
+
+  /* -------------------------------------------- template: vault-adminkey-show */
+  // ONE-TIME minted-admin-key display (M12 F4 Leg 3 admin-key-provision, DD4) — read-only and
+  // DISMISS-DISABLED, MIRRORING vault-accesskey-show. The { adminPrivateKey } arrives in the
+  // channel-3 init model; it is rendered via textContent only, copied via main's OS-clipboard
+  // write, and its reference is DROPPED on close (never re-emitted on model-replace). Escape /
+  // backdrop / window-blur must NOT close it — only the explicit acknowledge (the private key is
+  // unrecoverable): the entry carries dismissible:false and attachModalCard is wired
+  // dismissible:false (Escape/backdrop inert; Tab still traps).
+
+  const adminKey = buildVaultAdminKeyCard(document);
+  const adminKeyNode = adminKey.node;
+  root.appendChild(adminKeyNode);
+
+  /** @type {string | null} the minted admin private key currently displayed — dropped on close. */
+  let adminKeySecret = null;
+
+  const adminKeyEntry = menuController.register({
+    trigger: adminKeyNode,
+    menu: adminKeyNode,
+    dismissible: false, // DD4 — the menu-controller blur/outside-click guards skip it
+    // no `items` — roving no-ops; Tab-cycling is the modal-card helper below.
+    onOpen() {
+      adminKeyNode.classList.remove('hidden');
+      adminKey.keyValue.focus();
+    },
+    onClose() {
+      adminKeyNode.classList.add('hidden');
+      // Drop the key reference + scrub the DOM text — never retained past the display.
+      adminKey.keyValue.textContent = '';
+      adminKeySecret = null;
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  adminKey.copy.addEventListener('click', () => {
+    if (adminKeySecret) window.menuOverlay.copyText(adminKeySecret);
+  });
+  adminKey.acknowledge.addEventListener('click', () => {
+    // The deliberate close — activation (id:'ack') suppresses the trailing dismissed and
+    // drives main to close the sheet. This is the ONLY path that closes adminkey-show.
+    if (sendActivatedOnce({ id: 'ack' })) menuController.close(adminKeyEntry);
+  });
+  attachModalCard({
+    node: adminKeyNode,
+    getCycle: () => [adminKey.keyValue, adminKey.copy, adminKey.acknowledge],
+    dismissible: false,
+    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+  });
+
+  /** Render the minted admin private key into the read-only display (textContent only) + stash
+   * it for Copy. Re-reads the model each init, so a model-replace never re-emits a stale key.
+   * @param {any} model */
+  function renderAdminKey(model) {
+    adminKeySecret = model && typeof model.adminPrivateKey === 'string' ? model.adminPrivateKey : '';
+    adminKey.keyValue.textContent = adminKeySecret || '';
+  }
+
+  /* -------------------------------------------------------- template: vault-import */
+  // Import-bundle secret entry (M12 F4 Leg 1 export-import, DD1/DD2) — a dialog-style card
+  // on the shared modal-card helper, MIRRORING vault-stepup but adding a `secretKind` radio
+  // toggle (master password | recovery key). The single secret submits as a Uint8Array over
+  // the DEDICATED menu-overlay:vault-import Buffer channel, carrying the chosen secretKind —
+  // NEVER channel-4 sendActivated. The destination target + the bundle are held MAIN-SIDE
+  // (never on this sheet). The sheet awaits { ok }: false → stay open + show the error (wrong
+  // secret re-prompts); true → close (main runs the re-key / fresh-profile adopt).
+
+  const vaultImport = buildVaultImportCard(document);
+  const vaultImportNode = vaultImport.node;
+  root.appendChild(vaultImportNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultImportBusy = false;
+
+  const vaultImportEntry = menuController.register({
+    trigger: vaultImportNode,
+    menu: vaultImportNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+    onOpen() {
+      vaultImport.input.value = '';
+      vaultImport.error.textContent = '';
+      vaultImport.masterRadio.checked = true; // default to master password each open.
+      vaultImport.recoveryRadio.checked = false;
+      vaultImportBusy = false;
+      vaultImportNode.classList.remove('hidden');
+      vaultImport.input.focus();
+    },
+    onClose() {
+      vaultImportNode.classList.add('hidden');
+      // Scrub the field's DOM value on close (best-effort — the input V8 strings themselves
+      // are unscrubbable, the accepted DD4 limitation).
+      vaultImport.input.value = '';
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED vault-import channel. Client-side: empty guard only. Read the
+  // secretKind from the checked radio, encode the secret to a Uint8Array (never a JS string
+  // on the wire), invoke, act on { ok }. The sheet-side copy is zeroized after the round-trip;
+  // main zeroizes its own Buffer copy + the transferred array (dual-zeroize).
+  async function submitVaultImport() {
+    if (report.sent || report.token == null || vaultImportBusy) return;
+    const value = vaultImport.input.value;
+    if (!value) {
+      vaultImport.error.textContent = 'Enter the master password or recovery key';
+      vaultImport.input.focus();
+      return;
+    }
+    const token = report.token;
+    const secretKind = vaultImport.recoveryRadio.checked ? 'recovery' : 'master';
+    const secret = new TextEncoder().encode(value);
+    vaultImportBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.importVault({ token, secret, secretKind });
+    } catch {
+      // A rejected invoke degrades to an inline error, not a crash.
+      res = { ok: false };
+    } finally {
+      vaultImportBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await moved the live
+    // token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes the sheet.
+      menuController.close(vaultImportEntry);
+    } else if (res && res.reason === 'collision') {
+      // M12 F5 HAT tail (review HIGH-1 / MEDIUM-4): a destination COLLISION is not a secret
+      // failure — surface a truthful, FIXED string (never echo the store message, which embeds the
+      // destination/jar id). Defense-in-depth: the page's upfront Replace-existing checkbox makes a
+      // sheet-level collision normally unreachable, but a rare race can still land here.
+      vaultImport.error.textContent = 'A vault already exists at the destination.';
+      vaultImport.input.value = '';
+      vaultImport.input.focus();
+    } else {
+      vaultImport.error.textContent = 'Could not open the bundle. Check the secret and type.';
+      vaultImport.input.value = '';
+      vaultImport.input.focus();
+    }
+  }
+
+  vaultImport.submit.addEventListener('click', () => { void submitVaultImport(); });
+  vaultImport.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultImportEntry);
+  });
+  vaultImport.input.addEventListener('keydown', (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitVaultImport(); }
+  });
+  attachModalCard({
+    node: vaultImportNode,
+    getCycle: () => [
+      vaultImport.masterRadio, vaultImport.recoveryRadio, vaultImport.input,
+      vaultImport.submit, vaultImport.cancel,
+    ],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultImportEntry); },
+  });
+
+  /* -------------------------------------------------- template: vault-change-master */
+  // Master-password CHANGE entry (M12 F4 Leg 2 key-rotation, DD3/DD2) — a dialog-style card on
+  // the shared modal-card helper, MIRRORING vault-set but with THREE fields: old-password (the
+  // step-up), new-password, and confirm. The confirm === new check is CLIENT-SIDE; only the OLD
+  // + NEW secrets submit as Uint8Arrays over the DEDICATED menu-overlay:vault-change-master
+  // Buffer channel — NEVER channel-4 sendActivated. The sheet awaits { ok }: false → stay open +
+  // show the error (a WRONG old password re-prompts); true → close (there is no one-time display
+  // — the new master password is operator-chosen).
+
+  const vaultChangeMaster = buildVaultChangeMasterCard(document);
+  const vaultChangeMasterNode = vaultChangeMaster.node;
+  root.appendChild(vaultChangeMasterNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultChangeMasterBusy = false;
+
+  const vaultChangeMasterEntry = menuController.register({
+    trigger: vaultChangeMasterNode,
+    menu: vaultChangeMasterNode,
+    onOpen() {
+      vaultChangeMaster.oldInput.value = '';
+      vaultChangeMaster.newInput.value = '';
+      vaultChangeMaster.confirm.value = '';
+      vaultChangeMaster.error.textContent = '';
+      vaultChangeMasterBusy = false;
+      vaultChangeMasterNode.classList.remove('hidden');
+      vaultChangeMaster.oldInput.focus();
+    },
+    onClose() {
+      vaultChangeMasterNode.classList.add('hidden');
+      // Scrub the field DOM values on close (best-effort — the input V8 strings are unscrubbable,
+      // the accepted DD4 limitation).
+      vaultChangeMaster.oldInput.value = '';
+      vaultChangeMaster.newInput.value = '';
+      vaultChangeMaster.confirm.value = '';
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED change-master channel. Client-side: empty guards + confirm-MATCH check
+  // (NO invoke on an empty field / mismatch). Encode BOTH secrets to Uint8Arrays (never a JS
+  // string on the wire), invoke, act on { ok }. The sheet-side copies are zeroized after the
+  // round-trip; main zeroizes its own Buffer copies + the transferred arrays (dual-zeroize).
+  async function submitVaultChangeMaster() {
+    if (report.sent || report.token == null || vaultChangeMasterBusy) return;
+    const oldValue = vaultChangeMaster.oldInput.value;
+    const newValue = vaultChangeMaster.newInput.value;
+    if (!oldValue) {
+      vaultChangeMaster.error.textContent = 'Enter your current master password';
+      vaultChangeMaster.oldInput.focus();
+      return;
+    }
+    if (!newValue) {
+      vaultChangeMaster.error.textContent = 'Choose a new master password';
+      vaultChangeMaster.newInput.focus();
+      return;
+    }
+    if (newValue !== vaultChangeMaster.confirm.value) {
+      vaultChangeMaster.error.textContent = 'New passwords do not match';
+      vaultChangeMaster.confirm.focus();
+      return;
+    }
+    const token = report.token;
+    const oldSecret = new TextEncoder().encode(oldValue);
+    const newSecret = new TextEncoder().encode(newValue);
+    vaultChangeMasterBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.changeMaster({ token, oldSecret, newSecret });
+    } catch {
+      res = { ok: false };
+    } finally {
+      vaultChangeMasterBusy = false;
+      oldSecret.fill(0);
+      newSecret.fill(0);
+    }
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes the sheet.
+      menuController.close(vaultChangeMasterEntry);
+    } else {
+      vaultChangeMaster.error.textContent = 'Wrong current master password. Nothing was changed.';
+      vaultChangeMaster.oldInput.value = '';
+      vaultChangeMaster.oldInput.focus();
+    }
+  }
+
+  vaultChangeMaster.submit.addEventListener('click', () => { void submitVaultChangeMaster(); });
+  vaultChangeMaster.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultChangeMasterEntry);
+  });
+  const vaultChangeMasterEnter = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitVaultChangeMaster(); }
+  };
+  vaultChangeMaster.oldInput.addEventListener('keydown', vaultChangeMasterEnter);
+  vaultChangeMaster.newInput.addEventListener('keydown', vaultChangeMasterEnter);
+  vaultChangeMaster.confirm.addEventListener('keydown', vaultChangeMasterEnter);
+  attachModalCard({
+    node: vaultChangeMasterNode,
+    getCycle: () => [
+      vaultChangeMaster.oldInput, vaultChangeMaster.newInput, vaultChangeMaster.confirm,
+      vaultChangeMaster.submit, vaultChangeMaster.cancel,
+    ],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultChangeMasterEntry); },
+  });
+
+  /* --------------------------------------------------------- template: vault-recover */
+  // RECOVER-after-forgotten-master entry (M12 F4 Leg 2 key-rotation, DD3/DD2) — a dialog-style
+  // card on the shared modal-card helper, MIRRORING vault-change-master but with a RECOVERY-KEY
+  // field (the step-up — master-equivalent proof) in place of the old-password field. The
+  // confirm === new check is CLIENT-SIDE; only the RECOVERY + NEW secrets submit as Uint8Arrays
+  // over the DEDICATED menu-overlay:vault-recover Buffer channel — NEVER channel-4 sendActivated.
+  // The sheet awaits { ok }: false → stay open + show the error (a WRONG recovery key re-prompts);
+  // true → close (the store installs the MRK → the page moves to unlocked off the lock-state
+  // broadcast). Works FROM the LOCKED state (the recovery key is its own step-up).
+
+  const vaultRecover = buildVaultRecoverCard(document);
+  const vaultRecoverNode = vaultRecover.node;
+  root.appendChild(vaultRecoverNode);
+
+  // Guards a concurrent submit (double-Enter / Enter+click); reset on every open.
+  let vaultRecoverBusy = false;
+
+  const vaultRecoverEntry = menuController.register({
+    trigger: vaultRecoverNode,
+    menu: vaultRecoverNode,
+    onOpen() {
+      vaultRecover.recoveryInput.value = '';
+      vaultRecover.newInput.value = '';
+      vaultRecover.confirm.value = '';
+      vaultRecover.error.textContent = '';
+      vaultRecoverBusy = false;
+      vaultRecoverNode.classList.remove('hidden');
+      vaultRecover.recoveryInput.focus();
+    },
+    onClose() {
+      vaultRecoverNode.classList.add('hidden');
+      vaultRecover.recoveryInput.value = '';
+      vaultRecover.newInput.value = '';
+      vaultRecover.confirm.value = '';
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Submit → the DEDICATED recover channel. Client-side: empty guards + confirm-MATCH check.
+  // Encode BOTH secrets to Uint8Arrays (never a JS string on the wire), invoke, act on { ok }.
+  // The sheet-side copies are zeroized after the round-trip; main zeroizes its own Buffer copies
+  // + the transferred arrays (dual-zeroize).
+  async function submitVaultRecover() {
+    if (report.sent || report.token == null || vaultRecoverBusy) return;
+    const recoveryValue = vaultRecover.recoveryInput.value;
+    const newValue = vaultRecover.newInput.value;
+    if (!recoveryValue) {
+      vaultRecover.error.textContent = 'Enter your recovery key';
+      vaultRecover.recoveryInput.focus();
+      return;
+    }
+    if (!newValue) {
+      vaultRecover.error.textContent = 'Choose a new master password';
+      vaultRecover.newInput.focus();
+      return;
+    }
+    if (newValue !== vaultRecover.confirm.value) {
+      vaultRecover.error.textContent = 'New passwords do not match';
+      vaultRecover.confirm.focus();
+      return;
+    }
+    const token = report.token;
+    const recoverySecret = new TextEncoder().encode(recoveryValue);
+    const newSecret = new TextEncoder().encode(newValue);
+    vaultRecoverBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.recoverMaster({ token, recoverySecret, newSecret });
+    } catch {
+      res = { ok: false };
+    } finally {
+      vaultRecoverBusy = false;
+      recoverySecret.fill(0);
+      newSecret.fill(0);
+    }
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main closes the sheet.
+      menuController.close(vaultRecoverEntry);
+    } else {
+      vaultRecover.error.textContent = 'Wrong recovery key. Nothing was changed.';
+      vaultRecover.recoveryInput.value = '';
+      vaultRecover.recoveryInput.focus();
+    }
+  }
+
+  vaultRecover.submit.addEventListener('click', () => { void submitVaultRecover(); });
+  vaultRecover.cancel.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(vaultRecoverEntry);
+  });
+  const vaultRecoverEnter = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitVaultRecover(); }
+  };
+  vaultRecover.recoveryInput.addEventListener('keydown', vaultRecoverEnter);
+  vaultRecover.newInput.addEventListener('keydown', vaultRecoverEnter);
+  vaultRecover.confirm.addEventListener('keydown', vaultRecoverEnter);
+  attachModalCard({
+    node: vaultRecoverNode,
+    getCycle: () => [
+      vaultRecover.recoveryInput, vaultRecover.newInput, vaultRecover.confirm,
+      vaultRecover.submit, vaultRecover.cancel,
+    ],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultRecoverEntry); },
+  });
+
   /* ----------------------------------------------------------- template: downloads */
   // Downloads popup (M11 Flight 1 Leg 3, DD2/DD3): a role="dialog" list of the
   // current/recent downloads in the latest chrome-owned model. The sheet remains
@@ -574,7 +1593,7 @@ import { isSafeColor } from '../shared/safe-color.js';
   downloadsNode.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      lastStimulus = 'escape';
+      report.lastStimulus = 'escape';
       menuController.close(downloadsEntry);
     } else if (e.key === 'Tab') {
       e.preventDefault();
@@ -765,13 +1784,24 @@ import { isSafeColor } from '../shared/safe-color.js';
 
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
     'page-context': 'menu', // Leg 4 — point-anchored, separator/note item types
     'site-info': 'info-popup',
     'new-container': 'input-dialog',
+    'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
+    'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
+    'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
+    'vault-set': 'vault-set', // M12 F3 Leg 4 — the EIGHTH kind (first-run setup)
+    'vault-recovery-show': 'vault-recovery-show', // M12 F3 Leg 4 — the NINTH kind (dismiss-disabled)
+    'vault-stepup': 'vault-stepup', // M12 F3 Leg 5 — the TENTH kind (access-key mint step-up)
+    'vault-accesskey-show': 'vault-accesskey-show', // M12 F3 Leg 5 — the ELEVENTH kind (dismiss-disabled)
+    'vault-import-unlock': 'vault-import', // M12 F4 Leg 1 — the TWELFTH kind (import-bundle secret entry)
+    'vault-change-master': 'vault-change-master', // M12 F4 Leg 2 — the THIRTEENTH kind (master-pw change)
+    'vault-recover': 'vault-recover', // M12 F4 Leg 2 — the FOURTEENTH kind (recover-after-forgotten-master)
+    'vault-adminkey-show': 'vault-adminkey-show', // M12 F4 Leg 3 — the FIFTEENTH kind (dismiss-disabled)
     // LOAD-BEARING (M08 Flight 4 DD2): the fallback below (`TEMPLATES[menuType] ||
     // 'menu'`) is the FOCUSING menu template — an unregistered/missing entry here
     // would silently fall into it and break the suggestions template's
@@ -785,7 +1815,18 @@ import { isSafeColor } from '../shared/safe-color.js';
     [popupEntry, popupNode],
     [dialogEntry, dialogNode],
     [suggestionsEntry, suggestionsNode],
-    [downloadsEntry, downloadsNode]
+    [downloadsEntry, downloadsNode],
+    [vaultEntry, vaultNode],
+    [pickerEntry, pickerNode],
+    [captureEntry, captureNode],
+    [vaultSetEntry, vaultSetNode],
+    [recoveryEntry, recoveryNode],
+    [vaultStepupEntry, vaultStepupNode],
+    [accessKeyEntry, accessKeyNode],
+    [vaultImportEntry, vaultImportNode],
+    [vaultChangeMasterEntry, vaultChangeMasterNode],
+    [vaultRecoverEntry, vaultRecoverNode],
+    [adminKeyEntry, adminKeyNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -797,8 +1838,8 @@ import { isSafeColor } from '../shared/safe-color.js';
     (e) => {
       const cur = menuController.current;
       if (!cur || !NODE_OF_ENTRY.has(cur)) return;
-      if (e.key === 'Escape') lastStimulus = 'escape';
-      else if (e.key === 'Tab' && cur === menuEntry) lastStimulus = 'escape';
+      if (e.key === 'Escape') report.lastStimulus = 'escape';
+      else if (e.key === 'Tab' && (cur === menuEntry || cur === pickerEntry)) report.lastStimulus = 'escape';
     },
     true
   );
@@ -808,7 +1849,7 @@ import { isSafeColor } from '../shared/safe-color.js';
       const cur = menuController.current;
       const node = cur && NODE_OF_ENTRY.get(cur);
       if (!node) return;
-      if (!node.contains(/** @type {Node} */ (e.target))) lastStimulus = 'outside-click';
+      if (!node.contains(/** @type {Node} */ (e.target))) report.lastStimulus = 'outside-click';
     },
     true
   );
@@ -822,7 +1863,13 @@ import { isSafeColor } from '../shared/safe-color.js';
     // emptyNote?}` — DD1). A bare `Array.isArray(model)` guard would reject that
     // object outright and the sheet would silently never render suggestions.
     const template = TEMPLATES[menuType] || 'menu';
-    const modelShapeOk = template === 'suggestions'
+    // `suggestions` and `vault-capture` carry an OBJECT model (the omnibox shape /
+    // the capture offer `{origin, username, mode, defaultVaultId, choices, captureId}`);
+    // every other template carries a flat item array. A bare Array.isArray guard would
+    // reject the object and the sheet would silently never render it.
+    const modelShapeOk = (template === 'suggestions' || template === 'vault-capture'
+      || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
+      || template === 'vault-adminkey-show')
       ? model && typeof model === 'object' && !Array.isArray(model)
       : Array.isArray(model);
     if (!modelShapeOk) return;
@@ -838,7 +1885,7 @@ import { isSafeColor } from '../shared/safe-color.js';
     // popup isn't already open OR the structure changed (a download completed,
     // appeared, or vanished — rare; full rebuild is acceptable there).
     if (template === 'downloads' && menuController.current === downloadsEntry && sameDownloadsStructure(model)) {
-      currentToken = token;
+      report.adoptToken(token);
       updateDownloads(model);
       return;
     }
@@ -847,11 +1894,9 @@ import { isSafeColor } from '../shared/safe-color.js';
     // DOM after a main-initiated close): null the token FIRST so the closing
     // entry's onClose sends nothing — the superseded menu's channel 7 was already
     // emitted by main, and a late page-side dismissed would be stale anyway.
-    currentToken = null;
+    report.silence();
     menuController.closeAll();
-    sent = false;
-    lastStimulus = 'blur';
-    currentToken = token;
+    report.begin(token);
 
     if (template === 'menu') {
       renderMenu(menuType, model, anchor);
@@ -869,6 +1914,71 @@ import { isSafeColor } from '../shared/safe-color.js';
       // Still opened through the shared controller so the global outside-click/
       // blur listeners cover this template uniformly (module header rule).
       menuController.open(suggestionsEntry, 0);
+    } else if (template === 'vault-unlock') {
+      // Fixed layout (password + error + Unlock/Cancel), centered via CSS — the
+      // anchor is ignored, model may be empty. onOpen clears + focuses the input;
+      // it must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultEntry, 0);
+    } else if (template === 'vault-picker') {
+      // Roving list of badged credential rows, centered via CSS — the anchor is
+      // ignored. Build the rows FIRST (the items getter reads them at open), then
+      // open through the controller so roving/outside-click/blur apply uniformly.
+      // An empty model → the non-focusable note; onOpen focuses the card instead.
+      renderPicker(model);
+      menuController.open(pickerEntry, typeof startIndex === 'number' ? startIndex : 0);
+    } else if (template === 'vault-capture') {
+      // Fixed layout (heading + origin/username + optional vault choice + Save/Cancel),
+      // centered via CSS — the anchor is ignored. Render FIRST (stashes captureId +
+      // choices), then open through the controller. onOpen focuses the first choice
+      // (save) or Save (update); it must NOT fall through to the non-focusing fallback.
+      renderCapture(model);
+      menuController.open(captureEntry, 0);
+    } else if (template === 'vault-set') {
+      // Fixed layout (password + confirm + error + Set up/Cancel), centered via CSS — the
+      // anchor is ignored, model is an empty array. onOpen clears + focuses the password
+      // input; it must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultSetEntry, 0);
+    } else if (template === 'vault-recovery-show') {
+      // Read-only, DISMISS-DISABLED one-time key display. Render FIRST (stashes the key
+      // from the object model), then open through the controller. onOpen focuses the key
+      // value; it must NOT fall through to the non-focusing fallback.
+      renderRecovery(model);
+      menuController.open(recoveryEntry, 0);
+    } else if (template === 'vault-stepup') {
+      // Fixed layout (password + error + Mint/Cancel), centered via CSS — the anchor is
+      // ignored. Render FIRST (stashes the target vault id from the object model), then open
+      // through the controller. onOpen clears + focuses the password input; it must NOT fall
+      // through to the non-focusing 'menu' fallback.
+      renderStepup(model);
+      menuController.open(vaultStepupEntry, 0);
+    } else if (template === 'vault-accesskey-show') {
+      // Read-only, DISMISS-DISABLED one-time minted-secret display. Render FIRST (stashes the
+      // secret + keyId from the object model), then open through the controller. onOpen
+      // focuses the secret value; it must NOT fall through to the non-focusing fallback.
+      renderAccessKey(model);
+      menuController.open(accessKeyEntry, 0);
+    } else if (template === 'vault-adminkey-show') {
+      // Read-only, DISMISS-DISABLED one-time minted-admin-key display. Render FIRST (stashes the
+      // private key from the object model), then open through the controller. onOpen focuses the
+      // key value; it must NOT fall through to the non-focusing fallback.
+      renderAdminKey(model);
+      menuController.open(adminKeyEntry, 0);
+    } else if (template === 'vault-import') {
+      // Fixed layout (secretKind radios + secret + error + Import/Cancel), centered via CSS —
+      // the anchor is ignored, model is an empty array (the destination target + the bundle
+      // are held main-side). onOpen clears + resets to master + focuses the secret input; it
+      // must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultImportEntry, 0);
+    } else if (template === 'vault-change-master') {
+      // Fixed layout (old + new + confirm + error + Change/Cancel), centered via CSS — the
+      // anchor is ignored, model is an empty array. onOpen clears + focuses the old-password
+      // input; it must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultChangeMasterEntry, 0);
+    } else if (template === 'vault-recover') {
+      // Fixed layout (recovery + new + confirm + error + Recover/Cancel), centered via CSS — the
+      // anchor is ignored, model is an empty array. onOpen clears + focuses the recovery-key
+      // input; it must NOT fall through to the non-focusing 'menu' fallback.
+      menuController.open(vaultRecoverEntry, 0);
     } else if (template === 'downloads') {
       // Flat item array (modelShapeOk's non-suggestions branch). startIndex is
       // meaningless without items — onOpen focuses the first enabled button.

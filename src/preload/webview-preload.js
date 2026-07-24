@@ -8,6 +8,8 @@
 // WebContentsView, not a <webview> element.)
 
 const { ipcRenderer } = require('electron');
+const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-fill-fields');
+const { createVaultIconController } = require('./vault-fill-icon');
 
 function absUrl(src) {
   if (!src) return null;
@@ -189,10 +191,89 @@ function scheduleScan(delay = 400) {
   timer = setTimeout(send, delay);
 }
 
-window.addEventListener('DOMContentLoaded', () => scheduleScan(150));
-window.addEventListener('load', () => scheduleScan(300));
+// ---------------------------------------------------------------------------
+// Vault lock-icon injection (M12 F2 Leg 1, DD1/DD2/DD3/DD9).
+//
+// A DECORATIVE, spoofable lock icon is injected into each detected login form in
+// the guest MAIN WORLD (contextIsolation is off). It carries NO secret and its
+// click emits only a bare "the user gestured on this tab" trigger — main derives
+// the trusted wcId from event.sender.id and drives the chrome-owned prompt, so a
+// hostile page that fakes/hides the icon gains nothing (DD1). Injection is
+// TOP-FRAME ONLY (matches fillLoginForm's window.top === window guard) and
+// suppressed entirely in burner/non-persistent tabs via a main-provided
+// eligibility flag queried once at init (DD9).
+// ---------------------------------------------------------------------------
 
-const observer = new MutationObserver(() => scheduleScan(600));
+// Top-frame gate FIRST: no query, no icons, no listeners inside a subframe (a
+// cross-origin iframe login must never raise the prompt via the shared tab wcId).
+const IS_TOP_FRAME = (typeof window === 'undefined') || window.top === window;
+
+// Eligibility: main answers `true` only when this tab's session resolves to a
+// PERSISTENT jar (resolvePersistJar). Mirrors the `shields-farble` sync-IPC idiom.
+let vaultEligible = false;
+if (IS_TOP_FRAME) {
+  try {
+    vaultEligible = !!ipcRenderer.sendSync('vault-eligible');
+  } catch {
+    /* main not ready / not eligible → no icons */
+  }
+}
+
+// Capture the genuine isTrusted getter ONCE at init. contextIsolation is off, so
+// a hostile page can override Event.prototype's isTrusted getter; reading the
+// captured getter is annoyance-hardening only (a determined page can still raise
+// the prompt — it can NEVER complete a chrome-owned fill, DD1/DD3).
+const isTrustedGet = (() => {
+  try {
+    return (typeof Event !== 'undefined')
+      && Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
+  } catch {
+    return null;
+  }
+})();
+
+// The decorative fill-icon subsystem (SVG glyph, both-field placement, focus
+// gating, isTrusted-guarded click/contextmenu → bare IPCs) lives in the
+// electron-free `vault-fill-icon` core so it unit-tests headlessly. All DOM /
+// electron coupling is injected here; F2 invariants are enforced inside it.
+const vaultIcons = createVaultIconController({
+  document,
+  window,
+  ipcRenderer,
+  isTrustedGet,
+  findAllLoginFields,
+  getEnabled: () => vaultEligible && IS_TOP_FRAME,
+});
+
+// The icon appears ONLY while its field is focused (problem 3): a username or
+// password field's focusin shows ITS icon; focusout hides it (deferred so a
+// click on the icon — which keeps focus via mousedown preventDefault — is never
+// eaten). Icons are placed on BOTH the username and password field (problem 2).
+if (IS_TOP_FRAME && vaultEligible) {
+  document.addEventListener('focusin', vaultIcons.handleFocusIn);
+  document.addEventListener('focusout', vaultIcons.handleFocusOut);
+  // Keep the shown icon glued to its field across layout shifts (a focused
+  // field can move under scroll/resize/zoom without a DOM mutation firing).
+  window.addEventListener('scroll', () => vaultIcons.placeVaultIcons(), true);
+  window.addEventListener('resize', () => vaultIcons.placeVaultIcons());
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  scheduleScan(150);
+  vaultIcons.scheduleIconPlacement(150);
+});
+window.addEventListener('load', () => {
+  scheduleScan(300);
+  vaultIcons.scheduleIconPlacement(300);
+});
+
+const observer = new MutationObserver((mutations) => {
+  // Icon-only mutations (our own append/reposition) must not re-arm the media
+  // rescan or the scan would never settle (HIGH — DD3 feedback loop).
+  if (mutations.every(vaultIcons.isIconOnlyMutation)) return;
+  scheduleScan(600);
+  vaultIcons.scheduleIconPlacement(600);
+});
 if (document.documentElement) {
   observer.observe(document.documentElement, {
     childList: true,
@@ -204,6 +285,48 @@ if (document.documentElement) {
 
 // Allow the UI to force a refresh.
 ipcRenderer.on('rescan-media', () => send());
+
+// Vault fill (M12 F1 Leg 4): the main→preload credential-injection channel. The
+// resolved credential arrives ONLY here (never over the MCP wire) and is filled
+// into the TOP-FRAME login form; fillLoginForm guards `window.top === window`
+// and webContents.send targets the main frame, so a cross-origin iframe is never
+// filled. page JS cannot register a rogue 'vault-fill' listener — the guest runs
+// nodeIntegration:false, so it has no ipcRenderer (DD7).
+// A gesture-initiated fill lands on the CLICKED form's field (finding 9): consume the
+// single-use, TTL-bound target the icon controller recorded on the trusted click. A
+// non-gesture fill (MCP automation) has no pending target → consumeFillTarget() is null
+// → fillLoginForm falls back to the first-password-field heuristic (unchanged behavior).
+ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred, vaultIcons.consumeFillTarget()));
+
+// Vault capture (M12 F2 Leg 4, DD7): a capturing `submit` listener on detected login
+// forms (top-frame + vault-eligible only — the same gate as the lock icon; burner /
+// non-persistent tabs answer `vaultEligible=false`, so no observer). On a real form
+// submit whose form contains a detected login field, read the just-typed
+// { username, password } BEFORE navigation and send them to main — the password as a
+// Uint8Array (never a lingering JS string on the wire). The ORIGIN is NOT sent: main
+// derives it from the sender URL (a guest-supplied origin is never trusted). v1 covers
+// real <form> submits only; SPA / fetch logins with no submit event are a documented
+// F3 gap. contextIsolation is off, so a page could dispatch a synthetic submit — but
+// the credential captured is the user's OWN just-typed value (within the trust model),
+// and the prompt is chrome-owned, so a spurious offer leaks nothing.
+if (IS_TOP_FRAME && vaultEligible) {
+  document.addEventListener('submit', (e) => {
+    try {
+      const form = /** @type {any} */ (e.target);
+      if (!form || typeof form.querySelectorAll !== 'function') return;
+      const fields = findLoginFields(form);
+      if (!fields || !fields.password) return;
+      const password = fields.password.value != null ? String(fields.password.value) : '';
+      const username = fields.username && fields.username.value != null
+        ? String(fields.username.value)
+        : '';
+      const passwordBytes = new TextEncoder().encode(password);
+      ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
+    } catch {
+      /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
+    }
+  }, true);
+}
 
 // ---------------------------------------------------------------------------
 // Privacy: fingerprinting detection. The webview runs this preload in the

@@ -8,7 +8,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { scopeEngine, WCID_FIRST_OPS } = require('../../src/main/automation/scope');
+const { scopeEngine, WCID_FIRST_OPS, WCID_FIRST_CUSTOM_JAR_OPS } = require('../../src/main/automation/scope');
 const { buildToolRegistry } = require('../../src/main/automation/mcp-tools');
 
 // ---------------------------------------------------------------------------
@@ -229,15 +229,40 @@ test('scopeEngine: every wcId-first MCP tool is registered in WCID_FIRST_OPS (th
   // reason, e.g. `WCID_FIRST_EXEMPT.add('someAdminOnlyOp'); // reason: …`.
   const WCID_FIRST_EXEMPT = new Set([]);
 
-  const gated = new Set(WCID_FIRST_OPS);
+  // M12 F1 Leg 3: wcId-first tools that dispatch OUTSIDE scopeEngine (non-engine-op).
+  // `vaultFill` is registered here (WCID_FIRST_CUSTOM_JAR_OPS) — NOT in WCID_FIRST_OPS
+  // (its generic engine[op] wrapper would throw "engine.vaultFill is not a function")
+  // and NOT admin-only. Its jar-membership + origin-match enforcement lives in
+  // vault-context.fill. The guard accepts WCID_FIRST_OPS ∪ WCID_FIRST_EXEMPT ∪
+  // WCID_FIRST_CUSTOM_JAR_OPS; a wcId tool in NONE of the three still fails.
+  const gated = new Set([...WCID_FIRST_OPS, ...WCID_FIRST_CUSTOM_JAR_OPS]);
   const missing = wcIdFirst.filter((n) => !gated.has(n) && !WCID_FIRST_EXEMPT.has(n));
   assert.deepEqual(
     missing,
     [],
-    'wcId-first MCP tool(s) missing from scope.js WCID_FIRST_OPS — jar keys would throw "engine.<op> is not a function": ' +
+    'wcId-first MCP tool(s) missing from scope.js WCID_FIRST_OPS / WCID_FIRST_CUSTOM_JAR_OPS — jar keys would throw "engine.<op> is not a function": ' +
       missing.join(', ') +
-      '. Add them to WCID_FIRST_OPS (or to WCID_FIRST_EXEMPT with a reason if intentionally admin-only).'
+      '. Add them to WCID_FIRST_OPS (engine ops), WCID_FIRST_CUSTOM_JAR_OPS (non-engine-op vault-style ops), or WCID_FIRST_EXEMPT (admin-only) with a reason.'
   );
+});
+
+test('scope: WCID_FIRST_CUSTOM_JAR_OPS is disjoint from WCID_FIRST_OPS (never fed to the generic engine[op] wrapper)', () => {
+  // vaultFill must NEVER leak into WCID_FIRST_OPS — the generic wrapper would call
+  // engine.vaultFill (which does not exist). The registration-only set is consulted
+  // by the three-place guard above, but the scopeEngine façade never builds a method
+  // for it (enforcement lives in vault-context.fill).
+  const wcidFirst = new Set(WCID_FIRST_OPS);
+  for (const op of WCID_FIRST_CUSTOM_JAR_OPS) {
+    assert.equal(wcidFirst.has(op), false, op + ' must not be in WCID_FIRST_OPS');
+  }
+  // And scopeEngine builds NO façade method for a custom-jar op (admin returns the
+  // raw engine; a jar façade has no vaultFill).
+  const world = makeWorld();
+  const engine = makeFakeEngine(world);
+  const scoped = scopeEngine(engine, 'personal', makeCtx(world));
+  for (const op of WCID_FIRST_CUSTOM_JAR_OPS) {
+    assert.equal(typeof scoped[op], 'undefined', 'scopeEngine must not expose a method for ' + op);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolvePersistJar } = require('./persist-jar-gate');
+
 const PAGE_CONTEXT_ACTIONS = new Set(['cut', 'copy', 'paste', 'undo', 'redo']);
 const EMPTY_COOKIES = Object.freeze({ firstParty: null, first: 0, third: 0, total: 0, list: [] });
 
@@ -22,6 +24,11 @@ function registerBrowserIpc({
   registrableDomain,
   hostnameOf,
   shields,
+  getVaultHuman,
+  vaultImportBegin,
+  clearPendingVaultImport,
+  setPendingVaultImportOverwrite,
+  popupVaultIconMenu,
   random = Math.random,
   logger = console,
 }) {
@@ -72,6 +79,178 @@ function registerBrowserIpc({
     const container = jars.add(name);
     broadcastJarsChanged();
     return container;
+  });
+
+  // Vault lock-icon eligibility (M12 F2 Leg 1, DD9): the guest preload queries this
+  // synchronously at init (shields-farble idiom) to decide whether to inject the
+  // decorative lock icon. Eligible ONLY when the tab's session resolves to a
+  // PERSISTENT jar (resolvePersistJar) — burner/non-persistent tabs are not
+  // eligible, so no icon, no gesture wiring. The wcId is the trusted sender id; we
+  // resolve the tab entry from the registry, never from renderer-supplied data.
+  ipcMain.on('vault-eligible', (event) => {
+    const entry = registry.getWindowForGuest(event.sender.id)?.tabViews.get(event.sender.id);
+    event.returnValue = Boolean(entry && resolvePersistJar(entry, jars.list()));
+  });
+
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3): a TRUSTED click on the injected lock
+  // icon arrives here carrying NO secret ({}). Derive the trusted wcId from
+  // event.sender.id (never a renderer-supplied id) and forward a bare trigger to
+  // the owning window's chrome — mirrors the guest-media-list → chromeForTab idiom.
+  ipcMain.on('guest-vault-gesture', (event) => {
+    const wcId = event.sender.id;
+    chromeForTab(wcId)?.send('vault-gesture', { wcId });
+  });
+
+  // Vault fill-icon CONTEXT menu (M12 F5 HAT batch 1, I8): a TRUSTED right-click on the
+  // injected lock icon arrives here carrying NO payload (bare — no secret). Derive the trusted
+  // wcId from event.sender.id (never renderer-supplied) and resolve the owning window from the
+  // registry, then hand off to the injected delegate which builds a NATIVE Electron Menu and
+  // pops it over that window (Menu.popup). NO menu DOM is ever injected into the guest page — a
+  // page-DOM menu would be spoofable/readable by a hostile page. The delegate is injected so
+  // this module stays Electron-free (offline tests may omit it → the icon menu no-ops). Nothing
+  // is sent back to the guest wc.
+  ipcMain.on('guest-vault-icon-menu', (event) => {
+    const wcId = event.sender.id;
+    const win = registry.getWindowForGuest(wcId)?.win;
+    popupVaultIconMenu?.({ wcId, win });
+  });
+
+  // Vault capture (M12 F2 Leg 4, DD7/DD9): a submitted login form's credential arrives
+  // here as { username, password } (password a Uint8Array). The trusted wcId is
+  // event.sender.id; the ORIGIN is derived in main from the sender URL (never the
+  // guest-supplied value — none is sent). getVaultHuman().capture applies the
+  // set-up/unlocked/persistent-jar gate and holds the password in a MAIN-SIDE record;
+  // it returns { captureId, model } (model carries NO password) or null (dropped). On a
+  // returned offer, forward it to the owning window's chrome — the guest-media-list →
+  // chromeForTab idiom. Gated on the getVaultHuman injection (offline tests omit it).
+  ipcMain.on('guest-vault-capture', (event, payload) => {
+    if (!getVaultHuman) return;
+    const wcId = event.sender.id;
+    const { username, password } = /** @type {any} */ (payload || {});
+    const offer = getVaultHuman().capture({ wcId, username, passwordBytes: password });
+    if (offer) {
+      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
+    }
+  });
+
+  // Vault capture DISMISS (M12 F2 Leg 4, DD7): the chrome invokes this when the
+  // vault-capture sheet closes WITHOUT a save (Cancel / Escape / outside-click / a
+  // lifecycle close), so main drops+zeroizes the held record immediately rather than
+  // waiting for the 2-min safety timeout. Chrome-trust bare handle (the same class as
+  // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
+  ipcMain.handle('vault-capture-dismiss', (_event, captureId) => {
+    if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
+  });
+
+  // Vault cross-renderer triggers (M12 F3 Leg 4, first-run-setup, DD5). The internal
+  // goldfinch://vault page cannot call chrome-trust menuOverlay.* directly, so its
+  // not-set-up CTA (requestSetup) and locked affordance (requestUnlock) invoke these
+  // origin-gated channels. Main resolves the OWNING window's chrome via
+  // chromeForTab(event.sender.id) — the internal tab is in tabViews, so getWindowForGuest
+  // resolves it — and forwards a BARE trigger (no secret), the onVaultGesture →
+  // vault-gesture idiom. registerInternalHandler rejects any non-internal sender before
+  // the body runs. The distinct channels drive the DISTINCT chrome handlers: setup opens
+  // vault-set; unlock opens vault-unlock WITHOUT F2's pendingVaultFlow fill-picker
+  // continuation. Placed here (not registerVaultIpc) because this file has chromeForTab.
+  registerInternalHandler(ipcMain, 'internal-vault-request-setup', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-setup');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-unlock', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-unlock');
+    return { ok: true };
+  });
+
+  // Vault access-key MINT trigger (M12 F3 Leg 5, flight DD5 / mission durable-grant
+  // step-up). Mirrors internal-vault-request-setup — a BARE cross-renderer trigger with
+  // NO secret — but EXTENDED with the NON-SECRET target vault id so the chrome opens the
+  // vault-stepup sheet scoped to that vault. The step-up master password is entered on the
+  // chrome-owned sheet and the minted secret is shown on the chrome-owned vault-accesskey
+  // sheet — never the page DOM (DD5). Main resolves the OWNING window's chrome via
+  // chromeForTab(event.sender.id) (the internal tab is in tabViews). registerInternalHandler
+  // rejects any non-internal sender before the body runs; the target is re-validated
+  // main-side by the store's _resolveTarget when mintAccessKey runs (a compromised sheet
+  // cannot mint against a burner/unknown target).
+  registerInternalHandler(ipcMain, 'internal-vault-request-mint', (event, target) => {
+    chromeForTab(event.sender.id)?.send('vault-request-mint', { target });
+    return { ok: true };
+  });
+
+  // Vault IMPORT (M12 F4 Leg 1 export-import, DD1/DD2; SPLIT for the M12 F5 HAT page modal, I14).
+  // Import is a two-surface flow driven by the page's Import modal, so the atomic pick+forward is
+  // split into three page-invoked channels — none of which ever carries a secret:
+  //
+  //  1. internal-vault-pick-import-file (pickImportFile) — awaits the injected `vaultImportBegin`
+  //     delegate: it runs the open dialog, reads + parses the bundle (ciphertext) and HOLDS
+  //     { bundle, destinationTarget } main-side, returning { ok, path } | { canceled } | { error }.
+  //     It does NOT forward — the sheet opens only when the operator submits the modal. A canceled
+  //     dialog / unreadable file holds nothing (the delegate only sets the record on { ok }).
+  //  2. internal-vault-begin-import-unlock (beginImportUnlock) — binds `overwrite` (the modal's
+  //     Replace-existing checkbox, M12 F5 HAT tail) onto the held import record, then forwards the
+  //     BARE vault-request-import trigger to the owning chrome (chromeForTab(event.sender.id) — the
+  //     internal tab is in tabViews), which opens the chrome-owned vault-import-unlock sheet. The
+  //     held bundle is consumed there with the sheet's secret; the secret never touches this
+  //     channel or the page. Only `overwrite` (a boolean) crosses. Needs only chromeForTab, so it
+  //     is unconditional (mirrors internal-vault-request-setup), NOT gated on an injection.
+  //  3. internal-vault-clear-pending-import (clearPendingImport) — drops the held record (L1) when
+  //     the operator dismisses the modal after a pick. Always safe to call.
+  //
+  // registerInternalHandler rejects any non-internal sender before each body runs.
+  // PR#112 finding 5: the held import record is keyed by the OWNING CHROME id, so window A's
+  // pick can never be read/mutated/cleared/consumed by window B. Every step resolves the same
+  // window key via chromeForTab(event.sender.id) — the internal page tab's owning chrome — which
+  // is also the identity the secret sheet submits under. The opaque `handle` (returned by the
+  // pick) is echoed by the page on the mutating steps as a per-transaction guard within the window.
+  if (vaultImportBegin) {
+    registerInternalHandler(ipcMain, 'internal-vault-pick-import-file', async (event, destinationTarget) => {
+      return await vaultImportBegin(destinationTarget, chromeForTab(event.sender.id)?.id);
+    });
+  }
+  registerInternalHandler(ipcMain, 'internal-vault-begin-import-unlock', (event, payload) => {
+    // M12 F5 HAT tail (review MEDIUM-3): bind `overwrite` from the modal's Replace-existing
+    // checkbox FINAL state at the Continue step — BEFORE the sheet opens — so the held import
+    // record carries the operator's explicit replace decision. Strict-boolean coerced main-side.
+    // The page now passes `{ overwrite, handle }`; a bare boolean is tolerated for back-compat.
+    const overwrite = payload && typeof payload === 'object' ? payload.overwrite : payload;
+    const handle = payload && typeof payload === 'object' ? payload.handle : undefined;
+    const chromeId = chromeForTab(event.sender.id)?.id;
+    setPendingVaultImportOverwrite?.(chromeId, overwrite === true, handle);
+    chromeForTab(event.sender.id)?.send('vault-request-import');
+    return { ok: true };
+  });
+  if (clearPendingVaultImport) {
+    registerInternalHandler(ipcMain, 'internal-vault-clear-pending-import', (event, handle) => {
+      clearPendingVaultImport(chromeForTab(event.sender.id)?.id, handle);
+      return { ok: true };
+    });
+  }
+
+  // Vault ROTATION / RECOVER cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). All
+  // three mirror internal-vault-request-setup — a BARE trigger with NO secret — routing the vault
+  // page's rotation-section actions to the owning chrome (chromeForTab(event.sender.id) — the
+  // internal tab is in tabViews). The secret entry lives on the chrome-owned sheet, never this
+  // channel or the page DOM. rotate-recovery reuses the vault-stepup sheet (master-pw step-up);
+  // change-master opens the vault-change-master sheet (old + new); recover opens the vault-recover
+  // sheet (recovery key + new — reachable FROM LOCKED). registerInternalHandler rejects any
+  // non-internal sender before the body runs.
+  registerInternalHandler(ipcMain, 'internal-vault-request-rotate-recovery', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-rotate-recovery');
+    return { ok: true };
+  });
+  // M12 F4 Leg 3 (admin-key-provision): the admin-key PROVISION/ROTATE affordance — a BARE trigger
+  // (no secret) reusing the vault-stepup sheet (master-pw step-up, mode 'rotate-admin'). The new
+  // admin private key is shown once on the chrome-owned vault-adminkey-show sheet, never this channel.
+  registerInternalHandler(ipcMain, 'internal-vault-request-rotate-admin', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-rotate-admin');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-change-master', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-change-master');
+    return { ok: true };
+  });
+  registerInternalHandler(ipcMain, 'internal-vault-request-recover', (event) => {
+    chromeForTab(event.sender.id)?.send('vault-request-recover');
+    return { ok: true };
   });
 
   ipcMain.on('guest-media-list', (event, mediaList) => {

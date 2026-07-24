@@ -7,6 +7,8 @@
 import { BURNER } from '../shared/burner.js';
 import { buildContainerModel } from '../shared/container-menu.js';
 import { buildAutomationIndicatorModel } from '../shared/automation-indicator-model.js';
+import { buildVaultIndicatorModel } from '../shared/vault-indicator-model.js';
+import { parsePickIndex, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { isSafeColor } from '../shared/safe-color.js';
 import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
 import { keydownToAction } from '../shared/keydown-action.js';
@@ -157,6 +159,7 @@ function applyToolbarPins(pins) { return windowController.applyToolbarPins(pins)
 function dispatchChromeAction(action) { return shortcutController.dispatchChromeAction(action); }
 function openDownloads() { return pageActions.openDownloads(); }
 function openJarsPage() { return pageActions.openJarsPage(); }
+function openVaultPage() { return pageActions.openVaultPage(); }
 function openSiteSettingsTab() { return pageActions.openSiteSettingsTab(); }
 function siteInfoModel(tab) { return pageActions.siteInfoModel(tab); }
 function createContainerAndOpenTab(rawName) { return pageActions.createContainerAndOpenTab(rawName); }
@@ -165,7 +168,23 @@ function createContainerAndOpenTab(rawName) { return pageActions.createContainer
 // implementation and its mutable jar state live in the extracted client.
 const makeBurner = () => jarsClient.makeBurner();
 /* ------------------------------------------------------- kebab (overflow) menu */
-// Named action bodies are shared by sheet activation and keyboard shortcuts.
+// APG menu-button: role="menu" popup with seven role="menuitem" items — New window,
+// then Settings/Downloads/Cookie jars/Passwords, then Print…/Exit — divided into three
+// bands by two role="separator" rows (skipped by the roving tabindex/arrow-nav, no
+// role="menuitem"). Count and order track `kebabModel` below — the single source of
+// truth; if you add an item there, this line is stale until you edit it too.
+//
+// All menus render from the menu-overlay SHEET (M05 F8, DD4 model-over-IPC):
+// chrome keeps the trigger, open stimuli, model building, and action execution;
+// the sheet is presentation-only. The pre-F8 chrome-DOM menus and their
+// freeze-frame apparatus were retired at the Leg-5 cutover.
+
+// The kebab item actions, extracted into NAMED functions consumed by the
+// sheet's channel-6 activation — one source of truth (Exit is verified by this
+// shared body, never activated live).
+// New Window (M09 F6 Leg 4, DD5): the same body Ctrl/Cmd+N dispatches through
+// dispatchChromeAction('new-window') — main creates the window; its chrome
+// document boots a home tab normally (window-boot-config bootTab:true).
 function kebabActionNewWindow() {
   window.goldfinch.windowCreate();
 }
@@ -177,6 +196,9 @@ function kebabActionDownloads() {
 }
 function kebabActionJars() {
   openJarsPage();
+}
+function kebabActionVault() {
+  openVaultPage();
 }
 function kebabActionPrint() {
   const t = activeTab();
@@ -191,6 +213,7 @@ const KEBAB_ACTIONS = {
   settings: kebabActionSettings,
   downloads: kebabActionDownloads,
   jars: kebabActionJars,
+  vault: kebabActionVault,
   print: kebabActionPrint,
   exit: kebabActionExit
 };
@@ -233,6 +256,96 @@ const overlayMenus = {
   suggestions: {
     open: false, token: 0, blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
+    refocus() {}
+  },
+  // Human vault flow sheets (M12 F2 Leg 3 pick-and-fill, DD5/DD6). Both are raised
+  // from a guest lock-icon gesture — there is no chrome trigger element, so there is
+  // no aria-expanded target and no trigger refocus (the guest owns focus). The
+  // chrome-unlock leg added the vault-unlock TEMPLATE + secret handler; this leg
+  // wires its trigger→open here alongside the new picker.
+  'vault-unlock': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-picker': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Vault capture save/update sheet (M12 F2 Leg 4 capture-save, DD7). Raised from a
+  // main-forwarded login-submit offer — no chrome trigger element, so no aria-expanded
+  // target and no trigger refocus (the guest owns focus). handleOverlayClosed drops the
+  // held record on a non-save close.
+  'vault-capture': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // First-run setup sheets (M12 F3 Leg 4 first-run-setup, DD5). Both are raised from the
+  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — there is
+  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-set
+  // is the master-password entry; vault-recovery-show is the DISMISS-DISABLED one-time key
+  // display (opened with { dismissible: false }).
+  'vault-set': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-recovery-show': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Access-key sheets (M12 F3 Leg 5 access-keys, DD5). Both are raised from the
+  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) —
+  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-stepup
+  // is the master-password re-auth; vault-accesskey-show is the DISMISS-DISABLED one-time
+  // minted-secret display (opened with { dismissible: false }).
+  'vault-stepup': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-accesskey-show': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Import-bundle secret entry (M12 F4 Leg 1 export-import, DD1/DD2). Raised from the
+  // goldfinch://vault page's cross-renderer import request (page → main → chrome) after the
+  // main-side file open — no chrome trigger element, so no aria-expanded target and no trigger
+  // refocus. The destination target + the bundle are held main-side; the sheet collects only the
+  // secret + secretKind over the dedicated Buffer channel.
+  'vault-import-unlock': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Key-rotation sheets (M12 F4 Leg 2 key-rotation, DD3/DD2). All raised from the
+  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — no chrome
+  // trigger element, so no aria-expanded target and no trigger refocus. vault-change-master is
+  // the old + new master-password entry; vault-recover is the recovery-key + new-master entry
+  // (reachable from the LOCKED page). Recovery rotation's master-password step-up REUSES the
+  // vault-stepup sheet above (mode 'rotate-recovery'), so it needs no entry of its own.
+  'vault-change-master': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  'vault-recover': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // Admin-key provision/rotate display (M12 F4 Leg 3 admin-key-provision, DD4). Raised from the
+  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) — no chrome
+  // trigger element, so no aria-expanded target and no trigger refocus. vault-adminkey-show is the
+  // DISMISS-DISABLED one-time admin-private-key display (opened with { dismissible: false }); the
+  // master-password step-up REUSES the vault-stepup sheet (mode 'rotate-admin'), so it needs no entry.
+  'vault-adminkey-show': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
     refocus() {}
   },
   downloads: downloadsController.overlayState
@@ -401,6 +514,40 @@ const openSiteInfoOverlay = () => openOverlayMenu('site-info', siteInfoModel(act
 // New-container dialog (AC4): the template ignores the anchor (centered via CSS)
 // but the open path stays uniform (fresh token, aria on the ▾ refocus trigger).
 const openNewContainerOverlay = () => openOverlayMenu('new-container', [], containerAnchor(), 0);
+// M12 F3 Leg 4 (first-run-setup, DD5/DD9): a11y SHEET_STATES hooks for the two new setup
+// sheets (scripts/a11y-audit.mjs). vault-set opens empty; vault-recovery-show opens with a
+// synthetic NON-SECRET placeholder key so its read-only display + Copy + acknowledge
+// render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
+// FD-authorized seam additions per the leg's "add both to SHEET_STATES" deliverable — the
+// M09 F5 openTabContextMenuForAudit precedent.
+const openVaultSetOverlayForAudit = () => openOverlayMenu('vault-set', [], null, 0);
+const openVaultRecoveryShowOverlayForAudit = () =>
+  openOverlayMenu('vault-recovery-show', { recoveryKey: 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX' }, null, 0, { dismissible: false });
+// M12 F3 Leg 5 (access-keys, DD5/DD9): a11y SHEET_STATES hooks for the two new access-key
+// sheets. vault-stepup opens with a synthetic NON-SECRET target; vault-accesskey-show opens
+// with a synthetic NON-SECRET placeholder secret+keyId so its read-only display + Copy +
+// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes
+// it). Same evaluate-seam precedent as leg 4's openVault{Set,RecoveryShow}OverlayForAudit.
+const openVaultStepupOverlayForAudit = () => openOverlayMenu('vault-stepup', { target: 'global' }, null, 0);
+const openVaultAccessKeyShowOverlayForAudit = () =>
+  openOverlayMenu('vault-accesskey-show', { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' }, null, 0, { dismissible: false });
+// M12 F4 Leg 1 (export-import, DD9): a11y SHEET_STATES hook for the vault-import-unlock sheet.
+// Opens with an empty array model (the destination target + bundle are held main-side); the sheet
+// renders the secretKind radios + the secret field + Import/Cancel (dialog-style, Escape-dismissible).
+const openVaultImportUnlockOverlayForAudit = () => openOverlayMenu('vault-import-unlock', [], null, 0);
+// M12 F4 Leg 2 (key-rotation, DD9): a11y SHEET_STATES hooks for the two new rotation sheets. Both
+// open with an empty array model (no secret; the destination is the manager itself); each renders
+// its three password fields + error + submit/cancel (dialog-style, Escape-dismissible). Recovery
+// rotation's step-up reuses vault-stepup, already covered above. Same evaluate-seam precedent as
+// the leg-1 openVaultImportUnlockOverlayForAudit.
+const openVaultChangeMasterOverlayForAudit = () => openOverlayMenu('vault-change-master', [], null, 0);
+const openVaultRecoverOverlayForAudit = () => openOverlayMenu('vault-recover', [], null, 0);
+// M12 F4 Leg 3 (admin-key-provision, DD4/DD9): a11y SHEET_STATES hook for the vault-adminkey-show
+// sheet. Opens with a synthetic NON-SECRET placeholder key so its read-only display + Copy +
+// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
+// Same evaluate-seam precedent as leg-5's openVaultAccessKeyShowOverlayForAudit.
+const openVaultAdminKeyShowOverlayForAudit = () =>
+  openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, { dismissible: false });
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -509,6 +656,59 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // guard + newContainerCreate → push + createTab. The sheet page already
       // guards whitespace-only input (dialog stays open page-side).
       if (id === 'create') createContainerAndOpenTab(value);
+      break;
+    }
+    case 'vault-picker': {
+      // Human fill selection (M12 F2 Leg 3, DD5/DD6). The id is `pick:<i>` — an
+      // INDEX into the last picker model (metadata only; NO password on this path).
+      // Resolve the row, capture the flow's wcId, then dispatch the fill in MAIN
+      // (vaultFillHuman resolves the credential by (vaultId, itemId) under the MRK
+      // and hands it to F1's channel — the return carries no password). On a lock
+      // between pick and fill (`reason:'locked'`), re-raise the unlock prompt →
+      // onVaultLockState re-opens the picker (re-pick), rather than erroring.
+      //
+      // The separated "Manage passwords" footer is not a row: it navigates to the
+      // Secrets page (openVaultPage — a trusted goldfinch://vault tab). No secret, no
+      // fill; clear any pending flow so a later gesture starts clean.
+      if (id === MANAGE_ID) {
+        pendingVaultFlow = null;
+        openVaultPage();
+        break;
+      }
+      const idx = parsePickIndex(id);
+      const item = idx != null ? lastPickerModel[idx] : null;
+      const wcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
+      pendingVaultFlow = null;
+      if (!item || wcId == null) break;
+      Promise.resolve(window.goldfinch.vaultFillHuman({ wcId, vaultId: item.vaultId, itemId: item.id }))
+        .then((r) => {
+          if (r && r.reason === 'locked') {
+            pendingVaultFlow = { wcId, phase: 'unlocking' };
+            openOverlayMenu('vault-unlock', [], null, 0);
+          }
+        })
+        .catch(() => {});
+      break;
+    }
+    case 'vault-recovery-show': {
+      // First-run recovery-key acknowledge (M12 F3 Leg 4). The only activation is
+      // id:'ack' — the deliberate "I've saved it". Main already closed the sheet and the
+      // vault page already moved to unlocked off the setup lock-state broadcast, so there
+      // is nothing more to do here (no secret ever reaches this dispatch — the key lived
+      // only on the sheet).
+      break;
+    }
+    case 'vault-accesskey-show': {
+      // Minted access-key acknowledge (M12 F3 Leg 5). The only activation is id:'ack' — the
+      // deliberate "I've saved it". Main already closed the sheet; the vault page refreshes
+      // its access-key list off its own post-mint path. Nothing reaches this dispatch (the
+      // minted secret lived only on the sheet — never in the page or this chrome dispatch).
+      break;
+    }
+    case 'vault-adminkey-show': {
+      // Minted admin-key acknowledge (M12 F4 Leg 3). The only activation is id:'ack' — the
+      // deliberate "I've saved it". Main already closed the sheet; nothing reaches this dispatch
+      // (the admin private key lived only on the sheet — never in the page or this chrome dispatch).
       break;
     }
     case 'page-context': {
@@ -737,6 +937,31 @@ function handleOverlayClosed({ menuType, reason }) {
   // resolve the clicked row's URL. Ch6 finishes the reset once it has read it.
   if (menuType === 'suggestions') {
     navigationController.handleSuggestionsClosed(reason);
+  }
+  // Human vault flow (M12 F2 Leg 3): the user dismissed the unlock prompt (Cancel/
+  // Escape/outside-click) without unlocking — abandon the flow so a later unrelated
+  // unlock (recovery/admin, or another tab) can't spring the picker on this stale
+  // tab. Guarded on the phase + still-locked state: a SUCCESSFUL unlock closes this
+  // sheet too, but by then onVaultLockState has advanced the phase to 'picking' and
+  // lockState.unlocked is true, so this clear is correctly skipped.
+  if (menuType === 'vault-unlock'
+    && pendingVaultFlow && pendingVaultFlow.phase === 'unlocking'
+    && !lockState.unlocked) {
+    pendingVaultFlow = null;
+  }
+  // Human vault capture (M12 F2 Leg 4, DD7 — the dismiss-drop path, HIGH): the
+  // save/update sheet closed. Tell main to drop+zeroize the held record NOW (not just
+  // on the 2-min timeout) UNLESS this was a save. 'activated' = a successful save (main
+  // already dropped the record). 'superseded' = a newer capture model-replaced this
+  // sheet: main's capture() already evicted the prior record, and pendingCaptureId now
+  // names the NEW capture — dismissing it would wrongly drop the live one, so skip the
+  // whole block (leaving pendingCaptureId intact for the new offer).
+  if (menuType === 'vault-capture' && reason !== 'superseded') {
+    const captureId = pendingCaptureId;
+    pendingCaptureId = null;
+    if (captureId != null && reason !== 'activated') {
+      Promise.resolve(window.goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
+    }
   }
 }
 
@@ -1082,6 +1307,212 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   if (tab.id === ctx.activeTabId) renderMedia();
 });
 
+// Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
+// lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
+//   gesture → (unlock if locked, via the Leg-2 vault-unlock sheet) → pick (the
+//   badged vault-picker sheet) → fill (F1's vault-fill channel, in MAIN only).
+// The chrome never sees a password: the picker model is metadata, the selection is
+// an index, and vaultFillHuman resolves + dispatches the credential entirely in main.
+//
+// `pendingVaultFlow` is phase-tracked so an UNRELATED later unlock (the lock-state
+// broadcast also fires for recovery/admin unlock, and for other tabs) never springs
+// the picker on a stale tab — we continue to the picker only when we are the tab
+// mid-unlock (`phase === 'unlocking'`). Last-wins: a new gesture replaces it, and
+// opening a sheet model-replaces any open one.
+/** @type {{ wcId: number, phase: 'unlocking' | 'picking' } | null} */
+let pendingVaultFlow = null;
+/** @type {any[]} the last picker model — the index→item source for dispatch. */
+let lastPickerModel = [];
+/** @type {string | null} the held capture's id (Leg 4) — the dismiss-drop path needs
+ * it when the vault-capture sheet closes without a save. */
+let pendingCaptureId = null;
+
+/** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
+ * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
+ * a jar display-name badge (Global vs the jar's name) — the store returns vaultId only.
+ * @param {number} wcId */
+async function openVaultPicker(wcId) {
+  let model;
+  try {
+    model = await window.goldfinch.vaultReachableItems(wcId);
+  } catch {
+    model = [];
+  }
+  lastPickerModel = Array.isArray(model) ? model : [];
+  // Badge enrichment: map each row's source vaultId to a display label for the sheet
+  // (Global for the global vault, else the jar's name). Kept off the metadata read
+  // (which returns vaultId only); dispatch still reads vaultId + id from the row.
+  for (const row of lastPickerModel) {
+    if (row && row.vaultId && row.vaultId !== 'global') {
+      const jar = jarsClient.containers.find((c) => c.id === row.vaultId);
+      row.badgeLabel = jar ? jar.name : row.vaultId;
+      // The jar's dot color tints the sheet's top-right chicklet. Guard the raw color
+      // through isSafeColor before it ever reaches a style (never trust it into CSS);
+      // Global (skipped here) and colorless/unsafe jars get the neutral chip.
+      row.badgeColor = jar && isSafeColor(jar.color) ? jar.color : null;
+    }
+  }
+  openOverlayMenu('vault-picker', lastPickerModel, null, 0);
+}
+
+window.goldfinch.onVaultGesture(({ wcId }) => {
+  if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
+  if (lockState.unlocked) {
+    pendingVaultFlow = { wcId, phase: 'picking' };
+    openVaultPicker(wcId);
+  } else {
+    // Locked → raise the Leg-2 unlock prompt first; onVaultLockState continues to the
+    // picker on a successful unlock. openOverlayMenu is POSITIONAL (menuType, model,
+    // anchor, startIndex, opts); the vault-unlock card is centered (anchor ignored).
+    pendingVaultFlow = { wcId, phase: 'unlocking' };
+    openOverlayMenu('vault-unlock', [], null, 0);
+  }
+});
+
+// First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). The
+// goldfinch://vault page can't call chrome-trust menuOverlay.* directly, so its not-set-up
+// CTA / locked affordance route page → main (internal-vault-request-*) → chrome (here).
+// Mirrors onVaultGesture — a bare trigger, no secret.
+window.goldfinch.onVaultRequestSetup(() => {
+  // Open the master-password setup sheet. On success main drives vault-recovery-show and
+  // fires the lock-state broadcast → the page moves to unlocked.
+  openOverlayMenu('vault-set', [], null, 0);
+});
+window.goldfinch.onVaultRequestUnlock(() => {
+  // DISTINCT from onVaultGesture's locked branch: open the F2 unlock sheet WITHOUT setting
+  // pendingVaultFlow — the page's unlock must NOT spring the fill picker on success (that
+  // continuation is gated on pendingVaultFlow.phase === 'unlocking', left null here). The
+  // page refreshes off the lock-state broadcast.
+  openOverlayMenu('vault-unlock', [], null, 0);
+});
+// Setup-success → open the read-only recovery-show sheet (M12 F3 Leg 4). Main forwards the
+// recovery key ONLY (admin key deferred to F4). Opened DISMISS-DISABLED so a casual
+// dismiss can't lose the unrecoverable one-time key (Escape/backdrop/blur all inert;
+// only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
+window.goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
+  // `replacing` (rotate-recovery only; setup omits it) reveals the sheet's "this replaces
+  // your previous recovery key" line — the rotation kills the old key (HAT I9). Non-secret.
+  openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, { dismissible: false });
+});
+
+// Access-key mint cross-renderer triggers (M12 F3 Leg 5 access-keys, DD5). The vault page's
+// Mint CTA routes page → main (internal-vault-request-mint carrying the NON-SECRET target) →
+// chrome (here). Open the vault-stepup sheet scoped to that vault; on a successful step-up
+// main drives vault-accesskey-show and the page refreshes its list. Mirrors onVaultRequestSetup
+// (a bare trigger), extended with the target vault id.
+window.goldfinch.onVaultRequestMint(({ target }) => {
+  openOverlayMenu('vault-stepup', { target }, null, 0);
+});
+// Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2; page-modal split M12
+// F5 HAT, I14). The vault page's Import modal picks the destination + bundle file first (page → main
+// internal-vault-pick-import-file: the main-side file open + hold), then on Continue routes page →
+// main (internal-vault-begin-import-unlock) → chrome (here) via the UNCHANGED vault-request-import
+// forward. Open the vault-import-unlock sheet; the destination target + the bundle are held
+// main-side, so the model is an empty array (the sheet collects only the secret + secretKind).
+// On a successful import main closes the sheet + broadcasts lock-state → the page re-renders.
+window.goldfinch.onVaultRequestImport(() => {
+  openOverlayMenu('vault-import-unlock', [], null, 0);
+});
+// Mint-success → open the read-only accesskey-show sheet with the minted { secret, keyId }.
+// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time secret
+// (Escape/backdrop/blur all inert; only acknowledge closes). The secret lives only
+// main → chrome → sheet, never in the page.
+window.goldfinch.onVaultAccessKeyShow(({ secret, keyId }) => {
+  openOverlayMenu('vault-accesskey-show', { secret, keyId }, null, 0, { dismissible: false });
+});
+
+// Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). The vault page's
+// rotation-section actions route page → main (internal-vault-request-*) → chrome (here). Recovery
+// rotation REUSES the vault-stepup sheet (mode 'rotate-recovery') for its master-password step-up;
+// on success main mints the new recovery key + drives vault-recovery-show (the setup idiom).
+// Change-master opens the vault-change-master sheet (old + new + confirm). Recover opens the
+// vault-recover sheet (recovery key + new + confirm) — reachable FROM the LOCKED page; on success
+// the store installs the MRK and the page moves to unlocked off the lock-state broadcast. NO secret
+// crosses these bare triggers — every secret + one-time display lives on the chrome-owned sheet.
+window.goldfinch.onVaultRequestRotateRecovery(() => {
+  openOverlayMenu('vault-stepup', { mode: 'rotate-recovery' }, null, 0);
+});
+// Admin-key provision/rotate cross-renderer trigger (M12 F4 Leg 3 admin-key-provision, DD4). The
+// vault page's Provision/rotate admin key action routes page → main (internal-vault-request-rotate-
+// admin) → chrome (here). REUSES the vault-stepup sheet (mode 'rotate-admin') for its master-password
+// step-up; on success main mints the new admin keypair + drives vault-adminkey-show (post-write). NO
+// secret crosses this bare trigger — the master password + the one-time admin key live on the sheet.
+window.goldfinch.onVaultRequestRotateAdmin(() => {
+  openOverlayMenu('vault-stepup', { mode: 'rotate-admin' }, null, 0);
+});
+// Admin-key rotate-success → open the read-only adminkey-show sheet with the minted { adminPrivateKey }.
+// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time key (Escape/backdrop/
+// blur all inert; only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
+window.goldfinch.onVaultAdminKeyShow(({ adminPrivateKey }) => {
+  openOverlayMenu('vault-adminkey-show', { adminPrivateKey }, null, 0, { dismissible: false });
+});
+window.goldfinch.onVaultRequestChangeMaster(() => {
+  openOverlayMenu('vault-change-master', [], null, 0);
+});
+window.goldfinch.onVaultRequestRecover(() => {
+  openOverlayMenu('vault-recover', [], null, 0);
+});
+
+// Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
+// model } after a login-form submit in a set-up, unlocked, persistent-jar tab (model =
+// origin/username/mode/defaultVaultId/choices — NEVER a password; the captured password
+// lives only in the main-side held record). Stash the captureId (the dismiss-drop path
+// reads it in handleOverlayClosed), enrich the SAVE choices with jar display labels
+// (Global vs the jar's name), and open the chrome-owned vault-capture sheet. The Save
+// invoke originates in the SHEET (window.menuOverlay.captureSave); chrome only opens it.
+window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
+  pendingCaptureId = captureId;
+  const choices = Array.isArray(model.choices)
+    ? model.choices.map((vaultId) => {
+        if (vaultId === 'global') return { vaultId, label: 'Global' };
+        const jar = jarsClient.containers.find((c) => c.id === vaultId);
+        return { vaultId, label: jar ? jar.name : vaultId };
+      })
+    : [];
+  // captureId rides INSIDE the model so the sheet's Save invoke can carry it back.
+  openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
+});
+
+// Vault lock indicator (M12 F2 Leg 2 chrome-unlock, DD10). A PURE projection of
+// the pushed `vault-lock-state` (single source of truth = vault-store MRK-present)
+// — never a cache. Hidden until the manager is set up; then locked / unlocked.
+// Leg 3 also STASHES the state (`lockState`) so the gesture handler can decide
+// unlock-first-vs-pick, and CONTINUES a mid-unlock flow to the picker.
+let vaultStatePushed = false;
+/** @type {{ setUp: boolean, unlocked: boolean }} the last-known lock state (stashed). */
+let lockState = { setUp: false, unlocked: false };
+function renderVaultIndicator(state) {
+  const el = els.vaultIndicator;
+  if (!el) return;
+  const model = buildVaultIndicatorModel(state);
+  el.classList.toggle('hidden', !model.visible);
+  el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
+  el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
+  const label = model.visible && model.state === 'unlocked'
+    ? 'Password manager unlocked'
+    : 'Password manager locked';
+  el.setAttribute('aria-label', label);
+}
+// Subscribe FIRST, then fetch the initial state — so a transition that fires
+// between subscribe and fetch is not lost, and a fresher push always wins over a
+// late init fetch (DD10 freshness contract).
+window.goldfinch.onVaultLockState((state) => {
+  vaultStatePushed = true;
+  lockState = state;
+  renderVaultIndicator(state);
+  // Continue a mid-unlock flow ONLY when we are the tab that raised the unlock
+  // prompt (phase === 'unlocking') and the store is now unlocked — the phase guard
+  // stops an unrelated later unlock (recovery/admin, or another tab) from springing
+  // the picker on a stale tab.
+  if (pendingVaultFlow && pendingVaultFlow.phase === 'unlocking' && state.unlocked) {
+    pendingVaultFlow.phase = 'picking';
+    openVaultPicker(pendingVaultFlow.wcId);
+  }
+});
+window.goldfinch.getVaultLockState()
+  .then((state) => { lockState = state; if (!vaultStatePushed) renderVaultIndicator(state); })
+  .catch(() => {});
+
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
 // EVERY overlay query — empty included (deletion sync: switch-back must restore a
 // blank bar, not resurrected text). Closed arrives ONLY when the user closed the bar
@@ -1159,16 +1590,25 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 21-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 29-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 21 is
+// do not grow it without an FD ruling — an evaluate caller outside these 29 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
 // the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
 // showDownloadsIndicatorForAudit + openDownloadsOverlayForAudit for the new
-// downloads-button + sheet:downloads a11y states.)
+// downloads-button + sheet:downloads a11y states. M12 F3 Leg 4: added
+// openVaultSetOverlayForAudit + openVaultRecoveryShowOverlayForAudit for the
+// sheet:vault-set / vault-recovery-show a11y states per the leg's DD9 SHEET_STATES
+// deliverable. M12 F3 Leg 5: added openVaultStepupOverlayForAudit +
+// openVaultAccessKeyShowOverlayForAudit for the sheet:vault-stepup /
+// vault-accesskey-show a11y states. M12 F4 Legs 1-3: added
+// openVaultImportUnlockOverlayForAudit, openVaultChangeMasterOverlayForAudit,
+// openVaultRecoverOverlayForAudit + openVaultAdminKeyShowOverlayForAudit for the
+// sheet:vault-import-unlock / vault-change-master / vault-recover / vault-adminkey-show
+// a11y states.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1193,5 +1633,13 @@ Object.assign(/** @type {any} */ (globalThis), {
   openPageContextMenuForAudit,
   openTabContextMenuForAudit, // M09 F5 Leg 1 — SHEET_STATES 'sheet:tab-context' (FD-ruled addition)
   showDownloadsIndicatorForAudit, // M11 F1 Leg 3 — chrome state 'downloads-button' (FD-ruled addition)
-  openDownloadsOverlayForAudit // M11 F1 Leg 3 — SHEET_STATES 'sheet:downloads' (FD-ruled addition)
+  openDownloadsOverlayForAudit, // M11 F1 Leg 3 — SHEET_STATES 'sheet:downloads' (FD-ruled addition)
+  openVaultSetOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-set' (DD9 addition)
+  openVaultRecoveryShowOverlayForAudit, // M12 F3 Leg 4 — SHEET_STATES 'sheet:vault-recovery-show' (DD9 addition)
+  openVaultStepupOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-stepup' (DD9 addition)
+  openVaultAccessKeyShowOverlayForAudit, // M12 F3 Leg 5 — SHEET_STATES 'sheet:vault-accesskey-show' (DD9 addition)
+  openVaultImportUnlockOverlayForAudit, // M12 F4 Leg 1 — SHEET_STATES 'sheet:vault-import-unlock' (DD9 addition)
+  openVaultChangeMasterOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-change-master' (DD9 addition)
+  openVaultRecoverOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-recover' (DD9 addition)
+  openVaultAdminKeyShowOverlayForAudit // M12 F4 Leg 3 — SHEET_STATES 'sheet:vault-adminkey-show' (DD9 addition)
 });

@@ -180,6 +180,12 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
   });
   assert.equal(source.tabViews.has(webId), true);
   assert.equal(h.views[0].opts.webPreferences.contextIsolation, false);
+  // DD7 (M12 F1 Leg 4) security invariant: the WEB guest runs with nodeIntegration
+  // AND sandbox off — nodeIntegration:false is what denies page JS an ipcRenderer,
+  // so it cannot register a rogue 'vault-fill' listener to spoof credential fills.
+  // The trusted/internal branch already pins these; the web branch now does too.
+  assert.equal(h.views[0].opts.webPreferences.nodeIntegration, false);
+  assert.equal(h.views[0].opts.webPreferences.sandbox, false);
   assert.equal(h.views[0].opts.webPreferences.preload, '/preload/web.js');
   assert.ok(h.log.findIndex((x) => x[0] === 'wire-tab') < h.log.findIndex((x) => x[0] === 'load'));
 

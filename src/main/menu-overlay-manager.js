@@ -80,7 +80,8 @@
  *   removeChildView: (v: SheetViewLike) => void
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
- *   anchor: any, startIndex?: number, token: number, noFocus?: boolean }} MenuOpenPayload
+ *   anchor: any, startIndex?: number, token: number, noFocus?: boolean,
+ *   dismissible?: boolean }} MenuOpenPayload
  * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 
@@ -110,6 +111,12 @@ function createMenuOverlayManager({
   let lastGuestBounds = null;
   /** @type {{ menuType: string, token: number } | null} */
   let currentMenu = null;
+  // M12 F3 Leg 4 (first-run-setup, DD5): whether the current menu may be SOFT-dismissed
+  // (Escape / outside-click / window-blur). vault-recovery-show opens with
+  // `dismissible: false` so a casual dismiss (app switch, backdrop click) cannot lose the
+  // one-time recovery key — only the deliberate acknowledge ('activated') or a hard
+  // lifecycle close (tab/window teardown) closes it. Defaults true for every other menu.
+  let currentDismissible = true;
   /** @type {MenuOpenPayload | null} */
   let pendingInit = null; // at most ONE queued init (latest wins — F7 pattern)
   // DD7 attachment (M09 F6): the contentView/window the sheet is attached to,
@@ -268,6 +275,7 @@ function createMenuOverlayManager({
     attachment = nextAtt;
     if (nextAtt.bounds) lastGuestBounds = nextAtt.bounds; // per-window bounds at show (DD7)
     currentMenu = { menuType: payload.menuType, token: payload.token };
+    currentDismissible = payload.dismissible !== false; // DD5 — non-dismissible opt-out
     show();
     // DD5: find bar hidden while a menu is open (parity) — on the FIRST open of
     // a session (model-replace keeps the same open session; the call is
@@ -294,6 +302,14 @@ function createMenuOverlayManager({
   function closeMenuOverlay(reason, token) {
     if (!currentMenu) return; // idempotent — double-blur (app switch) safe
     if (token !== undefined && token !== currentMenu.token) return; // stale sheet report
+    // DD5 (M12 F3 Leg 4): a non-dismissible menu (vault-recovery-show) ignores the SOFT
+    // dismiss reasons — Escape / outside-click / window-blur (window-factory's win.on
+    // 'blur' → closeMenuOverlay('blur') is the main-initiated one). Only 'activated' (the
+    // deliberate acknowledge) and hard lifecycle reasons (tab-switch/-hide/-close,
+    // teardown, superseded) may close it — the one-time recovery key is unrecoverable.
+    if (!currentDismissible && (reason === 'escape' || reason === 'outside-click' || reason === 'blur')) {
+      return;
+    }
     const closed = currentMenu;
     currentMenu = null;
     pendingInit = null;

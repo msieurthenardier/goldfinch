@@ -21,7 +21,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // downloads + jars methods) is exposed to each. The downloads/jars methods are inert on
 // the settings page (it never calls them) and the main-side registerInternalHandler
 // origin check gates them regardless.
-const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars']);
+const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars', 'goldfinch://vault']);
 
 // Only expose the bridge when this preload is running in a genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
@@ -525,7 +525,239 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * @param {{jarId:string, url:string}} payload
      * @returns {Promise<{ok:boolean, error?:string}>}
      */
-    openTabInJar: (payload) => ipcRenderer.invoke('internal-open-tab-in-jar', payload)
+    openTabInJar: (payload) => ipcRenderer.invoke('internal-open-tab-in-jar', payload),
+
+    // Vault management surface (M12 Flight 3, Leg 1). The goldfinch://vault page is
+    // the only caller; inert on the other internal pages, and the main-side
+    // registerInternalHandler origin check gates it regardless. Leg 1 lands the
+    // metadata-only state read (labels only — no MRK, no counts, NO SECRET); later
+    // legs add CRUD / reveal / totp / access-key / setup / autolock wrappers here.
+
+    /**
+     * Read the vault manager's page state: whether it is set up, whether it is
+     * unlocked, and the vault list (the manager-wide `global` vault plus each
+     * persistent jar's vault) as LABELS ONLY — { vaultId, label }. No item counts
+     * (they need the MRK — leg 2) and no secret ever crosses this channel.
+     * @returns {Promise<{ setUp: boolean, unlocked: boolean, vaults: Array<{ vaultId: string, label: string, count?: number }> }>}
+     */
+    vaultState: () => ipcRenderer.invoke('internal-vault-state'),
+
+    // Item CRUD surface (M12 Flight 3, Leg 2 / DD3, DD6, DD10). Metadata-only list +
+    // explicit single-item reveal + preserving save + delete. A LOCKED store resolves
+    // to a structured { locked: true } (never a serialized error string) so the page
+    // can route to the unlock path.
+
+    /**
+     * Metadata-only item list for one vault (no secret ever). Resolves { items } or
+     * the structured { locked: true }.
+     * @param {string} vaultId
+     * @returns {Promise<{ items?: Array<object>, locked?: boolean }>}
+     */
+    vaultList: (vaultId) => ipcRenderer.invoke('internal-vault-list', vaultId),
+
+    /**
+     * Reveal a SINGLE item in full (incl. secrets) by id — the explicit-reveal path.
+     * Resolves { item } (item null when absent) or { locked: true }.
+     * @param {{ vaultId: string, itemId: string }} payload
+     * @returns {Promise<{ item?: (object|null), locked?: boolean }>}
+     */
+    vaultReveal: (payload) => ipcRenderer.invoke('internal-vault-reveal', payload),
+
+    /**
+     * Save a full item, preserving the masked-untouched secret fields named in
+     * `unchangedSecrets` (resolved against the existing item in main). Resolves the
+     * saved item's METADATA ({ item }) — never a secret — or { locked: true }.
+     * @param {{ vaultId: string, item: object, unchangedSecrets: string[] }} payload
+     * @returns {Promise<{ item?: object, locked?: boolean }>}
+     */
+    vaultItemSave: (payload) => ipcRenderer.invoke('internal-vault-item-save', payload),
+
+    /**
+     * Delete an item by id. Resolves { deleted } (false on a missing id) or
+     * { locked: true }.
+     * @param {{ vaultId: string, itemId: string }} payload
+     * @returns {Promise<{ deleted?: boolean, locked?: boolean }>}
+     */
+    vaultItemDelete: (payload) => ipcRenderer.invoke('internal-vault-item-delete', payload),
+
+    // Live TOTP code (M12 Flight 3, Leg 3 / DD4). The seed stays in main — this
+    // resolves the current code + seconds-remaining ONLY (never the seed). { code: null }
+    // when the item has no totp; { locked: true } when the store is locked. The page
+    // polls per-period and counts down locally.
+
+    /**
+     * Fetch the current TOTP code + countdown for an item (computed in main; NEVER
+     * the seed). Resolves { code, secondsRemaining }, { code: null }, or { locked: true }.
+     * @param {{ vaultId: string, itemId: string }} payload
+     * @returns {Promise<{ code?: (string|null), secondsRemaining?: number, locked?: boolean }>}
+     */
+    vaultTotpCode: (payload) => ipcRenderer.invoke('internal-vault-totp-code', payload),
+
+    // First-run setup + unlock triggers (M12 Flight 3, Leg 4 / DD5). The page cannot
+    // reach chrome-trust menuOverlay.*, so its not-set-up CTA / locked affordance invoke
+    // these origin-gated channels; main forwards a bare trigger to the owning window's
+    // chrome, which opens the chrome-owned vault-set / vault-unlock sheet. NO secret ever
+    // crosses either channel (the password lives only on the sheet + in main). The page
+    // moves to unlocked off the `vault-lock-state` broadcast below (also received by the
+    // internal session), so neither invoke needs to return anything actionable.
+
+    /** Request the first-run setup sheet (opens the chrome-owned vault-set card). */
+    requestSetup: () => ipcRenderer.invoke('internal-vault-request-setup'),
+
+    /** Request the unlock sheet (opens the F2 chrome-owned vault-unlock card — no
+     * fill-picker continuation, distinct from the guest-gesture unlock). */
+    requestUnlock: () => ipcRenderer.invoke('internal-vault-request-unlock'),
+
+    /**
+     * Explicit global LOCK (M12 F5 HAT batch 1, I6). Zeroizes ALL vault keys immediately —
+     * global (not per-vault) and idempotent. Carries NO secret. The page moves to the locked
+     * view off the `vault-lock-state` broadcast the store's onLock hook already emits (this
+     * call does not re-broadcast). Resolves { ok: true }.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    lockVault: () => ipcRenderer.invoke('internal-vault-lock'),
+
+    // Access-key management (M12 Flight 3, Leg 5 / flight DD5, mission durable-grant step-up).
+    // These are the vault-store `access` ENVELOPES — NOT the MCP automation transport tokens.
+    // List + revoke ride internal channels (no secret ever crosses either — keyIds are
+    // plaintext fingerprints); MINT rides the chrome-owned vault-stepup sheet (a fresh master
+    // password on the sheet, never the page), triggered by requestMint below.
+
+    /**
+     * List a vault's access-key grants by keyId ONLY (no secret). Resolves { keys } or the
+     * structured { locked: true }.
+     * @param {string} vaultId
+     * @returns {Promise<{ keys?: Array<{ keyId: string }>, locked?: boolean }>}
+     */
+    vaultAccessKeys: (vaultId) => ipcRenderer.invoke('internal-vault-accesskey-list', vaultId),
+
+    /**
+     * Revoke an access key by keyId — immediate. Resolves { revoked } (false for a stale
+     * keyId) or { locked: true }.
+     * @param {{ vaultId: string, keyId: string }} payload
+     * @returns {Promise<{ revoked?: boolean, locked?: boolean }>}
+     */
+    vaultAccessKeyRevoke: (payload) => ipcRenderer.invoke('internal-vault-accesskey-revoke', payload),
+
+    /** Request the access-key MINT sheet (opens the chrome-owned vault-stepup card scoped to
+     * `target`). NO secret crosses here — the master password is entered on the sheet and the
+     * minted secret is shown on the chrome-owned vault-accesskey-show sheet, never the page. */
+    requestMint: (target) => ipcRenderer.invoke('internal-vault-request-mint', target),
+
+    // Portable export / import (M12 Flight 4, Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT,
+    // I14). Export is fully main-side: the handler builds the ciphertext-only bundle from the store
+    // + writes the file — the bundle never crosses to the page (the sandboxed page can't write files
+    // anyway). The page's Export modal picks a save location up front via pickSavePath (save dialog
+    // in main, no write) then binds source→path at submit via exportVault(target, savePath); the
+    // jars delete-first offer calls exportVault(target) with no path (main runs the dialog). Import
+    // is a page-modal flow: pickImportFile opens + holds the bundle for a destination (main-side
+    // dialog + read + hold), then beginImportUnlock opens the chrome-owned vault-import-unlock sheet
+    // for the secret; clearPendingImport drops the held bundle on modal dismiss. NO secret ever
+    // crosses any of these channels.
+
+    /**
+     * Export a vault to a portable bundle file. With an optional pre-chosen `savePath` main writes
+     * directly (the page Export modal, which picked via pickSavePath); without one main runs the
+     * save dialog (the jars delete-first offer). Resolves { ok, path }, { canceled }, or the
+     * structured { locked: true } (a locked manager).
+     * @param {string} target  `'global'` or a persistent jar id.
+     * @param {string} [savePath]  a pre-chosen destination path (from pickSavePath).
+     * @returns {Promise<{ ok?: boolean, path?: string, canceled?: boolean, locked?: boolean }>}
+     */
+    exportVault: (target, savePath) => ipcRenderer.invoke('internal-vault-export', target, savePath),
+
+    /**
+     * Pick a save location for an export bundle — runs the save dialog in main ONLY (no build, no
+     * write). The page Export modal calls this to choose a location up front, then passes the path
+     * to exportVault at submit. Resolves { path } or { canceled }.
+     * @param {string} target  `'global'` or a persistent jar id (seeds the default filename).
+     * @returns {Promise<{ path?: string, canceled?: boolean }>}
+     */
+    pickSavePath: (target) => ipcRenderer.invoke('internal-vault-pick-save-path', target),
+
+    /**
+     * Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars
+     * page's Delete confirm surface the export-first offer only for a vault-bearing
+     * jar. A pure filesystem probe — no secret, non-throwing on a locked store.
+     * @param {string} vaultId  `'global'` or a persistent jar id.
+     * @returns {Promise<{ present: boolean }>}
+     */
+    hasVault: (vaultId) => ipcRenderer.invoke('internal-vault-has', vaultId),
+
+    /**
+     * Pick a bundle file for an import DESTINATION: main runs the open dialog, reads + parses the
+     * bundle (ciphertext), and HOLDS { bundle, destinationTarget } main-side — it does NOT open the
+     * secret sheet (that is beginImportUnlock, on submit). Resolves { ok, path } (held for the shown
+     * destination), { canceled } (dialog dismissed), or { error } (unreadable). The page must
+     * re-pick if the destination changes after a successful pick (H1: the held target is bound here).
+     * On { ok } the result carries an opaque `importHandle` (PR#112 finding 5) the page echoes on
+     * the mutating steps below — a per-transaction guard atop the per-window record keying.
+     * @param {string} destinationTarget  `'global'` or a persistent jar id.
+     * @returns {Promise<{ ok?: boolean, path?: string, importHandle?: string, canceled?: boolean, error?: string }>}
+     */
+    pickImportFile: (destinationTarget) => ipcRenderer.invoke('internal-vault-pick-import-file', destinationTarget),
+
+    /**
+     * Open the chrome-owned vault-import-unlock secret sheet for the held bundle (consumed there
+     * with the sheet's secret). Call on the Import modal's Continue submit, AFTER a successful
+     * pickImportFile. A BARE trigger — NO secret crosses here; the payload is `{ overwrite, handle }`:
+     * `overwrite` is the "Replace existing vault" checkbox's FINAL state (M12 F5 HAT tail), `handle`
+     * is the opaque token from pickImportFile (finding 5). Main binds them onto the held import record
+     * before the sheet opens. Resolves { ok }.
+     * @param {boolean} [overwrite]  replace an existing vault at the destination (checkbox state).
+     * @param {string} [handle]  the importHandle from pickImportFile.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    beginImportUnlock: (overwrite, handle) => ipcRenderer.invoke('internal-vault-begin-import-unlock', { overwrite: overwrite === true, handle }),
+
+    /**
+     * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop
+     * dismiss AFTER a pick so an abandoned bundle never lingers. Always safe to call. Pass the
+     * pickImportFile `importHandle` (finding 5) so only THIS transaction's record is dropped.
+     * @param {string} [handle]  the importHandle from pickImportFile.
+     * @returns {Promise<{ ok: boolean }>}
+     */
+    clearPendingImport: (handle) => ipcRenderer.invoke('internal-vault-clear-pending-import', handle),
+
+    // Key rotation / recover (M12 Flight 4, Leg 2 / DD3). All three are BARE cross-renderer
+    // triggers: main opens the chrome-owned sheet that collects the secret(s) — NO secret ever
+    // crosses these channels or enters the page DOM. rotate-recovery + change-master require the
+    // manager unlocked (rotation-section actions); recover is reachable FROM the LOCKED page (the
+    // recovery key is its own step-up + installs the MRK).
+
+    /** Request the recovery-key ROTATION sheet (reuses the chrome-owned vault-stepup card for a
+     * master-password step-up; the new recovery key is shown once on the recovery-show sheet). */
+    requestRotateRecovery: () => ipcRenderer.invoke('internal-vault-request-rotate-recovery'),
+
+    /** Request the admin-key PROVISION/ROTATE sheet (reuses the chrome-owned vault-stepup card for a
+     * master-password step-up, mode 'rotate-admin'; the new admin private key is shown once on the
+     * vault-adminkey-show sheet). M12 F4 Leg 3. */
+    requestRotateAdmin: () => ipcRenderer.invoke('internal-vault-request-rotate-admin'),
+
+    /** Request the master-password CHANGE sheet (chrome-owned vault-change-master card: old +
+     * new + confirm; the old password is the step-up). */
+    requestChangeMaster: () => ipcRenderer.invoke('internal-vault-request-change-master'),
+
+    /** Request the RECOVER-after-forgotten-master sheet (chrome-owned vault-recover card:
+     * recovery key + new + confirm; the recovery key is the step-up, installs the MRK). */
+    requestRecover: () => ipcRenderer.invoke('internal-vault-request-recover'),
+
+    /**
+     * Subscribe to vault lock-state transitions (`{ setUp, unlocked }`). The vault page
+     * re-queries its state on every push so setup / unlock move the page not-set-up →
+     * locked → unlocked without a manual refresh. Returns a numeric handle for
+     * offVaultLockState.
+     * @param {(d: { setUp: boolean, unlocked: boolean }) => void} cb
+     * @returns {number}
+     */
+    onVaultLockState: (cb) => on('vault-lock-state', cb),
+
+    /**
+     * Unsubscribe the vault-lock-state listener registered under handle h. Call from a
+     * pagehide handler to prevent accumulation across reloads.
+     * @param {number} h
+     */
+    offVaultLockState: (h) => off(h)
   });
 }
 // When origin does NOT match: expose nothing. The bridge does not exist for

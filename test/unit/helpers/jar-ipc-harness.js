@@ -120,7 +120,11 @@ function makeHarness(
     cookiesByPartition = {},
     cookiesGetThrows = false,
     cookiesRemoveThrows = false,
-    storagePaths = {}
+    storagePaths = {},
+    // M12 F4 Leg 6: optional accessor for a (real or fake) vault store, injected into
+    // registerJarIpc so handleRemove's fail-soft vault-removal step runs. Omitted by
+    // default → the step is skipped (the injection-gated precedent).
+    getVaultStore = undefined
   } = {}
 ) {
   appDb.open('', { memory: true });
@@ -191,7 +195,8 @@ function makeHarness(
     revokeJarKey,
     settings,
     broadcast,
-    historyStore
+    historyStore,
+    getVaultStore
   });
 
   const invoke = (channel, payload) => handlers.get(channel)({}, payload);

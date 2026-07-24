@@ -105,12 +105,23 @@ const PRESS_KEY_NAMES =
  * omit it and ride the default serialize. (Thrown errors still map to isError via callTool's
  * try/catch regardless of `shape`.)
  *
+ * The `call` mapper receives a THIRD arg (Leg 3, M12 F1): the per-session vault
+ * context (from getVaultCtx). Every engine-op def IGNORES it; only the four vault
+ * defs use it (they are non-engine-op and dispatch to the vault ctx, never engine[op]).
+ *
+ * `usesEngine` is an OPTIONAL declarative marker (M12 F1 review): the four vault
+ * defs are NON-engine-op (they dispatch to the per-session vault ctx, never
+ * engine[op]) and set it `false`, so callTool skips resolving the engine for them
+ * — a throwing/null `getEngine` (e.g. a closed window) can never fail a vault-only
+ * call. Every engine-op def omits it (defaults to needing the engine).
+ *
  * @typedef {{
  *   name: string,
  *   description: string,
  *   inputSchema: object,
- *   call: (engine: any, args: any) => any,
+ *   call: (engine: any, args: any, vault?: any) => any,
  *   shape?: (value: any) => { content: any[] },
+ *   usesEngine?: boolean,
  * }} ToolDef
  */
 
@@ -587,13 +598,102 @@ const HISTORY_TOOLS = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Tool definitions — vault ops (4, Mission 12 Flight 1 Leg 3). The FILL-ONLY
+// password-vault surface. UNLIKE every tool above, these are NON-ENGINE-OP: they
+// dispatch to the per-session VAULT CONTEXT (the 3rd `call` arg, threaded via
+// buildToolRegistry(getEngine, getVaultCtx)), NOT to engine[op]. Vault state is
+// per-session and lives OUTSIDE scopeEngine (the leg DECISION): a jar session
+// reaches only its own jar's vault, an admin session every vault, and the
+// credential a `vaultFill` resolves is handed to the injected fill delegate —
+// NEVER returned across this boundary. The four tools stay in `TOOLS` so the
+// existing auditLog wrap in mcp-server.js records them automatically.
+//
+// `vaultFill` is the one wcId-first vault op; its jar-membership + origin-match
+// enforcement lives in vault-context.fill, and scope.js registers it in the
+// registration-only `WCID_FIRST_CUSTOM_JAR_OPS` marker set (NOT WCID_FIRST_OPS —
+// there is deliberately no scopeEngine method for it).
+// ---------------------------------------------------------------------------
+
+/** @type {ToolDef[]} */
+const VAULT_TOOLS = [
+  {
+    name: 'vaultUnlock',
+    description: 'Unlock the password vaults reachable by THIS automation session, using the presented access secret. ' +
+      'A JAR key\'s session interprets accessKey as that jar\'s per-jar vault access secret and unlocks ONLY that jar\'s vault ' +
+      '(a per-jar access key holds no envelope for the global vault or sibling jars — global logins via automation require the admin key). ' +
+      'An ADMIN session interprets accessKey as the X25519 admin private key (base64) and unlocks EVERY vault. ' +
+      'Returns { unlocked: [vaultId, …] } — a wrong/foreign key unlocks nothing ({ unlocked: [] }), a NORMAL result, not an error. ' +
+      'The accessKey is never returned, logged, or echoed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accessKey: { type: 'string', description: 'the per-jar vault access secret (jar session) or the X25519 admin private key in base64 (admin session)' },
+      },
+      required: ['accessKey'],
+    },
+    usesEngine: false,
+    call: (engine, args, vault) => vault.unlock(args.accessKey),
+  },
+  {
+    name: 'vaultList',
+    description: 'List METADATA of the login items in this session\'s unlocked vaults: { vaultId, id, title, origin, username, hasTotp }. ' +
+      'Metadata only — NEVER the password, TOTP secret, or card data. Only unlocked vaults contribute; an empty (locked) session lists nothing. ' +
+      'Use the returned item id with vaultTotp / vaultFill.',
+    inputSchema: { type: 'object', properties: {} },
+    usesEngine: false,
+    call: (engine, args, vault) => vault.list(),
+  },
+  {
+    name: 'vaultTotp',
+    description: 'Return ONLY the current TOTP code for a named unlocked item: { id, code }. ' +
+      'code is null when the item is absent, not in an unlocked vault, has no TOTP, or is AMBIGUOUS — an item id can repeat ' +
+      'across vaults (e.g. the same bundle imported twice), so in a multi-vault session pass the item\'s vaultId (from vaultList) ' +
+      'to select the intended one. The TOTP secret itself is never returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        itemId: { type: 'string', description: 'the vault item id (from vaultList) whose current TOTP code to compute' },
+        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+      },
+      required: ['itemId'],
+    },
+    usesEngine: false,
+    call: (engine, args, vault) => vault.totp(args.itemId, args.vaultId),
+  },
+  {
+    name: 'vaultFill',
+    description: 'Fill an origin-matched login credential into the target tab (wcId). Resolves the item by id from an unlocked reachable vault, ' +
+      'enforces jar membership (a jar session naming a foreign/sibling tab is refused with automation: out-of-jar) and a top-frame origin match ' +
+      'against the item, then performs the fill via Goldfinch\'s internal fill effect. ' +
+      'The credential/password is NEVER returned — the result is { filled: true, id, origin } on success (origin = the resolved top-frame ' +
+      'origin the fill matched against; non-secret, no credential/password), or a NORMAL { filled: false, reason } ' +
+      '(reason "locked" / "no-match" / "origin-mismatch" / "ambiguous") when nothing was filled. "ambiguous" means the item id ' +
+      'exists in more than one unlocked vault (e.g. the same bundle imported twice) — pass the intended vaultId (from vaultList) ' +
+      'to disambiguate. Requires wcId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the target tab to fill into' },
+        itemId: { type: 'string', description: 'the login item id (from vaultList) to fill' },
+        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+      },
+      required: ['wcId', 'itemId'],
+    },
+    usesEngine: false,
+    call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
+  },
+];
+
 // The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 3
 // chrome/app-admin (getChromeTarget + enumerateWindows + downloadsList) + 1 history
-// (getHistory) = 30 (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find
-// + Flight 5 downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2
-// dragPointer + M09 F7 DD2 enumerateWindows),
-// iterated by buildToolRegistry for both discovery and dispatch.
-const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS];
+// (getHistory) + 4 vault (M12 F1 Leg 3: vaultUnlock/vaultList/vaultTotp/vaultFill) = 34
+// (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find + Flight 5
+// downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2 dragPointer + M09 F7
+// DD2 enumerateWindows + M12 F1 Leg 3 vault tools). The 30 engine-op tools map 1:1 to
+// engine ops; the 4 vault tools are NON-engine-op (they dispatch to the per-session
+// vault ctx). Iterated by buildToolRegistry for both discovery and dispatch.
+const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS, ...VAULT_TOOLS];
 
 // ---------------------------------------------------------------------------
 // Registry builder
@@ -606,12 +706,16 @@ const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TO
  *   result). Called fresh per callTool so a recreated/closed window is always
  *   picked up — matching the engine's per-call deps discipline. If it returns
  *   null (window closed) the op call null-derefs and is caught → isError.
+ * @param {() => any} [getVaultCtx]  lazy accessor for the per-session vault context
+ *   (Leg 3, M12 F1). Passed as the 3rd `call` arg; the four vault defs use it, all
+ *   engine-op defs ignore it. Absent (engine-only tests) → the vault defs get
+ *   undefined and, if invoked, degrade to isError like any throw.
  * @returns {{
  *   listTools: () => { name: string, description: string, inputSchema: object }[],
  *   callTool: (name: string, args: any) => Promise<{ content: any[], isError?: true }>
  * }}
  */
-function buildToolRegistry(getEngine) {
+function buildToolRegistry(getEngine, getVaultCtx) {
   const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
   /**
@@ -635,9 +739,16 @@ function buildToolRegistry(getEngine) {
       return errResult(new Error('automation: unknown-tool — no such tool: ' + name));
     }
     try {
-      // getEngine() deref is inside the try so a null engine degrades to isError.
-      const engine = getEngine();
-      const value = await def.call(engine, args ?? {});
+      // Resolve the engine ONLY for defs that actually dispatch to it. The four
+      // vault defs are non-engine-op (usesEngine: false) — they dispatch to the
+      // per-session vault ctx, so a throwing/null getEngine (e.g. a closed window)
+      // must never fail a vault-only call. getEngine() stays inside the try so a
+      // null engine still degrades to isError for the engine-op defs.
+      const engine = def.usesEngine === false ? undefined : getEngine();
+      // 3rd arg (Leg 3): the per-session vault ctx. Engine-op defs ignore it;
+      // the four vault defs dispatch to it (non-engine-op). getVaultCtx may be
+      // absent in engine-only tests — vault defs then get undefined.
+      const value = await def.call(engine, args ?? {}, getVaultCtx ? getVaultCtx() : undefined);
       // Per-tool result-shaping seam (Leg 3): the image ops shape base64 → image
       // content; everything else rides the default JSON-text serialize (okResult).
       return def.shape ? def.shape(value) : okResult(value);

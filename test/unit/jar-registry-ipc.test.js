@@ -2,9 +2,34 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { BURNER } = require('../../src/shared/burner');
 const { registerJarRegistryIpc } = require('../../src/main/jar-registry-ipc');
+const vs = require('../../src/main/vault/vault-store');
 const { appDb, makeHarness, personal } = require('./helpers/jar-ipc-harness');
+
+// M12 F4 Leg 6 — a real vault store on disk (FAST scrypt), for the delete/wipe
+// lifecycle integration tests (the vault-store.test.js FAST_SCRYPT idiom).
+const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+function tmpVaultDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-jarreg-vault-'));
+}
+function vaultFile(dir, id) {
+  return path.join(dir, 'vaults', `${id}.gfvault`);
+}
+async function realVaultStore(t, dir) {
+  const store = vs.load(dir, {
+    scryptParams: FAST_SCRYPT,
+    getAutoLockMinutes: () => 10,
+    // The harness seeds jars 'personal' + 'work'; the store's allowlist must match.
+    listJars: () => [{ id: 'personal' }, { id: 'work' }],
+  });
+  await store.setup({ masterPassword: 'correct horse battery staple' });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return store;
+}
 
 test('exports the registry registrar', () => {
   assert.equal(typeof registerJarRegistryIpc, 'function');
@@ -352,3 +377,94 @@ test('jars-rename with a non-object primitive payload (string) returns null, no 
 // ---------------------------------------------------------------------------
 // broadcastJarsChanged (returned for main.js's new-container-create reuse)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// jars-remove — the M12 F4 Leg 6 vault-removal step (fail-soft, after revoke)
+// ---------------------------------------------------------------------------
+
+// Fake vault store recording its deleteVault calls into the harness's ONE event
+// log, so ordering relative to revokeJarKey/broadcasts is assertable in one place.
+function fakeVaultStore(getEvents, { throws = false } = {}) {
+  return {
+    deleteVault(jarId) {
+      getEvents().push({ fn: 'deleteVault', jarId, threw: throws });
+      if (throws) throw new Error('vault unlink failed');
+      return { deleted: true };
+    }
+  };
+}
+
+test('jars-remove deletes the vault FIRST (before freeing the id) and reports vaultRemoved:true (PR#112 finding 8)', async (t) => {
+  let h;
+  const vaultStore = fakeVaultStore(() => h.events);
+  h = makeHarness(t, { getVaultStore: () => vaultStore });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.vaultRemoved, true);
+  // The vault is removed FIRST — the id is not freed until its secrets are gone —
+  // then the partition wipe, revoke, and the two broadcasts.
+  assert.deepEqual(h.events.map((e) => e.fn), [
+    'deleteVault',
+    'clearStorageData',
+    'clearCache',
+    'rerollSeed',
+    'revokeJarKey',
+    'broadcast',
+    'broadcast'
+  ]);
+  assert.equal(h.events.find((e) => e.fn === 'deleteVault').jarId, 'personal');
+});
+
+test('jars-remove is FAIL-CLOSED on a deleteVault throw: { ok:false }, the jar is KEPT and nothing else runs (finding 8)', async (t) => {
+  let h;
+  const vaultStore = fakeVaultStore(() => h.events, { throws: true });
+  h = makeHarness(t, { getVaultStore: () => vaultStore });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+
+  // The delete is REFUSED — the identity is never reported deleted while its secrets remain.
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'vault-delete-failed');
+  // Only the (failed) vault-delete attempt ran; no wipe / revoke / broadcast.
+  assert.deepEqual(h.events.map((e) => e.fn), ['deleteVault']);
+  // The jar (and its reusable id/partition) is retained so secrets never orphan under it.
+  assert.deepEqual(h.jars.list().map((c) => c.id).sort(), ['personal', 'work']);
+});
+
+test('jars-remove without a vault-store injection skips the step (vaultRemoved:false), delete still succeeds', async (t) => {
+  const h = makeHarness(t); // no getVaultStore
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+  assert.equal(result.ok, true);
+  assert.equal(result.vaultRemoved, false);
+  assert.ok(h.events.every((e) => e.fn !== 'deleteVault'), 'the step is skipped');
+});
+
+test('jars-remove removes the deleted jar\'s .gfvault while the GLOBAL vault survives (real store)', async (t) => {
+  const dir = tmpVaultDir();
+  const store = await realVaultStore(t, dir);
+  // Lazily create the personal jar's vault by saving into it.
+  store.saveItem('personal', { type: 'login', title: 'P', password: 'p' });
+  assert.ok(fs.existsSync(vaultFile(dir, 'personal')), 'personal vault exists');
+  assert.ok(fs.existsSync(vaultFile(dir, 'global')), 'global vault exists');
+
+  const h = makeHarness(t, { getVaultStore: () => store });
+  const result = await h.invoke('jars-remove', { id: 'personal' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.vaultRemoved, true);
+  assert.ok(!fs.existsSync(vaultFile(dir, 'personal')), 'the deleted jar\'s vault is gone');
+  assert.ok(fs.existsSync(vaultFile(dir, 'global')), 'the GLOBAL vault survives a jar delete');
+});
+
+test('jars-WIPE leaves the .gfvault intact (spare-on-wipe lifecycle pin)', async (t) => {
+  const dir = tmpVaultDir();
+  const store = await realVaultStore(t, dir);
+  store.saveItem('personal', { type: 'login', title: 'P', password: 'p' });
+  assert.ok(fs.existsSync(vaultFile(dir, 'personal')), 'personal vault exists before the wipe');
+
+  const h = makeHarness(t, { getVaultStore: () => store });
+  const result = await h.invoke('jars-wipe', { id: 'personal' });
+
+  assert.equal(result.ok, true);
+  assert.ok(fs.existsSync(vaultFile(dir, 'personal')), 'the .gfvault SURVIVES a wipe (only delete removes it)');
+});

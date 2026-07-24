@@ -69,14 +69,35 @@ function textOf(result) {
 // listTools — discovery contract
 // ---------------------------------------------------------------------------
 
-test('listTools returns exactly the 30 tools (18 drive + 4 observe + 2 eval + 2 devtools + 3 chrome/app-admin (getChromeTarget + enumerateWindows + downloadsList) + 1 history (getHistory)), named 1:1 with engine ops', () => {
+// M12 F1 Leg 3: the four vault tools are NON-engine-op — they dispatch to the
+// per-session vault context, not engine[op], so they are segregated from the
+// 1:1-with-engine-ops set below.
+const VAULT_NAMES = ['vaultUnlock', 'vaultList', 'vaultTotp', 'vaultFill'];
+
+test('listTools returns exactly the 34 tools — 30 engine-op tools named 1:1 with engine ops + 4 non-engine-op vault tools', () => {
   const { engine } = makeFakeEngine();
   const reg = buildToolRegistry(() => engine);
   const tools = reg.listTools();
-  assert.equal(tools.length, 30);
-  // M09 F7 DD2: enumerateWindows is the +1 — the window-topology discovery primitive.
-  const allNames30 = [...ALL_NAMES, 'getChromeTarget', 'enumerateWindows', 'downloadsList', 'getHistory'];
-  assert.deepEqual(tools.map((t) => t.name).sort(), [...allNames30].sort());
+  assert.equal(tools.length, 34);
+  // The 30 ENGINE-OP tools map 1:1 to engine ops (tool name === engine op name).
+  // M09 F7 DD2: enumerateWindows is one of the +1s — the window-topology discovery primitive.
+  const engineOpNames30 = [...ALL_NAMES, 'getChromeTarget', 'enumerateWindows', 'downloadsList', 'getHistory'];
+  // The 4 VAULT tools (M12 F1 Leg 3) are asserted as a SEPARATE non-engine-op set —
+  // they have no engine op behind them (they dispatch to the per-session vault ctx).
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...engineOpNames30, ...VAULT_NAMES].sort());
+});
+
+test('vault tools carry the correct required fields (vaultFill requires wcId + itemId)', () => {
+  const reg = buildToolRegistry(() => makeFakeEngine().engine);
+  const byName = new Map(reg.listTools().map((t) => [t.name, t]));
+  const req = (name) => byName.get(name).inputSchema.required || [];
+  assert.deepEqual(req('vaultUnlock'), ['accessKey']);
+  assert.deepEqual(req('vaultList'), []); // vaultList has no required input
+  assert.deepEqual(req('vaultTotp'), ['itemId']);
+  assert.deepEqual(req('vaultFill').slice().sort(), ['itemId', 'wcId']);
+  // vaultFill is the one wcId-first vault tool — the scope guard accepts it via the
+  // registration-only WCID_FIRST_CUSTOM_JAR_OPS marker (see automation-scope.test.js).
+  assert.equal(byName.get('vaultFill').inputSchema.properties.wcId.type, 'integer');
 });
 
 test('listTools exposes only { name, description, inputSchema } — no internal call fn leaks', () => {
@@ -1008,7 +1029,7 @@ test('DD9: the tools DD3 does NOT touch keep their wcId-required schemas unchang
 // `description` — yet listTools projects description to every consumer
 // (mcp-tools.js's listTools projection; the key-shape pin above asserts exactly
 // ['description','inputSchema','name']). So a description can LIE to every
-// consumer while all 30 tools, every schema, and every count stay green: the S10
+// consumer while all 34 tools, every schema, and every count stay green: the S10
 // schema-stable/contract-breaking class, in the one field DD9 doesn't cover.
 // That field matters more than its absence from the pin suggests — a description
 // is what an agentic consumer actually READS to decide how to call a tool.

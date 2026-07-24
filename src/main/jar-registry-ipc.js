@@ -14,7 +14,12 @@ function registerJarRegistryIpc({
   revokeJarKey,
   settings,
   broadcast,
-  broadcastJarsChanged
+  broadcastJarsChanged,
+  // M12 F4 Leg 6 (DD7): accessor for the memoized vault-store singleton (mirrors
+  // register-vault-ipc's getVaultStore injection). handleRemove removes the deleted
+  // jar's `.gfvault` fail-soft. GATED — offline tests that omit it skip the step
+  // (the existing injection-gated precedent).
+  getVaultStore
 }) {
   function handleList() {
     return jars.list();
@@ -56,13 +61,39 @@ function registerJarRegistryIpc({
     return jars.getDefault();
   }
 
-  // Delete composition (DD6). Order: remove → wipe (incl. history purge) →
-  // revoke → settings-changed → jars-changed. Only the wipe is fail-soft
-  // (registry removal already happened — matching identity-new's error
-  // containment); revoke/broadcasts run regardless. `handleRemove` emits no
-  // history broadcast — the section leaves the DOM entirely (flight DD2).
+  // Delete composition (DD6 + M12 F4 Leg 6 / DD7 + PR#112 finding 8). Order:
+  // deleteVault (fail-CLOSED) → remove → wipe (incl. history purge) → revoke →
+  // settings-changed → jars-changed. `handleRemove` emits no history broadcast — the
+  // section leaves the DOM entirely (flight DD2).
+  //
+  // SECRET DELETION IS FAIL-CLOSED (finding 8): jar ids/partitions are DETERMINISTIC
+  // (slug of the name) and REUSABLE once the registry entry is gone, so a stale
+  // `.gfvault` (with its access envelopes) left behind by a swallowed vault-delete
+  // failure would be silently re-adopted by a recreated same-named jar — resurrecting
+  // "deleted" secrets under a new identity. So the vault MUST be removed BEFORE the id
+  // is freed. If the unlink genuinely fails (permissions, races), the whole delete is
+  // refused: the jar (and its id) is KEPT, no wipe/revoke runs, and the operator can
+  // retry — the identity is never reported deleted while its secrets remain. ENOENT
+  // (a no-vault jar — the lazy common case) is a clean no-op (deleted:false), NOT a
+  // failure, so an ordinary jar still deletes. Gated on the injection (offline tests
+  // omit getVaultStore → the step is skipped, no vault system present).
   async function handleRemove(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false };
+    // Peek WITHOUT freeing the id — it must stay claimed until the vault is confirmed gone.
+    const target = jars.list().find((c) => c.id === p.id);
+    if (!target) return { ok: false };
+
+    let vaultRemoved = false;
+    if (getVaultStore) {
+      try {
+        vaultRemoved = getVaultStore().deleteVault(target.id).deleted;
+      } catch {
+        // Fail-closed: keep the jar so its id is never reused while its vault survives.
+        return { ok: false, error: 'vault-delete-failed', id: target.id };
+      }
+    }
+
+    // The vault is gone (or never existed) — NOW it is safe to free the id.
     const removed = jars.remove(p.id);
     if (!removed) return { ok: false };
     // Wipe the removed jar's partition. fromPartition on an already-cold
@@ -83,7 +114,7 @@ function registerJarRegistryIpc({
     revokeJarKey(removed.id, settings);
     broadcast('settings-changed', settings.getAll());
     broadcastJarsChanged();
-    return { ok: true, removed, wiped };
+    return { ok: true, removed, wiped, vaultRemoved };
   }
 
   ipcMain.handle('jars-list', handleList);

@@ -1,11 +1,19 @@
 const BLUR_REOPEN_SUPPRESS_MS = 300;
 
 export function buildKebabModel() {
+  // Two separators group the menu into three bands: window-scoped (New window) /
+  // internal-page destinations (Settings…Secrets) / app actions (Print, Exit).
+  // The sheet renders `type:'separator'` as role="separator" (menu-overlay.js) and
+  // the roving-tabindex/arrow-nav skips it for free (no role="menuitem"), the same
+  // idiom the page-context menu uses.
   return [
     { id: 'new-window', label: 'New window' },
+    { type: 'separator' },
     { id: 'settings', label: 'Settings' },
     { id: 'downloads', label: 'Downloads' },
     { id: 'jars', label: 'Cookie jars' },
+    { id: 'vault', label: 'Secrets' },
+    { type: 'separator' },
     { id: 'print', label: 'Print…' },
     { id: 'exit', label: 'Exit' }
   ];
@@ -98,6 +106,10 @@ export function createChromePageActions({
     createTab('goldfinch://jars', null, { trusted: true });
   }
 
+  function openVaultPage() {
+    createTab('goldfinch://vault', null, { trusted: true });
+  }
+
   function siteInfoInternalFlag(tab) {
     return !!tab && (isInternalTab(tab) || isInternalPageUrl(tab.url));
   }
@@ -133,5 +145,5 @@ export function createChromePageActions({
     if (container) createTab(currentHomePage(), container);
   }
 
-  return { openDownloads, openJarsPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };
+  return { openDownloads, openJarsPage, openVaultPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };
 }

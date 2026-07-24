@@ -15,3 +15,7 @@ goldfinch-*.png
 .env
 .env.*
 !.env.example
+
+# Ephemeral test-run captures
+test-out.txt
+test-time.txt

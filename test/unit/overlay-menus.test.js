@@ -68,9 +68,16 @@ test('activation dispatch is allowlisted to registered menu types', async () => 
 test('menu models and chrome-to-sheet anchor conversion retain exact shapes', async () => {
   const { buildKebabModel, chromePointToSheet, leftSheetAnchor, rightSheetAnchor } =
     await import('../../src/renderer/chrome/overlay-menus.js');
-  assert.deepEqual(buildKebabModel().map((item) => item.id), [
-    'new-window', 'settings', 'downloads', 'jars', 'print', 'exit'
+  const kebab = buildKebabModel();
+  // The menuitem ids, in order — separators carry no id and are filtered out here.
+  assert.deepEqual(kebab.filter((item) => item.id).map((item) => item.id), [
+    'new-window', 'settings', 'downloads', 'jars', 'vault', 'print', 'exit'
   ]);
+  // Two separators divide the menu into three bands: after New window and after Passwords.
+  assert.deepEqual(
+    kebab.map((item) => (item.type === 'separator' ? 'sep' : item.id)),
+    ['new-window', 'sep', 'settings', 'downloads', 'jars', 'vault', 'sep', 'print', 'exit']
+  );
   const webviews = { left: 100, top: 40 };
   const trigger = { left: 90, right: 250 };
   assert.deepEqual(chromePointToSheet(webviews, 91, 30), { x: -9, y: 0 });

@@ -354,12 +354,52 @@ interface GoldfinchBridge {
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
+  onVaultGesture(cb: (d: { wcId: number }) => void): void;
+  // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
+  // forwards the vault page's requestSetup / requestUnlock as bare triggers; the
+  // recovery-show carries the recovery key ONLY (admin key deferred to F4).
+  onVaultRequestSetup(cb: () => void): void;
+  onVaultRequestUnlock(cb: () => void): void;
+  onVaultRecoveryShow(cb: (d: { recoveryKey: string; replacing?: boolean }) => void): void;
+  // Access-key mint cross-renderer triggers (M12 F3 Leg 5, DD5). onVaultRequestMint carries
+  // the NON-SECRET target vault id; onVaultAccessKeyShow carries the minted secret + keyId.
+  onVaultRequestMint(cb: (d: { target: string }) => void): void;
+  onVaultAccessKeyShow(cb: (d: { secret: string; keyId: string }) => void): void;
+  // Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). A bare trigger —
+  // the destination target + the bundle are held main-side; the chrome opens vault-import-unlock.
+  onVaultRequestImport(cb: () => void): void;
+  // Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). Bare triggers —
+  // the chrome opens the matching sheet (rotate-recovery reuses vault-stepup; change-master and
+  // recover open their own sheets). The new one-time recovery key reuses onVaultRecoveryShow.
+  onVaultRequestRotateRecovery(cb: () => void): void;
+  onVaultRequestChangeMaster(cb: () => void): void;
+  onVaultRequestRecover(cb: () => void): void;
+  // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
+  // onVaultRequestRotateAdmin is a bare trigger (reuses vault-stepup, mode 'rotate-admin');
+  // onVaultAdminKeyShow carries the new one-time admin private key for the adminkey-show sheet.
+  onVaultRequestRotateAdmin(cb: () => void): void;
+  onVaultAdminKeyShow(cb: (d: { adminPrivateKey: string }) => void): void;
+  // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): subscribe + init-time fetch.
+  onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): void;
+  getVaultLockState(): Promise<{ setUp: boolean; unlocked: boolean }>;
+  // Explicit global LOCK (M12 F5 HAT batch 1, I8): chrome-trust trigger for the fill-icon
+  // native menu's "Lock now". Global + idempotent, no secret; onLock broadcasts, no re-broadcast.
+  vaultLock(): Promise<{ ok: boolean }>;
+  // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
+  // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
+  // a password — it is resolved and sent to the guest ONLY in main.
+  vaultReachableItems(wcId: number): Promise<Array<{ vaultId: string; id: string; title: string | null; origin: string | null; username: string | null; hasTotp: boolean; widened: boolean }>>;
+  vaultFillHuman(payload: { wcId: number; vaultId: string; itemId: string }): Promise<{ filled: boolean; reason?: string }>;
+  // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
+  // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.
+  onVaultCaptureOffer(cb: (d: { captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update'; defaultVaultId: string; choices: string[] } }) => void): void;
+  vaultCaptureDismiss(captureId: string): Promise<void>;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 
 /**
  * Internal bridge surface exposed by src/preload/internal-preload.js to goldfinch:// pages.
- * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads, goldfinch://jars).
+ * Only present when the page's origin is in the INTERNAL_ORIGINS allowlist (goldfinch://settings, goldfinch://downloads, goldfinch://jars, goldfinch://vault).
  */
 interface GoldfinchInternalBridge {
   version: number;
@@ -449,6 +489,99 @@ interface GoldfinchInternalBridge {
   onHistoryChanged(cb: (p: any) => void): number;
   offHistoryChanged(h: number): void;
   openTabInJar(payload: { jarId: string; url: string }): Promise<{ ok: boolean; error?: string }>;
+  // --- vault management surface (M12 Flight 3, Leg 1; item CRUD added Leg 2) ---
+  /** Vault state: setup/lock flags + the vault list ('global' + each persistent jar).
+   * Each row carries a metadata-only item `count` when UNLOCKED (omitted when locked);
+   * never a secret. */
+  vaultState(): Promise<{ setUp: boolean; unlocked: boolean; vaults: Array<{ vaultId: string; label: string; count?: number }> }>;
+  /** Metadata-only item list for one vault (no secret, ever) — { items } or { locked }. */
+  vaultList(vaultId: string): Promise<{ items?: Array<VaultItemMeta>; locked?: boolean }>;
+  /** Explicit single-item reveal (full item incl. secrets) — { item } or { locked }. */
+  vaultReveal(payload: { vaultId: string; itemId: string }): Promise<{ item?: (Record<string, any> | null); locked?: boolean }>;
+  /** Preserving full-item save; unchangedSecrets names the masked-untouched fields.
+   * Returns the saved item's METADATA (never a secret) — { item } or { locked }. */
+  vaultItemSave(payload: { vaultId: string; item: Record<string, any>; unchangedSecrets: string[] }): Promise<{ item?: VaultItemMeta; locked?: boolean }>;
+  /** Delete an item by id — { deleted } (false on missing id) or { locked }. */
+  vaultItemDelete(payload: { vaultId: string; itemId: string }): Promise<{ deleted?: boolean; locked?: boolean }>;
+  /** Live TOTP code (M12 F3 Leg 3 / DD4): the current code + seconds-remaining
+   * computed in main — NEVER the seed. { code, secondsRemaining }, { code: null }
+   * (no totp), or { locked }. */
+  vaultTotpCode(payload: { vaultId: string; itemId: string }): Promise<{ code?: string | null; secondsRemaining?: number; locked?: boolean }>;
+  // First-run setup + unlock triggers (M12 F3 Leg 4 / DD5). No secret crosses either — the
+  // password lives only on the chrome-owned sheet + in main; the page reacts to the
+  // vault-lock-state broadcast below.
+  /** Request the chrome-owned first-run setup sheet (vault-set). */
+  requestSetup(): Promise<{ ok: boolean }>;
+  /** Request the chrome-owned unlock sheet (vault-unlock) — no fill-picker continuation. */
+  requestUnlock(): Promise<{ ok: boolean }>;
+  /** Explicit global LOCK (M12 F5 HAT batch 1, I6): zeroize ALL vault keys now (idempotent,
+   * no secret). The page reacts to the vault-lock-state broadcast; this does not re-broadcast. */
+  lockVault(): Promise<{ ok: boolean }>;
+  // Access-key management (M12 F3 Leg 5 / flight DD5, mission durable-grant step-up). List +
+  // revoke ride internal channels (no secret — keyIds are plaintext fingerprints); MINT rides
+  // the chrome-owned vault-stepup sheet via requestMint (no secret crosses here).
+  /** List a vault's access-key grants by keyId ONLY — { keys } or { locked }. */
+  vaultAccessKeys(vaultId: string): Promise<{ keys?: Array<{ keyId: string }>; locked?: boolean }>;
+  /** Revoke an access key by keyId — { revoked } (false on a stale keyId) or { locked }. */
+  vaultAccessKeyRevoke(payload: { vaultId: string; keyId: string }): Promise<{ revoked?: boolean; locked?: boolean }>;
+  /** Request the chrome-owned access-key MINT sheet (vault-stepup) scoped to `target`. */
+  requestMint(target: string): Promise<{ ok: boolean }>;
+  // Portable export / import (M12 F4 Leg 1 / DD1 — Option A; page-modal split M12 F5 HAT, I14).
+  // Export is fully main-side (build + write); the page Export modal picks a location via
+  // pickSavePath then binds source→path via exportVault(target, savePath), while the jars offer
+  // calls exportVault(target) with no path. Import: pickImportFile opens + holds the bundle,
+  // beginImportUnlock opens the chrome-owned secret sheet, clearPendingImport drops the held
+  // bundle on dismiss. NO secret crosses any of these channels.
+  /** Export a vault to a portable bundle file. With `savePath` main writes directly (the page
+   * modal); without one main runs the save dialog (the jars offer). { ok, path }, { canceled },
+   * or { locked }. */
+  exportVault(target: string, savePath?: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
+  /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
+   * { canceled }. */
+  pickSavePath(target: string): Promise<{ path?: string; canceled?: boolean }>;
+  /** Does this jar have a saved `.gfvault` file? (M12 F4 Leg 6.) Lets the jars page's Delete
+   * confirm surface the export-first offer only for a vault-bearing jar. */
+  hasVault(vaultId: string): Promise<{ present: boolean }>;
+  /** Pick a bundle file for a destination target: open + read + HOLD the bundle main-side (no sheet
+   * opened). { ok, path }, { canceled }, or { error }. The page re-picks if the destination changes
+   * (H1). */
+  pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
+  /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
+   * Continue). Bare trigger — no secret; the payload is `{ overwrite, handle }` (the Replace-existing
+   * checkbox + the pickImportFile importHandle, PR#112 finding 5), bound onto the held record main-side. { ok }. */
+  beginImportUnlock(overwrite?: boolean, handle?: string): Promise<{ ok: boolean }>;
+  /** Drop the held import bundle (L1) on Import modal dismiss after a pick. Pass the pickImportFile
+   * importHandle so only this window's transaction is dropped (finding 5). Always safe. { ok }. */
+  clearPendingImport(handle?: string): Promise<{ ok: boolean }>;
+  // Key rotation / recover (M12 F4 Leg 2 / DD3). Bare triggers — main opens the chrome-owned
+  // sheet that collects the secret(s); NO secret crosses these channels or the page DOM.
+  /** Request the recovery-key ROTATION sheet (reuses vault-stepup for a master-pw step-up). */
+  requestRotateRecovery(): Promise<{ ok: boolean }>;
+  /** Request the admin-key PROVISION/ROTATE sheet (reuses vault-stepup, mode 'rotate-admin'; the
+   * new admin private key is shown once on vault-adminkey-show). M12 F4 Leg 3. */
+  requestRotateAdmin(): Promise<{ ok: boolean }>;
+  /** Request the master-password CHANGE sheet (vault-change-master: old + new + confirm). */
+  requestChangeMaster(): Promise<{ ok: boolean }>;
+  /** Request the RECOVER-after-forgotten-master sheet (vault-recover: recovery key + new). */
+  requestRecover(): Promise<{ ok: boolean }>;
+  /** Subscribe to vault lock-state transitions; the page re-queries on every push.
+   * Returns a numeric handle for offVaultLockState. */
+  onVaultLockState(cb: (d: { setUp: boolean; unlocked: boolean }) => void): number;
+  /** Unsubscribe the vault-lock-state listener registered under handle h. */
+  offVaultLockState(h: number): void;
+}
+
+/** Metadata-only item projection (no secret field): the vault-item-schema positive
+ * whitelist plus vaultId/id/type/hasTotp. Extra non-secret fields vary by type. */
+interface VaultItemMeta {
+  vaultId: string;
+  id: string;
+  type: 'login' | 'card' | 'note';
+  hasTotp: boolean;
+  title?: string | null;
+  username?: string | null;
+  origin?: string | null;
+  [k: string]: any;
 }
 
 interface Window {
@@ -474,6 +607,10 @@ interface MenuEntry {
   onOpen?: (startIndex?: number) => void;
   onClose?: () => void;
   focusReturn?: () => void;
+  /** M12 F3 Leg 4 (DD5): false opts the entry OUT of the global outside-click / window-
+   * blur dismissal (vault-recovery-show — the one-time recovery key is unrecoverable).
+   * Undefined/true keeps the default dismiss behavior. */
+  dismissible?: boolean;
 }
 
 /**

@@ -31,6 +31,16 @@ function makeHarness() {
     print: () => events.push(['print']),
   };
   const chrome = { send: (...args) => events.push(['chrome-send', ...args]) };
+  // Vault fill-icon native-menu delegate capture (I8): the owning window + recorded calls.
+  const iconMenuWin = { id: 17, isDestroyed: () => false };
+  const iconMenuCalls = [];
+  // Leg 4 (capture-save): a fake human whose capture() returns a settable offer (or
+  // null when the gate drops) and records the dismiss ids.
+  const human = {
+    captures: [], dismissed: [], nextOffer: null,
+    capture(arg) { human.captures.push(arg); return human.nextOffer; },
+    captureDismiss(id) { human.dismissed.push(id); },
+  };
   registerBrowserIpc({
     ipcMain: {
       handle: (channel, fn) => handlers.set(channel, fn),
@@ -51,6 +61,8 @@ function makeHarness() {
       getWindowForChrome: (sender) => sender === chromeSender
         ? { win: { id: 17, isMaximized: () => false, minimize: () => events.push(['minimize']), maximize: () => events.push(['maximize']), close: () => events.push(['close']) } }
         : null,
+      // Guest sender → owning window record (used by the vault fill-icon native menu path).
+      getWindowForGuest: (id) => id === 5 ? { win: iconMenuWin } : null,
     },
     createWindow: () => ({ win: { id: 23 } }),
     broadcastJarsChanged: () => events.push(['jars-changed']),
@@ -60,15 +72,40 @@ function makeHarness() {
     registrableDomain: (host) => host,
     hostnameOf: (url) => new URL(url).hostname,
     shields: { active: () => true },
+    getVaultHuman: () => human,
+    // M12 F5 HAT batch 1 (I8): the native fill-icon menu delegate. Records its args so a test
+    // can assert the bare, no-secret hand-off + that NOTHING is sent to the guest.
+    popupVaultIconMenu: (arg) => iconMenuCalls.push(arg),
     random: () => 0.5,
     logger: { warn: (...args) => events.push(['warn', ...args]) },
   });
-  return { handlers, listeners, internal, events, wc, chrome, chromeSender };
+  return { handlers, listeners, internal, events, wc, chrome, chromeSender, human, iconMenuCalls, iconMenuWin };
 }
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
   const h = makeHarness();
-  assert.deepEqual([...h.internal.keys()], ['internal-open-tab-in-jar']);
+  assert.deepEqual([...h.internal.keys()], [
+    // M12 F3 Leg 4 (first-run-setup): the cross-renderer setup/unlock request triggers
+    // (registered alongside the other guest-vault-* handlers, ahead of open-tab-in-jar).
+    'internal-vault-request-setup',
+    'internal-vault-request-unlock',
+    // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
+    // non-secret target), registered alongside the other request triggers.
+    'internal-vault-request-mint',
+    // M12 F5 HAT (I14, import split): the BARE vault-request-import forward (beginImportUnlock) is
+    // UNCONDITIONAL — it needs only chromeForTab. The pickImportFile + clearPendingImport channels
+    // are GATED on their injections (this harness omits them), so only this one appears here.
+    'internal-vault-begin-import-unlock',
+    // M12 F4 Leg 2 (key-rotation): the cross-renderer rotate-recovery / change-master / recover
+    // triggers (bare, no secret), registered alongside the other request triggers.
+    'internal-vault-request-rotate-recovery',
+    // M12 F4 Leg 3 (admin-key-provision): the cross-renderer rotate-admin trigger (bare, no secret),
+    // registered immediately after rotate-recovery.
+    'internal-vault-request-rotate-admin',
+    'internal-vault-request-change-master',
+    'internal-vault-request-recover',
+    'internal-open-tab-in-jar',
+  ]);
   assert.equal(h.handlers.has('privacy-cookies'), true);
   assert.equal(h.listeners.has('guest-media-list'), true);
   h.listeners.get('guest-media-list')({ sender: { id: 5 } }, ['song']);
@@ -104,6 +141,62 @@ test('browser target guards and page-context allowlist refuse malformed/internal
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, { jarId: 'personal', url: 'javascript:bad' }), {
     ok: false, error: 'open-tab-in-jar — bad-args'
   });
+});
+
+test('vault capture: an offer forwards to the owning chrome (no password on the wire); a dropped gate forwards nothing', () => {
+  const h = makeHarness();
+  // The main-side capture derives origin itself; the guest sends only { username, password }.
+  const passwordBytes = new TextEncoder().encode('typed-secret');
+
+  // GATE DROP: capture() returns null → no vault-capture-offer is sent.
+  h.human.nextOffer = null;
+  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
+  assert.deepEqual(h.human.captures[0], { wcId: 5, username: 'me@a', passwordBytes });
+  assert.deepEqual(h.events, [], 'no forward when the gate drops (null offer)');
+
+  // OFFER: capture() returns { captureId, model } → forwarded to the owning chrome.
+  h.human.nextOffer = { captureId: 'cap123', model: { origin: 'https://a.example', username: 'me@a', mode: 'save', defaultVaultId: 'personal', choices: ['personal', 'global'] } };
+  h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
+  assert.deepEqual(h.events, [
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }],
+  ]);
+  // The forwarded payload never carries a password (grep the whole event stream).
+  assert.ok(!JSON.stringify(h.events).includes('typed-secret'), 'no captured password crosses to chrome');
+});
+
+test('vault fill-icon context menu: a BARE guest signal pops a NATIVE menu over the owning window — no secret, no guest DOM', () => {
+  const h = makeHarness();
+  // The listener is bare (registered via ipcMain.on) and carries no payload — the guest sends
+  // no arguments; the trusted wcId is derived from event.sender.id.
+  assert.equal(h.listeners.has('guest-vault-icon-menu'), true);
+  h.listeners.get('guest-vault-icon-menu')({ sender: { id: 5 } });
+
+  // The native-menu delegate is invoked with the derived wcId + the OWNING window (resolved via
+  // registry.getWindowForGuest) — this is what pops an OS-native Menu.popup, NEVER a guest-DOM
+  // menu.
+  assert.deepEqual(h.iconMenuCalls, [{ wcId: 5, win: h.iconMenuWin }]);
+  // Nothing is sent back into the guest page — no menu DOM, no secret crosses to content.
+  assert.deepEqual(h.events, [], 'the icon-menu path sends nothing to the guest wc or chrome');
+  // The signal carried no payload at all (bare) — there is no secret to leak.
+  assert.deepEqual(Object.keys(h.iconMenuCalls[0]).sort(), ['wcId', 'win']);
+});
+
+test('vault fill-icon context menu: an unresolvable owning window no-ops (delegate still called with win undefined)', () => {
+  const h = makeHarness();
+  // A guest whose window does not resolve (id 6) — the delegate is called with win undefined and
+  // guards internally (real delegate returns early); no throw, nothing sent to the guest.
+  h.listeners.get('guest-vault-icon-menu')({ sender: { id: 6 } });
+  assert.deepEqual(h.iconMenuCalls, [{ wcId: 6, win: undefined }]);
+  assert.deepEqual(h.events, []);
+});
+
+test('vault capture dismiss: the chrome-invoked drop reaches the human ops', () => {
+  const h = makeHarness();
+  h.handlers.get('vault-capture-dismiss')({}, 'cap123');
+  assert.deepEqual(h.human.dismissed, ['cap123']);
+  // A non-string id is ignored (no drop).
+  h.handlers.get('vault-capture-dismiss')({}, 42);
+  assert.deepEqual(h.human.dismissed, ['cap123']);
 });
 
 test('privacy channels retain their exact empty/no-tab return shapes', async () => {

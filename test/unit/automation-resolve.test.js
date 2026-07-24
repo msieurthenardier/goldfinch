@@ -107,6 +107,28 @@ test('resolveContents: valid guest wcId → returns the webContents', () => {
   assert.equal(result, wc);
 });
 
+test('resolveContents: the vault SECRET SHEET wc is refused at EVERY tier, admin included (PR#112 finding 1)', () => {
+  const sheet = makeGuestWc(50);
+  const fromId = (id) => (id === 50 ? sheet : null);
+  const isSheetContents = (wc) => wc === sheet;
+
+  // Non-admin (no allowInternal): refused.
+  assert.throws(
+    () => resolveContents(50, { fromId, chromeContents: null, isSheetContents }),
+    /automation: secret-sheet/,
+  );
+  // ADMIN (allowInternal:true) — the relaxation that lifts internal-session + non-tab-contents
+  // does NOT lift this: the secret sheet stays undrivable so it can never be keylogged.
+  assert.throws(
+    () => resolveContents(50, { fromId, chromeContents: null, allowInternal: true, isSheetContents }),
+    /automation: secret-sheet/,
+  );
+  // A normal guest tab is unaffected by the predicate.
+  const tab = makeGuestWc(51);
+  const fromId2 = (id) => (id === 51 ? tab : null);
+  assert.equal(resolveContents(51, { fromId: fromId2, chromeContents: null, isSheetContents: (wc) => wc === sheet }), tab);
+});
+
 test('resolveContents: valid chrome wcId → returns the webContents (classifyContents can then identify it)', () => {
   const chromeContents = { id: 1, session: { __goldfinchInternal: false }, isDestroyed() { return false; } };
   const fromId = (id) => id === 1 ? chromeContents : null;

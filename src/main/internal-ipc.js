@@ -21,8 +21,8 @@
 // origin. The intended consequence is that ANY internal page can call ANY
 // registerInternalHandler channel — the trust boundary is "internal page vs web," NOT
 // "settings vs downloads vs jars," consistent with the existing single-trust-domain
-// model. A new internal origin is added here.
-const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars']);
+// model. A new internal origin is added here (M12 F3 F3: the vault management page).
+const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars', 'goldfinch://vault']);
 
 /**
  * Returns true only when both conditions are met:

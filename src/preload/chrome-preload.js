@@ -278,6 +278,66 @@ contextBridge.exposeInMainWorld('goldfinch', {
   onTabDomReady: (cb) => ipcRenderer.on('tab-dom-ready', (_e, d) => cb(d)),
   onTabMediaList: (cb) => ipcRenderer.on('tab-media-list', (_e, d) => cb(d)),
   onTabPrivacyFp: (cb) => ipcRenderer.on('tab-privacy-fp', (_e, d) => cb(d)),
+  // Vault gesture (M12 F2 Leg 1, DD1/DD3): main forwards a TRUSTED lock-icon
+  // click as { wcId } (the trusted, main-derived tab id) — carries no secret.
+  // The pick-and-fill leg's consumer raises the chrome-owned unlock/pick prompt.
+  onVaultGesture: (cb) => ipcRenderer.on('vault-gesture', (_e, d) => cb(d)),
+  // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
+  // forwards the goldfinch://vault page's requestSetup / requestUnlock (via chromeForTab)
+  // as BARE triggers (no secret) → the chrome opens the vault-set / vault-unlock sheet.
+  // onVaultRecoveryShow carries the recovery key ONLY (admin key deferred to F4) for the
+  // read-only, dismiss-disabled recovery-show sheet.
+  onVaultRequestSetup: (cb) => ipcRenderer.on('vault-request-setup', () => cb()),
+  onVaultRequestUnlock: (cb) => ipcRenderer.on('vault-request-unlock', () => cb()),
+  onVaultRecoveryShow: (cb) => ipcRenderer.on('vault-recovery-show', (_e, d) => cb(d)),
+  // Access-key mint cross-renderer triggers (M12 F3 Leg 5, DD5). onVaultRequestMint carries
+  // the NON-SECRET { target } vault id (the vault page's Mint CTA, via chromeForTab) → the
+  // chrome opens the vault-stepup sheet. onVaultAccessKeyShow carries the minted { secret,
+  // keyId } (main → chrome → sheet) for the read-only, dismiss-disabled accesskey-show sheet.
+  onVaultRequestMint: (cb) => ipcRenderer.on('vault-request-mint', (_e, d) => cb(d)),
+  onVaultAccessKeyShow: (cb) => ipcRenderer.on('vault-accesskey-show', (_e, d) => cb(d)),
+  // Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2). Main forwards a
+  // BARE trigger (no secret; the destination target + the bundle are held main-side) → the chrome
+  // opens the vault-import-unlock sheet, whose secret entry rides the dedicated Buffer channel.
+  onVaultRequestImport: (cb) => ipcRenderer.on('vault-request-import', () => cb()),
+  // Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). Main forwards BARE
+  // triggers (no secret) → the chrome opens the matching sheet: rotate-recovery reuses vault-stepup
+  // (master-pw step-up); change-master opens vault-change-master; recover opens vault-recover. The
+  // new one-time recovery key from a rotation is shown via the EXISTING onVaultRecoveryShow (setup's
+  // path, reused). Every secret + one-time display rides the chrome-owned sheet, never these triggers.
+  onVaultRequestRotateRecovery: (cb) => ipcRenderer.on('vault-request-rotate-recovery', () => cb()),
+  onVaultRequestChangeMaster: (cb) => ipcRenderer.on('vault-request-change-master', () => cb()),
+  onVaultRequestRecover: (cb) => ipcRenderer.on('vault-request-recover', () => cb()),
+  // Admin-key provision/rotate cross-renderer triggers (M12 F4 Leg 3 admin-key-provision, DD4).
+  // onVaultRequestRotateAdmin is a BARE trigger (no secret) → the chrome opens the vault-stepup
+  // sheet in mode 'rotate-admin'. onVaultAdminKeyShow carries the NEW { adminPrivateKey } (main →
+  // chrome → sheet) for the read-only, dismiss-disabled adminkey-show sheet.
+  onVaultRequestRotateAdmin: (cb) => ipcRenderer.on('vault-request-rotate-admin', () => cb()),
+  onVaultAdminKeyShow: (cb) => ipcRenderer.on('vault-adminkey-show', (_e, d) => cb(d)),
+  // Vault lock-state (M12 F2 Leg 2 chrome-unlock, DD10): the toolbar lock
+  // indicator subscribes to every transition push, then fetches the initial
+  // state once. Payload `{ setUp, unlocked }` — non-secret projection of the
+  // vault-store's MRK-present state.
+  onVaultLockState: (cb) => ipcRenderer.on('vault-lock-state', (_e, d) => cb(d)),
+  getVaultLockState: () => ipcRenderer.invoke('vault-lock-state-get'),
+  // Explicit global LOCK (M12 F5 HAT batch 1, I8): the chrome-trust trigger for the fill-icon
+  // native menu's "Lock now". Global + idempotent; carries no secret. The onLock hook already
+  // broadcasts vault-lock-state, so no re-broadcast follows.
+  vaultLock: () => ipcRenderer.invoke('vault-lock'),
+  // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the picker's reachable-items read
+  // (metadata only — never a password) and the human fill dispatch (returns
+  // { filled, reason? } — the password is resolved + sent ONLY in main). Both are
+  // chrome-originated invokes; the wcId is the trusted, main-derived gesture tab id.
+  vaultReachableItems: (wcId) => ipcRenderer.invoke('vault-reachable-items', wcId),
+  vaultFillHuman: (payload) => ipcRenderer.invoke('vault-fill-human', payload),
+  // Capture-save (M12 F2 Leg 4, DD7): main forwards a save/update offer as
+  // { captureId, model } (model = origin/username/mode/defaultVaultId/choices — NO
+  // password). The chrome opens the vault-capture sheet with it; the sheet's own Save
+  // invoke reports the choice. On a dismiss (close WITHOUT a save) the chrome calls
+  // vaultCaptureDismiss so main drops+zeroizes the held record immediately (not only on
+  // the 2-min timeout). The captured password never crosses to chrome.
+  onVaultCaptureOffer: (cb) => ipcRenderer.on('vault-capture-offer', (_e, d) => cb(d)),
+  vaultCaptureDismiss: (captureId) => ipcRenderer.invoke('vault-capture-dismiss', captureId),
   onTabNavState: (cb) => ipcRenderer.on('tab-nav-state', (_e, d) => cb(d)),
 
   // The internal partition string (single source of truth, src/shared/internal-page.js),

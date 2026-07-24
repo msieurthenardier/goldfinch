@@ -81,7 +81,7 @@ export function isSafePosterUrl(url) {
  * 3 F3). Add a host here when adding an internal page; never relax a web gate to
  * reach the scheme.
  */
-const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars']);
+const INTERNAL_HOSTS = new Set(['settings', 'downloads', 'jars', 'vault']);
 
 /**
  * isInternalPageUrl(url)

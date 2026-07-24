@@ -245,6 +245,22 @@ test('remap collision: input with both burner and jar-burner keeps BOTH (remappe
 });
 
 // ---------------------------------------------------------------------------
+// Reserved id `global` (M12 F1 security review): the vault-store reserves the
+// literal id `global` for the manager-wide global vault. A container that could
+// mint id `global` (slug('Global') === 'global') would alias every jar-scoped
+// vault op onto that shared vault — cross-vault privilege escalation. isReservedId
+// must therefore remap `global` to `jar-global`, exactly like the burner ids.
+// ---------------------------------------------------------------------------
+test('reserved id global is remapped to jar-global; partition and name preserved', () => {
+  const input = [{ id: 'global', name: 'Global', color: '#4caf50', partition: 'persist:container:global' }];
+  const result = validateContainers(input);
+  assert.equal(result.length, 1, 'remap never drops the entry');
+  assert.equal(result[0].id, 'jar-global', "reserved id 'global' is remapped");
+  assert.equal(result[0].name, 'Global', 'display name untouched by the remap');
+  assert.equal(result[0].partition, 'persist:container:global', 'partition string preserved');
+});
+
+// ---------------------------------------------------------------------------
 // Non-array input → empty array
 // ---------------------------------------------------------------------------
 test('non-array input returns empty array', () => {
@@ -1146,6 +1162,22 @@ test('add cannot mint a reserved id: slug remap applies at mint time, display na
     assert.equal(again.id, 'jar-burner-2', "'burner 2' slugs to reserved burner-2 → jar-burner-2");
     const collide = store.add('Burner');
     assert.equal(collide.id, 'jar-burner-1', 'collision loop suffixes past the existing jar-burner');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('add cannot mint the reserved vault id `global`: a "Global" container slugs to jar-global', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = loadedStore(dir, [], null);
+    const created = store.add('Global');
+    assert.notEqual(created.id, 'global', "must never mint the vault-store's manager-wide sentinel id");
+    assert.equal(created.id, 'jar-global');
+    assert.equal(created.name, 'Global', 'display name untouched');
+    assert.equal(created.partition, 'persist:container:jar-global');
   } finally {
     appDb.close();
     removeTempDir(dir);

@@ -106,6 +106,44 @@ test('set → persist → reload round-trip', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Test: vaultAutoLockMinutes get/set round-trip + out-of-range rejection (M12 F3 Leg 5).
+// The vault page's auto-lock number input binds to this existing settings key over the
+// internal-settings-get/set bridge (no new IPC); an out-of-range write throws the validator's
+// TypeError → the invoke rejects → the page surfaces it.
+// ---------------------------------------------------------------------------
+test('vaultAutoLockMinutes: default 10, valid [1,1440] round-trips, out-of-range/non-integer rejected', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.vaultAutoLockMinutes, 10, 'default is 10 minutes');
+    assert.equal(store.get('vaultAutoLockMinutes'), 10);
+
+    // Valid in-range write round-trips through get + a reload.
+    store.set('vaultAutoLockMinutes', 30);
+    assert.equal(store.get('vaultAutoLockMinutes'), 30);
+    assert.equal(store.load(dir).vaultAutoLockMinutes, 30, 'persisted across reload');
+
+    // The boundaries are accepted.
+    store.set('vaultAutoLockMinutes', 1);
+    assert.equal(store.get('vaultAutoLockMinutes'), 1);
+    store.set('vaultAutoLockMinutes', 1440);
+    assert.equal(store.get('vaultAutoLockMinutes'), 1440);
+
+    // Out-of-range + non-integer are rejected by the existing validator (TypeError), and the
+    // stored value is unchanged.
+    for (const bad of [0, -1, 1441, 5000, 10.5, '30', null, NaN]) {
+      assert.throws(() => store.set('vaultAutoLockMinutes', bad), TypeError, `must reject ${String(bad)}`);
+    }
+    assert.equal(store.get('vaultAutoLockMinutes'), 1440, 'a rejected write leaves the value unchanged');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Test: set() writes a valid JSON row (was: "atomic write produces valid
 // JSON on disk" — settings.json is no longer the write target; the document
 // row is, per the flight 10-1 migration).

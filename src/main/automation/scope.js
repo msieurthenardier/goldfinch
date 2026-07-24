@@ -69,6 +69,19 @@ const WCID_FIRST_OPS = [
   'dragPointer',
 ];
 
+// REGISTRATION-ONLY marker (Mission 12, Flight 1, Leg 3). `vaultFill` is a
+// wcId-first MCP tool, but it is NOT an engine op and NOT a scopeEngine method:
+// vault ops dispatch OUTSIDE scopeEngine, on the per-session vault-context path
+// (the leg DECISION — admin returns the raw engine reference-pinned, so vaultFill
+// could never be a scope method). Its jar-membership + origin-match enforcement
+// lives in `vault-context.fill` (which calls resolveContentsForJar directly), NOT
+// here. This set exists SOLELY so the three-place-registration guard in
+// automation-scope.test.js accepts vaultFill's required-wcId schema without demanding
+// a WCID_FIRST_OPS entry. It must NEVER be added to WCID_FIRST_OPS (that would feed
+// the generic engine[op] wrapper an op the engine does not have → "engine.vaultFill
+// is not a function").
+const WCID_FIRST_CUSTOM_JAR_OPS = ['vaultFill'];
+
 /**
  * Scope an engine to a resolved identity.
  *
@@ -224,4 +237,4 @@ function scopeEngine(engine, identity, ctx) {
   return facade;
 }
 
-module.exports = { scopeEngine, WCID_FIRST_OPS };
+module.exports = { scopeEngine, WCID_FIRST_OPS, WCID_FIRST_CUSTOM_JAR_OPS };

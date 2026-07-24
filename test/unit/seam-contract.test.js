@@ -37,8 +37,29 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
 // closed-set rule"). Growing the seam requires an FD ruling AND this
 // constant's update — enforcement by design (AC4).
-const SEAM_COUNT = 21;
-const RENDERER_LINE_BUDGET = 1200;
+// M11 F1 Leg 3 (downloads popup, FD ruling): +2 for showDownloadsIndicatorForAudit /
+// openDownloadsOverlayForAudit — the 'downloads-button' chrome state + SHEET_STATES
+// 'sheet:downloads' a11y drivers (the M09 F5 openTabContextMenuForAudit precedent).
+// M12 F3 Leg 4 (first-run-setup, DD9): +2 for openVaultSetOverlayForAudit /
+// openVaultRecoveryShowOverlayForAudit — the SHEET_STATES 'sheet:vault-set' /
+// 'sheet:vault-recovery-show' a11y drivers (a leg-authorized seam addition, the M09 F5
+// openTabContextMenuForAudit precedent).
+// M12 F3 Leg 5 (access-keys, DD9): +2 for openVaultStepupOverlayForAudit /
+// openVaultAccessKeyShowOverlayForAudit — the SHEET_STATES 'sheet:vault-stepup' /
+// 'sheet:vault-accesskey-show' a11y drivers (same leg-authorized seam-addition precedent).
+// M12 F4 Leg 1 (export-import, DD9): +1 for openVaultImportUnlockOverlayForAudit — the
+// SHEET_STATES 'sheet:vault-import-unlock' a11y driver (same leg-authorized seam-addition
+// precedent).
+// M12 F4 Leg 2 (key-rotation, DD9): +2 for openVaultChangeMasterOverlayForAudit /
+// openVaultRecoverOverlayForAudit — the SHEET_STATES 'sheet:vault-change-master' /
+// 'sheet:vault-recover' a11y drivers (same leg-authorized seam-addition precedent).
+// M12 F4 Leg 3 (admin-key-provision, DD9): +1 for openVaultAdminKeyShowOverlayForAudit — the
+// SHEET_STATES 'sheet:vault-adminkey-show' a11y driver (same leg-authorized seam-addition precedent).
+const SEAM_COUNT = 29;
+// Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
+// renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
+// PR #112; renderer.js extraction remains banked architecture debt.
+const RENDERER_LINE_BUDGET = 1700;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

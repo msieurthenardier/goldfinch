@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Secrets — Goldfinch</title>
+    <link rel="stylesheet" href="vault.css" />
+    <!-- Fully-module page (settings/jars precedent): vault.js is a real ES module
+         (type="module") that imports its pure state-model + nav controller via flat
+         serving-path specifiers resolved by internal-page-map.js. No inline
+         script/style — the strict internal CSP (default-src 'self') forbids both. -->
+    <script src="vault.js" type="module"></script>
+  </head>
+  <body>
+    <!-- Master-detail layout (M12 F5 HAT hat-page-sidebar): mirrors jars.html's
+         nav+main. vault.js rebuilds #vault-nav (Settings + one entry per vault) and
+         the #vault-root sections from vault state + jarsList on every refresh. The
+         nav is the jars-page rail (aria-current active state, scroll-spy). -->
+    <nav aria-label="Secrets">
+      <ul id="vault-nav" role="list"></ul>
+    </nav>
+    <main>
+      <div class="vault-header">
+        <h1>Secrets</h1>
+      </div>
+
+      <!-- The controller renders the section list into #vault-root from vaultState().
+           aria-live announces the state transition politely; the sections themselves
+           carry their own headings/landmarks. -->
+      <div id="vault-root" aria-live="polite"></div>
+
+      <noscript>
+        <p>The secrets manager requires JavaScript.</p>
+      </noscript>
+    </main>
+  </body>
+</html>

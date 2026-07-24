@@ -50,8 +50,9 @@
  * Transplants the menu-overlay sheet's new-container dialog
  * (`menu-overlay.js:296-431`, the same-repo template): `role="dialog"
  * aria-modal="true"`, a fixed small-array Tab cycle, Escape + backdrop
- * dismiss, explicit focus-return — simpler here, a 2-element
- * `[confirm, cancel]` cycle instead of 3. In-flight suppress (Confirm
+ * dismiss, explicit focus-return — a 2-element `[confirm, cancel]` cycle,
+ * widened to a 3-element `[export, confirm, cancel]` for a vault-bearing jar
+ * delete (M12 F4 Leg 6 offer-export-first). In-flight suppress (Confirm
  * clicked, `run` pending) is a dialog-local `keydown`+`stopPropagation`
  * shadow (design review, FD pick — mirrors the name-input Escape precedent
  * at `jars.js:831-838`; smaller than threading an `inFlight` flag through
@@ -60,14 +61,14 @@
  */
 
 /**
- * @typedef {{ copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean }} DataAction
+ * @typedef {{ copy: string, run: (id: string) => Promise<any>, okNote: string, failNote: string, silentSuccess?: boolean, vaultPresentCopy?: string, exportVault?: (id: string) => Promise<{ ok?: boolean, path?: string, locked?: boolean, canceled?: boolean }> }} DataAction
  */
 
 /**
  * @param {{
  *   dataActions: { [action: string]: DataAction },
  *   titles: { [action: string]: string },
- *   getUi: () => { mode: (string|null), rowId: (string|null), action: (string|null) },
+ *   getUi: () => { mode: (string|null), rowId: (string|null), action: (string|null), vaultPresent?: boolean },
  *   closeTransient: () => void,
  *   getSectionRefs: (rowId: string) => any,
  *   setSectionStatus: (refs: any, text: string, ok: boolean) => void,
@@ -109,6 +110,11 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
   let confirmBtnEl = null;
   /** @type {HTMLButtonElement|null} */
   let cancelBtnEl = null;
+  // M12 F4 Leg 6: the "Export vault first" button, present ONLY for a vault-bearing
+  // delete confirm (else null). When present, the Tab cycle is 3-element so it stays
+  // keyboard-reachable; a no-vault confirm keeps the 2-element cycle byte-unchanged.
+  /** @type {HTMLButtonElement|null} */
+  let exportBtnEl = null;
   // In-flight suppress flag — see module doc comment.
   let inFlight = false;
 
@@ -150,20 +156,31 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
    * `entry.silentSuccess` (delete only, today): on success, skip BOTH
    * `setSectionStatus` and `closeTransient()` — the historic no-op success
    * path (jars.js's `DATA_ACTIONS` comment).
+   *
+   * M12 F4 Leg 6 (offer-export-first, owned by this leg): when the action carries a
+   * `vaultPresentCopy` + `exportVault` AND `ui.vaultPresent` is true (a vault-bearing
+   * jar delete), the copy swaps to the permanence variant and an "Export vault first"
+   * button is prepended to the actions — it reuses Leg 1's export WITHOUT closing the
+   * modal, rendering `{ok,path}` / `{locked}` / `{canceled}` in a local result line (a
+   * `{locked}` surfaces "unlock to export", never a faked success). Delete stays the
+   * separate explicit Confirm click. A no-vault jar (or any non-delete action) has NO
+   * export button and the copy stays `entry.copy` — byte-unchanged from before this leg.
    * @param {string} id
    * @param {string} action
    * @param {any} refs
-   * @returns {{ root: HTMLElement, confirmBtn: HTMLButtonElement, cancelBtn: HTMLButtonElement }}
+   * @returns {{ root: HTMLElement, confirmBtn: HTMLButtonElement, cancelBtn: HTMLButtonElement, exportBtn: HTMLButtonElement|null }}
    */
   function buildContent(id, action, refs) {
     const entry = dataActions[action];
+    const vaultPresent = getUi().vaultPresent === true;
+    const showExport = vaultPresent && !!entry.vaultPresentCopy && typeof entry.exportVault === 'function';
     const wrap = document.createElement('div');
     wrap.className = 'jar-confirm';
 
     const text = document.createElement('p');
     text.className = 'jar-confirm-text';
     text.id = 'jars-confirm-desc';
-    text.textContent = entry.copy;
+    text.textContent = showExport ? /** @type {string} */ (entry.vaultPresentCopy) : entry.copy;
     wrap.appendChild(text);
 
     const errorLine = document.createElement('p');
@@ -173,6 +190,47 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
 
     const actionsEl = document.createElement('div');
     actionsEl.className = 'jar-form-actions';
+
+    // "Export vault first" — reuse Leg 1's export; keep the modal open and render the
+    // result in a dedicated aria-live line. Not chained to Confirm (a separate step).
+    /** @type {HTMLButtonElement|null} */
+    let exportBtn = null;
+    if (showExport) {
+      exportBtn = document.createElement('button');
+      exportBtn.type = 'button';
+      exportBtn.className = 'jar-btn';
+      exportBtn.textContent = 'Export vault first';
+
+      const exportResult = document.createElement('p');
+      exportResult.className = 'jar-confirm-text';
+      exportResult.setAttribute('aria-live', 'polite');
+
+      const runExport = entry.exportVault;
+      exportBtn.addEventListener('click', () => {
+        if (!exportBtn) return;
+        exportBtn.disabled = true;
+        exportResult.textContent = 'Exporting…';
+        Promise.resolve(runExport(id))
+          .then((res) => {
+            if (exportBtn) exportBtn.disabled = false;
+            if (res && res.ok) {
+              exportResult.textContent = res.path ? `Exported to ${res.path}` : 'Vault exported.';
+            } else if (res && res.locked) {
+              exportResult.textContent = 'Unlock the vault to export it first.';
+            } else if (res && res.canceled) {
+              exportResult.textContent = 'Export canceled.';
+            } else {
+              exportResult.textContent = "Couldn't export the vault.";
+            }
+          })
+          .catch(() => {
+            if (exportBtn) exportBtn.disabled = false;
+            exportResult.textContent = "Couldn't export the vault.";
+          });
+      });
+      wrap.appendChild(exportResult);
+      actionsEl.appendChild(exportBtn);
+    }
 
     const confirmBtn = document.createElement('button');
     confirmBtn.type = 'button';
@@ -228,7 +286,7 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
     actionsEl.appendChild(confirmBtn);
     actionsEl.appendChild(cancelBtn);
     wrap.appendChild(actionsEl);
-    return { root: wrap, confirmBtn, cancelBtn };
+    return { root: wrap, confirmBtn, cancelBtn, exportBtn };
   }
 
   /**
@@ -248,6 +306,7 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
       bodyEl.textContent = '';
       confirmBtnEl = null;
       cancelBtnEl = null;
+      exportBtnEl = null;
       inFlight = false;
       if (wasOpen) restoreFocus();
       return;
@@ -269,17 +328,20 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
     bodyEl.appendChild(built.root);
     confirmBtnEl = built.confirmBtn;
     cancelBtnEl = built.cancelBtn;
+    exportBtnEl = built.exportBtn;
     backdrop.hidden = false;
     // Default focus Cancel — destructive-safe (design review).
     built.cancelBtn.focus();
   }
 
-  // Focus trap: Tab/Shift+Tab cycle Confirm↔Cancel (menu-overlay.js:296-431
-  // precedent, a 2-element cycle here). Escape cancels UNLESS a confirm run
-  // is in flight — suppressed via the dialog-local stopPropagation shadow
-  // (module doc comment), which also keeps jars.js's own global Escape
-  // handler untouched (this listener runs on the bubble path before the
-  // event ever reaches `window`).
+  // Focus trap: Tab/Shift+Tab cycle the dialog's buttons (menu-overlay.js:296-431
+  // precedent). A no-vault confirm is the fixed 2-element cycle [confirm, cancel];
+  // a vault-bearing delete widens to the 3-element [export, confirm, cancel] so the
+  // Export button stays keyboard-reachable (M12 F4 Leg 6). Escape cancels UNLESS a
+  // confirm run is in flight — suppressed via the dialog-local stopPropagation shadow
+  // (module doc comment), which also keeps jars.js's own global Escape handler
+  // untouched (this listener runs on the bubble path before the event ever reaches
+  // `window`).
   backdrop.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.stopPropagation();
@@ -289,7 +351,9 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
     }
     if (e.key === 'Tab' && confirmBtnEl && cancelBtnEl) {
       e.preventDefault();
-      const cycle = [confirmBtnEl, cancelBtnEl];
+      const cycle = exportBtnEl
+        ? [exportBtnEl, confirmBtnEl, cancelBtnEl]
+        : [confirmBtnEl, cancelBtnEl];
       const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
       const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
       cycle[n].focus();

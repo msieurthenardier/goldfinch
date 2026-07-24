@@ -21,6 +21,7 @@ const IDS = {
   playerDur: 'player-dur', playerPlay: 'player-play', playerPrev: 'player-prev',
   playerNext: 'player-next', kebab: 'kebab', addressChip: 'address-chip',
   automationIndicator: 'automation-indicator', automationIndicatorBadge: 'automation-indicator-badge',
+  vaultIndicator: 'vault-indicator',
   zoomControl: 'zoom-control', zoomOut: 'zoom-out', zoomIn: 'zoom-in',
   zoomReset: 'zoom-reset', zoomPercent: 'zoom-percent'
 };
