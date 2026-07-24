@@ -244,10 +244,12 @@ function createVaultHuman(deps) {
    * global one on a tie (reachableLoginItems iterates global FIRST, so a naive .find would
    * target global). REQUIRES the vault unlocked (reachableLoginItems reads it).
    * @param {CaptureRecord} rec
-   * @returns {{ origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] }}
+   * @returns {{ origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } | null}
+   *   the save/update sheet model, or null when the login is UNCHANGED (no offer).
    */
   function disposeCapture(rec) {
-    const reachable = deps.getVaultStore().reachableLoginItems(rec.jarId, rec.origin);
+    const store = deps.getVaultStore();
+    const reachable = store.reachableLoginItems(rec.jarId, rec.origin);
     const jarMatch = reachable.find(
       (/** @type {any} */ r) => r.vaultId === rec.jarId && normUsername(r.username) === rec.username
     );
@@ -256,6 +258,16 @@ function createVaultHuman(deps) {
     );
     const match = jarMatch || globalMatch;
     if (match) {
+      // NO-OP GUARD: reachableLoginItems matches on origin + username only (it is
+      // metadata-only — no password), so an UNCHANGED login (same username AND same
+      // password already stored for this origin) would otherwise offer a pointless
+      // "update". Read the full stored item (listItems includes the password; the vault
+      // is unlocked here) and compare the submitted password — if identical, there is
+      // nothing to update, so drop the offer entirely.
+      const existing = store.listItems(match.vaultId).find((/** @type {any} */ i) => i.id === match.id);
+      if (existing && existing.password === rec.password.toString('utf8')) {
+        return null; // unchanged credential → no offer
+      }
       rec.mode = 'update';
       rec.vaultId = match.vaultId;
       rec.itemId = match.id;
@@ -318,8 +330,11 @@ function createVaultHuman(deps) {
       return { captureId, model: { origin, username: normUser, mode: /** @type {'locked'} */ ('locked') } };
     }
 
-    // UNLOCKED: compute the disposition now and return the save/update model.
-    return { captureId, model: disposeCapture(rec) };
+    // UNLOCKED: compute the disposition now. An UNCHANGED login (disposeCapture → null)
+    // has nothing to save — drop the held record and make no offer.
+    const model = disposeCapture(rec);
+    if (!model) { dropCapture(captureId); return null; }
+    return { captureId, model };
   }
 
   /**
@@ -338,7 +353,10 @@ function createVaultHuman(deps) {
     if (!deps.getVaultStore().isUnlocked()) return null; // unlock didn't take / raced a re-lock
     const jar = tabJarFor(rec.wcId);
     if (!jar || jar.id !== rec.jarId) { dropCapture(captureId); return null; }
-    return { captureId, model: disposeCapture(rec) };
+    // Unchanged login after unlock (disposeCapture → null) → drop, no offer.
+    const model = disposeCapture(rec);
+    if (!model) { dropCapture(captureId); return null; }
+    return { captureId, model };
   }
 
   /**

@@ -156,6 +156,45 @@ test('capture: empty-string username with no null-username item → SAVE (userna
   } finally { rm(dir); }
 });
 
+test('capture: UNCHANGED login (same username AND same password) → NO offer (no pointless update)', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', title: 'Work', username: 'me@a', password: 'unchanged', origin: A });
+    const bytes = bytesOf('unchanged');
+    const offer = human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytes });
+    assert.equal(offer, null, 're-logging in with the exact saved credential offers nothing');
+    // The held record was created then dropped; the incoming array is still wiped.
+    assert.ok(bytes.every((b) => b === 0), 'incoming password array zeroized even when the offer is dropped');
+  } finally { rm(dir); }
+});
+
+test('capture: same username, CHANGED password → UPDATE (the offer is NOT suppressed)', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'me@a', password: 'old-pw', origin: A });
+    const offer = human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytesOf('new-pw') });
+    assert.ok(offer, 'a changed password still offers an update');
+    assert.equal(offer.model.mode, 'update');
+    assert.equal(offer.model.defaultVaultId, 'work');
+  } finally { rm(dir); }
+});
+
+test('captureFinalize: an unchanged login discovered AFTER unlock → null (no offer)', async () => {
+  const dir = tmpDir();
+  try {
+    const { store, human } = await makeHarness(dir);
+    store.saveItem('work', { type: 'login', username: 'me@a', password: 'unchanged', origin: A });
+    store.lockNow();
+    const locked = human.capture({ wcId: 10, username: 'me@a', passwordBytes: bytesOf('unchanged') });
+    assert.equal(locked.model.mode, 'locked', 'held for unlock while the vault is locked');
+    await store.unlock(MASTER);
+    // Disposition (needs unlock) now finds the credential unchanged → no capture sheet.
+    assert.equal(human.captureFinalize(locked.captureId), null);
+  } finally { rm(dir); }
+});
+
 /* ------------------------------------------------------------------- gate (integration) */
 
 test('capture GATE: not set up → null (no offer), incoming array still zeroized', async () => {

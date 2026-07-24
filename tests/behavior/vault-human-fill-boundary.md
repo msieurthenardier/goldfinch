@@ -69,8 +69,8 @@ require typing into or reading the sheet DOM are intentionally out of scope.
   contents and selection, and the Buffer secret-channel zeroization — all verified by
   main-process integration tests (simulated sheet IPC) and the Flight 4 HAT. The sheet is
   MCP-unreachable by design (DD8); this test does not read or type into it.
-- **Capture** save/update prompt behavior — covered by its own steps in integration + the F4
-  HAT; a capture-specific behavior slice may be added when Leg 3 lands.
+- **Capture** save/update prompt behavior — covered by its own behavior spec
+  (`vault-capture-save-update`) plus integration tests + the F4 HAT.
 - **Automation fill path** — covered by F1's `vault-mcp-surface` behavior test.
 - **First-run setup** (master password chosen, recovery key shown once) — Flight 3.
 
