@@ -1206,7 +1206,9 @@ function openTabContextMenuForAudit() {
 
 /* ------------------------------------------------------------------- boot */
 window.goldfinch.onOpenTab(({ url, openerPartition }) => {
-  createTab(url, jarsClient.inheritContainerFromPartition(openerPartition));
+  // Every open-tab arrives from a page's window.open (setWindowOpenHandler
+  // deny-and-forward) — scriptOpened lets a later window.close() be honored (#119).
+  createTab(url, jarsClient.inheritContainerFromPartition(openerPartition), { scriptOpened: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -1254,6 +1256,18 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
     // Close trigger: navigation (in-page variant) of the active tab (flight DD5).
     closeSuggestions('navigation');
   }
+});
+
+// Guest self-close (#119): window.close() → preload shim → guest-window-close →
+// tab-self-close. Chromium's close gate, replicated: honor a script-opened tab
+// (onOpenTab above) or history ≤ 1; else silent no-op (same observable outcome
+// as Chromium refusing). closeTab runs the full normal path — strip removal,
+// closed-tab capture, never-zero-tabs fallback (last-tab self-close leaves a
+// fresh tab, never a closed window).
+window.goldfinch.onTabSelfClose(({ wcId, historyLength }) => {
+  const tab = findTabByWcId(wcId);
+  if (!tab) return;
+  if (tab.scriptOpened || historyLength <= 1) closeTab(tab.id);
 });
 
 window.goldfinch.onTabTitle(({ wcId, title }) => {

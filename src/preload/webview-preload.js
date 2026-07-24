@@ -478,3 +478,24 @@ function farbleImageData(d) {
     /* ignore */
   }
 })();
+
+// ---------------------------------------------------------------------------
+// window.close() interception (issue #119). Electron routes a guest page's
+// window.close() to the OWNING BaseWindow's close() — one page could close the
+// whole browser window (and, as the last window, quit the app). WebContents has
+// no preventable close event, so the interception lives here: this preload runs
+// in the page main world BEFORE any page script, and replacing the binding
+// keeps the request from ever reaching Electron's native path. Main owner-routes
+// the request to the chrome, which closes only the calling TAB (Chrome parity)
+// after applying Chromium's own close-permission gate — script-opened tabs
+// (marked chrome-side at createTab) or history.length ≤ 1. The length is
+// self-reported and only ever affects the sender's own tab, so a lying page
+// gains nothing beyond closing itself. Known residual: a cross-origin subframe
+// keeps its own realm's native binding (preload is top-frame-only).
+window.close = () => {
+  try {
+    ipcRenderer.send('guest-window-close', { historyLength: history.length });
+  } catch {
+    /* ipc unavailable — swallow; never fall back to the native close */
+  }
+};

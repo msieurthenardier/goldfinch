@@ -354,6 +354,7 @@ interface GoldfinchBridge {
   onTabDomReady(cb: (d: { wcId: number }) => void): void;
   onTabMediaList(cb: (d: { wcId: number; mediaList: any[] }) => void): void;
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
+  onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;
   onVaultGesture(cb: (d: { wcId: number }) => void): void;
   // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
   // forwards the vault page's requestSetup / requestUnlock as bare triggers; the
