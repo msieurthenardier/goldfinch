@@ -6,7 +6,7 @@ Goldfinch — an Electron desktop browser with a media panel (scan/play/download
 
 - `npm start` — run the app
 - `npm run dev:automation` — canonical dev launch (`scripts/dev-launch.mjs`, WSL/headless friendly). The launcher passes `--ozone-platform=wayland` when a Wayland socket is reachable (X11 under WSLg swallows the first cross-window click-to-activate; decision logic in `src/main/ozone-platform.js` — it lives in the launcher because Electron resolves ozone before `main.js` runs). A caller-provided `--ozone-platform*` flag wins; non-WSLg X desktops are untouched. `--automation-dev` is the dev-only force-bind for the in-process MCP automation surface (`!app.isPackaged`-gated). See `docs/mcp-automation.md`.
-- **MCP automation in admin mode** — launch `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation`. Both env gates matter: `--automation-dev` (carried by `dev:automation`) binds the surface; `GOLDFINCH_AUTOMATION_DEV_MINT=1` auto-mints the default jar's key to stdout; `GOLDFINCH_AUTOMATION_ADMIN=1` **additionally** mints the admin key. Startup prints one parseable line — `AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}` — grab `adminKey` (shown once; only its hash is stored). Present it on the wire as `Authorization: Bearer <adminKey>` (bundled scripts read `GOLDFINCH_MCP_ADMIN_KEY`; a jar key rides `GOLDFINCH_MCP_KEY`). The admin tier unlocks `getChromeTarget` + the chrome trust domain, `enumerateWindows`'s `sheetWcId`/`findWcId` and other non-tab addressable wcIds, all-vault access (the X25519 vault admin key opens every vault including jars created after minting), and any jar's `getHistory`. **Still refused even for admin:** the internal session (`goldfinch://*`) for both eval tools + both DevTools tools, and `--target` a11y of internal pages (the accepted settings-class gap). Full recipe: `docs/mcp-automation.md` → *Dogfooding / dev key acquisition*.
+- **MCP automation in admin mode** — launch `GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automation`; startup prints one parseable `AUTOMATION_DEV_MINT {"key":"<jarKey>","adminKey":"<adminKey>"}` line (admin key shown once; ride it as `Authorization: Bearer` / `GOLDFINCH_MCP_ADMIN_KEY`). Full recipe, admin-tier scope, and the still-refused-even-for-admin list: `docs/mcp-automation.md` → *Dogfooding / dev key acquisition*.
 - `npm run dist` — build installers (electron-builder); `npm run pack` for unpacked
 - `npm test` — `node --test` over `test/unit/**` (pure security/privacy helpers). For real-environment / UI behavior, drive the running app over the MCP automation surface (`npm run dev:automation`); behavior specs live in `tests/behavior/`.
 - `npm run lint` — ESLint, flat config (`eslint.config.mjs`)
@@ -267,15 +267,12 @@ Encrypted per-jar + global credential vaults (Mission 12). A self-contained subs
 Both workflows are supply-chain hardened; preserve these invariants:
 
 - **All `uses:` pinned to full commit SHAs** with a trailing `# vX.Y.Z` comment — never mutable tags. When bumping an action, **including accepting a Dependabot PR**, resolve the new version's commit SHA and pin to that (Dependabot proposes mutable tags; applying them verbatim regresses the hardening).
-- **Least privilege**: top-level `permissions: contents: read`; only the `release`/`update-readme` jobs escalate to `contents: write` per-job.
+- **Least privilege**: top-level `permissions: contents: read`; only the `create-release`/`build` jobs escalate to `contents: write` per-job.
 - `ci.yml` (PRs): `npm ci → test → typecheck → lint → npm audit --audit-level=high → package`. A high in a dev-only dep is fixed by bumping the dep, never by lowering the gate.
 
 ### Cutting a release (`build.yml`, on `v*` tag push)
 
-1. Bump `package.json` (`npm version patch --no-git-tag-version`) in a `release: vX.Y.Z` commit on `main`.
-2. `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
-
-Strict semver is enforced (a non-semver `v*` tag refuses to publish); the git tag is the source of truth for the version. A prerelease tag publishes as a GitHub prerelease (doesn't move `latest`, doesn't touch `main`); only a stable tag runs `update-readme` (regenerates the README download links between the `DOWNLOADS` markers, commits as `github-actions[bot]`). Rollback: `gh release delete vX.Y.Z --yes --cleanup-tag`, fix, re-tag. App icon: `build/icon.png`.
+Tag-driven — full flow in `docs/RELEASING.md`. Short form: from green `main`, `npm version patch -m "release-prep: bump to %s"` (the `version` npm-lifecycle hook regenerates the README download links into the same commit — there is no post-release README job) then `git push --follow-tags`. Strict semver is enforced; a prerelease tag publishes as a GitHub prerelease. Rollback: `gh release delete vX.Y.Z --yes --cleanup-tag`, fix, re-tag. App icon: `build/icon.png`.
 
 ## Flight Operations
 
