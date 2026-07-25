@@ -33,6 +33,17 @@ function registerBrowserIpc({
   random = Math.random,
   logger = console,
 }) {
+  // Leg 2 (F3 DD2) sender-identity gate. Resolves the SENDER's own window record
+  // via identity-compare against every record's chromeView — a non-chrome sender
+  // (a guest, a forged/absent sender) resolves null. Added AHEAD of each
+  // channel's existing target/internal guard below, never replacing it — the
+  // self-scoped channels (vault-*, guest-*, shields-farble, guest-media-list,
+  // guest-privacy-fp), which resolve identity from event.sender.id and are
+  // already caller-bound, are deliberately left untouched.
+  function requireChrome(event) {
+    return registry.getWindowForChrome(event.sender);
+  }
+
   const farbleSeeds = new WeakMap();
   function seedForSession(sess) {
     let seed = farbleSeeds.get(sess);
@@ -74,7 +85,9 @@ function registerBrowserIpc({
     if (!registry.getWindowForChrome(event.sender)) return null;
     return createWindow().win.id;
   });
-  ipcMain.handle('new-container-create', async (_event, payload) => {
+  ipcMain.handle('new-container-create', async (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate — a non-chrome sender refuses.
+    if (!requireChrome(event)) return null;
     const name = payload && payload.name;
     if (!name || typeof name !== 'string') return null;
     const container = jars.add(name);
@@ -292,7 +305,9 @@ function registerBrowserIpc({
     const historyLength = typeof raw === 'number' && Number.isFinite(raw) ? raw : 1;
     chromeForTab(wcId)?.send('tab-self-close', { wcId, historyLength });
   });
-  ipcMain.on('rescan-media', (_event, payload) => {
+  ipcMain.on('rescan-media', (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
+    if (!requireChrome(event)) return;
     const { wcId } = /** @type {any} */ (payload || {});
     if (wcId == null) return;
     const wc = getTabContents(wcId);
@@ -306,25 +321,32 @@ function registerBrowserIpc({
     return wc && !wc.isDestroyed() && !isInternalContents(wc) ? wc : null;
   }
 
-  ipcMain.on('zoom-apply', (_event, payload) => {
+  // Leg 2 (F3 DD2, AC2): every handler below gates on requireChrome AHEAD of its
+  // existing externalContents/target guard — the target guard is not replaced.
+  ipcMain.on('zoom-apply', (event, payload) => {
+    if (!requireChrome(event)) return;
     const wc = externalContents(payload);
     if (wc) applyZoom(wc, payload.action);
   });
-  ipcMain.handle('get-zoom', (_event, payload) => externalContents(payload)?.getZoomFactor() ?? null);
-  ipcMain.on('print', (_event, payload) => {
+  ipcMain.handle('get-zoom', (event, payload) => requireChrome(event) ? (externalContents(payload)?.getZoomFactor() ?? null) : null);
+  ipcMain.on('print', (event, payload) => {
+    if (!requireChrome(event)) return;
     const wc = externalContents(payload);
     if (!wc) return;
     wc.print({}, (ok, reason) => { if (!ok) logger.warn('print failed:', reason); });
   });
-  ipcMain.handle('toggle-devtools', (_event, payload) => {
+  ipcMain.handle('toggle-devtools', (event, payload) => {
+    if (!requireChrome(event)) return false;
     const wc = externalContents(payload);
     return wc ? toggleDevTools(wc) : false;
   });
-  ipcMain.handle('is-devtools-open', (_event, payload) => {
+  ipcMain.handle('is-devtools-open', (event, payload) => {
+    if (!requireChrome(event)) return false;
     const wc = externalContents(payload);
     return wc ? wc.isDevToolsOpened() : false;
   });
-  ipcMain.handle('page-context-correct', (_event, payload) => {
+  ipcMain.handle('page-context-correct', (event, payload) => {
+    if (!requireChrome(event)) return;
     const wc = externalContents(payload);
     if (!wc) return;
     const word = payload && payload.word;
@@ -333,7 +355,8 @@ function registerBrowserIpc({
       wc.replaceMisspelling(word);
     }
   });
-  ipcMain.handle('page-context-action', (_event, payload) => {
+  ipcMain.handle('page-context-action', (event, payload) => {
+    if (!requireChrome(event)) return;
     const wc = externalContents(payload);
     if (!wc) return;
     const action = payload && payload.action;
@@ -354,7 +377,9 @@ function registerBrowserIpc({
     return { ok: true };
   });
 
-  ipcMain.handle('identity-new', async (_event, payload) => {
+  ipcMain.handle('identity-new', async (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate.
+    if (!requireChrome(event)) return { ok: false };
     const partition = payload && payload.partition;
     if (!partition) return { ok: false };
     const sess = session.fromPartition(partition);
@@ -369,7 +394,9 @@ function registerBrowserIpc({
     }
   });
 
-  ipcMain.handle('privacy-cookies', async (_event, payload) => {
+  ipcMain.handle('privacy-cookies', async (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
+    if (!requireChrome(event)) return { ...EMPTY_COOKIES, list: [] };
     const { webContentsId, url } = /** @type {any} */ (payload || {});
     const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
     if (!wc || wc.session.__goldfinchInternal) return { ...EMPTY_COOKIES, list: [] };
@@ -392,7 +419,9 @@ function registerBrowserIpc({
     return { firstParty, first, third, total: all.length, list: list.slice(0, 300) };
   });
 
-  ipcMain.handle('privacy-clear-cookies', async (_event, payload) => {
+  ipcMain.handle('privacy-clear-cookies', async (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
+    if (!requireChrome(event)) return { removed: 0 };
     const { webContentsId, scope, url } = /** @type {any} */ (payload || {});
     const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
     if (!wc || wc.session.__goldfinchInternal) return { removed: 0 };
@@ -413,7 +442,9 @@ function registerBrowserIpc({
     return { removed };
   });
 
-  ipcMain.handle('privacy-clear-storage', async (_event, payload) => {
+  ipcMain.handle('privacy-clear-storage', async (event, payload) => {
+    // Leg 2 (F3 DD2, AC2): chrome-trust gate ahead of the existing target lookup.
+    if (!requireChrome(event)) return { ok: false, error: 'no-tab' };
     const { url, webContentsId } = /** @type {any} */ (payload || {});
     const wc = webContentsId != null ? webContents.fromId(webContentsId) : null;
     if (!wc || wc.session.__goldfinchInternal) return { ok: false, error: 'no-tab' };

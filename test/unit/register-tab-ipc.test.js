@@ -144,6 +144,7 @@ function setup() {
     getHistoryRecorder: () => ({ forgetTab: (id) => history.push(id) }),
     faviconFetcher: { forget: (id) => faviconForgotten.push(id) },
     isSafeTabUrl: (url) => url.startsWith('https://'),
+    isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     reopenStripIndex: (entry, winId) => entry.windowId === winId ? entry.stripIndex : -1,
     webContents,
     isInternalContents: (wc) => wc.internal === true,
@@ -313,4 +314,74 @@ test('remaining lifecycle channels execute through captured handlers with their 
   const reopened = h.ipcMain.invoke('tab-reopen', source.chromeView.webContents);
   assert.equal(reopened.url, 'https://tab-102.test/');
   assert.equal(reopened.stripIndex, 1);
+});
+
+// Leg 2 (F3 DD2, AC1/AC5): sender-identity gate on the wcId-scoped channels —
+// a non-chrome sender and a DIFFERENT window's real chrome are both refused,
+// while the legitimate owning chrome (already covered by every test above)
+// keeps working.
+test('AC1: owning-chrome checks refuse non-chrome and cross-window senders on wcId-scoped channels', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  const other = h.makeRecord(2);
+  const tab = h.addTab(source, 101);
+  tab.setVisible(true);
+  source.tabViews.get(101).active = true;
+
+  // A non-chrome sender (bare object — resolves no window at all) is refused on
+  // a wcId-scoped channel: the tab survives untouched.
+  h.ipcMain.send('tab-close', {}, 101, -1);
+  assert.equal(source.tabViews.has(101), true, 'a non-chrome sender cannot close a tab');
+
+  // Cross-window: window 2's REAL chrome sender resolves a record via
+  // getWindowForChrome, but that record does not equal getWindowForGuest(101) —
+  // refused all the same.
+  h.ipcMain.send('tab-hide', other.chromeView.webContents, 101);
+  assert.equal(tab.visible, true, 'a different window\'s chrome cannot hide this tab');
+  assert.equal(source.tabViews.get(101).active, true);
+
+  h.ipcMain.send('tab-set-active', other.chromeView.webContents, { wcId: 101, bounds: { x: 0, y: 0, width: 10, height: 10 } });
+  assert.equal(other.activeTabWcId, null, 'cross-window tab-set-active is refused, not just a no-op on the wrong record');
+
+  // A non-chrome sender is also refused on the chrome-required (not owning-
+  // scoped) tab-history-snapshot handle.
+  assert.equal(h.ipcMain.invoke('tab-history-snapshot', {}, { webContentsId: 101 }), null);
+
+  // The legitimate owning chrome still works (AC6 — no regression).
+  h.ipcMain.send('tab-hide', source.chromeView.webContents, 101);
+  assert.equal(tab.visible, false);
+});
+
+// Leg 2 (F3 DD2, AC3/AC5): tab-navigate's loadURL gate is BRANCHED on the target
+// tab's trust — never an unconditional isSafeTabUrl. This is the HIGH-regression
+// guard: openSiteSettingsTab navigates an EXISTING INTERNAL tab to
+// goldfinch://settings/#privacy, which isSafeTabUrl alone would reject outright.
+test('AC3: tab-navigate loadURL is gated on the target tab\'s trust — unsafe web URL refused, internal goldfinch:// allowed', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 101, false);
+  h.addTab(source, 102, true);
+
+  // WEB tab: an unsafe URL is refused — no loadURL call reaches the guest.
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: ['javascript:alert(1)'] });
+  assert.equal(h.log.some((x) => x[0] === 'load' && x[1] === 101), false);
+
+  // WEB tab: a safe https URL still loads (no regression on the common case).
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: ['https://example.test/'] });
+  assert.ok(h.log.some((x) => x[0] === 'load' && x[1] === 101 && x[2] === 'https://example.test/'));
+
+  // INTERNAL tab: goldfinch://settings/#privacy is ALLOWED — the regression this
+  // leg exists to avoid (openSiteSettingsTab must keep working).
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 102, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] });
+  assert.ok(h.log.some((x) => x[0] === 'load' && x[1] === 102 && x[2] === 'goldfinch://settings/#privacy'));
+
+  // INTERNAL tab: a web URL is refused — isInternalPageUrl (not isSafeTabUrl) governs
+  // the internal branch, and it rejects a non-goldfinch: URL.
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 102, verb: 'loadURL', args: ['https://evil.test/'] });
+  assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 102).length, 1, 'the internal tab only ever loaded the one allowed URL');
+
+  // A non-chrome sender is refused outright by the owning-chrome check, before
+  // the URL gate is even reached.
+  h.ipcMain.send('tab-navigate', {}, { wcId: 101, verb: 'loadURL', args: ['https://example.test/'] });
+  assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'an unowned sender adds no further loads');
 });

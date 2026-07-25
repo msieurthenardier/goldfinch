@@ -201,6 +201,37 @@ test('webRequest pipeline records privacy, blocks trackers, and denies sensitive
   ]);
 });
 
+test('permission allowlist denies invented/future permissions and grants allowlisted members', () => {
+  const h = setup();
+  const { session, handlers } = fakeSession(h.log);
+  h.runtime.onSessionCreated(session);
+
+  let permissionGranted;
+  handlers.permissionRequest(
+    { id: 10 },
+    'some-future-perm-2030',
+    (value) => { permissionGranted = value; }
+  );
+  assert.equal(permissionGranted, false, 'invented permission denies via request handler');
+  assert.equal(
+    handlers.permissionCheck(null, 'some-future-perm-2030'),
+    false,
+    'invented permission denies via check handler'
+  );
+
+  handlers.permissionRequest({ id: 10 }, 'fullscreen', (value) => { permissionGranted = value; });
+  assert.equal(permissionGranted, true, 'allowlisted permission is granted via request handler');
+  assert.equal(
+    handlers.permissionCheck(null, 'fullscreen'),
+    true,
+    'allowlisted permission is granted via check handler'
+  );
+  assert.deepEqual(h.chromeSends.at(-1), [
+    'privacy-permission',
+    { webContentsId: 10, permission: 'fullscreen', granted: true }
+  ]);
+});
+
 test('Shields pipeline strips tracking URLs and isolates third-party request/response cookies', () => {
   const h = setup({
     shields: {

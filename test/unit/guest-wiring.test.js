@@ -71,8 +71,8 @@ function setup() {
   };
 }
 
-function inputEvent() {
-  return { prevented: false, preventDefault() { this.prevented = true; } };
+function inputEvent(url) {
+  return { url, prevented: false, preventDefault() { this.prevented = true; } };
 }
 
 test('popup inherits the opener partition, targets owning chrome, and always denies native creation', () => {
@@ -84,22 +84,83 @@ test('popup inherits the opener partition, targets owning chrome, and always den
   assert.deepEqual(h.sends, [['open-tab', { url: 'https://popup.test/', openerPartition: 'persist:jar-a' }]]);
 });
 
-test('will-navigate applies the web and internal allowlists without trust inference', () => {
+test('will-navigate applies the web and internal allowlists without trust inference (event.url, not a positional url arg)', () => {
   const h = setup();
   const web = new FakeContents(1, false);
   const internal = new FakeContents(2, true);
   h.wiring.wireGuestContents(web);
   h.wiring.wireGuestContents(internal);
 
-  const webBad = inputEvent();
-  web.emit('will-navigate', webBad, 'goldfinch://settings');
+  // Mission 13 F3 Leg 3 (AC1): the handler reads event.url exclusively — a
+  // positional 2nd emit argument (the deprecated will-navigate shape) is
+  // deliberately NOT set here, so this test would fail loudly if a future edit
+  // regressed to reading a positional arg instead of event.url.
+  const webBad = inputEvent('goldfinch://settings');
+  web.emit('will-navigate', webBad);
   assert.equal(webBad.prevented, true);
-  const internalGood = inputEvent();
-  internal.emit('will-navigate', internalGood, 'goldfinch://settings');
+  const internalGood = inputEvent('goldfinch://settings');
+  internal.emit('will-navigate', internalGood);
   assert.equal(internalGood.prevented, false);
-  const internalBad = inputEvent();
-  internal.emit('will-navigate', internalBad, 'https://example.test/');
+  const internalBad = inputEvent('https://example.test/');
+  internal.emit('will-navigate', internalBad);
   assert.equal(internalBad.prevented, true);
+});
+
+test('will-frame-navigate and will-redirect enforce the same predicate as will-navigate, reading event.url (Mission 13 F3 Leg 3 / AC1)', () => {
+  const h = setup();
+  const web = new FakeContents(20, false);
+  h.wiring.wireGuestContents(web);
+
+  // will-frame-navigate is emitted with the SINGLE details-object shape Electron
+  // actually uses — { url, isMainFrame, preventDefault } — NOT a positional 2nd
+  // arg. A test emitting `(event, url)` here would pass even against the buggy
+  // `(event, url)` handler signature this leg fixes, masking the real bug.
+  const subframeBad = {
+    url: 'javascript:alert(1)',
+    isMainFrame: false,
+    prevented: false,
+    preventDefault() { this.prevented = true; }
+  };
+  web.emit('will-frame-navigate', subframeBad);
+  assert.equal(subframeBad.prevented, true, 'subframe nav to a disallowed scheme must be prevented');
+
+  const subframeGood = {
+    url: 'https://example.test/frame',
+    isMainFrame: false,
+    prevented: false,
+    preventDefault() { this.prevented = true; }
+  };
+  web.emit('will-frame-navigate', subframeGood);
+  assert.equal(subframeGood.prevented, false, 'subframe nav to an allowed https URL must NOT be prevented');
+
+  const redirectBad = inputEvent('file:///etc/passwd');
+  web.emit('will-redirect', redirectBad);
+  assert.equal(redirectBad.prevented, true, 'redirect to a disallowed scheme must be prevented');
+
+  const redirectGood = inputEvent('https://example.test/redirected');
+  web.emit('will-redirect', redirectGood);
+  assert.equal(redirectGood.prevented, false, 'redirect to an allowed https URL must NOT be prevented');
+});
+
+test('a guest latched by wireGuestContents is NOT blocked by a catch-all-style nav guard on an https navigation (Mission 13 F3 Leg 3 / AC3)', () => {
+  const h = setup();
+  const web = new FakeContents(21, false);
+  h.wiring.wireGuestContents(web);
+  assert.equal(web.__goldfinchNavGuarded, true, 'wireGuestContents must set the latch synchronously');
+
+  // Simulate the app-lifecycle catch-all's guard: it early-returns whenever the
+  // latch is present, deferring entirely to the guest's own predicate above.
+  let catchAllPrevented = false;
+  const catchAllGuard = (event) => {
+    if (web.__goldfinchNavGuarded) return;
+    catchAllPrevented = true;
+    event.preventDefault();
+  };
+  const event = inputEvent('https://example.test/next');
+  catchAllGuard(event);
+  web.emit('will-navigate', event);
+  assert.equal(catchAllPrevented, false, 'the latch must short-circuit the catch-all guard for guests');
+  assert.equal(event.prevented, false, 'a legitimate https navigation on a latched guest is never blocked');
 });
 
 test('cross-view shortcut classification runs before generalized forwarding for both guest kinds', () => {

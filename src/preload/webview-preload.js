@@ -322,11 +322,22 @@ ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred, vaultIc
 // Uint8Array (never a lingering JS string on the wire). The ORIGIN is NOT sent: main
 // derives it from the sender URL (a guest-supplied origin is never trusted). v1 covers
 // real <form> submits only; SPA / fetch logins with no submit event are a documented
-// F3 gap. contextIsolation is off, so a page could dispatch a synthetic submit — but
-// the credential captured is the user's OWN just-typed value (within the trust model),
-// and the prompt is chrome-owned, so a spurious offer leaks nothing.
+// F3 gap.
+//
+// Leg 2 (F3 DD4): gated on the GENUINE isTrusted (the same captured `isTrustedGet`
+// getter the fill-icon controller reads, mirroring vault-fill-icon.js's readTrusted) —
+// a synthetic/page-dispatched submit (`form.submit()`/`form.dispatchEvent(new
+// Event('submit'))`) is now ignored outright rather than accepted. This closes the two
+// cases the prior "leaks nothing" tradeoff still left open: a hostile page raising a
+// SPURIOUS vault-capture offer for a credential the user never actually submitted, and
+// a page steering the save/update DISPOSITION (new vs. existing entry) by forging
+// submits against a form it controls. contextIsolation is still off, so a hostile page
+// can still fabricate a *trusted*-looking submit only by getting the real browser to
+// dispatch one — i.e. a real user submit — which is exactly the credential this
+// listener is meant to capture.
 if (IS_TOP_FRAME && vaultEligible) {
   document.addEventListener('submit', (e) => {
+    if (!(isTrustedGet ? isTrustedGet.call(e) : e.isTrusted)) return;
     try {
       const form = /** @type {any} */ (e.target);
       if (!form || typeof form.querySelectorAll !== 'function') return;

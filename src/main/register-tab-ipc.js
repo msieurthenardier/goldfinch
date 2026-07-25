@@ -24,6 +24,7 @@ function registerTabIpc(deps) {
     getHistoryRecorder,
     faviconFetcher,
     isSafeTabUrl,
+    isInternalPageUrl,
     reopenStripIndex,
     webContents,
     isInternalContents,
@@ -48,6 +49,20 @@ function registerTabIpc(deps) {
     } else {
       record.pendingChromeSends.push(buildMessage);
     }
+  }
+
+  // Leg 2 (F3 DD2) sender-identity gate. `requireChrome` resolves the SENDER's
+  // own window record via identity-compare against every record's chromeView —
+  // any non-chrome sender (a guest, a forged/absent sender) resolves null.
+  // `ownsTab` extends that to the wcId-scoped channels: the sender's window must
+  // be the SAME record that owns the tab, so window B's chrome can never act on
+  // window A's tab merely by naming its wcId in the payload.
+  function requireChrome(event) {
+    return registry.getWindowForChrome(event.sender);
+  }
+  function ownsTab(event, wcId) {
+    const rec = requireChrome(event);
+    return rec && rec === registry.getWindowForGuest(wcId) ? rec : null;
   }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +159,9 @@ ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }
 ipcMain.on('tab-close', (event, wcId, stripIndex) => {
   // Class 1 (F6 DD2): resolve the OWNING window's record (guest reverse lookup) —
   // also the guard that replaces the former unguarded mainWindow deref below.
-  const owner = registry.getWindowForGuest(wcId);
+  // Leg 2 (F3 DD2): `ownsTab` additionally requires the SENDER to BE that owning
+  // chrome — a different window's chrome naming this wcId no longer reaches it.
+  const owner = ownsTab(event, wcId);
   const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!owner || !entry) return;
   // Captured BEFORE the null-out below — one line lower and this is always false.
@@ -260,7 +277,11 @@ ipcMain.handle('tab-reopen', (event) => {
 // guard, same discipline as toggle-devtools/page-context-correct) — never
 // activeTab(). Web tabs only: a dead/missing/internal target returns null (the
 // renderer's duplicate dispatch then no-ops rather than duplicating nothing).
-ipcMain.handle('tab-history-snapshot', (_e, { webContentsId }) => {
+ipcMain.handle('tab-history-snapshot', (event, { webContentsId }) => {
+  // Leg 2 (F3 DD2, AC1): requires A chrome sender — not owning-chrome, since this
+  // reads by an arbitrary webContentsId rather than acting on the sender's own
+  // tab. The existing internal-exclusion target guard below stays as-is.
+  if (!requireChrome(event)) return null;
   const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
   if (!wc || wc.isDestroyed()) return null;
   if (isInternalContents(wc)) return null;
@@ -627,7 +648,8 @@ ipcMain.handle('tab-adopt-by-drop', (event, payload) => {
 
 ipcMain.on('tab-hide', (event, wcId) => {
   // Class 1 (F6 DD2): owner-record resolve replaces the singleton activeTabWcId.
-  const owner = registry.getWindowForGuest(wcId);
+  // Leg 2 (F3 DD2): owning-chrome check — the sender must BE the owner.
+  const owner = ownsTab(event, wcId);
   if (!owner) return;
   // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
   // takes the overlay out of the stack too. Restore needs no code here —
@@ -651,10 +673,24 @@ ipcMain.on('tab-hide', (event, wcId) => {
   if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
 });
 
-ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
+ipcMain.on('tab-navigate', (event, { wcId, verb, args }) => {
+  // Leg 2 (F3 DD2, AC1): owning-chrome check ahead of the existing contents lookup.
+  const owner = ownsTab(event, wcId);
+  if (!owner) return;
   const wc = getTabContents(wcId);
   if (!wc || wc.isDestroyed()) return;
   if (verb === 'loadURL' && args && args[0]) {
+    // Leg 2 (F3 DD2, AC3) — HIGH regression guard: the gate is BRANCHED on the
+    // target tab's trust, never unconditional isSafeTabUrl. openSiteSettingsTab
+    // (overlay-menus.js) navigates an EXISTING INTERNAL tab to
+    // goldfinch://settings/#privacy — isSafeTabUrl would reject the goldfinch:
+    // scheme outright and silently break that path. The tabViews entry's
+    // `trusted` flag is the authoritative source (falls back to
+    // isInternalContents(wc) if the entry is momentarily absent).
+    const entry = owner.tabViews.get(wcId);
+    const isInternal = entry ? entry.trusted : isInternalContents(wc);
+    const safe = isInternal ? isInternalPageUrl(args[0]) : isSafeTabUrl(args[0]);
+    if (!safe) return;
     wc.loadURL(args[0]).catch((err) => {
       logger.warn('[tab-navigate] loadURL rejected:', err && (err.code || err.message || err));
     });
@@ -672,7 +708,8 @@ ipcMain.on('tab-navigate', (_event, { wcId, verb, args }) => {
 ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
   // Class 1 (F6 DD2): activation is scoped to the tab's OWNING window's record —
   // activating a tab in window 2 must not touch window 1's active state.
-  const owner = registry.getWindowForGuest(wcId);
+  // Leg 2 (F3 DD2): owning-chrome check — the sender must BE that owning window.
+  const owner = ownsTab(event, wcId);
   if (!owner) return;
   // L2 (T3): capture whether the OUTGOING active guest holds OS focus BEFORE the
   // visibility swap below. isFocused() on the outgoing guest is exactly the "focus was in
@@ -773,7 +810,8 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
 
 ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
   // Class 1 (F6 DD2): owner-record resolve for the active-tab compare below.
-  const owner = registry.getWindowForGuest(wcId);
+  // Leg 2 (F3 DD2): owning-chrome check — the sender must BE the owning window.
+  const owner = ownsTab(event, wcId);
   const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!entry || entry.view.webContents.isDestroyed()) return;
   const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
@@ -794,7 +832,9 @@ ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
   }
 });
 
-ipcMain.on('tab-find', (_event, { wcId, text, options, stop }) => {
+ipcMain.on('tab-find', (event, { wcId, text, options, stop }) => {
+  // Leg 2 (F3 DD2, AC1): owning-chrome check ahead of the existing contents lookup.
+  if (!ownsTab(event, wcId)) return;
   const wc = getTabContents(wcId);
   if (!wc || wc.isDestroyed()) return;
   if (stop) {
