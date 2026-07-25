@@ -4,7 +4,7 @@
 
 ## Summary
 
-Planning complete; execution not started.
+**Landed 2026-07-25.** Both legs completed; commit `cecb7dc`; draft PR #135. Cross-jar fetch isolation shipped: favicons fetched main-side in the owning jar session as `data:` URLs; media proxied through the session-scoped `goldfinch-media:` protocol; chrome CSP forbids remote img/media (pinned); download chrome-view fallback removed; one-time default-session hygiene purge. Full gate green (2825 tests, lint, typecheck). Pre-fix leak confirmed live; post-fix behavior test `cross-jar-fetch-isolation` passes with zero cross-jar carry. No deviations (DD3 fallback not needed — Electron 43 has no protocol.handle seek limitation). **[COMPLETE:flight]**
 
 ---
 
