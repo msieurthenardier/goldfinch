@@ -36,10 +36,10 @@ test('constructs platform chrome and lazy overlay views with exact trust options
   const sheet = h.managerDeps.sheet.createSheetView();
   const tearoff = h.managerDeps.tearoff.createOverlayView();
   assert.deepEqual(find.opts.webPreferences, {
-    preload: '/app/preload/find-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: false
+    preload: '/app/preload/find-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: true
   });
   assert.deepEqual(sheet.opts.webPreferences, {
-    preload: '/app/preload/menu-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: false
+    preload: '/app/preload/menu-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: true
   });
   assert.deepEqual(tearoff.opts.webPreferences, { contextIsolation: true, nodeIntegration: false, sandbox: true });
   assert.deepEqual(find.webContents.loadedFiles, ['/app/renderer/find-overlay.html']);

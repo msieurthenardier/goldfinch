@@ -19,3 +19,8 @@ goldfinch-*.png
 # Ephemeral test-run captures
 test-out.txt
 test-time.txt
+
+# Generated preload bundle (flight/02 leg 1) — regenerated at every
+# launch/test/build entry, never committed (source↔bundle drift is
+# structurally impossible when it's always freshly built).
+src/preload/webview-preload.bundle.js

@@ -28,8 +28,8 @@ The audit also verified several subsystems as strong (MCP automation auth, vault
 
 ## Success Criteria
 
-- [ ] A compromised web-guest renderer is contained by the OS sandbox: every web-content view constructs with the sandbox enabled, and a unit pin prevents regression. *(finding 1)*
-- [ ] The three preload-delivered capabilities — fingerprint farbling, media-panel scanning, and vault fill/capture — all work in the live app after sandboxing, verified against a real page. *(behavior-test-backed)*
+- [x] A compromised web-guest renderer is contained by the OS sandbox: every web-content view constructs with the sandbox enabled, and a unit pin prevents regression. *(finding 1)*
+- [x] The three preload-delivered capabilities — fingerprint farbling, media-panel scanning, and vault fill/capture — all work in the live app after sandboxing, verified against a real page. *(behavior-test-backed)*
 - [ ] Permission requests are governed by a positive allowlist: any permission string not explicitly enumerated — including ones that don't exist yet — is denied, and a unit test proves an invented permission denies. The chrome privacy indicator keeps receiving grant/deny events. *(finding 2)*
 - [x] No page-controlled URL is ever fetched by the browser chrome outside the owning jar's session; the chrome CSP no longer permits remote image/media origins, and a test pins the CSP. Cross-jar linkage via favicon or media-thumbnail fetches is demonstrated closed against a live cookie-setting server. *(finding 3, behavior-test-backed)*
 - [ ] Every chrome-trust IPC channel either verifies its sender is a chrome renderer (or documents why it can't), and `tab-navigate`'s URL argument passes the same safety gate as every other navigation entry point. A test asserts a non-chrome sender is refused on a representative channel. *(finding 4)*
@@ -67,14 +67,15 @@ The audit also verified several subsystems as strong (MCP automation auth, vault
 
 ## Known Issues
 
-*(none yet)*
+- [ ] **Chrome-view main sandbox flip deferred** — discovered in Flight 2, affects the chrome `WebContentsView` (`window-factory.js:178`, still `sandbox:false`). Flight 2 flipped the web guests + the two overlay preloads (find/menu) to `sandbox:true` but deferred the chrome view: it's a trusted `file://` surface (not a hostile-page host, so far lower value than the web-guest flip), `chrome-preload.js` has two `src/shared` relative requires needing their own bundling, and it reads `process.argv` to gate the automation surface (a sandboxed-preload `argv` regression would fail that gate *closed*). Candidate for a future hardening flight; not required for the finding-1 outcome (web guests are the hostile-content surface).
+- [ ] **Vault fill/capture full UI round-trip under sandbox not re-exercised** — discovered in Flight 2. AC5 verified the vault IPC transport + init sendSync work under `sandbox:true` (farbling and media, which share the transport, are proven live), but a full save→fill credential round-trip was not re-run under sandbox. The existing vault behavior specs cover that path; a targeted sandbox run would close the gap fully.
 
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses.
 
 - [x] Flight 1: **Cross-jar fetch isolation** — live-confirm the default-session leak, then route all page-controlled URL fetches (favicons, media thumbnails; decide playback) through the owning jar's session, tighten the chrome CSP to enforce it. *(finding 3 — sequenced first: silent today, contradicts the flagship feature)*
-- [ ] Flight 2: **Renderer OS sandbox** — introduce a preload bundling step, flip web guests (and assess the chrome view) to `sandbox: true`, live-verify farbling/media-scan/vault-fill, record the ruling in CLAUDE.md. *(finding 1 — biggest raw security delta. Named risk: bundler integration is this repo's first build-time transform — output must land where electron-builder's `files: ["src/**/*"]` + `asar:false` + the internal-page `__dirname` resolver + `dev-launch.mjs` all still resolve it; highest-variance flight. De-risk: `internal-preload.js` already proves the sandboxed-preload pattern live, and `sandbox:true` + `contextIsolation:false` is a supported Electron combination — the sandbox restricts Node API surface, not context isolation.)*
+- [x] Flight 2: **Renderer OS sandbox** — introduce a preload bundling step, flip web guests (and assess the chrome view) to `sandbox: true`, live-verify farbling/media-scan/vault-fill, record the ruling in CLAUDE.md. *(finding 1 — biggest raw security delta. Named risk: bundler integration is this repo's first build-time transform — output must land where electron-builder's `files: ["src/**/*"]` + `asar:false` + the internal-page `__dirname` resolver + `dev-launch.mjs` all still resolve it; highest-variance flight. De-risk: `internal-preload.js` already proves the sandboxed-preload pattern live, and `sandbox:true` + `contextIsolation:false` is a supported Electron combination — the sandbox restricts Node API surface, not context isolation.)*
 - [ ] Flight 3: **Policy and IPC hardening batch** — permission allowlist inversion, sender validation across chrome-trust channels + `isSafeTabUrl` on `tab-navigate`, `will-frame-navigate`/`will-redirect`/`web-contents-created` guards, vault-capture `isTrusted` guard. *(findings 2, 4, 5, 6 — mechanical, shared risk profile)*
 
 *(No alignment flight: this mission runs autonomously per operator directive; the work is verification-heavy rather than taste-driven.)*

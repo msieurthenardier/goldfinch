@@ -20,15 +20,24 @@
 // Dev-only by design: packaged builds launch the binary directly and never run
 // this script. The WSLg defect is a dev-environment concern (the packaged
 // target platforms are native Windows/macOS/Linux desktops).
+//
+// PRELOAD BUNDLE (flight/02 leg 1): both `npm run dev` and `npm run
+// dev:automation` (the `dev:*` colon-variant) funnel through this single
+// script, so the bundle is regenerated HERE rather than via npm's `predev`
+// hook — npm does not reliably fire `pre<script>` hooks for colon-containing
+// script names, so `predev:automation` cannot be trusted to run.
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { buildPreloadBundle } from './build-preload.mjs';
 
 const require = createRequire(import.meta.url);
 // In a plain Node context, require('electron') resolves to the binary path.
 const electron = require('electron');
 const { decideOzonePlatform } = require('../src/main/ozone-platform.js');
+
+await buildPreloadBundle();
 
 const args = process.argv.slice(2);
 const env = { ...process.env };
