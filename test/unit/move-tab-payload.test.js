@@ -53,6 +53,26 @@ test('null favicon is preserved as null; omitted favicon normalizes to null', ()
   assert.equal(validateMoveTabPayload(noFavicon).favicon, null);
 });
 
+// --- favicon length cap (Mission 13 Flight 1 / Leg 1 — DD1 data:-URL favicons) --
+
+const FAVICON_MAX_BYTES = 512 * 1024;
+
+test('a favicon exactly at the 512 KB cap rides through unchanged', () => {
+  const favicon = 'data:image/png;base64,' + 'A'.repeat(FAVICON_MAX_BYTES - 'data:image/png;base64,'.length);
+  assert.equal(favicon.length, FAVICON_MAX_BYTES);
+  const p = validateMoveTabPayload({ ...GOOD, favicon });
+  assert.equal(p.favicon, favicon);
+});
+
+test('a favicon over the 512 KB cap is normalized to null, not refused as an invalid payload', () => {
+  const favicon = 'data:image/png;base64,' + 'A'.repeat(FAVICON_MAX_BYTES);
+  const p = validateMoveTabPayload({ ...GOOD, favicon });
+  assert.notEqual(p, null, 'the rest of the payload stays valid');
+  assert.equal(p.favicon, null);
+  assert.equal(p.url, GOOD.url);
+  assert.equal(p.title, GOOD.title);
+});
+
 test('malformed payloads are refused with null, never a throw', () => {
   const bad = [
     null,

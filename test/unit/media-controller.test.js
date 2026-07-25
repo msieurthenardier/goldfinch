@@ -53,6 +53,7 @@ function harness() {
   const deps = {
     window, document, ctx: { activeFilter: 'all' }, els, activeTab: () => tab, isInternalTab: (t) => !!t.internal,
     closePrivacyPanel: () => {}, sendActiveBounds: () => {}, isSafePosterUrl: (url) => /^https:/.test(url || ''),
+    toMediaProxyUrl: (wcId, url) => `proxy:${wcId}:${url}`,
     toast: (...x) => toasts.push(x), persistentToast: () => new El('toast'), escapeHtml: String,
     openToolbarContextMenu: () => {}, createTab: (url) => calls.push(['create', url])
   };
@@ -118,9 +119,35 @@ test('audio playlist navigation follows the active tab media order', async () =>
   const two = { type: 'audio', url: 'https://x/two.mp3', name: 'Two' };
   h.tab.media = [one, two];
   controller.playAudio(one);
-  assert.equal(h.els.playerAudio.src, one.url);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${one.url}`);
   controller.playNext();
-  assert.equal(h.els.playerAudio.src, two.url);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${two.url}`);
   controller.playPrev();
-  assert.equal(h.els.playerAudio.src, one.url);
+  assert.equal(h.els.playerAudio.src, `proxy:${h.tab.wcId}:${one.url}`);
+});
+
+test('image thumb, poster, inline player, lightbox, and docked audio all route through the media proxy (Mission 13 F1 Leg 2 / DD2/AC3)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const image = { type: 'image', url: 'https://x/pic.png', name: 'pic.png' };
+  const video = { type: 'video', url: 'https://x/vid.mp4', poster: 'https://x/poster.png', name: 'vid.mp4' };
+  h.tab.media = [image, video];
+  h.tab.selected = new Set();
+
+  // renderMedia builds cards via els.mediaList — drive it the same way the app does.
+  h.deps.ctx.activeFilter = 'all';
+  controller.renderMedia();
+  const cards = h.els.mediaList.children;
+  assert.equal(cards.length, 2);
+
+  const imgEl = cards[0].children[0].children[1]; // card -> thumb -> [pick, img]
+  assert.equal(imgEl.src, `proxy:${h.tab.wcId}:${image.url}`);
+
+  const videoThumb = cards[1].children[0]; // card -> thumb
+  assert.equal(videoThumb.style.backgroundImage, `url("proxy:${h.tab.wcId}:${video.poster}")`);
+
+  // Lightbox and inline player resolve activeTab() at call time.
+  controller.openLightbox(image);
+  const lightboxImg = h.els.lightboxStage.children[0];
+  assert.equal(lightboxImg.src, `proxy:${h.tab.wcId}:${image.url}`);
 });

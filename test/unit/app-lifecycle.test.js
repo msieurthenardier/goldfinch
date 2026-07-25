@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerAppLifecycle } = require('../../src/main/app-lifecycle');
 
-function makeHarness({ restore = null, platform = 'linux', dev = false, automationEnabled = false } = {}) {
+function makeHarness({ restore = null, platform = 'linux', dev = false, automationEnabled = false, hygieneMarker = null } = {}) {
   const events = [];
   const appListeners = new Map();
   const handlers = new Map();
@@ -19,6 +19,21 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     protocol: { handle: (scheme) => events.push(`protocol:${scheme}`) }
   };
   let defaultSessionReads = 0;
+  // Media proxy wiring (Mission 13 Flight 1 / Leg 2 — DD2/AC2): capture what
+  // createMediaProxyHandler was invoked with, and what got registered on the
+  // default session's protocol.handle, so the tests can pin the threading.
+  let capturedMediaProxyDeps = null;
+  const mediaProxyHandlerFn = () => {};
+  const defaultSessionProtocolCalls = [];
+  const getTabContentsFake = () => null;
+  const isInternalContentsFake = () => false;
+  const parseMediaProxyUrlFake = () => null;
+  // DD7 (Mission 13 Flight 1 / Leg 2): one-time default-session hygiene purge.
+  // `hygieneMarker` seeds the fake appDb document row (null = fresh profile,
+  // never purged); `hygieneDocStoreCreatedFor` and the clear-* events below
+  // let tests pin the threading + gating without real Electron sessions.
+  let hygieneDocStoreCreatedFor = null;
+  const hygieneWrites = [];
   const app = {
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
@@ -57,11 +72,37 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     applyShields: () => events.push('apply-shields'),
     applySpellcheck: () => events.push('apply-spellcheck'),
     settings: { get: (key) => settingsValues[key] },
-    getDefaultSession: () => { defaultSessionReads++; return {}; },
+    getDefaultSession: () => {
+      defaultSessionReads++;
+      return {
+        protocol: {
+          handle: (scheme, handler) => {
+            defaultSessionProtocolCalls.push({ scheme, handler });
+            events.push(`default-protocol:${scheme}`);
+          },
+        },
+        clearStorageData: (options) => {
+          events.push(['clear-storage-data', options]);
+          return Promise.resolve();
+        },
+        clearCache: () => {
+          events.push('clear-cache');
+          return Promise.resolve();
+        },
+      };
+    },
     fromPartition: () => { events.push('internal-session'); return internalSession; },
     internalPartition: 'goldfinch-internal',
     setCreatingInternalSession: (value) => events.push(`creating:${value}`),
     handleInternal: () => {},
+    getTabContents: getTabContentsFake,
+    isInternalContents: isInternalContentsFake,
+    createMediaProxyHandler: (deps) => {
+      capturedMediaProxyDeps = deps;
+      events.push('media-proxy-handler-built');
+      return mediaProxyHandlerFn;
+    },
+    parseMediaProxyUrl: parseMediaProxyUrlFake,
     createWindow: (options) => {
       const rec = { options, win: { id: created.length + 10 } };
       created.push(rec);
@@ -95,7 +136,21 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     getMcpServer: () => server,
     setSessionQuitting: (value) => events.push(`quitting:${value}`),
     buildSessionSnapshot: () => ({ windows: [] }),
-    appDb: { close: () => events.push('appdb-close') },
+    appDb: {
+      close: () => events.push('appdb-close'),
+      createDocumentStore: (name) => {
+        hygieneDocStoreCreatedFor = name;
+        events.push(`create-document-store:${name}`);
+        return {
+          read: () => hygieneMarker,
+          write: (payload) => {
+            hygieneMarker = payload;
+            hygieneWrites.push(payload);
+            events.push(`hygiene-write:${payload}`);
+          },
+        };
+      },
+    },
     getAllWindows: () => [],
     argv: [], env: {}, platform,
     stdout: { write: () => {} },
@@ -105,7 +160,24 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
     events, appListeners, handlers, ipcListeners, lifecycle, created, internalSession,
     defaultSessionReads: () => defaultSessionReads,
     setBootRecord: (record) => { bootRecord = record; },
+    defaultSessionProtocolCalls,
+    getCapturedMediaProxyDeps: () => capturedMediaProxyDeps,
+    mediaProxyHandlerFn,
+    getTabContentsFake,
+    isInternalContentsFake,
+    parseMediaProxyUrlFake,
+    getHygieneDocStoreCreatedFor: () => hygieneDocStoreCreatedFor,
+    hygieneWrites,
+    getHygieneMarker: () => hygieneMarker,
   };
+}
+
+// Flushes the microtask queue past a macrotask boundary — needed because the
+// DD7 purge is deliberately fire-and-forget (never chained into `ready`'s
+// promise) so first paint is never gated on it. `await lifecycle.ready` alone
+// resolves before the purge's own .then() chain settles.
+function flushMicrotasks() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 test('ready path preserves store/session initialization order and default window creation', async () => {
@@ -113,16 +185,75 @@ test('ready path preserves store/session initialization order and default window
   assert.equal(h.defaultSessionReads(), 0, 'lifecycle registration must not touch Electron session');
   await h.lifecycle.ready;
   assert.equal(h.defaultSessionReads(), 1, 'default session resolves only inside the ready continuation');
-  assert.deepEqual(h.events.slice(0, 14), [
+  assert.deepEqual(h.events.slice(0, 16), [
     'init-stores', 'history-open', 'session-load', 'history-recorder', 'prune', 'interval',
     'downloads-manager', 'set-downloads-manager', 'wire-downloads', 'apply-shields',
-    'apply-spellcheck', 'creating:true', 'internal-session', 'creating:false'
+    'apply-spellcheck', 'media-proxy-handler-built', 'default-protocol:goldfinch-media',
+    'creating:true', 'internal-session', 'creating:false'
   ]);
   assert.equal(h.events.includes('protocol:goldfinch'), true);
   assert.equal(h.internalSession.__goldfinchInternal, true);
   assert.equal(h.events.includes('create-window:undefined'), true);
   assert.equal(h.appListeners.has('activate'), true);
   assert.equal(h.appListeners.has('session-created'), true);
+});
+
+test('media proxy handler is built with the threaded deps and registered on the DEFAULT session only (Mission 13 F1 Leg 2 / DD2/AC2)', async () => {
+  const h = makeHarness();
+  await h.lifecycle.ready;
+
+  // Threading: getTabContents/isInternalContents/parseMediaProxyUrl (previously NOT
+  // passed into this call at all) must reach createMediaProxyHandler unchanged.
+  const deps = h.getCapturedMediaProxyDeps();
+  assert.ok(deps, 'createMediaProxyHandler must be invoked');
+  assert.equal(deps.getTabContents, h.getTabContentsFake);
+  assert.equal(deps.isInternalContents, h.isInternalContentsFake);
+  assert.equal(deps.parseMediaProxyUrl, h.parseMediaProxyUrlFake);
+
+  // Registration: exactly one 'goldfinch-media' handler.handle call, on the DEFAULT
+  // session's protocol (never the internal session's) — using the built handler.
+  assert.deepEqual(
+    h.defaultSessionProtocolCalls.map((call) => call.scheme),
+    ['goldfinch-media']
+  );
+  assert.equal(h.defaultSessionProtocolCalls[0].handler, h.mediaProxyHandlerFn);
+  assert.equal(h.events.includes('protocol:goldfinch-media'), false, 'goldfinch-media must never be registered on the internal session');
+});
+
+test('DD7: a fresh profile purges default-session cookies + cache once, fire-and-forget, and writes the marker', async () => {
+  const h = makeHarness({ hygieneMarker: null });
+  await h.lifecycle.ready;
+
+  // Placement: the purge must not be part of the ready chain itself (first
+  // paint is never gated on it) — right after `ready` resolves, the store is
+  // built (gate check already run) but the async clear-* calls may not have
+  // settled yet. Flushing lets the fire-and-forget chain complete.
+  assert.equal(h.getHygieneDocStoreCreatedFor(), 'hygiene');
+  await flushMicrotasks();
+
+  const clearStorageCall = h.events.find((e) => Array.isArray(e) && e[0] === 'clear-storage-data');
+  assert.ok(clearStorageCall, 'clearStorageData must be called on a fresh profile');
+  assert.deepEqual(clearStorageCall[1], { storages: ['cookies'] });
+  assert.equal(h.events.includes('clear-cache'), true);
+  assert.equal(h.hygieneWrites.length, 1, 'marker must be written exactly once after a successful purge');
+  assert.equal(h.getHygieneMarker(), h.hygieneWrites[0]);
+
+  // Ordering: clearStorageData and clearCache both precede the marker write —
+  // a crash between the purge and the write must not leave a false marker.
+  const clearStorageIdx = h.events.findIndex((e) => Array.isArray(e) && e[0] === 'clear-storage-data');
+  const clearCacheIdx = h.events.indexOf('clear-cache');
+  const writeIdx = h.events.findIndex((e) => typeof e === 'string' && e.startsWith('hygiene-write:'));
+  assert.ok(clearStorageIdx < clearCacheIdx && clearCacheIdx < writeIdx);
+});
+
+test('DD7: a second boot with the marker already present performs no purge', async () => {
+  const h = makeHarness({ hygieneMarker: 'default-session-purge-v1' });
+  await h.lifecycle.ready;
+  await flushMicrotasks();
+
+  assert.equal(h.events.some((e) => Array.isArray(e) && e[0] === 'clear-storage-data'), false);
+  assert.equal(h.events.includes('clear-cache'), false);
+  assert.equal(h.hygieneWrites.length, 0, 'an already-purged profile must not rewrite the marker');
 });
 
 test('automation bind decision honors production setting and unpackaged dev override', async () => {

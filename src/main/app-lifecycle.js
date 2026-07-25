@@ -3,6 +3,12 @@
 // Electron-free ownership of app readiness, restore, activation, and quit order.
 // Electron handles are injected; this module only coordinates their public shape.
 
+// DD7 (Mission 13 Flight 1 / Leg 2): one-time default-session hygiene purge
+// marker. Versioned (migrate-once discipline, same shape as the other
+// appDb-backed stores) so a future need to re-purge is a marker-value bump,
+// not a new store/gate.
+const HYGIENE_PURGE_MARKER = 'default-session-purge-v1';
+
 function registerAppLifecycle({
   app,
   ipcMain,
@@ -31,6 +37,10 @@ function registerAppLifecycle({
   internalPartition,
   setCreatingInternalSession,
   handleInternal,
+  getTabContents,
+  isInternalContents,
+  createMediaProxyHandler,
+  parseMediaProxyUrl,
   createWindow,
   registry,
   isMcpAutomationEnabled,
@@ -94,6 +104,18 @@ function registerAppLifecycle({
     wireDownloadHandler(defaultSession);
     applyShields(defaultSession);
     applySpellcheck(defaultSession, settings.get('spellcheck'));
+
+    // Media proxy (Mission 13 Flight 1 / Leg 2 — DD2/AC2): registered on the DEFAULT
+    // session ONLY (the chrome's session) — jar-partitioned guest sessions never see this
+    // scheme, mirroring the internal-session trust model just below. Built here (not
+    // main.js) so getTabContents/isInternalContents are threaded through this call's
+    // deps rather than assumed already-available — Phase A of leg 2 wires this; the
+    // renderer's five media-assignment sites are wired in Phase B pending the FD's live
+    // seek smoke against this handler (electron/electron#38749, #51442).
+    defaultSession.protocol.handle(
+      'goldfinch-media',
+      createMediaProxyHandler({ getTabContents, isInternalContents, parseMediaProxyUrl })
+    );
 
     setCreatingInternalSession(true);
     const internalSession = fromPartition(internalPartition);
@@ -164,6 +186,26 @@ function registerAppLifecycle({
     app.on('activate', () => {
       if (getAllWindows().length === 0) createWindow();
     });
+
+    // DD7 (Mission 13 Flight 1 / Leg 2): one-time default-session cookie +
+    // HTTP-cache purge, gated by an appDb marker (migrate-once discipline).
+    // Placement is deliberate: END of the ready callback, after
+    // createWindow()/session-restore/automation wiring above, so first paint
+    // is NEVER gated on this — fire-and-forget with a terminal catch. A
+    // failed purge means no marker write, so the next boot retries; it can
+    // never block or crash boot. Safe because the chrome holds zero web
+    // storage of its own (DD4's verified premise) — only PRE-FIX-planted
+    // default-session state is at stake, not anything currently in use.
+    const hygieneStore = appDb.createDocumentStore('hygiene');
+    if (hygieneStore.read() !== HYGIENE_PURGE_MARKER) {
+      Promise.resolve()
+        .then(() => defaultSession.clearStorageData({ storages: ['cookies'] }))
+        .then(() => defaultSession.clearCache())
+        .then(() => hygieneStore.write(HYGIENE_PURGE_MARKER))
+        .catch((error) => {
+          logger.error('[app-lifecycle] default-session hygiene purge failed (will retry next boot):', error);
+        });
+    }
   });
 
   app.on('before-quit', () => {

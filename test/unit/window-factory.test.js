@@ -104,6 +104,7 @@ test('close tears down overlays before capture/snapshot and destroys every guest
     'build-snapshot',
     'snapshot-write',
     `forget:${guest.webContents.id}`,
+    `favicon-forget:${guest.webContents.id}`,
     `remove-view:${guest.webContents.id}`,
     `destroy-wc:${guest.webContents.id}`
   ];

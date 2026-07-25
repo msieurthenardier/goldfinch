@@ -22,6 +22,7 @@ function createGuestWiring(deps) {
     isInternalContents,
     getHistoryRecorder,
     broadcastMoveTargetsChanged,
+    faviconFetcher,
     logger
   } = deps;
 
@@ -161,8 +162,21 @@ function createGuestWiring(deps) {
       getHistoryRecorder()?.handleTitleUpdated(wcId, title);
       if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
     }));
+    // Mission 13 Flight 1 / Leg 1 (DD1): favicons are fetched MAIN-SIDE in the
+    // guest's own jar session (never the jar registry — burner partitions exist
+    // only renderer-side) and delivered as a size-capped data: URL. Nothing
+    // reaches the chrome on failure — no raw remote favicon URL is forwarded
+    // any more. Fire-and-forget: guard() only proves wc was alive at EVENT
+    // time; sendToChrome resolves the chrome at SEND time, so a tab closed
+    // mid-fetch simply drops the send (forget(wcId) at teardown prevents the
+    // per-tab sequence map from growing unbounded).
     wc.on('page-favicon-updated', guard((_event, favicons) => {
-      sendToChrome('tab-favicon', { wcId, favicons });
+      faviconFetcher
+        .request({ wcId, favicons, fetchImpl: (url) => wc.session.fetch(url) })
+        .then((dataUrl) => {
+          if (dataUrl) sendToChrome('tab-favicon', { wcId, favicons: [dataUrl] });
+        })
+        .catch(() => {});
     }));
     wc.on('did-start-loading', guard(() => {
       sendToChrome('tab-loading', { wcId, loading: true });

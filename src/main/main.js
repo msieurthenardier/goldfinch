@@ -20,8 +20,11 @@ const { createRetentionSweep } = require('./retention-sweep');
 const { cookieUrl, partitionFromStoragePath, cookieChangeAction } = require('./jar-data-helpers');
 const { createHistoryRecorder } = require('./history-recorder');
 const { registerHistoryIpc } = require('./history-ipc');
+const { createFaviconFetcher } = require('./favicon-fetch');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
+const { parseMediaProxyUrl } = require('../shared/media-proxy');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
+const { createMediaProxyHandler } = require('./media-proxy-handler');
 const { initProfileAndStores } = require('./init-profile');
 const { sanitizeFilename, isWithinDir } = require('./download-path');
 const { createResolver } = require('./internal-assets');
@@ -162,7 +165,17 @@ for (const stream of [process.stdout, process.stderr]) {
 // scheme real origin/host semantics so `new URL('goldfinch://settings').host === 'settings'`
 // (the host-based routing the handler relies on) and yields a secure context for the strict
 // CSP; `secure: true` marks it a trusted origin. Do NOT "simplify" these privileges away. (DD2)
-protocol.registerSchemesAsPrivileged([{ scheme: 'goldfinch', privileges: { standard: true, secure: true } }]);
+//
+// `goldfinch-media` (Mission 13 Flight 1 / Leg 2 — DD2/AC2) is the session-scoped media
+// proxy protocol: registered here (same single module-load call, second array entry) with
+// `stream: true` so the handler's Response can carry a live ReadableStream body (required
+// for Range/seek support). It is registered ONLY on the default session (below, via
+// app-lifecycle.js) — jar-partitioned guest sessions never get a handler for this scheme,
+// the same structural trust argument as `goldfinch://` itself.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'goldfinch', privileges: { standard: true, secure: true } },
+  { scheme: 'goldfinch-media', privileges: { stream: true } }
+]);
 
 // Fixed internal assets remain an exact host/path allowlist. The extracted
 // builder receives __dirname and path; it never derives a file from a URL.
@@ -365,6 +378,12 @@ let devEnableOverride = false;
 // practice — tabs are created via IPC after the chrome loads) are harmless no-ops.
 /** @type {ReturnType<typeof createHistoryRecorder> | null} */
 let historyRecorder = null;
+
+// The favicon fetcher (Mission 13 Flight 1, Leg 1 / DD1). Unlike historyRecorder
+// this has no init-ordering dependency — createFaviconFetcher is pure and
+// Electron-free, so it is constructed eagerly here and injected as a direct
+// value (no getter) into every deps map that needs it.
+const faviconFetcher = createFaviconFetcher();
 
 // Grab a screenshot of the main window as a base64 PNG (Flight 3, Leg 1).
 // Tries desktopCapturer first (with correct thumbnailSize); falls back to a
@@ -1046,6 +1065,7 @@ const { createWindow } = createWindowFactory({
   sessionStore,
   buildSessionSnapshot,
   getHistoryRecorder: () => historyRecorder,
+  faviconFetcher,
   defer: setImmediate,
   logger: console
 });
@@ -1066,6 +1086,7 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   isInternalContents,
   getHistoryRecorder: () => historyRecorder,
   broadcastMoveTargetsChanged,
+  faviconFetcher,
   logger: console
 });
 
@@ -1263,6 +1284,7 @@ registerTabIpc({
   closedTabStack,
   broadcastClosedTabStackChanged,
   getHistoryRecorder: () => historyRecorder,
+  faviconFetcher,
   isSafeTabUrl,
   reopenStripIndex,
   webContents,
@@ -1681,6 +1703,14 @@ registerAppLifecycle({
   internalPartition: INTERNAL_PARTITION,
   setCreatingInternalSession: (value) => { creatingInternalSession = value; },
   handleInternal,
+  // Media proxy wiring (Mission 13 Flight 1 / Leg 2 — DD2/AC2): threaded so
+  // app-lifecycle.js can build the handler and register it on the default
+  // session at ready time. getTabContents/isInternalContents were NOT
+  // previously threaded into this call — this is their first use here.
+  getTabContents,
+  isInternalContents,
+  createMediaProxyHandler,
+  parseMediaProxyUrl,
   createWindow,
   registry,
   isMcpAutomationEnabled,

@@ -159,6 +159,7 @@ function createHarness(options = {}) {
     sessionStore,
     buildSessionSnapshot: options.buildSessionSnapshot || (() => { log.push('build-snapshot'); return { version: 1 }; }),
     getHistoryRecorder: options.getHistoryRecorder || (() => ({ forgetTab: (wcId) => { log.push(`forget:${wcId}`); } })),
+    faviconFetcher: options.faviconFetcher || { forget: (wcId) => { log.push(`favicon-forget:${wcId}`); } },
     defer: options.defer || ((fn) => fn()),
     logger: { warn() {}, error(message) { log.push(`error:${message}`); } }
   });
