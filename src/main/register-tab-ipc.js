@@ -22,6 +22,7 @@ function registerTabIpc(deps) {
     closedTabStack,
     broadcastClosedTabStackChanged,
     getHistoryRecorder,
+    faviconFetcher,
     isSafeTabUrl,
     reopenStripIndex,
     webContents,
@@ -179,6 +180,10 @@ ipcMain.on('tab-close', (event, wcId, stripIndex) => {
   }
   owner.tabViews.delete(wcId);
   getHistoryRecorder()?.forgetTab(wcId);
+  // Mission 13 Flight 1 / Leg 1: drop this tab's favicon-fetch sequence entry
+  // beside the history recorder's forgetTab — same teardown site, same reason
+  // (prevents unbounded per-tab map growth over the process lifetime).
+  faviconFetcher?.forget(wcId);
   if (owner.activeTabWcId === wcId) owner.activeTabWcId = null;
   // Find-overlay session teardown (AC6d): the session target is being destroyed —
   // close the session with NO refocus (nothing sensible to focus; the stopFind inside

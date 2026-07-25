@@ -51,7 +51,11 @@ function registerDownloadIpc({
     const wc = typeof webContentsId === 'number' ? webContents.fromId(webContentsId) : null;
     const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
     const senderActiveTab = rec && rec.activeTabWcId != null ? getTabContents(rec.activeTabWcId) : null;
-    const downloader = wc || senderActiveTab || (rec ? rec.chromeView.webContents : null);
+    // DD6 (Mission 13 Flight 1 / Leg 2): the chrome-view terminal fallback is
+    // removed — a download with no resolvable jar-guest context fails loudly
+    // instead of riding the default session (the one path a download could
+    // have carried default-session cookies).
+    const downloader = wc || senderActiveTab;
     if (!downloader) return { ok: false, error: 'No web contents available to download with.' };
     if (saveDir != null && !approvedDownloadDirs.has(path.resolve(saveDir))) {
       return { ok: false, error: 'Download directory not approved.' };

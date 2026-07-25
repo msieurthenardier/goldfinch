@@ -78,6 +78,19 @@ test('download directory authority is minted by the chooser and enforced by down
   assert.deepEqual(h.events, [['download', 'https://example/file']]);
 });
 
+test('download-media fails loudly with no resolvable jar-guest context — the chrome-view terminal fallback is removed (DD6)', async () => {
+  const h = makeHarness();
+  // No webContentsId on the payload, and the sender's registry record has no
+  // activeTabWcId — so both wc and senderActiveTab resolve to null. Before
+  // DD6 this fell back to rec.chromeView.webContents (the default session);
+  // now it must fail loudly instead.
+  const payload = { url: 'https://example/file', suggestedName: 'file' };
+  assert.deepEqual(await h.handlers.get('download-media')({ sender: h.chromeSender }, payload), {
+    ok: false, error: 'No web contents available to download with.'
+  });
+  assert.deepEqual(h.events, []);
+});
+
 test('downloads-snapshot is chrome-authorized and omits paths and URLs', async () => {
   const h = makeHarness();
   assert.deepEqual(await h.handlers.get('downloads-snapshot')({ sender: {} }), []);

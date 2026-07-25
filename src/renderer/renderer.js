@@ -11,6 +11,7 @@ import { buildVaultIndicatorModel } from '../shared/vault-indicator-model.js';
 import { parsePickIndex, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { isSafeColor } from '../shared/safe-color.js';
 import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
+import { toMediaProxyUrl } from '../shared/media-proxy.js';
 import { keydownToAction } from '../shared/keydown-action.js';
 import { deriveSiteInfo } from '../shared/site-info.js';
 import { pageContextModel } from '../shared/page-context-model.js';
@@ -402,7 +403,7 @@ mediaController = createMediaController({
   isInternalTab,
   closePrivacyPanel: () => closePrivacyPanel(),
   sendActiveBounds,
-  isSafePosterUrl,
+  isSafePosterUrl, toMediaProxyUrl,
   escapeHtml,
   openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl),
   createTab

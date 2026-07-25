@@ -19,6 +19,13 @@
  * @typedef {{ wcId: number, url: string, title: string, favicon: string | null, container: ContainerSnapshot }} MoveTabPayload
  */
 
+// Mission 13 Flight 1 / Leg 1 (DD1): data:-URL favicons (introduced by the
+// jar-session favicon fetch) can run up to 512 KB. A favicon longer than that
+// is normalized to null rather than refusing the whole payload — the rest of
+// the snapshot (url/title/container) is still valid and the strip simply
+// shows no favicon for that move.
+const FAVICON_MAX_BYTES = 512 * 1024;
+
 /**
  * Shape-validate the renderer's move payload. Returns a NORMALIZED copy (only
  * the known fields, container reduced to its five known keys) or null when the
@@ -45,7 +52,7 @@ function validateMoveTabPayload(payload) {
     wcId,
     url,
     title,
-    favicon: typeof favicon === 'string' ? favicon : null,
+    favicon: typeof favicon === 'string' && favicon.length <= FAVICON_MAX_BYTES ? favicon : null,
     container: {
       id: container.id,
       name: container.name,

@@ -121,6 +121,7 @@ function setup() {
   const timers = [];
   const closed = [];
   const history = [];
+  const faviconForgotten = [];
   const views = [];
   class WebContentsView {
     constructor(opts) { const view = new FakeView(opts, log, nextWcId++); views.push(view); return view; }
@@ -141,6 +142,7 @@ function setup() {
     closedTabStack: { push: (entry) => closed.push(entry), pop: () => closed.pop() || null, size: () => closed.length },
     broadcastClosedTabStackChanged: () => log.push(['broadcast-stack']),
     getHistoryRecorder: () => ({ forgetTab: (id) => history.push(id) }),
+    faviconFetcher: { forget: (id) => faviconForgotten.push(id) },
     isSafeTabUrl: (url) => url.startsWith('https://'),
     reopenStripIndex: (entry, winId) => entry.windowId === winId ? entry.stripIndex : -1,
     webContents,
@@ -156,7 +158,7 @@ function setup() {
     logger: { warn() {}, error() {} }
   };
   registerTabIpc(deps);
-  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history };
+  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten };
 }
 
 test('registers the complete tab/move channel set exactly once', () => {
@@ -302,6 +304,7 @@ test('remaining lifecycle channels execute through captured handlers with their 
     'menu move keeps its historical null refusal shape');
   h.ipcMain.send('tab-close', source.chromeView.webContents, 102, 1);
   assert.equal(h.history.includes(102), true);
+  assert.equal(h.faviconForgotten.includes(102), true, 'favicon fetcher forgets the closed tab beside the history recorder');
   assert.equal(h.ipcMain.invoke('closed-tab-stack-size', source.chromeView.webContents), 1);
   const reopened = h.ipcMain.invoke('tab-reopen', source.chromeView.webContents);
   assert.equal(reopened.url, 'https://tab-102.test/');

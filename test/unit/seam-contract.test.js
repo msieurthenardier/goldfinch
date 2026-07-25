@@ -59,7 +59,10 @@ const SEAM_COUNT = 29;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
-const RENDERER_LINE_BUDGET = 1700;
+// Mission 13 F1 Leg 2 (DD2/AC3): +1 for the toMediaProxyUrl import + createMediaController
+// dep-injection line (media-panel proxy wiring) — the minimum single-line footprint for a
+// new shared dependency; no other renderer.js growth in this leg.
+const RENDERER_LINE_BUDGET = 1701;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

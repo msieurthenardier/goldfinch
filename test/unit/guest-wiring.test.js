@@ -5,6 +5,12 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createGuestWiring } = require('../../src/main/guest-wiring');
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
 class FakeContents extends EventEmitter {
   constructor(id, internal = false) {
     super();
@@ -37,6 +43,10 @@ function setup() {
     handleNavigation(payload) { calls.push(['history-nav', payload]); },
     handleTitleUpdated(id, title) { calls.push(['history-title', id, title]); }
   };
+  // The favicon-fetch harness has its first async cases (AC6): a test overrides
+  // this via setFaviconRequest to hand back a controllable deferred promise, so
+  // the assertion can await the fake fetch chain before checking h.sends.
+  let faviconRequest = () => Promise.resolve(null);
   const wiring = createGuestWiring({
     registry,
     chromeForTab: () => chrome,
@@ -51,9 +61,14 @@ function setup() {
     isInternalContents: (wc) => !!wc.session.__goldfinchInternal,
     getHistoryRecorder: () => historyRecorder,
     broadcastMoveTargetsChanged: () => calls.push('broadcast-targets'),
+    faviconFetcher: { request: (args) => faviconRequest(args) },
     logger: { warn() {} }
   });
-  return { wiring, sends, calls, records, chrome, setHistoryRecorder: (value) => { historyRecorder = value; } };
+  return {
+    wiring, sends, calls, records, chrome,
+    setHistoryRecorder: (value) => { historyRecorder = value; },
+    setFaviconRequest: (fn) => { faviconRequest = fn; }
+  };
 }
 
 function inputEvent() {
@@ -144,6 +159,40 @@ test('tab events forward navigation, record history, retitle active move targets
   assert.ok(h.calls.some((x) => Array.isArray(x) && x[0] === 'history-nav'));
   assert.ok(h.calls.includes('broadcast-targets'));
   assert.deepEqual(overlaySends, [['find-overlay:count', { activeMatchOrdinal: 2, matches: 5 }]]);
+});
+
+test('page-favicon-updated routes through the favicon fetcher and forwards a data: URL only on success', async () => {
+  const h = setup();
+  const wc = new FakeContents(11);
+  let capturedArgs = null;
+  const pending = deferred();
+  h.setFaviconRequest((args) => { capturedArgs = args; return pending.promise; });
+  h.wiring.wireTabViewEvents({ webContents: wc }, 11, 'persist:jar-a');
+
+  wc.emit('page-favicon-updated', {}, ['https://example.test/favicon.ico']);
+  assert.deepEqual(h.sends, [], 'nothing is sent before the fetch resolves');
+  assert.equal(capturedArgs.wcId, 11);
+  assert.deepEqual(capturedArgs.favicons, ['https://example.test/favicon.ico']);
+  assert.equal(typeof capturedArgs.fetchImpl, 'function');
+
+  pending.resolve('data:image/png;base64,AAAA');
+  await pending.promise;
+  await Promise.resolve(); // let the .then() microtask run
+  assert.deepEqual(h.sends, [['tab-favicon', { wcId: 11, favicons: ['data:image/png;base64,AAAA'] }]]);
+});
+
+test('page-favicon-updated forwards nothing when the fetch resolves to null (failure) — no raw remote URL ever reaches the chrome', async () => {
+  const h = setup();
+  const wc = new FakeContents(12);
+  const pending = deferred();
+  h.setFaviconRequest(() => pending.promise);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 12, 'persist:jar-a');
+
+  wc.emit('page-favicon-updated', {}, ['https://example.test/favicon.ico']);
+  pending.resolve(null);
+  await pending.promise;
+  await Promise.resolve();
+  assert.deepEqual(h.sends, []);
 });
 
 test('destroyed tab guards every tab-event side effect and history recorder is read live', () => {

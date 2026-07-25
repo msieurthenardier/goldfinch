@@ -4,7 +4,7 @@
 export function createMediaController(deps) {
   const {
     window, document, ctx, els, activeTab, isInternalTab, closePrivacyPanel,
-    sendActiveBounds, isSafePosterUrl, escapeHtml,
+    sendActiveBounds, isSafePosterUrl, toMediaProxyUrl, escapeHtml,
     openToolbarContextMenu, createTab
   } = deps;
   /* --------------------------------------------------------------- media panel */
@@ -119,13 +119,15 @@ export function createMediaController(deps) {
     if (item.type === 'image') {
       const img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = item.url;
+      img.src = toMediaProxyUrl(tab.wcId, item.url);
       img.alt = item.label || item.name || '';
       thumb.appendChild(img);
       thumb.title = 'Open in viewer';
       thumb.addEventListener('click', () => openLightbox(item));
     } else if (item.type === 'video') {
-      if (isSafePosterUrl(item.poster)) thumb.style.backgroundImage = `url("${item.poster}")`;
+      // isSafePosterUrl gates the RAW poster URL before wrapping — the proxy
+      // wrap must never bypass this validation (DD2/AC3).
+      if (isSafePosterUrl(item.poster)) thumb.style.backgroundImage = `url("${toMediaProxyUrl(tab.wcId, item.poster)}")`;
       thumb.insertAdjacentHTML('beforeend', `<span class="play-glyph">▶</span>`);
       thumb.title = 'Play here';
       thumb.addEventListener('click', () => playInline(item, thumb));
@@ -196,7 +198,9 @@ export function createMediaController(deps) {
     thumb.classList.add(item.type === 'audio' ? 'audio-live' : 'video-live');
     thumb.innerHTML = `<label class="media-pick"><span class="badge">${item.type}</span></label>`;
     const player = document.createElement(item.type === 'video' ? 'video' : 'audio');
-    player.src = item.url;
+    // Resolved at call time (fine — the item belongs to the active tab: playInline
+    // only ever runs from a click on a card rendered for the current tab).
+    player.src = toMediaProxyUrl(activeTab().wcId, item.url);
     player.controls = true;
     player.autoplay = true;
     player.className = 'inline-player';
@@ -255,7 +259,9 @@ export function createMediaController(deps) {
     lbReturnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
     els.lightboxStage.innerHTML = '';
     const img = document.createElement('img');
-    img.src = item.url;
+    // Resolved at call time (fine — the item belongs to the active tab: openLightbox
+    // only ever runs from a click on a card rendered for the current tab).
+    img.src = toMediaProxyUrl(activeTab().wcId, item.url);
     img.alt = item.label || item.name || '';
     img.className = 'lightbox-img';
     img.draggable = false;
@@ -476,7 +482,7 @@ export function createMediaController(deps) {
 
   /* --------------------------------------------------- docked music player */
 
-  const player = { list: [], index: -1, url: null };
+  const player = { list: [], index: -1, url: null, wcId: null };
   const pa = els.playerAudio;
 
   function currentAudioItems() {
@@ -485,6 +491,10 @@ export function createMediaController(deps) {
   }
 
   // Start a track; the page's audio list becomes the playlist for prev/next.
+  // The playlist survives tab switches (prev/next act on player.list, not a
+  // freshly-read activeTab()), so the owning wcId is captured HERE, once, from
+  // the active tab at build time — not re-resolved per track in loadCurrent,
+  // which would attribute the stream to whatever tab is active at seek time.
   function playAudio(item) {
     player.list = currentAudioItems();
     player.index = player.list.findIndex((m) => m.url === item.url);
@@ -492,14 +502,18 @@ export function createMediaController(deps) {
       player.list = [item];
       player.index = 0;
     }
+    const t = activeTab();
+    player.wcId = t ? t.wcId : null;
     loadCurrent();
   }
 
   function loadCurrent() {
     const item = player.list[player.index];
     if (!item) return;
+    // ADJACENT-LINE HAZARD: player.url MUST stay RAW — highlightPlaying() compares
+    // it raw-to-raw against card.dataset.url (also raw). Wrap ONLY pa.src below.
     player.url = item.url;
-    pa.src = item.url;
+    pa.src = toMediaProxyUrl(player.wcId, item.url);
     pa.play().catch(() => {});
     els.playerTitle.textContent = item.label || item.name;
     els.player.classList.remove('hidden');

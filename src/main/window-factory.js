@@ -50,6 +50,7 @@ function createWindowFactory(deps) {
     sessionStore,
     buildSessionSnapshot,
     getHistoryRecorder,
+    faviconFetcher,
     defer,
     logger
   } = deps;
@@ -273,6 +274,10 @@ function createWindowFactory(deps) {
       const historyRecorder = getHistoryRecorder();
       for (const [wcId, entry] of rec.tabViews) {
         historyRecorder?.forgetTab(wcId);
+        // Mission 13 Flight 1 / Leg 1: whole-window close teardown — the other
+        // of the two sites that must call forget(wcId) (register-tab-ipc.js's
+        // single tab-close is the other).
+        faviconFetcher?.forget(wcId);
         if (!win.isDestroyed()) win.contentView.removeChildView(entry.view);
         if (!entry.view.webContents.isDestroyed()) entry.view.webContents.destroy();
       }
