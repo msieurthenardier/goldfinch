@@ -12,5 +12,6 @@
     "maxNodeModuleJsDepth": 0,
     "types": ["node"]
   },
-  "include": ["src/**/*.js", "src/**/*.d.ts"]
+  "include": ["src/**/*.js", "src/**/*.d.ts"],
+  "exclude": ["src/preload/webview-preload.bundle.js"]
 }

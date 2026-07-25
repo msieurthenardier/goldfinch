@@ -6,3 +6,4 @@ missions/
 maintenance/
 tests/
 *.md
+src/preload/webview-preload.bundle.js

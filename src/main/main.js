@@ -1273,7 +1273,7 @@ registerTabIpc({
   ipcMain,
   WebContentsView,
   internalPreloadPath: path.join(__dirname, '..', 'preload', 'internal-preload.js'),
-  webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.js'),
+  webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.bundle.js'),
   INTERNAL_PARTITION,
   registry,
   wireGuestContents,
