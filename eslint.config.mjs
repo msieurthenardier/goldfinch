@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 import eslintConfigPrettier from 'eslint-config-prettier';
 export default [
-  { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs'] }, // standalone — ONLY the ignores key
+  { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs', 'src/preload/webview-preload.bundle.js'] }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
     // find-overlay-preload.js and menu-overlay-preload.js are chrome-class (M05 F7 DD1 /

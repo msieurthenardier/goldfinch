@@ -85,7 +85,7 @@ ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }
     webPreferencesObj = {
       preload: preloadPath,
       contextIsolation: false,
-      sandbox: false,
+      sandbox: true,
       nodeIntegration: false,
       partition: partition,
       // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle

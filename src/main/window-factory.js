@@ -67,7 +67,7 @@ function createWindowFactory(deps) {
         preload: paths.findPreload,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: true
       }
     });
     view.setBackgroundColor('#00000000');
@@ -91,7 +91,7 @@ function createWindowFactory(deps) {
         preload: paths.menuPreload,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: true
       }
     });
     view.setBackgroundColor('#00000000');
