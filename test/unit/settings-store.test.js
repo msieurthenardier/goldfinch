@@ -74,10 +74,10 @@ test('defaults on first load — no settings.json present', () => {
   try {
     const store = freshStore();
     const result = store.load(dir);
-    assert.equal(result.version, 1);
+    assert.equal(result.version, 2);
     assert.equal(result.homePage, 'https://www.google.com');
     assert.equal(store.get('homePage'), 'https://www.google.com');
-    assert.equal(store.get('version'), 1);
+    assert.equal(store.get('version'), 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -183,7 +183,7 @@ test('corrupt file repair → defaults, no throw', () => {
       result = store.load(dir);
     });
     assert.equal(result.homePage, 'https://www.google.com');
-    assert.equal(result.version, 1);
+    assert.equal(result.version, 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -197,7 +197,7 @@ test('bad-field repair keeps valid siblings', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
-    // Write a settings.json with an invalid homePage but correct version
+    // Write a settings.json with an invalid homePage (stored at schema v1)
     const badSettings = JSON.stringify({ homePage: 'javascript:bad', version: 1 });
     fs.writeFileSync(path.join(dir, 'settings.json'), badSettings, 'utf8');
 
@@ -206,8 +206,8 @@ test('bad-field repair keeps valid siblings', () => {
 
     // homePage should be repaired to default
     assert.equal(result.homePage, 'https://www.google.com', 'invalid homePage should be repaired to default');
-    // version is type-compatible and has no validator → should be kept
-    assert.equal(result.version, 1);
+    // the v1 → v2 migration ladder stamps the current schema version
+    assert.equal(result.version, 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -670,13 +670,15 @@ test('automation keys — defaults on first load (off, empty map, empty admin ha
   }
 });
 
-test('automation keys — additive load with NO version bump (version stays 1)', () => {
+test('automation keys — additive load rides the current schema version (no additive bump)', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
-    assert.equal(result.version, 1, 'schema version must NOT be bumped for additive keys');
+    // v2 is the restoreSession default-flip bump (issue #117) — the additive
+    // automation keys themselves never bumped the schema.
+    assert.equal(result.version, 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -956,8 +958,9 @@ test('spellcheck — default on first load is false (no settings.json)', () => {
     const result = store.load(dir);
     assert.equal(result.spellcheck, false);
     assert.equal(store.get('spellcheck'), false);
-    // Additive key must NOT bump the schema version.
-    assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive spellcheck key');
+    // The additive spellcheck key never bumped the schema — v2 is the
+    // restoreSession default flip (issue #117).
+    assert.equal(result.version, 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -1008,37 +1011,38 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
 });
 
 // ---------------------------------------------------------------------------
-// restoreSession (M09 Flight 9 / DD7) — additive boolean, default OFF, no version
-// bump, EXPLICIT strict-boolean validator (the automationEnabled template — a truthy
-// non-boolean is rejected, NOT coerced, so it can never silently enable restore).
+// restoreSession (M09 Flight 9 / DD7; default flipped ON in schema v2 — issue
+// #117). EXPLICIT strict-boolean validator (the automationEnabled template — a
+// truthy non-boolean is rejected, NOT coerced).
 // ---------------------------------------------------------------------------
 
-test('restoreSession — default on first load is false (no settings.json)', () => {
+test('restoreSession — default on first load is true (fresh profile, issue #117)', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
-    assert.equal(result.restoreSession, false);
-    assert.equal(store.get('restoreSession'), false);
-    // Additive key must NOT bump the schema version.
-    assert.equal(result.version, 1, 'schema version must NOT be bumped for the additive restoreSession key');
+    assert.equal(result.restoreSession, true);
+    assert.equal(store.get('restoreSession'), true);
+    assert.equal(result.version, 2);
   } finally {
     appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('restoreSession — set true persists and reloads (round-trip)', () => {
+test('restoreSession — set false persists and reloads (v2 opt-out survives, no re-migration)', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
     const store = freshStore();
     store.load(dir);
-    store.set('restoreSession', true);
+    store.set('restoreSession', false);
+    // The reload passes back through migrateStored(); the row is already v2, so
+    // the explicit opt-out is NOT discarded (the migration is one-time).
     const result = store.load(dir);
-    assert.equal(result.restoreSession, true);
-    assert.equal(store.get('restoreSession'), true);
+    assert.equal(result.restoreSession, false);
+    assert.equal(store.get('restoreSession'), false);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -1051,13 +1055,127 @@ test('restoreSession — set throws on a truthy non-boolean, prior value unchang
   try {
     const store = freshStore();
     store.load(dir);
-    // A truthy string must NOT coerce to true — the strict validator throws BEFORE
+    // A truthy string must NOT coerce — the strict validator throws BEFORE
     // mutating (set() validates-before-mutate), so the value stays at its default.
     assert.throws(
       () => store.set('restoreSession', 'yes'),
       (err) => err instanceof TypeError && err.message.includes('invalid value')
     );
-    assert.equal(store.get('restoreSession'), false);
+    assert.equal(store.get('restoreSession'), true);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// v1 → v2 migration (issue #117): save() serializes the WHOLE config, so v1
+// rows carry a serializer-stamped `restoreSession: false` indistinguishable
+// from a deliberate opt-out. The ladder discards the stored value (refills
+// true from DEFAULTS), stamps version 2, and persists the migrated row once.
+// ---------------------------------------------------------------------------
+
+// Seed a raw 'settings' row directly (simulating a profile written by 0.10–0.11).
+function seedRow(payloadObj) {
+  appDb.createDocumentStore('settings').write(JSON.stringify(payloadObj));
+}
+
+test('v1→v2 migration — v1 row with restoreSession:false loads as true and persists as v2', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 1, homePage: 'https://kept.example.com/', restoreSession: false });
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.restoreSession, true, 'serializer-frozen false is discarded → new default');
+    assert.equal(result.version, 2);
+    assert.equal(result.homePage, 'https://kept.example.com/', 'sibling keys survive the migration');
+
+    // The migrated row is persisted at load (one-time), stamped v2.
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.version, 2);
+    assert.equal(row.restoreSession, true);
+    assert.equal(row.homePage, 'https://kept.example.com/');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('v1→v2 migration — v1 row with restoreSession:true stays true', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 1, restoreSession: true });
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.restoreSession, true);
+    assert.equal(result.version, 2);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('v1→v2 migration — v2 row with restoreSession:false is NOT re-migrated (stays false)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 2, restoreSession: false });
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.restoreSession, false, 'a v2 opt-out is respected forever');
+    assert.equal(result.version, 2);
+    // No migration → no row rewrite at load (the seeded payload is untouched).
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.restoreSession, false);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('v1→v2 migration — a version-less row cannot prove v2 and migrates', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ homePage: 'https://kept.example.com/', restoreSession: false });
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.restoreSession, true);
+    assert.equal(result.version, 2);
+    assert.equal(result.homePage, 'https://kept.example.com/');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('v1→v2 migration — legacy settings.json (v1) imports with the new default', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // A pre-0.10 file predates restoreSession entirely — the absent key fills
+    // from DEFAULTS (true) and the imported row is stamped v2.
+    const legacy = JSON.stringify({ version: 1, homePage: 'https://legacy.example.com/' });
+    fs.writeFileSync(path.join(dir, 'settings.json'), legacy, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.restoreSession, true);
+    assert.equal(result.version, 2);
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.version, 2);
+    assert.equal(row.restoreSession, true);
   } finally {
     appDb.close();
     removeTempDir(dir);
