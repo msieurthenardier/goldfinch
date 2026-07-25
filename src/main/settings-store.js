@@ -45,13 +45,16 @@ const appDb = require('./app-db');
 
 /** @type {Settings} */
 const DEFAULTS = {
-  version: 1,
+  // v2 (issue #117): the restoreSession default flipped false → true. Stored
+  // rows with version < 2 pass through migrateStored() below before repair.
+  version: 2,
   homePage: 'https://www.google.com',
   toolbarPins: { media: true, shields: true, devtools: false },
   // Automation surface gating (Flight 4). off-by-default: the MCP surface binds
   // under --automation-dev but the auth gate 401s everything until this is true
   // AND a valid key is presented. Additive keys — no schema version bump (load()
-  // merges over Object.keys(DEFAULTS) with no version-gated migration).
+  // merges over Object.keys(DEFAULTS); the version ladder in migrateStored()
+  // exists only for changed defaults on EXISTING keys, never for additive ones).
   automationEnabled: false,
   // jarId → SHA-256 hex hash of that jar's automation key (DD5). Plaintext keys
   // are never persisted — only their hashes live here.
@@ -70,12 +73,16 @@ const DEFAULTS = {
   // layer in main.js (setSpellCheckerLanguages), never in the WebContentsView's webPreferences
   // (immutable after construction), so the toggle can reach already-open tabs.
   spellcheck: false,
-  // Restore session on startup (M09 Flight 9 / DD7). Opt-in, default OFF: with it
-  // off, startup is behaviorally byte-identical to today (the mission's absolute
-  // regression baseline). Follows the automationEnabled template — an explicit
-  // strict-boolean validator (NOT spellcheck's typeof-fallback). Additive, no schema
-  // version bump. Read directly by main at whenReady (startup-only, no live side-effect).
-  restoreSession: false,
+  // Restore session on startup (M09 Flight 9 / DD7; default flipped ON by
+  // issue #117 — shipping it off meant no snapshot was ever captured, so a lost
+  // session was unrecoverable, and the M09 "regression baseline" rationale for
+  // default-off is superseded). The v1 → v2 step in migrateStored() discards the
+  // serializer-frozen `false` from v1 rows so the flip reaches existing profiles.
+  // Follows the automationEnabled template — an explicit strict-boolean validator
+  // (NOT spellcheck's typeof-fallback). Read directly by main at whenReady
+  // (startup-only, no live side-effect); a clean-start-per-launch preference is
+  // the Settings → Startup toggle.
+  restoreSession: true,
   // Vault idle auto-lock timeout, in minutes (Mission 12 Flight 1 / Leg 2). The
   // password-manager MRK auto-locks after this many minutes of inactivity. Additive
   // integer key — no schema version bump; follows the automationPort integer-range
@@ -238,18 +245,53 @@ function repairConfig(stored) {
   return merged;
 }
 
+// ---------------------------------------------------------------------------
+// Version-gated migration ladder (cumulative steps, run before repairConfig).
+//
+// v1 → v2 (issue #117): the restoreSession default flipped false → true. save()
+// has always serialized the WHOLE config object, so every v1 row touched by any
+// set() carries an explicit `restoreSession: false` stamped by the serializer —
+// indistinguishable from a deliberate opt-out. The step discards the stored
+// value so the key refills from DEFAULTS (true). Accepted trade-off (issue
+// #117): a deliberate 0.10–0.11 opt-out is overridden once; the toggle remains.
+// ---------------------------------------------------------------------------
+
 /**
- * Deserialize + repair raw bytes (a document row payload or legacy JSON file
- * contents). NEVER throws — a deserialize failure (corrupt bytes) repairs to
- * fresh defaults, same as today's corrupt-file handling.
+ * @param {any} stored — the deserialized row/legacy payload, pre-repair
+ * @returns {{ stored: any, migrated: boolean }}
+ */
+function migrateStored(stored) {
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+    return { stored, migrated: false };
+  }
+  // An absent/non-integer version cannot prove v2 — treat as v1 (migrate).
+  const from =
+    typeof stored.version === 'number' && Number.isInteger(stored.version)
+      ? stored.version
+      : 1;
+  if (from >= DEFAULTS.version) {
+    return { stored, migrated: false };
+  }
+  const next = { ...stored };
+  // v1 → v2: discard restoreSession (repairConfig refills it from DEFAULTS).
+  delete next.restoreSession;
+  next.version = DEFAULTS.version;
+  return { stored: next, migrated: true };
+}
+
+/**
+ * Deserialize + migrate + repair raw bytes (a document row payload or legacy
+ * JSON file contents). NEVER throws — a deserialize failure (corrupt bytes)
+ * repairs to fresh defaults, same as today's corrupt-file handling.
  * @param {string} raw
- * @returns {Settings}
+ * @returns {{ config: Settings, migrated: boolean }}
  */
 function parseAndRepair(raw) {
   try {
-    return repairConfig(codec.deserialize(raw));
+    const { stored, migrated } = migrateStored(codec.deserialize(raw));
+    return { config: repairConfig(stored), migrated };
   } catch {
-    return freshDefaults();
+    return { config: freshDefaults(), migrated: false };
   }
 }
 
@@ -281,7 +323,18 @@ function load(userDataPath, opts = {}) {
   const row = docStore.read();
 
   if (row !== null) {
-    config = parseAndRepair(row);
+    const parsed = parseAndRepair(row);
+    config = parsed.config;
+    if (parsed.migrated) {
+      // One-time persist of the migrated (version-stamped) row. Best-effort
+      // inside load()'s never-throw contract — on a failed write the idempotent
+      // ladder simply re-runs at the next load.
+      try {
+        save(config);
+      } catch {
+        // best-effort — the in-memory config is already migrated.
+      }
+    }
     return config;
   }
 
@@ -289,7 +342,7 @@ function load(userDataPath, opts = {}) {
     const file = path.join(dir, 'settings.json');
     if (fs.existsSync(file)) {
       const raw = fs.readFileSync(file, 'utf8');
-      config = parseAndRepair(raw);
+      config = parseAndRepair(raw).config;
       // One-time migration: the repaired result becomes the row (even a
       // corrupt legacy file migrates its repaired-to-defaults result — DD5),
       // then the legacy file is renamed to mark it superseded.
