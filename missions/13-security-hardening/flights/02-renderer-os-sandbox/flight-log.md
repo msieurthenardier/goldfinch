@@ -4,7 +4,7 @@
 
 ## Summary
 
-Planning complete; execution not started. Branch `flight/02-renderer-os-sandbox` is stacked on flight 1 (`flight/01-cross-jar-fetch-isolation`).
+**Landed 2026-07-25.** Both legs completed; commit `e0d9753` (stacked on flight 1). Web guests + the two overlay preloads now run `sandbox:true`, delivered via a new esbuild preload-bundling step (gitignored, regenerated at every entry). Chrome view deferred (mission Known Issue). Full gate green (2830 tests, lint, typecheck). FD live: farbling + media scan work under sandbox; `/proc` diff confirms the guest renderer is OS-sandboxed (NoNewPrivs:1, +1 seccomp filter, distinct userns). No deviations. **[COMPLETE:flight]**
 
 ---
 
