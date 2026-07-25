@@ -41,6 +41,8 @@ function registerAppLifecycle({
   isInternalContents,
   createMediaProxyHandler,
   parseMediaProxyUrl,
+  isSafeTabUrl,
+  isInternalPageUrl,
   createWindow,
   registry,
   isMcpAutomationEnabled,
@@ -71,6 +73,45 @@ function registerAppLifecycle({
   logger = console,
 }) {
   app.on('session-created', sessionRuntime.onSessionCreated);
+
+  // Mission 13 Flight 3 / Leg 3 (DD3, AC2): every webContents (chrome, overlays,
+  // sheets, DevTools frontend, the built-in PDF viewer) gets a window-open denial
+  // and a navigation guard — a catch-all net beneath the explicit guest wiring.
+  // Registered at TOP-LEVEL scope (not inside app.whenReady().then(...)) because
+  // createWindow() runs inside whenReady and constructs the first chrome view —
+  // a listener attached only after whenReady would miss that first webContents.
+  //
+  // Latch semantics (design review, MEDIUM — the crux of this leg): this event
+  // fires SYNCHRONOUSLY during `new WebContentsView()`, before wireGuestContents
+  // runs, so at ATTACH time this handler cannot yet tell a future guest tab from
+  // a chrome/overlay view. Its listeners are additive and stay attached to guest
+  // contents for their whole lifetime. So the guard reads the
+  // `__goldfinchNavGuarded` latch INSIDE the handler (not at attach time) and
+  // early-returns for guests — wireGuestContents sets that latch synchronously
+  // before any navigation can occur, so by the time any 'will-navigate' /
+  // 'will-frame-navigate' / 'will-redirect' actually fires, the latch is already
+  // set for every guest. Skipping this and unconditionally guarding here would
+  // fire on every real guest navigation and break web browsing wholesale.
+  //
+  // `setWindowOpenHandler` is a setter (last call wins), so the guest's own
+  // handler — installed later by wireGuestContents — safely overrides this
+  // catch-all's deny; no clobber risk there.
+  const ALLOWED_NONGUEST_SCHEMES = ['devtools:', 'file:', 'chrome-extension:', 'about:'];
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    const guard = (event) => {
+      if (contents.__goldfinchNavGuarded) return; // guests: own predicate already covers them
+      const url = event.url || '';
+      if (isSafeTabUrl(url) || isInternalPageUrl(url)) return;
+      // DevTools frontend, extension pages, file:/source-map links, and about:
+      // are trusted non-guest surfaces — blocking these breaks DevTools/PDF viewer.
+      if (ALLOWED_NONGUEST_SCHEMES.some((scheme) => url.startsWith(scheme))) return;
+      event.preventDefault();
+    };
+    contents.on('will-navigate', guard);
+    contents.on('will-frame-navigate', guard);
+    contents.on('will-redirect', guard);
+  });
 
   ipcMain.handle('window-boot-config', (event) => {
     const rec = registry.getWindowForChrome(event.sender);

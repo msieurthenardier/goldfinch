@@ -2,7 +2,23 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { registerAppLifecycle } = require('../../src/main/app-lifecycle');
+
+// Mission 13 Flight 3 / Leg 3 (DD3, AC2/AC3): a minimal webContents double for the
+// web-contents-created catch-all tests — just enough EventEmitter + setWindowOpenHandler
+// surface to drive will-navigate/will-frame-navigate/will-redirect and read the result.
+class FakeWebContents extends EventEmitter {
+  constructor() {
+    super();
+    this.openHandler = null;
+  }
+  setWindowOpenHandler(fn) { this.openHandler = fn; }
+}
+
+function navEvent(url) {
+  return { url, prevented: false, preventDefault() { this.prevented = true; } };
+}
 
 function makeHarness({ restore = null, platform = 'linux', dev = false, automationEnabled = false, hygieneMarker = null } = {}) {
   const events = [];
@@ -103,6 +119,12 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
       return mediaProxyHandlerFn;
     },
     parseMediaProxyUrl: parseMediaProxyUrlFake,
+    // Mission 13 Flight 3 / Leg 3 (DD3, AC2): the web-contents-created catch-all's
+    // scheme predicates. Mirrors the real url-safety module closely enough for the
+    // catch-all tests below (http/https/about:blank safe; goldfinch://settings the
+    // one internal page exercised).
+    isSafeTabUrl: (url) => typeof url === 'string' && (/^https?:\/\//.test(url) || url === 'about:blank'),
+    isInternalPageUrl: (url) => typeof url === 'string' && url.startsWith('goldfinch://settings'),
     createWindow: (options) => {
       const rec = { options, win: { id: created.length + 10 } };
       created.push(rec);
@@ -196,6 +218,68 @@ test('ready path preserves store/session initialization order and default window
   assert.equal(h.events.includes('create-window:undefined'), true);
   assert.equal(h.appListeners.has('activate'), true);
   assert.equal(h.appListeners.has('session-created'), true);
+});
+
+test('web-contents-created catch-all is registered at TOP-LEVEL scope, before whenReady resolves (Mission 13 F3 Leg 3 / DD3)', () => {
+  const h = makeHarness();
+  // Registered synchronously by registerAppLifecycle itself — NOT deferred into
+  // the whenReady().then(...) continuation, since createWindow() (which makes the
+  // first chrome webContents) runs inside that continuation and a late listener
+  // would miss it.
+  assert.equal(h.appListeners.has('web-contents-created'), true);
+});
+
+test('web-contents-created catch-all denies window-open and blocks a non-guest navigation to a remote unsafe scheme (Mission 13 F3 Leg 3 / AC2)', () => {
+  const h = makeHarness();
+  const onWebContentsCreated = h.appListeners.get('web-contents-created');
+  const contents = new FakeWebContents();
+  onWebContentsCreated(null, contents);
+
+  assert.equal(typeof contents.openHandler, 'function');
+  assert.deepEqual(contents.openHandler(), { action: 'deny' }, 'setWindowOpenHandler must deny by default');
+
+  for (const eventName of ['will-navigate', 'will-frame-navigate', 'will-redirect']) {
+    const event = navEvent('javascript:alert(1)');
+    contents.emit(eventName, event);
+    assert.equal(event.prevented, true, `${eventName} to a remote unsafe scheme must be prevented`);
+  }
+});
+
+test('web-contents-created catch-all allows devtools:/file:/chrome-extension:/about: navigations (Mission 13 F3 Leg 3 / AC2 — DevTools/PDF viewer must not break)', () => {
+  const h = makeHarness();
+  const onWebContentsCreated = h.appListeners.get('web-contents-created');
+  const contents = new FakeWebContents();
+  onWebContentsCreated(null, contents);
+
+  for (const url of [
+    'devtools://devtools/bundled/inspector.html',
+    'file:///home/user/downloaded.pdf',
+    'chrome-extension://abcdefg/panel.html',
+    'about:blank'
+  ]) {
+    const event = navEvent(url);
+    contents.emit('will-navigate', event);
+    assert.equal(event.prevented, false, `${url} must not be blocked`);
+  }
+});
+
+test('web-contents-created catch-all early-returns for a latched guest, even on an https navigation (Mission 13 F3 Leg 3 / AC3)', () => {
+  const h = makeHarness();
+  const onWebContentsCreated = h.appListeners.get('web-contents-created');
+  const contents = new FakeWebContents();
+  // Simulates wireGuestContents having already set the latch (it fires
+  // synchronously, before the guest's own listeners could possibly run) —
+  // the catch-all must defer entirely to the guest's own predicate.
+  contents.__goldfinchNavGuarded = true;
+  onWebContentsCreated(null, contents);
+
+  const event = navEvent('https://example.test/');
+  contents.emit('will-navigate', event);
+  assert.equal(event.prevented, false, 'a latched guest must never be blocked by the catch-all');
+
+  const unsafeButLatched = navEvent('javascript:alert(1)');
+  contents.emit('will-navigate', unsafeButLatched);
+  assert.equal(unsafeButLatched.prevented, false, 'the latch early-returns unconditionally — enforcement is the guest\'s own job');
 });
 
 test('media proxy handler is built with the threaded deps and registered on the DEFAULT session only (Mission 13 F1 Leg 2 / DD2/AC2)', async () => {

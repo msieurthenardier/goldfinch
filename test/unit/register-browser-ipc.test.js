@@ -122,17 +122,27 @@ test('window actions derive authority from the sender and container creation bro
   assert.deepEqual(h.events, [['minimize']]);
   h.events.length = 0;
   assert.equal(await h.handlers.get('new-container-create')({}, null), null);
-  assert.deepEqual(await h.handlers.get('new-container-create')({}, { name: 'Work' }), { id: 'new', name: 'Work' });
+  // Leg 2 (F3 DD2, AC2/AC5): INVERTED — a bare `{}` sender (no chrome identity)
+  // now refuses. This was the succeeds-with-{}-sender pin the leg exists to close.
+  assert.equal(await h.handlers.get('new-container-create')({}, { name: 'Work' }), null,
+    'a non-chrome sender is refused, even with a well-formed payload');
+  assert.deepEqual(h.events, [], 'no jars-changed broadcast on a refused create');
+  // The legitimate chrome sender still succeeds (AC6 — no regression).
+  assert.deepEqual(await h.handlers.get('new-container-create')({ sender: h.chromeSender }, { name: 'Work' }), { id: 'new', name: 'Work' });
   assert.deepEqual(h.events, [['jars-changed']]);
 });
 
 test('browser target guards and page-context allowlist refuse malformed/internal requests', async () => {
   const h = makeHarness();
-  assert.equal(await h.handlers.get('get-zoom')({}, null), null);
-  assert.equal(await h.handlers.get('toggle-devtools')({}, { webContentsId: 6 }), false);
-  await h.handlers.get('page-context-action')({}, { webContentsId: 5, action: 'destroy' });
+  // Leg 2 (F3 DD2, AC2): these channels now also require a chrome sender — a
+  // real chrome sender is used here so the pre-existing target/internal guard
+  // assertions below stay meaningful (AC6 — no legitimate caller breaks).
+  const chromeEvent = { sender: h.chromeSender };
+  assert.equal(await h.handlers.get('get-zoom')(chromeEvent, null), null);
+  assert.equal(await h.handlers.get('toggle-devtools')(chromeEvent, { webContentsId: 6 }), false);
+  await h.handlers.get('page-context-action')(chromeEvent, { webContentsId: 5, action: 'destroy' });
   assert.deepEqual(h.events, []);
-  await h.handlers.get('page-context-action')({}, { webContentsId: 5, action: 'copy' });
+  await h.handlers.get('page-context-action')(chromeEvent, { webContentsId: 5, action: 'copy' });
   assert.deepEqual(h.events, [['copy']]);
 
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, null), {
@@ -141,6 +151,21 @@ test('browser target guards and page-context allowlist refuse malformed/internal
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, { jarId: 'personal', url: 'javascript:bad' }), {
     ok: false, error: 'open-tab-in-jar — bad-args'
   });
+});
+
+// Leg 2 (F3 DD2, AC2/AC5): a non-chrome sender is refused across the browser
+// chrome-trust channels — demonstrated against otherwise-VALID targets/payloads
+// (the same ones the previous test's chrome-sender calls succeed against), so
+// the refusal is attributable to the sender gate and not to a bad target.
+test('AC2/AC5: a non-chrome sender is refused across the browser chrome-trust channels', async () => {
+  const h = makeHarness();
+  assert.equal(await h.handlers.get('get-zoom')({}, { webContentsId: 5 }), null,
+    'a valid external target is still refused without a chrome sender');
+  assert.equal(await h.handlers.get('toggle-devtools')({}, { webContentsId: 5 }), false);
+  await h.handlers.get('page-context-action')({}, { webContentsId: 5, action: 'copy' });
+  assert.deepEqual(h.events, [], 'a non-chrome sender cannot dispatch a page-context action against a valid target');
+  h.listeners.get('rescan-media')({}, { wcId: 5 });
+  assert.deepEqual(h.events, [], 'rescan-media refuses a non-chrome sender');
 });
 
 test('vault capture: an offer forwards to the owning chrome (no password on the wire); a dropped gate forwards nothing', () => {

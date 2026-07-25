@@ -1,19 +1,24 @@
 // @ts-check
 'use strict';
 
-const SENSITIVE_PERMISSIONS = new Set([
-  'media',
-  'geolocation',
-  'notifications',
-  'midi',
-  'midiSysex',
-  'clipboard-read',
-  'hid',
-  'serial',
-  'usb',
-  'bluetooth',
-  'idle-detection',
-  'display-capture'
+// Positive allowlist: only permissions listed here are granted; everything
+// else — including permission strings that don't exist yet — is denied by
+// default. Electron 43's setPermissionRequestHandler and
+// setPermissionCheckHandler each take a DIFFERENT union of permission
+// strings (e.g. 'window-management'/'speaker-selection' are request-only;
+// 'hid'/'serial'/'usb' are check-only). This one Set is intentionally
+// shared by both handlers below — do not "fix" the apparent asymmetry by
+// splitting it; a permission irrelevant to one handler's union is simply
+// never asked of it.
+const ALLOWED_PERMISSIONS = new Set([
+  'fullscreen',
+  'clipboard-sanitized-write',
+  'pointerLock',
+  'mediaKeySystem',
+  'storage-access',
+  'top-level-storage-access',
+  'speaker-selection',
+  'window-management'
 ]);
 
 /**
@@ -225,14 +230,14 @@ function createSessionRuntime(deps) {
     });
 
     session.setPermissionRequestHandler((webContents, permission, callback) => {
-      const granted = !SENSITIVE_PERMISSIONS.has(permission);
+      const granted = ALLOWED_PERMISSIONS.has(permission);
       const webContentsId = webContents ? webContents.id : null;
       const chrome = webContentsId != null ? chromeForTab(webContentsId) : null;
       chrome?.send('privacy-permission', { webContentsId, permission, granted });
       callback(granted);
     });
     session.setPermissionCheckHandler((_webContents, permission) =>
-      !SENSITIVE_PERMISSIONS.has(permission));
+      ALLOWED_PERMISSIONS.has(permission));
   }
 
   function onSessionCreated(session) {

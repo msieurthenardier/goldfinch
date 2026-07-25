@@ -1,16 +1,16 @@
 # Flight: Policy and IPC Hardening Batch
 
-**Status**: ready
+**Status**: landed
 
 > Architect design review: **approve with changes** (2026-07-25) — incorporated: HIGH `tab-navigate` internal-tab regression (branch trusted/web like guest-wiring, not unconditional isSafeTabUrl); MED owning-chrome tightening on wcId-scoped channels; MED `web-contents-created` latch must be read *inside* the handler (else guest browsing breaks); MED nav guards are a live behavior change (non-http redirect divert trigger + real cross-scheme redirect in the live pass); permission-union asymmetry note; leg split (mechanical IPC vs live-behavior permission/nav). Autonomous phase-gate progression pre-authorized (issue #131 directive).
 **Mission**: [Web-Content Security Hardening](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Permission requests are governed by a positive allowlist: any permission string not explicitly enumerated — including ones that don't exist yet — is denied, and a unit test proves an invented permission denies. The chrome privacy indicator keeps receiving grant/deny events. *(finding 2)*
-- [ ] Every chrome-trust IPC channel either verifies its sender is a chrome renderer (or documents why it can't), and `tab-navigate`'s URL argument passes the same safety gate as every other navigation entry point. A test asserts a non-chrome sender is refused on a representative channel. *(finding 4)*
-- [ ] Subframe navigations and server-side redirects are subject to the same URL-safety predicate as top-level navigations, and every webContents in the app — chrome, overlays, sheets, DevTools — has a window-open denial handler and a navigation guard. *(finding 5)*
-- [ ] The vault-capture path either ignores synthetic (page-dispatched) submit events, or the accepted-tradeoff note explicitly covers the update-disposition case. *(finding 6)*
+- [x] Permission requests are governed by a positive allowlist: any permission string not explicitly enumerated — including ones that don't exist yet — is denied, and a unit test proves an invented permission denies. The chrome privacy indicator keeps receiving grant/deny events. *(finding 2)*
+- [x] Every chrome-trust IPC channel either verifies its sender is a chrome renderer (or documents why it can't), and `tab-navigate`'s URL argument passes the same safety gate as every other navigation entry point. A test asserts a non-chrome sender is refused on a representative channel. *(finding 4)*
+- [x] Subframe navigations and server-side redirects are subject to the same URL-safety predicate as top-level navigations, and every webContents in the app — chrome, overlays, sheets, DevTools — has a window-open denial handler and a navigation guard. *(finding 5)*
+- [x] The vault-capture path either ignores synthetic (page-dispatched) submit events, or the accepted-tradeoff note explicitly covers the update-disposition case. *(finding 6)*
 
 ---
 
@@ -62,16 +62,16 @@ Close the four remaining audit findings — mostly mechanical defense-in-depth w
 ### Prerequisites
 
 - [x] Flights 1 & 2 landed (branch stacked); `npm test` green
-- [ ] Live apparatus for the permission empirical pass + nav-guard behavior test (`dev:automation` + real pages) — verified at execution
+- [x] Live apparatus for the permission empirical pass + nav-guard behavior test (`dev:automation` + real pages) — verified at execution
 - [x] Recon complete (flight log): full IPC inventory, permission unions, nav-guard gaps, vault listener
 
 ### Pre-Flight Checklist
 
 - [x] Open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (live apparatus at execution)
+- [x] Prerequisites verified (live apparatus at execution)
 - [x] Validation approach defined
-- [ ] Legs defined (pending design review)
+- [x] Legs defined (pending design review)
 
 ---
 
@@ -83,11 +83,11 @@ Main-process policy edits (permission allowlist, IPC sender gate + `tab-navigate
 
 ### Checkpoints
 
-- [ ] Permission handler is a positive allowlist; invented permission denies (unit); privacy indicator still fed; real pages don't regress (FD live)
-- [ ] Unguarded chrome-trust channels validate the sender; `tab-navigate` applies `isSafeTabUrl`; representative refusal tests pass
-- [ ] Subframe + redirect navigations enforce the predicate; every webContents has a window-open denial + nav guard
-- [ ] Vault-capture ignores synthetic submits
-- [ ] Full gate green; relevant behavior tests pass
+- [x] Permission handler is a positive allowlist; invented permission denies (unit); privacy indicator still fed; real pages don't regress (FD live)
+- [x] Unguarded chrome-trust channels validate the sender; `tab-navigate` applies `isSafeTabUrl`; representative refusal tests pass
+- [x] Subframe + redirect navigations enforce the predicate; every webContents has a window-open denial + nav guard
+- [x] Vault-capture ignores synthetic submits
+- [x] Full gate green; relevant behavior tests pass
 
 ### Adaptation Criteria
 
@@ -105,9 +105,9 @@ Main-process policy edits (permission allowlist, IPC sender gate + `tab-navigate
 
 > Leg split (design review): the mechanical IPC-sender work is separated from the two live-behavior-change items (permission allowlist, nav guards) so a live-verification regression in one doesn't entangle the already-unit-verified other.
 
-- [ ] `permission-allowlist` — invert to positive allowlist (DD1); unit (invented-denies + granted) + **FD empirical real-page pass** (must include a File System Access API site + an `openExternal`/registered-protocol flow, not just the named sharp edges). *(live behavior change)*
-- [ ] `ipc-sender-and-vault-guard` — `requireChrome`/owning-chrome gate across the unguarded chrome-trust channels + the trusted-vs-web-branched URL gate on `tab-navigate` (DD2), plus the vault-capture `isTrusted` guard (DD4, one line, self-contained). Pure unit work — mechanical, no live verification needed. Invert the `new-container-create` no-check test pin; add `loadURL` web + internal-tab cases; representative refusal tests.
-- [ ] `nav-guards` — `will-frame-navigate`/`will-redirect` on guests + `web-contents-created` catch-all with the read-inside-handler latch (DD3); unit (subframe/redirect enforce predicate; guest https→https NOT blocked; non-guest view denied); **FD live pass** extending `tab-scheme-guard.md` with subframe + a real cross-scheme redirect. *(live behavior change — the riskiest leg)*
+- [x] `permission-allowlist` — invert to positive allowlist (DD1); unit (invented-denies + granted) + **FD empirical real-page pass** (must include a File System Access API site + an `openExternal`/registered-protocol flow, not just the named sharp edges). *(live behavior change)*
+- [x] `ipc-sender-and-vault-guard` — `requireChrome`/owning-chrome gate across the unguarded chrome-trust channels + the trusted-vs-web-branched URL gate on `tab-navigate` (DD2), plus the vault-capture `isTrusted` guard (DD4, one line, self-contained). Pure unit work — mechanical, no live verification needed. Invert the `new-container-create` no-check test pin; add `loadURL` web + internal-tab cases; representative refusal tests.
+- [x] `nav-guards` — `will-frame-navigate`/`will-redirect` on guests + `web-contents-created` catch-all with the read-inside-handler latch (DD3); unit (subframe/redirect enforce predicate; guest https→https NOT blocked; non-guest view denied); **FD live pass** extending `tab-scheme-guard.md` with subframe + a real cross-scheme redirect. *(live behavior change — the riskiest leg)*
 
 ---
 
@@ -115,10 +115,10 @@ Main-process policy edits (permission allowlist, IPC sender gate + `tab-navigate
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged (branch `flight/03-policy-and-ipc-hardening`, `flight/03: …` + `Mission: 13`)
-- [ ] Tests passing (`npm test`, lint, typecheck)
-- [ ] Documentation updated (CLAUDE.md permission-policy + IPC-sender + nav-guard invariants if the existing notes drift)
+- [x] All legs completed
+- [x] Code merged (branch `flight/03-policy-and-ipc-hardening`, `flight/03: …` + `Mission: 13`)
+- [x] Tests passing (`npm test`, lint, typecheck)
+- [x] Documentation updated (CLAUDE.md permission-policy + IPC-sender + nav-guard invariants if the existing notes drift)
 
 ### Verification
 

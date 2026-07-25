@@ -1286,6 +1286,7 @@ registerTabIpc({
   getHistoryRecorder: () => historyRecorder,
   faviconFetcher,
   isSafeTabUrl,
+  isInternalPageUrl,
   reopenStripIndex,
   webContents,
   isInternalContents,
@@ -1711,6 +1712,13 @@ registerAppLifecycle({
   isInternalContents,
   createMediaProxyHandler,
   parseMediaProxyUrl,
+  // Mission 13 Flight 3 / Leg 3 (DD3): threaded so the web-contents-created
+  // catch-all can apply the same session-aware URL-safety predicates as the
+  // explicit guest wiring, without app-lifecycle.js gaining a require() of
+  // its own (Electron-free, deps-injected by design). Already imported at
+  // the top of this file and already threaded into registerTabIpc above.
+  isSafeTabUrl,
+  isInternalPageUrl,
   createWindow,
   registry,
   isMcpAutomationEnabled,

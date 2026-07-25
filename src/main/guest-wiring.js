@@ -63,6 +63,15 @@ function createGuestWiring(deps) {
   }
 
   function wireGuestContents(contents) {
+    // Mission 13 Flight 3 / Leg 3 (DD3, AC3): set the latch synchronously, before
+    // any navigation can occur, so the app-lifecycle web-contents-created catch-all
+    // (which cannot yet distinguish this guest from a chrome/overlay view at ITS
+    // attach time — that fires during `new WebContentsView()`, before this function
+    // runs) reads the latch INSIDE its own handler and early-returns for guests.
+    // A future `await` inserted between `new WebContentsView()` and this call would
+    // reopen the race the latch closes — keep this assignment first and synchronous.
+    contents.__goldfinchNavGuarded = true;
+
     contents.setWindowOpenHandler(({ url }) => {
       const owner = registry.getWindowForGuest(contents.id);
       const openerPartition = owner ? owner.tabViews.get(contents.id)?.partition : undefined;
@@ -70,13 +79,23 @@ function createGuestWiring(deps) {
       return { action: 'deny' };
     });
 
-    contents.on('will-navigate', (event, url) => {
+    // Mission 13 Flight 3 / Leg 3 (DD3, AC1): session-aware predicate shared by
+    // top-frame navigations, subframe navigations, and redirects. All three events
+    // read `event.url` — `will-frame-navigate` passes a SINGLE merged Event (no
+    // positional url arg); `will-navigate`/`will-redirect` also expose `event.url`
+    // on the same event object. Reading a positional second argument here would
+    // read `undefined` for will-frame-navigate and preventDefault on every subframe
+    // navigation, breaking ordinary browsing.
+    const guardNav = (event) => {
       if (contents.session?.__goldfinchInternal) {
-        if (!isInternalPageUrl(url)) event.preventDefault();
-      } else if (!isSafeTabUrl(url)) {
+        if (!isInternalPageUrl(event.url)) event.preventDefault();
+      } else if (!isSafeTabUrl(event.url)) {
         event.preventDefault();
       }
-    });
+    };
+    contents.on('will-navigate', guardNav);
+    contents.on('will-frame-navigate', guardNav);
+    contents.on('will-redirect', guardNav);
 
     if (contents.session?.__goldfinchInternal) {
       contents.on('before-input-event', (event, input) => {
