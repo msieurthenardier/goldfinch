@@ -35,8 +35,8 @@ The audit also verified several subsystems as strong (MCP automation auth, vault
 - [x] Every chrome-trust IPC channel either verifies its sender is a chrome renderer (or documents why it can't), and `tab-navigate`'s URL argument passes the same safety gate as every other navigation entry point. A test asserts a non-chrome sender is refused on a representative channel. *(finding 4)*
 - [x] Subframe navigations and server-side redirects are subject to the same URL-safety predicate as top-level navigations, and every webContents in the app — chrome, overlays, sheets, DevTools — has a window-open denial handler and a navigation guard. *(finding 5)*
 - [x] The vault-capture path either ignores synthetic (page-dispatched) submit events, or the accepted-tradeoff note explicitly covers the update-disposition case. *(finding 6)*
-- [ ] The security posture record (CLAUDE.md architecture notes) reflects the new invariants: sandbox ruling documented next to the existing `contextIsolation` note; no stale claims remain.
-- [ ] Full regression net stays green: `npm test`, `npm run lint`, `npm run typecheck` all pass at mission end.
+- [x] The security posture record (CLAUDE.md architecture notes) reflects the new invariants: sandbox ruling documented next to the existing `contextIsolation` note; no stale claims remain.
+- [x] Full regression net stays green: `npm test`, `npm run lint`, `npm run typecheck` all pass at mission end.
 
 ## Stakeholders
 

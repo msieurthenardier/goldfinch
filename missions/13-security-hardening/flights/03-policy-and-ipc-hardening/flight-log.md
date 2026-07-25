@@ -4,7 +4,7 @@
 
 ## Summary
 
-Planning complete. Branch `flight/03-policy-and-ipc-hardening` stacked on flight 2. Covers audit findings 2 (permission allowlist), 4 (IPC sender + tab-navigate URL), 5 (nav guards), 6 (vault isTrusted).
+**Landed 2026-07-25.** All three legs completed; commit `e7229a4` (stacked on flight 2). Findings 2 (permission allowlist), 4 (IPC sender validation + branched tab-navigate URL gate), 5 (subframe/redirect guards + web-contents-created catch-all), 6 (vault isTrusted) all closed. Full gate green (2840 tests, lint, typecheck). Live smoke: ordinary browsing (main-frame + http subframe) unaffected, DevTools opens. Design review caught two would-be regressions pre-implementation (HIGH tab-navigate internal-tab break; HIGH will-frame-navigate arg-shape bug). No deviations. **[COMPLETE:flight]**
 
 ---
 
