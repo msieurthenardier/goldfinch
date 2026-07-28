@@ -18,6 +18,7 @@
  * @typedef {{ isVisible?: () => boolean, getView?: () => any } | null | undefined} ManagerLike
  * @typedef {{ win: { id: number, [k: string]: any }, chromeView: { webContents: any, [k: string]: any }, tabViews?: Map<number, any>, activeTabWcId?: number | null, bootConfigServed?: boolean, findOverlay?: ManagerLike, sheet?: ManagerLike, [k: string]: any }} RecordLike
  * @typedef {{ windowId: number, chromeWcId: number, booted: boolean, activeTabWcId: number | null, lastFocused: boolean, sheetWcId?: number, sheetVisible: boolean, findWcId?: number, findVisible: boolean }} WindowCensusRow
+ * @typedef {{ popupWcId: number, openerWindowId: number, url: string, title: string }} PopupCensusEntry
  */
 
 /**
@@ -87,11 +88,23 @@ function viewVisible(mgr) {
  * `focused` would read as an OS-focus claim this codebase deliberately refuses to
  * make.
  *
+ * POPUP ENTRIES (M14 F2 L2, DD1a): after the window rows, the census APPENDS one
+ * entry per live script-opened popup — `{ popupWcId, openerWindowId, url,
+ * title }`. Mixed-shape by design: a popup entry carries NO `windowId` (a popup
+ * is not a browser window row), so every existing `find(r => r.windowId === …)`
+ * consumer (requireWindow, getChromeTarget) skips popups structurally.
+ * Consumers discriminate on `popupWcId` presence. The entries arrive PRE-BUILT
+ * from main.js (`popupEntries` — derived at call time from the live popup
+ * registry + webContents, the same zero-state discipline as the rows); this
+ * module stays Electron-free and only appends them. Absent/omitted → byte-
+ * identical pre-popup behavior (the house idiom).
+ *
  * @param {RecordLike[]} records  registry.records(), in INSERTION order
  * @param {RecordLike | null | undefined} lastFocusedRecord  registry.getLastFocused()'s return
- * @returns {WindowCensusRow[]}  one row per record, insertion order preserved
+ * @param {PopupCensusEntry[]} [popupEntries]  live popup entries, registration order
+ * @returns {(WindowCensusRow | PopupCensusEntry)[]}  one row per record (insertion order), then one entry per popup
  */
-function buildWindowCensus(records, lastFocusedRecord) {
+function buildWindowCensus(records, lastFocusedRecord, popupEntries) {
   const out = [];
   for (const rec of records || []) {
     if (!rec || !rec.win) continue;
@@ -113,6 +126,17 @@ function buildWindowCensus(records, lastFocusedRecord) {
     if (sheetWcId !== undefined) row.sheetWcId = sheetWcId;
     if (findWcId !== undefined) row.findWcId = findWcId;
     out.push(row);
+  }
+  // Popup entries LAST (see the doc block above) — appended verbatim, minimally
+  // shape-checked so a half-torn-down entry can never masquerade as a window row.
+  for (const p of popupEntries || []) {
+    if (!p || typeof p.popupWcId !== 'number') continue;
+    out.push({
+      popupWcId: p.popupWcId,
+      openerWindowId: p.openerWindowId,
+      url: p.url,
+      title: p.title,
+    });
   }
   return out;
 }

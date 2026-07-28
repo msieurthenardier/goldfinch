@@ -217,3 +217,44 @@ test('absent authChallenges dep is tolerated on every hook (optional-chained)', 
     rec.win.emit('close');
   });
 });
+
+// ---------------------------------------------------------------------------
+// M14 F2 L1 (DD1f) — popup close-with-owner ordering.
+// ---------------------------------------------------------------------------
+
+test('window close runs popupRegistry.closeAllForRecord AFTER the auth cancel (pinned first) and BEFORE sheet/overlay teardown', () => {
+  const events = [];
+  let h = null;
+  const authChallenges = {
+    notifyWindowFocused: () => {},
+    notifySheetClosed: () => {},
+    cancelForWindow: (record) => events.push(['cancel-window', record.win.id]),
+  };
+  const popupRegistry = {
+    closeAllForRecord: (record) => events.push([
+      'close-popups',
+      record.win.id,
+      // ordering probes: the window-wide auth cancel already ran (DD1f rides
+      // BEHIND the unit-pinned cancelForWindow-first invariant), and no
+      // overlay teardown has run yet.
+      events.some((e) => e[0] === 'cancel-window'),
+      h.log.includes('find-teardown') || h.log.includes('sheet-close:teardown'),
+    ]),
+  };
+  h = createHarness({ authChallenges, popupRegistry });
+  const rec = h.factory.createWindow();
+  rec.win.emit('close');
+
+  const closePopups = events.find((e) => e[0] === 'close-popups');
+  assert.ok(closePopups, 'closeAllForRecord ran at window close');
+  assert.equal(closePopups[1], rec.win.id);
+  assert.equal(closePopups[2], true, 'auth cancelForWindow stays FIRST (unit-pinned invariant)');
+  assert.equal(closePopups[3], false, 'popups close before any sheet/overlay teardown');
+  assert.ok(h.log.includes('sheet-close:teardown'), 'the rest of the close path still runs');
+});
+
+test('absent popupRegistry dep is tolerated at window close (optional-chained)', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  assert.doesNotThrow(() => rec.win.emit('close'));
+});

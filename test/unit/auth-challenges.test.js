@@ -37,12 +37,19 @@ const FIXTURE_CERT = { subjectName: 'CN=Goldfinch Fixture Client', issuerName: '
 
 function makeHarness() {
   const guests = new Map(); // wcId -> record
+  const popupEntries = new Map(); // popupWcId -> PopupEntry (M14 F2 L2 popup routing)
   const presents = []; // every auth-challenge-present / cert-challenge-present send
   const registry = { getWindowForGuest: (id) => guests.get(id) || null };
   const chromeForTab = (wcId) => ({
     send: (channel, payload) => presents.push({ wcId, channel, payload }),
   });
-  const store = createAuthChallenges({ registry, chromeForTab, logger: { warn: () => {} } });
+  const store = createAuthChallenges({
+    registry,
+    chromeForTab,
+    // The main.js lazy-seam shape: getByWcId only.
+    popupRegistry: { getByWcId: (id) => popupEntries.get(id) || null },
+    logger: { warn: () => {} },
+  });
 
   let nextWinId = 1;
   function makeRecord({ wired = true } = {}) {
@@ -51,6 +58,14 @@ function makeHarness() {
       activeTabWcId: null,
       htmlFullscreen: null,
       sheet: null,
+    };
+    // M14 F2 L2: popup presentation resolves the record's OWN chrome directly
+    // (chromeForTab misses popups). Sends land in `presents` tagged via:'record'.
+    record.chromeView = {
+      webContents: {
+        isDestroyed: () => false,
+        send: (channel, payload) => presents.push({ via: 'record', winId: record.win.id, channel, payload }),
+      },
     };
     const sheet = {
       menu: null, // { menuType, token }
@@ -101,7 +116,30 @@ function makeHarness() {
     record.sheet.menu = { menuType: 'cert-picker', token: nextToken++ };
   }
 
-  return { store, presents, makeRecord, addGuest, challenge, certChallenge, openAuthSheet, openCertSheet, guests };
+  // M14 F2 L2 — popup harness half. addPopup registers a popup-registry entry
+  // WITHOUT a guests entry: getWindowForGuest must MISS (production shape —
+  // popups are never in tabViews) so routing provably comes from the registry.
+  function addPopup(record, popupWcId, { openerWcId = 900, partition = 'persist:jar-a' } = {}) {
+    popupEntries.set(popupWcId, { popupWcId, openerWcId, openerRecord: record, partition, win: {} });
+  }
+  function popupWc(popupWcId) {
+    return { id: popupWcId, session: {} };
+  }
+  // Enqueue a BASIC-AUTH challenge arriving from popup contents.
+  function popupChallenge(popupWcId, { url = 'http://127.0.0.1:8091/protected', realm = 'fixture', host = '127.0.0.1' } = {}) {
+    const cb = makeCallback();
+    store.handleLogin(popupWc(popupWcId), { url }, { isProxy: false, host, port: 8091, scheme: 'basic', realm }, cb);
+    return cb;
+  }
+  // Enqueue a CLIENT-CERT challenge arriving from popup contents.
+  function popupCertChallenge(popupWcId, { url = 'https://127.0.0.1:8493/', list } = {}) {
+    const cb = makeCallback();
+    cb.list = list || [FIXTURE_CERT];
+    store.handleSelectClientCertificate(popupWc(popupWcId), url, cb.list, cb);
+    return cb;
+  }
+
+  return { store, presents, makeRecord, addGuest, challenge, certChallenge, openAuthSheet, openCertSheet, guests, addPopup, popupChallenge, popupCertChallenge, popupEntries };
 }
 
 // The parametric kind table: shared-semantics tests run once per row (AC — the
@@ -697,4 +735,263 @@ test('source-scan: `challenge.callback` is read at exactly one site, inside reso
   // bypass the ledger).
   const bareInvocations = masked.match(/(?<![.\w$])callback\s*\(/g) || [];
   assert.equal(bareInvocations.length, 0, 'no bare callback(...) invocation anywhere — only the ledger answers it');
+});
+
+// ---------------------------------------------------------------------------
+// M14 F2 L2 — popup challenge matrix (DD1b as flight-log refined, kind-
+// agnostic). Popup challenges route popup-registry-FIRST to the OWNING record,
+// present on the record's OWN chrome with a `popup: true` payload field, are
+// eligible independent of activeTabWcId / opener liveness / occlusion, and
+// resolve-cancel on popup destroy ('tab-close' via the cancelChallengesForPopup
+// delegation), navigation-away ('navigated'), and opener re-key ('moved').
+// ---------------------------------------------------------------------------
+
+const POPUP_KINDS = [
+  {
+    kind: 'basic-auth',
+    menuType: 'auth-basic',
+    channel: 'auth-challenge-present',
+    enqueue: (h, popupWcId, opts) => h.popupChallenge(popupWcId, opts),
+    openSheet: (h, record) => h.openAuthSheet(record),
+  },
+  {
+    kind: 'client-cert',
+    menuType: 'cert-picker',
+    channel: 'cert-challenge-present',
+    enqueue: (h, popupWcId, opts) => h.popupCertChallenge(popupWcId, opts),
+    openSheet: (h, record) => h.openCertSheet(record),
+  },
+];
+
+for (const K of POPUP_KINDS) {
+  test(`[popup ${K.kind}] routes registry-first to the OWNING record and presents on the record's OWN chrome with popup: true`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10; // some unrelated active tab
+    h.addGuest(record, 10);
+    h.addPopup(record, 701, { openerWcId: 10 });
+    const cb = K.enqueue(h, 701);
+
+    assert.equal(h.presents.length, 1, 'presents immediately');
+    const p = h.presents[0];
+    assert.equal(p.via, 'record', 'presentation resolves record.chromeView.webContents directly — never chromeForTab(popup)');
+    assert.equal(p.winId, record.win.id);
+    assert.equal(p.channel, K.channel);
+    assert.equal(p.payload.wcId, 701);
+    assert.equal(p.payload.popup, true, 'the DD5 marker field rides the payload');
+    assert.deepEqual(cb.calls, [], 'pending, prompted');
+  });
+
+  test(`[popup ${K.kind}] eligibility is INDEPENDENT of activeTabWcId, opener-tab liveness (dead openerWcId), and popup occlusion`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 55; // popup's opener is NOT the active tab
+    // Dead opener: openerWcId 900 has no guest entry anywhere (the tolerated-
+    // dead-openerWcId seam) — eligibility must not consult it.
+    h.addPopup(record, 701, { openerWcId: 900 });
+    K.enqueue(h, 701);
+    assert.equal(h.presents.length, 1, 'presents with a foreign active tab and a dead opener');
+
+    // Occlusion/minimization of the POPUP window is not modeled by the store at
+    // all — structurally independent. Re-present after an occlusion close works
+    // through the standard triggers:
+    K.openSheet(h, record);
+    record.sheet.closeMenuOverlay('blur');
+    h.store.notifyWindowFocused(record);
+    assert.equal(h.presents.length, 2, 'occlusion close + refocus re-present, tab parity');
+  });
+
+  test(`[popup ${K.kind}] standard record-level gates still hold: fullscreen hold, open-menu hold, one presented per window`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.addPopup(record, 701, { openerWcId: 10 });
+
+    record.htmlFullscreen = { wcId: 10, savedBounds: {}, pendingBounds: null };
+    const cb = K.enqueue(h, 701);
+    assert.equal(h.presents.length, 0, 'held while the owner window is fullscreen');
+    record.htmlFullscreen = null;
+    record.sheet.menu = { menuType: 'kebab', token: 3 };
+    h.store.notifyFullscreenExited(record);
+    assert.equal(h.presents.length, 0, 'held while another menu is open');
+    record.sheet.menu = null;
+    h.store.notifyWindowFocused(record);
+    assert.equal(h.presents.length, 1, 'presents once the gates clear');
+    assert.deepEqual(cb.calls, []);
+  });
+
+  test(`[popup ${K.kind}] popup destroyed (the cancelChallengesForPopup delegation: cancelForTab 'tab-close') resolve-cancels queued + presented and closes the sheet`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.addPopup(record, 701, { openerWcId: 10 });
+    const cb1 = K.enqueue(h, 701); // presented
+    const cb2 = K.enqueue(h, 701); // queued behind it
+    K.openSheet(h, record);
+
+    // main.js's seam body, verbatim (the thin delegation).
+    h.store.cancelForTab(701, 'tab-close');
+    assert.deepEqual(cb1.calls, [[]], 'presented resolved exactly once');
+    assert.deepEqual(cb2.calls, [[]], 'queued sibling resolved too');
+    assert.deepEqual(record.sheet.closeCalls, ['tab-close'], 'visible sheet closed with a resolution-family reason');
+    // Idempotent second invocation (owner-close path double-fires the seam).
+    h.store.cancelForTab(701, 'tab-close');
+    assert.equal(cb1.calls.length + cb2.calls.length, 2);
+  });
+
+  test(`[popup ${K.kind}] opener re-key cancels with 'moved' — no hung callback across a cross-window move (cancel-on-rekey ruling)`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.addPopup(record, 701, { openerWcId: 10 });
+    const cb = K.enqueue(h, 701);
+    K.openSheet(h, record);
+    // register-tab-ipc's move hook: rekeyForRecord (registry-side) + this call.
+    h.store.cancelForTab(701, 'moved');
+    assert.deepEqual(cb.calls, [[]], 'resolved exactly once — never a strand, never a migration');
+    assert.deepEqual(record.sheet.closeCalls, ['tab-close'], 'sheet closes via the non-navigated mapping');
+  });
+
+  test(`[popup ${K.kind}] navigation-away ('navigated') cancels — DD2 max-staleness holds for popups`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    h.addPopup(record, 701, { openerWcId: 900 });
+    const cb = K.enqueue(h, 701);
+    K.openSheet(h, record);
+    h.store.cancelForTab(701, 'navigated');
+    assert.deepEqual(cb.calls, [[]]);
+    assert.deepEqual(record.sheet.closeCalls, ['navigation']);
+  });
+
+  test(`[popup ${K.kind}] cancelForWindow sweeps popup challenges with the whole queue (DD1f owner-close path)`, () => {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.addGuest(record, 10);
+    h.addPopup(record, 701, { openerWcId: 10 });
+    const tabCb = h.challenge(record, 10);
+    const popCb = K.enqueue(h, 701);
+    h.store.cancelForWindow(record);
+    assert.deepEqual(tabCb.calls, [[]]);
+    assert.deepEqual(popCb.calls, [[]], 'popup challenges die with the window — no popup awareness needed');
+  });
+}
+
+// Every DD2 bucket applies to popup challenges (AC4 parametric extension):
+// resolution reasons + the fail-safe unknown default resolve-cancel; occlusion
+// reasons survive and re-present. Kind-agnostic via POPUP_KINDS.
+for (const K of POPUP_KINDS) {
+  for (const reason of ['escape', 'outside-click', 'activated', 'tab-close', 'teardown', 'totally-unknown-reason']) {
+    test(`[popup ${K.kind}] sheet close '${reason}' maps to RESOLVE-CANCEL (exactly-once, fail-safe default included)`, () => {
+      const h = makeHarness();
+      const record = h.makeRecord();
+      h.addPopup(record, 701, { openerWcId: 900 });
+      const cb = K.enqueue(h, 701);
+      K.openSheet(h, record);
+      record.sheet.closeMenuOverlay(reason);
+      assert.deepEqual(cb.calls, [[]], `'${reason}' must cancel the popup challenge's callback`);
+      h.store.notifySheetClosed(record, K.menuType, reason);
+      assert.equal(cb.calls.length, 1, 'exactly once');
+    });
+  }
+
+  for (const reason of ['blur', 'superseded', 'tab-hide', 'tab-switch']) {
+    test(`[popup ${K.kind}] sheet close '${reason}' is OCCLUSION — the popup challenge survives and re-presents`, () => {
+      const h = makeHarness();
+      const record = h.makeRecord();
+      h.addPopup(record, 701, { openerWcId: 900 });
+      const cb = K.enqueue(h, 701);
+      K.openSheet(h, record);
+      record.sheet.closeMenuOverlay(reason);
+      assert.deepEqual(cb.calls, [], `'${reason}' must NOT resolve the callback`);
+      h.store.notifyWindowFocused(record);
+      assert.equal(h.presents.length, 2, 're-presents at the refocus trigger');
+      assert.equal(h.presents.at(-1).payload.popup, true, 'the re-present still carries the marker');
+    });
+  }
+}
+
+test('two popups from one opener: FIFO on the owning window single queue — one sheet at a time (leg edge case)', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  h.addPopup(record, 701, { openerWcId: 10 });
+  h.addPopup(record, 702, { openerWcId: 10 });
+  const cb1 = h.popupChallenge(701);
+  const cb2 = h.popupChallenge(702);
+  assert.equal(h.presents.length, 1, 'one prompt at a time');
+  assert.equal(h.presents[0].payload.wcId, 701, 'FIFO head first');
+  h.openAuthSheet(record);
+  record.sheet.closeMenuOverlay('escape');
+  assert.deepEqual(cb1.calls, [[]]);
+  assert.deepEqual(cb2.calls, []);
+  assert.equal(h.presents.length, 2, 'the queue event presents the second popup challenge');
+  assert.equal(h.presents[1].payload.wcId, 702);
+});
+
+test('a popup challenge queued BEHIND a held background-tab challenge presents (first ELIGIBLE, not first queued)', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  h.addGuest(record, 10);
+  const heldCb = h.challenge(record, 20); // background tab — holds
+  assert.equal(h.presents.length, 0);
+  h.addPopup(record, 701, { openerWcId: 10 });
+  const popCb = h.popupChallenge(701);
+  assert.equal(h.presents.length, 1, 'the popup challenge is eligible and presents');
+  assert.equal(h.presents[0].payload.wcId, 701);
+  assert.deepEqual(heldCb.calls, [], 'the held tab challenge stays queued');
+  assert.deepEqual(popCb.calls, []);
+});
+
+test('TAB presentation payloads are UNCHANGED: no popup field ever rides a tab challenge (both kinds)', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  h.challenge(record, 10);
+  assert.equal(h.presents.length, 1);
+  assert.equal('popup' in h.presents[0].payload, false, 'basic-auth tab payload contract frozen');
+  assert.equal(h.presents[0].via, undefined, 'tab presentation still routes chromeForTab');
+  record.sheet.menu = { menuType: 'auth-basic', token: 1 };
+  record.sheet.closeMenuOverlay('escape');
+
+  const rec2 = h.makeRecord();
+  rec2.activeTabWcId = 30;
+  h.certChallenge(rec2, 30);
+  assert.equal('popup' in h.presents.at(-1).payload, false, 'client-cert tab payload contract frozen');
+});
+
+test('agent seams on popup challenges: getPendingChallenge reads the popup basic-auth challenge; answerWithCredential answers it and closes the sheet; cert kind stays invisible', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  h.addPopup(record, 701, { openerWcId: 900 });
+  const cb = h.popupChallenge(701, { url: 'http://127.0.0.1:8091/oauth', realm: 'oauth' });
+  h.openAuthSheet(record);
+
+  const pending = h.store.getPendingChallenge(701);
+  assert.deepEqual(pending, { wcId: 701, host: '127.0.0.1', port: 8091, realm: 'oauth', url: 'http://127.0.0.1:8091/oauth' },
+    'non-secret read seam works on a popup wcId (origin match input for vaultAnswerAuth)');
+
+  const res = h.store.answerWithCredential(701, { username: 'user', password: 'pass' });
+  assert.deepEqual(res, { answered: true });
+  assert.deepEqual(cb.calls, [['user', 'pass']]);
+  assert.deepEqual(record.sheet.closeCalls, ['activated'], 'visible sheet closed with the answer reason');
+
+  // Cert kind filter unchanged for popups: only a cert challenge pending → no-challenge.
+  h.addPopup(record, 702, { openerWcId: 900 });
+  h.popupCertChallenge(702);
+  assert.equal(h.store.getPendingChallenge(702), null, 'cert challenges invisible to the agent seams');
+  assert.deepEqual(h.store.answerWithCredential(702, { username: 'u', password: 'p' }), { answered: false, reason: 'no-challenge' });
+});
+
+test('a destroyed owning-record chrome makes the popup present a harmless no-op (guarded) — never a throw, callback still owned', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.chromeView.webContents.isDestroyed = () => true;
+  h.addPopup(record, 701, { openerWcId: 900 });
+  const cb = h.popupChallenge(701);
+  assert.equal(h.presents.length, 0, 'no send into a destroyed chrome (mid-teardown window)');
+  assert.deepEqual(cb.calls, [], "not resolved here — teardown's cancelForWindow/seam owns the resolution");
+  h.store.cancelForWindow(record);
+  assert.deepEqual(cb.calls, [[]], 'and it does resolve exactly once at teardown');
 });

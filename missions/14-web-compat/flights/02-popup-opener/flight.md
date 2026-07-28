@@ -1,6 +1,6 @@
 # Flight 2: Popup & Opener Ruling + Implementation
 
-**Status**: ready
+**Status**: landed
 **Mission**: [Web Compatibility — Silent Failures Become Working Features](../../mission.md)
 
 ## Contributing to Criteria
@@ -54,7 +54,7 @@ Decide — with the human — how goldfinch handles script-opened popups, then i
 ### Pre-Flight Checklist
 
 - [x] Ruling approved and recorded as DD1
-- [ ] Legs defined
+- [x] Legs defined
 - [x] Premise verified
 - [x] Proposal authored
 
@@ -68,7 +68,8 @@ Option B: `setWindowOpenHandler` returns allow+override for DD3-qualifying reque
 
 ### Legs
 
-> Tentative: `popup-windows` (handler predicate, registry, wiring, preload+close discipline, teardown, persistence exclusion), `popup-parity-and-fixture` (census rows, challenge routing to opener sheet, OAuth fixture endpoints + behavior spec).
+- [x] `popup-windows` — handler predicate, registry, wiring, preload+close discipline, teardown, persistence exclusion (landed 2026-07-28)
+- [x] `popup-parity-and-fixture` — census rows, challenge routing to opener sheet, addressability widening, OAuth fixture endpoints + behavior spec (landed 2026-07-28)
 
 ---
 

@@ -440,6 +440,40 @@ The per-spec impact of these semantics on the behavior-test corpus is catalogued
 [`docs/behavior-specs-single-window-audit.md`](behavior-specs-single-window-audit.md) — the F7
 input artifact.
 
+### Popup windows (M14 F2)
+
+A DD3-qualifying `window.open` (window features present or a named non-`_blank` target, and
+Chromium disposition `new-window`) from a non-internal opener creates a **real popup
+BrowserWindow** in the opener's jar, with a live `window.opener` handle. Featureless / plain
+`target=_blank` opens still convert to tabs. Automation semantics:
+
+- **Census.** While a popup lives, `enumerateTabs` appends a row per popup **after the tab rows**:
+  `{ wcId, url, title, jarId, active: false, windowId, popup: true }` — `windowId` is the **owner
+  window's** (the window the popup closes with; the opener tab's window, re-keyed if the opener tab
+  moves), and `jarId` is mapped **main-side** from the popup's captured partition against the jar
+  registry. `enumerateWindows` (admin) appends one entry per popup of the **distinct shape**
+  `{ popupWcId, openerWindowId, url, title }` — no `windowId` field, so window-row consumers skip
+  popups structurally; discriminate on `popupWcId` presence.
+- **Tiers.** A jar key sees and drives ONLY popups whose **session** is its own jar (the popup's
+  session *is* the interned opener-jar session — the same object-identity rule as tabs; the
+  partition string is census bookkeeping only). Foreign-jar popups are invisible and refused
+  (`out-of-jar`). A **burner-opened popup** has no registry-mappable jar (`jarId: null` in the
+  admin census) and is **admin-visible/drivable only** — the exact burner-tab doctrine. Window
+  topology (`enumerateWindows`' popup entries) stays admin-only.
+- **Driving.** Every wcId-first op (`click`, `typeText`, `evaluate`, `readDom`, `readAxTree`,
+  `captureScreenshot`, `vaultFill`, `vaultAnswerAuth`, …) accepts a popup `wcId` at its existing
+  tier. `activateTab(popupWcId)` returns **`false`** (a popup is not a tab in any strip; no window
+  is raised) — popups are floating, normally-visible windows: drive them directly, there is no
+  activation step. Ops that raise-to-act simply skip the raise for popups.
+- **Auth challenges from popup contents** (basic-auth and client-cert) present on the **owner
+  window's** sheet with a popup marker line; `vaultAnswerAuth` answers a popup's basic-auth
+  challenge exactly like a tab's (origin-matched against the challenge URL).
+- **Lifecycle.** Popups close with their owner window; a popup that self-closes
+  (`window.close()`), navigates away, or whose opener tab moves cross-window resolve-cancels its
+  pending auth challenges. After close, the popup's rows/entries disappear and its `wcId` refuses
+  with `no-such-contents`. Popups never join session snapshots, closed-tab capture, or the tab
+  strip.
+
 ## Tool reference
 
 All 35 tools below match `src/main/automation/mcp-tools.js` exactly. Most tools address a tab
@@ -453,10 +487,10 @@ below.
 
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
-| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter) |
+| `enumerateTabs` | *(none)* | JSON text: array of `{ wcId, url, title, jarId, active, windowId }` for all drivable (dom-ready) tabs across **all windows** (M09 F7 — see *Multi-window semantics*). `windowId` is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes **zero rows** — poll `enumerateWindows()` until every `booted` is true for a guaranteed-total census. Admin listings include the internal `goldfinch://` tabs; jar-key listings never do (session filter). Script-opened **popup windows** append extra rows marked `popup: true` (`active: false`, `windowId` = the OWNER window's, `jarId` mapped main-side from the popup's captured partition) — see *Popup windows (M14 F2)* under *Multi-window semantics* |
 | `openTab` | `{ url: string, jarId?: string }` *(`url` required; `jarId` optional)* | JSON text: the new tab's `wcId` (number) — or `null` if the URL was rejected renderer-side or no handle appeared within the timeout (a **normal** result, not an error). `jarId`: a jar key may only supply its own jar id (foreign → `out-of-jar`); admin may supply any; an unknown id is refused (`unknown-jar`); omit to open in the current default jar (a fresh evaporating burner tab when Burner holds the flag) — admin identity only; a jar key's omitted `jarId` still forces that key's own jar. |
 | `closeTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal (`true`/`false`) |
-| `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal. `true` — the tab was activated **and its owning window raised** (M09 F7 DD6: the dispatch goes to the tab's OWNING window's chrome, so this works across windows). `false` — the wcId is **not a registry-owned tab** (e.g. an overlay view probed by id): no activation, no raise, no error. A third outcome is a **refusal**, not a boolean: if the registry says a window owns the tab but that window's chrome cannot activate it (a registry/renderer desync), the op errors with `automation: activate-refused — …` (isError) rather than silently returning `false`. |
+| `activateTab` | `{ wcId: integer }` *(required)* | JSON text: boolean success signal. `true` — the tab was activated **and its owning window raised** (M09 F7 DD6: the dispatch goes to the tab's OWNING window's chrome, so this works across windows). `false` — the wcId is **not a registry-owned tab** (e.g. an overlay view probed by id, or a **popup** — a popup is not in any window's strip; no window is raised, drive it directly): no activation, no raise, no error. A third outcome is a **refusal**, not a boolean: if the registry says a window owns the tab but that window's chrome cannot activate it (a registry/renderer desync), the op errors with `automation: activate-refused — …` (isError) rather than silently returning `false`. |
 | `navigate` | `{ wcId: integer, url: string }` *(required)* | JSON text `{"ok":true}` (void op; http(s) only — unsafe URLs are refused) |
 | `goBack` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (no-op when there is no back history) |
 | `goForward` | `{ wcId: integer }` *(required)* | JSON text `{"ok":true}` (no-op when there is no forward history) |
@@ -545,7 +579,7 @@ refusal, mirroring `captureWindow`).
 | Tool | Input schema | Result shape |
 |------|--------------|--------------|
 | `getChromeTarget` | `windowId` *(optional, integer)* | JSON text: `{ wcId, kind: "chrome", url, windowId }` — a window's chrome renderer. `windowId` omitted → the **last-focused** window; supplied → that window; unknown → `automation: no-such-window` (never a silent fall-back). Pass the returned `wcId` to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). See *Multi-window semantics*. |
-| `enumerateWindows` | *(none)* | **ADMIN ONLY.** JSON text: array of `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }` — one row per open window, in window creation order. The single window-topology discovery primitive: it resolves each window's chrome and overlay wcIds **exactly** (no id-space probing), and `booted` is `enumerateTabs`'s completeness signal. `sheetWcId`/`findWcId` are **absent** when that overlay has never been created (both are lazy); `sheetVisible`/`findVisible` are separate so "instantiated but hidden" is distinguishable from "never shown". `lastFocused` is main-side tracked — **not** an OS-focus claim. Jar keys get `automation: admin-only`. See *Multi-window semantics*. |
+| `enumerateWindows` | *(none)* | **ADMIN ONLY.** JSON text: array of `{ windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }` — one row per open window, in window creation order. The single window-topology discovery primitive: it resolves each window's chrome and overlay wcIds **exactly** (no id-space probing), and `booted` is `enumerateTabs`'s completeness signal. `sheetWcId`/`findWcId` are **absent** when that overlay has never been created (both are lazy); `sheetVisible`/`findVisible` are separate so "instantiated but hidden" is distinguishable from "never shown". `lastFocused` is main-side tracked — **not** an OS-focus claim. Script-opened **popup windows** append extra entries of the DISTINCT shape `{ popupWcId, openerWindowId, url, title }` — discriminate on `popupWcId` presence (popup entries carry no `windowId`); see *Popup windows*. Jar keys get `automation: admin-only`. |
 | `downloadsList` | *(none)* | JSON text: the app-level downloads records — an array of `{ id, url, filename, savePath, state, received, total, … }` (in-progress + completed history, persisted across restart). `filename` is the sanitized save name; `savePath` is the real on-disk path (`null` until known); `state` is the download lifecycle (`progressing` / `completed` / `interrupted` / …); `received`/`total` are byte counts. The internal `goldfinch://downloads` **page** that renders this model lives in the internal session and is **not** readable via the eval/observe tools — `downloadsList` is the automation-surface view of the same model. |
 
 > **Admin-only.** Jar keys calling `getChromeTarget` receive `automation: admin-only` (mirroring

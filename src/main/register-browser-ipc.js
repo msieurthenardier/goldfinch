@@ -30,6 +30,7 @@ function registerBrowserIpc({
   clearPendingVaultImport,
   setPendingVaultImportOverwrite,
   popupVaultIconMenu,
+  popupRegistry,
   random = Math.random,
   logger = console,
 }) {
@@ -301,6 +302,18 @@ function registerBrowserIpc({
   // SENDER'S own close, so a forged value cannot affect any other tab.
   ipcMain.on('guest-window-close', (event, payload) => {
     const wcId = event.sender.id;
+    // M14 F2 L1 (DD1d): popup-registry lookup FIRST — a popup's window.close()
+    // destroys its own BrowserWindow (the chrome path below structurally
+    // misses popups: chromeForTab resolves via tabViews, which popups never
+    // join). No permission gate needed: every registered popup is
+    // script-opened by construction, exactly the class Chromium lets close
+    // itself. destroy() (not close()) — the popup teardown hooks ride
+    // `closed`/`destroyed`, and popups have no close-time capture (DD1e).
+    const popupEntry = popupRegistry?.getByWcId(wcId);
+    if (popupEntry) {
+      if (popupEntry.win && !popupEntry.win.isDestroyed()) popupEntry.win.destroy();
+      return;
+    }
     const raw = /** @type {any} */ (payload || {}).historyLength;
     const historyLength = typeof raw === 'number' && Number.isFinite(raw) ? raw : 1;
     chromeForTab(wcId)?.send('tab-self-close', { wcId, historyLength });

@@ -72,7 +72,7 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isPopupWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through
  *                    for callers that immediately classify the result)
@@ -92,10 +92,20 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *                   only at the ADMIN tier. This is admin's SECOND relaxation
  *                   (alongside allowInternal). Absent predicate = no behavior
  *                   change (offline tests / legacy callers).
+ *   isPopupWcId — (M14 F2 L2, DD1a) the popup-registry membership predicate:
+ *                   a script-opened popup's contents are DRIVABLE, so the
+ *                   non-tab-contents refusal widens to "not a tab AND not a
+ *                   popup". Membership/tier confinement is UNCHANGED — a jar
+ *                   key still reaches only popups whose session is its own jar
+ *                   (resolveContentsForJar's session-identity check; the popup's
+ *                   session IS the interned opener-jar session). Never a
+ *                   partition-string compare (DD7 discipline — the registry's
+ *                   captured partition is census-only). Absent predicate = no
+ *                   behavior change.
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isChromeContents, isSheetContents }) {
+function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isPopupWcId, isChromeContents, isSheetContents }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -137,11 +147,16 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
   // Fires only when main.js threads the predicate; admin (allowInternal) is exempt.
   // M09 F6: ANY registered chrome is exempt (isChromeContents), mirroring the
   // accessor-chrome identity exemption — a second window's chrome is not an overlay.
+  // M14 F2 L2 (DD1a): popup-registry members are exempt too — the ONLY resolve-
+  // side popup change. Everything else (session-identity membership, internal
+  // exclusion, chrome exclusion) applies to popups through the existing guards
+  // untouched.
   if (
     !allowInternal && typeof isTabViewWcId === 'function' &&
     wc !== chromeContents &&
     !(typeof isChromeContents === 'function' && isChromeContents(wc)) &&
-    !isTabViewWcId(wcId)
+    !isTabViewWcId(wcId) &&
+    !(typeof isPopupWcId === 'function' && isPopupWcId(wcId))
   ) {
     throw new Error('automation: non-tab-contents — wcId ' + wcId + ' is not a tab view (chrome-class overlay contents resolve only at the admin tier)');
   }

@@ -45,6 +45,22 @@ This list grows as flight legs land:
   `data:text/html,redirected` (refused by `isSafeTabUrl`; the mission-13
   `tab-scheme-guard` carry-forward endpoint for the deferred steps 14-15
   re-run).
+- `GET /oauth/opener.html` — (F2 L2, `web-compat-oauth-popup`) OAuth-popup
+  opener: a **Sign in with popup** button calling
+  `window.open('/oauth/popup.html', 'oauth', 'width=420,height=520')` (the
+  DD3-qualifying features + named-target + `new-window`-disposition shape —
+  since M14 F2 this opens a **real popup window**, not a tab), a
+  `#popup-state` line (`none`/`open`/`blocked`/`closed`, driven by polling the
+  live handle's `.closed`), and `#result`, which receives the popup's
+  postMessage token and acks it back. The live handle is exposed as
+  `window.__oauthPopup` for jar-runnable spec assertions.
+- `GET /oauth/popup.html` — the popup, provider-shaped: **holds** at
+  `#status` `awaiting-approval` until its `#approve` button is clicked (the
+  spec's window to census/drive the popup by wcId), then posts
+  `{type:'oauth-token', token}` to its opener (same-origin targeted, brief
+  retry), waits for `{type:'oauth-ack'}`, and self-closes via
+  `window.close()` (the guest-shim path). `#status` reads
+  `awaiting-approval`/`delivering`/`acked`/`no-opener`.
 
 ## TLS sibling: client-certificate fixture (F1 L3)
 

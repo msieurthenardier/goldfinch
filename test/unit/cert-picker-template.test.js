@@ -38,8 +38,9 @@ test('cert-picker card: hidden backdrop + header (title + accessible close) + ro
   assert.equal(card.node.classList.contains('hidden'), true);
   assert.equal(card.card.parentNode, card.node);
 
-  const [header, list] = card.card.children;
+  const [header, popupNote, list] = card.card.children;
   assert.equal(header.className, 'vault-sheet-header');
+  assert.equal(popupNote, card.popupNote, 'the M14 F2 L2 popup marker sits between header and list');
   assert.equal(header.children[0].textContent, 'Select a certificate');
   assert.equal(card.close.tagName, 'BUTTON');
   assert.equal(card.close.type, 'button');
@@ -123,4 +124,19 @@ test("cross-pin: register-overlay-ipc.js's local prefix mirror matches the templ
     /const CERT_PICK_PREFIX = 'cert:';/,
     "register-overlay-ipc.js must carry the identical prefix literal (its parseCertPickIndex mirrors the template's)"
   );
+});
+
+test('popup marker line (M14 F2 L2, DD5): fixed copy, hidden by default, sited between the header and the roving list', () => {
+  const document = createDocument();
+  const card = buildCertPickerCard(document);
+
+  assert.ok(card.popupNote, 'the template returns the popupNote ref (menu-overlay toggles it per model.popup)');
+  assert.equal(card.popupNote.classList.contains('hidden'), true, 'hidden by default — tab challenges never show it');
+  assert.equal(card.popupNote.className, 'auth-basic-origin auth-popup-note');
+  assert.equal(card.popupNote.textContent, 'This request comes from a pop-up window opened by this page.',
+    'FIXED template copy — no server/certificate string ever rides the marker');
+
+  const kids = card.card.children;
+  assert.ok(kids.indexOf(card.popupNote) > -1 && kids.indexOf(card.popupNote) < kids.indexOf(card.list),
+    'marker sits above the certificate list');
 });

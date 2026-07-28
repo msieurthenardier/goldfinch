@@ -53,6 +53,7 @@ function createWindowFactory(deps) {
     buildSessionSnapshot,
     getHistoryRecorder,
     faviconFetcher,
+    popupRegistry,
     defer,
     logger
   } = deps;
@@ -257,6 +258,13 @@ function createWindowFactory(deps) {
       // head, not queued challenges (load-bearing; unit-pinned). Every native
       // login callback is answered before any view teardown runs.
       authChallenges?.cancelForWindow(record);
+      // M14 F2 L1 (DD1f): popups close WITH their owner window — after the
+      // window-wide auth cancel above (unit-pinned to stay first), before any
+      // sheet/overlay teardown. closeAllForRecord itself runs the DD1f order
+      // (cancel popup challenges — a stub seam until leg 2, harmlessly
+      // double-cancelling behind cancelForWindow — then destroy), snapshotting
+      // its list first (deregister-on-`closed` mutates mid-iteration).
+      popupRegistry?.closeAllForRecord(record);
       findOverlay.teardown();
       tearoffOverlay.teardown();
       sheet.closeMenuOverlay('teardown');

@@ -36,6 +36,7 @@ function registerTabIpc(deps) {
     buildAdoptPayload,
     broadcastMoveTargetsChanged,
     getTabContents,
+    popupRegistry,
     schedule: setTimeout,
     cancelScheduled: clearTimeout,
     logger
@@ -471,6 +472,24 @@ function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
   target.tabViews.set(p.wcId, entry);
   entry.active = true;
   if (source.activeTabWcId === p.wcId) source.activeTabWcId = null;
+  // M14 F2 L1 (step 3b): re-key this tab's popups to the DESTINATION record —
+  // DD1f closes popups with their CURRENT owning window, so a popup whose
+  // opener tab moved must die with the new window, not the old one.
+  // Synchronous by construction (a Map walk) — the DD1 synchrony pin above is
+  // untouched.
+  popupRegistry?.rekeyForRecord(p.wcId, target);
+  // M14 F2 L2 (FD cancel-on-rekey ruling): the moved opener's popups CANCEL
+  // their pending challenges at move time ('moved' — byte-consistent with the
+  // tab cancel above), instead of any state-map reshaping/migration. The
+  // challenges sit on the SOURCE record's queue; after the re-key they would
+  // present nowhere — the resolve-cancel guarantees no hung native callback,
+  // and the page simply re-challenges on its next request. Synchronous (the
+  // store is a plain Map walk); the DD1 synchrony pin is untouched.
+  if (popupRegistry && authChallenges) {
+    for (const entry of popupRegistry.listForRecord(target)) {
+      if (entry.openerWcId === p.wcId) authChallenges.cancelForTab(entry.popupWcId, 'moved');
+    }
+  }
   // THE TARGET'S OUTGOING TAB IS HIDDEN HERE, AND THE MENU IS CLOSED HERE, because the
   // adopt round-trip that would otherwise do them is ASYNC:
   // adopt-tab → onAdoptTab → activateTab → tab-set-active arrives on a LATER turn. Until

@@ -60,6 +60,7 @@ const { createFindOverlayManager } = require('./find-overlay-manager');
 const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
 const { createWindowFactory } = require('./window-factory');
 const { createGuestWiring } = require('./guest-wiring');
+const { createPopupRegistry } = require('./popup-registry');
 const { createHtmlFullscreen } = require('./html-fullscreen');
 const { createAuthChallenges } = require('./auth-challenges');
 const { createSessionRuntime } = require('./session-runtime');
@@ -268,7 +269,61 @@ const getChromeContents = (windowId) => {
 // registry does not export lastFocusedId (it is closure-local), and passing the
 // record keeps window-registry.js unchanged while inheriting its
 // membership-validated first-record fallback for free.
-const enumerateWindows = () => buildWindowCensus(registry.records(), registry.getLastFocused());
+//
+// M14 F2 L2 (DD1a): popup entries ride the same zero-state read —
+// popupCensusEntries() derives them from the live popup registry at call time.
+const enumerateWindows = () => buildWindowCensus(registry.records(), registry.getLastFocused(), popupCensusEntries());
+
+// M14 F2 L2 (DD1a) — the two popup census accessors, derived at CALL TIME from
+// the live popup registry (zero state, the enumerateWindows discipline).
+// Hoisted function declarations: popupRegistry/authChallenges are consts defined
+// further down; both accessors run only at op time, long after construction.
+//
+// popupCensusEntries — enumerateWindows' popup entries { popupWcId,
+// openerWindowId, url, title }: owner resolution walks registry.records() ×
+// popupRegistry.listForRecord (a popup whose owner record is mid-teardown is
+// skipped — DD1f makes that a transient), url/title read from the live
+// webContents.
+function popupCensusEntries() {
+  const out = [];
+  for (const rec of registry.records()) {
+    for (const entry of popupRegistry.listForRecord(rec)) {
+      const wc = webContents.fromId(entry.popupWcId);
+      if (!wc || wc.isDestroyed()) continue;
+      out.push({ popupWcId: entry.popupWcId, openerWindowId: rec.win.id, url: wc.getURL(), title: wc.getTitle() });
+    }
+  }
+  return out;
+}
+
+// popupTabRows — enumerateTabs' popup rows (the engine's `listPopups` seam):
+// tab-row shape plus `popup: true`, windowId = the OWNER window's. jarId is
+// mapped HERE from the entry's eagerly-captured partition via jars.list() —
+// the sanctioned MAIN-SIDE mapping (guidance #4): the automation modules never
+// compare partition strings (DD7 discipline), and a burner-opened popup's
+// partition maps to no registered jar → jarId null → visible to admin only
+// (the jar façade's resolved-session filter drops it for every jar key —
+// pinned as intended).
+function popupTabRows() {
+  const jarIdByPartition = new Map(jars.list().map((j) => [j.partition, j.id]));
+  const rows = [];
+  for (const rec of registry.records()) {
+    for (const entry of popupRegistry.listForRecord(rec)) {
+      const wc = webContents.fromId(entry.popupWcId);
+      if (!wc || wc.isDestroyed()) continue;
+      rows.push({
+        wcId: entry.popupWcId,
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        jarId: entry.partition != null ? (jarIdByPartition.get(entry.partition) ?? null) : null,
+        active: false,
+        windowId: rec.win.id,
+        popup: true,
+      });
+    }
+  }
+  return rows;
+}
 
 // F7 DD1's seam: the REGISTRY is the ownership authority for the all-windows tab
 // census. `ownsTab` is the record's own tabViews membership — the renderer is
@@ -860,6 +915,12 @@ async function startMcpServerInstance() {
       // house "Absent → no behavior change" idiom), which is why AC12 greps for 2.
       listWindows,
       enumerateWindows,
+      // M14 F2 L2 (DD1a): popup census rows + the popup addressability
+      // predicate. BOTH fallbacks are silent (no rows / non-tab refusal), so
+      // this injection site and app-lifecycle's dev-seam twin are grep-pinned
+      // (the listWindows precedent).
+      listPopups: popupTabRows,
+      isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
       // DD8 widening (F6 Leg 2): ALL-WINDOWS tab membership + the any-registered-
       // chrome predicate (classify/jar-guard widening — a second window's chrome
       // must classify 'chrome', not 'guest').
@@ -1044,6 +1105,10 @@ function applyZoom(wc, action) {
 const authChallenges = createAuthChallenges({
   registry,
   chromeForTab,
+  // M14 F2 L2 (DD1b): popup-registry-first routing seam — LAZY (arrow body
+  // reads the later-constructed popupRegistry at challenge time, so the
+  // store-before-registry construction order below stands unchanged).
+  popupRegistry: { getByWcId: (wcId) => popupRegistry.getByWcId(wcId) },
   logger: console
 });
 
@@ -1058,6 +1123,26 @@ const htmlFullscreen = createHtmlFullscreen({
   // challenge arriving mid-fullscreen holds (presentation eligibility) and
   // presents here.
   onExited: (record) => authChallenges.notifyFullscreenExited(record),
+  logger: console
+});
+
+// Popup registry (M14 F2 L1, DD1a/DD1f): the main-side record store for
+// script-opened popup BrowserWindows — registered at did-create-window
+// (guest-wiring), destroyed with their owner window (window-factory close),
+// re-keyed on cross-window tab moves (register-tab-ipc), and self-closable
+// via guest-window-close (register-browser-ipc).
+//
+// M14 F2 L2 (DD1f seam, REAL wiring — the leg-1 no-op stub replaced): a thin
+// delegation to the store's cancelForTab — it already owns the queue scan, the
+// exactly-once resolution, and the visible-sheet close via AUTH_MENU_TYPES
+// (the popup's sheet lives on the OWNING record). 'tab-close' is the
+// resolution-family reason (popup destroyed ≙ tab closed). ONE function, TWO
+// call paths: closeAllForRecord invokes it per entry BEFORE any destroy (the
+// DD1f order pin), and guest-wiring's popup teardown invokes it on self-close/
+// direct destroy — the double-invoke on the owner-close path is a ledger no-op.
+const cancelChallengesForPopup = (popupWcId) => authChallenges.cancelForTab(popupWcId, 'tab-close');
+const popupRegistry = createPopupRegistry({
+  cancelChallengesForPopup,
   logger: console
 });
 
@@ -1105,6 +1190,7 @@ const { createWindow } = createWindowFactory({
   buildSessionSnapshot,
   getHistoryRecorder: () => historyRecorder,
   faviconFetcher,
+  popupRegistry,
   defer: setImmediate,
   logger: console
 });
@@ -1128,6 +1214,14 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   getHistoryRecorder: () => historyRecorder,
   broadcastMoveTargetsChanged,
   faviconFetcher,
+  // M14 F2 L1: popup adoption — the registry plus the same web preload path
+  // the tab web branch injects (registerTabIpc's webPreloadPath below).
+  popupRegistry,
+  webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.bundle.js'),
+  // M14 F2 L2 (DD1f): the SAME cancel seam the popup registry holds — the
+  // popup teardown path (self-close / direct destroy) resolve-cancels through
+  // it before deregistering.
+  cancelChallengesForPopup,
   logger: console
 });
 
@@ -1271,6 +1365,7 @@ const { rerollSeed } = registerBrowserIpc({
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,
+  popupRegistry,
   random: Math.random,
   logger: console
 });
@@ -1339,6 +1434,7 @@ registerTabIpc({
   buildAdoptPayload,
   broadcastMoveTargetsChanged,
   getTabContents,
+  popupRegistry,
   schedule: setTimeout,
   cancelScheduled: clearTimeout,
   logger: console
@@ -1784,6 +1880,10 @@ registerAppLifecycle({
   grabWindow,
   listWindows,
   enumerateWindows,
+  // M14 F2 L2 (DD1a): the dev-seam engine is the SECOND live injection site for
+  // the popup census/addressability deps (grep-pinned, listWindows precedent).
+  listPopups: popupTabRows,
+  isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
   chromeForTab,
   raiseWindowForTab,
   isKnownJar: (id) => jars.list().some((jar) => jar.id === id),

@@ -491,3 +491,90 @@ test('resolveContents: error messages are distinguishable per guard', () => {
   assert.notEqual(noSuchMsg, internalSessionMsg);
   assert.notEqual(badHandleMsg, internalSessionMsg);
 });
+
+// ---------------------------------------------------------------------------
+// M14 F2 L2 (DD1a) — isPopupWcId widening: popup-registry members are exempt
+// from the non-tab-contents refusal; EVERYTHING else (session-identity jar
+// membership, internal exclusion, secret-sheet refusal) is untouched.
+// ---------------------------------------------------------------------------
+
+test('popup widening: isPopupWcId exempts a popup wcId from non-tab-contents at the non-admin tier', () => {
+  const chromeContents = makeGuestWc(1);
+  const popupWc = makeGuestWc(701); // live, NOT internal, NOT chrome, NOT a tab view
+  const deps = {
+    fromId: (id) => (id === 701 ? popupWc : id === 1 ? chromeContents : null),
+    chromeContents,
+    isTabViewWcId: (id) => id === 42,       // 701 is not a tab view…
+    isPopupWcId: (id) => id === 701,        // …but IS a popup — resolves
+  };
+  assert.equal(resolveContents(701, deps), popupWc, 'popup wcId resolves at the jar-capable tier');
+});
+
+test('popup widening: a wcId that is NEITHER tab NOR popup still throws non-tab-contents with both predicates present', () => {
+  const chromeContents = makeGuestWc(1);
+  const sheetWc = makeGuestWc(70);
+  const deps = {
+    fromId: (id) => (id === 70 ? sheetWc : null),
+    chromeContents,
+    isTabViewWcId: (id) => id === 42,
+    isPopupWcId: (id) => id === 701,
+  };
+  assert.throws(
+    () => resolveContents(70, deps),
+    (err) => err instanceof Error && err.message.includes('automation: non-tab-contents'),
+    'the overlay refusal survives the widening'
+  );
+});
+
+test('popup widening: jar membership rides the EXISTING session-identity check — own-jar popup resolves, foreign-jar popup refuses out-of-jar', () => {
+  const world = makeSessionWorld();
+  const personal = { id: 'personal', partition: 'persist:container:personal' };
+  // The popup session IS the interned opener-jar session (spike-verified) —
+  // exactly like a tab in that jar.
+  const ownPopup = makeWcInPartition(701, personal.partition, world);
+  const foreignPopup = makeWcInPartition(702, 'persist:container:work', world);
+  const fromId = (id) => (id === 701 ? ownPopup : id === 702 ? foreignPopup : null);
+  const deps = { fromId, chromeContents: null, fromPartition: world.fromPartition };
+  assert.equal(resolveContentsForJar(701, personal, deps), ownPopup, 'own-jar popup drivable by the jar key');
+  assert.throws(
+    () => resolveContentsForJar(702, personal, deps),
+    (err) => err instanceof Error && err.message.includes('automation: out-of-jar'),
+    'foreign-jar popup refused on session identity — no partition strings involved'
+  );
+});
+
+test('popup widening: the secret-sheet refusal is UNAFFECTED — isPopupWcId can never admit the sheet (guard order)', () => {
+  const sheet = makeGuestWc(50);
+  const deps = {
+    fromId: (id) => (id === 50 ? sheet : null),
+    chromeContents: null,
+    isSheetContents: (wc) => wc === sheet,
+    isTabViewWcId: () => false,
+    isPopupWcId: () => true, // even a (hypothetically) lying predicate
+  };
+  assert.throws(() => resolveContents(50, deps), /automation: secret-sheet/);
+});
+
+test('popup widening: internal-session still throws before the widened guard (a popup is never internal by DD3, pinned anyway)', () => {
+  const internalWc = makeInternalWc(99);
+  const deps = {
+    fromId: (id) => (id === 99 ? internalWc : null),
+    chromeContents: null,
+    isTabViewWcId: () => false,
+    isPopupWcId: (id) => id === 99,
+  };
+  assert.throws(
+    () => resolveContents(99, deps),
+    (err) => err instanceof Error && err.message.includes('automation: internal-session')
+  );
+});
+
+test('DD7 source-scan pin: no partition-string comparison in resolve.js or tabs.js (membership is session identity; census jarId maps main-side)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const rel of [['src', 'main', 'automation', 'resolve.js'], ['src', 'main', 'automation', 'tabs.js']]) {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', ...rel), 'utf8');
+    assert.equal(/partition\s*[!=]==?\s*|[!=]==?\s*[\w.]*partition\b/.test(src), false,
+      rel.join('/') + ' must never compare partition strings (DD7 discipline)');
+  }
+});

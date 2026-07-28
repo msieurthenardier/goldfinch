@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { registerBrowserIpc } = require('../../src/main/register-browser-ipc');
 
-function makeHarness() {
+function makeHarness(options = {}) {
   const handlers = new Map();
   const listeners = new Map();
   const internal = new Map();
@@ -76,6 +76,9 @@ function makeHarness() {
     // M12 F5 HAT batch 1 (I8): the native fill-icon menu delegate. Records its args so a test
     // can assert the bare, no-secret hand-off + that NOTHING is sent to the guest.
     popupVaultIconMenu: (arg) => iconMenuCalls.push(arg),
+    // M14 F2 L1 (DD1d): popup registry for the guest-window-close popup path —
+    // optional (offline suites that omit it exercise the optional-chain).
+    popupRegistry: options.popupRegistry,
     random: () => 0.5,
     logger: { warn: (...args) => events.push(['warn', ...args]) },
   });
@@ -233,4 +236,38 @@ test('privacy channels retain their exact empty/no-tab return shapes', async () 
   assert.deepEqual(await h.handlers.get('privacy-clear-storage')({}, { webContentsId: 999, url: 'https://example.com' }), {
     ok: false, error: 'no-tab'
   });
+});
+
+// ---------------------------------------------------------------------------
+// M14 F2 L1 (DD1d): guest-window-close — popup wcIds destroy their own
+// BrowserWindow; tab wcIds keep the chrome tab-self-close path; and the
+// spike-observed silent no-op (popup close reaching the tab path) is closed.
+// ---------------------------------------------------------------------------
+
+test('guest-window-close from a POPUP destroys its BrowserWindow and never reaches the tab path', () => {
+  const destroys = [];
+  const popupWin = { destroyed: false, isDestroyed() { return this.destroyed; }, destroy() { this.destroyed = true; destroys.push('popup'); } };
+  const h = makeHarness({
+    popupRegistry: { getByWcId: (id) => (id === 42 ? { popupWcId: 42, win: popupWin } : null) }
+  });
+
+  h.listeners.get('guest-window-close')({ sender: { id: 42 } }, { historyLength: 1 });
+  assert.deepEqual(destroys, ['popup'], 'the popup BrowserWindow is destroyed');
+  assert.deepEqual(h.events, [], 'no tab-self-close send for a popup sender — the silent no-op is replaced by a real close');
+
+  // Idempotent against an already-destroyed window (double window.close()).
+  assert.doesNotThrow(() => h.listeners.get('guest-window-close')({ sender: { id: 42 } }, {}));
+  assert.deepEqual(destroys, ['popup'], 'no second destroy on a dead window');
+});
+
+test('guest-window-close from a TAB keeps the chrome tab-self-close path (registry present but non-member)', () => {
+  const h = makeHarness({ popupRegistry: { getByWcId: () => null } });
+  h.listeners.get('guest-window-close')({ sender: { id: 5 } }, { historyLength: 3 });
+  assert.deepEqual(h.events, [['chrome-send', 'tab-self-close', { wcId: 5, historyLength: 3 }]]);
+});
+
+test('guest-window-close sanitizes a forged historyLength and tolerates an absent popup registry (optional-chain)', () => {
+  const h = makeHarness(); // no popupRegistry at all
+  h.listeners.get('guest-window-close')({ sender: { id: 5 } }, { historyLength: 'nope' });
+  assert.deepEqual(h.events, [['chrome-send', 'tab-self-close', { wcId: 5, historyLength: 1 }]]);
 });

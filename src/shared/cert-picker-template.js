@@ -63,7 +63,7 @@ export function parseCertPickIndex(id) {
  * renderCertPickerRows. menu-overlay.js wires the returned `close` button
  * (a deliberate dismiss, same family as Escape).
  * @param {Document} document
- * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, close: HTMLButtonElement }}
+ * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, popupNote: HTMLElement, close: HTMLButtonElement }}
  */
 export function buildCertPickerCard(document) {
   const node = document.createElement('div');
@@ -77,6 +77,16 @@ export function buildCertPickerCard(document) {
   const { header, close } = buildVaultSheetHeader(document, 'Select a certificate');
   card.appendChild(header);
 
+  // Popup marker copy line (M14 F2 L2, flight DD5): shown only when the init
+  // model carries `popup: true` — the challenge arrived from a script-opened
+  // pop-up window. FIXED template copy; menu-overlay.js toggles `.hidden` per
+  // model. NOT a new sheet — the DD5 budget line (auth-basic parity).
+  const popupNote = document.createElement('div');
+  popupNote.className = 'auth-basic-origin auth-popup-note';
+  popupNote.classList.add('hidden');
+  popupNote.textContent = 'This request comes from a pop-up window opened by this page.';
+  card.appendChild(popupNote);
+
   // The roving list host carries the menu semantics (vault-picker shape: the
   // fixed header is not a menuitem and does not scroll away).
   const list = document.createElement('div');
@@ -86,7 +96,7 @@ export function buildCertPickerCard(document) {
   list.tabIndex = -1;
   card.appendChild(list);
 
-  return { node, card, list, close };
+  return { node, card, list, popupNote, close };
 }
 
 /**

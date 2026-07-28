@@ -60,11 +60,12 @@ test('auth-basic card is a modal dialog: host/realm line + LABELED username/pass
   assert.equal(card.close.type, 'button');
   assert.equal(card.close.attributes.get('aria-label'), 'Close');
 
-  // DOM order inside the body: origin line → user label → username → pass
-  // label → password → error → actions(Sign in, Cancel). BOTH labels point at
-  // their inputs (the AC's "labeled fields").
+  // DOM order inside the body: origin line → popup marker (hidden, M14 F2 L2)
+  // → user label → username → pass label → password → error → actions(Sign in,
+  // Cancel). BOTH labels point at their inputs (the AC's "labeled fields").
   assert.equal(body.className, 'vault-sheet-body');
-  const [origin, userLabel, username, passLabel, password, error, actions] = body.children;
+  const [origin, popupNote, userLabel, username, passLabel, password, error, actions] = body.children;
+  assert.equal(popupNote, card.popupNote);
   assert.equal(origin, card.origin);
   assert.equal(origin.className, 'auth-basic-origin');
   assert.equal(origin.textContent, '', 'host/realm set per-init via textContent, never markup');
@@ -85,4 +86,20 @@ test('each buildAuthBasicCard call yields a fresh, independent node tree', () =>
   assert.notEqual(a.node, b.node);
   assert.notEqual(a.username, b.username);
   assert.notEqual(a.password, b.password);
+});
+
+test('popup marker line (M14 F2 L2, DD5): fixed copy, hidden by default, sited between the origin line and the username label', () => {
+  const document = createDocument();
+  const card = buildAuthBasicCard(document);
+
+  assert.ok(card.popupNote, 'the template returns the popupNote ref (menu-overlay toggles it per model.popup)');
+  assert.equal(card.popupNote.classList.contains('hidden'), true, 'hidden by default — tab challenges never show it');
+  assert.equal(card.popupNote.className, 'auth-basic-origin auth-popup-note');
+  assert.equal(card.popupNote.textContent, 'This request comes from a pop-up window opened by this page.',
+    'FIXED template copy — no server-controlled string ever rides the marker');
+
+  // Sited directly after the origin context line (both are context copy).
+  const body = card.origin.parentNode;
+  const kids = body.children;
+  assert.equal(kids.indexOf(card.popupNote), kids.indexOf(card.origin) + 1);
 });
