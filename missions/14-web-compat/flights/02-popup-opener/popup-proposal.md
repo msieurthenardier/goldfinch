@@ -1,7 +1,7 @@
 # Proposal: Script-Opened Popups & `window.opener` — Design Ruling
 
 **Flight**: [Popup & Opener Ruling + Implementation](flight.md)
-**Status**: awaiting human ruling (mission gate — no popup implementation until approved)
+**Status**: **RULED — Option B (real `BrowserWindow` popups)**, human decision 2026-07-28. The recommendation (A) was declined; B's re-implementation cost was explicitly surfaced and accepted. The ruling is recorded as flight DD1; the parity rows become implementation scope.
 **Grounding**: every mechanism claim below was **observed directly** in a throwaway spike on Electron 43.2.0 against this repo at `71a4f15` (spike report summarized in the flight log; worktree discarded, no code landed).
 
 ## The problem (recap)
