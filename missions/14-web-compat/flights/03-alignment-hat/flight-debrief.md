@@ -69,4 +69,6 @@ All ten. Four closures are **soft and go to the mission debrief as ratification 
 
 ## Operator Interview
 
-*(Appended when provided — three questions pending at debrief write: session pacing verdict; popup-limitation verdicts (no address bar, close-with-opener, inert shortcuts); daily-drive confidence and the one blocker if not.)*
+1. **Pacing**: "the rhythm is fine, working multiple sessions at a time" — the HAT cadence (one-step cueing, fix-loop waits) suits an operator who multitasks across sessions; waits are not dead time. No structural change requested.
+2. **Popup limitations**: fine as shipped — with a correction worth preserving: the "no address bar in popups" item was an FD-inferred gap, not an operator complaint; the operator rates address-bar-less popups as **preferred** (matches mainstream minimal popup chrome). Reclassify from named-accepted-gap to confirmed-design-choice; close-with-opener and inert shortcuts drew no objection in practice.
+3. **Daily-drive confidence**: "yes, it's becoming my daily driver — we still have gaps though." The mission's outcome statement validated by adoption; the acknowledged gaps map to the queued seeds (#143 trust UX, #144 popup defense/permissions, vault-on-auth-sheet).
