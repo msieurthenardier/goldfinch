@@ -1,12 +1,12 @@
 # Flight 2: Popup & Opener Ruling + Implementation
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Web Compatibility — Silent Failures Become Working Features](../../mission.md)
 
 ## Contributing to Criteria
 
 - [ ] A popup-based OAuth sign-in completes end to end against the local fixture (opener relationship, result delivery, self-close) *(behavior-test-backed)*
-- [ ] The popup handling approach is recorded as a human-approved design ruling with a per-contents parity checklist
+- [x] The popup handling approach is recorded as a human-approved design ruling with a per-contents parity checklist (Option B, 2026-07-28; proposal + DD1a–f; closed at debrief — artifact-verifiable, no live run needed)
 - [ ] Script-opened popups are visible to the automation surface (`enumerateTabs`/`enumerateWindows`)
 - [ ] Live GitHub OAuth witnessed run — **delivered in Flight 3 (HAT)**, not here
 - [ ] No regression of mission-13 posture
