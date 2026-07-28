@@ -70,7 +70,7 @@ Mission-planning rulings by the human:
 
 ## Known Issues
 
-*(none yet — populated during execution)*
+- [ ] **Stale-oversized guest/chrome bounds after fullscreen-exit × window-geometry change** — discovered in Flight 3 (HAT), affects window rendering under WSLg Wayland + display scaling; self-corrects on any manual window resize; manual fullscreen re-entry unaffected. Accepted by operator ruling at the fullscreen run's checkpoint 7 (run log `tests/behavior/web-compat-fullscreen/runs/2026-07-28-18-04-00.md`). Suspected root: units/convention mismatch between `win.getContentBounds()` (fullscreen expansion/resize re-expand) and the renderer-measured slot convention; same finding's other face is the fullscreen logical-viewport undershoot. Follow-up diagnosis disposition to be set at mission debrief (queue vs fold into the #144 mission vs maintenance).
 
 ## Flights
 
