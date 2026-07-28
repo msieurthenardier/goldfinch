@@ -159,16 +159,10 @@ Autonomous-mode note: user pre-authorized autonomous execution through Flight 2 
 
 ## Decisions
 
-*(runtime decisions will be appended here)*
-
 ### Cert-challenge present channel: dedicated `cert-challenge-present` send (leg 03, developer)
 **Context**: Leg guidance step 1 left the main→chrome present channel open — either a new `cert-challenge-present` send or a `kind` field on the existing `auth-challenge-present` — and required the choice documented here.
 **Decision**: A DEDICATED `cert-challenge-present` send (`{ wcId, host, certs: [{subject, issuer}] }`).
 **Rationale**: (a) the per-surface-channel idiom every other sheet trigger uses (`vault-recovery-show`, `vault-accesskey-show`, …); (b) the existing channel's payload contract stays frozen (leg-02 consumers and its unit pins are untouched); (c) the d.ts typing stays discriminated by channel rather than a runtime kind union. Cost: one extra preload method + d.ts entry — inside the planned renderer-budget bump.
-
----
-
-## Decisions
 
 ### Behavior runs for legs 02+ deferred without re-attempt (FD)
 **Context**: Leg 02's AC says "FD run attempted (pass, or apparatus-blocked with deferred disposition)". Leg 01's run already proved the session-wide apparatus gap (jar-scoped MCP identity; window-level captures admin-only), and leg 02's developer additionally observed `captureWindow` timing out while a prompt holds a pending load.
@@ -187,7 +181,7 @@ README web-compat feature notes; CLAUDE.md pins (auth-callback exactly-once ledg
 
 ## Deviations
 
-*(none yet)*
+See the Decisions entries above (behavior-run deferral without re-attempt; leg-04 SDK-client premise-check path) and each leg's Progress entry — per-leg implementation deviations from design-reviewed guidance were zero.
 
 ---
 

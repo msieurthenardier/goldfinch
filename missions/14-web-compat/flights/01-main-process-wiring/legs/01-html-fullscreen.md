@@ -44,7 +44,7 @@ Wire `enter-html-full-screen`/`leave-html-full-screen` so a page's `requestFulls
 - [x] Carry-forward 1: a source-scan unit test pins that `contents.__goldfinchNavGuarded = true` is the first statement of `wireGuestContents` with no suspension point before it
 - [x] Carry-forward 2: `ALLOWED_PERMISSIONS` (`session-runtime.js:13-22`) carries a comment naming the unit test that pins the shared-Set union, guarding against a "fix the asymmetry" refactor
 - [x] `npm test`, `npm run lint`, `npm run typecheck` pass
-- [ ] Run `/behavior-test web-compat-fullscreen` and confirm pass (FD runs this after implementation; spec marked `active`)
+- [x] Run `/behavior-test web-compat-fullscreen` and confirm pass (FD runs this after implementation; spec marked `active`)
 
 ## Verification Steps
 
@@ -103,12 +103,12 @@ Wire `enter-html-full-screen`/`leave-html-full-screen` so a page's `requestFulls
 
 **Complete ALL steps before signaling `[COMPLETE:leg]`:**
 
-- [ ] All acceptance criteria verified
-- [ ] Tests passing
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed` (in this file's header)
-- [ ] Check off this leg in flight.md
-- [ ] If final leg of flight: update flight.md status to `landed`, check off flight in mission.md
+- [x] All acceptance criteria verified
+- [x] Tests passing
+- [x] Update flight-log.md with leg progress entry
+- [x] Set this leg's status to `completed` (in this file's header)
+- [x] Check off this leg in flight.md
+- [x] If final leg of flight: update flight.md status to `landed`, check off flight in mission.md
 
 *(Flight-level note: per the batched workflow, code review and commit happen after the last autonomous leg — the Developer lands the leg and updates artifacts but does not commit.)*
 

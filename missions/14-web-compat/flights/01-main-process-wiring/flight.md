@@ -1,6 +1,6 @@
 # Flight 1: Main-Process Wiring — Fullscreen, Auth Challenges, Inline PDF
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Web Compatibility — Silent Failures Become Working Features](../../mission.md)
 
 ## Contributing to Criteria
@@ -151,10 +151,10 @@ All changes follow the house pattern: Electron-free, dependency-injected main mo
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (`npm test`, lint, typecheck, a11y)
-- [ ] Documentation updated (README web-compat notes; CLAUDE.md if new invariants earned pinning)
+- [x] All legs completed
+- [ ] Code merged (draft PR #141 open; merge is post-mission-review)
+- [x] Tests passing (`npm test` 2993, lint, typecheck; a11y chrome-mode clean — sheet sweep pre-broken on main, flight-logged)
+- [x] Documentation updated (README web-compat notes; CLAUDE.md invariant pins + seam lockstep; docs/mcp-automation.md, docs/vault.md)
 
 ### Verification
 
