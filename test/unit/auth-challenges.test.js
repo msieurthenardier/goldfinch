@@ -98,8 +98,11 @@ function makeHarness() {
   }
 
   // Enqueue a CLIENT-CERT challenge for `wcId`; returns its callback (with the
-  // raw list on cb.list so selection tests can assert identity).
-  function certChallenge(record, wcId, { url = 'https://127.0.0.1:8493/', list } = {}) {
+  // raw list on cb.list so selection tests can assert identity). The default
+  // `url` fixture is the LIVE Electron param form — a BARE `host:port`, not a
+  // full URL (fix #7: the previous full-URL fixture masked the derivation trap
+  // certChallengeHost now closes).
+  function certChallenge(record, wcId, { url = '127.0.0.1:8493', list } = {}) {
     const wc = addGuest(record, wcId);
     const cb = makeCallback();
     cb.list = list || [FIXTURE_CERT];
@@ -144,11 +147,19 @@ function makeHarness() {
 
 // The parametric kind table: shared-semantics tests run once per row (AC — the
 // full DD2 matrix applies to BOTH kinds via the shared machinery).
+// `cancelArgs` pins the KIND-SPECIFIC cancel invocation shape (M14 F3 HAT
+// fix, live-measured on Electron 43): a 'login' callback cancels with ZERO
+// args (documented), but a select-client-certificate callback invoked with
+// zero args SIGSEGVs the main process — silent native death, no JS error.
+// Cert cancels must pass EXACTLY ONE argument, strictly null (the
+// continue-without-certificate path: handshake completes cert-less,
+// Chrome-parity). Every cancel assertion below compares against this shape.
 const KINDS = [
   {
     kind: 'basic-auth',
     menuType: 'auth-basic',
     channel: 'auth-challenge-present',
+    cancelArgs: [],
     enqueue: (h, record, wcId, opts) => h.challenge(record, wcId, opts),
     openSheet: (h, record) => h.openAuthSheet(record),
   },
@@ -156,6 +167,7 @@ const KINDS = [
     kind: 'client-cert',
     menuType: 'cert-picker',
     channel: 'cert-challenge-present',
+    cancelArgs: [null],
     enqueue: (h, record, wcId, opts) => h.certChallenge(record, wcId, opts),
     openSheet: (h, record) => h.openCertSheet(record),
   },
@@ -171,9 +183,38 @@ test('a basic-auth guest challenge on the active tab presents exactly once (host
   record.activeTabWcId = 10;
   const cb = h.challenge(record, 10);
   assert.equal(h.presents.length, 1);
-  assert.deepEqual(h.presents[0].payload, { wcId: 10, host: '127.0.0.1', realm: 'fixture' });
+  // host:port display identity (HAT D1 fix): the fixture challenges from a
+  // non-default port, so the payload host carries it.
+  assert.deepEqual(h.presents[0].payload, { wcId: 10, host: '127.0.0.1:8091', realm: 'fixture' });
   assert.equal(h.presents[0].channel, 'auth-challenge-present');
   assert.deepEqual(cb.calls, [], 'the callback stays pending while the prompt is up');
+});
+
+// HAT D1 fix (M14 F3): the basic-auth payload's display host carries the port
+// whenever it is not the default for the challenge URL's scheme — the port
+// disambiguates services sharing a host. Record fields stay raw (the
+// getPendingChallenge pin below still sees bare host + numeric port).
+test('basic-auth payload host formatting: non-default port shown, scheme-default omitted, unparseable URL keeps port, portless stays bare, IPv6 bracketed', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  const wc = h.addGuest(record, 10);
+  /** @param {{ url?: string, host?: string, port?: number | null }} opts */
+  const presentedHost = ({ url, host, port }) => {
+    h.store.handleLogin(wc, { url }, { isProxy: false, host, port, scheme: 'basic', realm: 'r' }, makeCallback());
+    const p = h.presents[h.presents.length - 1];
+    // resolve-cancel so the next call presents fresh (one presented per window)
+    h.store.cancelForTab(10, 'navigated');
+    return p.payload.host;
+  };
+
+  assert.equal(presentedHost({ url: 'http://127.0.0.1:8091/x', host: '127.0.0.1', port: 8091 }), '127.0.0.1:8091', 'non-default http port shown');
+  assert.equal(presentedHost({ url: 'http://example.com/x', host: 'example.com', port: 80 }), 'example.com', 'default http port omitted');
+  assert.equal(presentedHost({ url: 'https://example.com/x', host: 'example.com', port: 443 }), 'example.com', 'default https port omitted');
+  assert.equal(presentedHost({ url: 'https://example.com:8443/x', host: 'example.com', port: 8443 }), 'example.com:8443', 'non-default https port shown');
+  assert.equal(presentedHost({ url: '', host: 'example.com', port: 443 }), 'example.com:443', 'unparseable URL keeps the port (fail-informative)');
+  assert.equal(presentedHost({ url: 'http://example.com/x', host: 'example.com', port: null }), 'example.com', 'no port → bare host');
+  assert.equal(presentedHost({ url: 'http://[::1]:8091/x', host: '::1', port: 8091 }), '[::1]:8091', 'IPv6 literal bracketed before the port');
 });
 
 test('a client-cert challenge presents exactly once on the DEDICATED channel with DISPLAY STRINGS only (never certificate objects)', () => {
@@ -192,6 +233,32 @@ test('a client-cert challenge presents exactly once on the DEDICATED channel wit
   assert.equal(h.presents[0].payload.certs[0].data, undefined);
   assert.equal('list' in h.presents[0].payload, false);
   assert.deepEqual(cb.calls, [], 'the callback stays pending while the chooser is up');
+});
+
+test("REGRESSION (M14 F3 HAT fix #7): cert attribution host derives from every live url form — bare host:port included — never a silent blank", () => {
+  // Electron passes select-client-certificate's `url` as a BARE `host:port`
+  // (live-verified). Naive `new URL()` on that form was a coin-flip: a
+  // letter-leading host is a valid SCHEME token → parse "succeeds" with host
+  // '' (subtitle silently absent — the operator's localhost. evidence); a
+  // digit-leading/bracketed host throws → the catch showed the raw string,
+  // right by luck. Each form pins the payload's host end-to-end through
+  // handleSelectClientCertificate → presentNext.
+  const forms = [
+    ['localhost.:8493', 'localhost.:8493'], // the live defect: parsed as scheme → was ''
+    ['127.0.0.1:8493', '127.0.0.1:8493'], // threw → was right by luck
+    ['[::1]:8493', '[::1]:8493'], // IPv6 bracket form: threw → was right by luck
+    ['example.com:443', 'example.com'], // default :443 stripped (displayHost parity); was ''
+    ['https://localhost.:8493/', 'localhost.:8493'], // full-URL form still parses directly
+    ['not a url at all', 'not a url at all'], // unparseable both ways → raw string, never blank
+  ];
+  for (const [url, expected] of forms) {
+    const h = makeHarness();
+    const record = h.makeRecord();
+    record.activeTabWcId = 10;
+    h.certChallenge(record, 10, { url });
+    assert.equal(h.presents[0].payload.host, expected, `url ${JSON.stringify(url)} must present host ${JSON.stringify(expected)}`);
+    assert.notEqual(h.presents[0].payload.host, '', 'a non-empty url must never yield a blank attribution host');
+  }
 });
 
 test('basic-auth silent cancels: proxy / contents-less / internal-session / non-guest each answer the callback exactly once with no args, no prompt', () => {
@@ -218,7 +285,7 @@ test('basic-auth silent cancels: proxy / contents-less / internal-session / non-
   assert.equal(h.presents.length, 0, 'no guard path presents a prompt');
 });
 
-test('client-cert silent cancels: contents-less / internal-session / non-guest each answer the callback exactly once with no args, no prompt', () => {
+test('client-cert silent cancels: contents-less / internal-session / non-guest each answer the callback exactly once with cb(null), no prompt', () => {
   const h = makeHarness();
   const record = h.makeRecord();
   record.activeTabWcId = 10;
@@ -226,15 +293,15 @@ test('client-cert silent cancels: contents-less / internal-session / non-guest e
 
   const noneCb = makeCallback();
   h.store.handleSelectClientCertificate(undefined, 'https://x/', list, noneCb);
-  assert.deepEqual(noneCb.calls, [[]]);
+  assert.deepEqual(noneCb.calls, [[null]]);
 
   const internalCb = makeCallback();
   h.store.handleSelectClientCertificate({ id: 10, session: { __goldfinchInternal: true } }, 'https://x/', list, internalCb);
-  assert.deepEqual(internalCb.calls, [[]]);
+  assert.deepEqual(internalCb.calls, [[null]]);
 
   const nonGuestCb = makeCallback();
   h.store.handleSelectClientCertificate({ id: 999, session: {} }, 'https://x/', list, nonGuestCb);
-  assert.deepEqual(nonGuestCb.calls, [[]]);
+  assert.deepEqual(nonGuestCb.calls, [[null]]);
 
   assert.equal(h.presents.length, 0, 'no guard path presents a chooser');
 });
@@ -247,11 +314,11 @@ test('client-cert empty/non-array list cancels silently without presenting — D
 
   const emptyCb = makeCallback();
   h.store.handleSelectClientCertificate(wc, 'https://x/', [], emptyCb);
-  assert.deepEqual(emptyCb.calls, [[]], 'empty list → exactly-once no-args cancel');
+  assert.deepEqual(emptyCb.calls, [[null]], 'empty list → exactly-once cb(null) cancel');
 
   const badCb = makeCallback();
   h.store.handleSelectClientCertificate(wc, 'https://x/', /** @type {any} */ (undefined), badCb);
-  assert.deepEqual(badCb.calls, [[]], 'non-array list → exactly-once no-args cancel');
+  assert.deepEqual(badCb.calls, [[null]], 'non-array list → exactly-once cb(null) cancel');
 
   assert.equal(h.presents.length, 0, 'no sheet for the guard paths');
 });
@@ -267,7 +334,7 @@ for (const K of KINDS) {
     K.openSheet(h, record);
     // Resolve the first via a resolution-family sheet close (Escape).
     record.sheet.closeMenuOverlay('escape');
-    assert.deepEqual(cb1.calls, [[]], 'Esc cancels the presented challenge');
+    assert.deepEqual(cb1.calls, [K.cancelArgs], 'Esc cancels the presented challenge');
     assert.deepEqual(cb2.calls, [], 'the second challenge stays pending');
     assert.equal(h.presents.length, 2, 'the queue event presents the second challenge');
     assert.equal(h.presents[1].channel, K.channel);
@@ -313,7 +380,7 @@ for (const K of KINDS) {
       const cb = K.enqueue(h, record, 10);
       K.openSheet(h, record);
       record.sheet.closeMenuOverlay(reason);
-      assert.deepEqual(cb.calls, [[]], `'${reason}' must cancel the callback`);
+      assert.deepEqual(cb.calls, [K.cancelArgs], `'${reason}' must cancel the callback`);
       // Idempotent: a duplicate close notification never double-resolves.
       h.store.notifySheetClosed(record, K.menuType, reason);
       assert.equal(cb.calls.length, 1);
@@ -438,8 +505,8 @@ for (const K of KINDS) {
     const cb2 = K.enqueue(h, record, 10);
     K.openSheet(h, record);
     h.store.cancelForTab(10, 'navigated');
-    assert.deepEqual(cb1.calls, [[]]);
-    assert.deepEqual(cb2.calls, [[]]);
+    assert.deepEqual(cb1.calls, [K.cancelArgs]);
+    assert.deepEqual(cb2.calls, [K.cancelArgs]);
     // The AUTH_MENU_TYPES pin (L3): a hardcoded 'auth-basic' here would leave a
     // stale cert-picker open across navigation-away.
     assert.deepEqual(record.sheet.closeCalls, ['navigation'], 'the visible prompt closes (resolution family)');
@@ -455,7 +522,7 @@ for (const K of KINDS) {
     const cb20 = K.enqueue(h, record, 20); // background hold
     K.openSheet(h, record);
     h.store.cancelForTab(10, 'tab-close');
-    assert.deepEqual(cb10.calls, [[]]);
+    assert.deepEqual(cb10.calls, [K.cancelArgs]);
     assert.deepEqual(cb20.calls, [], 'the other tab is untouched');
     record.activeTabWcId = 20;
     h.store.notifyTabActivated(record, 20);
@@ -471,9 +538,9 @@ for (const K of KINDS) {
     const cb3 = K.enqueue(h, record, 20); // background hold
     K.openSheet(h, record);
     h.store.cancelForWindow(record);
-    assert.deepEqual(cb1.calls, [[]]);
-    assert.deepEqual(cb2.calls, [[]]);
-    assert.deepEqual(cb3.calls, [[]]);
+    assert.deepEqual(cb1.calls, [K.cancelArgs]);
+    assert.deepEqual(cb2.calls, [K.cancelArgs]);
+    assert.deepEqual(cb3.calls, [K.cancelArgs]);
     // The window-factory close path fires the sheet 'teardown' close afterwards —
     // must be a clean no-op (state dropped, ledger exact-once).
     record.sheet.closeMenuOverlay('teardown');
@@ -637,7 +704,7 @@ test('selectCertFromSheet resolves callback(list[i]) LEDGER-FIRST; the trailing 
   assert.deepEqual(cb2.calls, []);
 });
 
-test('selectCertFromSheet out-of-range / non-integer index resolves CANCEL (no-args), exactly once — never a throw', () => {
+test('selectCertFromSheet out-of-range / non-integer index resolves CANCEL (cb(null)), exactly once — never a throw', () => {
   for (const badIndex of [2, -1, 1.5, NaN, Infinity]) {
     const h = makeHarness();
     const record = h.makeRecord();
@@ -646,7 +713,7 @@ test('selectCertFromSheet out-of-range / non-integer index resolves CANCEL (no-a
     h.openCertSheet(record);
     const res = h.store.selectCertFromSheet(record, /** @type {any} */ (badIndex));
     assert.deepEqual(res, { answered: true }, `index ${badIndex} still resolves (as cancel)`);
-    assert.deepEqual(cb.calls, [[]], `index ${badIndex} → no-args cancel`);
+    assert.deepEqual(cb.calls, [[null]], `index ${badIndex} → cb(null) cancel`);
     record.sheet.closeMenuOverlay('activated');
     assert.equal(cb.calls.length, 1);
   }
@@ -661,6 +728,68 @@ test('selectCertFromSheet refuses when nothing is presented, and when the presen
   h.openAuthSheet(record);
   assert.deepEqual(h.store.selectCertFromSheet(record, 0), { answered: false, reason: 'no-challenge' });
   assert.deepEqual(basicCb.calls, [], 'the basic-auth challenge is untouched');
+});
+
+// ---------------------------------------------------------------------------
+// M14 F3 HAT regression: cert-cancel invocation shape (Electron 43 SIGSEGV)
+// ---------------------------------------------------------------------------
+
+// The REAL Electron 43 Certificate shape, captured live during the M14 F3 HAT
+// crash diagnosis (instrumented app.on('select-client-certificate') against
+// the serve-tls.mjs fixture): a plain object with exactly these nine keys.
+// The lighter FIXTURE_CERT fake elsewhere is a subset — this test runs the
+// store against the full real shape so the fake can never mask a shape gap.
+const REAL_ELECTRON_CERT = {
+  data: '-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----\n',
+  issuer: { commonName: 'Goldfinch Fixture Throwaway CA', organizations: [], organizationUnits: [], locality: '', state: '', country: '' },
+  issuerName: 'Goldfinch Fixture Throwaway CA',
+  subject: { commonName: 'Goldfinch Fixture Client', organizations: [], organizationUnits: [], locality: '', state: '', country: '' },
+  subjectName: 'Goldfinch Fixture Client',
+  serialNumber: '0123456789abcdef',
+  validStart: 1753000000,
+  validExpiry: 1784536000,
+  fingerprint: 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+};
+
+test('REGRESSION (M14 F3 HAT): a client-cert cancel invokes the callback with EXACTLY ONE argument, strictly null — never zero-arg (Electron 43 SIGSEGV)', () => {
+  // Live-measured on Electron 43: callback() with ZERO args on a
+  // select-client-certificate callback SIGSEGVs the main process (silent
+  // native death — no JS error, no exception text, exit by signal).
+  // callback(null) takes the intended continue-without-certificate path
+  // (handshake completes cert-less — Chrome-parity cancel). callback(undefined)
+  // throws "Must pass valid certificate object". So every cancel of a
+  // client-cert challenge MUST be cb(null): one argument, strictly null.
+  // The crash repro path was tab-close with a presented chooser; escape and
+  // the guard cancels ride the same resolveOnce branch.
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  const cb = h.certChallenge(record, 10, { list: [REAL_ELECTRON_CERT] });
+
+  // The real shape presents display strings only (subjectName/issuerName).
+  assert.equal(h.presents.length, 1);
+  assert.deepEqual(h.presents[0].payload.certs, [
+    { subject: 'Goldfinch Fixture Client', issuer: 'Goldfinch Fixture Throwaway CA' },
+  ]);
+
+  // The live crash trigger: tab-close cancel of the presented cert challenge.
+  h.openCertSheet(record);
+  h.store.cancelForTab(10, 'tab-close');
+  assert.equal(cb.calls.length, 1, 'exactly once');
+  assert.equal(cb.calls[0].length, 1, 'EXACTLY ONE argument — zero-arg is the SIGSEGV');
+  assert.equal(cb.calls[0][0], null, 'strictly null — undefined throws in Electron');
+});
+
+test('REGRESSION (M14 F3 HAT): selection with the REAL Certificate shape resolves the raw object by identity', () => {
+  const h = makeHarness();
+  const record = h.makeRecord();
+  record.activeTabWcId = 10;
+  const cb = h.certChallenge(record, 10, { list: [REAL_ELECTRON_CERT] });
+  h.openCertSheet(record);
+  assert.deepEqual(h.store.selectCertFromSheet(record, 0), { answered: true });
+  assert.equal(cb.calls.length, 1);
+  assert.equal(cb.calls[0].length, 1);
+  assert.equal(cb.calls[0][0], REAL_ELECTRON_CERT, 'the raw real-shape object, untouched');
 });
 
 // ---------------------------------------------------------------------------
@@ -751,6 +880,7 @@ const POPUP_KINDS = [
     kind: 'basic-auth',
     menuType: 'auth-basic',
     channel: 'auth-challenge-present',
+    cancelArgs: [],
     enqueue: (h, popupWcId, opts) => h.popupChallenge(popupWcId, opts),
     openSheet: (h, record) => h.openAuthSheet(record),
   },
@@ -758,6 +888,7 @@ const POPUP_KINDS = [
     kind: 'client-cert',
     menuType: 'cert-picker',
     channel: 'cert-challenge-present',
+    cancelArgs: [null],
     enqueue: (h, popupWcId, opts) => h.popupCertChallenge(popupWcId, opts),
     openSheet: (h, record) => h.openCertSheet(record),
   },
@@ -831,8 +962,8 @@ for (const K of POPUP_KINDS) {
 
     // main.js's seam body, verbatim (the thin delegation).
     h.store.cancelForTab(701, 'tab-close');
-    assert.deepEqual(cb1.calls, [[]], 'presented resolved exactly once');
-    assert.deepEqual(cb2.calls, [[]], 'queued sibling resolved too');
+    assert.deepEqual(cb1.calls, [K.cancelArgs], 'presented resolved exactly once');
+    assert.deepEqual(cb2.calls, [K.cancelArgs], 'queued sibling resolved too');
     assert.deepEqual(record.sheet.closeCalls, ['tab-close'], 'visible sheet closed with a resolution-family reason');
     // Idempotent second invocation (owner-close path double-fires the seam).
     h.store.cancelForTab(701, 'tab-close');
@@ -848,7 +979,7 @@ for (const K of POPUP_KINDS) {
     K.openSheet(h, record);
     // register-tab-ipc's move hook: rekeyForRecord (registry-side) + this call.
     h.store.cancelForTab(701, 'moved');
-    assert.deepEqual(cb.calls, [[]], 'resolved exactly once — never a strand, never a migration');
+    assert.deepEqual(cb.calls, [K.cancelArgs], 'resolved exactly once — never a strand, never a migration');
     assert.deepEqual(record.sheet.closeCalls, ['tab-close'], 'sheet closes via the non-navigated mapping');
   });
 
@@ -859,7 +990,7 @@ for (const K of POPUP_KINDS) {
     const cb = K.enqueue(h, 701);
     K.openSheet(h, record);
     h.store.cancelForTab(701, 'navigated');
-    assert.deepEqual(cb.calls, [[]]);
+    assert.deepEqual(cb.calls, [K.cancelArgs]);
     assert.deepEqual(record.sheet.closeCalls, ['navigation']);
   });
 
@@ -873,7 +1004,7 @@ for (const K of POPUP_KINDS) {
     const popCb = K.enqueue(h, 701);
     h.store.cancelForWindow(record);
     assert.deepEqual(tabCb.calls, [[]]);
-    assert.deepEqual(popCb.calls, [[]], 'popup challenges die with the window — no popup awareness needed');
+    assert.deepEqual(popCb.calls, [K.cancelArgs], 'popup challenges die with the window — no popup awareness needed');
   });
 }
 
@@ -889,7 +1020,7 @@ for (const K of POPUP_KINDS) {
       const cb = K.enqueue(h, 701);
       K.openSheet(h, record);
       record.sheet.closeMenuOverlay(reason);
-      assert.deepEqual(cb.calls, [[]], `'${reason}' must cancel the popup challenge's callback`);
+      assert.deepEqual(cb.calls, [K.cancelArgs], `'${reason}' must cancel the popup challenge's callback`);
       h.store.notifySheetClosed(record, K.menuType, reason);
       assert.equal(cb.calls.length, 1, 'exactly once');
     });

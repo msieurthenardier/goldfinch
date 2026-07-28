@@ -63,7 +63,7 @@ export function parseCertPickIndex(id) {
  * renderCertPickerRows. menu-overlay.js wires the returned `close` button
  * (a deliberate dismiss, same family as Escape).
  * @param {Document} document
- * @returns {{ node: HTMLElement, card: HTMLElement, list: HTMLElement, popupNote: HTMLElement, close: HTMLButtonElement }}
+ * @returns {{ node: HTMLElement, card: HTMLElement, subtitle: HTMLElement, list: HTMLElement, popupNote: HTMLElement, close: HTMLButtonElement }}
  */
 export function buildCertPickerCard(document) {
   const node = document.createElement('div');
@@ -76,6 +76,19 @@ export function buildCertPickerCard(document) {
 
   const { header, close } = buildVaultSheetHeader(document, 'Select a certificate');
   card.appendChild(header);
+
+  // Site-attribution subtitle (M14 F3 HAT fix): WHO is asking for a
+  // certificate — the auth-basic origin-line parity ("The server <host>
+  // says…"); without it the chooser is indistinguishable across sites (the
+  // phishing-shaped gap class the displayHost fix closed for auth-basic).
+  // Rendered per-init via renderCertPickerSubtitle (the host is a server-
+  // derived display string — textContent only, never markup); hidden when the
+  // model carries no host (the a11y audit hook's bare-array shape).
+  const subtitle = document.createElement('div');
+  subtitle.className = 'auth-basic-origin cert-picker-origin';
+  subtitle.classList.add('hidden');
+  subtitle.textContent = '';
+  card.appendChild(subtitle);
 
   // Popup marker copy line (M14 F2 L2, flight DD5): shown only when the init
   // model carries `popup: true` — the challenge arrived from a script-opened
@@ -96,7 +109,24 @@ export function buildCertPickerCard(document) {
   list.tabIndex = -1;
   card.appendChild(list);
 
-  return { node, card, list, popupNote, close };
+  return { node, card, subtitle, list, popupNote, close };
+}
+
+/**
+ * Render the site-attribution subtitle from the presented challenge's host
+ * (derived main-side by auth-challenges' certChallengeHost from the bare
+ * `host:port` Electron passes — carries a non-default port natively). A
+ * missing/empty host hides the line entirely (the a11y audit hook's bare-array
+ * model has no host) rather than rendering copy with a blank in it. The host
+ * is a server-derived string: textContent only, never markup.
+ * @param {HTMLElement} subtitle
+ * @param {unknown} host
+ * @returns {void}
+ */
+export function renderCertPickerSubtitle(subtitle, host) {
+  const h = typeof host === 'string' ? host : '';
+  subtitle.textContent = h ? `The site ${h} is asking you to identify yourself with a certificate.` : '';
+  subtitle.classList.toggle('hidden', !h);
 }
 
 /**

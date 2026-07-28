@@ -19,6 +19,7 @@ const { createDocument } = require('./helpers/jars-page-dom');
 const {
   buildCertPickerCard,
   renderCertPickerRows,
+  renderCertPickerSubtitle,
   certPickId,
   parseCertPickIndex,
   CERT_PICK_PREFIX,
@@ -38,8 +39,9 @@ test('cert-picker card: hidden backdrop + header (title + accessible close) + ro
   assert.equal(card.node.classList.contains('hidden'), true);
   assert.equal(card.card.parentNode, card.node);
 
-  const [header, popupNote, list] = card.card.children;
+  const [header, subtitle, popupNote, list] = card.card.children;
   assert.equal(header.className, 'vault-sheet-header');
+  assert.equal(subtitle, card.subtitle, 'the M14 F3 site-attribution subtitle sits directly under the header');
   assert.equal(popupNote, card.popupNote, 'the M14 F2 L2 popup marker sits between header and list');
   assert.equal(header.children[0].textContent, 'Select a certificate');
   assert.equal(card.close.tagName, 'BUTTON');
@@ -124,6 +126,97 @@ test("cross-pin: register-overlay-ipc.js's local prefix mirror matches the templ
     /const CERT_PICK_PREFIX = 'cert:';/,
     "register-overlay-ipc.js must carry the identical prefix literal (its parseCertPickIndex mirrors the template's)"
   );
+});
+
+test('REGRESSION (M14 F3 HAT): the LIVE cert-picker model shape ({certs, popup?}) passes the sheet init gate — blank-sheet fix', () => {
+  // Live defect: since M14 F2 L2 the chrome's onCertChallengePresent wraps the
+  // rows in the OBJECT form { certs, popup? } (the popup marker rides it), but
+  // menu-overlay.js's init-dispatch model-shape gate still demanded a bare
+  // ARRAY for cert-picker — so every real certificate challenge bailed at the
+  // gate AFTER main's openMenu had already shown the sheet: a visible blank
+  // sheet, no chooser card, page load hung on the unanswered callback. The
+  // template tests passed (they exercise the pure builders with arrays) and
+  // the a11y hook still sends the pre-popup bare-array shape, which masked it.
+  // Source-contract pin (downloads-popup-contract idiom): BOTH ends of the
+  // shape contract, so neither side can drift without failing here.
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '../../src/renderer/renderer.js'), 'utf8'
+  );
+  const sheetSource = fs.readFileSync(
+    path.join(__dirname, '../../src/renderer/menu-overlay.js'), 'utf8'
+  );
+  // 1. The live chrome sender uses the object form (never the bare array —
+  //    the popup marker must be able to ride every presentation).
+  assert.match(
+    rendererSource,
+    /openOverlayMenu\('cert-picker', \{ certs: Array\.isArray\(certs\) \? certs : \[\]/,
+    "renderer.js's cert-challenge-present handler must send the { certs, popup? } object model"
+  );
+  // 2. The sheet's init gate accepts an OBJECT for cert-picker (array-or-object
+  //    — renderCertPicker's documented domain; an array-only gate re-blanks
+  //    the live sheet, an object-only gate breaks the a11y audit hook).
+  assert.match(
+    sheetSource,
+    /template === 'cert-picker'\s*\?\s*!!model && typeof model === 'object'/,
+    "menu-overlay.js's modelShapeOk must accept cert-picker's object form (and arrays — typeof covers both)"
+  );
+  // 3. (M14 F3 HAT fix, attribution subtitle) The chrome relays the store's
+  //    host on the object model — dropping it re-opens the no-attribution gap:
+  //    the sheet renders but can't say WHO is asking for a certificate…
+  assert.match(
+    rendererSource,
+    /onCertChallengePresent\(\(\{ certs, host, popup \}\)/,
+    "renderer.js's cert-challenge-present handler must destructure the payload's host"
+  );
+  assert.match(
+    rendererSource,
+    /\.\.\.\(typeof host === 'string' && host \? \{ host \} : \{\}\)/,
+    "renderer.js's cert-challenge-present handler must put host on the model for the attribution subtitle"
+  );
+  // …and the sheet side renders it (the model field is inert without the
+  //    renderCertPickerSubtitle call — both ends pinned, fix-#4 idiom).
+  assert.match(
+    sheetSource,
+    /renderCertPickerSubtitle\(certPicker\.subtitle, host\)/,
+    "menu-overlay.js's renderCertPicker must render the site-attribution subtitle from model.host"
+  );
+});
+
+test('site-attribution subtitle (M14 F3 HAT fix): host renders the attribution copy via textContent; an absent host hides the line (a11y hook path)', () => {
+  const document = createDocument();
+  const card = buildCertPickerCard(document);
+
+  // Default (as built): hidden and empty — the bare-array a11y audit model
+  // carries no host and must keep rendering without a blank attribution line.
+  assert.ok(card.subtitle, 'the template returns the subtitle ref (menu-overlay renders it per model.host)');
+  assert.equal(card.subtitle.classList.contains('hidden'), true, 'hidden by default');
+  assert.equal(card.subtitle.textContent, '');
+  assert.equal(card.subtitle.className, 'auth-basic-origin cert-picker-origin');
+
+  // Host present: the attribution copy names WHO is asking. The host is
+  // `new URL(url).host` main-side, so a non-default port rides it natively
+  // (the displayHost-parity property) — textContent only, never markup.
+  renderCertPickerSubtitle(card.subtitle, '127.0.0.1:8493');
+  assert.equal(
+    card.subtitle.textContent,
+    'The site 127.0.0.1:8493 is asking you to identify yourself with a certificate.'
+  );
+  assert.equal(card.subtitle.classList.contains('hidden'), false);
+
+  // Sited under the header, above the list (with the popup marker line — the
+  // two copy lines coexist; a popup challenge shows both).
+  const kids = card.card.children;
+  assert.ok(kids.indexOf(card.subtitle) === kids.indexOf(card.popupNote) - 1
+    && kids.indexOf(card.subtitle) < kids.indexOf(card.list),
+  'subtitle sits between the header and the popup marker / list');
+
+  // Back to no host (and non-string hosts): the line hides and empties —
+  // never copy with a blank in it.
+  for (const absent of [undefined, null, '', 7]) {
+    renderCertPickerSubtitle(card.subtitle, /** @type {any} */ (absent));
+    assert.equal(card.subtitle.classList.contains('hidden'), true, `host ${String(absent)} must hide the line`);
+    assert.equal(card.subtitle.textContent, '');
+  }
 });
 
 test('popup marker line (M14 F2 L2, DD5): fixed copy, hidden by default, sited between the header and the roving list', () => {

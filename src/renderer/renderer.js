@@ -1438,11 +1438,11 @@ window.goldfinch.onAuthChallengePresent(({ host, realm, popup }) => {
 });
 
 // Client-cert challenge presentation (M14 F1 L3, flight DD4): same store-
-// decides / chrome-opens contract as above. The model is display strings only
-// ({subject, issuer} rows); the selection resolves MAIN-SIDE from the
-// channel-4 index — nothing secret ever transits the chrome.
-window.goldfinch.onCertChallengePresent(({ certs, popup }) => {
-  openOverlayMenu('cert-picker', { certs: Array.isArray(certs) ? certs : [], ...(popup === true ? { popup: true } : {}) }, null, 0);
+// decides / chrome-opens contract as above. Display strings only — {subject,
+// issuer} rows + the requesting host (the sheet's site-attribution subtitle,
+// M14 F3 HAT fix); selection resolves MAIN-SIDE from the channel-4 index.
+window.goldfinch.onCertChallengePresent(({ certs, host, popup }) => {
+  openOverlayMenu('cert-picker', { certs: Array.isArray(certs) ? certs : [], ...(typeof host === 'string' && host ? { host } : {}), ...(popup === true ? { popup: true } : {}) }, null, 0);
 });
 
 window.goldfinch.onVaultGesture(({ wcId }) => {

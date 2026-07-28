@@ -492,14 +492,28 @@ async function grabWindow(windowId) {
   // FIX 2(b) — WSLg / Wayland fallback: build a REAL chrome+guest composite in the
   // chrome renderer via executeJavaScript. Steps:
   //   1. capturePage() on chrome and active guest in parallel.
-  //   2. Ask the chrome renderer for the #webviews bounding rect (the guest's offset).
-  //   3. Draw chrome first, then guest at its offset, on an offscreen <canvas>;
+  //   2. Read the active guest view's MAIN-SIDE bounds (record ground truth) for
+  //      the guest's placement on the canvas.
+  //   3. Draw chrome first, then guest at those bounds, on an offscreen <canvas>;
   //      return the composite as a data URL.
   // This is dep-free and avoids shipping a broken chrome-only screenshot.
+  //
+  // M14 F3 HAT fix: the guest layer is positioned from the view's OWN getBounds(),
+  // never the renderer-reported #webviews slot rect. During HTML fullscreen
+  // (record.htmlFullscreen — see html-fullscreen.js) the renderer's slot rect is
+  // stale by design (its bounds sends are DEFERRED as pendingBounds, never
+  // applied), while the view's real bounds are the full window content area and
+  // the view is raised above the chrome. Drawing at the slot rect falsely showed
+  // chrome in the capture of a correct on-screen window. In normal mode
+  // getBounds() equals the applied slot rect, so the composite is unchanged.
   try {
     // Same record as the window bounds above (F2: never mix records mid-capture).
+    // The active entry comes off grabRec DIRECTLY (not via a second registry
+    // resolve) so both the capture target and its bounds read the same record.
     const cc = grabRec.chromeView.webContents;
-    const atc = grabRec.activeTabWcId != null ? getTabContents(grabRec.activeTabWcId) : null;
+    const activeEntry = grabRec.activeTabWcId != null ? grabRec.tabViews.get(grabRec.activeTabWcId) : null;
+    const activeWc = activeEntry ? activeEntry.view.webContents : null;
+    const atc = activeWc && !activeWc.isDestroyed() ? activeWc : null;
     if (!cc || cc.isDestroyed()) return null;
 
     // Capture both views in parallel.
@@ -520,21 +534,27 @@ async function grabWindow(windowId) {
     const chromeB64 = chromeImg.toPNG().toString('base64');
     const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
 
-    // Get the #webviews slot bounds from the chrome renderer so we know
-    // where to draw the guest PNG on the composite canvas.
-    const guestBoundsJson = await cc.executeJavaScript(
-      'JSON.stringify(document.getElementById("webviews")?.getBoundingClientRect() ?? null)'
-    );
-    const guestBounds = guestBoundsJson ? JSON.parse(guestBoundsJson) : null;
+    // Guest placement: main-side ground truth (see the FIX 2(b) header). Same
+    // window-content-DIP space as every other view bounds here — no renderer
+    // round-trip needed for it.
+    const guestBounds = atc && activeEntry ? activeEntry.view.getBounds() : null;
 
-    // Layer list, bottom-up: guest at the slot offset, then the overlay views in
+    // Layer list, bottom-up: guest at its true bounds, then the overlay views in
     // their z-order (find bar, then the menu-overlay sheet — the sheet is added
     // after the find re-assert on every show path, so it stacks above). Without
     // the overlay layers a Wayland-path captureWindow would silently omit an
     // OPEN MENU / find bar that IS on the real screen (the x11 desktopCapturer
     // path captured real window pixels, hiding this gap until the Leg-6 ozone
-    // switch). View bounds are window-content DIPs — the same space as the
-    // chrome DOM rect (the chrome view fills the window at 0,0).
+    // switch). View bounds are window-content DIPs — the same space the chrome
+    // canvas is drawn in (the chrome view fills the window at 0,0).
+    //
+    // Draw order vs real z-order: the canvas draws chrome first, then the guest
+    // (then overlays), so the guest sits ABOVE chrome in the composite — which
+    // matches the screen exactly when it matters: in normal mode the guest only
+    // covers the #webviews slot (chrome shows around it), and during HTML
+    // fullscreen the raised guest at full-window bounds covers the chrome
+    // completely (enter() hides the find overlay and closes the sheet, so no
+    // overlay layer can wrongly stack above a fullscreen guest here).
     /** @type {{ b64: string, x: number, y: number, w: number, h: number }[]} */
     const layers = [];
     if (tabB64 && guestBounds) {
