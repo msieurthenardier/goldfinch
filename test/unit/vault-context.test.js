@@ -606,3 +606,170 @@ test('deriveAuditDetail NEVER emits a secret for vault ops (both accessKey types
     rm(fx.dir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 (flight DD3) — answerAuth: the vaultAnswerAuth context method.
+// Mirror of fill: jar membership via resolveTarget, item type 'login',
+// originMatches against the PENDING CHALLENGE's URL origin (never
+// authInfo.scheme), effect via the injected answerAuthDelegate, credential
+// never in the return.
+// ---------------------------------------------------------------------------
+
+function makeAnswerWorld({ challengeUrl = 'https://work.example/protected' } = {}) {
+  const world = makeWorld();
+  const answers = [];
+  const challenges = new Map([
+    // wcId 10 (work tab) has a pending challenge whose URL origin matches w1.
+    [10, { wcId: 10, host: 'work.example', port: 443, realm: 'fixture', url: challengeUrl }],
+  ]);
+  const deps = {
+    answerAuthDelegate: (arg) => { answers.push(arg); return { answered: true }; },
+    getPendingChallenge: (wcId) => challenges.get(wcId) || null,
+  };
+  return { world, answers, challenges, deps };
+}
+
+test('answerAuth success: delegate receives { wcId, credential }; result carries id + CHALLENGE origin and NO credential', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: true, id: 'w1', origin: 'https://work.example' });
+    assert.equal(aw.answers.length, 1);
+    assert.deepEqual(aw.answers[0], { wcId: 10, credential: { username: 'wuser', password: 'wpass' } });
+    assert.equal('credential' in res, false);
+    assert.equal(JSON.stringify(res).includes('wpass'), false, 'no password anywhere in the result');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth locked session → { answered:false, reason:locked }; delegate untouched', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'locked' });
+    assert.equal(aw.answers.length, 0);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth with no pending challenge → { answered:false, reason:no-challenge }', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    // wcId 30 is a work-jar tab with NO pending challenge.
+    const res = ctx.answerAuth('work', { wcId: 30, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'no-challenge' });
+    assert.equal(aw.answers.length, 0);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth unknown item → no-match; wrong item type is not resolvable as login', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'nope' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'no-match' });
+    assert.equal(aw.answers.length, 0);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth origin mismatch (challenge origin ≠ item origin) → origin-mismatch; delegate untouched', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld({ challengeUrl: 'https://evil.example/protected' });
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'origin-mismatch' });
+    assert.equal(aw.answers.length, 0);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth on a FOREIGN/sibling tab THROWS automation: out-of-jar (delegate not called)', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    assert.throws(
+      () => ctx.answerAuth('work', { wcId: 20 /* personal-jar tab */, itemId: 'w1' }, fillDeps(aw.world)),
+      (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
+    );
+    assert.equal(aw.answers.length, 0);
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth ambiguous item id (same id in two unlocked vaults, no vaultId) → ambiguous; vaultId disambiguates', async () => {
+  const fx = await buildFixture();
+  try {
+    // Duplicate w1's id into the personal vault so an admin session sees both.
+    const seed = makeStore(fx.dir);
+    await seed.unlock(MASTER);
+    seed.saveItem('personal', { id: 'w1', type: 'login', title: 'Dup', origin: 'https://work.example', username: 'dupuser', password: 'duppass' });
+    seed.lockNow();
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('admin', fx.adminPrivateKeyB64);
+    const res = ctx.answerAuth('admin', { wcId: 10, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'ambiguous' });
+    assert.equal(aw.answers.length, 0);
+    const picked = ctx.answerAuth('admin', { wcId: 10, itemId: 'w1', vaultId: 'work' }, fillDeps(aw.world));
+    assert.deepEqual(picked, { answered: true, id: 'w1', origin: 'https://work.example' });
+    assert.deepEqual(aw.answers[0].credential.username, 'wuser', 'the vaultId-selected item filled, not the dup');
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('answerAuth: a delegate reporting failure (challenge vanished mid-answer) degrades to no-challenge', async () => {
+  const fx = await buildFixture();
+  try {
+    const store = makeStore(fx.dir);
+    const aw = makeAnswerWorld();
+    aw.deps.answerAuthDelegate = () => ({ answered: false, reason: 'no-challenge' });
+    const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn, ...aw.deps });
+    ctx.unlock('work', fx.workSecret);
+    const res = ctx.answerAuth('work', { wcId: 10, itemId: 'w1' }, fillDeps(aw.world));
+    assert.deepEqual(res, { answered: false, reason: 'no-challenge' });
+  } finally {
+    rm(fx.dir);
+  }
+});
+
+test('deriveAuditDetail(vaultAnswerAuth) records item id + resolved origin from the result — never a credential', () => {
+  const okResult = { content: [{ text: JSON.stringify({ answered: true, id: 'w1', origin: 'https://work.example' }) }] };
+  assert.equal(
+    deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }, okResult),
+    'item=w1 origin=https://work.example'
+  );
+  const noResult = { content: [{ text: JSON.stringify({ answered: false, reason: 'locked' }) }] };
+  assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }, noResult), 'item=w1');
+  assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10 }, okResult), null, 'no itemId → null');
+  assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }), 'item=w1', '2-arg call keeps args-only detail');
+});

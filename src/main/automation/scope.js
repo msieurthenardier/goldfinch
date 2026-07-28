@@ -80,7 +80,11 @@ const WCID_FIRST_OPS = [
 // a WCID_FIRST_OPS entry. It must NEVER be added to WCID_FIRST_OPS (that would feed
 // the generic engine[op] wrapper an op the engine does not have → "engine.vaultFill
 // is not a function").
-const WCID_FIRST_CUSTOM_JAR_OPS = ['vaultFill'];
+// M14 F1 L2 (flight DD3): `vaultAnswerAuth` joins on identical reasoning — a
+// wcId-first NON-engine-op whose jar-membership + origin enforcement lives in
+// vault-context.answerAuth (resolveTarget + originMatches against the pending
+// challenge's URL origin), never here.
+const WCID_FIRST_CUSTOM_JAR_OPS = ['vaultFill', 'vaultAnswerAuth'];
 
 /**
  * Scope an engine to a resolved identity.

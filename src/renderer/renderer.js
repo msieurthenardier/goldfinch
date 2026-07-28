@@ -259,6 +259,24 @@ const overlayMenus = {
     ariaTarget: () => els.address,
     refocus() {}
   },
+  // HTTP basic-auth credential prompt (M14 F1 L2, flight DD2). Raised from main's
+  // pending-challenge store (auth-challenge-present) — no chrome trigger element,
+  // so no aria-expanded target and no trigger refocus. The close reason's DD2
+  // lifecycle bucket (resolve vs re-present) is mapped MAIN-SIDE by the store's
+  // manager close-observer; the chrome only opens.
+  'auth-basic': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
+  // TLS client-cert chooser (M14 F1 L3, flight DD4) — same shape as auth-basic:
+  // raised from main's pending-challenge store (cert-challenge-present), no
+  // chrome trigger element, close buckets mapped MAIN-SIDE by the store.
+  'cert-picker': {
+    open: false, token: 0, blurClosedAt: -Infinity,
+    ariaTarget: () => null,
+    refocus() {}
+  },
   // Human vault flow sheets (M12 F2 Leg 3 pick-and-fill, DD5/DD6). Both are raised
   // from a guest lock-icon gesture — there is no chrome trigger element, so there is
   // no aria-expanded target and no trigger refocus (the guest owns focus). The
@@ -549,6 +567,18 @@ const openVaultRecoverOverlayForAudit = () => openOverlayMenu('vault-recover', [
 // Same evaluate-seam precedent as leg-5's openVaultAccessKeyShowOverlayForAudit.
 const openVaultAdminKeyShowOverlayForAudit = () =>
   openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, { dismissible: false });
+// M14 F1 L2 (auth-challenges): a11y SHEET_STATES hook for the auth-basic credential
+// sheet. Opens with a synthetic NON-SECRET host/realm model so the labeled
+// username/password fields + Sign in/Cancel render (dialog-style, Escape-dismissible).
+// Same leg-authorized evaluate-seam precedent as the vault sheet hooks above.
+const openAuthBasicOverlayForAudit = () =>
+  openOverlayMenu('auth-basic', { host: '127.0.0.1:8091', realm: 'fixture' }, null, 0);
+// M14 F1 L3 (client-cert): a11y SHEET_STATES hook for the cert-picker chooser
+// sheet. Opens with a synthetic display-string row (subject + issuer — never a
+// certificate object) so the roving list + Cancel row render. Same
+// leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
+const openCertPickerOverlayForAudit = () =>
+  openOverlayMenu('cert-picker', [{ subject: 'CN=Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }], null, 0);
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -689,6 +719,20 @@ function dispatchOverlayActivation({ menuType, id, value }) {
           }
         })
         .catch(() => {});
+      break;
+    }
+    case 'auth-basic': {
+      // The only channel-4 activation is the NON-SECRET id:'cancel' (M14 F1 L2) —
+      // the credential rides the dedicated menuOverlay.authSubmit invoke, never
+      // this dispatch. Main's auth store maps the 'activated' close to
+      // resolve-cancel; nothing to do chrome-side (validated no-op).
+      break;
+    }
+    case 'cert-picker': {
+      // Selection already resolved MAIN-SIDE, ledger-first, in register-
+      // overlay-ipc BEFORE this unconditional forward (M14 F1 L3 — the
+      // deliberate deviation from vault-picker's chrome-side dispatch). Every
+      // id ('cert:<i>' / 'cancel') is a validated no-op here.
       break;
     }
     case 'vault-recovery-show': {
@@ -1384,6 +1428,23 @@ async function openVaultPicker(wcId) {
   openOverlayMenu('vault-picker', lastPickerModel, null, 0);
 }
 
+// HTTP auth challenge presentation (M14 F1 L2, flight DD2). Main's pending-
+// challenge store decides WHEN a challenge presents (eligibility + queue); the
+// chrome only opens the auth-basic sheet through the standard open path with
+// the NON-SECRET {host, realm} model (centered card — anchor ignored). The
+// credential leaves the sheet over the dedicated authSubmit Buffer channel.
+window.goldfinch.onAuthChallengePresent(({ host, realm }) => {
+  openOverlayMenu('auth-basic', { host, realm }, null, 0);
+});
+
+// Client-cert challenge presentation (M14 F1 L3, flight DD4): same store-
+// decides / chrome-opens contract as above. The model is display strings only
+// ({subject, issuer} rows); the selection resolves MAIN-SIDE from the
+// channel-4 index — nothing secret ever transits the chrome.
+window.goldfinch.onCertChallengePresent(({ certs }) => {
+  openOverlayMenu('cert-picker', Array.isArray(certs) ? certs : [], null, 0);
+});
+
 window.goldfinch.onVaultGesture(({ wcId }) => {
   if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
   if (lockState.unlocked) {
@@ -1645,11 +1706,11 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 29-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 31-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 29 is
+// do not grow it without an FD ruling — an evaluate caller outside these 31 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
 // the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
@@ -1663,7 +1724,9 @@ Promise.all([
 // openVaultImportUnlockOverlayForAudit, openVaultChangeMasterOverlayForAudit,
 // openVaultRecoverOverlayForAudit + openVaultAdminKeyShowOverlayForAudit for the
 // sheet:vault-import-unlock / vault-change-master / vault-recover / vault-adminkey-show
-// a11y states.)
+// a11y states. M14 F1 L2: added openAuthBasicOverlayForAudit for the
+// sheet:auth-basic a11y state. M14 F1 L3: added openCertPickerOverlayForAudit
+// for the sheet:cert-picker a11y state.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1696,5 +1759,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openVaultImportUnlockOverlayForAudit, // M12 F4 Leg 1 — SHEET_STATES 'sheet:vault-import-unlock' (DD9 addition)
   openVaultChangeMasterOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-change-master' (DD9 addition)
   openVaultRecoverOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-recover' (DD9 addition)
-  openVaultAdminKeyShowOverlayForAudit // M12 F4 Leg 3 — SHEET_STATES 'sheet:vault-adminkey-show' (DD9 addition)
+  openVaultAdminKeyShowOverlayForAudit, // M12 F4 Leg 3 — SHEET_STATES 'sheet:vault-adminkey-show' (DD9 addition)
+  openAuthBasicOverlayForAudit, // M14 F1 L2 — SHEET_STATES 'sheet:auth-basic' (leg-authorized addition)
+  openCertPickerOverlayForAudit // M14 F1 L3 — SHEET_STATES 'sheet:cert-picker' (leg-authorized addition)
 });

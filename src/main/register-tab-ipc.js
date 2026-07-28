@@ -14,6 +14,8 @@ function registerTabIpc(deps) {
     webPreloadPath,
     INTERNAL_PARTITION,
     registry,
+    htmlFullscreen,
+    authChallenges,
     wireGuestContents,
     wireTabViewEvents,
     captureClosedTabEntry,
@@ -103,6 +105,13 @@ ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }
       sandbox: true,
       nodeIntegration: false,
       partition: partition,
+      // M14 F1 L4 (DD5): enable the plugin process so Chromium's built-in PDF
+      // viewer renders PDFs inline. WEB branch only — the internal branch above
+      // deliberately has no plugins key. `sandbox: true` is retained: the PDF
+      // viewer runs sandboxed in stock Chrome, so this preserves the mission-13
+      // posture. The viewer's chrome-extension: subframe is admitted by the
+      // frame-scoped, id-pinned carve-out in guest-wiring.js (guardFrameNav).
+      plugins: true,
       // NO spellcheck key — the session-layer applier (applySpellcheck) owns the web toggle
     };
   }
@@ -166,6 +175,10 @@ ipcMain.on('tab-close', (event, wcId, stripIndex) => {
   if (!owner || !entry) return;
   // Captured BEFORE the null-out below — one line lower and this is always false.
   const wasActive = owner.activeTabWcId === wcId;
+  // M14 F1 L2 (DD2 resolution edge): a closing tab's pending auth challenges
+  // are cancelled (exactly-once ledger) BEFORE any teardown — the later sheet
+  // close below re-resolves idempotently.
+  authChallenges?.cancelForTab(wcId, 'tab-close');
   // M09 F4 Leg 1 (DD2) — closed-tab-stack capture. Sits strictly BEFORE destroy()/
   // tabViews.delete below (the webContents and its navigationHistory must still be
   // alive to read). The allowlist/exclusion body lives in captureClosedTabEntry
@@ -222,6 +235,12 @@ ipcMain.on('tab-close', (event, wcId, stripIndex) => {
     owner.findOverlay?.hide();
     owner.sheet?.closeMenuOverlay('tab-close');
   }
+  // M14 F1 L1 (DD1 exit edge — explicit idempotent cleanup): the fullscreen
+  // mode must NEVER survive its tab. The entry is already deleted and the
+  // contents destroyed above, so forceExit skips all view work and reduces to
+  // record cleanup (an armed gate keyed to a dead wcId would leave the
+  // window's bounds pipeline believing main is still the bounds writer).
+  if (owner.htmlFullscreen?.wcId === wcId) htmlFullscreen.forceExit(owner);
   const anyWebTabLeft = [...owner.tabViews.values()].some((e) => e.trusted === false);
   if (!anyWebTabLeft) owner.findOverlay?.hide();
 });
@@ -388,6 +407,23 @@ function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {
   // source window and does not survive the move; findText/findOpen reset is
   // the documented renderer-side lost state).
   if (source.findOverlay?.isSessionActive(p.wcId)) source.findOverlay.closeSession({ refocusGuest: false });
+
+  // M14 F1 L1 (DD1 exit edge): force-exit fullscreen BEFORE the H3 geometry
+  // capture below — the captured rect must be the RESTORED slot rect, never
+  // the full-window fullscreen rect (which would seed the target wrong and
+  // leave the gate armed on the source record). Unconditional on which tab
+  // holds the mode: any armed mode on the source is cleared (moving a
+  // background tab out from under a fullscreen tab is exotic but must not
+  // strand state). forceExit is SYNCHRONOUS BY CONTRACT (its page-exit ask is
+  // fire-and-forget), so this function's pinned synchrony invariant holds.
+  htmlFullscreen.forceExit(source);
+
+  // M14 F1 L2 (flight DD2 ruling): a cross-window move CANCELS the tab's
+  // pending auth challenges at move time — re-homing a live native callback
+  // across records is complexity without a user-visible payoff; the page
+  // re-issues the challenge on reload in the new window. Synchronous (the
+  // DD1 synchrony invariant below is untouched).
+  authChallenges?.cancelForTab(p.wcId, 'moved');
 
   // (H3) geometry: capture the guest's current window-local content-DIP bounds
   // BEFORE detach. A window-LOCAL view rect, never a window origin — the DD16
@@ -651,6 +687,10 @@ ipcMain.on('tab-hide', (event, wcId) => {
   // Leg 2 (F3 DD2): owning-chrome check — the sender must BE the owner.
   const owner = ownsTab(event, wcId);
   if (!owner) return;
+  // M14 F1 L1 (DD1 exit edge): hiding the fullscreen tab force-exits the mode
+  // FIRST — the restore must run while the entry is still resolvable; the
+  // overlay-hide block below then re-hides whatever the restore re-showed.
+  if (owner.htmlFullscreen?.wcId === wcId) htmlFullscreen.forceExit(owner);
   // Find-overlay hide (DD5): hiding the active guest (the pending-activation hide)
   // takes the overlay out of the stack too. Restore needs no code here —
   // late-activation lands in tab-set-active's re-add.
@@ -711,6 +751,17 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
   // Leg 2 (F3 DD2): owning-chrome check — the sender must BE that owning window.
   const owner = ownsTab(event, wcId);
   if (!owner) return;
+  // M14 F1 L1 (DD1): activating a DIFFERENT tab while one holds fullscreen is
+  // an exit edge — force-exit (restore-first) so the incoming activation lands
+  // on a normal window. Same-tab re-activation (MCP activateTab on the
+  // fullscreen tab — the existing deliberate sheet path below) is a GEOMETRY
+  // NO-OP under fullscreen: the incoming bounds defer as pending and the
+  // find-restore/sheet-sync branches are skipped, so activateTab never shrinks
+  // the fullscreen guest or repaints overlays over it.
+  if (owner.htmlFullscreen && owner.htmlFullscreen.wcId !== wcId) {
+    htmlFullscreen.forceExit(owner);
+  }
+  const fullscreenSameTab = owner.htmlFullscreen != null && owner.htmlFullscreen.wcId === wcId;
   // L2 (T3): capture whether the OUTGOING active guest holds OS focus BEFORE the
   // visibility swap below. isFocused() on the outgoing guest is exactly the "focus was in
   // the page" signal — a page-content chord leaves the outgoing guest focused, while strip
@@ -728,7 +779,11 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
       ? { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) }
       : null;
     if (rounded) {
-      entry.view.setBounds(rounded);
+      // M14 F1 L1 (DD1 bounds gate): under same-tab fullscreen the rect is
+      // deferred as pendingBounds (exit applies it), never applied live.
+      if (!htmlFullscreen.handleRendererBounds(owner, wcId, rounded)) {
+        entry.view.setBounds(rounded);
+      }
     }
     if (!entry.view.webContents.isDestroyed()) {
       entry.view.setVisible(true);
@@ -760,10 +815,12 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
       // the OLD guest would land OS focus on a view about to be hidden and steal
       // focus from tab-strip keyboard navigation (AC5).
       owner.findOverlay.closeSession({ refocusGuest: false });
-    } else if (owner.findOverlay?.isSessionActive(wcId)) {
+    } else if (!fullscreenSameTab && owner.findOverlay?.isSessionActive(wcId)) {
       // AC6b / DD5 restore: re-activating the session's own tab re-shows the
       // overlay — the session survives a hide/re-add cycle.
       // isSessionActive(wcId) implies !entry.trusted (open refuses trusted).
+      // M14 F1 L1: skipped under same-tab fullscreen — the surviving session
+      // is restored by the fullscreen EXIT path, never over the expanded guest.
       if (rounded) owner.findOverlay.syncBounds(rounded);
       owner.findOverlay.show();
     }
@@ -774,7 +831,7 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
     // window B's tab activity is structurally unable to move/close/re-raise window A's
     // menu, so the pre-F7 attachment conditioning is deleted (syncBounds stores always
     // regardless; closeMenuOverlay is idempotent when no menu is open).
-    if (rounded) owner.sheet?.syncBounds(rounded);
+    if (rounded && !fullscreenSameTab) owner.sheet?.syncBounds(rounded);
     if (owner.activeTabWcId !== null && owner.activeTabWcId !== wcId) {
       // Close family: activating a DIFFERENT tab (any driver, incl. MCP activateTab —
       // the DD4 "never blurs the sheet" path) closes any open menu. The DD5 hook
@@ -801,6 +858,12 @@ ipcMain.on('tab-set-active', (event, { wcId, bounds }) => {
   }
   const captionChanged = owner.activeTabWcId !== wcId;
   owner.activeTabWcId = wcId;
+  // M14 F1 L2 (DD2 re-present trigger): a background tab's held auth challenge
+  // presents when its tab activates. Strictly AFTER the activeTabWcId write —
+  // presentation eligibility reads it — and after the sheet close family above
+  // (the tab-switch close occluded any prior prompt; the store's own
+  // isMenuOpen gate holds if some other menu is still open).
+  authChallenges?.notifyTabActivated(owner, wcId);
   // F8 DD8: this window's caption is its ACTIVE tab's title, so an activation
   // retitles it for every OTHER window's menu. Gated on the active tab actually
   // changing — a re-activation of the same tab (the menu/find re-assert path
@@ -815,6 +878,14 @@ ipcMain.on('tab-set-bounds', (event, { wcId, bounds }) => {
   const entry = owner ? owner.tabViews.get(wcId) : null;
   if (!entry || entry.view.webContents.isDestroyed()) return;
   const rounded = { x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) };
+  // M14 F1 L1 (DD1 bounds gate): while THIS tab holds the window's fullscreen
+  // mode, the renderer's slot rect is DEFERRED (stored as pendingBounds), not
+  // applied — main is the single bounds writer during fullscreen. The early
+  // return also skips the findOverlay/sheet syncBounds fan-out below; exit's
+  // 'trigger-send-bounds' re-converges all three managers from the renderer's
+  // next authoritative send. Other tabs' bounds apply normally (deliberate —
+  // background-tab bounds are harmless to apply; silent drops wedge nothing).
+  if (htmlFullscreen.handleRendererBounds(owner, wcId, rounded)) return;
   entry.view.setBounds(rounded);
   // Find-overlay position-sync (DD2): the overlay tracks the ACTIVE guest's bounds —
   // resize/maximize/panel toggles all funnel here via sendActiveBounds/ResizeObserver/

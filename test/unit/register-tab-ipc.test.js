@@ -93,6 +93,7 @@ function setup() {
       bootConfigServed: true,
       pendingChromeSends: [],
       dragWcId: null,
+      htmlFullscreen: null,
       findOverlay: {
         isSessionActive: () => false,
         getSessionTabWcId: () => null,
@@ -127,6 +128,36 @@ function setup() {
     constructor(opts) { const view = new FakeView(opts, log, nextWcId++); views.push(view); return view; }
   }
   let nextWindowId = 50;
+  // M14 F1 L1: fullscreen module FAKE mirroring the real contract's mutations
+  // (mode clear on forceExit + restore of savedBounds; pending stash on
+  // handleRendererBounds) — this suite asserts register-tab-ipc's CALL POINTS;
+  // the real mode logic is pinned by html-fullscreen.test.js.
+  const htmlFullscreen = {
+    forceExit: (record) => {
+      log.push(['force-exit', record.win.id, record.htmlFullscreen ? record.htmlFullscreen.wcId : null]);
+      const mode = record.htmlFullscreen;
+      record.htmlFullscreen = null;
+      if (!mode) return;
+      const entry = record.tabViews.get(mode.wcId);
+      if (entry && !entry.view.webContents.isDestroyed()) entry.view.setBounds(mode.savedBounds);
+    },
+    handleRendererBounds: (record, wcId, rounded) => {
+      if (record.htmlFullscreen && record.htmlFullscreen.wcId === wcId) {
+        record.htmlFullscreen.pendingBounds = rounded;
+        log.push(['defer-bounds', wcId]);
+        return true;
+      }
+      return false;
+    }
+  };
+  // M14 F1 L2: auth pending-challenge store FAKE — this suite asserts
+  // register-tab-ipc's CALL POINTS; the real lifecycle is pinned by
+  // auth-challenges.test.js.
+  const authCalls = [];
+  const authChallenges = {
+    cancelForTab: (wcId, reason) => authCalls.push(['cancel-tab', wcId, reason]),
+    notifyTabActivated: (record, wcId) => authCalls.push(['notify-activated', record.win.id, wcId])
+  };
   const deps = {
     ipcMain,
     WebContentsView,
@@ -134,6 +165,8 @@ function setup() {
     webPreloadPath: '/preload/web.js',
     INTERNAL_PARTITION: 'goldfinch-internal',
     registry,
+    htmlFullscreen,
+    authChallenges,
     wireGuestContents: (wc) => log.push(['wire-guest', wc.id]),
     wireTabViewEvents: (_view, id, partition) => log.push(['wire-tab', id, partition]),
     captureClosedTabEntry: ({ tabEntry, stripIndex, windowId }) => ({ url: tabEntry.view.webContents.url, title: 'x', jarId: 'jar-a', stripIndex, windowId, navEntries: [], navIndex: 0 }),
@@ -159,7 +192,7 @@ function setup() {
     logger: { warn() {}, error() {} }
   };
   registerTabIpc(deps);
-  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten };
+  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten, authCalls };
 }
 
 test('registers the complete tab/move channel set exactly once', () => {
@@ -194,6 +227,11 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
   assert.equal(h.views[0].opts.webPreferences.nodeIntegration, false);
   assert.equal(h.views[0].opts.webPreferences.sandbox, true);
   assert.equal(h.views[0].opts.webPreferences.preload, '/preload/web.js');
+  // M14 F1 L4 (DD5): the WEB branch enables the plugin process (inline PDF
+  // viewer) — with sandbox retained (asserted above). The internal branch must
+  // NOT gain the key (deepEqual below is the structural pin; the explicit
+  // assertion documents the invariant).
+  assert.equal(h.views[0].opts.webPreferences.plugins, true);
   assert.ok(h.log.findIndex((x) => x[0] === 'wire-tab') < h.log.findIndex((x) => x[0] === 'load'));
 
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
@@ -203,6 +241,8 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
     preload: '/preload/internal.js', contextIsolation: true, sandbox: true,
     nodeIntegration: false, partition: 'goldfinch-internal', spellcheck: false
   });
+  assert.equal('plugins' in h.views[1].opts.webPreferences, false,
+    'internal branch webPreferences must not carry a plugins key (DD5 scopes the relaxation to web guests)');
 });
 
 test('move-to-window derives source from sender, treats windowId as a destination request, and mutates synchronously', () => {
@@ -316,6 +356,152 @@ test('remaining lifecycle channels execute through captured handlers with their 
   assert.equal(reopened.stripIndex, 1);
 });
 
+// ---------------------------------------------------------------------------
+// M14 F1 L1 (DD1) — fullscreen bounds gate + exit edges. The htmlFullscreen
+// dep is the contract-mirroring fake defined in setup(); these tests pin THIS
+// module's call points: where the gate is consulted, where force-exit fires,
+// and their ordering against the surrounding handler bodies.
+// ---------------------------------------------------------------------------
+
+function armFullscreen(record, wcId, savedBounds = { x: 0, y: 80, width: 1000, height: 700 }) {
+  record.htmlFullscreen = { wcId, savedBounds, pendingBounds: null };
+}
+
+test('fullscreen: tab-set-bounds defers the fullscreen tab (no apply, no overlay fan-out); other tabs apply normally', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const fsView = h.addTab(record, 101);
+  const other = h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  armFullscreen(record, 101);
+  fsView.bounds = { x: 0, y: 0, width: 1200, height: 800 }; // expanded
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
+    wcId: 101, bounds: { x: 0, y: 80.4, width: 1000.2, height: 700.4 }
+  });
+  assert.deepEqual(record.htmlFullscreen.pendingBounds, { x: 0, y: 80, width: 1000, height: 700 }, 'rounded rect stored as pending');
+  assert.deepEqual(fsView.bounds, { x: 0, y: 0, width: 1200, height: 800 }, 'the expanded guest is never shrunk');
+  assert.equal(h.log.some((x) => x[0] === 'sync-find' || x[0] === 'sync-menu'), false, 'overlay syncBounds fan-out skipped');
+
+  // A DIFFERENT (background) tab's bounds still apply normally.
+  h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
+    wcId: 102, bounds: { x: 0, y: 80, width: 990, height: 690 }
+  });
+  assert.deepEqual(other.bounds, { x: 0, y: 80, width: 990, height: 690 });
+});
+
+test('fullscreen: activating a DIFFERENT tab force-exits BEFORE the swap; the restored rect lands on the old holder', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const fsView = h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  const saved = { x: 0, y: 80, width: 1000, height: 700 };
+  armFullscreen(record, 101, saved);
+  fsView.bounds = { x: 0, y: 0, width: 1200, height: 800 };
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 102, bounds: { x: 0, y: 80, width: 1000, height: 700 }
+  });
+  assert.equal(record.htmlFullscreen, null);
+  assert.deepEqual(h.log.find((x) => x[0] === 'force-exit'), ['force-exit', 1, 101]);
+  assert.deepEqual(fsView.bounds, saved, 'old holder restored by the force-exit');
+  const exitIdx = h.log.findIndex((x) => x[0] === 'force-exit');
+  const raiseIdx = h.log.findIndex((x) => x[0] === 'add-view' && x[2] === 102);
+  assert.ok(exitIdx < raiseIdx, 'force-exit runs before the incoming activation work');
+  assert.equal(record.activeTabWcId, 102);
+});
+
+test('fullscreen: same-tab tab-set-active is a geometry no-op — bounds deferred, find restore and sheet sync skipped', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const fsView = h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  record.tabViews.get(101).active = true;
+  armFullscreen(record, 101);
+  fsView.bounds = { x: 0, y: 0, width: 1200, height: 800 };
+  // A live find session on the fullscreen tab: the AC6b restore branch would
+  // fire show() here if the same-tab skip regressed.
+  record.findOverlay.isSessionActive = (wcId) => wcId === 101;
+  record.findOverlay.getSessionTabWcId = () => 101;
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 101, bounds: { x: 0, y: 80, width: 1000, height: 700 }
+  });
+  assert.deepEqual(fsView.bounds, { x: 0, y: 0, width: 1200, height: 800 }, 'MCP activateTab must not shrink the fullscreen guest');
+  assert.deepEqual(record.htmlFullscreen.pendingBounds, { x: 0, y: 80, width: 1000, height: 700 });
+  assert.equal(h.log.some((x) => x[0] === 'show-find' || x[0] === 'sync-find'), false, 'find restore branch skipped');
+  assert.equal(h.log.some((x) => x[0] === 'sync-menu'), false, 'sheet syncBounds skipped');
+  assert.equal(h.log.some((x) => x[0] === 'force-exit'), false, 'same-tab activation is NOT an exit edge');
+});
+
+test('fullscreen: tab-hide of the holding tab force-exits first', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const fsView = h.addTab(record, 101);
+  record.activeTabWcId = 101;
+  const saved = { x: 0, y: 80, width: 1000, height: 700 };
+  armFullscreen(record, 101, saved);
+  fsView.bounds = { x: 0, y: 0, width: 1200, height: 800 };
+  h.log.length = 0;
+
+  h.ipcMain.send('tab-hide', record.chromeView.webContents, 101);
+  assert.equal(record.htmlFullscreen, null);
+  assert.deepEqual(fsView.bounds, saved);
+  const exitIdx = h.log.findIndex((x) => x[0] === 'force-exit');
+  const hideIdx = h.log.findIndex((x) => x[0] === 'visible' && x[1] === 101 && x[2] === false);
+  assert.ok(exitIdx !== -1 && exitIdx < hideIdx, 'restore runs while the entry is still resolvable');
+});
+
+test('fullscreen: tab-close clears the mode even after the entry is destroyed (armed gate never survives its tab)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  armFullscreen(record, 101);
+
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 101, -1);
+  assert.equal(record.htmlFullscreen, null);
+  assert.ok(h.log.some((x) => x[0] === 'force-exit' && x[2] === 101));
+});
+
+test('fullscreen: closing a NON-holding tab leaves the mode armed', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.addTab(record, 102);
+  record.activeTabWcId = 101;
+  armFullscreen(record, 101);
+
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 102, -1);
+  assert.deepEqual(record.htmlFullscreen && record.htmlFullscreen.wcId, 101);
+  assert.equal(h.log.some((x) => x[0] === 'force-exit'), false);
+});
+
+test('fullscreen: moveTabIntoWindow force-exits BEFORE the geometry capture — the target seeds the RESTORED rect', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.makeRecord(2);
+  const moved = h.addTab(source, 101);
+  h.addTab(source, 102);
+  source.activeTabWcId = 101;
+  const saved = { x: 0, y: 80, width: 1000, height: 700 };
+  armFullscreen(source, 101, saved);
+  moved.bounds = { x: 0, y: 0, width: 1200, height: 800 }; // expanded fullscreen rect
+
+  const result = h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 2 });
+  assert.equal(result.ok, true);
+  assert.equal(source.htmlFullscreen, null, 'the gate never stays armed on the source record');
+  // The post-re-parent seed setBounds carries the CAPTURED rect: if the
+  // capture had run before force-exit it would seed the full-window rect.
+  assert.deepEqual(moved.bounds, saved, 'captured (and re-applied) rect is the restored slot rect');
+});
+
 // Leg 2 (F3 DD2, AC1/AC5): sender-identity gate on the wcId-scoped channels —
 // a non-chrome sender and a DIFFERENT window's real chrome are both refused,
 // while the legitimate owning chrome (already covered by every test above)
@@ -384,4 +570,45 @@ test('AC3: tab-navigate loadURL is gated on the target tab\'s trust — unsafe w
   // the URL gate is even reached.
   h.ipcMain.send('tab-navigate', {}, { wcId: 101, verb: 'loadURL', args: ['https://example.test/'] });
   assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'an unowned sender adds no further loads');
+});
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 (DD2) — auth pending-challenge store call points.
+// ---------------------------------------------------------------------------
+
+test('tab-close cancels the closing tab pending auth challenges (M14 F1 L2)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const view = h.addTab(record, 100);
+  void view;
+  h.ipcMain.send('tab-close', record.chromeView.webContents, 100, 0);
+  assert.deepEqual(h.authCalls, [['cancel-tab', 100, 'tab-close']]);
+});
+
+test('a cross-window move cancels the moved tab pending auth challenges at move time (flight DD2 ruling)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100);
+  h.addTab(source, 101);
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.authCalls.filter((c) => c[0] === 'cancel-tab'), [['cancel-tab', 100, 'moved']]);
+});
+
+test('a REFUSED move (sole tab) cancels nothing — the guards run before the cancel', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100); // sole tab → refused
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result, null);
+  assert.deepEqual(h.authCalls, [], 'a refused move must not cancel live challenges');
+});
+
+test('tab-set-active notifies the auth store AFTER activeTabWcId is written (re-present trigger)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 100);
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, { wcId: 100, bounds: { x: 0, y: 80, width: 1000, height: 700 } });
+  assert.deepEqual(h.authCalls, [['notify-activated', 1, 100]]);
+  assert.equal(record.activeTabWcId, 100, 'the eligibility read (activeTabWcId) is already current');
 });

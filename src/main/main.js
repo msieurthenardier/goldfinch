@@ -60,6 +60,8 @@ const { createFindOverlayManager } = require('./find-overlay-manager');
 const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
 const { createWindowFactory } = require('./window-factory');
 const { createGuestWiring } = require('./guest-wiring');
+const { createHtmlFullscreen } = require('./html-fullscreen');
+const { createAuthChallenges } = require('./auth-challenges');
 const { createSessionRuntime } = require('./session-runtime');
 const { registerTabIpc } = require('./register-tab-ipc');
 const { registerOverlayIpc } = require('./register-overlay-ipc');
@@ -907,6 +909,13 @@ async function startMcpServerInstance() {
     fillDelegate: ({ wcId, credential }) => {
       webContents.fromId(wcId)?.send('vault-fill', credential);
     },
+    // M14 F1 L2 (DD3): vaultAnswerAuth's twins, beside fillDelegate. The
+    // delegate resolves the tab's pending challenge's native callback in the
+    // auth store (closing a visible sheet with a resolution-family reason);
+    // the read seam feeds vault-context's origin match. The credential is
+    // handed main-side only — never across the MCP boundary.
+    answerAuthDelegate: ({ wcId, credential }) => authChallenges.answerWithCredential(wcId, credential),
+    getPendingChallenge: (wcId) => authChallenges.getPendingChallenge(wcId),
     getAutoLockMinutes: () => settings.get('vaultAutoLockMinutes'),
     // In-memory dev-enable override (DD3/DD4, Flight 8). Read LAZILY per request by
     // the auth gate so it tracks the module-scoped value. It lets a dev `dev:automation`
@@ -1024,6 +1033,34 @@ function applyZoom(wc, action) {
   chromeForTab(wc.id)?.send('zoom-changed', { wcId: wc.id, factor: next });
 }
 
+// HTTP auth pending-challenge store (M14 F1 L2, DD2/DD3): the every-callback-
+// answered ledger + per-window serialized prompt queue — Electron-free,
+// offline-tested. Constructed BEFORE htmlFullscreen so its onExited hook can
+// close over it. Threaded into app-lifecycle (app.on('login')), window-factory
+// (sheet onClosed + focus + close teardown), guest-wiring (navigation-away),
+// register-tab-ipc (tab close/move/activate), register-overlay-ipc (the
+// zeroized auth-submit channel), and the MCP server (vaultAnswerAuth's
+// delegate + read seam) below.
+const authChallenges = createAuthChallenges({
+  registry,
+  chromeForTab,
+  logger: console
+});
+
+// HTML5 element fullscreen (M14 F1 L1, DD1): the window-record mode owner —
+// Electron-free, offline-tested; threaded into window-factory (resize
+// re-expand), guest-wiring (enter/leave events + Esc), and register-tab-ipc
+// (bounds gate + exit edges) below.
+const htmlFullscreen = createHtmlFullscreen({
+  registry,
+  chromeForTab,
+  // M14 F1 L2 (DD2): fullscreen exit is an auth re-present trigger — a
+  // challenge arriving mid-fullscreen holds (presentation eligibility) and
+  // presents here.
+  onExited: (record) => authChallenges.notifyFullscreenExited(record),
+  logger: console
+});
+
 // Electron construction is confined to this dependency map; window-factory.js itself
 // remains Electron-free and its close/closed lifecycle runs under strict fake windows.
 const { createWindow } = createWindowFactory({
@@ -1048,6 +1085,8 @@ const { createWindow } = createWindowFactory({
   createFindOverlayManager,
   createMenuOverlayManager,
   createTearoffOverlayManager,
+  htmlFullscreen,
+  authChallenges,
   computeFindOverlayBounds,
   getTabContents,
   chromeForAttachment,
@@ -1075,6 +1114,8 @@ const { createWindow } = createWindowFactory({
 const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   registry,
   chromeForTab,
+  htmlFullscreen,
+  authChallenges,
   crossViewNavAction,
   keydownToAction,
   isChromeActionForwardable,
@@ -1276,6 +1317,8 @@ registerTabIpc({
   webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.bundle.js'),
   INTERNAL_PARTITION,
   registry,
+  htmlFullscreen,
+  authChallenges,
   wireGuestContents,
   wireTabViewEvents,
   captureClosedTabEntry,
@@ -1423,7 +1466,17 @@ registerOverlayIpc({
   },
   // M12 F3 Leg 4: the recovery-show Copy delegate — main owns the OS clipboard string
   // write (the chrome-clipboard-write precedent). Sender-validated in the handler.
-  writeClipboard: (text) => clipboard.writeText(String(text))
+  writeClipboard: (text) => clipboard.writeText(String(text)),
+  // M14 F1 L2 (DD2): the auth-basic sheet's submit delegate — the store resolves
+  // the presented challenge's native callback (exactly-once) and owns the
+  // 'activated' sheet close; the handler owns the Buffer copy + dual-zeroize.
+  authAnswerFromSheet: (rec, username, buf) => authChallenges.answerFromSheet(rec, username, buf),
+  // M14 F1 L3 (DD4): the cert-picker sheet's selection delegate — the store
+  // resolves the presented client-cert challenge's native callback (exactly-
+  // once, ledger-FIRST; bounds-checked index, out-of-range → cancel). The
+  // activated handler's trailing close is then the store's exactly-once no-op.
+  // No secret rides this path — the channel-4 id carries only a row index.
+  certSelectFromSheet: (rec, index) => authChallenges.selectCertFromSheet(rec, index)
 });
 
 // DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
@@ -1741,6 +1794,8 @@ registerAppLifecycle({
   setSessionQuitting: (value) => { sessionQuitting = value; },
   buildSessionSnapshot,
   appDb,
+  // M14 F1 L2 (DD2): the pending-challenge store behind app.on('login').
+  authChallenges,
   getAllWindows: () => BaseWindow.getAllWindows(),
   argv: process.argv,
   env: process.env,

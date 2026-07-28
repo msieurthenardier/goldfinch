@@ -65,6 +65,13 @@ function originOf(url) {
  * }} vaultStore  the STATELESS vault-store methods (no MRK / no singleton).
  * @property {(arg: { wcId: number, credential: any }) => any} fillDelegate  the
  *   main→preload fill effect (Leg 4 injects the real one; Leg 3 tests inject a fake).
+ * @property {(arg: { wcId: number, credential: any }) => { answered: boolean, reason?: string }} [answerAuthDelegate]
+ *   the auth-challenge answer effect (M14 F1 L2 / flight DD3): resolves the tab's
+ *   pending challenge's native callback in the auth store and closes a visible
+ *   sheet with a resolution-family reason. The credential never crosses back.
+ * @property {(wcId: number) => ({ wcId: number, host: string, port: number|null, realm: string, url: string } | null)} [getPendingChallenge]
+ *   NON-SECRET read of the tab's presented-or-head pending auth challenge (M14
+ *   F1 L2) — the origin-match input for answerAuth.
  * @property {() => number} [getAutoLockMinutes]  idle auto-lock minutes reader.
  * @property {() => number} [now]  clock (default Date.now) — TOTP + idle stamps.
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  idle-timer arm.
@@ -95,6 +102,7 @@ function originOf(url) {
  *   list: () => Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>,
  *   totp: (itemId: string, vaultId?: string) => { id: string, code: string|null },
  *   fill: (identity: string, target: { wcId: number, itemId: string, vaultId?: string }, engineDeps?: FillEngineDeps) => { filled: boolean, id?: string, reason?: string },
+ *   answerAuth: (identity: string, target: { wcId: number, itemId: string, vaultId?: string }, engineDeps?: FillEngineDeps) => { answered: boolean, id?: string, origin?: string, reason?: string },
  *   touch: () => void,
  *   zeroize: () => void,
  * }}
@@ -104,6 +112,15 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
   const fillDelegate = typeof deps.fillDelegate === 'function'
     ? deps.fillDelegate
     : () => { throw new Error('automation: vault-fill-unavailable — no fill delegate injected'); };
+  // M14 F1 L2 (DD3): the auth-answer twins of fillDelegate — an injected effect
+  // plus the pending-challenge read seam. Absent (older tests / engine-only
+  // rigs) → answerAuth degrades to the throwing stub / a clean no-challenge.
+  const answerAuthDelegate = typeof deps.answerAuthDelegate === 'function'
+    ? deps.answerAuthDelegate
+    : () => { throw new Error('automation: vault-answer-auth-unavailable — no answer delegate injected'); };
+  const getPendingChallenge = typeof deps.getPendingChallenge === 'function'
+    ? deps.getPendingChallenge
+    : () => null;
   const getAutoLockMinutes = typeof deps.getAutoLockMinutes === 'function' ? deps.getAutoLockMinutes : () => 10;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
   const setT = typeof deps.setTimeout === 'function' ? deps.setTimeout : setTimeout;
@@ -448,7 +465,65 @@ function createVaultContext(deps = /** @type {any} */ ({})) {
     return { filled: true, id: itemId, origin: tabOrigin };
   }
 
-  return { unlock, list, totp, fill, touch, zeroize };
+  /**
+   * Answer the target tab's pending HTTP auth challenge with an origin-matched
+   * login credential (M14 F1 L2 / flight DD3 — the `fill` mirror). Steps:
+   *   1. touch() + revalidate() (idle timer + grant revalidation);
+   *   2. locked? → normal `{ answered: false, reason: 'locked' }`;
+   *   3. resolve + jar-membership-check the target tab (THROWS out-of-jar on a
+   *      foreign tab — a genuine error, isError at the boundary);
+   *   4. read the tab's pending challenge — none → `{ reason: 'no-challenge' }`;
+   *   5. resolve the login item by COMPOSITE identity (ambiguous → refuse);
+   *   6. origin-match against `originOf(challenge.url)` — the SAME helper fill
+   *      uses. NEVER an origin built from authInfo.scheme (that field is the
+   *      AUTH scheme, 'basic', not the URL scheme; host/port are display-only);
+   *   7. hand `{ wcId, credential }` to the injected answerAuthDelegate — the
+   *      credential is NEVER returned across the MCP boundary;
+   *   8. return `{ answered: true, id, origin }` (non-secret; audit records it).
+   * @param {string} identity  jarId | 'admin'
+   * @param {{ wcId: number, itemId: string, vaultId?: string }} target
+   * @param {FillEngineDeps} [engineDeps]
+   * @returns {{ answered: boolean, id?: string, origin?: string, reason?: string }}
+   */
+  function answerAuth(identity, { wcId, itemId, vaultId }, engineDeps = {}) {
+    touch();
+    revalidate();
+    if (keys.size === 0) return { answered: false, reason: 'locked' };
+
+    // (3) reachability + membership — throws automation: out-of-jar on a foreign tab.
+    resolveTarget(identity, wcId, engineDeps);
+
+    // (4) the pending challenge — per-tab by construction in the auth store.
+    const challenge = getPendingChallenge(wcId);
+    if (!challenge) return { answered: false, reason: 'no-challenge' };
+    const challengeOrigin = originOf(challenge.url);
+
+    // (5) composite item resolve — login items only; ambiguous refuses.
+    const hit = resolveItem(itemId, vaultId, (item) => item.type === 'login');
+    if (hit.ambiguous) return { answered: false, reason: 'ambiguous' };
+    const found = hit.item;
+    if (!found) return { answered: false, reason: 'no-match' };
+
+    // (6) origin match against the challenge URL's origin (fail-closed matcher,
+    // registrable-domain widening only for an item-level opt-in — fill parity).
+    if (!challengeOrigin || !originMatches(found, challengeOrigin, { widen: true })) {
+      return { answered: false, reason: 'origin-mismatch' };
+    }
+
+    // (7) hand the credential to the answer delegate — NEVER returned across the
+    // MCP boundary. The delegate reports whether a live challenge was resolved
+    // (it can vanish between the read above and the answer — treat as no-challenge).
+    const credential = { username: found.username, password: found.password };
+    const res = answerAuthDelegate({ wcId, credential });
+    if (!res || res.answered !== true) {
+      return { answered: false, reason: (res && res.reason) || 'no-challenge' };
+    }
+
+    // (8) non-secret result only — id + the resolved challenge origin.
+    return { answered: true, id: itemId, origin: challengeOrigin };
+  }
+
+  return { unlock, list, totp, fill, answerAuth, touch, zeroize };
 }
 
 module.exports = { createVaultContext };

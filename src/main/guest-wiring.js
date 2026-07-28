@@ -1,6 +1,18 @@
 // @ts-check
 'use strict';
 
+// M14 F1 L4 (DD5, security-assessed): Chromium's built-in PDF viewer loads as a
+// chrome-extension: SUBFRAME inside the guest (premise-checked live: with
+// `plugins: true`, navigating a guest to a PDF fires `will-frame-navigate` with
+// `isMainFrame === false` and URL `chrome-extension://<this id>/<stream-uuid>`
+// — refused by strict guardNav, which blanks the viewer). The id is Chromium's
+// fixed built-in PDF viewer extension id; the carve-out below admits exactly
+// this host, subframe-only, on `will-frame-navigate` only — `will-navigate` and
+// `will-redirect` stay fully strict (top-frame page-JS and redirect attempts
+// keep being refused by guardNav itself; the omnibox/MCP path is independently
+// refused by tab-navigate's trust-branched gate).
+const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
+
 /**
  * Build the event wiring shared by web and trusted-internal guest views. The
  * module owns no Electron state; owner lookups and every side effect are live
@@ -11,6 +23,8 @@ function createGuestWiring(deps) {
   const {
     registry,
     chromeForTab,
+    htmlFullscreen,
+    authChallenges,
     crossViewNavAction,
     keydownToAction,
     isChromeActionForwardable,
@@ -93,8 +107,31 @@ function createGuestWiring(deps) {
         event.preventDefault();
       }
     };
+    // M14 F1 L4 (DD5): frame-scoped PDF-viewer carve-out. This wrapper REPLACES
+    // the bare guardNav registration on `will-frame-navigate` ONLY — keeping
+    // both listeners would leave strict guardNav still preventDefault'ing the
+    // viewer subframe, making the allow path dead code. Allow iff the event is
+    // a SUBFRAME navigation (strict `=== false` — an event lacking the field
+    // fails closed into guardNav), on a non-internal guest, whose URL parses
+    // (URL-parse, never startsWith; parse failure falls through to guardNav)
+    // with scheme `chrome-extension:` and host exactly the pinned viewer id.
+    // Everything else delegates to guardNav unchanged.
+    const guardFrameNav = (event) => {
+      if (event.isMainFrame === false && !contents.session?.__goldfinchInternal) {
+        let parsed;
+        try {
+          parsed = new URL(event.url);
+        } catch {
+          parsed = null;
+        }
+        if (parsed && parsed.protocol === 'chrome-extension:' && parsed.host === PDF_VIEWER_EXTENSION_ID) {
+          return; // the built-in PDF viewer's own subframe — allowed (DD5)
+        }
+      }
+      guardNav(event);
+    };
     contents.on('will-navigate', guardNav);
-    contents.on('will-frame-navigate', guardNav);
+    contents.on('will-frame-navigate', guardFrameNav);
     contents.on('will-redirect', guardNav);
 
     if (contents.session?.__goldfinchInternal) {
@@ -105,6 +142,14 @@ function createGuestWiring(deps) {
       return;
     }
 
+    // M14 F1 L1 (DD1): HTML5 element fullscreen — WEB guests only (the internal
+    // branch above already returned; a goldfinch:// page has no business seizing
+    // the window). Blink fires these around requestFullscreen()/exitFullscreen();
+    // the injected module owns the record mode, geometry, and overlay
+    // coordination — nothing here reads records directly.
+    contents.on('enter-html-full-screen', () => htmlFullscreen.enter(contents.id));
+    contents.on('leave-html-full-screen', () => htmlFullscreen.exit(contents.id));
+
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
       if (handleCrossView(event, input, contents)) return;
@@ -113,6 +158,20 @@ function createGuestWiring(deps) {
       if (input.key === 'F12') {
         if (!input.isAutoRepeat) toggleDevTools(contents);
         event.preventDefault();
+        return;
+      }
+      // M14 F1 L1 (DD1): defensive Esc. Blink normally exits element fullscreen
+      // on Esc itself (firing leave-html-full-screen), but if that native path
+      // ever fails to run this ask keeps Esc working: page-side exit only
+      // (document.exitFullscreen → leave event → exit()), never a direct
+      // main-side restore. Deliberately NO preventDefault — the page may have
+      // its own Esc handling, and exit() is idempotent when both paths fire.
+      // MUST sit before the modifier early-return below: Esc carries no
+      // modifier and would never reach a later branch.
+      if (input.key === 'Escape') {
+        if (!input.isAutoRepeat && htmlFullscreen.isFullscreen(contents.id)) {
+          contents.executeJavaScript('document.exitFullscreen()').catch(() => {});
+        }
         return;
       }
       if (!(input.control || input.meta)) return;
@@ -166,6 +225,14 @@ function createGuestWiring(deps) {
     const sendToChrome = (channel, payload) => chromeForTab(wcId)?.send(channel, payload);
     const guard = (fn) => (...args) => { if (!wc.isDestroyed()) fn(...args); };
 
+    // M14 F1 L2 (DD2): navigation-away is a pending-auth-challenge RESOLUTION
+    // trigger — main-frame, non-same-document navigations only (a hash change
+    // or an in-page pushState must not cancel a live prompt; subframe
+    // navigation is unrelated to the top-level challenge's fate). Max
+    // challenge staleness is therefore one navigation.
+    wc.on('did-start-navigation', guard((e) => {
+      if (e.isMainFrame && !e.isSameDocument) authChallenges.cancelForTab(wcId, 'navigated');
+    }));
     wc.on('did-navigate', guard(() => {
       sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
       sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });

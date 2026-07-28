@@ -33,6 +33,8 @@ function createWindowFactory(deps) {
     createFindOverlayManager,
     createMenuOverlayManager,
     createTearoffOverlayManager,
+    htmlFullscreen,
+    authChallenges,
     computeFindOverlayBounds,
     getTabContents,
     chromeForAttachment,
@@ -189,7 +191,14 @@ function createWindowFactory(deps) {
     const record = registry.create({ win, chromeView, noBootTab });
     broadcastMoveTargetsChanged();
     const winId = win.id;
-    win.on('focus', () => registry.noteFocus(winId));
+    // M14 F1 L2 (DD2): window refocus is a mandatory auth re-present trigger —
+    // the 'blur' close below has no tab-activation counterpart, so without this
+    // hook an app-switch would strand a pending challenge until some other
+    // trigger fired.
+    win.on('focus', () => {
+      registry.noteFocus(winId);
+      authChallenges?.notifyWindowFocused(record);
+    });
 
     const sendToOwnChrome = (channel, payload) => {
       const cc = chromeView.webContents;
@@ -225,7 +234,12 @@ function createWindowFactory(deps) {
         const sessionWcId = findOverlay.getSessionTabWcId();
         if (sessionWcId != null && record.activeTabWcId === sessionWcId) findOverlay.show();
       },
-      focusChrome: (attWin) => chromeForAttachment(attWin)?.focus()
+      focusChrome: (attWin) => chromeForAttachment(attWin)?.focus(),
+      // M14 F1 L2: close-observer → the auth pending-challenge store's DD2
+      // bucket mapping. Closes over `record` so the store gets window identity
+      // natively (it holds no tokens). Fires on BOTH manager emit paths
+      // (closeMenuOverlay AND the model-replace 'superseded' branch).
+      onClosed: ({ menuType, reason }) => authChallenges?.notifySheetClosed(record, menuType, reason)
     });
 
     const tearoffOverlay = createTearoffOverlayManager({
@@ -238,6 +252,11 @@ function createWindowFactory(deps) {
     record.tearoffOverlay = tearoffOverlay;
 
     win.on('close', () => {
+      // M14 F1 L2 (DD2): cancel the WHOLE per-window auth queue FIRST — the
+      // sheet's own 'teardown' close below only ever resolves the presented
+      // head, not queued challenges (load-bearing; unit-pinned). Every native
+      // login callback is answered before any view teardown runs.
+      authChallenges?.cancelForWindow(record);
       findOverlay.teardown();
       tearoffOverlay.teardown();
       sheet.closeMenuOverlay('teardown');
@@ -299,14 +318,25 @@ function createWindowFactory(deps) {
       if (chromeView.webContents.isDestroyed()) return;
       const { width, height } = win.getContentBounds();
       chromeView.setBounds({ x: 0, y: 0, width, height });
+      // M14 F1 L1 (DD1): while a tab holds HTML fullscreen, re-expand it to
+      // the NEW content bounds (one discrete step); the renderer's triggered
+      // bounds send below lands in the tab-set-bounds gate and defers as
+      // pending — that ordering is fine (exit applies the pending rect).
+      htmlFullscreen.handleWindowResize(record);
       sendToOwnChrome('trigger-send-bounds');
     });
+    // maximize/unmaximize send trigger-send-bounds independently and can
+    // arrive WITHOUT a paired resize on some platforms — the fullscreen
+    // re-expand hook rides both (M14 F1 L1; handleWindowResize is a cheap
+    // no-op when no tab holds the mode).
     win.on('maximize', () => {
       sendToOwnChrome('window-maximized-change', true);
+      htmlFullscreen.handleWindowResize(record);
       sendToOwnChrome('trigger-send-bounds');
     });
     win.on('unmaximize', () => {
       sendToOwnChrome('window-maximized-change', false);
+      htmlFullscreen.handleWindowResize(record);
       sendToOwnChrome('trigger-send-bounds');
     });
 

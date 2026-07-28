@@ -50,6 +50,11 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
   // let tests pin the threading + gating without real Electron sessions.
   let hygieneDocStoreCreatedFor = null;
   const hygieneWrites = [];
+  // M14 F1 L2: captured app.on('login') routings — [webContents, details, authInfo, callback].
+  const authLoginCalls = [];
+  // M14 F1 L3: captured app.on('select-client-certificate') routings —
+  // [webContents, url, list, callback].
+  const certSelectCalls = [];
   const app = {
     isPackaged: !dev,
     on: (name, fn) => appListeners.set(name, fn),
@@ -173,13 +178,20 @@ function makeHarness({ restore = null, platform = 'linux', dev = false, automati
         };
       },
     },
+    // M14 F1 L2/L3: the pending-challenge store behind app.on('login') and
+    // app.on('select-client-certificate') — recording fakes; the tests pin
+    // registration + routing.
+    authChallenges: {
+      handleLogin: (...args) => authLoginCalls.push(args),
+      handleSelectClientCertificate: (...args) => certSelectCalls.push(args),
+    },
     getAllWindows: () => [],
     argv: [], env: {}, platform,
     stdout: { write: () => {} },
     logger: { error: (...args) => events.push(['error', ...args]), warn: () => {} },
   });
   return {
-    events, appListeners, handlers, ipcListeners, lifecycle, created, internalSession,
+    events, appListeners, handlers, ipcListeners, lifecycle, created, internalSession, authLoginCalls, certSelectCalls,
     defaultSessionReads: () => defaultSessionReads,
     setBootRecord: (record) => { bootRecord = record; },
     defaultSessionProtocolCalls,
@@ -218,6 +230,58 @@ test('ready path preserves store/session initialization order and default window
   assert.equal(h.events.includes('create-window:undefined'), true);
   assert.equal(h.appListeners.has('activate'), true);
   assert.equal(h.appListeners.has('session-created'), true);
+});
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 (flight DD2): app.on('login') registration + routing.
+// ---------------------------------------------------------------------------
+
+test('login handler is registered at TOP-LEVEL scope, before whenReady resolves (M14 F1 L2 / DD2)', () => {
+  const h = makeHarness();
+  // Registered synchronously by registerAppLifecycle itself — the first
+  // window's first navigation can challenge before whenReady's tail runs.
+  assert.equal(h.appListeners.has('login'), true);
+});
+
+test('login handler ALWAYS preventDefault()s and routes all four args to authChallenges.handleLogin', () => {
+  const h = makeHarness();
+  const handler = h.appListeners.get('login');
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  const webContents = { id: 42, session: {} };
+  const details = { url: 'http://127.0.0.1:8091/protected' };
+  const authInfo = { isProxy: false, host: '127.0.0.1', port: 8091, scheme: 'basic', realm: 'fixture' };
+  const callback = () => {};
+  handler(event, webContents, details, authInfo, callback);
+  assert.equal(event.prevented, true, 'preventDefault must run unconditionally');
+  assert.equal(h.authLoginCalls.length, 1);
+  assert.deepEqual(h.authLoginCalls[0], [webContents, details, authInfo, callback]);
+});
+
+// ---------------------------------------------------------------------------
+// M14 F1 L3 (flight DD4): app.on('select-client-certificate') registration +
+// routing — an APP-level event (design-review corrected), beside 'login'.
+// ---------------------------------------------------------------------------
+
+test('select-client-certificate handler is registered at TOP-LEVEL scope, before whenReady resolves (M14 F1 L3 / DD4)', () => {
+  const h = makeHarness();
+  // Registered synchronously by registerAppLifecycle itself — the first
+  // window's first navigation can hit a cert-requesting TLS handshake before
+  // whenReady's tail runs (the 'login' rationale, verbatim).
+  assert.equal(h.appListeners.has('select-client-certificate'), true);
+});
+
+test('select-client-certificate handler ALWAYS preventDefault()s and routes all four args to authChallenges.handleSelectClientCertificate', () => {
+  const h = makeHarness();
+  const handler = h.appListeners.get('select-client-certificate');
+  const event = { prevented: false, preventDefault() { this.prevented = true; } };
+  const webContents = { id: 42, session: {} };
+  const url = 'https://127.0.0.1:8493/';
+  const list = [{ subjectName: 'CN=Fixture Client', issuerName: 'CN=Fixture CA' }];
+  const callback = () => {};
+  handler(event, webContents, url, list, callback);
+  assert.equal(event.prevented, true, 'preventDefault must run unconditionally (Electron would auto-pick the first cert)');
+  assert.equal(h.certSelectCalls.length, 1);
+  assert.deepEqual(h.certSelectCalls[0], [webContents, url, list, callback]);
 });
 
 test('web-contents-created catch-all is registered at TOP-LEVEL scope, before whenReady resolves (Mission 13 F3 Leg 3 / DD3)', () => {

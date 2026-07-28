@@ -8,6 +8,22 @@ const MENU_CLOSE_REASONS = new Set([
 ]);
 const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
 
+// M14 F1 L3 (flight DD4): the cert-picker row-id namespace — a LOCAL mirror of
+// src/shared/cert-picker-template.js's CERT_PICK_PREFIX/parseCertPickIndex
+// (that file is src/shared/ ESM; this registrar stays require(cjs)-clean). The
+// template unit suite cross-pins the two literals so they cannot drift.
+const CERT_PICK_PREFIX = 'cert:';
+
+/** @param {string} id @returns {number | null} */
+function parseCertPickIndex(id) {
+  if (typeof id !== 'string' || !id.startsWith(CERT_PICK_PREFIX)) return null;
+  const rest = id.slice(CERT_PICK_PREFIX.length);
+  // Digits only — a bare 'cert:', a negative, or a non-numeric suffix all map
+  // to no row (the store then resolves cancel via the trailing close).
+  if (!/^\d+$/.test(rest)) return null;
+  return Number(rest);
+}
+
 function registerOverlayIpc({
   ipcMain,
   registry,
@@ -24,6 +40,8 @@ function registerOverlayIpc({
   vaultChangeMaster,
   vaultRecover,
   writeClipboard,
+  authAnswerFromSheet,
+  certSelectFromSheet,
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -62,6 +80,19 @@ function registerOverlayIpc({
     if (typeof id !== 'string' || typeof token !== 'number') return;
     const current = rec.sheet.getCurrentMenu();
     if (!current || token !== current.token) return;
+    // M14 F1 L3 (flight DD4): cert-picker selections resolve MAIN-SIDE,
+    // ledger-FIRST — a deliberate deviation from vault-picker's chrome-side
+    // dispatch (main-side gives native record identity + ledger-first
+    // ordering, mirroring auth-submit). This MUST run BEFORE the
+    // closeMenuOverlay below: that close fires notifySheetClosed(...,
+    // 'activated') — a RESOLUTION reason — and without ledger-first ordering
+    // every selection would resolve as a cancel. The trailing close then hits
+    // the store's exactly-once no-op. Non-index ids (the 'cancel' row, foreign
+    // ids) fall through: the close's resolution-cancel handles them.
+    if (certSelectFromSheet && current.menuType === 'cert-picker') {
+      const certIndex = parseCertPickIndex(id);
+      if (certIndex != null) certSelectFromSheet(rec, certIndex);
+    }
     rec.sheet.closeMenuOverlay('activated', token);
     const out = { menuType: current.menuType, id };
     const cleanValue = sanitizeActivatedValue(value);
@@ -417,6 +448,36 @@ function registerOverlayIpc({
       if (!rec || !rec.sheet) return;
       const text = payload && payload.text;
       if (typeof text === 'string' && text) writeClipboard(text);
+    });
+  }
+
+  // M14 F1 L2 (flight DD2): the auth-basic sheet's DEDICATED credential channel,
+  // mirroring menu-overlay:vault-unlock BYTE-FOR-BYTE in discipline (sender
+  // identity via recordForSheetSender + open-token freshness gate + `secret
+  // instanceof Uint8Array` + Buffer.from copy + DUAL-ZEROIZE in finally) — the
+  // password NEVER rides channel-4 `menu-overlay:activated` (string-only,
+  // 24-char capped). The payload adds the NON-SECRET username string. The
+  // handler NEVER closes the sheet itself — the pending-challenge store owns
+  // sheet-closing (single close site: answerFromSheet resolves the exactly-once
+  // ledger FIRST, then closes with the resolution-family 'activated'). Gated on
+  // the authAnswerFromSheet injection so offline overlay tests never register it.
+  if (authAnswerFromSheet) {
+    ipcMain.handle('menu-overlay:auth-submit', (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { answered: false };
+      const { token, username, secret } = payload || {};
+      if (typeof token !== 'number' || typeof username !== 'string' || !(secret instanceof Uint8Array)) {
+        return { answered: false };
+      }
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { answered: false };
+      const buf = Buffer.from(secret);
+      try {
+        return authAnswerFromSheet(rec, username, buf) || { answered: false };
+      } finally {
+        buf.fill(0);
+        secret.fill?.(0);
+      }
     });
   }
 

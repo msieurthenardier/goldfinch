@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // sheet preload (a reviewed upgrade over DD4's literal `send`): the wrong-
   // password re-prompt needs the { ok } result back to keep the sheet open.
   unlockVault: (payload) => ipcRenderer.invoke('menu-overlay:vault-unlock', payload),
+  // M14 F1 L2 (flight DD2): the auth-basic sheet's DEDICATED credential channel.
+  // Mirrors unlockVault — the password rides as a Uint8Array `secret` (NEVER
+  // sendActivated, string-only / 24-char capped) beside the NON-SECRET username
+  // string. Returns { answered }; false re-prompts (the challenge vanished),
+  // true closes it (the main-side auth store owns the 'activated' close).
+  authSubmit: (payload) => ipcRenderer.invoke('menu-overlay:auth-submit', payload),
   // M12 F3 Leg 4 (first-run-setup): the vault-set sheet's master-password SETUP channel.
   // Mirrors unlockVault byte-for-byte — `secret` is a Uint8Array, NEVER sendActivated
   // (string-only / 24-char capped); the sheet needs the { ok } result back to re-prompt.

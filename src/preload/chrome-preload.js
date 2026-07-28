@@ -290,6 +290,18 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // as BARE triggers (no secret) → the chrome opens the vault-set / vault-unlock sheet.
   // onVaultRecoveryShow carries the recovery key ONLY (admin key deferred to F4) for the
   // read-only, dismiss-disabled recovery-show sheet.
+  // HTTP auth challenge presentation trigger (M14 F1 L2, flight DD2). Main's
+  // pending-challenge store forwards { wcId, host, realm } — NEVER a secret —
+  // when a challenge becomes eligible to present; the chrome opens the
+  // auth-basic sheet through the standard menu-overlay:open path (the
+  // vault-recovery-show precedent).
+  onAuthChallengePresent: (cb) => ipcRenderer.on('auth-challenge-present', (_e, d) => cb(d)),
+  // Client-cert challenge presentation trigger (M14 F1 L3, flight DD4). Main's
+  // store forwards { wcId, host, certs: [{subject, issuer}] } — DISPLAY STRINGS
+  // only, never certificate objects (those stay main-side; the selection rides
+  // channel-4 as an index) — when a client-cert challenge becomes eligible; the
+  // chrome opens the cert-picker sheet through the same standard open path.
+  onCertChallengePresent: (cb) => ipcRenderer.on('cert-challenge-present', (_e, d) => cb(d)),
   onVaultRequestSetup: (cb) => ipcRenderer.on('vault-request-setup', () => cb()),
   onVaultRequestUnlock: (cb) => ipcRenderer.on('vault-request-unlock', () => cb()),
   onVaultRecoveryShow: (cb) => ipcRenderer.on('vault-recovery-show', (_e, d) => cb(d)),

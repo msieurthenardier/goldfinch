@@ -20,6 +20,7 @@ class FakeContents extends EventEmitter {
     this.url = 'https://example.test/page';
     this.openHandler = null;
     this.printCalls = 0;
+    this.execCalls = [];
     this.navigationHistory = {
       canGoBack: () => true,
       canGoForward: () => false
@@ -29,6 +30,9 @@ class FakeContents extends EventEmitter {
   isDestroyed() { return this.destroyed; }
   getURL() { return this.url; }
   print(_opts, cb) { this.printCalls++; cb(true); }
+  // Rejected on purpose: callers MUST attach their own .catch (a missing one
+  // surfaces here as an unhandled rejection failing the suite).
+  executeJavaScript(code) { this.execCalls.push(code); return Promise.reject(new Error('no page')); }
 }
 
 function setup() {
@@ -47,9 +51,20 @@ function setup() {
   // this via setFaviconRequest to hand back a controllable deferred promise, so
   // the assertion can await the fake fetch chain before checking h.sends.
   let faviconRequest = () => Promise.resolve(null);
+  // M14 F1 L1: fullscreen module fake — event wiring and the Esc branch are
+  // asserted against these calls; the real mode logic has its own suite
+  // (html-fullscreen.test.js).
+  const fullscreenIds = new Set();
   const wiring = createGuestWiring({
     registry,
     chromeForTab: () => chrome,
+    htmlFullscreen: {
+      enter: (id) => calls.push(['fs-enter', id]),
+      exit: (id) => calls.push(['fs-exit', id]),
+      isFullscreen: (id) => fullscreenIds.has(id)
+    },
+    // M14 F1 L2: navigation-away auth invalidation — a recording fake.
+    authChallenges: { cancelForTab: (wcId, reason) => calls.push(['auth-cancel', wcId, reason]) },
     crossViewNavAction: (input) => { calls.push('classify-cross-view'); return input.key === 'l' ? 'focus-address' : null; },
     keydownToAction: (input) => { calls.push('classify-chrome'); return input.key === 't' ? 'new-tab' : null; },
     isChromeActionForwardable: (action) => action === 'new-tab',
@@ -65,7 +80,7 @@ function setup() {
     logger: { warn() {} }
   });
   return {
-    wiring, sends, calls, records, chrome,
+    wiring, sends, calls, records, chrome, fullscreenIds,
     setHistoryRecorder: (value) => { historyRecorder = value; },
     setFaviconRequest: (fn) => { faviconRequest = fn; }
   };
@@ -142,6 +157,112 @@ test('will-frame-navigate and will-redirect enforce the same predicate as will-n
   assert.equal(redirectGood.prevented, false, 'redirect to an allowed https URL must NOT be prevented');
 });
 
+// ---------------------------------------------------------------------------
+// M14 F1 L4 (DD5): frame-scoped PDF-viewer carve-out matrix. Each case drives
+// the CAPTURED per-event handler (emit on the named event) — the carve-out
+// wrapper REPLACES the will-frame-navigate registration, so testing a single
+// shared function would not match the registration shape.
+// ---------------------------------------------------------------------------
+
+const PDF_VIEWER_URL = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/stream-uuid';
+
+function navEvent(url, extra = {}) {
+  return { url, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+}
+
+test('PDF-viewer carve-out: a will-frame-navigate SUBFRAME event to the pinned viewer id is allowed (DD5)', () => {
+  const h = setup();
+  const web = new FakeContents(40, false);
+  h.wiring.wireGuestContents(web);
+  const event = navEvent(PDF_VIEWER_URL, { isMainFrame: false });
+  web.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, false, 'the viewer subframe is the one admitted navigation');
+});
+
+test('PDF-viewer carve-out: top-frame will-navigate and will-redirect to the viewer URL stay refused (guardNav untouched)', () => {
+  const h = setup();
+  const web = new FakeContents(41, false);
+  h.wiring.wireGuestContents(web);
+
+  const nav = navEvent(PDF_VIEWER_URL, { isMainFrame: true });
+  web.emit('will-navigate', nav);
+  assert.equal(nav.prevented, true, 'top-frame will-navigate refused — page-JS location= stays blocked');
+
+  const redirect = navEvent(PDF_VIEWER_URL, { isMainFrame: true });
+  web.emit('will-redirect', redirect);
+  assert.equal(redirect.prevented, true, 'top-frame will-redirect refused');
+});
+
+test('PDF-viewer carve-out: a SUBFRAME will-redirect to the viewer URL is refused — the carve-out lives on will-frame-navigate only (DD5 strictness)', () => {
+  const h = setup();
+  const web = new FakeContents(42, false);
+  h.wiring.wireGuestContents(web);
+  const event = navEvent(PDF_VIEWER_URL, { isMainFrame: false });
+  web.emit('will-redirect', event);
+  assert.equal(event.prevented, true, 'will-redirect carries bare guardNav even for subframes');
+});
+
+test('PDF-viewer carve-out: a will-frame-navigate top-frame event (isMainFrame true) to the viewer URL is refused', () => {
+  const h = setup();
+  const web = new FakeContents(43, false);
+  h.wiring.wireGuestContents(web);
+  const event = navEvent(PDF_VIEWER_URL, { isMainFrame: true });
+  web.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, true);
+});
+
+test('PDF-viewer carve-out: an event LACKING isMainFrame entirely is refused — strict === false fails closed (DD5)', () => {
+  const h = setup();
+  const web = new FakeContents(44, false);
+  h.wiring.wireGuestContents(web);
+  const event = navEvent(PDF_VIEWER_URL); // no isMainFrame field at all
+  web.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, true, 'absent isMainFrame must not satisfy the subframe condition');
+});
+
+test('PDF-viewer carve-out: a different extension id is refused — the allow is id-pinned, never scheme-wide', () => {
+  const h = setup();
+  const web = new FakeContents(45, false);
+  h.wiring.wireGuestContents(web);
+  const event = navEvent('chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh/stream', { isMainFrame: false });
+  web.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, true);
+});
+
+test('PDF-viewer carve-out: an unparseable subframe URL falls through to guardNav and is refused (URL-parse, never startsWith)', () => {
+  const h = setup();
+  const web = new FakeContents(46, false);
+  h.wiring.wireGuestContents(web);
+  // 'chrome-extension://[bad/x' genuinely THROWS in new URL() (unclosed
+  // bracket host) — exercising the catch branch, not merely a host mismatch.
+  const event = navEvent('chrome-extension://[bad/x', { isMainFrame: false });
+  web.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, true);
+});
+
+test('PDF-viewer carve-out: ordinary http(s) subframes are unaffected — delegation to guardNav is byte-identical for non-viewer URLs', () => {
+  const h = setup();
+  const web = new FakeContents(47, false);
+  h.wiring.wireGuestContents(web);
+
+  const allowed = navEvent('https://example.test/frame', { isMainFrame: false });
+  web.emit('will-frame-navigate', allowed);
+  assert.equal(allowed.prevented, false, 'allowed subframe stays allowed');
+
+  const refused = navEvent('file:///etc/passwd', { isMainFrame: false });
+  web.emit('will-frame-navigate', refused);
+  assert.equal(refused.prevented, true, 'disallowed subframe stays refused');
+});
+
+test('PDF-viewer carve-out: an INTERNAL guest gets no carve-out — a viewer subframe event on the internal session is refused', () => {
+  const h = setup();
+  const internal = new FakeContents(48, true);
+  h.wiring.wireGuestContents(internal);
+  const event = navEvent(PDF_VIEWER_URL, { isMainFrame: false });
+  internal.emit('will-frame-navigate', event);
+  assert.equal(event.prevented, true, 'internal guests keep the internal allowlist — no plugins, no viewer');
+});
+
 test('a guest latched by wireGuestContents is NOT blocked by a catch-all-style nav guard on an https navigation (Mission 13 F3 Leg 3 / AC3)', () => {
   const h = setup();
   const web = new FakeContents(21, false);
@@ -180,6 +301,50 @@ test('cross-view shortcut classification runs before generalized forwarding for 
   internal.emit('before-input-event', internalEvent, { type: 'keyDown', key: 't', control: true });
   assert.deepEqual(h.calls, ['classify-cross-view', 'classify-chrome']);
   assert.deepEqual(h.sends.at(-1), ['chrome-shortcut-action', { action: 'new-tab' }]);
+});
+
+// M14 F1 L1 (DD1): enter/leave-html-full-screen route to the injected module —
+// web guests only (an internal page must never seize the window).
+test('html fullscreen events wire to the module on web guests only', () => {
+  const h = setup();
+  const web = new FakeContents(5, false);
+  const internal = new FakeContents(6, true);
+  h.wiring.wireGuestContents(web);
+  h.wiring.wireGuestContents(internal);
+
+  assert.equal(internal.listenerCount('enter-html-full-screen'), 0);
+  assert.equal(internal.listenerCount('leave-html-full-screen'), 0);
+  web.emit('enter-html-full-screen');
+  web.emit('leave-html-full-screen');
+  assert.deepEqual(h.calls.filter((x) => Array.isArray(x) && String(x[0]).startsWith('fs-')), [
+    ['fs-enter', 5],
+    ['fs-exit', 5]
+  ]);
+});
+
+// M14 F1 L1 (DD1): defensive Esc — page-side exit ask, no preventDefault, only
+// while this contents holds the mode, auto-repeat-guarded.
+test('defensive Esc asks the fullscreen page to exit without preventDefault', () => {
+  const h = setup();
+  const web = new FakeContents(5, false);
+  h.wiring.wireGuestContents(web);
+
+  // Not fullscreen: Esc does nothing.
+  const idle = inputEvent();
+  web.emit('before-input-event', idle, { type: 'keyDown', key: 'Escape' });
+  assert.deepEqual(web.execCalls, []);
+
+  // Fullscreen: the page is asked to exit; the event is NOT prevented (the
+  // page may run its own Esc handling; Blink's native exit stays primary).
+  h.fullscreenIds.add(5);
+  const event = inputEvent();
+  web.emit('before-input-event', event, { type: 'keyDown', key: 'Escape' });
+  assert.deepEqual(web.execCalls, ['document.exitFullscreen()']);
+  assert.equal(event.prevented, false);
+
+  // Auto-repeat guarded: a held Esc asks once, not per repeat.
+  web.emit('before-input-event', inputEvent(), { type: 'keyDown', key: 'Escape', isAutoRepeat: true });
+  assert.equal(web.execCalls.length, 1);
 });
 
 test('web-only accelerators and DevTools state never attach to internal guests', () => {
@@ -266,4 +431,24 @@ test('destroyed tab guards every tab-event side effect and history recorder is r
   wc.emit('did-navigate');
   assert.deepEqual(h.sends, []);
   assert.deepEqual(h.calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 (DD2): did-start-navigation → pending-auth-challenge invalidation.
+// Main-frame, non-same-document only — a hash change / pushState / subframe
+// navigation must never cancel a live prompt.
+// ---------------------------------------------------------------------------
+
+test('did-start-navigation cancels the tab pending auth challenges — main-frame, non-same-document only', () => {
+  const h = setup();
+  const wc = new FakeContents(31);
+  h.wiring.wireTabViewEvents({ webContents: wc }, 31, 'persist:jar-a');
+
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+  assert.deepEqual(h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel'), [['auth-cancel', 31, 'navigated']]);
+
+  wc.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false }); // subframe
+  wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true }); // hash/pushState
+  assert.equal(h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel').length, 1,
+    'subframe and same-document navigations never cancel');
 });

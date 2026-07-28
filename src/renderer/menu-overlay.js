@@ -52,6 +52,8 @@
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
+import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
+import { buildCertPickerCard, renderCertPickerRows, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
@@ -633,6 +635,111 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultEntry); },
   });
 
+  /* --------------------------------------------------------- template: auth-basic */
+  // HTTP basic-auth credential prompt (M14 F1 L2, flight DD2) — modal-card
+  // family, near-cloning vault-unlock: centered backdrop + card, dialog-local
+  // Tab-cycle + Escape via attachModalCard, and — critically — the password
+  // leaving ONLY via the DEDICATED dual-zeroized channel
+  // (menuOverlay.authSubmit), NEVER channel-4 sendActivated (string-only /
+  // 24-char capped). Cancel rides channel-4 `activated` with the non-secret id
+  // 'cancel' (the leg contract — an explicit resolution-family close; the
+  // chrome dispatch validated-no-ops it). Host + realm arrive in the OBJECT
+  // model and render via textContent only (server-controlled strings).
+
+  const auth = buildAuthBasicCard(document);
+  const authNode = auth.node;
+  root.appendChild(authNode);
+
+  let authBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
+
+  const authEntry = menuController.register({
+    trigger: authNode,
+    menu: authNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are dialog-local below.
+    onOpen() {
+      auth.username.value = '';
+      auth.password.value = '';
+      auth.error.textContent = '';
+      authBusy = false;
+      authNode.classList.remove('hidden');
+      auth.username.focus();
+    },
+    onClose() {
+      authNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  /** Render the host + realm context line from the init model (textContent only).
+   * @param {any} model */
+  function renderAuthBasic(model) {
+    const host = model && typeof model.host === 'string' ? model.host : '';
+    const realm = model && typeof model.realm === 'string' ? model.realm : '';
+    auth.origin.textContent = realm
+      ? `The server ${host} says: “${realm}”`
+      : `The server ${host} requires a username and password.`;
+  }
+
+  // Submit → the DEDICATED credential channel (the vault-unlock submit shape:
+  // encode to a Uint8Array, invoke, zeroize the sheet-side copy in finally;
+  // main zeroizes its Buffer copy + the transferred array; the inputs' V8
+  // strings are unscrubbable — the accepted DD4-class limitation). Empty
+  // username/password submit as empty strings — legal in basic auth.
+  async function submitAuth() {
+    if (report.sent || report.token == null || authBusy) return;
+    const token = report.token;
+    const username = auth.username.value;
+    const secret = new TextEncoder().encode(auth.password.value);
+    authBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.authSubmit({ token, username, secret });
+    } catch {
+      res = { answered: false }; // a rejected invoke degrades to a re-prompt
+    } finally {
+      authBusy = false;
+      secret.fill(0);
+    }
+    // Stale-resolution guard: a supersede during the await moves the live token.
+    if (report.token !== token || report.sent) return;
+    if (res && res.answered) {
+      report.sent = true; // main (the auth store) closes the sheet; suppress the trailing dismissed
+      menuController.close(authEntry);
+    } else {
+      // The challenge vanished mid-entry (navigation/agent answer) or the
+      // submit raced a close — stay open; the operator can Cancel out.
+      auth.error.textContent = 'Sign-in is no longer pending for this page';
+      auth.username.focus();
+    }
+  }
+
+  auth.submit.addEventListener('click', () => { void submitAuth(); });
+  // Cancel — the leg contract: channel-4 `activated` with the NON-SECRET id
+  // 'cancel' (an explicit resolution-family close; the store cancels the
+  // challenge via its 'activated' bucket mapping).
+  auth.cancel.addEventListener('click', () => {
+    if (sendActivatedOnce({ id: 'cancel' })) menuController.close(authEntry);
+  });
+  // Header close (X): a deliberate dismiss, same family as Escape.
+  auth.close.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(authEntry);
+  });
+  const authEnterSubmits = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitAuth();
+    }
+  };
+  auth.username.addEventListener('keydown', authEnterSubmits);
+  auth.password.addEventListener('keydown', authEnterSubmits);
+  attachModalCard({
+    node: authNode,
+    getCycle: () => [auth.close, auth.username, auth.password, auth.submit, auth.cancel],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(authEntry); },
+  });
+
   /* ------------------------------------------------------- template: vault-picker */
   // Human vault picker (M12 Flight 2 Leg 3 pick-and-fill, DD5/DD6) — the DEDICATED
   // SIXTH template kind (the 'menu' kind renders only a single label + dot + a
@@ -715,6 +822,79 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     if (e.target === pickerNode) {
       report.lastStimulus = 'outside-click';
       menuController.close(pickerEntry);
+    }
+  });
+
+  /* -------------------------------------------------------- template: cert-picker */
+  // TLS client-certificate chooser (M14 F1 L3, flight DD4) — the vault-picker
+  // DOM/roving-list shape (centered backdrop, role="menu" roving rows, an
+  // index-carrying row id `cert:<i>`), with a deliberate ROUTING deviation:
+  // the selection is resolved MAIN-SIDE in register-overlay-ipc's activated
+  // handler (ledger-first against the pending-challenge store) — this sheet
+  // only reports the index over channel 4, exactly like every other row. The
+  // model is display strings only ({subject, issuer} per row); no certificate
+  // object or secret ever reaches this sheet. The separated Cancel row rides
+  // the NON-INDEX id 'cancel' — main lets it fall through to the close's
+  // resolution-cancel (continue without a certificate), same as Escape.
+
+  const certPicker = buildCertPickerCard(document);
+  const certPickerNode = certPicker.node;
+  const certPickerList = certPicker.list; // the role="menu" roving host
+  root.appendChild(certPickerNode);
+
+  /** @type {HTMLElement[]} */
+  let certPickerRows = [];
+  const certPickerItems = () => certPickerRows;
+
+  const certPickerEntry = menuController.register({
+    // trigger === menu === backdrop: opens are programmatic per init (the
+    // vault-picker registration rationale applies verbatim — see above).
+    trigger: certPickerNode,
+    menu: certPickerNode,
+    items: certPickerItems,
+    /** @param {number} [startIndex] */
+    onOpen(startIndex = 0) {
+      certPickerNode.classList.remove('hidden');
+      const list = certPickerItems();
+      if (list.length) focusItem(list, startIndex === -1 ? list.length - 1 : startIndex);
+      else certPickerList.focus(); // defensive empty (note) state
+    },
+    onClose() {
+      certPickerNode.classList.add('hidden');
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  // Header close (X): a deliberate dismiss — parity with Escape/backdrop; the
+  // store maps the dismissal to resolution-cancel (continue cert-less).
+  certPicker.close.addEventListener('click', () => {
+    report.lastStimulus = 'escape';
+    menuController.close(certPickerEntry);
+  });
+
+  /** Render the chooser rows from the display-string model + wire selection.
+   * @param {any[]} model */
+  function renderCertPicker(model) {
+    certPickerRows = renderCertPickerRows(document, certPickerList, model);
+    certPickerRows.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // A cert row reports its INDEX (`cert:<i>`, from data-cert-index); the
+        // separated Cancel row (no data-cert-index) reports CERT_CANCEL_ID.
+        // Activation wins over the onClose dismissal (one report per token).
+        const ci = btn.dataset.certIndex;
+        const id = ci != null && ci !== '' ? certPickId(Number(ci)) : CERT_CANCEL_ID;
+        if (sendActivatedOnce({ id })) menuController.close(certPickerEntry);
+      });
+    });
+  }
+
+  // Backdrop click (outside the card) dismisses — vault-picker parity (the
+  // controller's global pointerdown can't own in-sheet backdrop clicks).
+  certPickerNode.addEventListener('click', (e) => {
+    if (e.target === certPickerNode) {
+      report.lastStimulus = 'outside-click';
+      menuController.close(certPickerEntry);
     }
   });
 
@@ -1807,13 +1987,15 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
 
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
     'page-context': 'menu', // Leg 4 — point-anchored, separator/note item types
     'site-info': 'info-popup',
     'new-container': 'input-dialog',
+    'auth-basic': 'auth-basic', // M14 F1 L2 — HTTP basic-auth credential prompt
+    'cert-picker': 'cert-picker', // M14 F1 L3 — TLS client-certificate chooser
     'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
     'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
     'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
@@ -1840,7 +2022,9 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     [suggestionsEntry, suggestionsNode],
     [downloadsEntry, downloadsNode],
     [vaultEntry, vaultNode],
+    [authEntry, authNode],
     [pickerEntry, pickerNode],
+    [certPickerEntry, certPickerNode],
     [captureEntry, captureNode],
     [vaultSetEntry, vaultSetNode],
     [recoveryEntry, recoveryNode],
@@ -1892,7 +2076,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     // reject the object and the sheet would silently never render it.
     const modelShapeOk = (template === 'suggestions' || template === 'vault-capture'
       || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
-      || template === 'vault-adminkey-show')
+      || template === 'vault-adminkey-show' || template === 'auth-basic')
       ? model && typeof model === 'object' && !Array.isArray(model)
       : Array.isArray(model);
     if (!modelShapeOk) return;
@@ -1937,6 +2121,14 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       // Still opened through the shared controller so the global outside-click/
       // blur listeners cover this template uniformly (module header rule).
       menuController.open(suggestionsEntry, 0);
+    } else if (template === 'auth-basic') {
+      // Fixed layout (host/realm line + username + password + Sign in/Cancel),
+      // centered via CSS — the anchor is ignored; the model is the {host, realm}
+      // object. Render FIRST (sets the context line), then open through the
+      // controller. onOpen clears + focuses the username input; it must NOT
+      // fall through to the non-focusing 'menu' fallback.
+      renderAuthBasic(model);
+      menuController.open(authEntry, 0);
     } else if (template === 'vault-unlock') {
       // Fixed layout (password + error + Unlock/Cancel), centered via CSS — the
       // anchor is ignored, model may be empty. onOpen clears + focuses the input;
@@ -1949,6 +2141,12 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       // An empty model → the non-focusable note; onOpen focuses the card instead.
       renderPicker(model);
       menuController.open(pickerEntry, typeof startIndex === 'number' ? startIndex : 0);
+    } else if (template === 'cert-picker') {
+      // Roving list of subject/issuer rows + the Cancel row, centered via CSS —
+      // the anchor is ignored. Build FIRST (the items getter reads the rows at
+      // open), then open through the controller (vault-picker discipline).
+      renderCertPicker(model);
+      menuController.open(certPickerEntry, typeof startIndex === 'number' ? startIndex : 0);
     } else if (template === 'vault-capture') {
       // Fixed layout (heading + origin/username + optional vault choice + Save/Cancel),
       // centered via CSS — the anchor is ignored. Render FIRST (stashes captureId +

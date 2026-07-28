@@ -43,6 +43,7 @@
  *   findOverlay: any,
  *   sheet: any,
  *   tearoffOverlay: any,
+ *   htmlFullscreen: { wcId: number, savedBounds: any, pendingBounds: any } | null,
  *   dragWcId: number | null,
  *   restoreTabs?: Array<{ url: string, jarId: string, active: boolean }>
  * }} WindowRecord
@@ -86,6 +87,11 @@ function createWindowRegistry() {
       findOverlay: null,
       sheet: null,
       tearoffOverlay: null,
+      // M14 F1 L1 (DD1): HTML fullscreen mode — { wcId, savedBounds,
+      // pendingBounds } while a tab holds element fullscreen, else null.
+      // Owned by html-fullscreen.js; every exit edge (activation-away,
+      // tab-hide, tab-close, window close, cross-window move) clears it.
+      htmlFullscreen: null,
       // DD2 provenance registration (M09 F11 Leg 3): the wcId THIS window's chrome
       // declared at dragstart — the adopt-by-drop gate refuses a payload the source
       // never declared. Cleared by a grace timer at dragend, or consumed by a

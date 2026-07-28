@@ -683,15 +683,37 @@ const VAULT_TOOLS = [
     usesEngine: false,
     call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
   },
+  {
+    name: 'vaultAnswerAuth',
+    description: 'Answer the target tab\'s pending HTTP auth challenge (the browser-owned basic-auth prompt) with an origin-matched ' +
+      'login credential from an unlocked reachable vault. Resolves the item by id, enforces jar membership (a jar session naming a ' +
+      'foreign/sibling tab is refused with automation: out-of-jar) and an origin match against the CHALLENGE URL\'s origin, then ' +
+      'resolves the challenge\'s native callback inside Goldfinch — a visible credential sheet for that challenge closes without ' +
+      're-presenting. The credential/password is NEVER returned — the result is { answered: true, id, origin } on success, or a ' +
+      'NORMAL { answered: false, reason } (reason "locked" / "no-challenge" / "no-match" / "origin-mismatch" / "ambiguous") when ' +
+      'nothing was answered. "no-challenge" means the tab has no pending auth prompt. Requires wcId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wcId: { type: 'integer', description: 'webContents id of the tab whose pending auth challenge to answer' },
+        itemId: { type: 'string', description: 'the login item id (from vaultList) whose credential answers the challenge' },
+        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+      },
+      required: ['wcId', 'itemId'],
+    },
+    usesEngine: false,
+    call: (engine, args, vault) => vault.answerAuth({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
+  },
 ];
 
 // The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 3
 // chrome/app-admin (getChromeTarget + enumerateWindows + downloadsList) + 1 history
-// (getHistory) + 4 vault (M12 F1 Leg 3: vaultUnlock/vaultList/vaultTotp/vaultFill) = 34
+// (getHistory) + 5 vault (M12 F1 Leg 3: vaultUnlock/vaultList/vaultTotp/vaultFill;
+// M14 F1 L2: vaultAnswerAuth) = 35
 // (Leg 3 + Flight 6 + Flight 9 + Flight 1 zoom + printToPDF + find + Flight 5
 // downloadsList + Mission 08 Flight 5 getHistory + M09 F2 Leg 2 dragPointer + M09 F7
 // DD2 enumerateWindows + M12 F1 Leg 3 vault tools). The 30 engine-op tools map 1:1 to
-// engine ops; the 4 vault tools are NON-engine-op (they dispatch to the per-session
+// engine ops; the 5 vault tools are NON-engine-op (they dispatch to the per-session
 // vault ctx). Iterated by buildToolRegistry for both discovery and dispatch.
 const TOOLS = [...DRIVE_TOOLS, ...OBSERVE_TOOLS, ...DEVTOOLS_TOOLS, ...CHROME_TOOLS, ...HISTORY_TOOLS, ...VAULT_TOOLS];
 
