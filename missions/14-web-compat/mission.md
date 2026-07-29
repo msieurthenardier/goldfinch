@@ -1,6 +1,6 @@
 # Mission: Web Compatibility — Silent Failures Become Working Features
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
@@ -26,16 +26,16 @@ Mission-planning rulings by the human:
 
 ## Success Criteria
 
-- [ ] Activating fullscreen on an embedded video expands the video over the browser chrome to fill the window, and restores the normal layout cleanly when fullscreen exits (including via Esc) — verified live on at least one real video site. *(behavior-test-backed)*
-- [ ] A popup-based OAuth sign-in flow completes end to end against a local OAuth-popup fixture — the popup opens with a working opener relationship, the result reaches the opening page, and the popup closes. *(behavior-test-backed)*
-- [ ] A real popup-based OAuth/SSO sign-in with a live provider (GitHub preferred) completes end to end in a witnessed manual run.
-- [ ] The popup handling approach is recorded as a design ruling that was reviewed and approved by the human before implementation began, including a per-contents parity checklist (nav guards, registry membership, teardown, automation census) for whatever form popups take.
-- [ ] Script-opened popups are visible to the automation surface: `enumerateTabs`/`enumerateWindows` report them like any other guest.
-- [ ] Navigating to a page behind HTTP basic auth prompts for credentials through browser-owned secure UI; correct credentials load the page, and cancelling dismisses cleanly. Credentials never enter any page's DOM. *(behavior-test-backed)*
-- [ ] An agent can answer a basic-auth challenge through a vault-mediated path (vault-fill-style) that preserves the credentials-never-in-page-DOM guarantee.
-- [ ] Sites requesting a client certificate present a certificate chooser instead of failing silently (once per session per host, per Chromium's cert-choice caching; verified against a local TLS fixture).
-- [ ] Navigating to a PDF renders it inline in the tab, and the same navigation does not also trigger a download.
-- [ ] None of the fixes regresses the mission-13 security posture: guests remain OS-sandboxed, the nav-guard relaxation for the PDF viewer is a named, narrowly-scoped design decision with a recorded security assessment, and credential-handling UI keeps credentials out of page-reachable contexts.
+- [x] Activating fullscreen on an embedded video expands the video over the browser chrome to fill the window, and restores the normal layout cleanly when fullscreen exits (including via Esc) — verified live on at least one real video site. *(behavior-test-backed)*
+- [x] A popup-based OAuth sign-in flow completes end to end against a local OAuth-popup fixture — the popup opens with a working opener relationship, the result reaches the opening page, and the popup closes. *(behavior-test-backed)*
+- [x] A real popup-based OAuth/SSO sign-in with a live provider (GitHub preferred) completes end to end in a witnessed manual run. *(Delivered via Google OAuth popup on claude.ai — the harder provider; deviation recorded in the F3 log.)*
+- [x] The popup handling approach is recorded as a design ruling that was reviewed and approved by the human before implementation began, including a per-contents parity checklist (nav guards, registry membership, teardown, automation census) for whatever form popups take. *(Option B, human-ruled 2026-07-28; closed at the F2 debrief.)*
+- [x] Script-opened popups are visible to the automation surface: `enumerateTabs`/`enumerateWindows` report them like any other guest.
+- [x] Navigating to a page behind HTTP basic auth prompts for credentials through browser-owned secure UI; correct credentials load the page, and cancelling dismisses cleanly. Credentials never enter any page's DOM. *(behavior-test-backed)*
+- [x] An agent can answer a basic-auth challenge through a vault-mediated path (vault-fill-style) that preserves the credentials-never-in-page-DOM guarantee.
+- [x] Sites requesting a client certificate present a certificate chooser instead of failing silently (once per session per host, per Chromium's cert-choice caching; verified against a local TLS fixture).
+- [x] Navigating to a PDF renders it inline in the tab, and the same navigation does not also trigger a download.
+- [x] None of the fixes regresses the mission-13 security posture: guests remain OS-sandboxed, the nav-guard relaxation for the PDF viewer is a named, narrowly-scoped design decision with a recorded security assessment, and credential-handling UI keeps credentials out of page-reachable contexts.
 
 ## Stakeholders
 
@@ -70,12 +70,12 @@ Mission-planning rulings by the human:
 
 ## Known Issues
 
-*(none yet — populated during execution)*
+- [ ] **Stale-oversized guest/chrome bounds after fullscreen-exit × window-geometry change** — discovered in Flight 3 (HAT), affects window rendering under WSLg Wayland + display scaling; self-corrects on any manual window resize; manual fullscreen re-entry unaffected. Accepted by operator ruling at the fullscreen run's checkpoint 7 (run log `tests/behavior/web-compat-fullscreen/runs/2026-07-28-18-04-00.md`). Suspected root: units/convention mismatch between `win.getContentBounds()` (fullscreen expansion/resize re-expand) and the renderer-measured slot convention; same finding's other face is the fullscreen logical-viewport undershoot. Follow-up diagnosis disposition to be set at mission debrief (queue vs fold into the #144 mission vs maintenance).
 
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses. This list will evolve based on discoveries during implementation.
 
 - [x] Flight 1: **Main-process wiring** — video fullscreen, HTTP basic auth + client-certificate prompts (including the vault-mediated agent auth path), inline PDF viewing (including the nav-guard security assessment). Self-contained gaps sharing one risk profile: main-process event wiring with chrome-owned UI. *(Landed; behavior runs deferred to HAT/admin-keyed session — see flight log.)*
-- [ ] Flight 2: **Popup & opener ruling + implementation** — author the popup/OAuth proposal, human reviews and approves the ruling, then implement it (with automation-census parity) and verify the OAuth flow end to end against the local fixture. Separate flight because it sits at a genuine decision seam: the human must see and approve the direction before code.
-- [ ] Flight 3: **Alignment/HAT** *(no longer optional — Flight-1 debrief ruling)* — hands-on session against live sites: fullscreen feel, the witnessed live GitHub OAuth sign-in, auth prompts, and adjustments benefiting from real-time human judgment. **Owns the deferred verification bundle** (admin-keyed session): `web-compat-fullscreen` → `web-compat-basic-auth` + `vaultAnswerAuth` + vault-login re-run → `web-compat-client-cert` (install `libnss3-tools` first) → `web-compat-pdf`. Most Flight-1 mission criteria can only be checked off here.
+- [x] Flight 2: **Popup & opener ruling + implementation** — proposal authored (spike-grounded), human ruled **Option B (real BrowserWindow popups)** 2026-07-28, implemented with challenge/census/addressability parity re-implemented explicitly per the ruling's accepted cost. *(Landed; fixture behavior run + census admin-tier steps deferred to HAT per the standing apparatus disposition.)*
+- [x] Flight 3: **Alignment/HAT** *(no longer optional — Flight-1 debrief ruling)* — hands-on session against live sites: fullscreen feel, the witnessed live GitHub OAuth sign-in, auth prompts, and adjustments benefiting from real-time human judgment. **Owns the deferred verification bundle** (admin-keyed session): `web-compat-fullscreen` → `web-compat-basic-auth` + `vaultAnswerAuth` + vault-login re-run → `web-compat-client-cert` (install `libnss3-tools` first) → `web-compat-pdf`. Most Flight-1 mission criteria can only be checked off here.

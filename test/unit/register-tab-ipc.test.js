@@ -158,6 +158,20 @@ function setup() {
     cancelForTab: (wcId, reason) => authCalls.push(['cancel-tab', wcId, reason]),
     notifyTabActivated: (record, wcId) => authCalls.push(['notify-activated', record.win.id, wcId])
   };
+  // M14 F2 L1 (step 3b): popup registry FAKE — this suite asserts the move
+  // core's re-key CALL POINT; the real re-key semantics are pinned by
+  // popup-registry.test.js. L2: listForRecord backs the cancel-on-rekey walk —
+  // a test seeds popupEntries with { popupWcId, openerWcId, openerRecord }.
+  const popupRekeys = [];
+  const popupEntries = [];
+  const popupRegistry = {
+    rekeyForRecord: (wcId, record) => {
+      popupRekeys.push([wcId, record.win.id]);
+      // Mirror the real registry: re-keyed entries now belong to the destination.
+      for (const e of popupEntries) if (e.openerWcId === wcId) e.openerRecord = record;
+    },
+    listForRecord: (record) => popupEntries.filter((e) => e.openerRecord === record)
+  };
   const deps = {
     ipcMain,
     WebContentsView,
@@ -187,12 +201,13 @@ function setup() {
     buildAdoptPayload: (payload, wc) => ({ ...payload, url: wc.getURL(), title: wc.getTitle() }),
     broadcastMoveTargetsChanged: () => log.push(['broadcast-targets']),
     getTabContents: (id) => webContents.fromId(id),
+    popupRegistry,
     schedule: (fn, ms) => { const token = { fn, ms }; timers.push(token); return token; },
     cancelScheduled: (token) => { const i = timers.indexOf(token); if (i >= 0) timers.splice(i, 1); },
     logger: { warn() {}, error() {} }
   };
   registerTabIpc(deps);
-  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten, authCalls };
+  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten, authCalls, popupRekeys, popupEntries };
 }
 
 test('registers the complete tab/move channel set exactly once', () => {
@@ -611,4 +626,59 @@ test('tab-set-active notifies the auth store AFTER activeTabWcId is written (re-
   h.ipcMain.send('tab-set-active', record.chromeView.webContents, { wcId: 100, bounds: { x: 0, y: 80, width: 1000, height: 700 } });
   assert.deepEqual(h.authCalls, [['notify-activated', 1, 100]]);
   assert.equal(record.activeTabWcId, 100, 'the eligibility read (activeTabWcId) is already current');
+});
+
+// ---------------------------------------------------------------------------
+// M14 F2 L1 (step 3b) — popup re-key on cross-window tab moves.
+// ---------------------------------------------------------------------------
+
+test('a committed move re-keys the moved tab popups to the DESTINATION record (M14 F2 L1)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100);
+  h.addTab(source, 101);
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.popupRekeys, [[100, result.windowId]],
+    'popups opened by the moved tab now belong to the destination window (DD1f closes with the CURRENT owner)');
+});
+
+test('a REFUSED move re-keys nothing — the guards run before the re-key', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100); // sole tab → refused
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result, null);
+  assert.deepEqual(h.popupRekeys, []);
+});
+
+test('cancel-on-rekey (M14 F2 L2, FD ruling): a committed move cancels the MOVED opener popups challenges with tab-parity reason moved', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100);
+  h.addTab(source, 101);
+  // Two popups opened by the moving tab, one by the staying tab.
+  h.popupEntries.push(
+    { popupWcId: 701, openerWcId: 100, openerRecord: source },
+    { popupWcId: 702, openerWcId: 100, openerRecord: source },
+    { popupWcId: 703, openerWcId: 101, openerRecord: source }
+  );
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result.ok, true);
+  const cancels = h.authCalls.filter((c) => c[0] === 'cancel-tab');
+  assert.deepEqual(cancels, [
+    ['cancel-tab', 100, 'moved'],            // the tab contract (F1 DD2 ruling)
+    ['cancel-tab', 701, 'moved'],            // its popups — byte-consistent reason
+    ['cancel-tab', 702, 'moved'],
+  ], 'moved-opener popups cancel; the staying tab popup (703) is untouched — no hung callback across a re-key');
+});
+
+test('cancel-on-rekey: a REFUSED move cancels no popup challenges (guards precede the hook)', () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+  h.addTab(source, 100); // sole tab → refused
+  h.popupEntries.push({ popupWcId: 701, openerWcId: 100, openerRecord: source });
+  const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
+  assert.equal(result, null);
+  assert.deepEqual(h.authCalls, []);
 });

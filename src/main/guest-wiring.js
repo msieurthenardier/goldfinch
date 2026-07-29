@@ -13,6 +13,35 @@
 // refused by tab-navigate's trust-branched gate).
 const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 
+// M14 F2 L1: the sole sanctioned `closed` registration wrapper (the DD8
+// destroyed-window tripwire bans raw registrations tree-wide) — popup teardown
+// routes through it like every other window. window-factory is Electron-free;
+// no cycle (it never requires this module).
+const { onWindowClosed } = require('./window-factory');
+
+/**
+ * M14 F2 L1 — the DD3 popup predicate (pure, exported for the unit matrix),
+ * carrying the leg-design disposition refinement (FD-logged): qualifying =
+ * `disposition === 'new-window'` (Chromium's own popup classification — without
+ * it, middle-clicks (`background-tab`) and plain clicks on named-target links
+ * (`foreground-tab`) would become focused floating popups) AND (non-empty
+ * `features` string OR a named non-`_blank` target) AND a safe URL AND a
+ * non-internal opener. Named consequence (flight-logged, premise-confirmed
+ * live): `window.open(url, 'name')` with NO features is classified
+ * `foreground-tab` by Chromium, so it keeps deny-and-convert — the disposition
+ * conjunction intentionally narrows DD3's original "features OR named" reading.
+ * @param {{ url: string, frameName?: string, features?: string, disposition?: string }} details
+ * @param {{ isSafeTabUrl: (url: string) => boolean, isInternalOpener: boolean }} ctx
+ * @returns {boolean}
+ */
+function qualifiesAsPopupRequest({ url, frameName, features, disposition }, { isSafeTabUrl, isInternalOpener }) {
+  return disposition === 'new-window'
+    && ((typeof features === 'string' && features.length > 0)
+      || (typeof frameName === 'string' && frameName !== '' && frameName !== '_blank'))
+    && isSafeTabUrl(url)
+    && !isInternalOpener;
+}
+
 /**
  * Build the event wiring shared by web and trusted-internal guest views. The
  * module owns no Electron state; owner lookups and every side effect are live
@@ -37,8 +66,33 @@ function createGuestWiring(deps) {
     getHistoryRecorder,
     broadcastMoveTargetsChanged,
     faviconFetcher,
+    popupRegistry,
+    webPreloadPath,
+    // M14 F2 L2 (DD1f seam, real wiring): the SAME delegation main.js hands the
+    // popup registry — cancelForTab(popupWcId, 'tab-close'). Called from the
+    // popup teardown below so a SELF-closed/destroyed popup (guest-window-close,
+    // OS close) resolve-cancels its queued/presented challenges exactly like the
+    // owner-window close path (closeAllForRecord invokes the seam per entry
+    // before destroying). Optional: absent → no-op (leg-1-era tests unchanged).
+    cancelChallengesForPopup = () => {},
     logger
   } = deps;
+
+  /**
+   * M14 F2 L1 (review Issue 1): POPUP-REGISTRY-FIRST owner resolution, shared
+   * by the window-open handler and did-create-window below. A popup opener
+   * resolves its registry entry's openerRecord; a tab opener falls back to the
+   * window registry. Liveness-checked: a dead/absent record resolves null
+   * (window.open during opener teardown must refuse the allow path).
+   * @param {any} contents
+   * @returns {{ owner: any | null, popupEntry: any | null }}
+   */
+  function resolveOpenerOwner(contents) {
+    const popupEntry = popupRegistry.getByWcId(contents.id);
+    const resolved = popupEntry ? popupEntry.openerRecord : registry.getWindowForGuest(contents.id);
+    const owner = resolved && resolved.win && !resolved.win.isDestroyed() ? resolved : null;
+    return { owner, popupEntry };
+  }
 
   function handleCrossView(event, input, contents) {
     if (input.type !== 'keyDown') return false;
@@ -86,9 +140,58 @@ function createGuestWiring(deps) {
     // reopen the race the latch closes — keep this assignment first and synchronous.
     contents.__goldfinchNavGuarded = true;
 
-    contents.setWindowOpenHandler(({ url }) => {
-      const owner = registry.getWindowForGuest(contents.id);
-      const openerPartition = owner ? owner.tabViews.get(contents.id)?.partition : undefined;
+    // M14 F2 L1 (flight DD1/DD3, human-ruled Option B): the window-open ruling.
+    // Qualifying popup requests (DD3 predicate above) return allow+override —
+    // the return deliberately carries NO adopt hook (DD2 pin, source-scanned:
+    // the spike proved returning any other contents from that hook permanently
+    // wedges the opener renderer, silently). Everything else keeps
+    // deny-and-convert with OWNER-AWARE forwarding: a popup-originated
+    // `target=_blank` (e.g. a "forgot password" link inside an OAuth popup)
+    // opens as a tab in the RESOLVED owning window with the popup's captured
+    // partition — never vanishes. Internal openers, unsafe URLs, and
+    // tab-intent dispositions always deny(-convert).
+    contents.setWindowOpenHandler((details) => {
+      const { url } = details;
+      const { owner, popupEntry } = resolveOpenerOwner(contents);
+      const qualifies = owner != null && qualifiesAsPopupRequest(details, {
+        isSafeTabUrl,
+        isInternalOpener: !!contents.session?.__goldfinchInternal
+      });
+      if (qualifies) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            webPreferences: {
+              // DD1d posture — premise-#2-verified live in this exact
+              // allow+override combination (flight log): preload honored,
+              // contextIsolation:false (farbling main-world requirement),
+              // sandbox:true, nodeIntegration:false, plugins:true (guest
+              // parity ruling — without it the guardFrameNav PDF carve-out is
+              // dead code in popups). NO partition key: the popup's session is
+              // automatically the opener's jar (spike-verified; partition
+              // overrides are silently ignored).
+              preload: webPreloadPath,
+              contextIsolation: false,
+              sandbox: true,
+              nodeIntegration: false,
+              plugins: true
+            }
+          }
+        };
+      }
+      if (popupEntry) {
+        // Popup opener: forward to the owning window's chrome (chromeForTab
+        // misses by construction — popups are not in tabViews) with the
+        // partition captured at register time. Dead owner → plain deny.
+        const chrome = owner && !owner.chromeView.webContents.isDestroyed()
+          ? owner.chromeView.webContents
+          : null;
+        chrome?.send('open-tab', { url, openerPartition: popupEntry.partition });
+        return { action: 'deny' };
+      }
+      const rec = registry.getWindowForGuest(contents.id);
+      const openerPartition = rec ? rec.tabViews.get(contents.id)?.partition : undefined;
       chromeForTab(contents.id)?.send('open-tab', { url, openerPartition });
       return { action: 'deny' };
     });
@@ -149,6 +252,97 @@ function createGuestWiring(deps) {
     // coordination — nothing here reads records directly.
     contents.on('enter-html-full-screen', () => htmlFullscreen.enter(contents.id));
     contents.on('leave-html-full-screen', () => htmlFullscreen.exit(contents.id));
+
+    // M14 F2 L1 (DD1a/DD1c/DD1f): popup adoption. The OPENER contents emits
+    // did-create-window with the new BrowserWindow. Premise #1 (flight-logged,
+    // measured live): this fires BEFORE the popup's first navigation event, so
+    // wiring the latch + guards here is race-free — the DD1c pending-popup
+    // fallback stays unused and app-lifecycle is untouched. Web guests only
+    // (an internal opener can never reach the allow path).
+    contents.on('did-create-window', (win) => {
+      const popupWc = win.webContents;
+      const { owner: openerRecord, popupEntry: parentEntry } = resolveOpenerOwner(contents);
+      if (!openerRecord) {
+        // Opener died between the allow return and window creation (teardown
+        // race): a popup with no owning record sits outside every DD1f/census
+        // rule — destroy it before it ever navigates.
+        if (!win.isDestroyed()) win.destroy();
+        return;
+      }
+      // Partition captured EAGERLY (leg 2's census/attribution needs it after
+      // the opener tab dies). Chained popups parent FLAT to the same
+      // openerRecord and inherit its captured partition (named simplification).
+      const partition = parentEntry
+        ? parentEntry.partition
+        : openerRecord.tabViews.get(contents.id)?.partition;
+      const popupWcId = popupWc.id;
+
+      // Full guest discipline first (audited reuse): latch, guardNav trio +
+      // guardFrameNav wrapper (the GUEST nav-guard shape — never the wider
+      // non-guest ALLOWED_NONGUEST_SCHEMES), input surfaces, and the popup's
+      // own window-open handler (chained popups). Chrome-routed sends inside
+      // resolve a null chrome for popups and no-op — the named-accepted input
+      // gaps (chrome shortcuts swallowed, no context menu; Electron-default
+      // parity, documented for HAT). htmlFullscreen.enter early-returns on
+      // its registry miss, so popup HTML fullscreen stays native.
+      wireGuestContents(popupWc);
+      popupRegistry.register(popupWcId, {
+        openerWcId: contents.id,
+        openerRecord,
+        partition,
+        win
+      });
+
+      // Slim popup event variant (deliberately NOT wireTabViewEvents — there
+      // is no chrome strip to feed): history records under the opener's jar
+      // (DD1c — it is real browsing in that jar), titles feed the recorder's
+      // late-title backfill, and teardown deregisters.
+      //
+      // M14 F2 L2 (DD2 navigation-away, popup parity): a main-frame, non-same-
+      // document navigation resolve-cancels the popup's pending challenges —
+      // the same filter and reason as wireTabViewEvents' tab wiring, so DD2's
+      // max-staleness contract (one navigation) holds for popups too.
+      popupWc.on('did-start-navigation', (e) => {
+        if (!popupWc.isDestroyed() && e.isMainFrame && !e.isSameDocument) {
+          authChallenges.cancelForTab(popupWcId, 'navigated');
+        }
+      });
+      popupWc.on('did-navigate', () => {
+        if (!popupWc.isDestroyed()) {
+          getHistoryRecorder()?.handleNavigation({ wcId: popupWcId, partition, url: popupWc.getURL() });
+        }
+      });
+      popupWc.on('did-navigate-in-page', () => {
+        if (!popupWc.isDestroyed()) {
+          getHistoryRecorder()?.handleNavigation({ wcId: popupWcId, partition, url: popupWc.getURL() });
+        }
+      });
+      popupWc.on('page-title-updated', (_event, title) => {
+        getHistoryRecorder()?.handleTitleUpdated(popupWcId, title);
+      });
+
+      // Teardown rides the events destroy() actually EMITS — `closed` on the
+      // window (via the sanctioned onWindowClosed wrapper: captured-primitive
+      // discipline, never a raw registration) and `destroyed` on the contents
+      // (destroy() skips `close`). Idempotent pair; inputs captured at wiring
+      // time (house destroyed-window rule — never read win.* in
+      // closed-or-later handlers). forgetTab is required here: the
+      // window-factory close loop only covers tabViews, which popups never
+      // join (DD1e).
+      const teardown = () => {
+        // DD1f cancel seam (M14 F2 L2): resolve-cancel this popup's queued/
+        // presented challenges BEFORE deregistering — a self-closed popup must
+        // never strand a native callback, and the owning record's visible auth
+        // sheet closes with a resolution-family reason. Idempotent alongside
+        // closeAllForRecord's per-entry seam call (the exactly-once ledger makes
+        // the second cancel a no-op) and safe on the already-canceled path.
+        cancelChallengesForPopup(popupWcId);
+        popupRegistry.remove(popupWcId);
+        getHistoryRecorder()?.forgetTab(popupWcId);
+      };
+      onWindowClosed(win, teardown);
+      popupWc.on('destroyed', teardown);
+    });
 
     contents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
@@ -292,4 +486,4 @@ function createGuestWiring(deps) {
   return { wireGuestContents, wireTabViewEvents };
 }
 
-module.exports = { createGuestWiring };
+module.exports = { createGuestWiring, qualifiesAsPopupRequest };

@@ -815,3 +815,99 @@ test('enumerateTabs (DD1): zero registered windows → empty array, and executeI
   assert.deepEqual(result, []);
   assert.equal(rendererCalls, 0, 'the census path never falls back to the last-focused chrome');
 });
+
+// ---------------------------------------------------------------------------
+// M14 F2 L2 (DD1a) — listPopups popup-row merge. Rows arrive READY-MADE from
+// main.js (jarId mapped main-side); this module only appends them, after every
+// window's tab rows, on BOTH assembly paths. Absent → no rows (the silent
+// house fallback — the reason both live injection sites are grep-pinned, see
+// popup-parity-pins.test.js).
+// ---------------------------------------------------------------------------
+
+test('enumerateTabs (popup merge): popup rows append AFTER all tab rows, verbatim, on the multi-window path', async () => {
+  const fromId = makeFakeFromId({ 10: makeGuestWc(10), 20: makeGuestWc(20) });
+  const windows = [
+    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'personal', active: true }] }),
+    makeWindow({ windowId: 2, tabs: [{ wcId: 20, url: 'https://c.example', title: 'C', jarId: 'work', active: true }] }),
+  ];
+  const popupRow = { wcId: 701, url: 'https://popup.example/', title: 'P', jarId: 'personal', active: false, windowId: 1, popup: true };
+  const { exec } = makeChromeExecute(windows);
+  const result = await enumerateTabs({
+    executeInRenderer: makeFixedExecute([]),
+    executeInChrome: exec,
+    listWindows: () => windows,
+    listPopups: () => [popupRow],
+    fromId,
+    chromeContents: null,
+  });
+  assert.deepEqual(result.map((t) => t.wcId), [10, 20, 701], 'popup rows last');
+  assert.deepEqual(result[2], popupRow, 'the main-built row rides untouched (jarId mapped main-side, popup: true, owner windowId)');
+});
+
+test('enumerateTabs (popup merge): absent listPopups → no popup rows (house absent-dep idiom)', async () => {
+  const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
+  const windows = [
+    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] }),
+  ];
+  const { exec } = makeChromeExecute(windows);
+  const result = await enumerateTabs({
+    executeInRenderer: makeFixedExecute([]),
+    executeInChrome: exec,
+    listWindows: () => windows,
+    fromId,
+    chromeContents: null,
+  });
+  assert.deepEqual(result.map((t) => t.wcId), [10], 'no popup rows without the seam');
+  assert.equal(result.some((t) => t.popup), false);
+});
+
+test('enumerateTabs (popup merge): the pre-F7 fallback path also appends popup rows', async () => {
+  const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
+  const popupRow = { wcId: 701, url: 'https://popup.example/', title: 'P', jarId: null, active: false, windowId: 1, popup: true };
+  const result = await enumerateTabs({
+    executeInRenderer: makeFixedExecute([
+      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
+    ]),
+    listPopups: () => [popupRow],
+    fromId,
+    chromeContents: null,
+  });
+  assert.deepEqual(result.map((t) => t.wcId), [10, 701]);
+});
+
+test('enumerateTabs (popup merge): a null/empty listPopups return contributes nothing (defensive)', async () => {
+  const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
+  const windows = [
+    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] }),
+  ];
+  const { exec } = makeChromeExecute(windows);
+  const result = await enumerateTabs({
+    executeInRenderer: makeFixedExecute([]),
+    executeInChrome: exec,
+    listWindows: () => windows,
+    listPopups: () => null,
+    fromId,
+    chromeContents: null,
+  });
+  assert.deepEqual(result.map((t) => t.wcId), [10]);
+});
+
+test('activateTab on a POPUP wcId returns false — chromeForTab misses popups; no raise, no dispatch, no throw (M14 F2 L2)', async () => {
+  const popupWc = makeGuestWc(701);
+  const fromId = makeFakeFromId({ 701: popupWc });
+  let raised = 0;
+  let dispatched = 0;
+  const result = await activateTab(701, {
+    executeInRenderer: async () => { throw new Error('must not take the fallback path'); },
+    executeInChrome: async () => { dispatched++; return true; },
+    chromeForTab: () => null,               // popups are in no window's tabViews
+    raiseWindowForTab: () => { raised++; },
+    fromId,
+    chromeContents: null,
+    isTabViewWcId: () => false,             // not a tab…
+    isPopupWcId: (id) => id === 701,        // …but resolves via the popup widening
+  });
+  assert.equal(result, false, 'the honest "not a registry-owned tab" answer');
+  assert.equal(dispatched, 0, 'no chrome dispatch');
+  assert.equal(raised, 0, 'raiseWindowForTab never called for popups');
+});

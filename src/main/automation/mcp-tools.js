@@ -129,7 +129,7 @@ const PRESS_KEY_NAMES =
 const DRIVE_TOOLS = [
   {
     name: 'enumerateTabs',
-    description: 'List all drivable (dom-ready) tabs across ALL windows as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes ZERO rows — call enumerateWindows and poll until every `booted` is true if a total census is required. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows\' tabs for its own jar, never the window topology.',
+    description: 'List all drivable (dom-ready) tabs across ALL windows as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes ZERO rows — call enumerateWindows and poll until every `booted` is true if a total census is required. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows\' tabs for its own jar, never the window topology. Script-opened POPUP windows appear as extra rows (after the tab rows) marked `popup: true`, with `active: false` and windowId = the OWNER window\'s; a jar key sees only popups whose session is its own jar (a burner-opened popup is admin-visible only). Popup wcIds are drivable like tab wcIds.',
     inputSchema: { type: 'object', properties: {} },
     call: (engine) => engine.enumerateTabs(),
   },
@@ -162,7 +162,7 @@ const DRIVE_TOOLS = [
   },
   {
     name: 'activateTab',
-    description: 'Bring the tab identified by wcId to the foreground. Returns a boolean success signal.',
+    description: 'Bring the tab identified by wcId to the foreground. Returns a boolean success signal. A POPUP wcId returns false (a popup is not a tab in any window\'s strip and no window is raised) — popups are floating windows; drive them directly, no activation step exists or is needed.',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
@@ -558,7 +558,7 @@ const CHROME_TOOLS = [
   },
   {
     name: 'enumerateWindows',
-    description: 'ADMIN ONLY. List every open browser window as an array of { windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }. The single window-topology discovery primitive: it resolves per-window overlay wcIds exactly (no id-space probing), and `booted` is the completeness signal for enumerateTabs — a window whose chrome has not booted contributes zero tab rows, so poll until every booted is true for a total census. sheetWcId/findWcId are ABSENT when that overlay has never been created (they are lazy); sheetVisible/findVisible are separate so "instantiated but hidden" is distinguishable from "never shown". lastFocused is main-side tracked, NOT an OS-focus claim. Jar keys are refused with automation: admin-only.',
+    description: 'ADMIN ONLY. List every open browser window as an array of { windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }. The single window-topology discovery primitive: it resolves per-window overlay wcIds exactly (no id-space probing), and `booted` is the completeness signal for enumerateTabs — a window whose chrome has not booted contributes zero tab rows, so poll until every booted is true for a total census. sheetWcId/findWcId are ABSENT when that overlay has never been created (they are lazy); sheetVisible/findVisible are separate so "instantiated but hidden" is distinguishable from "never shown". lastFocused is main-side tracked, NOT an OS-focus claim. Script-opened POPUP windows are appended as extra entries of the DISTINCT shape { popupWcId, openerWindowId, url, title } — discriminate on popupWcId presence (popup entries carry no windowId). Jar keys are refused with automation: admin-only.',
     inputSchema: { type: 'object', properties: {} }, // no input, mirrors getChromeTarget's pre-F7 schema
     call: (engine) => engine.enumerateWindows(),
   },
@@ -691,7 +691,9 @@ const VAULT_TOOLS = [
       'resolves the challenge\'s native callback inside Goldfinch — a visible credential sheet for that challenge closes without ' +
       're-presenting. The credential/password is NEVER returned — the result is { answered: true, id, origin } on success, or a ' +
       'NORMAL { answered: false, reason } (reason "locked" / "no-challenge" / "no-match" / "origin-mismatch" / "ambiguous") when ' +
-      'nothing was answered. "no-challenge" means the tab has no pending auth prompt. Requires wcId.',
+      'nothing was answered. "no-challenge" means the tab has no pending auth prompt. Requires wcId. A POPUP wcId works the same ' +
+      'way (a popup challenge presents on its opener\'s window; the origin match is still against the challenge URL, and ' +
+      'certificate challenges remain invisible to this tool).',
     inputSchema: {
       type: 'object',
       properties: {

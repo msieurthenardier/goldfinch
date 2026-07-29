@@ -72,15 +72,33 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
  * wrapper breaks the jar facade's .filter outright, and an array-with-an-own-property
  * is SILENTLY dropped by Array.prototype.filter, which does not copy own props.
  *
- * @param {{ executeInRenderer: (code: string) => Promise<any>, executeInChrome?: (chrome: any, code: string) => Promise<any>, listWindows?: () => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>, fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
+ * @param {{ executeInRenderer: (code: string) => Promise<any>, executeInChrome?: (chrome: any, code: string) => Promise<any>, listWindows?: () => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>, listPopups?: () => Array<{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, windowId: number, popup: boolean }>, fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean }} deps
  *   listWindows — main.js's registry seam (F7 DD1): the registered windows in
  *                 insertion order, each with its chrome, boot state, and ownership
  *                 predicate. Absent → no behavior change (the pre-F7 single-window
  *                 path). Electron-free: the only handle that crosses is `chrome`,
  *                 and it goes to executeInChrome and nowhere else.
- * @returns {Promise<{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, windowId?: number }[]>}
+ *   listPopups  — (M14 F2 L2, DD1a) main.js's popup-registry seam: READY-MADE
+ *                 rows for every live script-opened popup, `{ wcId, url, title,
+ *                 jarId, active: false, windowId (the OWNER window's), popup:
+ *                 true }`. The rows are built MAIN-SIDE — jarId is mapped there
+ *                 from the entry's captured partition via jars.list() (never a
+ *                 partition-string compare in THIS module, DD7 discipline), and
+ *                 they are appended after the tab rows (registration order).
+ *                 Jar-tier filtering needs no special casing: the scope façade
+ *                 filters every row by RESOLVED SESSION, and a popup's session
+ *                 is the interned opener-jar session — so foreign-jar popups
+ *                 drop exactly like foreign-jar tabs, and burner-opened popups
+ *                 (jarId unmappable → null) are admin-visible only. Absent → no
+ *                 popup rows (the house conditional-spread idiom) — SILENT,
+ *                 which is why both live injection sites are grep-pinned
+ *                 (the listWindows precedent).
+ * @returns {Promise<{ wcId: number, url: string, title: string, jarId: string|null, active: boolean, windowId?: number, popup?: boolean }[]>}
  */
 async function enumerateTabs(deps) {
+  // M14 F2 L2: popup rows ride BOTH assembly paths (they come from the main-side
+  // registry, not from any chrome round-trip — popups are chrome-invisible).
+  const popupRows = typeof deps.listPopups === 'function' ? (deps.listPopups() || []) : [];
   // Fallback is gated on listWindows ALONE in practice: executeInChrome is built
   // UNCONDITIONALLY in engine.js's deps() (:107, a plain object-literal property),
   // NOT via the conditional-spread idiom listWindows/chromeForTab use — so it can
@@ -96,7 +114,9 @@ async function enumerateTabs(deps) {
   // test failure anywhere.
   if (typeof deps.listWindows !== 'function' || typeof deps.executeInChrome !== 'function') {
     const raw = await deps.executeInRenderer('window.__goldfinchAutomation.listTabs()');
-    return mapEnumeratedTabs(raw, deps); // forwards allowInternal so admin keeps the internal tab
+    // forwards allowInternal so admin keeps the internal tab; popup rows appended
+    // on this path too (hand-built deps that thread listPopups get them).
+    return [...mapEnumeratedTabs(raw, deps), ...popupRows];
   }
 
   const out = [];
@@ -117,6 +137,9 @@ async function enumerateTabs(deps) {
       out.push({ ...t, windowId: w.windowId });     // windowId stamped HERE, from the registry
     }
   }
+  // Popup rows LAST (after every window's tab rows), in registration order —
+  // main-side registry truth, no chrome round-trip involved (see listPopups doc).
+  out.push(...popupRows);
   return out;
 }
 
@@ -231,6 +254,11 @@ async function activateTab(wcId, deps) {
   if (!owning) {
     // NOT a registry-owned tab (the overlay/probe-walk branch — see the three-way
     // rule above). Return today's discarded false verbatim: no raise, no throw.
+    // M14 F2 L2: POPUP wcIds land here by design — a popup is not in any
+    // window's tabViews, so chromeForTab misses; activateTab(popup) returns
+    // false and raiseWindowForTab is never called. Popups are floating
+    // always-visible windows; acts on them proceed without a raise (documented
+    // in mcp-tools/docs).
     return false;
   }
 

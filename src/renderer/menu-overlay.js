@@ -53,7 +53,7 @@
 import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
-import { buildCertPickerCard, renderCertPickerRows, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
+import { buildCertPickerCard, renderCertPickerRows, renderCertPickerSubtitle, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
@@ -671,7 +671,9 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     focusReturn: () => {}
   });
 
-  /** Render the host + realm context line from the init model (textContent only).
+  /** Render the host + realm context line from the init model (textContent only),
+   * and toggle the popup marker copy line (M14 F2 L2, DD5 — shown only when the
+   * store stamped `popup: true` on the presentation payload).
    * @param {any} model */
   function renderAuthBasic(model) {
     const host = model && typeof model.host === 'string' ? model.host : '';
@@ -679,6 +681,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     auth.origin.textContent = realm
       ? `The server ${host} says: “${realm}”`
       : `The server ${host} requires a username and password.`;
+    auth.popupNote.classList.toggle('hidden', !(model && model.popup === true));
   }
 
   // Submit → the DEDICATED credential channel (the vault-unlock submit shape:
@@ -874,9 +877,18 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
   });
 
   /** Render the chooser rows from the display-string model + wire selection.
-   * @param {any[]} model */
+   * The model is EITHER the bare rows array (pre-popup shape — the a11y audit
+   * hook still sends it; no host → subtitle hidden) OR `{ certs, host?, popup? }`
+   * (M14 F2 L2: the popup marker rides the object form; M14 F3 HAT fix: `host`
+   * feeds the site-attribution subtitle — copy-line renders, nothing else changes).
+   * @param {any[] | { certs?: any[], host?: string, popup?: boolean }} model */
   function renderCertPicker(model) {
-    certPickerRows = renderCertPickerRows(document, certPickerList, model);
+    const rows = Array.isArray(model) ? model : (model && Array.isArray(model.certs) ? model.certs : []);
+    const popup = !Array.isArray(model) && !!model && model.popup === true;
+    const host = !Array.isArray(model) && model && typeof model.host === 'string' ? model.host : '';
+    renderCertPickerSubtitle(certPicker.subtitle, host);
+    certPicker.popupNote.classList.toggle('hidden', !popup);
+    certPickerRows = renderCertPickerRows(document, certPickerList, rows);
     certPickerRows.forEach((btn) => {
       btn.addEventListener('click', () => {
         // A cert row reports its INDEX (`cert:<i>`, from data-cert-index); the
@@ -2074,11 +2086,21 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     // the capture offer `{origin, username, mode, defaultVaultId, choices, captureId}`);
     // every other template carries a flat item array. A bare Array.isArray guard would
     // reject the object and the sheet would silently never render it.
-    const modelShapeOk = (template === 'suggestions' || template === 'vault-capture'
-      || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
-      || template === 'vault-adminkey-show' || template === 'auth-basic')
-      ? model && typeof model === 'object' && !Array.isArray(model)
-      : Array.isArray(model);
+    // cert-picker accepts BOTH shapes — renderCertPicker's documented domain:
+    // the bare rows array (the a11y audit hook's pre-popup shape) OR
+    // `{ certs, popup? }` (the LIVE cert-challenge-present path since M14 F2
+    // L2 — the popup marker rides the object form). M14 F3 HAT fix: this gate
+    // previously demanded an array here while the live chrome sent the object,
+    // so every real cert challenge bailed AFTER main had already shown the
+    // sheet — a visible blank sheet with no card (contract-pinned in
+    // cert-picker-template.test.js).
+    const modelShapeOk = template === 'cert-picker'
+      ? !!model && typeof model === 'object'
+      : (template === 'suggestions' || template === 'vault-capture'
+        || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
+        || template === 'vault-adminkey-show' || template === 'auth-basic')
+        ? model && typeof model === 'object' && !Array.isArray(model)
+        : Array.isArray(model);
     if (!modelShapeOk) return;
 
     // In-place downloads update (Leg 4, Option 1): a repaint that arrives while

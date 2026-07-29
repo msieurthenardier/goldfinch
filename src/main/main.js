@@ -60,6 +60,7 @@ const { createFindOverlayManager } = require('./find-overlay-manager');
 const { createTearoffOverlayManager } = require('./tearoff-overlay-manager');
 const { createWindowFactory } = require('./window-factory');
 const { createGuestWiring } = require('./guest-wiring');
+const { createPopupRegistry } = require('./popup-registry');
 const { createHtmlFullscreen } = require('./html-fullscreen');
 const { createAuthChallenges } = require('./auth-challenges');
 const { createSessionRuntime } = require('./session-runtime');
@@ -268,7 +269,61 @@ const getChromeContents = (windowId) => {
 // registry does not export lastFocusedId (it is closure-local), and passing the
 // record keeps window-registry.js unchanged while inheriting its
 // membership-validated first-record fallback for free.
-const enumerateWindows = () => buildWindowCensus(registry.records(), registry.getLastFocused());
+//
+// M14 F2 L2 (DD1a): popup entries ride the same zero-state read —
+// popupCensusEntries() derives them from the live popup registry at call time.
+const enumerateWindows = () => buildWindowCensus(registry.records(), registry.getLastFocused(), popupCensusEntries());
+
+// M14 F2 L2 (DD1a) — the two popup census accessors, derived at CALL TIME from
+// the live popup registry (zero state, the enumerateWindows discipline).
+// Hoisted function declarations: popupRegistry/authChallenges are consts defined
+// further down; both accessors run only at op time, long after construction.
+//
+// popupCensusEntries — enumerateWindows' popup entries { popupWcId,
+// openerWindowId, url, title }: owner resolution walks registry.records() ×
+// popupRegistry.listForRecord (a popup whose owner record is mid-teardown is
+// skipped — DD1f makes that a transient), url/title read from the live
+// webContents.
+function popupCensusEntries() {
+  const out = [];
+  for (const rec of registry.records()) {
+    for (const entry of popupRegistry.listForRecord(rec)) {
+      const wc = webContents.fromId(entry.popupWcId);
+      if (!wc || wc.isDestroyed()) continue;
+      out.push({ popupWcId: entry.popupWcId, openerWindowId: rec.win.id, url: wc.getURL(), title: wc.getTitle() });
+    }
+  }
+  return out;
+}
+
+// popupTabRows — enumerateTabs' popup rows (the engine's `listPopups` seam):
+// tab-row shape plus `popup: true`, windowId = the OWNER window's. jarId is
+// mapped HERE from the entry's eagerly-captured partition via jars.list() —
+// the sanctioned MAIN-SIDE mapping (guidance #4): the automation modules never
+// compare partition strings (DD7 discipline), and a burner-opened popup's
+// partition maps to no registered jar → jarId null → visible to admin only
+// (the jar façade's resolved-session filter drops it for every jar key —
+// pinned as intended).
+function popupTabRows() {
+  const jarIdByPartition = new Map(jars.list().map((j) => [j.partition, j.id]));
+  const rows = [];
+  for (const rec of registry.records()) {
+    for (const entry of popupRegistry.listForRecord(rec)) {
+      const wc = webContents.fromId(entry.popupWcId);
+      if (!wc || wc.isDestroyed()) continue;
+      rows.push({
+        wcId: entry.popupWcId,
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        jarId: entry.partition != null ? (jarIdByPartition.get(entry.partition) ?? null) : null,
+        active: false,
+        windowId: rec.win.id,
+        popup: true,
+      });
+    }
+  }
+  return rows;
+}
 
 // F7 DD1's seam: the REGISTRY is the ownership authority for the all-windows tab
 // census. `ownsTab` is the record's own tabViews membership — the renderer is
@@ -437,14 +492,28 @@ async function grabWindow(windowId) {
   // FIX 2(b) — WSLg / Wayland fallback: build a REAL chrome+guest composite in the
   // chrome renderer via executeJavaScript. Steps:
   //   1. capturePage() on chrome and active guest in parallel.
-  //   2. Ask the chrome renderer for the #webviews bounding rect (the guest's offset).
-  //   3. Draw chrome first, then guest at its offset, on an offscreen <canvas>;
+  //   2. Read the active guest view's MAIN-SIDE bounds (record ground truth) for
+  //      the guest's placement on the canvas.
+  //   3. Draw chrome first, then guest at those bounds, on an offscreen <canvas>;
   //      return the composite as a data URL.
   // This is dep-free and avoids shipping a broken chrome-only screenshot.
+  //
+  // M14 F3 HAT fix: the guest layer is positioned from the view's OWN getBounds(),
+  // never the renderer-reported #webviews slot rect. During HTML fullscreen
+  // (record.htmlFullscreen — see html-fullscreen.js) the renderer's slot rect is
+  // stale by design (its bounds sends are DEFERRED as pendingBounds, never
+  // applied), while the view's real bounds are the full window content area and
+  // the view is raised above the chrome. Drawing at the slot rect falsely showed
+  // chrome in the capture of a correct on-screen window. In normal mode
+  // getBounds() equals the applied slot rect, so the composite is unchanged.
   try {
     // Same record as the window bounds above (F2: never mix records mid-capture).
+    // The active entry comes off grabRec DIRECTLY (not via a second registry
+    // resolve) so both the capture target and its bounds read the same record.
     const cc = grabRec.chromeView.webContents;
-    const atc = grabRec.activeTabWcId != null ? getTabContents(grabRec.activeTabWcId) : null;
+    const activeEntry = grabRec.activeTabWcId != null ? grabRec.tabViews.get(grabRec.activeTabWcId) : null;
+    const activeWc = activeEntry ? activeEntry.view.webContents : null;
+    const atc = activeWc && !activeWc.isDestroyed() ? activeWc : null;
     if (!cc || cc.isDestroyed()) return null;
 
     // Capture both views in parallel.
@@ -465,21 +534,27 @@ async function grabWindow(windowId) {
     const chromeB64 = chromeImg.toPNG().toString('base64');
     const tabB64 = tabImg ? tabImg.toPNG().toString('base64') : null;
 
-    // Get the #webviews slot bounds from the chrome renderer so we know
-    // where to draw the guest PNG on the composite canvas.
-    const guestBoundsJson = await cc.executeJavaScript(
-      'JSON.stringify(document.getElementById("webviews")?.getBoundingClientRect() ?? null)'
-    );
-    const guestBounds = guestBoundsJson ? JSON.parse(guestBoundsJson) : null;
+    // Guest placement: main-side ground truth (see the FIX 2(b) header). Same
+    // window-content-DIP space as every other view bounds here — no renderer
+    // round-trip needed for it.
+    const guestBounds = atc && activeEntry ? activeEntry.view.getBounds() : null;
 
-    // Layer list, bottom-up: guest at the slot offset, then the overlay views in
+    // Layer list, bottom-up: guest at its true bounds, then the overlay views in
     // their z-order (find bar, then the menu-overlay sheet — the sheet is added
     // after the find re-assert on every show path, so it stacks above). Without
     // the overlay layers a Wayland-path captureWindow would silently omit an
     // OPEN MENU / find bar that IS on the real screen (the x11 desktopCapturer
     // path captured real window pixels, hiding this gap until the Leg-6 ozone
-    // switch). View bounds are window-content DIPs — the same space as the
-    // chrome DOM rect (the chrome view fills the window at 0,0).
+    // switch). View bounds are window-content DIPs — the same space the chrome
+    // canvas is drawn in (the chrome view fills the window at 0,0).
+    //
+    // Draw order vs real z-order: the canvas draws chrome first, then the guest
+    // (then overlays), so the guest sits ABOVE chrome in the composite — which
+    // matches the screen exactly when it matters: in normal mode the guest only
+    // covers the #webviews slot (chrome shows around it), and during HTML
+    // fullscreen the raised guest at full-window bounds covers the chrome
+    // completely (enter() hides the find overlay and closes the sheet, so no
+    // overlay layer can wrongly stack above a fullscreen guest here).
     /** @type {{ b64: string, x: number, y: number, w: number, h: number }[]} */
     const layers = [];
     if (tabB64 && guestBounds) {
@@ -860,6 +935,12 @@ async function startMcpServerInstance() {
       // house "Absent → no behavior change" idiom), which is why AC12 greps for 2.
       listWindows,
       enumerateWindows,
+      // M14 F2 L2 (DD1a): popup census rows + the popup addressability
+      // predicate. BOTH fallbacks are silent (no rows / non-tab refusal), so
+      // this injection site and app-lifecycle's dev-seam twin are grep-pinned
+      // (the listWindows precedent).
+      listPopups: popupTabRows,
+      isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
       // DD8 widening (F6 Leg 2): ALL-WINDOWS tab membership + the any-registered-
       // chrome predicate (classify/jar-guard widening — a second window's chrome
       // must classify 'chrome', not 'guest').
@@ -1044,6 +1125,10 @@ function applyZoom(wc, action) {
 const authChallenges = createAuthChallenges({
   registry,
   chromeForTab,
+  // M14 F2 L2 (DD1b): popup-registry-first routing seam — LAZY (arrow body
+  // reads the later-constructed popupRegistry at challenge time, so the
+  // store-before-registry construction order below stands unchanged).
+  popupRegistry: { getByWcId: (wcId) => popupRegistry.getByWcId(wcId) },
   logger: console
 });
 
@@ -1058,6 +1143,26 @@ const htmlFullscreen = createHtmlFullscreen({
   // challenge arriving mid-fullscreen holds (presentation eligibility) and
   // presents here.
   onExited: (record) => authChallenges.notifyFullscreenExited(record),
+  logger: console
+});
+
+// Popup registry (M14 F2 L1, DD1a/DD1f): the main-side record store for
+// script-opened popup BrowserWindows — registered at did-create-window
+// (guest-wiring), destroyed with their owner window (window-factory close),
+// re-keyed on cross-window tab moves (register-tab-ipc), and self-closable
+// via guest-window-close (register-browser-ipc).
+//
+// M14 F2 L2 (DD1f seam, REAL wiring — the leg-1 no-op stub replaced): a thin
+// delegation to the store's cancelForTab — it already owns the queue scan, the
+// exactly-once resolution, and the visible-sheet close via AUTH_MENU_TYPES
+// (the popup's sheet lives on the OWNING record). 'tab-close' is the
+// resolution-family reason (popup destroyed ≙ tab closed). ONE function, TWO
+// call paths: closeAllForRecord invokes it per entry BEFORE any destroy (the
+// DD1f order pin), and guest-wiring's popup teardown invokes it on self-close/
+// direct destroy — the double-invoke on the owner-close path is a ledger no-op.
+const cancelChallengesForPopup = (popupWcId) => authChallenges.cancelForTab(popupWcId, 'tab-close');
+const popupRegistry = createPopupRegistry({
+  cancelChallengesForPopup,
   logger: console
 });
 
@@ -1105,6 +1210,7 @@ const { createWindow } = createWindowFactory({
   buildSessionSnapshot,
   getHistoryRecorder: () => historyRecorder,
   faviconFetcher,
+  popupRegistry,
   defer: setImmediate,
   logger: console
 });
@@ -1128,6 +1234,14 @@ const { wireGuestContents, wireTabViewEvents } = createGuestWiring({
   getHistoryRecorder: () => historyRecorder,
   broadcastMoveTargetsChanged,
   faviconFetcher,
+  // M14 F2 L1: popup adoption — the registry plus the same web preload path
+  // the tab web branch injects (registerTabIpc's webPreloadPath below).
+  popupRegistry,
+  webPreloadPath: path.join(__dirname, '..', 'preload', 'webview-preload.bundle.js'),
+  // M14 F2 L2 (DD1f): the SAME cancel seam the popup registry holds — the
+  // popup teardown path (self-close / direct destroy) resolve-cancels through
+  // it before deregistering.
+  cancelChallengesForPopup,
   logger: console
 });
 
@@ -1271,6 +1385,7 @@ const { rerollSeed } = registerBrowserIpc({
   // M12 F5 HAT batch 1 (I8): pop the NATIVE fill-icon context menu (Menu.popup) over the owning
   // window — never a guest-DOM menu. Gated — offline register-browser-ipc tests omit it.
   popupVaultIconMenu,
+  popupRegistry,
   random: Math.random,
   logger: console
 });
@@ -1339,6 +1454,7 @@ registerTabIpc({
   buildAdoptPayload,
   broadcastMoveTargetsChanged,
   getTabContents,
+  popupRegistry,
   schedule: setTimeout,
   cancelScheduled: clearTimeout,
   logger: console
@@ -1784,6 +1900,10 @@ registerAppLifecycle({
   grabWindow,
   listWindows,
   enumerateWindows,
+  // M14 F2 L2 (DD1a): the dev-seam engine is the SECOND live injection site for
+  // the popup census/addressability deps (grep-pinned, listWindows precedent).
+  listPopups: popupTabRows,
+  isPopupWcId: (id) => popupRegistry.isPopupWcId(id),
   chromeForTab,
   raiseWindowForTab,
   isKnownJar: (id) => jars.list().some((jar) => jar.id === id),

@@ -24,7 +24,7 @@ const find = require('./find');
  *   F7 DD3: takes an OPTIONAL windowId — omitted → the last-focused record (the
  *   pre-F7 contract every existing caller relies on); supplied → that window's
  *   chrome, or null when the id names no registered window.
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -59,6 +59,19 @@ const find = require('./find');
  *   it). Rides base by the conditional-spread idiom. Absent → no behavior change
  *   (the pre-F7 single-window enumeration, emitting no windowId) — and because that
  *   fallback is SILENT, both live injection sites are grep-pinned by the leg.
+ *   listPopups — main.js's popup-registry census seam (M14 F2 L2, DD1a):
+ *   ready-made popup rows for tabs.enumerateTabs ({ wcId, url, title, jarId,
+ *   active: false, windowId, popup: true } — jarId mapped MAIN-SIDE from the
+ *   captured partition via jars.list(); tabs.js never compares partitions).
+ *   Rides base by the conditional-spread idiom. Absent → no popup rows —
+ *   SILENT, so both live injection sites are grep-pinned (the listWindows
+ *   precedent, restated by the leg).
+ *   isPopupWcId — main.js's popup-registry membership predicate (M14 F2 L2,
+ *   DD1a): widens resolveContents' non-tab-contents refusal to "not a tab AND
+ *   not a popup", making popup wcIds drivable. Jar confinement is untouched —
+ *   resolveContentsForJar's session-identity check already admits/refuses
+ *   popups correctly (the popup's session IS the interned opener-jar session).
+ *   Rides deps by the conditional-spread idiom; absent → no behavior change.
  *   enumerateWindows — main.js's window-topology accessor (M09 F7 DD2), backed by
  *   the pure window-census.js. Reads NOTHING but the live registry records at call
  *   time (zero state). Backs the enumerateWindows op AND getChromeTarget's windowId
@@ -84,7 +97,7 @@ const find = require('./find');
  *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, enumerateWindows = null, isTabViewWcId = null, isChromeContents = null, isSheetContents = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, listPopups = null, enumerateWindows = null, isTabViewWcId = null, isPopupWcId = null, isChromeContents = null, isSheetContents = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -126,7 +139,9 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // isSheetContents (PR#112 finding 1) rides base by the SAME conditional-spread idiom. Unlike
     // isTabViewWcId, its resolver guard is ABSOLUTE — admin's allowInternal does NOT lift it — so
     // the vault secret sheet is undrivable at every tier.
-    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
+    // listPopups / isPopupWcId (M14 F2 L2, DD1a) ride base by the SAME
+    // conditional-spread idiom: absent → no popup rows / no popup widening.
+    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof listPopups === 'function' ? { listPopups } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.

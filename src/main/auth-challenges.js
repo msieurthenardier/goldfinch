@@ -16,9 +16,13 @@
 //   RESOLUTION (challenge ends — callback answered):
 //     submit / agent answer → callback(user, pass); Esc / outside-click /
 //     explicit cancel / tab close / window close / cross-window move /
-//     navigation-away / teardown → callback() (cancel). ANY sheet-close reason
-//     not in the occlusion set maps here — the FAIL-SAFE default is
-//     resolve-cancel, never a hung callback (unit-pinned).
+//     navigation-away / teardown → cancel. The cancel INVOCATION SHAPE is
+//     kind-split (M14 F3 HAT fix): basic-auth cancels callback() (zero args,
+//     documented); client-cert cancels callback(null) — a zero-arg call on a
+//     select-client-certificate callback SIGSEGVs the main process on
+//     Electron 43 (see resolveOnce). ANY sheet-close reason not in the
+//     occlusion set maps here — the FAIL-SAFE default is resolve-cancel,
+//     never a hung callback (unit-pinned).
 //   OCCLUSION (challenge survives — sheet hidden, callback still pending):
 //     'blur' / 'superseded' / 'tab-hide' / 'tab-switch'. The challenge stays
 //     queued and re-presents at the next trigger: tab activation, window
@@ -30,7 +34,30 @@
 // already is (the manager/IPC freshness gate); notifySheetClosed and the
 // auth-submit handler both carry window identity natively.
 //
-// PRESENTATION ELIGIBILITY: the challenge's tab is the window's activeTabWcId,
+// POPUPS (M14 F2 L2, DD1a/DD1b as flight-log refined): a challenge arriving
+// from a POPUP's contents (Option B BrowserWindow popups) routes popup-registry-
+// FIRST — the popup's OWNING WindowRecord (`popupRegistry.getByWcId(wcId)
+// .openerRecord`), before getWindowForGuest (which misses popups by
+// construction). Popup challenges enqueue on that record's ordinary queue with
+// `isPopup: true` and are KIND-AGNOSTIC (basic-auth AND client-cert). Their
+// eligibility is INDEPENDENT of `activeTabWcId`, of the opener tab's liveness
+// (the registry's tolerated-dead-`openerWcId` seam), and of popup occlusion/
+// minimization — a popup is a floating always-visible surface, and the sheet
+// renders on the OWNER window, which is what the user interacts with. The
+// standard record-level gates (one presented challenge per window, fullscreen
+// hold, open-menu hold) still apply. Presentation resolves the owning record's
+// OWN chrome directly (`record.chromeView.webContents` — `chromeForTab(popup)`
+// misses by construction) and the payload carries `popup: true` for the sheet's
+// marker copy line (DD5 — a payload field + template copy, never a new sheet).
+// Cancel triggers for popup challenges: popup destroyed (the
+// cancelChallengesForPopup seam → cancelForTab 'tab-close'), popup
+// navigation-away (guest-wiring's slim popup variant → 'navigated'), opener tab
+// moved cross-window (cancel-on-rekey → 'moved', byte-consistent with the tab
+// contract — no queue migration), and window teardown (cancelForWindow, whose
+// whole-queue sweep needs no popup awareness).
+//
+// PRESENTATION ELIGIBILITY: the challenge's tab is the window's activeTabWcId
+// (or the challenge is a popup challenge — see POPUPS above),
 // no other challenge is presented on that window, `record.htmlFullscreen` is not
 // set (a challenge arriving mid-fullscreen holds like tab-hidden), AND no sheet
 // menu is open (`record.sheet.isMenuOpen()`) — a re-present must never
@@ -58,6 +85,7 @@
  *   list?: any[],
  *   callback: (...args: any[]) => void,
  *   resolved: boolean,
+ *   isPopup?: boolean,
  * }} Challenge
  * @typedef {{ queue: Challenge[], presented: Challenge | null }} WindowAuthState
  */
@@ -75,9 +103,83 @@ const RESOLUTION_REASONS = new Set(['escape', 'outside-click', 'activated', 'tab
 const AUTH_MENU_TYPES = new Set(['auth-basic', 'cert-picker']);
 
 /**
- * @param {{ registry: any, chromeForTab: (wcId: number) => any, logger?: any }} deps
+ * Display identity for the basic-auth presentation payload (M14 F3 HAT fix,
+ * Validator finding D1): `host:port` whenever the challenge carries a port
+ * that is NOT the default for the challenge URL's scheme, else the bare host
+ * — mainstream-browser rendering; the port disambiguates services sharing a
+ * host (two fixtures on 127.0.0.1 must not read identically). Electron's
+ * authInfo.host is the bare hostname; the port rides authInfo.port
+ * separately, which is why the pre-fix payload dropped it. An unparseable or
+ * absent URL keeps the port (fail-informative — when the default-port
+ * question can't be answered, showing the port is the safe direction). An
+ * IPv6 literal is bracketed before the port is appended (URL.host
+ * serialization). Display-only: the queue record keeps raw host + port
+ * (getPendingChallenge's agent-seam contract is unchanged). The client-cert
+ * sibling is certChallengeHost below — a DIFFERENT derivation (Electron hands
+ * that path a bare `host:port` string, not authInfo fields). This path has no
+ * same-class exposure: authInfo.host is Chromium's bare hostname (never
+ * URL-parsed here — a trailing-dot host rides through verbatim), and the URL
+ * parse below only answers the default-port question, failing informative.
+ * @param {Challenge} challenge
+ * @returns {string}
  */
-function createAuthChallenges({ registry, chromeForTab, logger = console }) {
+function displayHost(challenge) {
+  const host = challenge.host || '';
+  const port = challenge.port;
+  if (typeof port !== 'number') return host;
+  /** @type {string | null} */
+  let protocol = null;
+  try {
+    protocol = new URL(challenge.url).protocol;
+  } catch {
+    // unparseable URL — keep the port (fail-informative)
+  }
+  const isDefaultPort = ((protocol === 'http:' || protocol === 'ws:') && port === 80)
+    || ((protocol === 'https:' || protocol === 'wss:') && port === 443);
+  if (isDefaultPort) return host;
+  const bracketed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${bracketed}:${port}`;
+}
+
+/**
+ * Display host for a client-cert challenge (M14 F3 HAT fix #7). Electron's
+ * `select-client-certificate` passes `url` as the request's BARE `host:port`
+ * (Chromium's cert_request_info host_and_port serialization), NOT a full URL
+ * — live-verified: `localhost.:8493` presented with NO attribution while
+ * `127.0.0.1:8493` displayed. Feeding that form to `new URL()` directly is a
+ * trap with a coin-flip failure mode: a letter-leading host ("localhost.",
+ * "example.com") is a VALID SCHEME token, so the parse SUCCEEDS with host ""
+ * (the subtitle silently vanished); a digit-leading or bracketed host
+ * ("127.0.0.1:8493", "[::1]:8493") THROWS, and the old catch-fallback showed
+ * the raw string — right by luck. Derivation: a string without "://" is
+ * parsed as host:port under a synthetic `https://` base (which also strips a
+ * default :443 — displayHost's mainstream-browser parity); a full URL parses
+ * directly. ANY empty-host outcome — parse failure OR parseable-but-hostless
+ * — falls back to the raw string: never a silent blank. IPv6 bracket forms
+ * ride URL.host natively in both branches. Display only, never a secret.
+ * @param {any} url
+ * @returns {string}
+ */
+function certChallengeHost(url) {
+  const raw = String(url || '');
+  if (!raw) return '';
+  let host = '';
+  try {
+    host = new URL(raw.includes('://') ? raw : 'https://' + raw).host;
+  } catch {
+    // unparseable under both readings — fall back to the raw string below
+  }
+  return host || raw;
+}
+
+/**
+ * @param {{ registry: any, chromeForTab: (wcId: number) => any, popupRegistry?: { getByWcId: (wcId: number) => any } | null, logger?: any }} deps
+ *   popupRegistry — (M14 F2 L2, DD1b) the popup registry's lookup seam, read
+ *   LAZILY per challenge so construction order in main.js is irrelevant.
+ *   Absent → no behavior change (offline tests / legacy callers): popup
+ *   contents then resolve no record and cancel silently, the pre-leg-2 shape.
+ */
+function createAuthChallenges({ registry, chromeForTab, popupRegistry = null, logger = console }) {
   /** @type {Map<any, WindowAuthState>} keyed by WindowRecord */
   const states = new Map();
   let seq = 0;
@@ -113,8 +215,22 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
       // callback sites outside this ledger, so BOTH kinds' answer shapes live
       // here. basic-auth answers (user, pass) with String coercion; client-cert
       // answers (cert) — the raw Electron Certificate object, main-side only.
-      // null resolves the no-args cancel for both kinds.
-      if (!resolution) cb();
+      //
+      // ⚠️ CANCEL SHAPES DIFFER BY KIND (M14 F3 HAT fix, live-measured on
+      // Electron 43): a basic-auth ('login') callback cancels with ZERO args —
+      // documented, exercised live. A select-client-certificate callback
+      // invoked with ZERO args SIGSEGVs the main process (silent death, no JS
+      // error to catch — native argument-count bug); an explicit `cb(null)`
+      // takes the intended continue-WITHOUT-certificate path (Chrome-parity
+      // cancel: the TLS handshake completes cert-less and the page renders its
+      // unauthenticated state). `cb(undefined)` is also wrong (throws "Must
+      // pass valid certificate object" and fails the request with
+      // ERR_SSL_CLIENT_AUTH_CERT_NEEDED). Cert cancels MUST pass exactly one
+      // argument, strictly null — pinned in auth-challenges.test.js.
+      if (!resolution) {
+        if (challenge.kind === 'client-cert') cb(null); // explicit null — NEVER zero-arg (SIGSEGV, see above)
+        else cb();
+      }
       else if (challenge.kind === 'client-cert') cb(/** @type {{ cert: any }} */ (resolution).cert);
       else {
         const credential = /** @type {{ username?: any, password?: any }} */ (resolution);
@@ -147,7 +263,12 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
     if (record.htmlFullscreen) return; // holds like tab-hidden; presents on exit
     if (record.sheet?.isMenuOpen?.()) return; // never model-replace an open menu
     if (record.win?.isDestroyed?.()) return;
-    const next = state.queue.find((c) => c.wcId === record.activeTabWcId);
+    // Eligibility (DD1b as flight-log refined): a TAB challenge is eligible only
+    // while its tab is the window's active tab; a POPUP challenge is eligible
+    // unconditionally at this gate — independent of activeTabWcId, of the opener
+    // tab's liveness, and of popup occlusion/minimization (the record-level
+    // gates above still hold; the sheet renders on the owner window).
+    const next = state.queue.find((c) => c.isPopup === true || c.wcId === record.activeTabWcId);
     if (!next) return; // background-tab challenges hold until their tab activates
     state.presented = next;
     // Chrome-mediated presentation (vault-recovery-show precedent): the chrome
@@ -160,17 +281,33 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
     // field on the existing channel — the per-surface-channel idiom every
     // other sheet trigger uses, and it keeps 'auth-challenge-present's payload
     // contract frozen.
+    // Popup presentation (M14 F2 L2, DD1b wall 3): `chromeForTab(popup)` misses
+    // by construction (popups are never in tabViews), so a popup challenge
+    // resolves the owning record's OWN chrome directly — the record is in hand;
+    // guard the destroyed-chrome teardown window. The payload's `popup: true`
+    // feeds the sheet templates' marker copy line (DD5) and is ABSENT for tab
+    // challenges — both existing payload contracts stay frozen.
+    const target = next.isPopup === true
+      ? (record.chromeView?.webContents && !record.chromeView.webContents.isDestroyed?.()
+        ? record.chromeView.webContents
+        : null)
+      : chromeForTab(next.wcId);
+    const popupField = next.isPopup === true ? { popup: true } : {};
     if (next.kind === 'client-cert') {
-      chromeForTab(next.wcId)?.send('cert-challenge-present', {
+      target?.send('cert-challenge-present', {
         wcId: next.wcId,
         host: next.host,
         certs: next.certSummaries,
+        ...popupField,
       });
     } else {
-      chromeForTab(next.wcId)?.send('auth-challenge-present', {
+      target?.send('auth-challenge-present', {
         wcId: next.wcId,
-        host: next.host,
+        // host:port display identity (D1 fix — see displayHost): the record's
+        // raw host/port stay untouched for the agent read seam.
+        host: displayHost(next),
         realm: next.realm,
+        ...popupField,
       });
     }
   }
@@ -194,7 +331,12 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
     if (authInfo && authInfo.isProxy) return cancelSilently(); // no proxy feature (DD2 ruling)
     // Internal-session symmetry with DD4 (practically unreachable, pinned anyway).
     if (webContents.session && webContents.session.__goldfinchInternal === true) return cancelSilently();
-    const record = registry.getWindowForGuest(webContents.id);
+    // Popup-registry-FIRST routing (M14 F2 L2, DD1b wall 1): a popup's contents
+    // resolve their OWNING record via the registry entry's openerRecord —
+    // getWindowForGuest misses popups by construction. Kind-agnostic (the cert
+    // ladder below mirrors this).
+    const popupEntry = popupRegistry ? popupRegistry.getByWcId(webContents.id) : null;
+    const record = popupEntry ? popupEntry.openerRecord : registry.getWindowForGuest(webContents.id);
     // Non-guest contents (chrome, sheet, DevTools, favicon session.fetch) —
     // cancel silently: no prompt spam from background subresources (DD2).
     if (!record) return cancelSilently();
@@ -203,6 +345,7 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
       challengeId: 'auth-' + (++seq),
       kind: 'basic-auth',
       record,
+      ...(popupEntry ? { isPopup: true } : {}),
       wcId: webContents.id,
       host: (authInfo && authInfo.host) || '',
       port: authInfo && typeof authInfo.port === 'number' ? authInfo.port : null,
@@ -229,7 +372,7 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
    * the sheet (certSummaries) and the raw Electron Certificate list MAIN-SIDE
    * ONLY (selection resolves `list[i]` in selectCertFromSheet).
    * @param {any} webContents  may be undefined (utility/contents-less requests)
-   * @param {string} url
+   * @param {string} url  live form is the request's BARE `host:port` (see certChallengeHost)
    * @param {any[]} list
    * @param {(...args: any[]) => void} callback
    */
@@ -242,24 +385,25 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
     // Internal-session symmetry with handleLogin (DD4: exclusion via the
     // session marker, not the onSessionCreated seam).
     if (webContents.session && webContents.session.__goldfinchInternal === true) return cancelSilently();
-    const record = registry.getWindowForGuest(webContents.id);
+    // Popup-registry-FIRST routing — the kind-agnostic mirror of handleLogin's
+    // ladder (M14 F2 L2: the popup contract applies to BOTH challenge kinds).
+    const popupEntry = popupRegistry ? popupRegistry.getByWcId(webContents.id) : null;
+    const record = popupEntry ? popupEntry.openerRecord : registry.getWindowForGuest(webContents.id);
     // Non-guest contents — cancel silently (no prompt spam), like handleLogin.
     if (!record) return cancelSilently();
     // Defensive-unreachable (doc above): the live no-cert expectation is
     // "no event, no sheet, page loads unauthenticated".
     if (!Array.isArray(list) || list.length === 0) return cancelSilently();
-    /** @type {string} */
-    let host;
-    try {
-      host = new URL(url).host; // display only — derived from the request URL
-    } catch {
-      host = String(url || '');
-    }
+    // Display attribution host. `url` arrives as BARE host:port live (fix #7
+    // — certChallengeHost's derivation-trap doc); naive new URL() here blanked
+    // the sheet's site attribution for every letter-leading hostname.
+    const host = certChallengeHost(url);
     const state = stateFor(record);
     state.queue.push({
       challengeId: 'cert-' + (++seq),
       kind: 'client-cert',
       record,
+      ...(popupEntry ? { isPopup: true } : {}),
       wcId: webContents.id,
       host,
       url: String(url || ''),
@@ -275,11 +419,15 @@ function createAuthChallenges({ registry, chromeForTab, logger = console }) {
   }
 
   /**
-   * Resolution-family invalidation for one tab: navigation-away, tab close,
-   * cross-window move. Cancels every pending challenge for that wcId (all
+   * Resolution-family invalidation for one tab OR POPUP: navigation-away, tab/
+   * popup close, cross-window move (for popups: the opener tab's cancel-on-rekey
+   * — 'moved', tab parity). Cancels every pending challenge for that wcId (all
    * windows scanned — the store's own bookkeeping is the authority, immune to
    * registry timing around teardown) and closes a visible auth sheet that was
-   * showing one of them.
+   * showing one of them. This is also `cancelChallengesForPopup`'s whole body:
+   * main.js's DD1f seam is a thin delegation here with reason 'tab-close' — a
+   * popup challenge lives on its owning record's ordinary queue keyed by the
+   * popup's wcId, so the scan needs no popup awareness.
    * @param {number} wcId
    * @param {string} reason  'navigated' | 'tab-close' | 'moved'
    */

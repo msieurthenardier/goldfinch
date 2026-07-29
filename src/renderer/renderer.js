@@ -1430,19 +1430,19 @@ async function openVaultPicker(wcId) {
 
 // HTTP auth challenge presentation (M14 F1 L2, flight DD2). Main's pending-
 // challenge store decides WHEN a challenge presents (eligibility + queue); the
-// chrome only opens the auth-basic sheet through the standard open path with
-// the NON-SECRET {host, realm} model (centered card — anchor ignored). The
-// credential leaves the sheet over the dedicated authSubmit Buffer channel.
-window.goldfinch.onAuthChallengePresent(({ host, realm }) => {
-  openOverlayMenu('auth-basic', { host, realm }, null, 0);
+// chrome opens the auth-basic sheet through the standard open path with the
+// NON-SECRET {host, realm} model + the store-stamped `popup` marker flag (M14
+// F2 L2 DD5). The credential leaves only via the authSubmit Buffer channel.
+window.goldfinch.onAuthChallengePresent(({ host, realm, popup }) => {
+  openOverlayMenu('auth-basic', { host, realm, ...(popup === true ? { popup: true } : {}) }, null, 0);
 });
 
 // Client-cert challenge presentation (M14 F1 L3, flight DD4): same store-
-// decides / chrome-opens contract as above. The model is display strings only
-// ({subject, issuer} rows); the selection resolves MAIN-SIDE from the
-// channel-4 index — nothing secret ever transits the chrome.
-window.goldfinch.onCertChallengePresent(({ certs }) => {
-  openOverlayMenu('cert-picker', Array.isArray(certs) ? certs : [], null, 0);
+// decides / chrome-opens contract as above. Display strings only — {subject,
+// issuer} rows + the requesting host (the sheet's site-attribution subtitle,
+// M14 F3 HAT fix); selection resolves MAIN-SIDE from the channel-4 index.
+window.goldfinch.onCertChallengePresent(({ certs, host, popup }) => {
+  openOverlayMenu('cert-picker', { certs: Array.isArray(certs) ? certs : [], ...(typeof host === 'string' && host ? { host } : {}), ...(popup === true ? { popup: true } : {}) }, null, 0);
 });
 
 window.goldfinch.onVaultGesture(({ wcId }) => {

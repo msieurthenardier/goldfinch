@@ -26,6 +26,25 @@
 //                     to the PINNED cross-scheme target
 //                     `data:text/html,redirected` (refused by isSafeTabUrl —
 //                     exactly what the deferred spec re-run needs).
+//   GET /oauth/opener.html — (F2 L2) OAuth-popup opener page: a button calling
+//                     `window.open('/oauth/popup.html','oauth','width=420,
+//                     height=520')` (features + named target + new-window
+//                     disposition — the DD3-qualifying popup shape), a
+//                     `#popup-state` line tracking the live handle
+//                     (none/open/closed via `.closed` polling), and `#result`,
+//                     which receives the popup's postMessage token (the spec's
+//                     observability seam). Acks the token back so the popup
+//                     self-closes. The handle is exposed as
+//                     `window.__oauthPopup` for jar-runnable assertions.
+//   GET /oauth/popup.html — (F2 L2) the popup, provider-shaped: HOLDS at
+//                     `#status` awaiting-approval until its `#approve` button
+//                     is clicked (giving the spec a live window to census/
+//                     drive the popup by wcId), then posts
+//                     `{type:'oauth-token', token}` to its opener (same-origin
+//                     targeted, short retry), waits for `{type:'oauth-ack'}`,
+//                     and `window.close()`s itself (the guest-shim self-close
+//                     path). `#status`: awaiting-approval / delivering /
+//                     acked / no-opener.
 //
 // Usage: node serve.mjs --port <port> [--log <path>]
 // (--log is optional here, unlike the cross-jar-fetch precedent: the
@@ -190,6 +209,112 @@ const VIDEO_PAGE = `<!doctype html>
 </html>
 `;
 
+// --- OAuth popup fixture pages (F2 L2) ---
+// Same-origin pair. The opener's listener is installed before the popup ever
+// exists; the popup retries delivery briefly (belt-and-suspenders against a
+// slow opener turn) and self-closes only after the ack round-trip completes —
+// so a token in `#result` plus a closed popup proves the FULL opener-handle
+// postMessage loop, not a lucky one-way send.
+
+const OAUTH_OPENER_PAGE = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>web-compat oauth opener fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; background: #f5f5f5; }
+    #open-popup { font-size: 18px; padding: 8px 16px; margin: 12px 0; }
+    #result, #popup-state { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>OAuth opener fixture</h1>
+  <button id="open-popup">Sign in with popup</button>
+  <p>Popup state: <span id="popup-state">none</span></p>
+  <p>Result: <span id="result"></span></p>
+  <script>
+    let popup = null;
+    let pollTimer = null;
+    // The opener-side message listener is installed BEFORE any popup exists.
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin) return;
+      if (!e.data || e.data.type !== 'oauth-token') return;
+      document.getElementById('result').textContent = String(e.data.token || '');
+      // Ack back to the popup — it self-closes on receipt.
+      if (e.source) e.source.postMessage({ type: 'oauth-ack' }, e.origin);
+    });
+    document.getElementById('open-popup').addEventListener('click', () => {
+      // Features + named non-_blank target => Chromium classifies this
+      // disposition 'new-window' — the qualifying popup shape.
+      popup = window.open('/oauth/popup.html', 'oauth', 'width=420,height=520');
+      window.__oauthPopup = popup; // exposed for jar-runnable spec assertions
+      document.getElementById('popup-state').textContent = popup ? 'open' : 'blocked';
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => {
+        if (popup && popup.closed) {
+          document.getElementById('popup-state').textContent = 'closed';
+          clearInterval(pollTimer);
+        }
+      }, 100);
+    });
+  </script>
+</body>
+</html>
+`;
+
+const OAUTH_POPUP_PAGE = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>web-compat oauth popup fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; background: #eef2ff; }
+    #approve { font-size: 18px; padding: 8px 16px; margin: 12px 0; }
+    #status { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>OAuth popup fixture</h1>
+  <p>Status: <span id="status">awaiting-approval</span></p>
+  <button id="approve">Approve sign-in</button>
+  <script>
+    // Provider-shaped flow: the popup HOLDS until Approve is clicked (a real
+    // OAuth popup waits on the provider page), which also gives the behavior
+    // spec a live window to census/drive the popup by wcId. Approve delivers
+    // {type:'oauth-token', token} to the opener (same-origin targeted, brief
+    // retry); the opener's {type:'oauth-ack'} triggers the self-close.
+    const token = 'fixture-oauth-token-' + Math.random().toString(36).slice(2, 8);
+    let acked = false;
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin) return;
+      if (e.data && e.data.type === 'oauth-ack') {
+        acked = true;
+        document.getElementById('status').textContent = 'acked';
+        window.close(); // the guest-shim self-close path (M14 F2 L1 AC5)
+      }
+    });
+    const deliver = () => {
+      if (!window.opener || window.opener.closed) {
+        document.getElementById('status').textContent = 'no-opener';
+        return false;
+      }
+      window.opener.postMessage({ type: 'oauth-token', token }, location.origin);
+      return true;
+    };
+    document.getElementById('approve').addEventListener('click', () => {
+      document.getElementById('status').textContent = 'delivering';
+      if (!deliver()) return;
+      let tries = 0;
+      const retry = setInterval(() => {
+        tries += 1;
+        if (acked || tries > 50 || !deliver()) clearInterval(retry);
+      }, 100);
+    });
+  </script>
+</body>
+</html>
+`;
+
 // --- Range parsing (single-range only, per fixture contract) ---
 
 function parseRange(rangeHeader, totalLength) {
@@ -292,6 +417,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/video.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(VIDEO_PAGE);
+    return;
+  }
+
+  if (pathname === '/oauth/opener.html' || pathname === '/oauth/popup.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(pathname === '/oauth/opener.html' ? OAUTH_OPENER_PAGE : OAUTH_POPUP_PAGE);
     return;
   }
 

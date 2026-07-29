@@ -179,3 +179,43 @@ test('window-census: a manager whose isVisible() throws → visible false, no th
   const [row] = buildWindowCensus([r], r);
   assert.equal(row.sheetVisible, false);
 });
+
+// ---------------------------------------------------------------------------
+// M14 F2 L2 (DD1a) — popup census entries. Appended AFTER the window rows, in
+// the DISTINCT { popupWcId, openerWindowId, url, title } shape (no windowId —
+// window-row consumers skip popups structurally). Entries arrive pre-built
+// from main.js; this module appends with a minimal shape check. Omitted →
+// byte-identical pre-popup behavior.
+// ---------------------------------------------------------------------------
+
+test('window-census (popups): entries append after window rows in the exact leg shape — and carry NO windowId', () => {
+  const a = rec({ id: 1 });
+  const b = rec({ id: 2 });
+  const rows = buildWindowCensus([a, b], a, [
+    { popupWcId: 701, openerWindowId: 1, url: 'https://popup.example/', title: 'P1' },
+    { popupWcId: 702, openerWindowId: 2, url: 'https://popup2.example/', title: 'P2' },
+  ]);
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map((r) => r.windowId), [1, 2, undefined, undefined], 'popup entries have no windowId key');
+  assert.deepEqual(rows[2], { popupWcId: 701, openerWindowId: 1, url: 'https://popup.example/', title: 'P1' });
+  assert.equal('windowId' in rows[2], false, 'discriminate on popupWcId presence — a find(r => r.windowId === …) skips popups');
+  assert.deepEqual(rows[3], { popupWcId: 702, openerWindowId: 2, url: 'https://popup2.example/', title: 'P2' });
+});
+
+test('window-census (popups): omitted third argument → byte-identical pre-popup rows (house absent idiom)', () => {
+  const a = rec({ id: 1 });
+  assert.deepEqual(buildWindowCensus([a], a), buildWindowCensus([a], a, []));
+  assert.equal(buildWindowCensus([a], a).length, 1);
+});
+
+test('window-census (popups): malformed entries (no numeric popupWcId) are skipped — never a fake window row', () => {
+  const a = rec({ id: 1 });
+  const rows = buildWindowCensus([a], a, [
+    null,
+    {},
+    { popupWcId: 'not-a-number', openerWindowId: 1, url: 'x', title: 'x' },
+    { popupWcId: 701, openerWindowId: 1, url: 'https://ok.example/', title: 'OK' },
+  ]);
+  assert.equal(rows.length, 2, 'only the well-formed entry appended');
+  assert.equal(rows[1].popupWcId, 701);
+});

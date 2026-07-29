@@ -624,7 +624,7 @@ body {
 /* The cert-picker (M14 F1 L3) shares the picker's backdrop + card + row chrome
    wholesale — its rows reuse the .vault-picker-* classes (subject over dimmed
    issuer; no icon/badges) and the separated cancel row reuses the manage-footer
-   classes, so no cert-specific rules are needed beyond this selector. */
+   classes; the only cert-specific rule is the origin-line margin below. */
 #sheet-vault-picker,
 #sheet-cert-picker {
   position: absolute;
@@ -633,6 +633,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+/* The cert card's origin lines (site-attribution subtitle + popup note, M14 F3
+   HAT) sit directly in the zero-padding .vault-picker-inner card between the
+   full-bleed header and the list — unlike auth-basic, whose origin line gets
+   its spacing from the padded .vault-sheet-body. Carry that idiom here: 14px
+   sides (header parity), 10px below the header rule, and a 2px bottom that
+   lands 10px above the first row via the list's own 8px padding. */
+.cert-picker-inner > .auth-basic-origin {
+  margin: 10px 14px 2px;
 }
 /* ---------- shared vault-sheet chrome (header + body): picker + unlock ---------- */
 /* A fixed header (title + close/X) over the sheet body, so the sheet reads as a real

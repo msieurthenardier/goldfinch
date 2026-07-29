@@ -458,3 +458,24 @@ test('quit path snapshots and flushes before MCP stop, then closes stores at wil
   h.appListeners.get('will-quit')();
   assert.deepEqual(h.events, ['history-close', 'appdb-close']);
 });
+
+// ---------------------------------------------------------------------------
+// M14 F2 L1 (flight DD3 "catch-all stays" clause) — source-scan pin: the
+// popup allow path lives EXCLUSIVELY in guest-wiring's per-guest handler; the
+// app-lifecycle non-guest catch-all deny and its nav guard stay byte-unchanged.
+// ---------------------------------------------------------------------------
+
+test('the non-guest web-contents-created catch-all deny + guard is byte-unchanged (M14 F2 L1 / DD3 pin)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'app-lifecycle.js'), 'utf8');
+  const pinned = `  const ALLOWED_NONGUEST_SCHEMES = ['devtools:', 'file:', 'chrome-extension:', 'about:'];
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    const guard = (event) => {
+      if (contents.__goldfinchNavGuarded) return; // guests: own predicate already covers them
+      const url = event.url || '';
+      if (isSafeTabUrl(url) || isInternalPageUrl(url)) return;`;
+  assert.ok(src.includes(pinned),
+    'the catch-all region changed — DD3 requires the non-guest deny to stay; the popup allow path belongs in guest-wiring only');
+});

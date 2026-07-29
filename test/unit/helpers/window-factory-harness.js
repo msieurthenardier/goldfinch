@@ -149,6 +149,9 @@ function createHarness(options = {}) {
     // M14 F1 L2: the auth pending-challenge store (optional in production too —
     // window-factory optional-chains every call). Tests pass a recording fake.
     authChallenges: options.authChallenges,
+    // M14 F2 L1 (DD1f): the popup registry (optional-chained). Tests pass a
+    // recording fake to pin the close-order slot.
+    popupRegistry: options.popupRegistry,
     computeFindOverlayBounds: () => null,
     getTabContents: (wcId) => options.tabContents?.get(wcId) || null,
     chromeForAttachment: () => null,

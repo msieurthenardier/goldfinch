@@ -1,12 +1,12 @@
 # Flight 2: Popup & Opener Ruling + Implementation
 
-**Status**: ready
+**Status**: completed
 **Mission**: [Web Compatibility — Silent Failures Become Working Features](../../mission.md)
 
 ## Contributing to Criteria
 
 - [ ] A popup-based OAuth sign-in completes end to end against the local fixture (opener relationship, result delivery, self-close) *(behavior-test-backed)*
-- [ ] The popup handling approach is recorded as a human-approved design ruling with a per-contents parity checklist
+- [x] The popup handling approach is recorded as a human-approved design ruling with a per-contents parity checklist (Option B, 2026-07-28; proposal + DD1a–f; closed at debrief — artifact-verifiable, no live run needed)
 - [ ] Script-opened popups are visible to the automation surface (`enumerateTabs`/`enumerateWindows`)
 - [ ] Live GitHub OAuth witnessed run — **delivered in Flight 3 (HAT)**, not here
 - [ ] No regression of mission-13 posture
@@ -54,7 +54,7 @@ Decide — with the human — how goldfinch handles script-opened popups, then i
 ### Pre-Flight Checklist
 
 - [x] Ruling approved and recorded as DD1
-- [ ] Legs defined
+- [x] Legs defined
 - [x] Premise verified
 - [x] Proposal authored
 
@@ -68,7 +68,8 @@ Option B: `setWindowOpenHandler` returns allow+override for DD3-qualifying reque
 
 ### Legs
 
-> Tentative: `popup-windows` (handler predicate, registry, wiring, preload+close discipline, teardown, persistence exclusion), `popup-parity-and-fixture` (census rows, challenge routing to opener sheet, OAuth fixture endpoints + behavior spec).
+- [x] `popup-windows` — handler predicate, registry, wiring, preload+close discipline, teardown, persistence exclusion (landed 2026-07-28)
+- [x] `popup-parity-and-fixture` — census rows, challenge routing to opener sheet, addressability widening, OAuth fixture endpoints + behavior spec (landed 2026-07-28)
 
 ---
 

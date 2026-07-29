@@ -55,6 +55,8 @@ function registerAppLifecycle({
   grabWindow,
   listWindows,
   enumerateWindows,
+  listPopups,
+  isPopupWcId,
   chromeForTab,
   raiseWindowForTab,
   isKnownJar,
@@ -208,6 +210,11 @@ function registerAppLifecycle({
         grabWindow,
         listWindows,
         enumerateWindows,
+        // M14 F2 L2 (DD1a): popup census rows + addressability predicate —
+        // the dev-seam twin of main.js's MCP injection site (both grep-pinned;
+        // the fallbacks are silent, the listWindows precedent).
+        listPopups,
+        isPopupWcId,
         isTabViewWcId: (id) => registry.isTabViewWcId(id),
         isChromeContents: (contents) => registry.isChromeContents(contents),
         chromeForTab,

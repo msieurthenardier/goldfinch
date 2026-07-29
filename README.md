@@ -34,7 +34,7 @@ or download **v0.11.6** directly:
 
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
   bar with search-or-URL detection, persistent session (stays logged in),
-  favicons, popups opened as new tabs.
+  favicons, plain `target=_blank` popups opened as new tabs.
 - **Everyday web compatibility**: HTML5 fullscreen works — a video (or any
   page element) expands over the whole window, and `Esc` or the page's own
   control exits. Pages behind **HTTP basic auth** prompt for credentials with
@@ -42,7 +42,10 @@ or download **v0.11.6** directly:
   shows the site's error page instead). Sites that request a **client
   certificate** show a chooser listing your certificates, with a "Continue
   without a certificate" option. **PDFs render inline** in the tab with the
-  built-in viewer — links that force a download still download.
+  built-in viewer — links that force a download still download. **OAuth-style
+  popups work**: a sized/named `window.open` opens a real floating popup
+  window in the opener's cookie jar with a live `window.opener` handle —
+  sign-in result delivery and popup self-close included.
 - **Frameless window**: Goldfinch runs in a custom frameless window —
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.

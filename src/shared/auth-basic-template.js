@@ -24,6 +24,7 @@ import { buildVaultSheetHeader } from './vault-sheet-header.js';
  *   node: HTMLElement,
  *   card: HTMLElement,
  *   origin: HTMLElement,
+ *   popupNote: HTMLElement,
  *   username: HTMLInputElement,
  *   password: HTMLInputElement,
  *   error: HTMLElement,
@@ -54,6 +55,16 @@ export function buildAuthBasicCard(document) {
   const origin = document.createElement('div');
   origin.className = 'auth-basic-origin';
   origin.textContent = '';
+
+  // Popup marker copy line (M14 F2 L2, flight DD5): shown only when the init
+  // model carries `popup: true` — the challenge arrived from a script-opened
+  // pop-up window, not the visible tab. FIXED template copy (no server string
+  // rides it); menu-overlay.js toggles `.hidden` per model. NOT a new sheet —
+  // the DD5 budget line.
+  const popupNote = document.createElement('div');
+  popupNote.className = 'auth-basic-origin auth-popup-note';
+  popupNote.classList.add('hidden');
+  popupNote.textContent = 'This request comes from a pop-up window opened by this page.';
 
   const userLabel = document.createElement('label');
   userLabel.className = 'new-container-label';
@@ -102,6 +113,7 @@ export function buildAuthBasicCard(document) {
   const body = document.createElement('div');
   body.className = 'vault-sheet-body';
   body.appendChild(origin);
+  body.appendChild(popupNote);
   body.appendChild(userLabel);
   body.appendChild(username);
   body.appendChild(passLabel);
@@ -110,5 +122,5 @@ export function buildAuthBasicCard(document) {
   body.appendChild(actions);
   card.appendChild(body);
 
-  return { node, card, origin, username, password, error, submit, cancel, close };
+  return { node, card, origin, popupNote, username, password, error, submit, cancel, close };
 }

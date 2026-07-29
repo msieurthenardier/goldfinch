@@ -16,6 +16,19 @@ partition); the popup opens as a tab (native windows stay denied). Real-environm
 behavior spanning main's window-open handler, the `open-tab` IPC payload, and the
 renderer's inheritance decision — no unit seam covers the cross-process path.
 
+> **M14 F2 annotation (spec premise re-audited, still valid).** Since Mission 14
+> Flight 2, a *DD3-qualifying* request — window `features` present or a named
+> non-`_blank` target, AND Chromium disposition `new-window` — opens a **real
+> popup BrowserWindow** in the opener's jar instead of deny-converting to a tab.
+> This spec's fixture calls are deliberately the FEATURELESS, unnamed form
+> (`window.open('<url>')` → disposition `foreground-tab`), which **stays on the
+> deny-convert path** — every step and expected result here remains correct as
+> written, and "the popup opens as a tab (native windows stay denied)" should be
+> read as pinning exactly that deny-convert branch. Real-popup behavior (window
+> creation, opener handle, census, self-close) is covered by
+> `web-compat-oauth-popup`. If a future edit adds features or a named target to
+> any `window.open` in this spec, the tab-shape expectations break by design.
+
 ## Preconditions
 
 - Goldfinch dev build launched against a **fresh scratch profile** (`XDG_CONFIG_HOME`
