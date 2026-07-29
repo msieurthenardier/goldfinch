@@ -1,6 +1,6 @@
 # Flight 3: Alignment / HAT — Deferred Verification Bundle + Human Acceptance
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Web Compatibility — Silent Failures Become Working Features](../../mission.md)
 
 ## Contributing to Criteria
