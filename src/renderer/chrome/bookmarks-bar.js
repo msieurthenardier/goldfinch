@@ -97,13 +97,13 @@ export function resolveOverflowRowId(id, snapshot) {
  *   openBookmarkEditOverlay: (bookmark: any, anchorEl?: any) => void,
  *   overlayMenuClient: { open: Function, close: Function, trigger: Function },
  *   overlayMenuState: { open: boolean },
- *   leftAnchorOf: (el: any) => any
+ *   rightAnchorOf: (el: any) => any
  * }} deps
  */
 export function createBookmarksBar({
   document, ResizeObserver, els,
   bookmarksClient, navigate, createTab, openBookmarkEditOverlay,
-  overlayMenuClient, overlayMenuState, leftAnchorOf
+  overlayMenuClient, overlayMenuState, rightAnchorOf
 }) {
   /** @type {any[]} the chrome-side snapshot the overflow sheet was last opened with. */
   let overflowSnapshot = [];
@@ -225,7 +225,10 @@ export function createBookmarksBar({
     applyOverflowPartition(rect.width);
   }
 
-  const overflowAnchor = () => leftAnchorOf(els.bookmarksOverflow);
+  // Right-aligned (HAT fix, Leg 5): the chevron sits at the bar's far right,
+  // so the menu's RIGHT edge anchors to it and the box grows leftward —
+  // the kebab idiom — instead of bleeding past the viewport's right edge.
+  const overflowAnchor = () => rightAnchorOf(els.bookmarksOverflow);
 
   /** @param {number} [startIndex] */
   function openOverflowMenu(startIndex = 0) {

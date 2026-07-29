@@ -530,15 +530,15 @@ shortcutController = createShortcutController({
 
 // Static kebab model — labels rendered via textContent in the sheet (DD8).
 // New window first (Chrome adjacency: window/tab creation ahead of app pages).
-// DD2 anchor nuance: the kebab's anchor is a CHROME client rect — translate
-// chrome→sheet by subtracting the guest-region origin (#webviews). y clamps to 0
-// (DD12): the menu renders right-aligned, flush at the sheet's top edge (the
-// accepted ~4px shift).
-const kebabAnchor = () => {
+// DD2 anchor nuance: the CHROME client rect translates chrome→sheet by
+// subtracting the guest-region origin (#webviews); y clamps to 0 (DD12, flush
+// at the top). Generic — Leg 5 HAT fix reuses it for the far-right bookmarks-overflow chevron.
+const rightAnchorOf = (el) => {
   const wv = els.webviews.getBoundingClientRect();
-  const r = els.kebab.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
   return rightSheetAnchor(wv, r);
 };
+const kebabAnchor = () => rightAnchorOf(els.kebab);
 // Left-aligned toolbar anchors (Leg 3 — ▾ and 🔒): same chrome→sheet translation,
 // LEFT edge, clamped ≥ 0; y clamps to 0 (DD12 flush-at-top, the accepted shift).
 /** @param {HTMLElement} el */
@@ -567,7 +567,7 @@ bookmarksBarController = createBookmarksBar({
   openBookmarkEditOverlay,
   overlayMenuClient,
   overlayMenuState: overlayMenus['bookmarks-overflow'],
-  leftAnchorOf
+  rightAnchorOf // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
 });
 // Initial paint: the bar renders empty until the cache's boot fetch resolves
 // (idempotent — a subsequent bookmarks-changed re-render is a full rebuild

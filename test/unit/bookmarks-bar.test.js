@@ -146,7 +146,7 @@ function harness({ list = [] } = {}) {
     openBookmarkEditOverlay: (bookmark, anchorEl) => calls.push(['edit', bookmark, anchorEl === bookmarksOverflow ? 'chevron' : 'item']),
     overlayMenuClient,
     overlayMenuState,
-    leftAnchorOf: (el) => ({ alignLeft: 0, from: el === bookmarksOverflow ? 'chevron' : 'other' }),
+    rightAnchorOf: (el) => ({ alignRight: 0, from: el === bookmarksOverflow ? 'chevron' : 'other' }),
   };
 
   return { els, calls, bookmarksClient, overlayMenuState, deps };
@@ -226,6 +226,10 @@ test('chevron click opens the overflow sheet with the overflowed-items snapshot;
   assert.ok(openCall, 'chevron click opens the sheet');
   assert.equal(openCall[1], 'bookmarks-overflow');
   assert.deepEqual(openCall[2], [{ id: 'bookmark:0', label: 'Two' }]);
+  // HAT fix regression pin (Leg 5): the far-right chevron must anchor via
+  // rightAnchorOf (kebab idiom — right edge pinned, grows leftward), never
+  // leftAnchorOf (which bled the sheet past the viewport's right edge).
+  assert.deepEqual(openCall[3], { alignRight: 0, from: 'chevron' });
 
   bar.dispatch('bookmark:0');
   assert.deepEqual(h.calls.at(-1), ['navigate', 'https://two.test/']);
