@@ -55,6 +55,7 @@
  *   | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *   | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
  *   | 'reopen-closed-tab'
+ *   | 'bookmark-page' | 'toggle-bookmarks-bar'
  *   | null}
  */
 export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = false }) {
@@ -96,6 +97,15 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
   // same class as tab-cycle/jump above).
   if (shift && (key === 'T' || key === 't')) return 'reopen-closed-tab';
 
+  // toggle-bookmarks-bar (M15 F1 DD5) -> Ctrl+Shift+B. Matches both cases
+  // (capslock-with-shift parity, same as the Ctrl+Shift+T/P/I chords above),
+  // placed in the shifted chain BEFORE the unshifted-letter branch below (the
+  // Ctrl+Shift+T/P/I placement convention) — no unshifted 'b'/'B' branch
+  // exists today, but the placement holds regardless, matching the precedent.
+  // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this classifier — this
+  // addition lands in both files in the same change.
+  if (shift && (key === 'B' || key === 'b')) return 'toggle-bookmarks-bar';
+
   // The rest of the chain (NOT lightbox-gated, except Ctrl+Shift+I below).
   if (key === 't') return 'new-tab';
   if (key === 'w') return 'close-tab';
@@ -114,6 +124,12 @@ export function keydownToAction({ key, ctrl, meta, shift, lightboxOpen, alt = fa
     return lightboxOpen ? null : 'devtools';
   }
   if (key === 'r') return 'reload';
+  // bookmark-page (M15 F1 DD5) -> Ctrl+D: behaves exactly like a star click
+  // (leg 2 wires the actual add+popover; this leg only adds the classifier
+  // entry — the flight's Context section accepts an interim dispatch with no
+  // consumer yet). Lowercase-only match — the t/w/l/m/r case discipline.
+  // LOCKSTEP PIN: sheet-accelerator.js hand-mirrors this classifier.
+  if (key === 'd') return 'bookmark-page';
 
   return null;
 }

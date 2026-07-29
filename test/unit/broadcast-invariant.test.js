@@ -31,9 +31,14 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { maskComments, findMatchingBracket } = require('../helpers/source-scan');
 const { makeHarness } = require('./helpers/jar-ipc-harness');
 const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
+const appDb = require('../../src/main/app-db');
+const { registerBookmarksIpc } = require('../../src/main/register-bookmarks-ipc');
 
 const MUTATION_MARKERS = ['settings.set(', 'mintJarKey(', 'revokeJarKey(', 'mintAdminKey(', 'revokeAdminKey('];
 const BROADCAST_MARKER = 'settings-changed';
@@ -165,4 +170,127 @@ test('a registration-shaped mention inside a comment (main.js:996 precedent) is 
     registrations.map((r) => r.label),
     ['real-channel']
   );
+});
+
+// ---------------------------------------------------------------------------
+// bookmarks-changed no-snapshot contract (M15 Flight 1 "Bookmarking Core and
+// Surfaces" Leg 1 / DD3, AC5): every mutation (add/update/remove/reorder)
+// broadcasts `bookmarks-changed` with an EMPTY payload — invalidation-not-
+// snapshot, the jars-changed/history-changed precedent, pinned here at the
+// IPC-wiring level (the store's own unit tests cover the mutation contracts
+// themselves) — a real registerBookmarksIpc instance over a real (temp-dir,
+// real app-db) bookmarksStore, exercising every channel end-to-end.
+// ---------------------------------------------------------------------------
+
+function makeBookmarksIpcHarness() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-bookmarks-ipc-'));
+  appDb.open(dir);
+  const resolved = require.resolve('../../src/main/bookmarks-store');
+  delete require.cache[resolved];
+  const bookmarksStore = require('../../src/main/bookmarks-store');
+  bookmarksStore.load(dir);
+
+  /** @type {Array<{ channel: string, payload: any }>} */
+  const events = [];
+  const handlers = {};
+  const ipcMain = { handle: (channel, fn) => { handlers[channel] = fn; } };
+  const broadcast = (channel, payload) => events.push({ channel, payload });
+
+  registerBookmarksIpc({ ipcMain, bookmarksStore, broadcast });
+
+  return {
+    events,
+    invoke: (channel, payload) => handlers[channel](null, payload),
+    teardown: () => {
+      appDb.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+test('bookmark-add (created) broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const result = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  assert.equal(result.ok, true);
+  assert.equal(result.created, true);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+});
+
+test('bookmark-add (duplicate URL, DD2 idempotent) does NOT re-broadcast', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  h.events.length = 0;
+  const second = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  assert.equal(second.created, false);
+  assert.deepEqual(h.events, [], 'a duplicate add — Edge Case: only ONE broadcast is needed');
+});
+
+test('bookmark-add with an invalid url does NOT broadcast', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const result = await h.invoke('bookmark-add', { url: 'javascript:alert(1)' });
+  assert.equal(result.ok, false);
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-update broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const { bookmark } = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmark-update', { id: bookmark.id, title: 'New title' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+});
+
+test('bookmark-update rejected by the DD3/AC3 duplicate-url ruling does NOT broadcast', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  await h.invoke('bookmark-add', { url: 'https://a.example/' });
+  const b = await h.invoke('bookmark-add', { url: 'https://b.example/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmark-update', { id: b.bookmark.id, url: 'https://a.example/' });
+  assert.deepEqual(result, { ok: false, reason: 'duplicate-url' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-remove broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const { bookmark } = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmark-remove', { id: bookmark.id });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+});
+
+test('bookmark-remove of an unknown id does NOT broadcast', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const result = await h.invoke('bookmark-remove', { id: 'nope' });
+  assert.deepEqual(result, { ok: false, reason: 'not-found' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-reorder broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const a = await h.invoke('bookmark-add', { url: 'https://a.example/' });
+  const b = await h.invoke('bookmark-add', { url: 'https://b.example/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmark-reorder', { ids: [b.bookmark.id, a.bookmark.id] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+});
+
+test('bookmarks-get is a pure read — never broadcasts', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmarks-get');
+  assert.equal(result.length, 1);
+  assert.deepEqual(h.events, []);
 });

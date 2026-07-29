@@ -526,11 +526,52 @@ a:focus-visible {
   color: #6dff8f; /* secure green — a non-accent neutral tone for internal pages */
 }
 
-/* Shift the address input right to make room for the chip; reserve right padding so
-   long URLs don't slide under the (revealed) in-bar zoom control. */
+/* Address-bar star (M15 F1 Leg 2, flight DD4): a compact icon-button between
+   #address-chip and the address input, same absolutely-positioned idiom as
+   the chip (not .icon-btn — that class targets the toolbar's flex children).
+   Outline by default; .starred fills the glyph and tints it (bookmarked). */
+.star-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  left: 39px; /* chip's 7px left + 28px width + 4px gap */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  padding: 0;
+}
+.star-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+.star-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.star-btn.hidden {
+  display: none;
+}
+.star-btn.starred {
+  color: #ffd166;
+}
+.star-btn.starred .tb-glyph {
+  fill: currentColor;
+}
+
+/* Shift the address input right to make room for the chip + star; reserve right
+   padding so long URLs don't slide under the (revealed) in-bar zoom control. */
 #address {
   width: 100%;
-  padding: 8px 132px 8px 40px; /* left padding accommodates the 28px chip + offset; right reserves room for #zoom-control */
+  padding: 8px 132px 8px 68px; /* left padding accommodates the 28px chip + 24px star + offsets; right reserves room for #zoom-control */
   border-radius: 18px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -618,6 +659,92 @@ a:focus-visible {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
   user-select: none;
+}
+
+/* ---------- Bookmarks bar (M15 F1 Leg 3, DD7/DD8) ---------- */
+#bookmarks-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  /* Fixed literal (pinned in CSS with a comment, like other fixed chrome
+     dimensions — e.g. #window-controls .win-ctrl's 46px) — #main's flex:1
+     absorbs whatever this row is or isn't, so the height must never itself
+     depend on content. */
+  height: 30px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  /* INSTANTLY — no transition (M15 F1 Leg 3, cite M05 F9 media/privacy-panel
+     precedent above). Rationale: showing/hiding this row changes #main's
+     flex-computed height, which changes the active guest's bounds via
+     tabSetActive/tabSetBounds — a SEPARATE COMPOSITING SURFACE
+     (`WebContentsView`) whose bounds move in ONE discrete `setBounds` step. A
+     CSS height transition here would animate the chrome-DOM box while the
+     guest slot snaps to its final bounds at t=0 (chrome ramps, guest steps) —
+     the same mismatched-half-animation defect the panel INVARIANT above
+     documents, at the compositor, not the DOM. This is why window-controller.js
+     calls sendActiveBounds() explicitly right after every applyBookmarksBar —
+     belt-and-suspenders over the #webviews ResizeObserver, since the observer
+     alone could lag one frame behind the instant class toggle.
+     INVARIANT: never animate #bookmarks-bar's visibility/height. Animate only
+     things that float OVER the guest (find bar, menu sheet) — never this row. */
+}
+#bookmarks-bar.hidden {
+  display: none;
+}
+.bm-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 160px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bm-item.hidden {
+  display: none;
+}
+.bm-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.bm-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.bm-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 2px;
+}
+.bm-mono {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--bg-2);
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+.bm-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#bookmarks-overflow {
+  flex: none;
+  width: 24px;
+  height: 24px;
 }
 
 /* ---------- Main / webviews ---------- */

@@ -4,7 +4,7 @@ export function createShortcutController(deps) {
     window, document, ctx, els, activeTab, isInternalTab, isWebTab,
     openFind, createTab, closeTab, jarsClient, announceTabStatus,
     togglePanel, togglePrivacy, openDownloads, orderedTabIds, activateTab,
-    keydownToAction
+    keydownToAction, handleBookmarkStarActivate
   } = deps;
   /* --------------------------------------------------------------- shortcuts */
 
@@ -147,6 +147,23 @@ export function createShortcutController(deps) {
         activateTab(ids[idx]);
         return true;
       }
+      // bookmark-page (Ctrl+D) — M15 F1 Leg 2, DD5: behaves EXACTLY like a
+      // star click — routes through the same shared handler (unbookmarked →
+      // add + open popover; bookmarked → open popover directly; inert on
+      // internal tabs, control hidden anyway — bookmark-page is already
+      // web-guest-only in the forward allowlist, so this branch only ever
+      // sees a web active tab in practice, but the shared handler re-guards
+      // regardless).
+      case 'bookmark-page':
+        handleBookmarkStarActivate(activeTab());
+        return true;
+      // toggle-bookmarks-bar (Ctrl+Shift+B) — M15 F1 DD5, wired leg 3: the
+      // unpin-toolbar-item shape — main flips bookmarksBarEnabled and
+      // broadcasts itself, so this converges on the exact same stored value
+      // as the Settings checkbox (no divergent state).
+      case 'toggle-bookmarks-bar':
+        window.goldfinch.toggleBookmarksBar();
+        return true;
     }
     return false;
   }

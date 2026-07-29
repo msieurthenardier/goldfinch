@@ -54,6 +54,14 @@ const TAB_CYCLE_JUMP_ACTIONS = [
 // forwarder's blanket `!isAutoRepeat` guard covers it with no code change
 // (windows are heavier than tabs — a held Ctrl+N must not machine-gun
 // BaseWindows; flight design review L1); pinned by a dedicated unit test.
+// bookmark-page / toggle-bookmarks-bar (M15 F1 DD5, Leg 1 AC4): `bookmark-page`
+// (Ctrl+D) joins WEB_CHROME_ACTIONS only — bookmarking a goldfinch:// internal
+// page is meaningless (internal pages are never bookmarkable — DD's
+// internal-page gating carries forward here at the shortcut layer too).
+// `toggle-bookmarks-bar` (Ctrl+Shift+B) joins BOTH guest kinds — the bar's
+// visibility is app-wide chrome layout, the same navigation-neutral class as
+// new-tab/new-window: an internal settings page must not trap the operator
+// from toggling it either.
 const WEB_CHROME_ACTIONS = new Set([
   'new-tab',
   'close-tab',
@@ -63,10 +71,19 @@ const WEB_CHROME_ACTIONS = new Set([
   'toggle-privacy',
   'reload',
   'reopen-closed-tab',
+  'bookmark-page',
+  'toggle-bookmarks-bar',
   ...TAB_CYCLE_JUMP_ACTIONS,
 ]);
 
-const INTERNAL_CHROME_ACTIONS = new Set(['new-tab', 'close-tab', 'new-window', 'reopen-closed-tab', ...TAB_CYCLE_JUMP_ACTIONS]);
+const INTERNAL_CHROME_ACTIONS = new Set([
+  'new-tab',
+  'close-tab',
+  'new-window',
+  'reopen-closed-tab',
+  'toggle-bookmarks-bar',
+  ...TAB_CYCLE_JUMP_ACTIONS,
+]);
 
 /**
  * isChromeActionForwardable(action, guestKind)

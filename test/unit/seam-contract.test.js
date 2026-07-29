@@ -62,7 +62,15 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // M14 F1 L3 (client-cert): +1 for openCertPickerOverlayForAudit — the SHEET_STATES
 // 'sheet:cert-picker' a11y driver for the TLS client-certificate chooser sheet (same
 // leg-authorized seam-addition precedent; planned bump per the leg's Outputs).
-const SEAM_COUNT = 31;
+// M15 F1 Leg 2 (bookmarking, FD ruling): +1 for openBookmarkEditOverlayForAudit —
+// the SHEET_STATES 'sheet:bookmark-edit' a11y driver for the star/bar/overflow
+// quick-edit popover (the every-new-sheet precedent, explicitly FD-ruled in the
+// leg's Context: "the evaluate-seam closed set MAY grow by exactly one entry this
+// leg").
+// M15 F1 Leg 3 (bookmarking, FD ruling): +1 for openBookmarksOverflowOverlayForAudit —
+// the SHEET_STATES 'sheet:bookmarks-overflow' a11y driver for the overflow chevron
+// menu (same every-new-sheet precedent, FD-ruled in the leg's Context).
+const SEAM_COUNT = 33;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
@@ -82,7 +90,38 @@ const SEAM_COUNT = 31;
 // seam-block bookkeeping — the same minimum per-sheet chrome footprint as L2's
 // auth-basic bump. Planned, deliberate bump per the leg's Outputs; renderer.js
 // extraction remains banked architecture debt.
-const RENDERER_LINE_BUDGET = 1766;
+// M15 F1 Leg 2 (bookmarking, FD ruling): +100 (1766 → 1866) — the star/bar/
+// overflow quick-edit popover's residual renderer.js footprint: the
+// bookmark-edit overlay-state entry (fixedTriggerMenu(() => els.star)), the
+// anchored-open + shared star-activation glue (openBookmarkEditOverlay /
+// handleBookmarkStarActivate — the sheet-opening half can't move into
+// bookmarks-client.js, which owns no sheet/anchor machinery), the
+// dispatchOverlayActivation 'bookmark-edit' stub case + the page-context
+// 'action:bookmark-page' branch, the bookmarksClient construction + boot-race
+// join, the five star-sync call sites (2 land in renderer.js;
+// tab-controller.js/navigation-controller.js absorb the rest), the DD6 icon
+// passive-refresh line in onTabFavicon, the star trigger + bookmark-edit-submit
+// subscriber wiring, and the seam hook — bookmark BUSINESS logic (the cache,
+// activateStar's decision, the edit-submit forward body) lives in the new
+// bookmarks-client.js per the leg's own line-budget ruling, not here. Planned,
+// deliberate bump per the leg's Context FD ruling; renderer.js extraction
+// remains banked architecture debt.
+// M15 F1 Leg 3 (bar/settings/overflow, FD ruling — second minimal bump,
+// conditional on bar/overflow logic living in bookmarks-bar.js): +67
+// (1866 → 1933) — the bar/overflow's residual renderer.js footprint: the
+// 'bookmarks-overflow' overlay-state entry (fixedTriggerMenu(() =>
+// els.bookmarksOverflow)), the bookmarksBarController construction + its
+// boot-race render() join, the extended single onChanged closure (bar
+// re-render + DD9 overflow stale-close — no independent
+// onBookmarksChanged subscriber), the dispatchOverlayActivation
+// 'bookmarks-overflow' case, the parameterized openBookmarkEditOverlay
+// anchor (leg-2 code, small refactor), the sendActiveBounds dep threaded
+// into window-controller.js's construction, and the seam hook — ALL
+// bar/overflow rendering, measurement, and dispatch business logic lives in
+// the new bookmarks-bar.js per the leg's own line-budget ruling, not here.
+// Planned, deliberate bump per the leg's Context FD ruling; renderer.js
+// extraction remains banked architecture debt.
+const RENDERER_LINE_BUDGET = 1933;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;

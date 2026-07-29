@@ -19,17 +19,40 @@
   <body>
     <nav aria-label="Settings sections">
       <ul role="list">
-        <li><a href="#appearance">Appearance</a></li>
+        <li><a href="#appearance">Startup &amp; appearance</a></li>
         <li><a href="#privacy">Privacy &amp; Shields</a></li>
         <li><a href="#automation">Automation</a></li>
-        <li><a href="#startup">On startup</a></li>
         <li><a href="#about">About</a></li>
       </ul>
     </nav>
     <main>
       <h1>Settings</h1>
+      <!-- Merged section (M15 F1 Leg 3 / DD7): the former #startup section's content
+           (home page + restore-session) moves in here, ahead of the pre-existing
+           Appearance pin toggles, with the bookmarks-bar toggle alongside it. Every
+           element id below is UNCHANGED (settings.js selects by id only) — the
+           #startup section and its nav <li> are removed outright. -->
       <section id="appearance">
-        <h2>Appearance</h2>
+        <h2>Startup &amp; appearance</h2>
+        <label for="home-page-input">Home page</label>
+        <input id="home-page-input" type="url" autocomplete="off" spellcheck="false" />
+        <button id="home-page-save" type="button">Save</button>
+        <p id="home-page-status" role="status"></p>
+        <fieldset class="shields-group startup-toggle-group">
+          <legend class="sr-only">Session restore</legend>
+          <label class="shield-row startup-toggle-row"><span>Restore session on startup</span><input type="checkbox" id="restore-session-enabled" /></label>
+        </fieldset>
+        <p class="muted">Reopens the previous session's windows and tabs (addresses and cookie jars) on launch. Burner tabs are never restored. Takes effect on the next launch.</p>
+        <!-- Bookmarks bar toggle (M15 F1 Leg 3, DD7): the restore-session checkbox's
+             sibling — settingsSet('bookmarksBarEnabled', …) keeps every window's bar
+             in sync via the settings-changed broadcast (window-controller.js's
+             applyBookmarksBar). Also reachable via Ctrl+Shift+B (same stored value —
+             no divergent state). -->
+        <fieldset class="shields-group startup-toggle-group">
+          <legend class="sr-only">Bookmarks bar</legend>
+          <label class="shield-row startup-toggle-row"><span>Show bookmarks bar</span><input type="checkbox" id="bookmarks-bar-enabled" /></label>
+        </fieldset>
+        <p class="muted">Shows a bar of your bookmarks below the toolbar in every window. Toggle anytime with Ctrl+Shift+B.</p>
         <div class="appearance-row">
           <span>Media</span>
           <button type="button" class="pin-toggle" id="pin-media" aria-pressed="true" aria-label="Pin Media to toolbar">
@@ -122,18 +145,6 @@
         <h4>Recent actions</h4>
         <div id="automation-activity-log"></div>
         <nav id="automation-activity-pager" class="activity-pager" aria-label="Activity log pages" hidden></nav>
-      </section>
-      <section id="startup">
-        <h2>On startup</h2>
-        <label for="home-page-input">Home page</label>
-        <input id="home-page-input" type="url" autocomplete="off" spellcheck="false" />
-        <button id="home-page-save" type="button">Save</button>
-        <p id="home-page-status" role="status"></p>
-        <fieldset class="shields-group startup-toggle-group">
-          <legend class="sr-only">Session restore</legend>
-          <label class="shield-row startup-toggle-row"><span>Restore session on startup</span><input type="checkbox" id="restore-session-enabled" /></label>
-        </fieldset>
-        <p class="muted">Reopens the previous session's windows and tabs (addresses and cookie jars) on launch. Burner tabs are never restored. Takes effect on the next launch.</p>
       </section>
       <section id="about">
         <h2>About</h2>

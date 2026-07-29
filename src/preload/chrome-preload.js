@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('goldfinch', {
   windowClose: () => ipcRenderer.send('window-close'),
   appQuit: () => ipcRenderer.send('app-quit'),
   unpinToolbarItem: (item) => ipcRenderer.send('unpin-toolbar-item', item),
+  // Ctrl+Shift+B / the Settings checkbox both converge here (M15 F1 Leg 3, DD7):
+  // one-way send, the unpin-toolbar-item shape — main flips bookmarksBarEnabled
+  // and broadcasts settings-changed itself.
+  toggleBookmarksBar: () => ipcRenderer.send('toggle-bookmarks-bar'),
   windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
   onWindowMaximizedChange: (cb) => ipcRenderer.on('window-maximized-change', (_e, isMax) => cb(isMax)),
   // New Window command (M09 F6 Leg 4, DD5): kebab item + Ctrl/Cmd+N →
@@ -52,6 +56,28 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history
   // bridge method, bare-handle like settingsGet above) ---
   historySuggest: (payload) => ipcRenderer.invoke('history-suggest', payload),
+
+  // --- bookmarks (chrome-trusted; M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
+  // DD3 — sender-resolved, NO internal twin: every consumer this flight builds lives
+  // in the chrome; see register-bookmarks-ipc.js) ---
+  bookmarksGet: () => ipcRenderer.invoke('bookmarks-get'),
+  bookmarkAdd: (payload) => ipcRenderer.invoke('bookmark-add', payload),
+  bookmarkUpdate: (payload) => ipcRenderer.invoke('bookmark-update', payload),
+  bookmarkRemove: (payload) => ipcRenderer.invoke('bookmark-remove', payload),
+  bookmarkReorder: (payload) => ipcRenderer.invoke('bookmark-reorder', payload),
+  // M15 F1 Leg 4 (DD11): app-scoped omnibox suggest source — no jarId. Response
+  // envelope mirrors historySuggest's {ok, suggestions} shape.
+  bookmarksSuggest: (payload) => ipcRenderer.invoke('bookmarks-suggest', payload),
+  // Fired after every bookmark mutation with an EMPTY payload — invalidation-
+  // not-snapshot (DD3); subscribers re-query via bookmarksGet(). Mirrors
+  // onJarsChanged's raw on() subscription shape (no off* — chrome preload has
+  // no handle-based subscription cleanup, same as onJarWiped).
+  onBookmarksChanged: (cb) => ipcRenderer.on('bookmarks-changed', (_e, d) => cb(d)),
+  // M15 F1 Leg 2: the bookmark-edit sheet's forwarded submit ({ id, action:
+  // 'save'|'remove', name?, url? }) — main validates/closes, then forwards
+  // here; the chrome subscriber issues the actual bookmarkUpdate/
+  // bookmarkRemove (chrome is the sole bookmark-mutation issuer).
+  onBookmarkEditSubmit: (cb) => ipcRenderer.on('bookmark-edit-submit', (_e, d) => cb(d)),
 
   // --- shields ---
   shieldsGet: () => ipcRenderer.invoke('shields-get'),

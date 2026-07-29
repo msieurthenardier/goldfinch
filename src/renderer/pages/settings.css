@@ -263,11 +263,14 @@ main section p {
   outline-offset: 2px;
 }
 
-/* ── On startup — home page controls ────────────────────────────────────────────
+/* ── Startup & appearance — home page controls ──────────────────────────────────
    The label is a block above the input+button row; input and button are siblings
    (no wrapper div), so we use inline-block on both to let them sit naturally on
-   one line with a small gap via margin. */
-#startup label[for="home-page-input"] {
+   one line with a small gap via margin. Re-scoped from #startup (M15 F1 Leg 3,
+   design-review catch): the #startup section merged into #appearance — a bare
+   #startup selector here would silently stop matching once that section is
+   removed, and the home-page label would lose its styling. */
+#appearance label[for="home-page-input"] {
   display: block;
   color: var(--fg);
   font-size: 14px;

@@ -300,6 +300,37 @@ async function copyText(text, messageEl) {
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
 })();
 
+/* ---- bookmarks-bar controller (M15 F1 Leg 3 / DD7) ---- */
+
+(function () {
+  // Guard: only run when the internal bridge is present (goldfinch://settings origin).
+  if (!window.goldfinchInternal) return;
+
+  const el = /** @type {HTMLInputElement|null} */ (document.getElementById('bookmarks-bar-enabled'));
+  if (!el) return;
+
+  // Populate from the persisted setting on load. Assign .checked directly — never
+  // .click()/dispatchEvent('change'), which would echo-loop back through settingsSet
+  // (the restore-session checkbox's own idiom, byte-for-byte in shape).
+  window.goldfinchInternal.settingsGet('bookmarksBarEnabled').then((v) => { el.checked = v === true; }).catch(() => {});
+
+  // Write a clean boolean on change (the strict validator rejects a non-boolean
+  // anyway). Every open chrome window re-syncs live via the settings-changed
+  // broadcast (window-controller.js's applyBookmarksBar) — the same stored value
+  // Ctrl+Shift+B flips, so the checkbox and the shortcut never diverge.
+  el.addEventListener('change', () => {
+    window.goldfinchInternal.settingsSet('bookmarksBarEnabled', !!el.checked).catch(() => {});
+  });
+
+  // Re-sync when another surface changes the setting (the shortcut, or another
+  // window's checkbox). Capture the handle so we can remove this listener on
+  // pagehide (DD5: prevents accumulation across reloads).
+  const h = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && typeof all.bookmarksBarEnabled === 'boolean') el.checked = all.bookmarksBarEnabled;
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(h), { once: true });
+})();
+
 /* ---- automation controller ---- */
 
 (function () {

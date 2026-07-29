@@ -19,11 +19,13 @@ const IDS = {
   player: 'player', playerAudio: 'player-audio', playerTitle: 'player-title',
   playerProgress: 'player-progress', playerSeek: 'player-seek', playerCur: 'player-cur',
   playerDur: 'player-dur', playerPlay: 'player-play', playerPrev: 'player-prev',
-  playerNext: 'player-next', kebab: 'kebab', addressChip: 'address-chip',
+  playerNext: 'player-next', kebab: 'kebab', addressChip: 'address-chip', star: 'star',
   automationIndicator: 'automation-indicator', automationIndicatorBadge: 'automation-indicator-badge',
   vaultIndicator: 'vault-indicator',
   zoomControl: 'zoom-control', zoomOut: 'zoom-out', zoomIn: 'zoom-in',
-  zoomReset: 'zoom-reset', zoomPercent: 'zoom-percent'
+  zoomReset: 'zoom-reset', zoomPercent: 'zoom-percent',
+  // Bookmarks bar (M15 F1 Leg 3): the row itself + its overflow chevron trigger.
+  bookmarksBar: 'bookmarks-bar', bookmarksOverflow: 'bookmarks-overflow'
 };
 
 export function createChromeContext({ document, goldfinch }) {

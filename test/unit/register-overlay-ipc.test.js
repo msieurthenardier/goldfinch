@@ -156,3 +156,126 @@ test('the activated handler tolerates an absent certSelectFromSheet injection (o
     ['send', 'menu-overlay-activated', { menuType: 'cert-picker', id: 'cert:0' }],
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// M15 F1 Leg 2 (flight DD4): the bookmark-edit sheet's dedicated submit
+// channel — sender identity, token freshness, per-field validation,
+// close-only-on-success, chromeForAttachment forward. `action:'remove'`
+// bypasses field validation entirely.
+// ---------------------------------------------------------------------------
+
+function makeIpcWithHandle() {
+  const listeners = new Map();
+  const handlers = new Map();
+  return {
+    listeners,
+    handlers,
+    on(channel, fn) { assert.equal(listeners.has(channel), false); listeners.set(channel, fn); },
+    handle(channel, fn) { assert.equal(handlers.has(channel), false); handlers.set(channel, fn); },
+  };
+}
+
+function makeBookmarkEditHarness({ validateBookmarkEdit } = {}) {
+  const ipcMain = makeIpcWithHandle();
+  const events = [];
+  const chrome = { send(channel, payload) { events.push(['send', channel, payload]); } };
+  const sheetSender = { isDestroyed: () => false };
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    getCurrentMenu: () => ({ token: 7, menuType: 'bookmark-edit' }),
+    closeMenuOverlay: (reason, token) => events.push(['close', reason, token]),
+  };
+  const rec = { win: {}, sheet };
+  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  registerOverlayIpc({
+    ipcMain, registry,
+    chromeForAttachment: () => chrome,
+    chromeForTab: () => chrome,
+    sanitizeActivatedValue: () => undefined,
+    validateBookmarkEdit: validateBookmarkEdit === undefined
+      ? ({ name, url }) => (name === 'Example' && url === 'https://example.com/'
+        ? { ok: true, name, url }
+        : { ok: false })
+      : validateBookmarkEdit,
+  });
+  return { ipcMain, events, rec, sheetSender };
+}
+
+test('the registrar never registers menu-overlay:bookmark-edit-submit when validateBookmarkEdit is absent (offline overlay tests)', () => {
+  const ipcMain = makeIpcWithHandle();
+  const registry = { records: () => [], getWindowForChrome: () => null };
+  registerOverlayIpc({
+    ipcMain, registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined,
+  });
+  assert.equal(ipcMain.handlers.has('menu-overlay:bookmark-edit-submit'), false);
+});
+
+test('bookmark-edit-submit: valid save fields close the sheet and forward {id, action:"save", name, url} to the chrome', async () => {
+  const h = makeBookmarkEditHarness();
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-edit-submit', { id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }],
+  ]);
+});
+
+test('bookmark-edit-submit: a validation failure keeps the sheet open — no close, no forward', async () => {
+  const h = makeBookmarkEditHarness();
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: '', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: action "remove" skips field validation entirely and always closes-and-forwards', async () => {
+  const h = makeBookmarkEditHarness({
+    validateBookmarkEdit: () => { throw new Error('must not be called for remove'); },
+  });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-edit-submit', { id: 'bm-1', action: 'remove' }],
+  ]);
+});
+
+test('bookmark-edit-submit: a stale token is rejected — no close, no forward', async () => {
+  const h = makeBookmarkEditHarness();
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 6, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: a malformed payload (non-string id / non-number token) is rejected', async () => {
+  const h = makeBookmarkEditHarness();
+  const handler = h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit');
+  assert.deepEqual(await handler({ sender: h.sheetSender }, { token: 7, id: 42, action: 'remove' }), { ok: false });
+  assert.deepEqual(await handler({ sender: h.sheetSender }, { token: '7', id: 'bm-1', action: 'remove' }), { ok: false });
+  assert.deepEqual(await handler({ sender: h.sheetSender }, null), { ok: false });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: an unrecognized sender resolves { ok:false } (recordForSheetSender fails closed)', async () => {
+  const h = makeBookmarkEditHarness();
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: {} },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.deepEqual(res, { ok: false });
+  assert.deepEqual(h.events, []);
+});

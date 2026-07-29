@@ -11,7 +11,17 @@ class El {
   constructor() {
     this.listeners = new Map(); this.attributes = new Map(); this.value = ''; this.textContent = '';
     this.disabled = false; this.readOnly = false; this.blurred = false;
-    this.classList = { values: new Set(), add: (x) => this.classList.values.add(x), remove: (x) => this.classList.values.delete(x), contains: (x) => this.classList.values.has(x) };
+    this.classList = {
+      values: new Set(),
+      add: (x) => this.classList.values.add(x),
+      remove: (x) => this.classList.values.delete(x),
+      contains: (x) => this.classList.values.has(x),
+      toggle: (x, force) => {
+        const on = force === undefined ? !this.classList.values.has(x) : !!force;
+        if (on) this.classList.values.add(x); else this.classList.values.delete(x);
+        return on;
+      }
+    };
   }
   addEventListener(name, fn) { this.listeners.set(name, fn); }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
@@ -22,16 +32,27 @@ class El {
 }
 
 function harness() {
-  const names = ['address', 'addressChip', 'back', 'forward', 'reload', 'newTab', 'zoomControl', 'zoomPercent', 'zoomOut', 'zoomIn', 'zoomReset', 'lightbox'];
+  const names = ['address', 'addressChip', 'star', 'back', 'forward', 'reload', 'newTab', 'zoomControl', 'zoomPercent', 'zoomOut', 'zoomIn', 'zoomReset', 'lightbox'];
   const els = Object.fromEntries(names.map((name) => [name, new El()]));
   els.lightbox.classList.add('hidden');
   const state = { active: null, suggestions: { open: false, token: 0 }, openedModels: [], calls: [] };
   const callbacks = {};
   let suggestResolve;
+  let suggestReject;
+  let bookmarksSuggestResolve;
+  let bookmarksSuggestReject;
   let zoomResolve;
   const window = { goldfinch: {
     tabNavigate: (payload) => state.calls.push(['navigate', payload]),
-    historySuggest: () => new Promise((resolve) => { suggestResolve = resolve; }),
+    historySuggest: (payload) => {
+      state.calls.push(['historySuggest', payload]);
+      return new Promise((resolve, reject) => { suggestResolve = resolve; suggestReject = reject; });
+    },
+    // M15 F1 Leg 4 (DD11): queried alongside historySuggest via Promise.allSettled.
+    bookmarksSuggest: (payload) => {
+      state.calls.push(['bookmarksSuggest', payload]);
+      return new Promise((resolve, reject) => { bookmarksSuggestResolve = resolve; bookmarksSuggestReject = reject; });
+    },
     getZoom: () => new Promise((resolve) => { zoomResolve = resolve; }),
     zoomApply: (payload) => state.calls.push(['zoom', payload]),
     findOverlayOpen: (payload) => state.calls.push(['find', payload]),
@@ -41,6 +62,7 @@ function harness() {
   } };
   const document = { activeElement: els.address };
   const ctx = { activeTabId: null };
+  const bookmarks = new Set();
   const deps = {
     window, document, ctx, els,
     activeTab: () => state.active,
@@ -48,9 +70,18 @@ function harness() {
     isWebTab: (tab) => !!tab && !tab.internal,
     createTab: (url) => state.calls.push(['create', url]),
     openDownloads: () => state.calls.push(['downloads']),
+    bookmarksClient: { findByUrl: (url) => bookmarks.has(url) ? { id: 'bm', url } : null },
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     shouldQuery: ({ focused, isInternal, isBurner, value }) => focused && !isInternal && !isBurner && !!value.trim(),
     buildSuggestionModel: (items, selectedIndex) => ({ items, selectedIndex }),
+    // Minimal stand-in (bookmark rows first, then history — full dedupe/cap
+    // semantics are unit-pinned separately in omnibox-suggest-model.test.js;
+    // this harness only needs to observe that the controller calls through
+    // with both sources in the right positions).
+    mergeSuggestionSources: (bookmarkRows, historyRows) => [
+      ...bookmarkRows.map((r) => ({ ...r, kind: 'bookmark' })),
+      ...historyRows.map((r) => ({ ...r, kind: 'history' }))
+    ],
     moveSelection: (index, delta, length) => length ? Math.max(0, Math.min(length - 1, index + delta)) : -1,
     acceptSuggestResponse: ({ requestSeq, currentSeq, gateNow }) => requestSeq === currentSeq && gateNow,
     suggestionsState: () => state.suggestions,
@@ -58,7 +89,14 @@ function harness() {
     openOverlayMenu: (_type, model) => { state.suggestions.open = true; state.openedModels.push(model); },
     leftAnchorOf: () => ({ x: 0, y: 0 })
   };
-  return { deps, state, els, ctx, callbacks, resolveSuggest: (value) => suggestResolve(value), resolveZoom: (value) => zoomResolve(value) };
+  return {
+    deps, state, els, ctx, callbacks, bookmarks,
+    resolveSuggest: (value) => suggestResolve(value),
+    rejectSuggest: (err) => suggestReject(err),
+    resolveBookmarksSuggest: (value) => bookmarksSuggestResolve(value),
+    rejectBookmarksSuggest: (err) => bookmarksSuggestReject(err),
+    resolveZoom: (value) => zoomResolve(value)
+  };
 }
 
 async function create(h) {
@@ -93,8 +131,94 @@ test('suggestion responses are rejected after the tab controller invalidates on 
   h.els.address.value = 'changed';
   controller.resetSuggestionsForActivation();
   h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://stale.test/' }] });
+  h.resolveBookmarksSuggest({ ok: true, suggestions: [] });
+  await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(h.state.openedModels, []);
+});
+
+// ---------------------------------------------------------------------------
+// DD11 (M15 F1 Leg 4): historySuggest + bookmarksSuggest queried together via
+// Promise.allSettled, merged, and painted.
+// ---------------------------------------------------------------------------
+
+test('DD11: both historySuggest and bookmarksSuggest are queried on input, merged bookmark-first', async () => {
+  const h = harness();
+  await create(h);
+  h.state.active = { id: 'a', container: { id: 'jar-a' } };
+  h.ctx.activeTabId = 'a';
+  h.els.address.value = 'exa';
+  h.els.address.listeners.get('input')();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  assert.ok(h.state.calls.some(([name, payload]) => name === 'historySuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'));
+  assert.ok(h.state.calls.some(([name, payload]) => name === 'bookmarksSuggest' && payload.query === 'exa'));
+
+  h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://history.example/', title: 'History Row' }] });
+  h.resolveBookmarksSuggest({ ok: true, suggestions: [{ url: 'https://bm.example/', title: 'Bookmark Row' }] });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.state.suggestions.open, true);
+  const model = h.state.openedModels.at(-1);
+  assert.deepEqual(model.items.map((i) => i.kind), ['bookmark', 'history']);
+  assert.deepEqual(model.items.map((i) => i.url), ['https://bm.example/', 'https://history.example/']);
+});
+
+test('DD11: a bookmarksSuggest rejection degrades that source to [] — history results still paint', async () => {
+  const h = harness();
+  await create(h);
+  h.state.active = { id: 'a', container: { id: 'jar-a' } };
+  h.ctx.activeTabId = 'a';
+  h.els.address.value = 'exa';
+  h.els.address.listeners.get('input')();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://history.example/', title: 'History Row' }] });
+  h.rejectBookmarksSuggest(new Error('bookmarks-suggest failed'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.state.suggestions.open, true);
+  const model = h.state.openedModels.at(-1);
+  assert.deepEqual(model.items.map((i) => i.url), ['https://history.example/']);
+});
+
+test('DD11: a historySuggest rejection degrades that source to [] — bookmark results still paint', async () => {
+  const h = harness();
+  await create(h);
+  h.state.active = { id: 'a', container: { id: 'jar-a' } };
+  h.ctx.activeTabId = 'a';
+  h.els.address.value = 'exa';
+  h.els.address.listeners.get('input')();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  h.rejectSuggest(new Error('history-suggest failed'));
+  h.resolveBookmarksSuggest({ ok: true, suggestions: [{ url: 'https://bm.example/', title: 'Bookmark Row' }] });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.state.suggestions.open, true);
+  const model = h.state.openedModels.at(-1);
+  assert.deepEqual(model.items.map((i) => i.url), ['https://bm.example/']);
+});
+
+test('DD11: an {ok:false} bookmarksSuggest response also degrades to [] (not just a rejection)', async () => {
+  const h = harness();
+  await create(h);
+  h.state.active = { id: 'a', container: { id: 'jar-a' } };
+  h.ctx.activeTabId = 'a';
+  h.els.address.value = 'exa';
+  h.els.address.listeners.get('input')();
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://history.example/', title: 'History Row' }] });
+  h.resolveBookmarksSuggest({ ok: false, suggestions: [] });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const model = h.state.openedModels.at(-1);
+  assert.deepEqual(model.items.map((i) => i.url), ['https://history.example/']);
 });
 
 test('zoom readback drops a result after TOCTOU tab switch and find restores saved text', async () => {
@@ -115,4 +239,31 @@ test('zoom readback drops a result after TOCTOU tab switch and find restores sav
   assert.deepEqual(h.state.calls.pop(), ['find', { wcId: 10, findText: 'needle' }]);
   controller.openFind({ id: 'internal', wcId: 12, internal: true });
   assert.equal(h.state.calls.some(([name, payload]) => name === 'find' && payload.wcId === 12), false);
+});
+
+test('refreshStar: hidden on internal tabs / no live wcId; synchronous cache-driven aria-pressed + .starred otherwise (M15 F1 Leg 2)', async () => {
+  const h = harness();
+  const controller = await create(h);
+
+  controller.refreshStar(null);
+  assert.equal(h.els.star.classList.contains('hidden'), true);
+
+  controller.refreshStar({ id: 'internal', internal: true, wcId: 1, url: 'goldfinch://settings' });
+  assert.equal(h.els.star.classList.contains('hidden'), true);
+
+  controller.refreshStar({ id: 'no-wc', internal: false, wcId: null, url: 'https://x/' });
+  assert.equal(h.els.star.classList.contains('hidden'), true);
+
+  const unbookmarked = { id: 'a', internal: false, wcId: 5, url: 'https://unbookmarked.test/' };
+  controller.refreshStar(unbookmarked);
+  assert.equal(h.els.star.classList.contains('hidden'), false);
+  assert.equal(h.els.star.attributes.get('aria-pressed'), 'false');
+  assert.equal(h.els.star.classList.contains('starred'), false);
+
+  h.bookmarks.add('https://bookmarked.test/');
+  const bookmarked = { id: 'b', internal: false, wcId: 6, url: 'https://bookmarked.test/' };
+  controller.refreshStar(bookmarked);
+  assert.equal(h.els.star.classList.contains('hidden'), false);
+  assert.equal(h.els.star.attributes.get('aria-pressed'), 'true');
+  assert.equal(h.els.star.classList.contains('starred'), true);
 });

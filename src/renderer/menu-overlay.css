@@ -350,6 +350,27 @@ body {
   overflow-wrap: anywhere; /* server-controlled host/realm strings can be long */
 }
 
+/* ---------- bookmark-edit template (M15 F1 Leg 2, flight DD4) ----------
+   Star/bar/overflow quick-edit popover. Reuses the input-dialog card chrome
+   (.new-container-inner / -input / .text-btn) + the auth-basic/vault-unlock
+   backdrop shape — BUT this is the FIRST-EVER anchored modal card (leg design
+   review): unlike every sibling dialog card, `.bookmark-edit-inner` takes its
+   OWN `position: absolute` so positionNode's inline left/top (applied to the
+   CARD, not the backdrop) take effect. The backdrop keeps its flex-centering
+   rules as a no-anchor fallback (e.g. the a11y audit hook) — an absolutely-
+   positioned child simply leaves the flex flow, so the two rules coexist. */
+#sheet-bookmark-edit {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bookmark-edit-inner {
+  position: absolute;
+}
+
 /* ---------- vault-set + vault-recovery-show templates (M12 Flight 3 Leg 4 first-run-
    setup, DD5) ----------
    Both reuse the input-dialog card chrome (.new-container-inner / -input / .text-btn) +
@@ -905,6 +926,7 @@ body {
   outline: none;
 }
 .sg-option {
+  position: relative; /* anchors .sg-badge (M15 F1 Leg 4, DD11) */
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -940,6 +962,40 @@ body {
   color: var(--fg-dim);
   font-size: 12px;
   padding: 7px 8px;
+}
+/* Bookmark-row badge (M15 F1 Leg 4, DD11): a REAL DOM span with a textContent
+   node (design review: no CSS `content:` glyph — zero precedent for
+   generated-content markers in this codebase). `aria-hidden` on this element
+   keeps its visible text out of the option's computed accessible NAME (the
+   `.sr-only` node below carries the actual accessible signal, wired via
+   `aria-describedby` on the row). */
+.sg-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+/* This document does not load styles.css (menu-overlay.html is a separate
+   page) — the standard visually-hidden-but-accessible technique is
+   reproduced locally rather than duplicated import. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- downloads template (M11 Flight 1 Leg 3) ----------

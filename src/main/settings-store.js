@@ -39,7 +39,8 @@ const appDb = require('./app-db');
  *   automationPort: number,
  *   spellcheck: boolean,
  *   restoreSession: boolean,
- *   vaultAutoLockMinutes: number
+ *   vaultAutoLockMinutes: number,
+ *   bookmarksBarEnabled: boolean
  * }} Settings
  */
 
@@ -88,7 +89,15 @@ const DEFAULTS = {
   // integer key — no schema version bump; follows the automationPort integer-range
   // template (an explicit [1, 1440] validator, NOT the typeof fallback). Read by the
   // vault-store's injected getAutoLockMinutes at each operation to arm the idle timer.
-  vaultAutoLockMinutes: 10
+  vaultAutoLockMinutes: 10,
+  // Bookmarks bar visibility (M15 F1 Leg 3 / DD7). Off-by-default (a new chrome
+  // row must not appear unannounced on upgrade). Additive boolean — no schema
+  // version bump, no migration; the restoreSession template (explicit strict-
+  // boolean validator, NOT the typeof fallback — see VALIDATORS below). Read by
+  // window-controller.js's applyBookmarksBar at boot and live via the
+  // settings-changed broadcast (multi-window sync); flipped from either the
+  // Settings checkbox or Ctrl+Shift+B (toggle-bookmarks-bar main-side channel).
+  bookmarksBarEnabled: false
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -144,6 +153,13 @@ const VALIDATORS = {
   // restoreSession: strictly boolean (M09 Flight 9 / DD7) — the automationEnabled
   // template, so a truthy 'yes'/1 is rejected rather than silently enabling restore.
   restoreSession: (v) => typeof v === 'boolean',
+
+  // bookmarksBarEnabled: strictly boolean (M15 F1 Leg 3 / DD7) — the
+  // restoreSession template, NOT the typeof-fallback (a boolean-typed key still
+  // needs an explicit validator to reject e.g. a stray truthy string cleanly —
+  // consistency with automationEnabled/restoreSession, not a null/array hazard
+  // like the object-typed keys above).
+  bookmarksBarEnabled: (v) => typeof v === 'boolean',
 
   // automationKeyHashes: a plain object (NOT null, NOT an array) whose every
   // value is a 64-char lowercase-hex SHA-256 digest. Deliberately strict — it

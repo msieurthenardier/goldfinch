@@ -31,7 +31,7 @@ export function createTabController(deps) {
     ctx, els, tabs, jarsClient,
     blankPrivacy, escapeHtml, openTabContextMenu, currentHomePage,
     isInternalPageUrl, isSafeTabUrl, resolveNewTabContainer, classifyDragPoint,
-    announceTabStatus, updateNavButtons, refreshZoomControl, fetchCookies,
+    announceTabStatus, updateNavButtons, refreshZoomControl, refreshStar, fetchCookies,
     closeSuggestions, resetSuggestionsForActivation, updateAddressChip,
     renderMedia, renderPrivacy, setDevtoolsPressed
   } = deps;
@@ -253,7 +253,7 @@ export function createTabController(deps) {
   // step 4); `title` is read HERE (renderer-side only, stripped of no further
   // meaning to main) to seed the initial strip title. `insertAt` lands the tab at
   // its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
-  function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false } = {}) {
+  function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false, background = false } = {}) {
     // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
     // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
     if (dnd) cancelDnd();
@@ -325,13 +325,23 @@ export function createTabController(deps) {
         ctx.activeViewWcId = tab.wcId;
         updateNavButtons();
         refreshZoomControl(tab);
+        // sync path 3/5 (M15 F1 Leg 2, AC "five sync paths"): without this,
+        // restoreHistory-based creates (duplicate/reopen/restore) can boot a
+        // permanently hidden star since they skip loadURL and may never fire
+        // did-navigate.
+        refreshStar(tab);
         if (!els.privacyPanel.classList.contains('collapsed')) {
           fetchCookies();
         }
       }
     });
 
-    activateTab(id);
+    // background: true (M15 F1 DD10, Leg 1 AC): skip self-activation for this
+    // create ONLY — every existing call site (which never passes it) keeps the
+    // default path byte-for-byte, activation still synchronous. A background
+    // tab's wcId-arrival .then() above naturally no-ops (its id never became
+    // ctx.activeTabId), so no further branching is needed there.
+    if (!background) activateTab(id);
     return tab;
   }
 
@@ -686,6 +696,7 @@ export function createTabController(deps) {
     els.address.value = tab.url || '';
     updateAddressChip(tab);
     refreshZoomControl(tab);
+    refreshStar(tab); // sync path 4/5 (M15 F1 Leg 2) — covers adopt-tab too (single body)
 
     if (tab.wcId != null) {
       // Send tab-set-active with bounds (main handles visibility + hides the previous
