@@ -97,3 +97,19 @@ export function buildBookmarkEditCard(document) {
 
   return { node, card, name, url, error, remove, done };
 }
+
+/**
+ * Pure: populate the card's name/url fields + reset the error line from the
+ * sheet model ({ id, name, url }) — the ONE place that reads model.name /
+ * model.url (menu-overlay.js's renderBookmarkEdit calls this; pinned here so
+ * a future model-shape drift, e.g. a `title` field creeping back in, fails a
+ * fast unit test instead of silently blanking the popover — the HAT-observed
+ * M15 F1 Leg 5 regression this guards against).
+ * @param {{name: HTMLInputElement, url: HTMLInputElement, error: HTMLElement}} card
+ * @param {any} model
+ */
+export function applyBookmarkEditModel(card, model) {
+  card.name.value = model && typeof model.name === 'string' ? model.name : '';
+  card.url.value = model && typeof model.url === 'string' ? model.url : '';
+  card.error.textContent = '';
+}

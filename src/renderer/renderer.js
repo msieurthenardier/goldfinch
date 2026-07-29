@@ -26,7 +26,7 @@ import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
-import { createBookmarksClient } from './chrome/bookmarks-client.js';
+import { createBookmarksClient, bookmarkEntryToEditModel } from './chrome/bookmarks-client.js';
 import { createBookmarksBar } from './chrome/bookmarks-bar.js';
 import { createMediaController } from './chrome/media-controller.js';
 import { createNavigationController } from './chrome/navigation-controller.js';
@@ -655,10 +655,10 @@ const openCertPickerOverlayForAudit = () =>
 // convertChromePointToSheet, overlay-menus.test.js). The FIRST-EVER anchored
 // modal card (leg-2 design review): the sheet applies positionNode to the
 // CARD, not the backdrop (menu-overlay.css / menu-overlay.js).
-/** @param {any} bookmark @param {HTMLElement} [anchorEl] defaults to the star (leg-2 call sites) */
+/** @param {any} bookmark store entry, translated via bookmarkEntryToEditModel (entry.title → model.name — HAT FIX, Leg 5) @param {HTMLElement} [anchorEl] defaults to the star (leg-2 call sites) */
 function openBookmarkEditOverlay(bookmark, anchorEl = els.star) {
   const r = anchorEl.getBoundingClientRect();
-  openOverlayMenu('bookmark-edit', bookmark, chromePointToSheet(r.left, r.bottom), 0);
+  openOverlayMenu('bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0);
 }
 // The ONE shared handler for star click / Ctrl+D / page-context "Bookmark
 // this page" (AC "Star click / Ctrl+D behavior"): bookmarksClient.activateStar

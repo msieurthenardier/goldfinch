@@ -95,3 +95,21 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged }) {
     get list() { return state.list; },
   };
 }
+
+/**
+ * Pure: translate a store-shaped bookmark entry ({id, title, url, icon,
+ * addedAt}) into the bookmark-edit sheet's model shape ({id, name, url}) —
+ * the mirror of handleEditSubmit's name→title mapping above, and the SINGLE
+ * choke point every open path (star / Ctrl+D / page-context via
+ * activateStar's resolution; bar right-click; overflow right-click) must
+ * route through — renderer.js's openBookmarkEditOverlay is the one caller.
+ * A missing/non-string/empty title falls back to the entry's url (never a
+ * blank field) — the same "never blank" idiom as activateStar's own title
+ * fallback above.
+ * @param {any} entry
+ * @returns {{ id: any, name: string, url: any }}
+ */
+export function bookmarkEntryToEditModel(entry) {
+  const title = entry && typeof entry.title === 'string' && entry.title ? entry.title : (entry && entry.url) || '';
+  return { id: entry && entry.id, name: title, url: entry && entry.url };
+}

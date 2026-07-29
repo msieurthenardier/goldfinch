@@ -53,7 +53,7 @@
 import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
-import { buildBookmarkEditCard } from '../shared/bookmark-edit-template.js';
+import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
 import { buildCertPickerCard, renderCertPickerRows, renderCertPickerSubtitle, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
@@ -2085,9 +2085,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
    * @param {any} model @param {any} anchor */
   function renderBookmarkEdit(model, anchor) {
     bookmarkEditId = model && typeof model.id === 'string' ? model.id : null;
-    bookmarkEdit.name.value = model && typeof model.name === 'string' ? model.name : '';
-    bookmarkEdit.url.value = model && typeof model.url === 'string' ? model.url : '';
-    bookmarkEdit.error.textContent = '';
+    applyBookmarkEditModel(bookmarkEdit, model);
     bookmarkEditNode.classList.remove('hidden');
     positionNode(bookmarkEdit.card, anchor);
   }

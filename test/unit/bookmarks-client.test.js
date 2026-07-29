@@ -11,7 +11,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createBookmarksClient } = require('../../src/renderer/chrome/bookmarks-client.js');
+const { createBookmarksClient, bookmarkEntryToEditModel } = require('../../src/renderer/chrome/bookmarks-client.js');
 
 function makeBridge(initialList = []) {
   const calls = [];
@@ -135,4 +135,36 @@ test('handleEditSubmit: a malformed payload (no string id) is a silent no-op', (
   client.handleEditSubmit({});
   client.handleEditSubmit({ id: 42 });
   assert.deepEqual(bridge.calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// bookmarkEntryToEditModel — the HAT-fix (Leg 5) store→sheet translation
+// choke point: every open path (star/Ctrl+D/page-context, bar right-click,
+// overflow right-click) must route a store-shaped entry through this before
+// it reaches the bookmark-edit sheet, which reads model.name/model.url.
+// ---------------------------------------------------------------------------
+
+test('bookmarkEntryToEditModel: translates a store entry\'s title to the sheet model\'s name', () => {
+  const entry = { id: 'a', url: 'https://x/', title: 'X Site', icon: null, addedAt: 1 };
+  assert.deepEqual(bookmarkEntryToEditModel(entry), { id: 'a', name: 'X Site', url: 'https://x/' });
+});
+
+test('bookmarkEntryToEditModel: a missing/empty/non-string title falls back to the url (never blank)', () => {
+  assert.deepEqual(
+    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: '' }),
+    { id: 'a', name: 'https://x/', url: 'https://x/' }
+  );
+  assert.deepEqual(
+    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/' }),
+    { id: 'a', name: 'https://x/', url: 'https://x/' }
+  );
+  assert.deepEqual(
+    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: 42 }),
+    { id: 'a', name: 'https://x/', url: 'https://x/' }
+  );
+});
+
+test('bookmarkEntryToEditModel: a null/undefined entry degrades to an all-blank model, never throws', () => {
+  assert.deepEqual(bookmarkEntryToEditModel(null), { id: null, name: '', url: null });
+  assert.deepEqual(bookmarkEntryToEditModel(undefined), { id: undefined, name: '', url: undefined });
 });
