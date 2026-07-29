@@ -705,7 +705,20 @@ a:focus-visible {
   border-radius: 5px;
   background: transparent;
   color: var(--fg);
+  /* HAT fix (Leg 5): reset the UA button font shorthand FIRST — same idiom as
+     .tab-close's `font: inherit` — then re-apply the bar's own size. Without
+     this, the browser's default button font (a system-control font distinct
+     from the app's system-ui stack) carries its own `line-height: normal`,
+     whose ascent/descent metrics sit off-center inside the flex-centered
+     24px box: the glyph ink reads visually low, i.e. more gap above the icon
+     / label than below (operator-reported squashed look). `line-height: 1`
+     removes the half-leading so the label's line box tracks the font's em
+     box, and flex align-items:center on this row + the parent #bookmarks-bar
+     then centers it symmetrically. Height/overflow/transition of
+     #bookmarks-bar itself are untouched (INVARIANT above). */
+  font: inherit;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
 }
 .bm-item.hidden {

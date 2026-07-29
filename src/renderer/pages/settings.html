@@ -53,6 +53,12 @@
           <label class="shield-row startup-toggle-row"><span>Show bookmarks bar</span><input type="checkbox" id="bookmarks-bar-enabled" /></label>
         </fieldset>
         <p class="muted">Shows a bar of your bookmarks below the toolbar in every window. Toggle anytime with Ctrl+Shift+B.</p>
+        <!-- Pinned-icons subheading (HAT fix, Leg 5): a divider + h3 sets the pin rows
+             apart as their own named group, matching the Automation section's h2>h3
+             subheading idiom ("Keys", "Activity") — the divider itself mirrors the
+             border-top pattern .startup-toggle-group/.spellcheck-group already use to
+             mark a standalone group. No element ids changed; toggle behavior untouched. -->
+        <h3>Pinned Icons</h3>
         <div class="appearance-row">
           <span>Media</span>
           <button type="button" class="pin-toggle" id="pin-media" aria-pressed="true" aria-label="Pin Media to toolbar">
