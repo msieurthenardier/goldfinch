@@ -35,6 +35,14 @@ or download **v0.11.6** directly:
 - **Standard browser chrome**: multi-tab browsing, back/forward/reload, address
   bar with search-or-URL detection, persistent session (stays logged in),
   favicons, popups opened as new tabs.
+- **Everyday web compatibility**: HTML5 fullscreen works — a video (or any
+  page element) expands over the whole window, and `Esc` or the page's own
+  control exits. Pages behind **HTTP basic auth** prompt for credentials with
+  Goldfinch's own sign-in sheet (showing the site's host and realm; Cancel
+  shows the site's error page instead). Sites that request a **client
+  certificate** show a chooser listing your certificates, with a "Continue
+  without a certificate" option. **PDFs render inline** in the tab with the
+  built-in viewer — links that force a download still download.
 - **Frameless window**: Goldfinch runs in a custom frameless window —
   minimize / maximize-restore / close controls live at the right end of the tab
   bar on Windows and Linux; macOS keeps its native traffic-light controls.
@@ -245,7 +253,7 @@ drive and observe tabs. It is exposed in no released build — see
 | `Home` / `End`  | First / last tab    |
 | `Delete` / `Backspace` | Close the focused tab |
 | `Shift+F10` / Context-Menu key | Open the tab context menu for a focused tab (or the page context menu elsewhere) |
-| `Esc`           | Close an open menu / panel / find bar |
+| `Esc`           | Close an open menu / panel / find bar; exit HTML5 fullscreen |
 
 Zoom shows a chip in the toolbar when the level is not 100%, and applies to web
 content only (not `goldfinch://` internal pages).

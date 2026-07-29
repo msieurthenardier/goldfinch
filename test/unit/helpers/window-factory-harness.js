@@ -142,6 +142,13 @@ function createHarness(options = {}) {
     createFindOverlayManager: (deps) => manager('find', deps),
     createMenuOverlayManager: (deps) => manager('sheet', deps),
     createTearoffOverlayManager: (deps) => manager('tearoff', deps),
+    // M14 F1 L1: resize/maximize/unmaximize call the fullscreen re-expand hook
+    // with the in-scope record — logged for the ordering assertion.
+    htmlFullscreen: options.htmlFullscreen
+      || { handleWindowResize: (record) => { log.push(`fs-resize:${record.win.id}`); } },
+    // M14 F1 L2: the auth pending-challenge store (optional in production too —
+    // window-factory optional-chains every call). Tests pass a recording fake.
+    authChallenges: options.authChallenges,
     computeFindOverlayBounds: () => null,
     getTabContents: (wcId) => options.tabContents?.get(wcId) || null,
     chromeForAttachment: () => null,

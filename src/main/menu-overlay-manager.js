@@ -92,7 +92,8 @@
  *   sendToChrome?: (channel: string, payload: any, win?: any) => void,
  *   hideFindOverlay?: () => void,
  *   restoreFindOverlay?: (reason: string) => void,
- *   focusChrome?: (win?: any) => void
+ *   focusChrome?: (win?: any) => void,
+ *   onClosed?: (info: { menuType: string, reason: string }) => void
  * }} deps
  */
 function createMenuOverlayManager({
@@ -101,7 +102,14 @@ function createMenuOverlayManager({
   sendToChrome = () => {},
   hideFindOverlay = () => {},
   restoreFindOverlay = () => {},
-  focusChrome = () => {}
+  focusChrome = () => {},
+  // M14 F1 L2 (auth-challenges): optional close-observer, invoked on BOTH
+  // close-emit paths — closeMenuOverlay after its channel-7 emit AND openMenu's
+  // model-replace branch (which emits 'superseded' directly via sendToChrome
+  // without ever calling closeMenuOverlay — hooking only closeMenuOverlay would
+  // stall the auth queue on exactly the occlusion case it depends on). The
+  // mapping consumer must therefore be path-agnostic about 'superseded'.
+  onClosed = () => {}
 }) {
   /** @type {SheetViewLike | null} */
   let view = null;
@@ -264,6 +272,10 @@ function createMenuOverlayManager({
         reason: 'superseded',
         token: currentMenu.token
       }, attachment ? attachment.win : null);
+      // Close-observer, model-replace path (M14 F1 L2): the superseded menu is
+      // over even though closeMenuOverlay never ran — observers (the auth
+      // pending-challenge store) must see this close too.
+      onClosed({ menuType: currentMenu.menuType, reason: 'superseded' });
       // Cross-window model-replace: detach from the OLD recorded attachment
       // before attaching to the new window (the one case where model-replace
       // must physically move the view).
@@ -319,6 +331,10 @@ function createMenuOverlayManager({
     // DD7: channel 7 + the refocus both target the ATTACHMENT window's chrome
     // (wrong-window delivery = stuck aria-expanded / focus into the wrong window).
     sendToChrome('menu-overlay-closed', { menuType: closed.menuType, reason, token: closed.token }, att ? att.win : null);
+    // Close-observer, single-close-path half (M14 F1 L2): after the channel-7
+    // emit, with currentMenu already null — an observer re-opening a menu (the
+    // auth re-present) sees isMenuOpen() === false.
+    onClosed({ menuType: closed.menuType, reason });
     // Reason-resolved refocus, main-side half: escape/activated move keyboard
     // focus back to the chrome view (webContents-level); chrome then focuses the
     // appropriate DOM target on channel 7. `input-empty` also restores chrome:

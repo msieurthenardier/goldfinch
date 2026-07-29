@@ -175,6 +175,18 @@ function deriveAuditDetail(op, args, result) {
       }
       return detail;
     }
+    case 'vaultAnswerAuth': {
+      // M14 F1 L2 (DD3): vaultFill's audit twin — the item id plus, on a
+      // successful answer, the resolved (non-secret) CHALLENGE origin from the
+      // result. NEVER the credential/password — read from neither args nor result.
+      if (args.itemId == null) return null;
+      let detail = 'item=' + String(args.itemId);
+      const parsed = parseResultJson(result);
+      if (parsed && parsed.answered === true && parsed.origin) {
+        detail += ' origin=' + String(parsed.origin);
+      }
+      return detail;
+    }
     default:
       return null;
   }
@@ -328,6 +340,13 @@ async function freePortInRange(lo = 49152, hi = 65535) {
  *   the vaultFill effect (M12 F1 Leg 3). Leg 4 injects the real main→preload
  *   fill; Leg 3 tests inject a fake; the running app injects a stub that throws
  *   until Leg 4. Defaults to a throwing stub. The credential never crosses back.
+ * @param {(arg: { wcId: number, credential: any }) => { answered: boolean, reason?: string }} [opts.answerAuthDelegate]
+ *   the vaultAnswerAuth effect (M14 F1 L2 / DD3): resolves the tab's pending
+ *   HTTP auth challenge's native callback in the auth store. The credential
+ *   never crosses back. Absent → vault-context's throwing stub.
+ * @param {(wcId: number) => any} [opts.getPendingChallenge]  NON-SECRET read of
+ *   the tab's pending auth challenge (M14 F1 L2) — vault-context.answerAuth's
+ *   origin-match input. Absent → answerAuth reports no-challenge.
  * @param {() => number} [opts.getAutoLockMinutes]  idle auto-lock minutes reader
  *   for the per-session vault idle backstop (DD5). Defaults to `() => 10`.
  * @param {string} [opts.version]  server version advertised in the handshake;
@@ -412,6 +431,15 @@ function createMcpServer(opts = {}) {
   // the running app injects a stub that throws until Leg 4 wires the real
   // main→preload fill effect. getAutoLockMinutes drives the DD5 idle backstop.
   const vaultStore = opts.vaultStore;
+  // M14 F1 L2 (DD3): auth-answer twins of fillDelegate below. Left undefined
+  // when not injected — vault-context installs its own throwing stub / null
+  // read, so engine-only tests need nothing.
+  const answerAuthDelegate = typeof opts.answerAuthDelegate === 'function'
+    ? opts.answerAuthDelegate
+    : undefined;
+  const getPendingChallenge = typeof opts.getPendingChallenge === 'function'
+    ? opts.getPendingChallenge
+    : undefined;
   const fillDelegate = typeof opts.fillDelegate === 'function'
     ? opts.fillDelegate
     : () => { throw new Error('automation: vault-fill-not-wired — the main→preload fill delegate lands in Leg 4'); };
@@ -437,7 +465,7 @@ function createMcpServer(opts = {}) {
   let pendingSessions = 0;
 
   /**
-   * Build a fresh MCP Server with the 34 tools wired over a per-session,
+   * Build a fresh MCP Server with the 35 tools wired over a per-session,
    * IDENTITY-SCOPED engine accessor (DD4/DD6/DD7 / Leg 2) + the per-session VAULT
    * CONTEXT (M12 F1 Leg 3). One per session:
    *   - the engine is built with `{ allowInternal: identity === 'admin' }`, then
@@ -479,6 +507,9 @@ function createMcpServer(opts = {}) {
       totp: (/** @type {string} */ itemId, /** @type {string=} */ vaultId) => vaultCtx.totp(itemId, vaultId),
       fill: (/** @type {{ wcId: number, itemId: string, vaultId?: string }} */ target) =>
         vaultCtx.fill(identity, target, scopeCtx || {}),
+      // M14 F1 L2 (DD3): the auth-answer twin — same identity + membership deps.
+      answerAuth: (/** @type {{ wcId: number, itemId: string, vaultId?: string }} */ target) =>
+        vaultCtx.answerAuth(identity, target, scopeCtx || {}),
     };
     const registry = buildToolRegistry(
       () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx),
@@ -804,6 +835,11 @@ function createMcpServer(opts = {}) {
     const vaultCtx = createVaultContext({
       vaultStore,
       fillDelegate,
+      // M14 F1 L2 (DD3): the auth-answer delegate + the pending-challenge read
+      // seam, threaded from main.js's auth store (absent in engine-only tests —
+      // vault-context degrades cleanly).
+      answerAuthDelegate,
+      getPendingChallenge,
       getAutoLockMinutes: getVaultAutoLockMinutes,
     });
 

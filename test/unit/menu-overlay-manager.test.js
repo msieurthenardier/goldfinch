@@ -790,3 +790,81 @@ test('DD7: attachment-less opens (fallback resolve) keep a null attached window'
   mgr.closeMenuOverlay('escape');
   assert.equal(cv.calls.filter((c) => c[0] === 'removeChildView').length, 1, 'fallback recorded and removed-from');
 });
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 — onClosed close-observer, BOTH emit paths. The auth pending-
+// challenge store's bucket mapping depends on seeing every close, including
+// openMenu's model-replace branch (which emits 'superseded' via sendToChrome
+// WITHOUT calling closeMenuOverlay — hooking only closeMenuOverlay would stall
+// the queue on exactly that occlusion case).
+// ---------------------------------------------------------------------------
+
+function setupObserved() {
+  cv = makeFakeContentView();
+  createdViews = [];
+  const closedEvents = [];
+  mgr = createMenuOverlayManager({
+    getContentView: () => cv,
+    createSheetView: () => {
+      const v = makeFakeView();
+      createdViews.push(v);
+      return v;
+    },
+    onClosed: (info) => closedEvents.push(info)
+  });
+  return closedEvents;
+}
+
+test('onClosed fires on the closeMenuOverlay path, after the channel-7 emit, with isMenuOpen already false', () => {
+  let openAtObserve = null;
+  const events = setupObservedWithProbe((v) => { openAtObserve = v; });
+  mgr.openMenu({ menuType: 'auth-basic', model: [], anchor: null, token: 1 });
+  mgr.closeMenuOverlay('escape');
+  assert.deepEqual(events, [{ menuType: 'auth-basic', reason: 'escape' }]);
+  assert.equal(openAtObserve, false, 'currentMenu is already null when the observer runs — a re-open sees isMenuOpen false');
+});
+
+// Helper for the probe variant above: rebuild the manager with an observer that
+// also snapshots isMenuOpen() at observe time.
+function setupObservedWithProbe(probe) {
+  cv = makeFakeContentView();
+  createdViews = [];
+  const events = [];
+  mgr = createMenuOverlayManager({
+    getContentView: () => cv,
+    createSheetView: () => {
+      const v = makeFakeView();
+      createdViews.push(v);
+      return v;
+    },
+    onClosed: (info) => {
+      events.push(info);
+      probe(mgr.isMenuOpen());
+    }
+  });
+  return events;
+}
+
+test("onClosed fires on openMenu's model-replace branch with reason 'superseded' — the path that bypasses closeMenuOverlay", () => {
+  const closedEvents = setupObserved();
+  mgr.openMenu({ menuType: 'auth-basic', model: [], anchor: null, token: 1 });
+  assert.deepEqual(closedEvents, [], 'no close yet');
+  mgr.openMenu({ menuType: 'kebab', model: [], anchor: null, token: 2 });
+  assert.deepEqual(closedEvents, [{ menuType: 'auth-basic', reason: 'superseded' }],
+    'the superseded menu reaches the observer even though closeMenuOverlay never ran');
+  mgr.closeMenuOverlay('escape');
+  assert.deepEqual(closedEvents.at(-1), { menuType: 'kebab', reason: 'escape' });
+});
+
+test('onClosed does NOT fire on an idempotent no-op close (no menu open)', () => {
+  const closedEvents = setupObserved();
+  mgr.closeMenuOverlay('blur');
+  assert.deepEqual(closedEvents, []);
+});
+
+test('onClosed default is a no-op (absent injection changes nothing)', () => {
+  setup();
+  mgr.openMenu({ menuType: 'kebab', model: [], anchor: null, token: 1 });
+  mgr.closeMenuOverlay('escape'); // must not throw
+  assert.equal(mgr.isMenuOpen(), false);
+});

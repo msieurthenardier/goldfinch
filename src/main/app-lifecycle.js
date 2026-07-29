@@ -65,6 +65,7 @@ function registerAppLifecycle({
   setSessionQuitting,
   buildSessionSnapshot,
   appDb,
+  authChallenges,
   getAllWindows,
   argv,
   env,
@@ -73,6 +74,30 @@ function registerAppLifecycle({
   logger = console,
 }) {
   app.on('session-created', sessionRuntime.onSessionCreated);
+
+  // M14 F1 L2 (flight DD2): HTTP auth challenges. Registered at TOP-LEVEL scope
+  // (not inside whenReady — same reasoning as web-contents-created below: the
+  // first window's first navigation can challenge before whenReady's tail).
+  // preventDefault() ALWAYS — Electron would otherwise cancel the auth attempt
+  // immediately; from here every callback is owned by the pending-challenge
+  // store's exactly-once ledger (guard cancels included).
+  app.on('login', (event, webContents, details, authInfo, callback) => {
+    event.preventDefault();
+    authChallenges.handleLogin(webContents, details, authInfo, callback);
+  });
+
+  // M14 F1 L3 (flight DD4, design-review corrected: select-client-certificate
+  // is an APP-level event, not a session event). Same top-level registration
+  // rationale as 'login' above. preventDefault() ALWAYS — Electron would
+  // otherwise auto-select the first certificate in the list; from here every
+  // callback is owned by the store's exactly-once ledger (guard cancels
+  // included). An empty candidate list never reaches this handler (Electron
+  // continues cert-less before emitting) — the store's empty-list guard is
+  // defense-in-depth.
+  app.on('select-client-certificate', (event, webContents, url, list, callback) => {
+    event.preventDefault();
+    authChallenges.handleSelectClientCertificate(webContents, url, list, callback);
+  });
 
   // Mission 13 Flight 3 / Leg 3 (DD3, AC2): every webContents (chrome, overlays,
   // sheets, DevTools frontend, the built-in PDF viewer) gets a window-open denial

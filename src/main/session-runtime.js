@@ -9,7 +9,11 @@
 // 'hid'/'serial'/'usb' are check-only). This one Set is intentionally
 // shared by both handlers below — do not "fix" the apparent asymmetry by
 // splitting it; a permission irrelevant to one handler's union is simply
-// never asked of it.
+// never asked of it. The shared-Set union is pinned by the unit test
+// 'permission allowlist denies invented/future permissions and grants
+// allowlisted members' (test/unit/session-runtime.test.js), which exercises
+// BOTH handlers against the same membership — a split would have to weaken
+// that test to land, which is the tell that the refactor is wrong.
 const ALLOWED_PERMISSIONS = new Set([
   'fullscreen',
   'clipboard-sanitized-write',

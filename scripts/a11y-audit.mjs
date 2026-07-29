@@ -246,7 +246,7 @@ async function findSheetWcId(client) {
 // The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
 // first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
 // SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey'];
+const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey', 'sheet-auth-basic', 'sheet-cert-picker'];
 const SHEET_DISMISS_EXPR = `(() => {
   const ids = ${JSON.stringify(SHEET_NODE_IDS)};
   const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
@@ -459,6 +459,17 @@ async function main() {
         // reuses vault-stepup (already covered above). Raises no chrome-side trigger — the audit hook
         // opens it directly.
         { label: 'sheet:vault-adminkey-show', open: 'openVaultAdminKeyShowOverlayForAudit()' },
+        // M14 F1 L2 (auth-challenges): the HTTP basic-auth credential prompt.
+        // Dialog-style, Escape-dismissible; host/realm context line + labeled
+        // username/password fields + Sign in/Cancel (modal-card contract). Raises
+        // no chrome-side trigger — the audit hook opens it directly with a
+        // synthetic NON-SECRET host/realm model.
+        { label: 'sheet:auth-basic', open: 'openAuthBasicOverlayForAudit()' },
+        // M14 F1 L3 (client-cert): the TLS client-certificate chooser. A roving
+        // role="menu" list (vault-picker shape: labeled subject/issuer rows + a
+        // separated Cancel row), Escape-dismissible. Raises no chrome-side
+        // trigger — the audit hook opens it with a synthetic display-string row.
+        { label: 'sheet:cert-picker', open: 'openCertPickerOverlayForAudit()' },
         // M11 Flight 1 Leg 3: the downloads popup. openDownloadsOverlayForAudit()
         // force-shows a capped synthetic completed list then opens the role="dialog"
         // popup (filename-open + folder buttons, a keyboard-scrollable overflow

@@ -84,6 +84,15 @@ test('tracks focus and routes resize/maximize state only to the owning chrome', 
     ['window-maximized-change', false],
     ['trigger-send-bounds', undefined]
   ]);
+  // M14 F1 L1 (DD1): the fullscreen re-expand hook rides all THREE geometry
+  // events — resize plus maximize/unmaximize (which can arrive without a
+  // paired resize on some platforms) — and each call precedes that event's
+  // trigger-send-bounds (the renderer's triggered send must land in an
+  // already-re-expanded gate).
+  assert.equal(h.log.filter((entry) => entry === `fs-resize:${rec.win.id}`).length, 3);
+  const fsIdx = h.log.indexOf(`fs-resize:${rec.win.id}`);
+  const sendIdx = h.log.indexOf('send:trigger-send-bounds');
+  assert.ok(fsIdx !== -1 && fsIdx < sendIdx, 'resize re-expand precedes the triggered renderer send');
 });
 
 test('close tears down overlays before capture/snapshot and destroys every guest afterward', () => {
@@ -147,4 +156,64 @@ test('closed handler uses only the captured primitive id and destroys chrome def
   assert.doesNotThrow(() => rec.win.emit('closed'));
   assert.equal(h.registry.get(id), null);
   assert.equal(rec.chromeView.webContents.isDestroyed(), true);
+});
+
+// ---------------------------------------------------------------------------
+// M14 F1 L2 (DD2) — auth pending-challenge store wiring.
+// ---------------------------------------------------------------------------
+
+function authWiredHarness() {
+  const events = [];
+  /** late-bound so the cancelForWindow ordering probe can read the harness log */
+  let h = null;
+  const authChallenges = {
+    notifyWindowFocused: (record) => events.push(['focused', record.win.id]),
+    notifySheetClosed: (record, menuType, reason) => events.push(['sheet-closed', record.win.id, menuType, reason]),
+    cancelForWindow: (record) => events.push([
+      'cancel-window',
+      record.win.id,
+      // ordering probe: the sheet's 'teardown' close must NOT have run yet —
+      // cancelForWindow empties the queue FIRST (load-bearing, leg AC).
+      h.log.includes('sheet-close:teardown'),
+    ]),
+  };
+  h = createHarness({ authChallenges });
+  return { h, events };
+}
+
+test('window focus notifies the auth store (the blur-close re-present counterpart, M14 F1 L2)', () => {
+  const { h, events } = authWiredHarness();
+  const rec = h.factory.createWindow();
+  rec.win.emit('focus');
+  assert.deepEqual(events, [['focused', rec.win.id]]);
+});
+
+test('window close cancels the WHOLE auth queue BEFORE the sheet teardown close', () => {
+  const { h, events } = authWiredHarness();
+  const rec = h.factory.createWindow();
+  rec.win.emit('close');
+  const cancel = events.find((e) => e[0] === 'cancel-window');
+  assert.ok(cancel, 'cancelForWindow ran');
+  assert.equal(cancel[1], rec.win.id);
+  assert.equal(cancel[2], false, "ran BEFORE the sheet's closeMenuOverlay('teardown')");
+  assert.ok(h.log.includes('sheet-close:teardown'), 'the teardown close still runs after');
+});
+
+test('the manager onClosed dep threads to notifySheetClosed closing over the window record', () => {
+  const { h, events } = authWiredHarness();
+  const rec = h.factory.createWindow();
+  const sheetDeps = h.managerDeps.sheet;
+  assert.equal(typeof sheetDeps.onClosed, 'function', 'onClosed is threaded at the construction site');
+  sheetDeps.onClosed({ menuType: 'auth-basic', reason: 'blur' });
+  assert.deepEqual(events, [['sheet-closed', rec.win.id, 'auth-basic', 'blur']]);
+});
+
+test('absent authChallenges dep is tolerated on every hook (optional-chained)', () => {
+  const h = createHarness();
+  const rec = h.factory.createWindow();
+  assert.doesNotThrow(() => {
+    rec.win.emit('focus');
+    h.managerDeps.sheet.onClosed({ menuType: 'kebab', reason: 'escape' });
+    rec.win.emit('close');
+  });
 });

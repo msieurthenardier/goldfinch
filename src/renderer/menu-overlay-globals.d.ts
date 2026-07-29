@@ -42,6 +42,11 @@ interface MenuOverlayBridge {
    * master password rides as a Uint8Array (never channel-4 activated). Returns
    * { ok } — false re-prompts the sheet (wrong password); true closes it. */
   unlockVault(payload: { token: number; secret: Uint8Array }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED auth-basic credential channel (M14 F1 L2, DD2). The
+   * password rides as a Uint8Array `secret` beside the NON-SECRET username (never
+   * channel-4 activated). Returns { answered } — false re-prompts (challenge gone);
+   * true closes it (the main-side auth store owns the 'activated' close). */
+  authSubmit(payload: { token: number; username: string; secret: Uint8Array }): Promise<{ answered: boolean; reason?: string }>;
   /** sheet → main: the DEDICATED vault-capture save channel (M12 F2 Leg 4, DD7). The
    * chosen vaultId + the stashed captureId (+ token) — NEVER the captured password
    * (held only in the main-side record). Returns { saved }; false re-prompts the sheet. */

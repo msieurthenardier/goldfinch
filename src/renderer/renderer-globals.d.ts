@@ -356,6 +356,14 @@ interface GoldfinchBridge {
   onTabPrivacyFp(cb: (d: { wcId: number; fpCounts: any }) => void): void;
   onTabSelfClose(cb: (d: { wcId: number; historyLength: number }) => void): void;
   onVaultGesture(cb: (d: { wcId: number }) => void): void;
+  // HTTP auth challenge presentation trigger (M14 F1 L2, flight DD2). Main's
+  // pending-challenge store forwards host + realm (NEVER a secret); the chrome
+  // opens the auth-basic sheet through the standard open path.
+  onAuthChallengePresent(cb: (d: { wcId: number; host: string; realm: string }) => void): void;
+  // Client-cert challenge presentation trigger (M14 F1 L3, flight DD4). Display
+  // strings only (never certificate objects); the chrome opens the cert-picker
+  // sheet; the selection rides channel-4 as an index, resolved main-side.
+  onCertChallengePresent(cb: (d: { wcId: number; host: string; certs: Array<{ subject: string; issuer: string }> }) => void): void;
   // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
   // forwards the vault page's requestSetup / requestUnlock as bare triggers; the
   // recovery-show carries the recovery key ONLY (admin key deferred to F4).

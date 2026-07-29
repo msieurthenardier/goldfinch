@@ -23,9 +23,9 @@ the one credential a fill effect injects.
 - **Master-equivalent secrets never touch the vault page DOM.** Master password, recovery
   key, per-jar access secret, and admin private key are entered and displayed only through
   the chrome-owned menu-overlay **sheet**, over a dedicated dual-zeroized Buffer channel.
-- **Fill-only automation.** The four MCP vault tools can unlock, browse metadata, read a
-  live TOTP code, and fill a matching credential into a page — but a password is **never**
-  returned across the automation boundary.
+- **Fill-only automation.** The five MCP vault tools can unlock, browse metadata, read a
+  live TOTP code, fill a matching credential into a page, or answer a pending HTTP
+  basic-auth prompt — but a password is **never** returned across the automation boundary.
 - **Unrecoverable by design.** Lose the master password *and* the recovery key and the data
   is permanently gone. There is no backdoor and no vendor recovery path (see *Threat model*).
 
@@ -189,8 +189,9 @@ gap the mission explicitly accepted.
 
 ## The MCP automation surface
 
-Four tools expose the vault over MCP as a deliberately **fill-only** surface —
-`vaultUnlock` / `vaultList` / `vaultTotp` / `vaultFill` (`src/main/automation/mcp-tools.js`).
+Five tools expose the vault over MCP as a deliberately **fill-only** surface —
+`vaultUnlock` / `vaultList` / `vaultTotp` / `vaultFill` / `vaultAnswerAuth`
+(`src/main/automation/mcp-tools.js`).
 They are **non-engine-op**: they dispatch to a per-session vault context
 (`vault-context.js`), never the automation engine, and hold no cross-session state. Full
 consumer reference: `docs/mcp-automation.md` (*Vault tools*).
@@ -208,6 +209,13 @@ consumer reference: `docs/mcp-automation.md` (*Vault tools*).
   same session-object-identity check the drive/observe tools use; admin may target any tab),
   then a top-frame origin match against the item. The credential is never returned —
   `{ filled, id, origin }` on success, or a normal `{ filled: false, reason }` otherwise.
+- **`vaultAnswerAuth` mirrors `vaultFill`'s gates** (M14 F1) against the browser-owned HTTP
+  basic-auth prompt: the same jar-membership check, then an origin match against the pending
+  **challenge URL's** origin. On success the challenge's native callback resolves inside
+  Goldfinch and a visible credential sheet closes; the credential is never returned —
+  `{ answered, id, origin }` or a normal `{ answered: false, reason }` (`locked` /
+  `no-challenge` / `no-match` / `origin-mismatch` / `ambiguous`). Client-certificate
+  choosers are human-only — never visible to or answerable by this tool.
 - **Metadata only.** `vaultList` returns `{ vaultId, id, title, origin, username, hasTotp }`;
   `vaultTotp` returns the current code only. No password, TOTP secret, or card data crosses
   the wire.
@@ -216,7 +224,8 @@ consumer reference: `docs/mcp-automation.md` (*Vault tools*).
   timer as a belt-and-suspenders backstop. There is no singleton coupling with the human lock
   in either direction — each holds its own fresh-buffer copies.
 - **Audit surface = origin + unlock count, never a secret.** `deriveAuditDetail`
-  (`mcp-server.js`) records the resolved fill **origin** for `vaultFill`, the **count** of
+  (`mcp-server.js`) records the resolved fill **origin** for `vaultFill`, the item id +
+  resolved **origin** for `vaultAnswerAuth`, the **count** of
   vaults opened for `vaultUnlock` (never the ids-as-secrets), and the item id for
   `vaultTotp` — and reads the `accessKey` / password / TOTP secret / vault key from neither
   the args nor the result.
@@ -329,7 +338,8 @@ no plaintext key and adding no fourth recovery route.
 - **Per-jar isolation.** A per-jar automation access key opens only its own vault (it holds
   no MRK envelope). Burner and internal partitions have no vaults.
 - **The automation scope boundary.** The fill-only wire never returns a stored password;
-  `vaultFill` enforces jar membership and a top-frame origin match; the audit records origin
+  `vaultFill` / `vaultAnswerAuth` enforce jar membership and an origin match (top-frame
+  origin / challenge-URL origin respectively); the audit records origin
   and counts, never secrets.
 - **Web content.** No vault secret is readable from a web page except the single credential a
   fill injects — and master-equivalent secrets never enter any page DOM (they route through

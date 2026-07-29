@@ -331,6 +331,25 @@ body {
   color: transparent;
 }
 
+/* ---------- auth-basic template (M14 F1 L2, flight DD2) ----------
+   HTTP basic-auth credential prompt. Reuses the vault-unlock card chrome
+   (centered backdrop + .new-container-inner card + the aria-live error line);
+   only the host/realm context line is template-specific. */
+#sheet-auth-basic {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.auth-basic-origin {
+  font-size: 12px;
+  color: #b8bcc8;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere; /* server-controlled host/realm strings can be long */
+}
+
 /* ---------- vault-set + vault-recovery-show templates (M12 Flight 3 Leg 4 first-run-
    setup, DD5) ----------
    Both reuse the input-dialog card chrome (.new-container-inner / -input / .text-btn) +
@@ -602,7 +621,12 @@ body {
    title, a dimmed username, and a source-vault badge (jar name vs "Global"). The
    empty state is a single non-focusable note. Reuses .new-container-inner for card
    chrome + .cm-item for the row base. */
-#sheet-vault-picker {
+/* The cert-picker (M14 F1 L3) shares the picker's backdrop + card + row chrome
+   wholesale — its rows reuse the .vault-picker-* classes (subject over dimmed
+   issuer; no icon/badges) and the separated cancel row reuses the manage-footer
+   classes, so no cert-specific rules are needed beyond this selector. */
+#sheet-vault-picker,
+#sheet-cert-picker {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);

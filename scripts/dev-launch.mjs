@@ -31,6 +31,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { buildPreloadBundle } from './build-preload.mjs';
+import { decideInsecureTlsFixtures } from './insecure-tls-flag.mjs';
 
 const require = createRequire(import.meta.url);
 // In a plain Node context, require('electron') resolves to the binary path.
@@ -39,7 +40,14 @@ const { decideOzonePlatform } = require('../src/main/ozone-platform.js');
 
 await buildPreloadBundle();
 
-const args = process.argv.slice(2);
+// Dev-only TLS trust bypass for the throwaway-CA behavior fixtures (M14 F1 L3,
+// flight DD6): the `--insecure-tls-fixtures` flag is stripped from the
+// forwarded argv and the corresponding Chromium switch is appended ONLY when
+// the flag was present — pure decision helper, unit-pinned (no flag → no
+// switch). Never a production path: packaged builds launch the binary
+// directly and never run this script.
+const tls = decideInsecureTlsFixtures(process.argv.slice(2));
+const args = [...tls.forwardArgs, ...tls.electronSwitches];
 const env = { ...process.env };
 
 // A caller-provided --ozone-platform / --ozone-platform-hint always wins.

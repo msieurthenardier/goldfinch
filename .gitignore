@@ -24,3 +24,8 @@ test-time.txt
 # launch/test/build entry, never committed (source↔bundle drift is
 # structurally impossible when it's always freshly built).
 src/preload/webview-preload.bundle.js
+
+# Throwaway TLS fixture certs/keys (web-compat client-cert leg) — generated
+# locally by tests/behavior/fixtures/web-compat/gen-certs.mjs, never committed
+# (no-committed-baselines rule; short-lived throwaway CA).
+tests/behavior/fixtures/web-compat/certs/

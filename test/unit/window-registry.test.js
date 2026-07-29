@@ -38,6 +38,9 @@ test('create returns a record with the DD2 shape and registers it', () => {
   assert.ok(rec.tabViews instanceof Map);
   assert.equal(rec.tabViews.size, 0);
   assert.equal(rec.activeTabWcId, null);
+  // M14 F1 L1 (DD1): the HTML fullscreen mode slot is seeded null (house
+  // pattern: every record slot seeded at create).
+  assert.equal(rec.htmlFullscreen, null);
   assert.equal(registry.get(win.id), rec);
   assert.equal(registry.size(), 1);
 });

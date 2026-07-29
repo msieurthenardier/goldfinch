@@ -55,14 +55,34 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // 'sheet:vault-recover' a11y drivers (same leg-authorized seam-addition precedent).
 // M12 F4 Leg 3 (admin-key-provision, DD9): +1 for openVaultAdminKeyShowOverlayForAudit — the
 // SHEET_STATES 'sheet:vault-adminkey-show' a11y driver (same leg-authorized seam-addition precedent).
-const SEAM_COUNT = 29;
+// M14 F1 L2 (auth-challenges): +1 for openAuthBasicOverlayForAudit — the SHEET_STATES
+// 'sheet:auth-basic' a11y driver for the new HTTP basic-auth credential sheet (same
+// leg-authorized seam-addition precedent; a planned, deliberate bump per the flight's
+// Technical Approach).
+// M14 F1 L3 (client-cert): +1 for openCertPickerOverlayForAudit — the SHEET_STATES
+// 'sheet:cert-picker' a11y driver for the TLS client-certificate chooser sheet (same
+// leg-authorized seam-addition precedent; planned bump per the leg's Outputs).
+const SEAM_COUNT = 31;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.
 // Mission 13 F1 Leg 2 (DD2/AC3): +1 for the toMediaProxyUrl import + createMediaController
 // dep-injection line (media-panel proxy wiring) — the minimum single-line footprint for a
 // new shared dependency; no other renderer.js growth in this leg.
-const RENDERER_LINE_BUDGET = 1701;
+// M14 F1 L2 (auth-challenges): +34 (1700 → 1734) for the auth-basic sheet's chrome
+// wiring — overlay state entry, auth-challenge-present open listener, channel-6
+// validated-no-op branch, and the openAuthBasicOverlayForAudit seam hook — the
+// minimum per-sheet chrome footprint (vault-sheet precedent). Planned, deliberate
+// bump per the flight's Technical Approach; renderer.js extraction remains banked
+// architecture debt. (Budget counts split-array elements — one above `wc -l` for a
+// newline-terminated file, matching the prior 1700/1701 pairing.)
+// M14 F1 L3 (client-cert): +31 (1734 → 1765) for the cert-picker sheet's chrome
+// wiring — overlay state entry, cert-challenge-present open listener, channel-6
+// validated-no-op branch, the openCertPickerOverlayForAudit seam hook, and the
+// seam-block bookkeeping — the same minimum per-sheet chrome footprint as L2's
+// auth-basic bump. Planned, deliberate bump per the leg's Outputs; renderer.js
+// extraction remains banked architecture debt.
+const RENDERER_LINE_BUDGET = 1766;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
