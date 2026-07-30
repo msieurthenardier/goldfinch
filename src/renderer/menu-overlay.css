@@ -932,6 +932,13 @@ body {
   gap: 1px;
   width: 100%;
   padding: 6px 8px;
+  /* M15 F1 Leg 5 HAT fix: this rule predates the badge (M08 F4 Leg 2) — width:100%
+     plus padding with the document's default content-box sizing makes the row's
+     border box 16px WIDER than #sheet-suggestions's content box, bleeding past the
+     sheet's right edge on every row (badged or not; confirmed pre-existing, not
+     introduced by Leg 4's badge markup — the same box-sizing gap the vault-picker-
+     list comment above documents for .cm-item, just never patched here). */
+  box-sizing: border-box;
   border-radius: 6px;
   cursor: pointer;
   overflow: hidden;
@@ -963,24 +970,20 @@ body {
   font-size: 12px;
   padding: 7px 8px;
 }
-/* Bookmark-row badge (M15 F1 Leg 4, DD11): a REAL DOM span with a textContent
-   node (design review: no CSS `content:` glyph — zero precedent for
-   generated-content markers in this codebase). `aria-hidden` on this element
-   keeps its visible text out of the option's computed accessible NAME (the
+/* Bookmark-row badge (M15 F1 Leg 4, DD11; glyph swapped to a star in the Leg 5 HAT
+   fix): a REAL DOM node (design review: no CSS `content:` glyph — zero precedent
+   for generated-content markers in this codebase). `aria-hidden` on this element
+   keeps its visible glyph out of the option's computed accessible NAME (the
    `.sr-only` node below carries the actual accessible signal, wired via
-   `aria-describedby` on the row). */
+   `aria-describedby` on the row). `color` here is read by the star SVG's
+   `fill="currentColor"` (buildBookmarkStarIcon) — same accent token the address-
+   bar star uses for its filled/starred state. */
 .sg-badge {
   position: absolute;
   top: 6px;
   right: 8px;
-  font-size: 9px;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--bg);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  display: flex;
+  color: var(--accent);
   pointer-events: none;
 }
 /* This document does not load styles.css (menu-overlay.html is a separate

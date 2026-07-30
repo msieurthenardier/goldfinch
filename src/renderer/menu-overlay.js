@@ -54,6 +54,7 @@ import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
 import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
+import { buildBookmarkStarIcon } from '../shared/bookmark-star-icon.js';
 import { buildCertPickerCard, renderCertPickerRows, renderCertPickerSubtitle, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
@@ -526,22 +527,28 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
         secondary.className = 'sg-secondary';
         secondary.textContent = String(item && item.secondary != null ? item.secondary : '');
         row.append(primary, secondary);
-        // M15 F1 Leg 4 (DD11): kind==='bookmark' rows get a visible badge that
-        // is a REAL DOM span with a textContent node (design review: no CSS
-        // `content:` glyph — zero precedent for generated-content markers in
-        // this codebase; every marker is a textContent node) plus an
+        // M15 F1 Leg 4 (DD11): kind==='bookmark' rows get a visible badge —
+        // a REAL DOM node (design review: no CSS `content:` glyph — zero
+        // precedent for generated-content markers in this codebase) plus an
         // accessible description. The badge itself is `aria-hidden` so its
-        // visible text never leaks into the option's computed accessible
+        // visible glyph never leaks into the option's computed accessible
         // NAME (which stays primary+secondary, matching every other row);
         // the actual accessible signal is a separate `.sr-only` text node
         // wired via `aria-describedby` — deliberately NOT `aria-label` on the
         // row, which would override the computed name outright and drop the
         // visible primary/secondary text for AT users (design review).
+        // M15 F1 Leg 5 HAT fix: the badge was originally a text pill
+        // (`textContent = 'Bookmark'`); operator asked for a star glyph
+        // matching the address-bar star's visual idiom instead. Built via
+        // the shared `buildBookmarkStarIcon` (createElementNS-only, same
+        // no-innerHTML discipline as `.sg-badge`'s prior textContent form)
+        // — the a11y contract above (aria-hidden badge + sr-only description)
+        // is unchanged; only the visible glyph moved from text to SVG.
         if (item && item.kind === 'bookmark') {
           const badge = document.createElement('span');
           badge.className = 'sg-badge';
-          badge.textContent = 'Bookmark';
           badge.setAttribute('aria-hidden', 'true');
+          badge.appendChild(buildBookmarkStarIcon(document));
           row.appendChild(badge);
 
           const descId = 'sg-bookmark-desc-' + i;
