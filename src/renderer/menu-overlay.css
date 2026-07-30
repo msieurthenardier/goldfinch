@@ -926,10 +926,18 @@ body {
   outline: none;
 }
 .sg-option {
-  position: relative; /* anchors .sg-badge (M15 F1 Leg 4, DD11) */
+  /* M15 F1 Leg 5 HAT fix (full-height star): row flips from a column flex
+     (primary above secondary, full stop) to a ROW flex — `.sg-text` below
+     reproduces the old column stack, and `.sg-badge`, when present, is now a
+     real flex sibling instead of an absolutely-positioned corner chip, so it
+     can `align-self: stretch` to the row's full CONTENT height (the two text
+     lines, padding excluded — flexbox's default cross-axis stretch fills the
+     container's content box, which is exactly that). */
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
   width: 100%;
   padding: 6px 8px;
   /* M15 F1 Leg 5 HAT fix: this rule predates the badge (M08 F4 Leg 2) — width:100%
@@ -950,6 +958,17 @@ body {
   background: var(--bg-2);
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+/* Text column (M15 F1 Leg 5 HAT fix) — reproduces the row's former column
+   layout exactly; `min-width: 0` overrides the flex item's default
+   `min-width: auto` so the nowrap primary/secondary spans can still shrink
+   and ellipsize instead of forcing the row (and the badge) wider. */
+.sg-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .sg-primary {
   color: var(--fg);
@@ -977,14 +996,34 @@ body {
    `.sr-only` node below carries the actual accessible signal, wired via
    `aria-describedby` on the row). `color` here is read by the star SVG's
    `fill="currentColor"` (buildBookmarkStarIcon) — same accent token the address-
-   bar star uses for its filled/starred state. */
+   bar star uses for its filled/starred state.
+   M15 F1 Leg 5 HAT fix (full-height star): no longer an absolutely-positioned
+   corner chip — now a real `.sg-option` flex child. `align-self: stretch` (also
+   the row's own default `align-items: stretch`, stated explicitly for clarity)
+   sizes the badge to the row's full content height so the star reads as one
+   full-height indicator; `flex: none` keeps it from growing/shrinking away from
+   that height-driven, aspect-locked square (see `.sg-badge-star` below). */
 .sg-badge {
-  position: absolute;
-  top: 6px;
-  right: 8px;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex: none;
   color: var(--accent);
   pointer-events: none;
+}
+/* The star glyph itself sizes off the badge's stretched height (which in turn
+   tracks the row's own two-line content height — see `.sg-option`/`.sg-text`
+   above) rather than a hardcoded pixel guess, so it stays correct if row
+   line-heights ever change. This overrides `buildBookmarkStarIcon`'s
+   width="11"/height="11" presentation attributes (CSS beats presentation
+   attributes regardless of selector specificity) — the builder's own
+   contract/attributes are otherwise untouched. `aspect-ratio: 1 / 1` matches
+   the icon's square 24x24 viewBox, so height:100% alone determines width. */
+.sg-badge-star {
+  height: 100%;
+  width: auto;
+  aspect-ratio: 1 / 1;
 }
 /* This document does not load styles.css (menu-overlay.html is a separate
    page) — the standard visually-hidden-but-accessible technique is

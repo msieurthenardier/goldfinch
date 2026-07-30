@@ -520,13 +520,22 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
         row.className = 'sg-option' + (i === selectedIndex ? ' selected' : '');
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', String(i === selectedIndex));
+        // M15 F1 Leg 5 HAT fix (full-height star): the primary/secondary pair
+        // moves into its own column ('.sg-text') so `.sg-option` can become a
+        // ROW flex container — the bookmark badge is now a real flex sibling
+        // that stretches to the row's full content height (see menu-overlay.css),
+        // instead of an absolutely-positioned corner chip. Non-bookmark rows are
+        // unaffected: `.sg-text` reproduces the prior column layout exactly.
+        const text = document.createElement('span');
+        text.className = 'sg-text';
         const primary = document.createElement('span');
         primary.className = 'sg-primary';
         primary.textContent = String(item && item.primary != null ? item.primary : '');
         const secondary = document.createElement('span');
         secondary.className = 'sg-secondary';
         secondary.textContent = String(item && item.secondary != null ? item.secondary : '');
-        row.append(primary, secondary);
+        text.append(primary, secondary);
+        row.append(text);
         // M15 F1 Leg 4 (DD11): kind==='bookmark' rows get a visible badge —
         // a REAL DOM node (design review: no CSS `content:` glyph — zero
         // precedent for generated-content markers in this codebase) plus an
