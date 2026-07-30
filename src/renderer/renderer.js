@@ -18,7 +18,7 @@ import { pageContextModel } from '../shared/page-context-model.js';
 import { tabContextModel } from '../shared/tab-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
-import { shouldQuery, buildSuggestionModel, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
+import { shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
 import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
@@ -26,6 +26,8 @@ import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
+import { createBookmarksClient, bookmarkEntryToEditModel } from './chrome/bookmarks-client.js';
+import { createBookmarksBar } from './chrome/bookmarks-bar.js';
 import { createMediaController } from './chrome/media-controller.js';
 import { createNavigationController } from './chrome/navigation-controller.js';
 import { createPrivacyController } from './chrome/privacy-controller.js';
@@ -74,6 +76,7 @@ let privacyController;
 let windowController;
 let shortcutController;
 let pageActions;
+let bookmarksBarController;
 const jarsClient = createJarsClient({
   bridge: window.goldfinch,
   ctx,
@@ -87,6 +90,30 @@ const jarsClient = createJarsClient({
   inheritContainerDecision,
   inheritFromPartition,
   random: Math.random
+});
+// Bookmarks cache (M15 F1 Leg 2) — the jarsClient sibling: cache + boot +
+// subscribe triad, plus the bookmark business logic the leg's line-budget
+// ruling keeps out of this file (see bookmarks-client.js header). `isInternalTab`
+// is injected lazily, the same `tabController`-not-yet-assigned closure jarsClient
+// uses above.
+const bookmarksClient = createBookmarksClient({
+  bridge: window.goldfinch,
+  isInternalTab: (tab) => tabController.isInternalTab(tab),
+  // sync path 5/5 (M15 F1 Leg 2, AC "five sync paths") — covers cross-window
+  // edits: re-derive the active tab's star after the cache's own
+  // bookmarks-changed re-query completes (not on the raw broadcast, which
+  // would read a still-stale cache).
+  // Extended inline (M15 F1 Leg 3, AC "Bar rendering" — single-subscriber
+  // decision): the SAME post-refresh signal also re-renders the bar and
+  // closes the overflow sheet if a change raced it open (DD9 cache
+  // freshness). An independent onBookmarksChanged subscription from
+  // bookmarks-bar.js is forbidden — it would fire before THIS cache refresh
+  // resolves and could read stale bookmarksClient.list.
+  onChanged: () => {
+    refreshStar(activeTab());
+    bookmarksBarController.render();
+    bookmarksBarController.closeOverflowIfOpen();
+  }
 });
 
 tabController = createTabController({
@@ -109,6 +136,7 @@ tabController = createTabController({
   announceTabStatus,
   updateNavButtons,
   refreshZoomControl,
+  refreshStar,
   fetchCookies,
   closeSuggestions,
   resetSuggestionsForActivation,
@@ -140,6 +168,7 @@ function toUrl(input) { return navigationController.toUrl(input); }
 function closeSuggestions(reason) { return navigationController.closeSuggestions(reason); }
 function resetSuggestionsForActivation() { return navigationController.resetSuggestionsForActivation(); }
 function refreshZoomControl(tab) { return navigationController.refreshZoomControl(tab); }
+function refreshStar(tab) { return navigationController.refreshStar(tab); }
 function openFind(tab) { return navigationController.openFind(tab); }
 function togglePanel(force) { return mediaController.togglePanel(force); }
 function renderMedia() { return mediaController.renderMedia(); }
@@ -234,6 +263,14 @@ const overlayMenus = {
   container: fixedTriggerMenu(() => els.newTabMenu),
   'site-info': fixedTriggerMenu(() => els.addressChip),
   'new-container': fixedTriggerMenu(() => els.newTabMenu),
+  // Star/bar/overflow quick-edit popover (M15 F1 Leg 2, flight DD4). The star
+  // is a real trigger button (fixedTriggerMenu — the kebab/container/site-info
+  // shape), so aria-expanded + escape/activated refocus land on it for free.
+  'bookmark-edit': fixedTriggerMenu(() => els.star),
+  // Bookmarks-bar overflow chevron (M15 F1 Leg 3, DD9): the kebab/container
+  // shape — a real trigger button, template family 'menu' (shares menuNode —
+  // no NODE_OF_ENTRY addition, per the leg's audit-seam AC).
+  'bookmarks-overflow': fixedTriggerMenu(() => els.bookmarksOverflow),
   'page-context': {
     open: false, token: 0, blurClosedAt: -Infinity, ariaTarget: () => null,
     refocus(reason) {
@@ -401,9 +438,10 @@ navigationController = createNavigationController({
   isWebTab,
   createTab,
   openDownloads,
+  bookmarksClient,
   isInternalPageUrl,
   shouldQuery,
-  buildSuggestionModel,
+  buildSuggestionModel, mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
   moveSelection,
   acceptSuggestResponse,
   suggestionsState: () => overlayMenus.suggestions,
@@ -461,7 +499,8 @@ windowController = createWindowController({
   closeTab,
   activeTab,
   setHomePage: (value) => { homePageCache = value || HOMEPAGE; },
-  updateAutomationKeyState
+  updateAutomationKeyState,
+  sendActiveBounds
 });
 
 shortcutController = createShortcutController({
@@ -482,20 +521,24 @@ shortcutController = createShortcutController({
   openDownloads,
   orderedTabIds,
   activateTab,
-  keydownToAction
+  keydownToAction,
+  // Ctrl+D (M15 F1 Leg 2, flight DD5): behaves exactly like a star click — the
+  // one shared handler (star click / Ctrl+D / page-context "Bookmark this
+  // page" all funnel through it).
+  handleBookmarkStarActivate
 });
 
 // Static kebab model — labels rendered via textContent in the sheet (DD8).
 // New window first (Chrome adjacency: window/tab creation ahead of app pages).
-// DD2 anchor nuance: the kebab's anchor is a CHROME client rect — translate
-// chrome→sheet by subtracting the guest-region origin (#webviews). y clamps to 0
-// (DD12): the menu renders right-aligned, flush at the sheet's top edge (the
-// accepted ~4px shift).
-const kebabAnchor = () => {
+// DD2 anchor nuance: the CHROME client rect translates chrome→sheet by
+// subtracting the guest-region origin (#webviews); y clamps to 0 (DD12, flush
+// at the top). Generic — Leg 5 HAT fix reuses it for the far-right bookmarks-overflow chevron.
+const rightAnchorOf = (el) => {
   const wv = els.webviews.getBoundingClientRect();
-  const r = els.kebab.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
   return rightSheetAnchor(wv, r);
 };
+const kebabAnchor = () => rightAnchorOf(els.kebab);
 // Left-aligned toolbar anchors (Leg 3 — ▾ and 🔒): same chrome→sheet translation,
 // LEFT edge, clamped ≥ 0; y clamps to 0 (DD12 flush-at-top, the accepted shift).
 /** @param {HTMLElement} el */
@@ -506,6 +549,30 @@ const leftAnchorOf = (el) => {
 };
 const containerAnchor = () => leftAnchorOf(els.newTabMenu);
 const siteInfoAnchor = () => leftAnchorOf(els.addressChip);
+
+// Bookmarks bar + overflow (M15 F1 Leg 3) — houses ALL bar/overflow business
+// logic per the leg's line-budget FD ruling (this file gets only the
+// construction below, the extended onChanged closure above, and the
+// dispatchOverlayActivation/seam wiring further down). Constructed here
+// (after `leftAnchorOf`'s own `const` declaration, just above) — a `const`
+// arrow function, unlike the hoisted `function` declarations this file
+// otherwise forward-references, is TDZ-live only after its own line runs.
+bookmarksBarController = createBookmarksBar({
+  document,
+  ResizeObserver,
+  els,
+  bookmarksClient,
+  navigate,
+  createTab,
+  openBookmarkEditOverlay,
+  overlayMenuClient,
+  overlayMenuState: overlayMenus['bookmarks-overflow'],
+  rightAnchorOf // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
+});
+// Initial paint: the bar renders empty until the cache's boot fetch resolves
+// (idempotent — a subsequent bookmarks-changed re-render is a full rebuild
+// either way, per the onChanged closure above).
+bookmarksClient.boot.then(() => bookmarksBarController.render());
 
 // Generic channel-1 open (Leg 3): mint token, mark open, send, set aria.
 // Mutual exclusion is main's model-replace (channel 7 'superseded' for the
@@ -579,6 +646,48 @@ const openAuthBasicOverlayForAudit = () =>
 // leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
 const openCertPickerOverlayForAudit = () =>
   openOverlayMenu('cert-picker', [{ subject: 'CN=Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }], null, 0);
+// Bookmark-edit popover opener (M15 F1 Leg 2, flight DD4/AC "Anchored
+// positioning attempt"; anchor PARAMETERIZED leg 3 — bar/overflow right-click
+// reuse this same opener anchored at their own trigger element instead of the
+// star) — the toolbar-unpin idiom: measure the anchor element's own rect and
+// translate chrome→sheet (chromePointToSheet, defined further down — hoisted
+// function declaration; already pure + unit-tested via its underlying
+// convertChromePointToSheet, overlay-menus.test.js). The FIRST-EVER anchored
+// modal card (leg-2 design review): the sheet applies positionNode to the
+// CARD, not the backdrop (menu-overlay.css / menu-overlay.js).
+/** @param {any} bookmark store entry, translated via bookmarkEntryToEditModel (entry.title → model.name — HAT FIX, Leg 5) @param {HTMLElement} [anchorEl] defaults to the star (leg-2 call sites) */
+function openBookmarkEditOverlay(bookmark, anchorEl = els.star) {
+  const r = anchorEl.getBoundingClientRect();
+  openOverlayMenu('bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0);
+}
+// The ONE shared handler for star click / Ctrl+D / page-context "Bookmark
+// this page" (AC "Star click / Ctrl+D behavior"): bookmarksClient.activateStar
+// resolves the entry to edit (creating it first when unbookmarked) or null
+// (inert — internal tab / no live wcId); a non-null resolution opens the
+// popover.
+/** @param {any} tab */
+function handleBookmarkStarActivate(tab) {
+  bookmarksClient.activateStar(tab).then((bookmark) => {
+    if (bookmark) openBookmarkEditOverlay(bookmark);
+  });
+}
+// M15 F1 Leg 2 (FD-ruled seam addition): a11y SHEET_STATES hook for the
+// bookmark-edit popover. Opens with a synthetic NON-SECRET row (id/name/url
+// are all this leg's own already-public data) so the labeled name/url fields
+// + Remove/Done render (dialog-style, Escape-dismissible). Same
+// leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
+const openBookmarkEditOverlayForAudit = () =>
+  openOverlayMenu('bookmark-edit', { id: 'bm-audit', name: 'Fixture Bookmark', url: 'https://example.com/' }, null, 0);
+// M15 F1 Leg 3 (FD-ruled seam addition, SHEET_STATES ordering rule — see the
+// flight-log FD ruling: placed BEFORE sheet:kebab so this new surface gets
+// real audit coverage instead of being masked by the pre-existing kebab
+// secret-sheet refusal): a11y hook for the bookmarks-overflow chevron menu.
+// Opens with a synthetic NON-SECRET row (this leg's own already-public data
+// shape) so the roving item list renders — template family 'menu' (shares
+// menuNode with kebab/container/page-context/tab-context; no NODE_OF_ENTRY
+// addition, per the leg's audit-seam AC).
+const openBookmarksOverflowOverlayForAudit = () =>
+  openOverlayMenu('bookmarks-overflow', [{ id: 'bookmark:0', label: 'Fixture Bookmark' }], null, 0);
 // Page-context sheet opener (Leg 4). The four invocation sites (guest
 // right-click subscription, chrome-focused keyboard, toolbar-unpin, audit hook)
 // live further down; they capture pageCtx FIRST, then call with a POINT anchor:
@@ -587,9 +696,14 @@ const openCertPickerOverlayForAudit = () =>
 // (keyboard / toolbar / audit) pass chrome→sheet-translated points. The model is
 // built from the captured params by the pure shared builder; toolbar mode passes
 // pageCtx.toolbarItem.
+// isBookmarked (M15 F1 Leg 2): computed from THIS chrome's own bookmarks cache
+// keyed on the captured tab's URL — never guest-influenced `params` (AC).
 /** @param {{ x: number, y: number }} anchor */
-const openPageContextOverlaySheet = (anchor) =>
-  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem), anchor, 0);
+const openPageContextOverlaySheet = (anchor) => {
+  const srcTab = pageCtx.wcId != null ? findTabByWcId(pageCtx.wcId) : null;
+  const isBookmarked = !!(srcTab && bookmarksClient.findByUrl(srcTab.url));
+  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked }), anchor, 0);
+};
 
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
 // 'toggle' close (the sheet's blur usually resolves the close first — see the
@@ -641,6 +755,16 @@ els.addressChip.addEventListener('keydown', (e) => {
     openSiteInfoOverlay();
   }
 });
+
+// ★ star trigger (M15 F1 Leg 2): native <button> — Enter/Space already
+// synthesize click, no separate keydown handler needed.
+els.star.addEventListener('click', () => handleBookmarkStarActivate(activeTab()));
+
+// Bookmark-edit-submit forward subscriber (M15 F1 Leg 2): main validates +
+// closes the sheet, then forwards here; the actual bookmarkUpdate/
+// bookmarkRemove issue lives in bookmarksClient (chrome is the sole
+// bookmark-mutation issuer).
+window.goldfinch.onBookmarkEditSubmit((payload) => bookmarksClient.handleEditSubmit(payload));
 
 // Channel 6: execute the activated item's action via the named action bodies /
 // shared helpers (one source of truth). Arrives AFTER
@@ -756,6 +880,23 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // (the admin private key lived only on the sheet — never in the page or this chrome dispatch).
       break;
     }
+    case 'bookmark-edit': {
+      // No channel-4 activation ever rides this menuType — Remove/Done submit
+      // over the DEDICATED menu-overlay:bookmark-edit-submit invoke, never
+      // sendActivated (24-char cap; DD3-preserving). Included for switch
+      // completeness / VALIDATED-NO-OP discipline, the auth-basic/cert-picker
+      // precedent.
+      break;
+    }
+    case 'bookmarks-overflow': {
+      // Index dispatch (M15 F1 Leg 3, DD9): `bookmark:<i>` (row click) and
+      // `bookmark-edit:<i>` (the sheet's first per-row contextmenu, sent via
+      // sendActivatedOnce on the SAME channel-4) both resolve against the
+      // chrome-side snapshot in bookmarks-bar.js — VALIDATED-NO-OP on an
+      // out-of-range/malformed id.
+      bookmarksBarController.dispatch(id);
+      break;
+    }
     case 'page-context': {
       // Bodies read the pageCtx fields CAPTURED at open (TOCTOU: acted-on
       // wcId is never re-resolved via activeTab()). VALIDATED-NO-OP discipline
@@ -830,6 +971,12 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         }
       } else if (id === 'action:inspect') {
         if (wcId != null) window.goldfinch.toggleDevtools({ webContentsId: wcId });
+      } else if (id === 'action:bookmark-page') {
+        // VALIDATED-NO-OP (M15 F1 Leg 2): re-resolve the tab from the
+        // CAPTURED wcId (TOCTOU rule — never activeTab()); no-op if gone,
+        // then run the shared star handler against THAT tab.
+        const bmTab = wcId != null ? findTabByWcId(wcId) : null;
+        if (bmTab) handleBookmarkStarActivate(bmTab);
       } else if (id.startsWith('action:unpin:')) {
         const item = id.slice('action:unpin:'.length);
         if (item === 'media' || item === 'shields' || item === 'devtools') {
@@ -1268,6 +1415,7 @@ window.goldfinch.onTabDidNavigate(({ wcId, url }) => {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
+    refreshStar(tab); // sync path 1/5 (M15 F1 Leg 2)
     // Close trigger: navigation of the active tab (flight DD5).
     closeSuggestions('navigation');
   }
@@ -1298,6 +1446,7 @@ window.goldfinch.onTabDidNavigateInPage(({ wcId, url }) => {
     els.address.value = tab.url;
     updateAddressChip(tab);
     updateNavButtons();
+    refreshStar(tab); // sync path 2/5 (M15 F1 Leg 2)
     // Close trigger: navigation (in-page variant) of the active tab (flight DD5).
     closeSuggestions('navigation');
   }
@@ -1335,6 +1484,12 @@ window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
   tab.favicon = fav;
   const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
   if (img) { img.src = fav; img.classList.remove('hidden'); }
+  // Icon passive refresh (M15 F1 Leg 2, DD6): a difference guard prevents
+  // broadcast storms on routine navigation — only issue the mutation when the
+  // cache holds a bookmark matching this tab's URL AND its stored icon
+  // actually differs from the freshly-delivered one.
+  const bm = bookmarksClient.findByUrl(tab.url);
+  if (bm && bm.icon !== fav) window.goldfinch.bookmarkUpdate({ id: bm.id, icon: fav });
 });
 
 window.goldfinch.onTabLoading(({ wcId, loading }) => {
@@ -1673,28 +1828,32 @@ window.goldfinch.onTabNavState(({ wcId, canGoBack, canGoForward }) => {
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
   jarsClient.boot,
+  // Boot-race gate (M15 F1 Leg 2, AC): joins the barrier exactly as
+  // jarsClient.boot does, so the first tab's star renders only after the
+  // bookmarks cache is populated.
+  bookmarksClient.boot,
   window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
-]).then(([url, , bootConfig]) => {
-  // Session restore (M09 F9 / DD4 / AC5): when main serves an ordered saved tab list, CREATE
-  // each tab FRESH in its saved jar — never adopt (no live source view exists at cold start).
-  // This is the reopen precedent MINUS restoreHistory/insertAt (address+jar only, DD5), and it
-  // must NOT use inheritContainerFromPartition: that helper takes a partition and carries a
-  // default-jar/fresh-burner fallback that would silently re-home a deleted jar tab (DD4).
-  // resolveRestoreContainer maps the saved jarId to a live jar over the awaited `containers`
-  // snapshot; a deleted jar resolves null and the entry is DROPPED (continue) — never
-  // home-substituted. Loop order gives insertion-order fidelity; each createTab self-activates,
-  // so the saved-active tab is re-activated last. (Comments kept OUTSIDE the branch on purpose:
-  // renderer.js trips maskComments' documented regex-literal blind spot before this point, so
-  // the wiring test extracts a pure-code branch body — see session-restore-wiring.test.js.)
+]).then(([url, , , bootConfig]) => {
+  // Session restore (M09 F9 / DD4 / AC5; REWRITTEN M15 F1 DD10 Leg 1): CREATE each
+  // saved tab FRESH in its saved jar — never adopt; MINUS restoreHistory/insertAt
+  // (DD5); NEVER inheritContainerFromPartition (its default-jar fallback would
+  // silently re-home a deleted jar tab, DD4) — resolveRestoreContainer maps the
+  // saved jarId to a live jar, dropping (continue) an unresolvable one. Every create
+  // now passes background:true (DD10): no more relying on serial self-activation —
+  // the saved-active tab, or (Edge Case) the LAST created tab, activates once at the end.
   if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {
     let activeTab = null;
+    let lastTab = null;
     for (const t of bootConfig.restoreTabs) {
       const container = resolveRestoreContainer(t.jarId, jarsClient.containers);
       if (!container) continue;
-      const tab = createTab(t.url, container, { trusted: false });
-      if (tab && t.active) activeTab = tab;
+      const tab = createTab(t.url, container, { trusted: false, background: true });
+      if (!tab) continue;
+      lastTab = tab;
+      if (t.active) activeTab = tab;
     }
-    if (activeTab) activateTab(activeTab.id);
+    const toActivate = activeTab || lastTab;
+    if (toActivate) activateTab(toActivate.id);
   } else if (!bootConfig || bootConfig.bootTab !== false) {
     createTab(url || HOMEPAGE);
   }
@@ -1706,11 +1865,11 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 31-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 33-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 31 is
+// do not grow it without an FD ruling — an evaluate caller outside these 33 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
 // the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
@@ -1726,7 +1885,13 @@ Promise.all([
 // sheet:vault-import-unlock / vault-change-master / vault-recover / vault-adminkey-show
 // a11y states. M14 F1 L2: added openAuthBasicOverlayForAudit for the
 // sheet:auth-basic a11y state. M14 F1 L3: added openCertPickerOverlayForAudit
-// for the sheet:cert-picker a11y state.)
+// for the sheet:cert-picker a11y state. M15 F1 Leg 2 FD ruling: added
+// openBookmarkEditOverlayForAudit for the new sheet:bookmark-edit a11y state
+// (the every-new-sheet precedent) — CLAUDE.md's dual-source note updated in
+// the same change, per the flight-log FD ruling. M15 F1 Leg 3 FD ruling: added
+// openBookmarksOverflowOverlayForAudit for the new sheet:bookmarks-overflow
+// a11y state (32 → 33, same every-new-sheet precedent) — CLAUDE.md's
+// dual-source note updated in the same change.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1761,5 +1926,7 @@ Object.assign(/** @type {any} */ (globalThis), {
   openVaultRecoverOverlayForAudit, // M12 F4 Leg 2 — SHEET_STATES 'sheet:vault-recover' (DD9 addition)
   openVaultAdminKeyShowOverlayForAudit, // M12 F4 Leg 3 — SHEET_STATES 'sheet:vault-adminkey-show' (DD9 addition)
   openAuthBasicOverlayForAudit, // M14 F1 L2 — SHEET_STATES 'sheet:auth-basic' (leg-authorized addition)
-  openCertPickerOverlayForAudit // M14 F1 L3 — SHEET_STATES 'sheet:cert-picker' (leg-authorized addition)
+  openCertPickerOverlayForAudit, // M14 F1 L3 — SHEET_STATES 'sheet:cert-picker' (leg-authorized addition)
+  openBookmarkEditOverlayForAudit, // M15 F1 Leg 2 — SHEET_STATES 'sheet:bookmark-edit' (FD-ruled addition)
+  openBookmarksOverflowOverlayForAudit // M15 F1 Leg 3 — SHEET_STATES 'sheet:bookmarks-overflow' (FD-ruled addition)
 });

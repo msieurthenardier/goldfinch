@@ -129,6 +129,16 @@ function registerSettingsIpc({
     settings.set('toolbarPins', { ...settings.get('toolbarPins'), [item]: false });
     broadcastSettings();
   });
+
+  // toggle-bookmarks-bar (M15 F1 Leg 3, DD7 / Ctrl+Shift+B): the unpin-toolbar-item
+  // shape — a one-way chrome-initiated mutation that flips its own setting and
+  // broadcasts itself (CLAUDE.md's "any handler mutating settings directly must
+  // broadcast settings-changed itself" rule). The Settings checkbox and the
+  // shortcut converge on this SAME stored value — no divergent state.
+  ipcMain.on('toggle-bookmarks-bar', () => {
+    settings.set('bookmarksBarEnabled', !settings.get('bookmarksBarEnabled'));
+    broadcastSettings();
+  });
 }
 
 module.exports = { registerSettingsIpc };

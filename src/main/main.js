@@ -9,6 +9,11 @@ const { registrableDomain, hostnameOf, classify } = require('./trackers');
 const shields = require('./shields');
 const jars = require('./jars');
 const { registerJarIpc } = require('./jar-ipc');
+// Bookmarks store + IPC (Flight 1 "Bookmarking Core and Surfaces" / DD1, DD3, Leg 1).
+// jars.js's collection-store template (Electron-free, load(userDataPath)); the IPC
+// domain is sender-resolved chrome-only (no internal twins — DD3).
+const bookmarksStore = require('./bookmarks-store');
+const { registerBookmarksIpc } = require('./register-bookmarks-ipc');
 const historyStore = require('./history-store');
 // App database (M10 Flight 1, Leg 1 / DD2-DD4): the Electron-free node:sqlite
 // substrate backing settings/downloads/session (jars/shields fold in leg 2).
@@ -86,6 +91,7 @@ const { withCaptureTimeout } = require('./capture-timeout');
 // F8 Leg 3 / AC5: pure channel-4 `value` validator (string, ≤24) — unit-tested;
 // deliberately NOT part of the manager (the manager never touches channel 4).
 const { sanitizeActivatedValue } = require('./menu-overlay-value');
+const { validateBookmarkEditFields } = require('./bookmark-edit-validate');
 const {
   isMcpAutomationEnabled,
   shouldAutoMint,
@@ -1592,7 +1598,12 @@ registerOverlayIpc({
   // once, ledger-FIRST; bounds-checked index, out-of-range → cancel). The
   // activated handler's trailing close is then the store's exactly-once no-op.
   // No secret rides this path — the channel-4 id carries only a row index.
-  certSelectFromSheet: (rec, index) => authChallenges.selectCertFromSheet(rec, index)
+  certSelectFromSheet: (rec, index) => authChallenges.selectCertFromSheet(rec, index),
+  // M15 F1 Leg 2 (flight DD4): the bookmark-edit sheet's submit validator — a
+  // pure, Electron-free per-field check (name/url). Main never touches
+  // bookmarksStore for this channel; on a pass the handler forwards to the
+  // owning chrome, which issues the actual bookmarkUpdate/bookmarkRemove.
+  validateBookmarkEdit: validateBookmarkEditFields
 });
 
 // DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
@@ -1761,6 +1772,16 @@ registerHistoryIpc({
   broadcast: broadcastToChromeAndInternal
 });
 
+// Bookmarks IPC (Flight 1 DD3, Leg 1): chrome-only, sender-resolved — no
+// internal-page consumer exists this flight (see register-bookmarks-ipc.js
+// header). Registered at module scope like registerHistoryIpc above; handlers
+// only touch bookmarksStore at invoke time, always after boot.
+registerBookmarksIpc({
+  ipcMain,
+  bookmarksStore,
+  broadcast: broadcastToChromeAndInternal
+});
+
 // H2 (M08 Flight 6 Leg 4, design review): history rows in the goldfinch://jars
 // panel open a NEW TAB IN THE SAME JAR. Registered DIRECTLY here (not threaded
 // through jar-ipc.js/history-ipc.js as a new dep) because it needs
@@ -1850,7 +1871,7 @@ registerAppLifecycle({
   ipcMain,
   sessionRuntime,
   initProfileAndStores,
-  profileStores: { appDb, shields, settings, jars, downloads },
+  profileStores: { appDb, shields, settings, jars, downloads, bookmarks: bookmarksStore },
   historyStore,
   sessionStore,
   getUserDataPath: () => app.getPath('userData'),

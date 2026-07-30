@@ -15,12 +15,14 @@
 // THE INVARIANT: app.setPath('userData', …) (dev-profile isolation, app.isPackaged-keyed,
 // DD1) MUST run before appDb.open(...) and before any consumer that resolves its store
 // path via getPath('userData') — shields.load(path) now takes the path as an ARG (leg 2
-// dropped its internal getPath call); settings.load(path), jars.load(path), and
-// downloads.load(path) also take the path as an ARG (so the ordering signal for those is
-// the getPath('userData') call made HERE to build each arg). appDb.open(...) MUST also run
-// before shields/settings/jars/downloads' loads — they all read/write through its
-// document-row seam. Reordering any consumer ahead of setPath, or any store load ahead of
-// appDb.open, would silently read the wrong profile or throw "app db not open".
+// dropped its internal getPath call); settings.load(path), jars.load(path),
+// downloads.load(path), and bookmarks.load(path) (Flight 1 "Bookmarking Core and
+// Surfaces" Leg 1 — jars.js's own collection-store template) also take the path as an ARG
+// (so the ordering signal for those is the getPath('userData') call made HERE to build
+// each arg). appDb.open(...) MUST also run before shields/settings/jars/downloads/
+// bookmarks' loads — they all read/write through its document-row seam. Reordering any
+// consumer ahead of setPath, or any store load ahead of appDb.open, would silently read
+// the wrong profile or throw "app db not open".
 
 const { devUserDataPath } = require('../shared/dev-profile');
 
@@ -33,10 +35,11 @@ const { devUserDataPath } = require('../shared/dev-profile');
  *   shields: { load: (path: string) => void },
  *   settings: { load: (path: string) => void },
  *   jars: { load: (path: string) => void },
- *   downloads: { load: (path: string) => void }
+ *   downloads: { load: (path: string) => void },
+ *   bookmarks: { load: (path: string) => void }
  * }} stores
  */
-function initProfileAndStores(app, { appDb, shields, settings, jars, downloads }) {
+function initProfileAndStores(app, { appDb, shields, settings, jars, downloads, bookmarks }) {
   // DD1: dev runs are profile-isolated from the installed binary. Keyed off
   // app.isPackaged alone — no flag to forget — so a dev launch can never read or
   // write ~/.config/goldfinch. Must run before ANY getPath('userData') consumer
@@ -63,6 +66,10 @@ function initProfileAndStores(app, { appDb, shields, settings, jars, downloads }
   // Downloads store (Flight 5, Leg 1). Only hard ordering constraint is "after the
   // setPath('userData') redirect"; it takes the userData path as an arg like settings.
   downloads.load(app.getPath('userData'));
+  // Bookmarks store (Flight 1 "Bookmarking Core and Surfaces", Leg 1 / DD1): follows
+  // the jars.js collection-store template — takes the userData path as an arg like
+  // every sibling store above. Only hard ordering constraint is "after appDb.open".
+  bookmarks.load(app.getPath('userData'));
 }
 
 module.exports = { initProfileAndStores };

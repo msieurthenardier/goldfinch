@@ -7,15 +7,24 @@
 // mirrored unit assertions; do NOT refactor the old renderer to consume this).
 //
 // Sections, in order (separators BETWEEN sections, never before the first):
-//   link → image → selection → editable → spelling → always-Inspect.
+//   link → image → selection → editable → spelling → always(bookmark-page, Inspect).
 // Toolbar mode (toolbarItem set) short-circuits to the single Unpin item.
 //
 // NAMESPACED id space (the Leg-3 lesson, mandatory): `link:*`, `image:*`, `sel:*`,
-// `edit:*`, `spell:<index>`, `action:inspect`, `action:unpin:<item>`. Spelling
-// dispatches by INDEX (DD8): the id carries only `spell:2`; the chrome resolves
-// the word from the CAPTURED params.dictionarySuggestions[2] with bounds/type
-// validation — a guest-controlled string never round-trips as a command, only as
-// a rendered label (the sheet renders labels via textContent only).
+// `edit:*`, `spell:<index>`, `action:inspect`, `action:bookmark-page`,
+// `action:unpin:<item>`. Spelling dispatches by INDEX (DD8): the id carries only
+// `spell:2`; the chrome resolves the word from the CAPTURED
+// params.dictionarySuggestions[2] with bounds/type validation — a guest-controlled
+// string never round-trips as a command, only as a rendered label (the sheet
+// renders labels via textContent only).
+//
+// `action:bookmark-page` (M15 F1 Leg 2, flight DD4): a THIRD parameter, an
+// options object `opts` — extensible, backward-compatible with every existing
+// 2-arg call (opts defaults to {}) — carries `opts.isBookmarked`, computed by
+// the chrome from ITS OWN bookmarks cache keyed on the captured tab's URL
+// (never guest-influenced `params`). Lives in the always-present section
+// beside `action:inspect` (same section, no separator between the two — one
+// separator precedes the whole group, mirroring every other section).
 //
 // Item types (extends the Leg-3 registry vocabulary):
 //   { type: 'item', id, label }   — focusable role="menuitem" button
@@ -38,9 +47,10 @@ const UNPIN_LABELS = { media: 'Unpin Media', shields: 'Unpin Shields', devtools:
  * @param {any} params  the guest context-menu params captured at open (or null —
  *   keyboard/toolbar invocations carry no params; yields the Inspect-only menu)
  * @param {('media'|'shields'|'devtools'|null)} [toolbarItem]  toolbar-unpin mode
+ * @param {{ isBookmarked?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>}
  */
-export function pageContextModel(params, toolbarItem) {
+export function pageContextModel(params, toolbarItem, opts = {}) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>} */
   const model = [];
 
@@ -114,8 +124,10 @@ export function pageContextModel(params, toolbarItem) {
     }
   }
 
-  // --- always: Inspect ---
+  // --- always: Bookmark this page + Inspect (one section, no separator between
+  //     the two — a single separator precedes the whole group) ---
   sep();
+  item('action:bookmark-page', opts && opts.isBookmarked ? 'Edit bookmark…' : 'Bookmark this page');
   item('action:inspect', 'Inspect');
   return model;
 }

@@ -42,6 +42,7 @@ function registerOverlayIpc({
   writeClipboard,
   authAnswerFromSheet,
   certSelectFromSheet,
+  validateBookmarkEdit,
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -478,6 +479,58 @@ function registerOverlayIpc({
         buf.fill(0);
         secret.fill?.(0);
       }
+    });
+  }
+
+  // M15 F1 Leg 2 (flight DD4/AC "Popover payload path (DD3-preserving)"): the
+  // bookmark-edit sheet's DEDICATED submit channel — the form payload does NOT
+  // ride channel-4 `menu-overlay:activated` (24-char value cap; close-on-
+  // activation). Mirrors the sibling secret-channel handlers' DISCIPLINE minus
+  // the Buffer/zeroize half (this payload carries no secret): sender identity
+  // via recordForSheetSender, open-token freshness gate, close-only-on-success.
+  // Per-field validation (name/url) runs through the pure, Electron-free
+  // validateBookmarkEditFields (the menu-overlay-value.js testability
+  // pattern) — a failure is rejection path (a): the invoke returns
+  // { ok:false } and the sheet STAYS OPEN with a generic inline error (no
+  // close). `action:'remove'` skips field validation entirely (no name/url
+  // needed) and always closes-and-forwards. On success main does NOT touch
+  // bookmarksStore itself — it forwards to the OWNING window's chrome via
+  // chromeForAttachment(rec.win)?.send('bookmark-edit-submit', payload) (the
+  // vault-setup forward precedent); the chrome subscriber issues the actual
+  // bookmarkUpdate/bookmarkRemove — chrome is the sole bookmark-mutation
+  // issuer (AC invariant). Rejection path (b) — a cross-entry `duplicate-url`
+  // collision — is invisible to this per-field validator by construction; it
+  // can only surface AFTER close, from the chrome's own bookmarkUpdate call
+  // (see the leg's Edge Cases) — a `reason:'invalid-url'` response reaching
+  // the chrome post-close should therefore be unreachable given this
+  // validator ran first. Gated on the validateBookmarkEdit injection so
+  // offline overlay tests that don't wire it never register this channel.
+  if (validateBookmarkEdit) {
+    ipcMain.handle('menu-overlay:bookmark-edit-submit', (event, payload) => {
+      const rec = recordForSheetSender(event.sender);
+      if (!rec || !rec.sheet) return { ok: false };
+      const { token, id, action } = payload || {};
+      if (typeof token !== 'number' || typeof id !== 'string') return { ok: false };
+      const current = rec.sheet.getCurrentMenu();
+      if (!current || token !== current.token) return { ok: false };
+      if (action === 'remove') {
+        rec.sheet.closeMenuOverlay('activated', current.token);
+        chromeForAttachment(rec.win)?.send('bookmark-edit-submit', { id, action: 'remove' });
+        return { ok: true };
+      }
+      const validated = validateBookmarkEdit({
+        name: payload && payload.name,
+        url: payload && payload.url,
+      });
+      if (!validated.ok) return { ok: false };
+      rec.sheet.closeMenuOverlay('activated', current.token);
+      chromeForAttachment(rec.win)?.send('bookmark-edit-submit', {
+        id,
+        action: 'save',
+        name: validated.name,
+        url: validated.url,
+      });
+      return { ok: true };
     });
   }
 

@@ -3,7 +3,7 @@ export function createWindowController(deps) {
   const {
     window, document, ctx, els, tabs, orderedTabIds, releaseTabWidths,
     keyboardMove, commitTabMove, activateTab, closeTab, activeTab,
-    setHomePage, updateAutomationKeyState
+    setHomePage, updateAutomationKeyState, sendActiveBounds
   } = deps;
   // --- custom window controls (win+linux frameless; hidden on macOS) ---
   els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
@@ -88,9 +88,24 @@ export function createWindowController(deps) {
 
   window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {});
 
+  // Bookmarks bar visibility (M15 F1 Leg 3, DD8) — the applyToolbarPins sibling:
+  // class-toggle only (bar CONTENT is bookmarks-bar.js's job), then an EXPLICIT
+  // sendActiveBounds() so the active guest re-bounds instantly (belt-and-
+  // suspenders over the #webviews ResizeObserver — see the styles.css
+  // INVARIANT comment on #bookmarks-bar for why this can't be an animation).
+  function applyBookmarksBar(enabled) {
+    els.bookmarksBar.classList.toggle('hidden', !enabled);
+    sendActiveBounds();
+  }
+  window.goldfinch.settingsGet('bookmarksBarEnabled').then(applyBookmarksBar).catch(() => {});
+
   window.goldfinch.onSettingsChanged((all) => {
     if (all && all.homePage !== undefined) setHomePage(all.homePage);
     if (all && all.toolbarPins) applyToolbarPins(all.toolbarPins);
+    // Full-object broadcast (settings.getAll()) means all.bookmarksBarEnabled is
+    // always present here — the multi-window sync mechanism (Ctrl+Shift+B in one
+    // window, or another window's Settings checkbox, reaches every window live).
+    if (all && typeof all.bookmarksBarEnabled === 'boolean') applyBookmarksBar(all.bookmarksBarEnabled);
     // F7 (Flight 3, Leg 6 HAT): settings-changed always carries the FULL settings
     // object (settings.getAll()), so automationKeyHashes/automationAdminKeyHash are
     // always present here — re-derive the enabled-key state on every broadcast
@@ -100,5 +115,5 @@ export function createWindowController(deps) {
 
 
 
-  return { setMaximized, announceTabStatus, applyToolbarPins };
+  return { setMaximized, announceTabStatus, applyToolbarPins, applyBookmarksBar };
 }

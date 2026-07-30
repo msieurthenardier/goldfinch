@@ -5,7 +5,8 @@ export function createNavigationController(deps) {
   const {
     window, document, ctx, els,
     activeTab, isInternalTab, isWebTab, createTab, openDownloads,
-    isInternalPageUrl, shouldQuery, buildSuggestionModel, moveSelection,
+    bookmarksClient,
+    isInternalPageUrl, shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection,
     acceptSuggestResponse, suggestionsState, closeOverlayMenu,
     openOverlayMenu, leftAnchorOf
   } = deps;
@@ -197,21 +198,29 @@ export function createNavigationController(deps) {
       if (!tab) return;
       const requestSeq = ++suggest.seq;
       suggest.lastQuery = value;
-      window.goldfinch.historySuggest({ jarId: tab.container.id, query: value }).then((res) => {
+      // DD11: history + bookmarks are queried TOGETHER via Promise.allSettled —
+      // deliberately NOT Promise.all (design-review correction): a rejected or
+      // {ok:false} source degrades to [] independently, so a bookmarks-side
+      // failure never blanks history results (and vice versa) — the pair
+      // never fails closed.
+      Promise.allSettled([
+        window.goldfinch.historySuggest({ jarId: tab.container.id, query: value }),
+        window.goldfinch.bookmarksSuggest({ query: value })
+      ]).then(([historyOutcome, bookmarksOutcome]) => {
         // Response-time gate revalidation (flight DD5 HIGH, the kebab-while-
         // typing race): a stale response must never model-replace a menu the
         // operator opened meanwhile.
         const gateNow = suggestGateNow();
         if (!acceptSuggestResponse({ requestSeq, currentSeq: suggest.seq, gateNow })) return;
-        if (!res || res.ok !== true) {
-          closeSuggestions('input-empty');
-          return;
-        }
-        suggest.items = Array.isArray(res.suggestions) ? res.suggestions : [];
+        const historyRes = historyOutcome.status === 'fulfilled' ? historyOutcome.value : null;
+        const bookmarksRes = bookmarksOutcome.status === 'fulfilled' ? bookmarksOutcome.value : null;
+        const historyRows = historyRes && historyRes.ok === true && Array.isArray(historyRes.suggestions)
+          ? historyRes.suggestions : [];
+        const bookmarkRows = bookmarksRes && bookmarksRes.ok === true && Array.isArray(bookmarksRes.suggestions)
+          ? bookmarksRes.suggestions : [];
+        suggest.items = mergeSuggestionSources(bookmarkRows, historyRows);
         suggest.selectedIndex = -1;
         paintSuggestions();
-      }).catch(() => {
-        if (acceptSuggestResponse({ requestSeq, currentSeq: suggest.seq, gateNow: suggestGateNow() })) closeSuggestions('input-empty');
       });
     }, SUGGEST_DEBOUNCE_MS);
   });
@@ -337,6 +346,28 @@ export function createNavigationController(deps) {
     els.zoomPercent.setAttribute('aria-label', `Current zoom ${pct}`);
   }
 
+  /**
+   * Sync the address-bar star to a tab (M15 F1 Leg 2, modeled on
+   * refreshZoomControl above — including its hidden-early-return shape):
+   * hidden entirely on internal tabs / a tab with no live wcId; else a
+   * SYNCHRONOUS cache lookup (no async race guard needed, unlike the zoom
+   * control's live IPC query) sets the filled state. `aria-pressed` reflects
+   * fill state; `title`/`aria-label` are static (set once in index.html,
+   * the toolbar "Label (Chord)" convention) — only the pressed state and the
+   * `.starred` fill-color class change here.
+   * @param {Tab|null} tab
+   */
+  function refreshStar(tab) {
+    if (!tab || isInternalTab(tab) || tab.wcId == null) {
+      els.star.classList.add('hidden');
+      return;
+    }
+    els.star.classList.remove('hidden');
+    const filled = !!(bookmarksClient && bookmarksClient.findByUrl(tab.url));
+    els.star.setAttribute('aria-pressed', String(filled));
+    els.star.classList.toggle('starred', filled);
+  }
+
   window.goldfinch.onZoomChanged(({ wcId }) => {
     const t = activeTab();
     // Compare wcIds directly — the value is queried live, the broadcast is only the
@@ -422,6 +453,7 @@ export function createNavigationController(deps) {
     dispatchSuggestion,
     handleSuggestionsClosed,
     refreshZoomControl,
+    refreshStar,
     applyTabZoom,
     openFind
   };

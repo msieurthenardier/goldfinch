@@ -112,6 +112,22 @@ test('Ctrl+Shift+N (uppercase) does NOT match — lowercase-only case discipline
   assert.equal(k('n'), null, 'unmodified n must not match');
 });
 
+// M15 F1 DD5: bookmark-page (Ctrl+D) and toggle-bookmarks-bar (Ctrl+Shift+B) —
+// LOCKSTEP with keydown-action.test.js's own pins (the hand-mirror rule).
+test('Ctrl+D (lowercase d) -> chrome bookmark-page (M15 F1 DD5)', () => {
+  assert.deepEqual(ctrl('d'), { scope: 'chrome', action: 'bookmark-page' });
+});
+
+test('Ctrl+Shift+B / Ctrl+Shift+b -> chrome toggle-bookmarks-bar (M15 F1 DD5)', () => {
+  assert.deepEqual(ctrl('B', { shift: true }), { scope: 'chrome', action: 'toggle-bookmarks-bar' });
+  assert.deepEqual(ctrl('b', { shift: true }), { scope: 'chrome', action: 'toggle-bookmarks-bar' });
+});
+
+test('unshifted Ctrl+B does NOT match — only the shifted chord is assigned', () => {
+  assert.equal(ctrl('b'), null);
+  assert.equal(ctrl('B'), null, 'capital B with no shift flag is still unassigned');
+});
+
 // ---------------------------------------------------------------------------
 // APG-key exclusions (by construction: control||meta required except F12)
 // ---------------------------------------------------------------------------
@@ -133,7 +149,9 @@ test('unmodified letters/symbols are null (no accidental forwarding)', () => {
 // it is no longer a non-union key, and leaving it in this loop would be a
 // permanent red test, not a regression catch.
 test('modified NON-union keys are null (e.g. Ctrl+A, Ctrl+S, Ctrl+ArrowDown)', () => {
-  for (const key of ['a', 's', 'd', 'q', 'ArrowDown', 'Escape', 'Enter']) {
+  // 'd' is EXCLUDED here (M15 F1 DD5): Ctrl+D now maps to bookmark-page — see
+  // the dedicated pin above, not a member of this "stays null" list anymore.
+  for (const key of ['a', 's', 'q', 'ArrowDown', 'Escape', 'Enter']) {
     assert.equal(ctrl(key), null, `Ctrl+${key} must not match`);
   }
 });

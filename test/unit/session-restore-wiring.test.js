@@ -224,14 +224,21 @@ test('AC5: the restore branch calls resolveRestoreContainer + createTab and drop
   const realBody = bodyAfter(maskComments(rendererSource()), RENDERER_BRANCH);
   assert.equal(realBody.includes('resolveRestoreContainer('), true, 'real → resolves the jar via the pure helper');
   assert.equal(realBody.includes('createTab('), true, 'real → creates each saved tab fresh');
-  assert.equal(realBody.includes('continue'), true, 'real → drops (continue) when the jar no longer resolves');
+  assert.equal(
+    realBody.includes('if (!container) continue;'),
+    true,
+    'real → drops (continue) when the jar no longer resolves'
+  );
 
   // Remove the drop: the deleted-jar entry would fall through to createTab with a null
-  // container — the privacy-critical home-substitution DD4 forbids.
+  // container — the privacy-critical home-substitution DD4 forbids. Target the SPECIFIC
+  // container-null drop literal (M15 F1 DD10 Leg 1 added a SECOND, unrelated `if (!tab)
+  // continue;` guard — the wcId-not-yet-resolved defensive skip — to the same branch, so
+  // a bare `.includes('continue')` count would no longer discriminate this mutation).
   const mutated = rendererSource().replace('if (!container) continue;', 'if (!container) void 0;');
   assertMutated(rendererSource(), mutated, 'drop-removed');
   assert.equal(
-    bodyAfter(maskComments(mutated), RENDERER_BRANCH).includes('continue'),
+    bodyAfter(maskComments(mutated), RENDERER_BRANCH).includes('if (!container) continue;'),
     false,
     'mutated → the drop is gone and this pin FAILS'
   );

@@ -246,7 +246,7 @@ async function findSheetWcId(client) {
 // The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
 // first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
 // SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey', 'sheet-auth-basic', 'sheet-cert-picker'];
+const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey', 'sheet-auth-basic', 'sheet-cert-picker', 'sheet-bookmark-edit'];
 const SHEET_DISMISS_EXPR = `(() => {
   const ids = ${JSON.stringify(SHEET_NODE_IDS)};
   const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
@@ -418,6 +418,26 @@ async function main() {
       // Between states, dismissal is SHEET-SIDE (see SHEET_DISMISS_EXPR) and the
       // DOM-closed check runs before the next open.
       const SHEET_STATES = [
+        // M15 F1 Leg 3 FD ruling (flight-log-recorded): the two bookmark sheet
+        // states are placed FIRST — BEFORE sheet:kebab — so this flight's new
+        // surfaces get real audit coverage instead of being masked by the
+        // pre-existing sheet:kebab secret-sheet refusal (legs 1/2 both
+        // recorded that `resolve.js`'s `isSheetContents` guard throws on the
+        // very first sheet-wcId read, which halts this whole loop and was
+        // never this flight's to fix — see the flight log). Both bookmark
+        // states raise no chrome-side trigger element in this audit path.
+        // sheet:bookmark-edit (M15 F1 Leg 2, flight DD4): the quick-edit
+        // popover — the FIRST-EVER anchored modal card. Dialog-style,
+        // Escape-dismissible; labeled name/url fields + Remove/Done. Opens
+        // with a synthetic NON-SECRET bookmark row (id/name/url are all this
+        // leg's own, already-public data — nothing sensitive rides this state).
+        { label: 'sheet:bookmark-edit', open: 'openBookmarkEditOverlayForAudit()' },
+        // sheet:bookmarks-overflow (M15 F1 Leg 3, DD9): the bar's overflow
+        // chevron menu — 'menu' template family (shares menuNode with
+        // kebab/container/page-context/tab-context). Opens with a synthetic
+        // NON-SECRET row (this leg's own already-public data shape) so the
+        // roving item list renders.
+        { label: 'sheet:bookmarks-overflow', open: 'openBookmarksOverflowOverlayForAudit()' },
         { label: 'sheet:kebab', open: 'openKebabOverlay(0)' },
         { label: 'sheet:container', open: 'openContainerOverlay(0)' },
         { label: 'sheet:site-info', open: 'openSiteInfoOverlay()' },

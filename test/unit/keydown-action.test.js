@@ -288,3 +288,36 @@ test('Ctrl+Shift+7 (shifted digit, AZERTY) -> tab-jump-7 (shift-tolerant match)'
 test('alt defaults to false when omitted (existing pins unaffected)', () => {
   assert.equal(keydownToAction({ key: '7', ctrl: true, meta: false, shift: false, lightboxOpen: false }), 'tab-jump-7');
 });
+
+// ---------------------------------------------------------------------------
+// bookmark-page / toggle-bookmarks-bar (M15 F1 DD5) — LOCKSTEP with
+// sheet-accelerator.test.js's own pins (the hand-mirror rule).
+// ---------------------------------------------------------------------------
+
+test('Ctrl+d -> bookmark-page (M15 F1 DD5)', () => {
+  assert.equal(keydownToAction(desc({ key: 'd', ctrl: true })), 'bookmark-page');
+});
+
+test('d without modifier -> null', () => {
+  assert.equal(keydownToAction(desc({ key: 'd' })), null);
+});
+
+test('Ctrl+d with lightbox open -> bookmark-page (NOT lightbox-gated)', () => {
+  assert.equal(keydownToAction(desc({ key: 'd', ctrl: true, lightboxOpen: true })), 'bookmark-page');
+});
+
+test('Ctrl+Shift+B -> toggle-bookmarks-bar (M15 F1 DD5)', () => {
+  assert.equal(keydownToAction(desc({ key: 'B', ctrl: true, shift: true })), 'toggle-bookmarks-bar');
+});
+
+test('Ctrl+Shift+b (lowercase, capslock-with-shift parity) -> toggle-bookmarks-bar', () => {
+  assert.equal(keydownToAction(desc({ key: 'b', ctrl: true, shift: true })), 'toggle-bookmarks-bar');
+});
+
+test('unshifted Ctrl+b -> null — only the shifted chord is assigned', () => {
+  assert.equal(keydownToAction(desc({ key: 'b', ctrl: true })), null);
+});
+
+test('Ctrl+Shift+B with lightbox open -> toggle-bookmarks-bar (NOT lightbox-gated)', () => {
+  assert.equal(keydownToAction(desc({ key: 'B', ctrl: true, shift: true, lightboxOpen: true })), 'toggle-bookmarks-bar');
+});

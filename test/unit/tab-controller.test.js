@@ -100,7 +100,7 @@ function createHarness() {
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
     resolveNewTabContainer: (containers, defaultId) => containers.find((item) => item.id === defaultId) || null,
     classifyDragPoint: () => ({ zone: 'reorder', index: 0 }),
-    announceTabStatus: noOp, updateNavButtons: noOp, refreshZoomControl: noOp, fetchCookies: noOp,
+    announceTabStatus: noOp, updateNavButtons: noOp, refreshZoomControl: noOp, refreshStar: noOp, fetchCookies: noOp,
     closeSuggestions: noOp, resetSuggestionsForActivation: noOp, updateAddressChip: noOp,
     renderMedia: noOp, renderPrivacy: noOp, setDevtoolsPressed: noOp
   };

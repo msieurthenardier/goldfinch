@@ -162,6 +162,48 @@ test('Ctrl+Alt+7 classifies to null end-to-end (AltGr guard) and never forwards'
 });
 
 // ---------------------------------------------------------------------------
+// bookmark-page / toggle-bookmarks-bar (M15 F1 DD5, Leg 1 AC4): bookmark-page
+// (Ctrl+D) forwards on WEB guests only (internal pages are never bookmarkable);
+// toggle-bookmarks-bar (Ctrl+Shift+B) forwards on BOTH guest kinds (app-wide
+// chrome layout, the navigation-neutral class new-tab/new-window already join).
+// ---------------------------------------------------------------------------
+
+test('web guest: bookmark-page is forwardable', () => {
+  assert.equal(isChromeActionForwardable('bookmark-page', 'web'), true);
+});
+
+test('internal guest: bookmark-page is NOT forwardable (internal pages are never bookmarkable)', () => {
+  assert.equal(isChromeActionForwardable('bookmark-page', 'internal'), false);
+});
+
+test('web guest: toggle-bookmarks-bar is forwardable', () => {
+  assert.equal(isChromeActionForwardable('toggle-bookmarks-bar', 'web'), true);
+});
+
+test('internal guest: toggle-bookmarks-bar is forwardable (app-level like new-tab/new-window)', () => {
+  assert.equal(isChromeActionForwardable('toggle-bookmarks-bar', 'internal'), true);
+});
+
+test('Ctrl+D classifies to bookmark-page end-to-end and forwards on web only (M15 F1 DD5)', () => {
+  const action = keydownToAction({ key: 'd', ctrl: true, meta: false, shift: false, lightboxOpen: false });
+  assert.equal(action, 'bookmark-page');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), false);
+});
+
+test('Ctrl+Shift+B classifies to toggle-bookmarks-bar end-to-end and forwards on both guest kinds (M15 F1 DD5)', () => {
+  const action = keydownToAction({ key: 'B', ctrl: true, meta: false, shift: true, lightboxOpen: false });
+  assert.equal(action, 'toggle-bookmarks-bar');
+  assert.equal(isChromeActionForwardable(action, 'web'), true);
+  assert.equal(isChromeActionForwardable(action, 'internal'), true);
+});
+
+test('isRepeatSafeAction(\'bookmark-page\') and (\'toggle-bookmarks-bar\') are false (not tab-* prefixed — held key must not repeat-fire)', () => {
+  assert.equal(isRepeatSafeAction('bookmark-page'), false);
+  assert.equal(isRepeatSafeAction('toggle-bookmarks-bar'), false);
+});
+
+// ---------------------------------------------------------------------------
 // isRepeatSafeAction (M09 F3 fix-cycle, FD ruling): the pure carve-out predicate
 // consulted by handleGuestChromeShortcut's (main.js) isAutoRepeat guard so that
 // held-key repeat cycling isn't swallowed under guest focus — mirrors Chrome's

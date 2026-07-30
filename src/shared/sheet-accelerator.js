@@ -64,7 +64,8 @@
  *     | 'tab-next' | 'tab-prev'
  *     | 'tab-jump-1' | 'tab-jump-2' | 'tab-jump-3' | 'tab-jump-4' | 'tab-jump-5'
  *     | 'tab-jump-6' | 'tab-jump-7' | 'tab-jump-8' | 'tab-jump-last'
- *     | 'reopen-closed-tab',
+ *     | 'reopen-closed-tab'
+ *     | 'bookmark-page' | 'toggle-bookmarks-bar',
  *   autoRepeatGuard?: boolean } | null}
  */
 export function sheetAcceleratorAction({ key, control, meta, shift, alt = false }) {
@@ -79,6 +80,9 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
   if (shift && (key === 'I' || key === 'i')) return { scope: 'guest', action: 'devtools', autoRepeatGuard: true };
   if (shift && (key === 'P' || key === 'p')) return { scope: 'chrome', action: 'toggle-privacy' };
   if (shift && (key === 'T' || key === 't')) return { scope: 'chrome', action: 'reopen-closed-tab' };
+  // toggle-bookmarks-bar (M15 F1 DD5) — LOCKSTEP with keydown-action.js's own
+  // Ctrl+Shift+B addition (the hand-mirror rule), same shifted-chain placement.
+  if (shift && (key === 'B' || key === 'b')) return { scope: 'chrome', action: 'toggle-bookmarks-bar' };
 
   // Guest-class (mirrors the guest before-input-event branch bodies).
   if (key === '=' || key === '+') return { scope: 'guest', action: 'zoom-in' };
@@ -111,6 +115,9 @@ export function sheetAcceleratorAction({ key, control, meta, shift, alt = false 
   if (key === 'l') return { scope: 'chrome', action: 'focus-address' };
   if (key === 'm') return { scope: 'chrome', action: 'toggle-panel' };
   if (key === 'r') return { scope: 'chrome', action: 'reload' };
+  // bookmark-page (M15 F1 DD5) — LOCKSTEP with keydown-action.js's own Ctrl+D
+  // addition (the hand-mirror rule).
+  if (key === 'd') return { scope: 'chrome', action: 'bookmark-page' };
 
   return null;
 }

@@ -73,5 +73,12 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // stashed captureId (+ token). It rides an invoke like unlockVault (the sheet needs
   // the { saved } result back to re-prompt on a lock race). The CAPTURED PASSWORD is
   // NEVER on this path — it lives only in the main-side held record, keyed by captureId.
-  captureSave: (payload) => ipcRenderer.invoke('menu-overlay:vault-capture-save', payload)
+  captureSave: (payload) => ipcRenderer.invoke('menu-overlay:vault-capture-save', payload),
+  // M15 F1 Leg 2 (flight DD4): the bookmark-edit sheet's DEDICATED submit
+  // channel. Mirrors captureSave's shape (an invoke, no secret) — the sheet
+  // needs the { ok } result back to keep the card open + show an inline error
+  // on a pre-forward validation failure. `payload` carries { token, id,
+  // action: 'save' | 'remove', name?, url? } — never a raw sendActivated
+  // (channel-4 is string-only / 24-char capped; DD3-preserving).
+  bookmarkEditSubmit: (payload) => ipcRenderer.invoke('menu-overlay:bookmark-edit-submit', payload)
 });

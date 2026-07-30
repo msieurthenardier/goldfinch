@@ -8,6 +8,16 @@
 // controller is thin wiring. (Grep-AC: this file must have zero hits for the
 // wall-clock read every other pure module in this house avoids calling
 // directly — see pruneOneJar/suggest's `now`-injection precedent.)
+//
+// M15 F1 Leg 4 (DD11) adds `mergeSuggestionSources` — bookmark rows first
+// (already ≤3 pre-merge, from bookmarks-suggest's own limit), deduped
+// against history by `bookmarkUrlsMatch` (bookmark wins), total capped at 6
+// — and stamps every merged row with `kind: 'bookmark' | 'history'`, which
+// `buildSuggestionModel` now forwards onto the model item unchanged. Every
+// PRE-EXISTING export's signature is untouched (`shouldQuery` byte-for-byte;
+// see the leg's own verification grep).
+
+import { bookmarkUrlsMatch } from './bookmark-url.js';
 
 /**
  * Query gate (flight DD5): suggestions engage only when the address bar is
@@ -53,21 +63,62 @@ function clampSelection(index, count) {
 
 /**
  * Build the sheet's `suggestions` template model from a raw store response.
- * @param {Array<{ url?: any, title?: any }> | null | undefined} suggestions
+ * @param {Array<{ url?: any, title?: any, kind?: any }> | null | undefined} suggestions
  * @param {number} selectedIndex
- * @returns {{ items: Array<{ primary: string, secondary: string }>, selectedIndex: number, emptyNote?: string }}
+ * @returns {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string }}
  */
 export function buildSuggestionModel(suggestions, selectedIndex) {
   const list = Array.isArray(suggestions) ? suggestions : [];
   const items = list.map((s) => {
     const url = s && typeof s.url === 'string' ? s.url : '';
     const title = s && typeof s.title === 'string' ? s.title : '';
-    return { primary: title || url, secondary: hostOf(url) };
+    // DD11: pass `kind` through unchanged (no re-derivation) — mergeSuggestionSources
+    // is the sole stamping site. Any row not explicitly kind:'bookmark' renders as
+    // an ordinary ('history') row, including pre-merge/legacy inputs with no kind
+    // field at all.
+    /** @type {'bookmark' | 'history'} */
+    const kind = s && s.kind === 'bookmark' ? 'bookmark' : 'history';
+    return { primary: title || url, secondary: hostOf(url), kind };
   });
-  /** @type {{ items: Array<{ primary: string, secondary: string }>, selectedIndex: number, emptyNote?: string }} */
+  /** @type {{ items: Array<{ primary: string, secondary: string, kind: 'bookmark' | 'history' }>, selectedIndex: number, emptyNote?: string }} */
   const model = { items, selectedIndex: clampSelection(selectedIndex, items.length) };
   if (items.length === 0) model.emptyNote = 'No matches';
   return model;
+}
+
+/**
+ * Merge bookmark and history suggestion rows (flight DD11): bookmark rows
+ * first (the caller pre-caps this list at ≤3 via bookmarks-suggest's own
+ * `limit` — this function does not re-cap the bookmark side alone), then
+ * history rows in their given order, EXCLUDING any history row whose url
+ * exactly matches a bookmark row already included (`bookmarkUrlsMatch` — the
+ * DD2 identity predicate; bookmark row wins, dedupe only removes history
+ * rows that duplicate a SURFACED bookmark row per the leg's Edge Cases).
+ * Every output row is stamped with `kind: 'bookmark' | 'history'`. Total
+ * output length capped at `limit` (default 6). Non-throwing on any input.
+ * @param {Array<{url?: any, title?: any}>} bookmarkRows
+ * @param {Array<{url?: any, title?: any}>} historyRows
+ * @param {{ limit?: number }} [opts]
+ * @returns {Array<{url: any, title: any, kind: 'bookmark' | 'history'}>}
+ */
+export function mergeSuggestionSources(bookmarkRows, historyRows, { limit = 6 } = {}) {
+  const bookmarks = Array.isArray(bookmarkRows) ? bookmarkRows : [];
+  const history = Array.isArray(historyRows) ? historyRows : [];
+  const cap = Number.isInteger(limit) && limit > 0 ? limit : 6;
+
+  /** @type {Array<{url: any, title: any, kind: 'bookmark' | 'history'}>} */
+  const merged = [];
+  for (const row of bookmarks) {
+    if (merged.length >= cap) break;
+    merged.push({ url: row && row.url, title: row && row.title, kind: 'bookmark' });
+  }
+  for (const row of history) {
+    if (merged.length >= cap) break;
+    const dup = bookmarks.some((b) => bookmarkUrlsMatch(b && b.url, row && row.url));
+    if (dup) continue;
+    merged.push({ url: row && row.url, title: row && row.title, kind: 'history' });
+  }
+  return merged;
 }
 
 /**

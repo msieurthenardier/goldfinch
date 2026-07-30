@@ -11,7 +11,7 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
     'automation:get-activity', 'chrome-clipboard-write', 'settings-get',
     'shields-get', 'shields-pause', 'shields-set'
   ]);
-  assert.deepEqual([...h.listeners.keys()], ['unpin-toolbar-item']);
+  assert.deepEqual([...h.listeners.keys()], ['unpin-toolbar-item', 'toggle-bookmarks-bar']);
   assert.deepEqual([...h.internal.keys()].sort(), [
     'automation:admin-key-mint', 'automation:admin-key-revoke', 'automation:find-free-port',
     'automation:get-status', 'automation:jar-key-mint', 'automation:jar-key-revoke',
@@ -60,5 +60,23 @@ test('automation key mutations and toolbar allowlist always broadcast settings-c
   assert.deepEqual(h.events, []);
   h.send('unpin-toolbar-item', 'media');
   assert.equal(h.values.toolbarPins.media, false);
+  assert.equal(h.events.at(-1)[1], 'settings-changed');
+});
+
+test('toggle-bookmarks-bar flips the stored value and broadcasts itself (Ctrl+Shift+B / Settings converge)', () => {
+  const h = makeSettingsIpcHarness();
+  assert.equal(h.values.bookmarksBarEnabled, false);
+  h.events.length = 0;
+
+  h.send('toggle-bookmarks-bar');
+  assert.equal(h.values.bookmarksBarEnabled, true);
+  assert.deepEqual(h.events.map((event) => event.slice(0, 2)), [
+    ['set', 'bookmarksBarEnabled'],
+    ['broadcast', 'settings-changed'],
+  ]);
+
+  h.events.length = 0;
+  h.send('toggle-bookmarks-bar');
+  assert.equal(h.values.bookmarksBarEnabled, false);
   assert.equal(h.events.at(-1)[1], 'settings-changed');
 });

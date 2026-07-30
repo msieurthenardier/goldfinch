@@ -1069,6 +1069,79 @@ test('restoreSession — set throws on a truthy non-boolean, prior value unchang
 });
 
 // ---------------------------------------------------------------------------
+// bookmarksBarEnabled (M15 F1 Leg 3 / DD7). Additive boolean, off-by-default,
+// EXPLICIT strict-boolean validator (the restoreSession template).
+// ---------------------------------------------------------------------------
+
+test('bookmarksBarEnabled — default on first load is false, additive (no version bump)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.bookmarksBarEnabled, false);
+    assert.equal(store.get('bookmarksBarEnabled'), false);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('bookmarksBarEnabled — set true persists and reloads', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('bookmarksBarEnabled', true);
+    const result = store.load(dir);
+    assert.equal(result.bookmarksBarEnabled, true);
+    assert.equal(store.get('bookmarksBarEnabled'), true);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('bookmarksBarEnabled — set throws on a truthy non-boolean, prior value unchanged', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.throws(
+      () => store.set('bookmarksBarEnabled', 1),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('bookmarksBarEnabled'), false);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('bookmarksBarEnabled — config written before this leg (no bookmarksBarEnabled key) loads with false (forward-compat)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Simulate a pre-leg settings file that predates the bookmarksBarEnabled key entirely.
+    const preLeg = JSON.stringify({ version: 2, homePage: 'https://www.google.com', toolbarPins: { media: true, shields: true, devtools: false } });
+    fs.writeFileSync(path.join(dir, 'settings.json'), preLeg, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    // The merge-with-repair loop fills the missing additive key from DEFAULTS (false).
+    assert.equal(result.bookmarksBarEnabled, false);
+    assert.equal(store.get('bookmarksBarEnabled'), false);
+    assert.equal(result.homePage, 'https://www.google.com');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // v1 → v2 migration (issue #117): save() serializes the WHOLE config, so v1
 // rows carry a serializer-stamped `restoreSession: false` indistinguishable
 // from a deliberate opt-out. The ladder discards the stored value (refills

@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   shouldQuery,
   buildSuggestionModel,
+  mergeSuggestionSources,
   moveSelection,
   acceptSuggestResponse
 } = require('../../src/shared/omnibox-suggest-model');
@@ -58,20 +59,20 @@ test('buildSuggestionModel: maps url/title to primary/secondary (host)', () => {
     [{ url: 'https://example.com/path', title: 'Example Site' }],
     0
   );
-  assert.deepEqual(model.items, [{ primary: 'Example Site', secondary: 'example.com' }]);
+  assert.deepEqual(model.items, [{ primary: 'Example Site', secondary: 'example.com', kind: 'history' }]);
   assert.equal(model.selectedIndex, 0);
   assert.equal(model.emptyNote, undefined);
 });
 
 test('buildSuggestionModel: missing/empty title falls back to the URL as primary', () => {
   const model = buildSuggestionModel([{ url: 'https://example.com/', title: '' }], -1);
-  assert.deepEqual(model.items, [{ primary: 'https://example.com/', secondary: 'example.com' }]);
+  assert.deepEqual(model.items, [{ primary: 'https://example.com/', secondary: 'example.com', kind: 'history' }]);
 });
 
 test('buildSuggestionModel: malformed URL never throws — secondary falls back to empty string', () => {
   assert.doesNotThrow(() => {
     const model = buildSuggestionModel([{ url: 'not a url', title: '' }], 0);
-    assert.deepEqual(model.items, [{ primary: 'not a url', secondary: '' }]);
+    assert.deepEqual(model.items, [{ primary: 'not a url', secondary: '', kind: 'history' }]);
   });
 });
 
@@ -81,8 +82,39 @@ test('buildSuggestionModel: non-string url/title fields never throw', () => {
       /** @type {any} */ ([{ url: null, title: 42 }]),
       0
     );
-    assert.deepEqual(model.items, [{ primary: '', secondary: '' }]);
+    assert.deepEqual(model.items, [{ primary: '', secondary: '', kind: 'history' }]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// buildSuggestionModel — DD11 kind passthrough
+// ---------------------------------------------------------------------------
+
+test('buildSuggestionModel: kind:"bookmark" passes through unchanged', () => {
+  const model = buildSuggestionModel(
+    [{ url: 'https://example.com/', title: 'Example', kind: 'bookmark' }],
+    -1
+  );
+  assert.deepEqual(model.items, [{ primary: 'Example', secondary: 'example.com', kind: 'bookmark' }]);
+});
+
+test('buildSuggestionModel: kind:"history" and a missing kind field both render as history', () => {
+  const model = buildSuggestionModel(
+    [
+      { url: 'https://a.com/', title: 'A', kind: 'history' },
+      { url: 'https://b.com/', title: 'B' }
+    ],
+    -1
+  );
+  assert.deepEqual(model.items.map((i) => i.kind), ['history', 'history']);
+});
+
+test('buildSuggestionModel: an unrecognized kind value is never trusted verbatim — renders as history', () => {
+  const model = buildSuggestionModel(
+    [{ url: 'https://a.com/', title: 'A', kind: /** @type {any} */ ('not-a-real-kind') }],
+    -1
+  );
+  assert.equal(model.items[0].kind, 'history');
 });
 
 test('buildSuggestionModel: empty suggestions → items:[] + emptyNote', () => {
@@ -115,6 +147,101 @@ test('buildSuggestionModel: non-integer selectedIndex clamps to -1', () => {
     /** @type {any} */ (NaN)
   );
   assert.equal(model.selectedIndex, -1);
+});
+
+// ---------------------------------------------------------------------------
+// mergeSuggestionSources — DD11: bookmark-first, history-dedupe-by-url,
+// total cap, kind stamping
+// ---------------------------------------------------------------------------
+
+test('mergeSuggestionSources: bookmark rows first, then history, both stamped with kind', () => {
+  const bookmarks = [{ url: 'https://bm.example/', title: 'Bookmarked' }];
+  const history = [{ url: 'https://hist.example/', title: 'Visited' }];
+  assert.deepEqual(mergeSuggestionSources(bookmarks, history), [
+    { url: 'https://bm.example/', title: 'Bookmarked', kind: 'bookmark' },
+    { url: 'https://hist.example/', title: 'Visited', kind: 'history' }
+  ]);
+});
+
+test('mergeSuggestionSources: a history row exactly duplicating a bookmark URL is dropped — bookmark wins', () => {
+  const bookmarks = [{ url: 'https://dupe.example/', title: 'Bookmark Title' }];
+  const history = [
+    { url: 'https://dupe.example/', title: 'History Title (stale/different)' },
+    { url: 'https://unique.example/', title: 'Unique' }
+  ];
+  const merged = mergeSuggestionSources(bookmarks, history);
+  assert.deepEqual(merged, [
+    { url: 'https://dupe.example/', title: 'Bookmark Title', kind: 'bookmark' },
+    { url: 'https://unique.example/', title: 'Unique', kind: 'history' }
+  ]);
+});
+
+test('mergeSuggestionSources: a 4th+ matching bookmark beyond the source cap is not deduped away — its history row still surfaces plain', () => {
+  // The pre-merge bookmark list already reflects bookmarks-suggest's own ≤3
+  // cap (Edge Case: dedupe only removes history rows that duplicate a
+  // SURFACED bookmark row) — this function never re-derives that cap from a
+  // longer bookmark list, it just merges what it's given.
+  const bookmarks = [
+    { url: 'https://one.example/', title: 'One' },
+    { url: 'https://two.example/', title: 'Two' },
+    { url: 'https://three.example/', title: 'Three' }
+  ];
+  const history = [{ url: 'https://four.example/', title: 'Four (would-be 4th bookmark)' }];
+  const merged = mergeSuggestionSources(bookmarks, history);
+  assert.deepEqual(merged.map((r) => ({ url: r.url, kind: r.kind })), [
+    { url: 'https://one.example/', kind: 'bookmark' },
+    { url: 'https://two.example/', kind: 'bookmark' },
+    { url: 'https://three.example/', kind: 'bookmark' },
+    { url: 'https://four.example/', kind: 'history' }
+  ]);
+});
+
+test('mergeSuggestionSources: total capped at 6 (default), bookmarks counted first', () => {
+  const bookmarks = [
+    { url: 'https://b1.example/' },
+    { url: 'https://b2.example/' },
+    { url: 'https://b3.example/' }
+  ];
+  const history = [
+    { url: 'https://h1.example/' },
+    { url: 'https://h2.example/' },
+    { url: 'https://h3.example/' },
+    { url: 'https://h4.example/' } // pushed past the cap, dropped
+  ];
+  const merged = mergeSuggestionSources(bookmarks, history);
+  assert.equal(merged.length, 6);
+  assert.deepEqual(merged.map((r) => r.url), [
+    'https://b1.example/',
+    'https://b2.example/',
+    'https://b3.example/',
+    'https://h1.example/',
+    'https://h2.example/',
+    'https://h3.example/'
+  ]);
+});
+
+test('mergeSuggestionSources: respects a custom limit', () => {
+  const bookmarks = [{ url: 'https://b1.example/' }, { url: 'https://b2.example/' }];
+  const history = [{ url: 'https://h1.example/' }, { url: 'https://h2.example/' }];
+  const merged = mergeSuggestionSources(bookmarks, history, { limit: 3 });
+  assert.deepEqual(merged.map((r) => r.url), ['https://b1.example/', 'https://b2.example/', 'https://h1.example/']);
+});
+
+test('mergeSuggestionSources: empty bookmark list degrades to history-only (Edge Case: empty store)', () => {
+  const history = [{ url: 'https://h1.example/', title: 'H1' }];
+  assert.deepEqual(mergeSuggestionSources([], history), [{ url: 'https://h1.example/', title: 'H1', kind: 'history' }]);
+});
+
+test('mergeSuggestionSources: empty history list degrades to bookmark-only', () => {
+  const bookmarks = [{ url: 'https://b1.example/', title: 'B1' }];
+  assert.deepEqual(mergeSuggestionSources(bookmarks, []), [{ url: 'https://b1.example/', title: 'B1', kind: 'bookmark' }]);
+});
+
+test('mergeSuggestionSources: non-array/malformed inputs never throw, treated as empty', () => {
+  assert.doesNotThrow(() => {
+    assert.deepEqual(mergeSuggestionSources(/** @type {any} */ (null), /** @type {any} */ (undefined)), []);
+    assert.deepEqual(mergeSuggestionSources(/** @type {any} */ ('x'), /** @type {any} */ (42)), []);
+  });
 });
 
 // ---------------------------------------------------------------------------

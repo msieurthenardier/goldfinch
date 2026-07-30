@@ -263,11 +263,14 @@ main section p {
   outline-offset: 2px;
 }
 
-/* ── On startup — home page controls ────────────────────────────────────────────
+/* ── Startup & appearance — home page controls ──────────────────────────────────
    The label is a block above the input+button row; input and button are siblings
    (no wrapper div), so we use inline-block on both to let them sit naturally on
-   one line with a small gap via margin. */
-#startup label[for="home-page-input"] {
+   one line with a small gap via margin. Re-scoped from #startup (M15 F1 Leg 3,
+   design-review catch): the #startup section merged into #appearance — a bare
+   #startup selector here would silently stop matching once that section is
+   removed, and the home-page label would lose its styling. */
+#appearance label[for="home-page-input"] {
   display: block;
   color: var(--fg);
   font-size: 14px;
@@ -320,6 +323,21 @@ main section p {
 }
 
 /* ── Appearance — pin-icon toggle rows ───────────────────────────────────────── */
+
+/* "Pinned Icons" subheading (HAT fix, Leg 5): scoped to #appearance so it
+   doesn't touch the Automation section's own bare h3s ("Keys", "Activity",
+   "Admin key") — only one h3 lives in #appearance today. The border-top
+   divider mirrors the .startup-toggle-group / .spellcheck-group pattern
+   (same rgba border, same rationale: set this group apart from what precedes
+   it); heading typography is otherwise left at the browser h3 default, same
+   treatment the Automation subheadings already get (no dedicated h3 rule
+   there either). */
+#appearance h3 {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
 
 /* Label-left / button-right layout, matching .shield-row */
 .appearance-row {

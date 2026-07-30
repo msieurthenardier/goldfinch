@@ -88,6 +88,13 @@ interface MenuOverlayBridge {
   /** sheet → main: copy a string to the OS clipboard (M12 F3 Leg 4 recovery-show Copy).
    * One-way; sender-validated main-side. */
   copyText(text: string): void;
+  /** sheet → main: the DEDICATED bookmark-edit submit channel (M15 F1 Leg 2, flight
+   * DD4) — no secret, but the same request/response discipline. `action:'save'` carries
+   * the current name/url field values; `action:'remove'` carries neither. Returns
+   * { ok }; false keeps the card open with a generic inline error (rejection path (a) —
+   * a pre-forward validation failure), true means main already closed the sheet
+   * (close-only-on-success). */
+  bookmarkEditSubmit(payload: { token: number; id: string; action: 'save' | 'remove'; name?: string; url?: string }): Promise<{ ok: boolean }>;
 }
 
 interface Window {

@@ -6,14 +6,15 @@
 // internal step, immediately after the dev-profile redirect and before every
 // store load.
 //
-// initProfileAndStores(app, { appDb, shields, settings, jars, downloads }) MUST run
-// app.setPath('userData', …) (dev-profile isolation, unpackaged only) BEFORE
+// initProfileAndStores(app, { appDb, shields, settings, jars, downloads, bookmarks })
+// MUST run app.setPath('userData', …) (dev-profile isolation, unpackaged only) BEFORE
 // appDb.open(...) and before any getPath('userData') consumer — else a dev
 // launch reads the WRONG profile, or a store load races app-db's open.
 //
 // The seam: shields.load(path) now takes the path as an ARG (leg 2 dropped its
-// former internal getPath call), like settings.load(path), jars.load(path), and
-// downloads.load(path) — so the ordering signal for all four is the
+// former internal getPath call), like settings.load(path), jars.load(path),
+// downloads.load(path), and bookmarks.load(path) (Flight 1 "Bookmarking Core and
+// Surfaces" Leg 1) — so the ordering signal for all five is the
 // getPath('userData') call initProfileAndStores makes to build each arg.
 // appDb.open(...) records its own call directly (it takes the resolved path,
 // not a store-recorded one). The fake app's getPath records every call, and the
@@ -56,6 +57,7 @@ function makeWorld({ isPackaged }) {
     settings: { load: (p) => { order.push('settings.load'); order.push(`settings.load:${p}`); } },
     jars: { load: (p) => { order.push('jars.load'); order.push(`jars.load:${p}`); } },
     downloads: { load: (p) => { order.push('downloads.load'); order.push(`downloads.load:${p}`); } },
+    bookmarks: { load: (p) => { order.push('bookmarks.load'); order.push(`bookmarks.load:${p}`); } },
   };
   return { app, appDb, stores, order, getUserData: () => userData };
 }
@@ -89,9 +91,10 @@ test('unpackaged — setPath runs before appDb.open, which runs before every get
   assert.ok(setPathIdx < idx(w.order, 'settings.load'), 'setPath before settings.load');
   assert.ok(setPathIdx < idx(w.order, 'jars.load'), 'setPath before jars.load');
   assert.ok(setPathIdx < idx(w.order, 'downloads.load'), 'setPath before downloads.load');
+  assert.ok(setPathIdx < idx(w.order, 'bookmarks.load'), 'setPath before bookmarks.load');
 
   // And the redirect actually took effect: appDb.open, shields/settings/jars/
-  // downloads.load all got the -dev path.
+  // downloads/bookmarks.load all got the -dev path.
   assert.ok(
     w.order.includes('appDb.open:/home/x/.config/goldfinch-dev'),
     'appDb.open got the dev-redirected userData path'
@@ -112,6 +115,10 @@ test('unpackaged — setPath runs before appDb.open, which runs before every get
     w.order.includes(`downloads.load:/home/x/.config/goldfinch-dev`),
     'downloads.load got the dev-redirected userData path'
   );
+  assert.ok(
+    w.order.includes(`bookmarks.load:/home/x/.config/goldfinch-dev`),
+    'bookmarks.load got the dev-redirected userData path'
+  );
 });
 
 test('packaged — setPath is NOT called; appDb.open + consumers still run (invariant vacuously holds)', () => {
@@ -125,6 +132,7 @@ test('packaged — setPath is NOT called; appDb.open + consumers still run (inva
   assert.ok(w.order.includes('settings.load'), 'settings.load still runs when packaged');
   assert.ok(w.order.includes('jars.load'), 'jars.load still runs when packaged');
   assert.ok(w.order.includes('downloads.load'), 'downloads.load still runs when packaged');
+  assert.ok(w.order.includes('bookmarks.load'), 'bookmarks.load still runs when packaged');
   assert.ok(
     w.order.includes('appDb.open:/home/x/.config/goldfinch'),
     'appDb.open got the un-redirected userData path when packaged'
@@ -144,6 +152,10 @@ test('packaged — setPath is NOT called; appDb.open + consumers still run (inva
   assert.ok(
     w.order.includes(`downloads.load:/home/x/.config/goldfinch`),
     'downloads.load got the un-redirected userData path when packaged'
+  );
+  assert.ok(
+    w.order.includes(`bookmarks.load:/home/x/.config/goldfinch`),
+    'bookmarks.load got the un-redirected userData path when packaged'
   );
 });
 

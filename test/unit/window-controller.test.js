@@ -15,17 +15,19 @@ class El {
 
 async function harness() {
   const callbacks = {}; const calls = [];
-  const els = Object.fromEntries(['winMin','winMax','winClose','tabs','tabStatus','toggleMedia','togglePrivacy','toggleDevtools'].map((name) => [name, new El()]));
+  const els = Object.fromEntries(['winMin','winMax','winClose','tabs','tabStatus','toggleMedia','togglePrivacy','toggleDevtools','bookmarksBar'].map((name) => [name, new El()]));
   const window = { goldfinch: {
     windowMinimize: () => calls.push('minimize'), windowToggleMaximize: () => calls.push('maximize'), windowClose: () => calls.push('close'),
     windowIsMaximized: async () => false, onWindowMaximizedChange: (fn) => { callbacks.maximized = fn; },
-    settingsGet: async () => ({ media: true, shields: false, devtools: true }), onSettingsChanged: (fn) => { callbacks.settings = fn; }
+    settingsGet: async (key) => key === 'bookmarksBarEnabled' ? false : { media: true, shields: false, devtools: true },
+    onSettingsChanged: (fn) => { callbacks.settings = fn; }
   } };
   const deps = {
     window, document: { activeElement: null }, ctx: { activeTabId: null }, els, tabs: new Map(),
     orderedTabIds: () => [], releaseTabWidths: () => {}, keyboardMove: (ids) => ids, commitTabMove: () => {},
     activateTab: () => {}, closeTab: () => {}, activeTab: () => null,
-    setHomePage: (value) => calls.push(['home', value]), updateAutomationKeyState: (value) => calls.push(['keys', value])
+    setHomePage: (value) => calls.push(['home', value]), updateAutomationKeyState: (value) => calls.push(['keys', value]),
+    sendActiveBounds: () => calls.push('bounds')
   };
   const { createWindowController } = await import(moduleUrl);
   const controller = createWindowController(deps);
@@ -52,4 +54,29 @@ test('toolbar pins and settings broadcasts stay independent of active-tab type',
   h.callbacks.settings({ homePage: 'https://home.test/', toolbarPins: { media: true, shields: true, devtools: true }, automationKeyHashes: [] });
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'home'));
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'keys'));
+});
+
+test('applyBookmarksBar toggles visibility and explicitly sends active bounds on every apply', async () => {
+  const h = await harness();
+  await Promise.resolve(); // let the initial settingsGet('bookmarksBarEnabled') resolve
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true, 'off by default');
+  h.calls.length = 0;
+
+  h.controller.applyBookmarksBar(true);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
+  assert.ok(h.calls.includes('bounds'), 'sendActiveBounds is called explicitly on every apply');
+
+  h.calls.length = 0;
+  h.controller.applyBookmarksBar(false);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.ok(h.calls.includes('bounds'));
+});
+
+test('bookmarksBarEnabled syncs live from the settings-changed broadcast (multi-window sync)', async () => {
+  const h = await harness();
+  await Promise.resolve();
+  h.calls.length = 0;
+  h.callbacks.settings({ bookmarksBarEnabled: true, toolbarPins: { media: true, shields: true, devtools: true } });
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
+  assert.ok(h.calls.includes('bounds'));
 });

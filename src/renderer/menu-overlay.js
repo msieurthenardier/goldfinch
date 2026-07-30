@@ -53,6 +53,8 @@
 import { isSafeColor } from '../shared/safe-color.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
+import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
+import { buildBookmarkStarIcon } from '../shared/bookmark-star-icon.js';
 import { buildCertPickerCard, renderCertPickerRows, renderCertPickerSubtitle, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
@@ -136,7 +138,8 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     kebab: 'More menu',
     container: 'Open new tab in a container', // parity with chrome #container-menu
     'page-context': 'Page actions', // parity with chrome #page-context-menu (index.html:54)
-    'tab-context': 'Tab menu' // M09 Flight 5 Leg 1 — right-click / Context-Menu-key on a tab
+    'tab-context': 'Tab menu', // M09 Flight 5 Leg 1 — right-click / Context-Menu-key on a tab
+    'bookmarks-overflow': 'More bookmarks' // M15 F1 Leg 3 — the bar's overflow chevron menu
   };
   // Non-item header row per menuType (role="presentation" — parity with the old
   // container menu's "Open new tab in…" .cm-title; excluded from the item set).
@@ -233,6 +236,20 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
         // controller's onClose would otherwise send.
         if (sendActivatedOnce({ id: item.id })) menuController.close(menuEntry);
       });
+      // Per-row contextmenu (M15 F1 Leg 3, DD9 — the sheet's FIRST-EVER
+      // per-row contextmenu): gated to bookmarks-overflow ONLY, so no other
+      // 'menu'-family menuType (kebab/container/page-context/tab-context)
+      // gets this listener. Sends a SECOND id family on the SAME channel 4
+      // (`bookmark-edit:<i>`, the same index the row's own `bookmark:<i>`
+      // click id carries) — no new IPC channel; id is type-checked only,
+      // length-unbounded (verified).
+      if (menuType === 'bookmarks-overflow' && item.id.startsWith('bookmark:')) {
+        btn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const editId = 'bookmark-edit:' + item.id.slice('bookmark:'.length);
+          if (sendActivatedOnce({ id: editId })) menuController.close(menuEntry);
+        });
+      }
       menuNode.appendChild(btn);
     }
     // Unhide BEFORE positioning (Leg 4): point-anchor clamping measures the node,
@@ -503,13 +520,54 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
         row.className = 'sg-option' + (i === selectedIndex ? ' selected' : '');
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', String(i === selectedIndex));
+        // M15 F1 Leg 5 HAT fix (full-height star): the primary/secondary pair
+        // moves into its own column ('.sg-text') so `.sg-option` can become a
+        // ROW flex container — the bookmark badge is now a real flex sibling
+        // that stretches to the row's full content height (see menu-overlay.css),
+        // instead of an absolutely-positioned corner chip. Non-bookmark rows are
+        // unaffected: `.sg-text` reproduces the prior column layout exactly.
+        const text = document.createElement('span');
+        text.className = 'sg-text';
         const primary = document.createElement('span');
         primary.className = 'sg-primary';
         primary.textContent = String(item && item.primary != null ? item.primary : '');
         const secondary = document.createElement('span');
         secondary.className = 'sg-secondary';
         secondary.textContent = String(item && item.secondary != null ? item.secondary : '');
-        row.append(primary, secondary);
+        text.append(primary, secondary);
+        row.append(text);
+        // M15 F1 Leg 4 (DD11): kind==='bookmark' rows get a visible badge —
+        // a REAL DOM node (design review: no CSS `content:` glyph — zero
+        // precedent for generated-content markers in this codebase) plus an
+        // accessible description. The badge itself is `aria-hidden` so its
+        // visible glyph never leaks into the option's computed accessible
+        // NAME (which stays primary+secondary, matching every other row);
+        // the actual accessible signal is a separate `.sr-only` text node
+        // wired via `aria-describedby` — deliberately NOT `aria-label` on the
+        // row, which would override the computed name outright and drop the
+        // visible primary/secondary text for AT users (design review).
+        // M15 F1 Leg 5 HAT fix: the badge was originally a text pill
+        // (`textContent = 'Bookmark'`); operator asked for a star glyph
+        // matching the address-bar star's visual idiom instead. Built via
+        // the shared `buildBookmarkStarIcon` (createElementNS-only, same
+        // no-innerHTML discipline as `.sg-badge`'s prior textContent form)
+        // — the a11y contract above (aria-hidden badge + sr-only description)
+        // is unchanged; only the visible glyph moved from text to SVG.
+        if (item && item.kind === 'bookmark') {
+          const badge = document.createElement('span');
+          badge.className = 'sg-badge';
+          badge.setAttribute('aria-hidden', 'true');
+          badge.appendChild(buildBookmarkStarIcon(document));
+          row.appendChild(badge);
+
+          const descId = 'sg-bookmark-desc-' + i;
+          const desc = document.createElement('span');
+          desc.className = 'sr-only';
+          desc.id = descId;
+          desc.textContent = 'bookmark';
+          row.appendChild(desc);
+          row.setAttribute('aria-describedby', descId);
+        }
         // Row click → sug:<i> index dispatch, the exact menu/info-popup idiom
         // (one-shot guard + token auto-injection via sendActivatedOnce) — NEVER
         // the raw preload sendActivated (design review).
@@ -1997,17 +2055,122 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     positionNode(downloadsNode, anchor);
   }
 
+  /* ---------------------------------------------------- template: bookmark-edit */
+  // Star/bar/overflow quick-edit popover (M15 F1 Leg 2, flight DD4) — the
+  // SIXTEENTH template kind, and the FIRST-EVER ANCHORED modal card (leg
+  // design review): every prior dialog-style card ignores its anchor and
+  // centers via CSS; this one is positioned via `positionNode` applied to the
+  // CARD itself (not the backdrop) — see the card's own `position: absolute`
+  // override in menu-overlay.css. Name + URL fields, a 4-way Tab-cycle (name →
+  // url → Remove → Done) via the shared attachModalCard helper. The form
+  // payload does NOT ride channel-4 sendActivated (24-char cap; close-on-
+  // activation) — Done/Remove both submit over the DEDICATED
+  // menu-overlay:bookmark-edit-submit invoke (no secret, but the same
+  // request/response discipline as the vault-unlock family: the sheet awaits
+  // { ok } to decide whether to stay open with an inline error).
+
+  const bookmarkEdit = buildBookmarkEditCard(document);
+  const bookmarkEditNode = bookmarkEdit.node;
+  root.appendChild(bookmarkEditNode);
+
+  /** @type {string | null} the bookmark id currently rendered — stashed per-init. */
+  let bookmarkEditId = null;
+  let bookmarkEditBusy = false; // guards a concurrent submit (double-Enter / Enter+click)
+
+  const bookmarkEditEntry = menuController.register({
+    trigger: bookmarkEditNode,
+    menu: bookmarkEditNode,
+    // no `items` — roving no-ops; Tab-cycling + Escape are the modal-card helper below.
+    onOpen() {
+      bookmarkEditBusy = false;
+      bookmarkEditNode.classList.remove('hidden');
+      bookmarkEdit.name.focus();
+    },
+    onClose() {
+      bookmarkEditNode.classList.add('hidden');
+      bookmarkEditId = null;
+      reportDismissed();
+    },
+    focusReturn: () => {}
+  });
+
+  /** Render the name/url fields + reset the error line from the object model
+   * ({ id, name, url }), then position the CARD (not the backdrop) at the
+   * translated anchor — unhide FIRST (positionNode's point-anchor clamp
+   * measures the node; offsetWidth/Height are 0 under display:none).
+   * @param {any} model @param {any} anchor */
+  function renderBookmarkEdit(model, anchor) {
+    bookmarkEditId = model && typeof model.id === 'string' ? model.id : null;
+    applyBookmarkEditModel(bookmarkEdit, model);
+    bookmarkEditNode.classList.remove('hidden');
+    positionNode(bookmarkEdit.card, anchor);
+  }
+
+  /** Submit → the DEDICATED bookmark-edit-submit invoke. `action` is 'save'
+   * (Done — carries the current field values) or 'remove' (no fields needed).
+   * Client-side: no empty/format guard here — the pre-forward validator is
+   * main-side (the single source of truth for what counts as a valid
+   * name/url, shared with nothing else to keep in sync). The sheet awaits
+   * { ok }: false → stay open + show a generic inline error (rejection path
+   * (a) — malformed/unsafe/internal URL or an empty field); true → main
+   * already closed the sheet (close-only-on-success).
+   * @param {'save' | 'remove'} action */
+  async function submitBookmarkEdit(action) {
+    if (report.sent || report.token == null || bookmarkEditBusy || bookmarkEditId == null) return;
+    const token = report.token;
+    const id = bookmarkEditId;
+    /** @type {any} */
+    const payload = { token, id, action };
+    if (action === 'save') {
+      payload.name = bookmarkEdit.name.value;
+      payload.url = bookmarkEdit.url.value;
+    }
+    bookmarkEditBusy = true;
+    let res;
+    try {
+      res = await window.menuOverlay.bookmarkEditSubmit(payload);
+    } catch {
+      res = { ok: false }; // a rejected invoke degrades to a re-prompt, never a crash
+    } finally {
+      bookmarkEditBusy = false;
+    }
+    // Stale-resolution guard: a supersede / model-replace during the await
+    // moved the live token; a late result must not act on the new menu.
+    if (report.token !== token || report.sent) return;
+    if (res && res.ok) {
+      report.sent = true; // suppress the trailing dismissed; main already closed the sheet.
+      menuController.close(bookmarkEditEntry);
+    } else {
+      bookmarkEdit.error.textContent = 'Enter a name and a valid web address';
+    }
+  }
+
+  bookmarkEdit.done.addEventListener('click', () => { void submitBookmarkEdit('save'); });
+  bookmarkEdit.remove.addEventListener('click', () => { void submitBookmarkEdit('remove'); });
+  const bookmarkEditEnterSubmits = (/** @type {any} */ e) => {
+    if (e.key === 'Enter') { e.preventDefault(); void submitBookmarkEdit('save'); }
+  };
+  bookmarkEdit.name.addEventListener('keydown', bookmarkEditEnterSubmits);
+  bookmarkEdit.url.addEventListener('keydown', bookmarkEditEnterSubmits);
+  attachModalCard({
+    node: bookmarkEditNode,
+    getCycle: () => [bookmarkEdit.name, bookmarkEdit.url, bookmarkEdit.remove, bookmarkEdit.done],
+    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(bookmarkEditEntry); },
+  });
+
   /* ----------------------------------------------------- registry + init dispatch */
 
-  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' }} */
+  /** @type {{ [menuType: string]: 'menu' | 'info-popup' | 'input-dialog' | 'suggestions' | 'downloads' | 'vault-unlock' | 'vault-picker' | 'vault-capture' | 'vault-set' | 'vault-recovery-show' | 'vault-stepup' | 'vault-accesskey-show' | 'vault-import' | 'vault-change-master' | 'vault-recover' | 'vault-adminkey-show' | 'auth-basic' | 'cert-picker' | 'bookmark-edit' }} */
   const TEMPLATES = {
     kebab: 'menu',
     container: 'menu',
     'page-context': 'menu', // Leg 4 — point-anchored, separator/note item types
+    'bookmarks-overflow': 'menu', // M15 F1 Leg 3 — shares menuNode; no NODE_OF_ENTRY addition
     'site-info': 'info-popup',
     'new-container': 'input-dialog',
     'auth-basic': 'auth-basic', // M14 F1 L2 — HTTP basic-auth credential prompt
     'cert-picker': 'cert-picker', // M14 F1 L3 — TLS client-certificate chooser
+    'bookmark-edit': 'bookmark-edit', // M15 F1 Leg 2 — star/bar/overflow quick-edit popover (anchored)
     'vault-unlock': 'vault-unlock', // M12 F2 Leg 2 — the FIFTH kind (see above)
     'vault-picker': 'vault-picker', // M12 F2 Leg 3 — the SIXTH kind (see above)
     'vault-capture': 'vault-capture', // M12 F2 Leg 4 — the SEVENTH kind (see above)
@@ -2045,7 +2208,8 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     [vaultImportEntry, vaultImportNode],
     [vaultChangeMasterEntry, vaultChangeMasterNode],
     [vaultRecoverEntry, vaultRecoverNode],
-    [adminKeyEntry, adminKeyNode]
+    [adminKeyEntry, adminKeyNode],
+    [bookmarkEditEntry, bookmarkEditNode]
   ]);
 
   // Capture-phase reason attribution (document capture beats the controller's
@@ -2098,7 +2262,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       ? !!model && typeof model === 'object'
       : (template === 'suggestions' || template === 'vault-capture'
         || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
-        || template === 'vault-adminkey-show' || template === 'auth-basic')
+        || template === 'vault-adminkey-show' || template === 'auth-basic' || template === 'bookmark-edit')
         ? model && typeof model === 'object' && !Array.isArray(model)
         : Array.isArray(model);
     if (!modelShapeOk) return;
@@ -2227,6 +2391,13 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       // meaningless without items — onOpen focuses the first enabled button.
       renderDownloads(menuType, model, anchor);
       menuController.open(downloadsEntry, 0);
+    } else if (template === 'bookmark-edit') {
+      // The FIRST-EVER anchored modal card (leg design review) — render FIRST
+      // (stashes the id, positions the CARD at the translated anchor), then
+      // open through the controller. onOpen focuses the name input; it must
+      // NOT fall through to the non-focusing 'menu' fallback.
+      renderBookmarkEdit(model, anchor);
+      menuController.open(bookmarkEditEntry, 0);
     } else {
       // input-dialog: fixed layout, model may be empty; centered via CSS —
       // the anchor is deliberately ignored.

@@ -12,6 +12,16 @@ interface AutomationSession {
   since: number;
 }
 
+/** One persisted bookmark entry (M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
+ * DD1). `icon` is a size-capped `data:image/...` URL or null (monogram fallback). */
+interface BookmarkEntry {
+  id: string;
+  url: string;
+  title: string;
+  icon: string | null;
+  addedAt: number;
+}
+
 /** One entry in the bounded automation action log. Carries no key/hash. */
 interface AutomationLogEntry {
   ts: number;
@@ -41,6 +51,10 @@ interface GoldfinchBridge {
   windowClose(): void;
   appQuit(): void;
   unpinToolbarItem(item: string): void;
+  /** Ctrl+Shift+B / the Settings checkbox both converge here (M15 F1 Leg 3,
+   * DD7): main flips `bookmarksBarEnabled` and broadcasts `settings-changed`
+   * itself (the `unpinToolbarItem` shape). */
+  toggleBookmarksBar(): void;
   windowIsMaximized(): Promise<boolean>;
   onWindowMaximizedChange(cb: (isMax: boolean) => void): void;
   /** New Window command (M09 F6 Leg 4, DD5): creates a fresh window (boots its
@@ -82,6 +96,37 @@ interface GoldfinchBridge {
 
   // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history bridge method) ---
   historySuggest(payload: any): Promise<any>;
+
+  // --- bookmarks (chrome-trusted; M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
+  // DD3 — sender-resolved, NO internal twin) ---
+  bookmarksGet(): Promise<Array<BookmarkEntry>>;
+  bookmarkAdd(payload: { url: string; title?: string; icon?: string | null }): Promise<
+    | { ok: true; bookmark: BookmarkEntry; created: boolean }
+    | { ok: false; reason: 'invalid-url' }
+  >;
+  bookmarkUpdate(payload: { id: string; url?: string; title?: string; icon?: string | null }): Promise<
+    | { ok: true; bookmark: BookmarkEntry }
+    | { ok: false; reason: 'not-found' | 'invalid-url' | 'duplicate-url' }
+  >;
+  bookmarkRemove(payload: { id: string }): Promise<
+    | { ok: true; bookmark: BookmarkEntry }
+    | { ok: false; reason: 'not-found' }
+  >;
+  bookmarkReorder(payload: { ids: string[] }): Promise<{ ok: true; bookmarks: BookmarkEntry[] }>;
+  /** M15 F1 Leg 4 (DD11): app-scoped omnibox suggest source — no jarId param
+   * (bookmarks are app-scoped; may surface in any jar). Envelope mirrors
+   * historySuggest's {ok, suggestions} shape. */
+  bookmarksSuggest(payload: { query: string; limit?: number }): Promise<
+    { ok: true; suggestions: BookmarkEntry[] } | { ok: false; suggestions: [] }
+  >;
+  /** Fired after every bookmark mutation (add/update/remove/reorder) with an
+   * EMPTY payload — invalidation-not-snapshot (DD3): bookmarks are app-scoped,
+   * so there is no jarId to carry. Subscribers re-query via bookmarksGet(). */
+  onBookmarksChanged(cb: () => void): void;
+  /** M15 F1 Leg 2: the bookmark-edit sheet's forwarded submit — main validates/
+   * closes, then forwards here; the chrome subscriber issues the actual
+   * bookmarkUpdate/bookmarkRemove (chrome is the sole mutation issuer). */
+  onBookmarkEditSubmit(cb: (d: { id: string; action: 'save' | 'remove'; name?: string; url?: string }) => void): void;
 
   // --- shields ---
   shieldsGet(): Promise<any>;

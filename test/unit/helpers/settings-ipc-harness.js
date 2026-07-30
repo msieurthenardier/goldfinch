@@ -11,6 +11,7 @@ function makeSettingsIpcHarness() {
     toolbarPins: { media: true, shields: true, devtools: true },
     automationKeyHashes: {},
     automationAdminKeyHash: '',
+    bookmarksBarEnabled: false,
   };
   const settings = {
     get: (key) => values[key],
