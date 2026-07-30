@@ -1,9 +1,9 @@
 # Behavior Test: Bookmarks — Star State, Popover, and Sync
 
 **Slug**: `bookmarks-star-sync`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-28
-**Last Run**: never
+**Last Run**: 2026-07-29-15-04-37 (pass, 11/11)
 
 ## Intent
 
@@ -11,9 +11,10 @@ Verifies that starring a page from the address-bar star, the page context menu, 
 
 ## Preconditions
 
-- App running via `npm run dev:automation`; MCP key is **admin-tier** (chrome-target access verified by a successful `getChromeTarget`, not just tab enumeration)
+- App running via the canonical admin dev launch (`docs/dev-testing.md`); MCP key is **admin-tier** (chrome-target access verified by a successful `getChromeTarget`, not just tab enumeration)
 - MCP binding reaches the instance under test (probe: open a tab, confirm it appears in `enumerateTabs`)
 - No existing bookmarks (fresh or cleared `bookmarks` store)
+- **Operator present** — apparatus constraint (established run 2026-07-29): the menu-overlay sheet (popover, context menus) is refused by the automation surface for ALL ops at EVERY tier by design (`automation: secret-sheet`). Every step that types into, clicks inside, or dismisses a sheet (steps 3, 5, 6, 8, 9) is **operator-performed**; the Executor triggers the sheet's appearance and captures all evidence. Multi-window creation (step 9) is also operator-performed.
 
 ## Observables Required
 

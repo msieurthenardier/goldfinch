@@ -862,3 +862,46 @@ Approach chosen: **flex stretch, not a hardcoded pixel size** (the guidance's pr
 A11y contract unchanged: badge stays `aria-hidden`, SVG stays `aria-hidden`/`focusable="false"`, `currentColor` fill unchanged, no innerHTML anywhere (still `createElementNS` only), the row's `.sr-only` "bookmark" text + `aria-describedby` wiring untouched (the `.sr-only` node is `position: absolute` and unaffected by the row's flex-direction change — it never participated in flex layout).
 
 Tests: `bookmark-star-icon.test.js` left as-is — the builder's own attributes/contract are unchanged (still emits `width="11" height="11"`, now overridden downstream by CSS), so no test update needed; confirmed no other unit test asserts `.sg-option`/`.sg-primary`/`.sg-secondary`/`.sg-badge` DOM structure (grepped `test/unit` and `tests/behavior` — no hits) before concluding the restructuring was test-safe. `npm test`: 3278/3278 passing (unchanged — pure CSS/DOM-shape change, no new tests). `npm run typecheck` / `npm run lint`: clean. Live visual re-verification not performed this session — no automation key was available to this agent (no mint output/env var; `.mcp.json` empty; `enumerateWindows` timed out against the already-running instance) — reasoning verified via the flexbox stretch/content-box semantics above and confirmed against the existing green suite; recommend an operator relaunch-and-eyeball pass per the usual HAT loop.
+
+**HAT fix 5 disposition (f7586b2)**: operator verdict — star is now vertically centered (accepted) but did NOT visibly enlarge; the flex-stretch approach evidently doesn't override the icon builder's width/height presentation attributes in practice. Operator explicitly accepted as-is ("I'll take it"). Recorded as an ACCEPTED KNOWN COSMETIC ITEM, not a completed fix: the suggestions-sheet bookmark star renders smaller than the row height. Follow-up candidate for a future flight (likely needs the builder to emit no fixed width/height, or an explicit px size, rather than relying on CSS to beat the attributes).
+
+**HAT cosmetic dispositions (all operator-decided)**: outline star contrast — ACCEPTED as-is ("star is fine"). Overflow menu right-offset from chevron — accepted (not raised again after the anchor fix). Bar item focus/pressed highlight — accepted (not raised). Suggestions row right-edge bleed — FIXED (0b4d8e9; was a PRE-EXISTING M08-era box-sizing bug, not flight-introduced). BOOKMARK text chiclet → star glyph — FIXED (0b4d8e9). Duplicate-URL edit silence — accepted for v1.
+
+### Drag-spike operator procedures — EXECUTED (HAT leg 5, 2026-07-30, X11 session)
+
+Both axes were run with the operator in a keyed session under `--ozone-platform=x11` (Wayland
+excluded: it cancels drags leaving the source surface and cannot discriminate the question).
+Instrumentation was throwaway and removed afterward (guest reloaded; probe absence verified).
+
+**Axis (a) chrome-DOM → guest-surface drag delivery: VIABLE (measured, positive).**
+First attempt recorded 24 guest-side `dragover` events but no `drop` — diagnosed as a PROBE
+DEFECT, not an app limitation: the listener never called `preventDefault()` on `dragover`, which
+the HTML5 DnD spec requires before `drop` fires. Re-armed correctly (capture-phase listeners
+calling `preventDefault` on both events) and repeated the gesture in a single-tab window (so
+tear-off could not consume the release). Result:
+`{dragoverCount: 81, dropSeen: true, dropTypes: "application/x-goldfinch-tab,chromium/x-drag-id"}`.
+A native drag started on a chrome-DOM element delivers BOTH dragover and drop into the guest
+`WebContentsView`, **and the app's own custom drag payload MIME type survives the crossing and is
+readable by the guest**. This is decisive positive evidence for Flight 2's drag-onto-page feature:
+it can be built on real native DnD with a custom MIME type, no synthetic-event workaround.
+Operator-observed environment note: under X11/WSLg the mouse cursor was NOT visible over either
+chrome or page during the drag (cosmetic rig quirk; the gesture itself worked).
+
+**Axis (b) chrome ↔ menu-overlay-sheet drag delivery: NOT MEASURABLE as authored — procedure is
+obsolete.** The leg-1 procedure assumed `evaluate` could arm a probe on the sheet's webContents.
+That premise was falsified later in this same HAT session (established during the star-sync and
+bar runs, and re-confirmed empirically here): `evaluate` on the sheet returns
+`automation: secret-sheet — wcId 8 is a chrome-owned secret/overlay sheet and is never automatable
+(any tier)`. The sheet cannot be instrumented from outside, so the authored measurement is
+impossible. Verdict stays `needs-operator-manual-test` with a corrected method for whoever runs it:
+temporarily add a throwaway probe listener to the sheet's OWN source (`src/renderer/menu-overlay.js`),
+relaunch, run the gesture, then revert the source — i.e. instrument from inside, since outside
+instrumentation is permanently refused by design.
+*Structural inference (explicitly NOT a verdict)*: the sheet is the same class of
+`WebContentsView` surface as the guest, and axis (a) proved that class receives cross-surface
+native drags with payload intact — so (b) is likely viable, but Flight 2 should confirm by the
+corrected method before building on it.
+
+**Consumption**: DD9's overflow surface choice was never gated on this spike and stands. Flight 2
+now has a measured green light for drag-onto-page, and a corrected (cheap) method for settling
+bar↔overflow drag before designing it.

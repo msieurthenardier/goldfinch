@@ -1,9 +1,9 @@
 # Behavior Test: Bookmarks Bar — Toggle, Reflow, Overflow, Edit, Persistence
 
 **Slug**: `bookmarks-bar`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-28
-**Last Run**: never
+**Last Run**: 2026-07-29-18-23-40 (pass, 12/12; checkpoint 8 failed first attempt, fixed inline and re-run)
 
 ## Intent
 
@@ -12,7 +12,8 @@ Verifies the bookmarks bar end-to-end: the merged startup-and-appearance Setting
 ## Preconditions
 
 - App running via `npm run dev:automation`; **admin-tier** MCP key verified via `getChromeTarget`; instance identity confirmed (re-verify after the relaunch steps)
-- Operator available for the two relaunch steps (restart persistence, corrupt-store repair)
+- Operator available for the two relaunch steps AND for every sheet interaction — apparatus constraints established run 2026-07-29: the menu-overlay sheet (popovers, overflow menu, context menus) refuses ALL automation ops at EVERY tier by design; there is no hover primitive (native tooltips are un-assertable); there are no window-create/resize tools
+- Reader notes for the Executor: `readAxTree` (not `readDom` HTML) is authoritative for live checkbox state; every `window.goldfinch.*` read is Promise-based and silently yields `{}` if not awaited; clicking a named chrome control requires an `evaluate` + `getBoundingClientRect()` round-trip then a coordinate click; after a relaunch, check port/pid (a stale instance answers 401 rather than refusing) and identify the continuing window by tab-set match, not `lastFocused`; dismiss any popover before capturing "did the bar update" evidence
 - At least 8 bookmarks exist with distinct names (create via star if needed; enough to overflow a normal-width window when the bar is narrow — resize window narrower if needed)
 
 ## Observables Required

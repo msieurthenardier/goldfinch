@@ -1,9 +1,9 @@
 # Behavior Test: Bookmarks in Omnibox Suggestions
 
 **Slug**: `bookmarks-omnibox`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-28
-**Last Run**: never
+**Last Run**: 2026-07-29-23-13-53 (pass, 6/6)
 
 ## Intent
 
@@ -15,6 +15,8 @@ Verifies that bookmarked pages surface in address-bar suggestions: matched by na
 - A bookmark exists with a distinctive name (e.g. `Zephyr Docs` → some stable URL) created in the **default** jar; that URL has also been visited in the default jar (so it exists in default-jar history)
 - A second cookie jar exists with no browsing history for that URL
 - A second bookmark exists whose URL has **never** been visited (bookmark-only, no history row)
+- **A history-only URL** (present in the default jar's history, matching NO bookmark) for step 3's control — enumerate it explicitly; run 2026-07-29 had to discover one live via `getHistory` cross-checked against `bookmarksGet()`
+- Apparatus (established run 2026-07-29): the suggestions dropdown and star popover render in the overlay sheet, which refuses ALL automation ops at EVERY tier — sheet content is observable only via `captureWindow` composites (`readAxTree` on the chrome returns the bar/address field but never sheet rows), and interaction inside a sheet is operator-performed. Jar identity has two independent signals: `enumerateTabs[].jarId` and the chrome accent colour (work = yellow/gold, personal = blue/green) — the accent is a free corroborating signal for jar-persistence claims. Every `window.goldfinch.*` read is Promise-based (await it or get `{}` silently)
 
 ## Observables Required
 

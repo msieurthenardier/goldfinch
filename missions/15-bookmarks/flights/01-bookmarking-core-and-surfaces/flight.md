@@ -1,17 +1,17 @@
 # Flight: Bookmarking Core and Surfaces
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Bookmarks](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Star/context-menu/shortcut bookmarking with quick-edit popover and full state sync (nav, SPA, tab switch, cross-window)
-- [ ] Internal-page gating: bookmarking affordances hidden/inert; bookmarks can never reach an internal page
-- [ ] Combined startup-and-appearance Settings section with bookmarks-bar toggle (+ shortcut), instant non-animated reflow in every window
-- [ ] Bookmarks bar: stored order, names + site icons + tooltips, click-to-navigate, middle/Ctrl+click background-tab open, overflow menu, keyboard-operable
-- [ ] Right-click edit (rename / change URL / remove) on bar and overflow, effective everywhere immediately
-- [ ] Bookmarks in address-bar suggestions: source-distinguishable, deduped against history, cross-jar
-- [ ] Persistence: bookmarks (names, order, icons) survive restart; corrupt data repairs to empty; invalid entries dropped individually
+- [x] Star/context-menu/shortcut bookmarking with quick-edit popover and full state sync (nav, SPA, tab switch, cross-window)
+- [x] Internal-page gating: bookmarking affordances hidden/inert; bookmarks can never reach an internal page
+- [x] Combined startup-and-appearance Settings section with bookmarks-bar toggle (+ shortcut), instant non-animated reflow in every window
+- [x] Bookmarks bar: stored order, names + site icons + tooltips, click-to-navigate, middle/Ctrl+click background-tab open, overflow menu, keyboard-operable
+- [x] Right-click edit (rename / change URL / remove) on bar and overflow, effective everywhere immediately
+- [x] Bookmarks in address-bar suggestions: source-distinguishable, deduped against history, cross-jar
+- [x] Persistence: bookmarks (names, order, icons) survive restart; corrupt data repairs to empty; invalid entries dropped individually
 
 *(The drag criterion belongs to Flight 2; this flight retires its riskiest unknown via the cross-surface drag spike.)*
 
@@ -114,7 +114,7 @@ Foundations land first (leg 1): the store + broadcast + IPC spine, the shortcut 
 - [x] Leg 2 landed: star reflects state through all five sync paths; popover edits propagate cross-window (via the chrome's own `bookmarkUpdate`/`bookmarkRemove` + the `bookmarks-changed` re-query — `bookmarks-star-sync` behavior-test run deferred to flight verification per the leg's own Verification Steps); internal tabs show no star. Note (design-review correction absorbed into the leg spec): five sync paths, not four — the `createTab` wcId-arrival site was added beyond the flight's original three-`updateAddressChip`-site sketch.
 - [x] Leg 3 landed: settings section merged with live toggle; bar shows/hides instantly in every window; overflow + per-row edit works; `bookmarks-bar` passes; restart persistence witnessed
 - [x] Leg 4 landed: bookmark suggestions ranked, deduped, star-marked, cross-jar; `bookmarks-omnibox` passes
-- [ ] Full verification sweep green (unit, typecheck, lint, a11y, new + affected behavior specs)
+- [x] Full verification sweep green (unit/typecheck/lint; 3 new behavior specs pass; 6 affected existing specs deferred by operator decision) (unit, typecheck, lint, a11y, new + affected behavior specs)
 
 ### Adaptation Criteria
 
@@ -136,7 +136,7 @@ Foundations land first (leg 1): the store + broadcast + IPC spine, the shortcut 
 - [x] `star-popover-and-context-menu` - Star control with four-path state sync + internal gating; `bookmark-edit` anchored sheet menuType; page-context "Bookmark this page"; Ctrl+D; icon capture + passive refresh
 - [x] `bar-settings-and-overflow` - Settings section merge + bar toggle + Ctrl+Shift+B; the bar (icons/monograms, tooltips, click, middle/Ctrl+click background open, instant reflow); overflow sheet with index dispatch + per-row edit; restart persistence
 - [x] `omnibox-bookmarks-source` - `bookmarks-suggest` provider; merge/rank/dedup with star-marked rows; spec updates
-- [ ] `hat-and-alignment` - Guided HAT session: operator visually validates star fill/popover feel, instant bar reflow, icons, overflow, middle-click, suggestions; iterative fixes until satisfied
+- [x] `hat-and-alignment` - Guided HAT session: operator visually validates star fill/popover feel, instant bar reflow, icons, overflow, middle-click, suggestions; iterative fixes until satisfied
 
 ---
 
