@@ -103,3 +103,11 @@ The suite grew **+183 tests (+5.9%)** — the largest single-flight jump in this
 - [ ] Surface the duplicate-URL edit rejection to the user — currently `handleEditSubmit`'s `.catch()` never fires because `{ok:false, reason:'duplicate-url'}` is a resolved value that nothing reads; the edit silently reverts with no feedback. Operator-accepted for v1, but it is the flight's most likely real-user confusion
 - [ ] Record the "instrument from inside, not outside" sheet-spike method in CLAUDE.md (currently only in the flight log and spec preconditions)
 - [ ] Flight 2 planning: run the corrected in-source axis-(b) drag probe before designing bar↔overflow drag; budget operator time for sheet-touching verification from the start; re-examine whether DD9's frozen-snapshot index dispatch survives live reordering, or whether id-based addressing is needed
+
+---
+
+## Merge Record
+
+Landed on `main` as squash commit `d9e764e` via PR #145 (2026-07-30), following the recent project convention (M14's flights landed the same way). The review requirement was bypassed with an admin override at the operator's explicit instruction — noted here because the guard exists on this repo and the bypass should be visible rather than silent.
+
+The per-commit SHAs cited throughout this debrief and the flight log (`7dbf08b` foundations+surfaces batch, `2d1a5f3` prefill fix, `fc9f87e` settings/bar polish, `5d2d098` overflow anchor fix, `0b4d8e9` row overflow + star indicator, `f7586b2` star sizing attempt, `b336696` landing, `04ea5c2` debrief) are pre-squash branch commits. **The `flight/01-bookmarking-core-and-surfaces` branch is deliberately retained** so those references stay resolvable; they also remain visible in PR #145's commit list.
