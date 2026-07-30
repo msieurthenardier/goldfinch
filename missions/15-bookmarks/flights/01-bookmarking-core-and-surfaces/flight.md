@@ -1,6 +1,6 @@
 # Flight: Bookmarking Core and Surfaces
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Bookmarks](../../mission.md)
 
 ## Contributing to Criteria
