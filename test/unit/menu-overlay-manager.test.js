@@ -379,6 +379,26 @@ test('openMenu shows, hides the find overlay, delivers init then focuses (ready 
   assert.ok(focusIdx > sendIdx, 'focus AFTER init delivery');
 });
 
+// HAT FIX 1 (M15 F2 Leg 4 HAT fixes — H5): jarId is retained on the current-menu
+// record CONDITIONALLY — only when the opening payload actually carries a
+// string jarId — so every payload built by `payloadFor` above (no jarId) keeps
+// getCurrentMenu()'s pre-fix { menuType, token } shape byte-identical, per the
+// two `deepEqual` shape pins at :373/:427.
+test('openMenu retains jarId on the current-menu record when the payload carries one (string only)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu({ ...payloadFor(1, 'bookmark-edit'), jarId: 'work' });
+  assert.deepEqual(mgr.getCurrentMenu(), { menuType: 'bookmark-edit', token: 1, jarId: 'work' });
+});
+
+test('openMenu with a non-string jarId (or none at all) keeps the pre-fix shape — no jarId key at all', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu({ ...payloadFor(1, 'bookmark-edit'), jarId: null });
+  assert.deepEqual(mgr.getCurrentMenu(), { menuType: 'bookmark-edit', token: 1 });
+  assert.equal('jarId' in mgr.getCurrentMenu(), false, 'a null jarId is never retained as a key');
+});
+
 test('openMenu before load queues init (latest wins); did-finish-load delivers + focuses once', () => {
   setupProto();
   mgr.openMenu(payloadFor(1));

@@ -174,8 +174,20 @@ export function createBookmarksClient({ bridge, isInternalTab, onChanged, toast,
   }
 
   /** L3-DD-F: distinct, non-blocking operator feedback for a resolved
-   * rejection. Wording is implementer's discretion (flight "Acceptable
-   * variations"). @param {string} [reason] */
+   * rejection. HAT FIX 1 (M15 F2 Leg 4 HAT fixes — H5) demoted this from the
+   * PRIMARY bookmark-edit-submit feedback path to the RESIDUAL-RACE
+   * fallback: main's register-overlay-ipc.js now consults the store and
+   * rejects BEFORE closing the sheet for the common case, so the sheet's own
+   * inline error line is what the operator actually sees. This toast still
+   * fires for the narrow case that pre-close check cannot cover — main's
+   * read-check and this handler's own bookmarkUpdate/bookmarkRemove call are
+   * two SEPARATE round trips, so another window can still mutate the store
+   * in the gap between them. Also kept as-is: `toast` is a chrome-document
+   * surface (`#toasts`), and the guest WebContentsView is layered OVER the
+   * chrome, so it renders nowhere the operator can see (a pre-existing,
+   * mission-level known issue wider than this flight — NOT fixed here).
+   * Wording is implementer's discretion (flight "Acceptable variations").
+   * @param {string} [reason] */
   function surfaceRejection(reason) {
     if (!toast) return;
     if (reason === 'duplicate-url') {

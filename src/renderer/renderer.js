@@ -606,7 +606,15 @@ const openCertPickerOverlayForAudit = () =>
 function openBookmarkEditOverlay(bookmark, anchorEl = els.star, jarId = null) {
   bookmarksClient.captureEditJar(jarId);
   const r = anchorEl.getBoundingClientRect();
-  openOverlayMenu('bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0);
+  // HAT FIX 1 (M15 F2 Leg 4 HAT fixes): the captured jarId ALSO rides the OPEN
+  // OPTIONS bag (never the edit model — the model populates the sheet's visible
+  // name/url inputs, so a jarId there would be dead weight or a future
+  // accidental render). menu-overlay-manager.js retains it on the current-menu
+  // record; register-overlay-ipc.js's submit handler reads it back to consult
+  // the store BEFORE closing the sheet.
+  openOverlayMenu(
+    'bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0, { jarId }
+  );
 }
 // The ONE shared handler for star click / Ctrl+D / page-context "Bookmark
 // this page" (AC "Star click / Ctrl+D behavior"): bookmarksClient.activateStar

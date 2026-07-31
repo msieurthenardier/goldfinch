@@ -3,6 +3,8 @@
 // Electron-free registrar for the per-window menu, find, and tear-off overlays.
 // Sender identity is resolved from live registry/view ownership on every message.
 
+const { bookmarkUrlsMatch } = require('../shared/bookmark-url');
+
 const MENU_CLOSE_REASONS = new Set([
   'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
 ]);
@@ -43,6 +45,13 @@ function registerOverlayIpc({
   authAnswerFromSheet,
   certSelectFromSheet,
   validateBookmarkEdit,
+  // HAT FIX 1 (M15 F2 Leg 4 HAT fixes): the bookmarks store's `list` binding
+  // ONLY — never the whole store — so the read-only invariant ("chrome is
+  // the sole bookmark-MUTATION issuer") is enforced by construction, not by
+  // comment. A plain optional reference (leg 2's jar-ipc.js precedent, not a
+  // getVaultStore-style accessor): offline overlay tests that don't inject
+  // it get the pre-fix no-consultation shape, byte-unchanged.
+  list,
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -482,29 +491,48 @@ function registerOverlayIpc({
     });
   }
 
-  // M15 F1 Leg 2 (flight DD4/AC "Popover payload path (DD3-preserving)"): the
-  // bookmark-edit sheet's DEDICATED submit channel — the form payload does NOT
-  // ride channel-4 `menu-overlay:activated` (24-char value cap; close-on-
-  // activation). Mirrors the sibling secret-channel handlers' DISCIPLINE minus
-  // the Buffer/zeroize half (this payload carries no secret): sender identity
-  // via recordForSheetSender, open-token freshness gate, close-only-on-success.
+  // M15 F1 Leg 2 (flight DD4/AC "Popover payload path (DD3-preserving)"), HAT
+  // FIX 1 (M15 F2 Leg 4 HAT fixes — H5): the bookmark-edit sheet's DEDICATED
+  // submit channel — the form payload does NOT ride channel-4
+  // `menu-overlay:activated` (24-char value cap; close-on-activation).
+  // Mirrors the sibling secret-channel handlers' DISCIPLINE minus the
+  // Buffer/zeroize half (this payload carries no secret): sender identity via
+  // recordForSheetSender, open-token freshness gate, close-only-on-success.
   // Per-field validation (name/url) runs through the pure, Electron-free
-  // validateBookmarkEditFields (the menu-overlay-value.js testability
-  // pattern) — a failure is rejection path (a): the invoke returns
-  // { ok:false } and the sheet STAYS OPEN with a generic inline error (no
-  // close). `action:'remove'` skips field validation entirely (no name/url
-  // needed) and always closes-and-forwards. On success main does NOT touch
-  // bookmarksStore itself — it forwards to the OWNING window's chrome via
+  // validateBookmarkEditFields — a failure is the ORIGINAL rejection path:
+  // the invoke returns { ok:false } and the sheet STAYS OPEN with a generic
+  // inline error (no close).
+  //
+  // HAT FIX 1 folds what was Flight 1's "two rejection paths, two UXes"
+  // contract into ONE path. H5 found the second UX (a post-close chrome
+  // toast) architecturally invisible — the guest WebContentsView is layered
+  // OVER the chrome document, so #toasts never renders (a known issue wider
+  // than this flight, recorded separately). Rather than build a new surface,
+  // main now CONSULTS the bookmarks store (read-only, via the injected `list`
+  // binding — never the whole store, so the "chrome is the sole
+  // bookmark-mutation issuer" invariant holds by construction) BEFORE closing
+  // the sheet: not-found (the target row is already gone) and, for `save`,
+  // duplicate-url (a DIFFERENT row in the SAME jar already has this exact
+  // URL — bookmarkUrlsMatch, never a re-derived `===`) both now reject with
+  // `{ ok:false, reason }` and leave the sheet open, same as a field-
+  // validation failure. `action:'remove'` skips FIELD validation (no
+  // name/url needed) but gets the SAME not-found consult — it used to close
+  // and forward with zero consultation, hitting the identical
+  // invisible-feedback defect on the far side. `list` is gated-optional
+  // (offline overlay tests omit it) and jarId-normalized to `null` when the
+  // current menu carries none (the audit-seam fixture, or any future
+  // non-string jarId) — `list(null)` resolves to zero rows (not-found) rather
+  // than throwing (SQLite's bound-parameter contract rejects `undefined`,
+  // accepts `null`). On success main still does NOT MUTATE bookmarksStore —
+  // it forwards to the OWNING window's chrome via
   // chromeForAttachment(rec.win)?.send('bookmark-edit-submit', payload) (the
   // vault-setup forward precedent); the chrome subscriber issues the actual
-  // bookmarkUpdate/bookmarkRemove — chrome is the sole bookmark-mutation
-  // issuer (AC invariant). Rejection path (b) — a cross-entry `duplicate-url`
-  // collision — is invisible to this per-field validator by construction; it
-  // can only surface AFTER close, from the chrome's own bookmarkUpdate call
-  // (see the leg's Edge Cases) — a `reason:'invalid-url'` response reaching
-  // the chrome post-close should therefore be unreachable given this
-  // validator ran first. Gated on the validateBookmarkEdit injection so
-  // offline overlay tests that don't wire it never register this channel.
+  // bookmarkUpdate/bookmarkRemove. A genuine RACE — another window mutates
+  // the store in the gap between this read-check and the chrome's own
+  // mutation round trip — still survives, narrowly; bookmarks-client.js's
+  // `surfaceRejection`/`toast` stays wired as that residual fallback. Gated
+  // on the validateBookmarkEdit injection so offline overlay tests that don't
+  // wire it never register this channel.
   if (validateBookmarkEdit) {
     ipcMain.handle('menu-overlay:bookmark-edit-submit', (event, payload) => {
       const rec = recordForSheetSender(event.sender);
@@ -513,22 +541,41 @@ function registerOverlayIpc({
       if (typeof token !== 'number' || typeof id !== 'string') return { ok: false };
       const current = rec.sheet.getCurrentMenu();
       if (!current || token !== current.token) return { ok: false };
+
+      /** @type {{ ok: true, name: string, url: string } | null} */
+      let validated = null;
+      if (action !== 'remove') {
+        validated = validateBookmarkEdit({
+          name: payload && payload.name,
+          url: payload && payload.url,
+        });
+        if (!validated.ok) return { ok: false };
+      }
+
+      if (list) {
+        const jarId = typeof current.jarId === 'string' ? current.jarId : null;
+        const rows = list(jarId);
+        const row = rows.find((r) => r.id === id);
+        if (!row) return { ok: false, reason: 'not-found' };
+        if (
+          action !== 'remove'
+          && rows.find((r) => r.id !== id && bookmarkUrlsMatch(r.url, /** @type {any} */ (validated).url))
+        ) {
+          return { ok: false, reason: 'duplicate-url' };
+        }
+      }
+
       if (action === 'remove') {
         rec.sheet.closeMenuOverlay('activated', current.token);
         chromeForAttachment(rec.win)?.send('bookmark-edit-submit', { id, action: 'remove' });
         return { ok: true };
       }
-      const validated = validateBookmarkEdit({
-        name: payload && payload.name,
-        url: payload && payload.url,
-      });
-      if (!validated.ok) return { ok: false };
       rec.sheet.closeMenuOverlay('activated', current.token);
       chromeForAttachment(rec.win)?.send('bookmark-edit-submit', {
         id,
         action: 'save',
-        name: validated.name,
-        url: validated.url,
+        name: /** @type {any} */ (validated).name,
+        url: /** @type {any} */ (validated).url,
       });
       return { ok: true };
     });

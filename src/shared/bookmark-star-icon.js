@@ -35,7 +35,12 @@ export function buildBookmarkStarIcon(document) {
   svg.setAttribute('viewBox', '0 0 24 24');
   // No `width`/`height` presentation attributes (M15 F2 Leg 3, DD12(b)): they
   // defeated CSS sizing on the suggestions-row badge — `.sg-badge-star` sizes
-  // it via CSS instead, letting it render at row height.
+  // it via CSS instead, letting it render at row scale. That CSS rule
+  // originally sized off a percentage height + `aspect-ratio`, which collapsed
+  // to zero in live use (M15 F2 Leg 4 HAT fix — see `.sg-badge-star` in
+  // menu-overlay.css for the invisible-star regression and the em-based fix).
+  // Keep this element attribute-free; the CSS fix does not require
+  // reintroducing width/height attributes here.
   svg.setAttribute('fill', 'currentColor');
   svg.setAttribute('stroke', 'none');
   svg.setAttribute('aria-hidden', 'true');

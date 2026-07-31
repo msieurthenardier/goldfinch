@@ -1,6 +1,6 @@
 # Leg: hat-and-verification
 
-**Status**: ready
+**Status**: in-flight
 **Flight**: [Jar-Scoped Bookmarks](../flight.md)
 
 ## Objective
