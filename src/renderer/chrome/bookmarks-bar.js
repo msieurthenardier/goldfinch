@@ -1,12 +1,16 @@
 // bookmarks-bar.js — the bookmarks bar + its overflow sheet (M15 F1
-// "Bookmarking Core and Surfaces" Leg 3). Houses ALL bar/overflow business
-// logic per the leg's line-budget FD ruling (renderer.js gets only thin
-// wiring: construction, the extended single onChanged closure, and the
-// window-controller.js toggle→sendActiveBounds glue lives there, not here).
+// "Bookmarking Core and Surfaces" Leg 3; jar-resolved M15 F2 "Jar-Scoped
+// Bookmarks" Leg 3). Houses ALL bar/overflow business logic per the leg's
+// line-budget FD ruling (renderer.js gets only thin wiring: construction,
+// the extended single onChanged closure, and the window-controller.js
+// toggle→sendActiveBounds glue lives there, not here).
 //
-// Rendering: one <button class="bm-item"> per bookmarksClient.list entry, in
-// list order, inserted ahead of the always-present #bookmarks-overflow
-// chevron (the one fixed child every render preserves).
+// Rendering: `render(jarId)` renders `bookmarksClient.listFor(jarId)` — the
+// last-rendered jarId is remembered (`currentJarId`) so the ResizeObserver's
+// re-partition pass and the overflow snapshot both stay scoped to the SAME
+// jar without needing the caller to re-pass it. One <button class="bm-item">
+// per entry, in list order, inserted ahead of the always-present
+// #bookmarks-overflow chevron (the one fixed child every render preserves).
 //
 // Overflow: a ResizeObserver on the bar + a cumulative item-width walk (NEW
 // pattern — no in-repo precedent; the tab strip is pure CSS) decides how many
@@ -94,7 +98,8 @@ export function resolveOverflowRowId(id, snapshot) {
  *   document: Document, ResizeObserver: any, els: any,
  *   bookmarksClient: any, navigate: (url: string) => void,
  *   createTab: (url: string, container: any, opts?: any) => any,
- *   openBookmarkEditOverlay: (bookmark: any, anchorEl?: any) => void,
+ *   openBookmarkEditOverlay: (bookmark: any, anchorEl?: any, jarId?: string|null) => void,
+ *   activeContainer: () => any,
  *   overlayMenuClient: { open: Function, close: Function, trigger: Function },
  *   overlayMenuState: { open: boolean },
  *   rightAnchorOf: (el: any) => any
@@ -102,13 +107,17 @@ export function resolveOverflowRowId(id, snapshot) {
  */
 export function createBookmarksBar({
   document, ResizeObserver, els,
-  bookmarksClient, navigate, createTab, openBookmarkEditOverlay,
+  bookmarksClient, navigate, createTab, openBookmarkEditOverlay, activeContainer,
   overlayMenuClient, overlayMenuState, rightAnchorOf
 }) {
   /** @type {any[]} the chrome-side snapshot the overflow sheet was last opened with. */
   let overflowSnapshot = [];
   /** @type {{ width: number, height: number } | null} re-entrancy guard. */
   let lastMeasuredSize = null;
+  /** @type {string | null} the jarId the bar is CURRENTLY rendered for — set
+   * by every render() call, read by the resize-triggered re-partition and by
+   * the overflow snapshot, both of which must stay scoped to that same jar. */
+  let currentJarId = null;
 
   function itemEls() {
     return [...els.bookmarksBar.children].filter((el) => el.classList.contains('bm-item'));
@@ -148,31 +157,39 @@ export function createBookmarksBar({
     // uses (the untrusted gate stays intact — never a trusted create).
     // Ctrl/Cmd+click rides the SAME click event to a background open instead
     // (three-arg createTab form — options in the THIRD slot; see DD10 note
-    // below on auxclick for why the 2-arg form is forbidden here).
+    // below on auxclick for why the 2-arg form is forbidden here). M15 F2 L3
+    // DD7b: the container is the ACTIVE tab's (via `activeContainer()`), not
+    // `null` — a `null` container resolves the current DEFAULT jar (or a
+    // fresh burner), which would silently open a work-jar bookmark in the
+    // wrong jar on middle/Ctrl-click.
     btn.addEventListener('click', (e) => {
       if (e.ctrlKey || e.metaKey) {
-        createTab(b.url, null, { background: true });
+        createTab(b.url, activeContainer(), { background: true });
       } else {
         navigate(b.url);
       }
     });
     // Middle-click (auxclick button 1): background-open. THREE-arg createTab
-    // form is non-negotiable — createTab(url, null, { background: true }) —
-    // the 2-arg form would land { background: true } in the CONTAINER
-    // parameter, silently defeating background-open AND corrupting jar
-    // resolution (design-review correction, leg-3 AC).
+    // form is non-negotiable — createTab(url, activeContainer(), { background:
+    // true }) — the 2-arg form would land { background: true } in the
+    // CONTAINER parameter, silently defeating background-open AND corrupting
+    // jar resolution (design-review correction, leg-3 AC).
     btn.addEventListener('auxclick', (e) => {
       if (e.button !== 1) return;
       e.preventDefault();
-      createTab(b.url, null, { background: true });
+      createTab(b.url, activeContainer(), { background: true });
     });
     // Right-click: the leg-2 quick-edit popover, anchored at THIS item — the
     // bookmark object is captured in this closure at BUILD time (TOCTOU rule:
     // render() rebuilds the whole bar on every bookmarks-changed re-query, so
-    // a stale closure never survives past the next change it would matter for).
+    // a stale closure never survives past the next change it would matter
+    // for). `currentJarId` (M15 F2 L3 DD13/L3-DD-E) is the bar's OWN rendered
+    // jar — the same value `activeContainer().id` would give by construction,
+    // passed explicitly so the popover's captured jar never depends on the
+    // active tab still being what it was when this row was built.
     btn.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      openBookmarkEditOverlay(b, btn);
+      openBookmarkEditOverlay(b, btn, currentJarId);
     });
 
     return btn;
@@ -191,7 +208,7 @@ export function createBookmarksBar({
     for (const el of items) el.classList.remove('hidden');
     const widths = items.map((el) => el.getBoundingClientRect().width);
     const { visibleCount, overflowing } = partitionOverflow(widths, availableWidth, CHEVRON_WIDTH);
-    overflowSnapshot = overflowing ? bookmarksClient.list.slice(visibleCount) : [];
+    overflowSnapshot = overflowing ? bookmarksClient.listFor(currentJarId).slice(visibleCount) : [];
     items.forEach((el, i) => el.classList.toggle('hidden', i >= visibleCount));
     els.bookmarksOverflow.classList.toggle('hidden', !overflowing);
   }
@@ -211,13 +228,15 @@ export function createBookmarksBar({
     applyOverflowPartition(rect.width);
   }
 
-  /** Full re-render from bookmarksClient.list — idempotent, called on boot
-   * and on every post-refresh signal (the extended onChanged closure). Always
-   * re-partitions directly (bypassing the resize guard): the CONTENT changed
-   * even when the bar's own box didn't. */
-  function render() {
+  /** Full re-render from `bookmarksClient.listFor(jarId)` — idempotent,
+   * called on boot and on every post-refresh signal (the extended onChanged
+   * closure), always for the ACTIVE tab's jar. Always re-partitions directly
+   * (bypassing the resize guard): the CONTENT changed even when the bar's
+   * own box didn't. @param {string|null} [jarId] */
+  function render(jarId = currentJarId) {
+    currentJarId = jarId;
     clearItems();
-    for (const b of bookmarksClient.list) {
+    for (const b of bookmarksClient.listFor(jarId)) {
       els.bookmarksBar.insertBefore(buildItemButton(b), els.bookmarksOverflow);
     }
     const rect = els.bookmarksBar.getBoundingClientRect();
@@ -257,7 +276,7 @@ export function createBookmarksBar({
     if (resolved.kind === 'bookmark') {
       navigate(resolved.bookmark.url);
     } else {
-      openBookmarkEditOverlay(resolved.bookmark, els.bookmarksOverflow);
+      openBookmarkEditOverlay(resolved.bookmark, els.bookmarksOverflow, currentJarId);
     }
   }
 

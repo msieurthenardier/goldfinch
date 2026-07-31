@@ -21,10 +21,11 @@ const { registerJarDataIpc } = require('./jar-data-ipc');
  *   settings: { get: (k: string) => any, set: (k: string, v: any) => any, getAll: () => any },
  *   broadcast: (channel: string, payload: unknown) => void,
  *   historyStore: typeof import('./history-store'),
- *   getVaultStore?: () => any
+ *   getVaultStore?: () => any,
+ *   bookmarksStore?: typeof import('./bookmarks-store')
  * }} deps
  */
-function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore, getVaultStore }) {
+function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, settings, broadcast, historyStore, getVaultStore, bookmarksStore }) {
   const cookieSeen = appDb.createCookieSeenStore();
 
   // getDefault() returns the shared frozen BURNER when no persistent jar
@@ -55,7 +56,11 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     broadcastJarsChanged,
     // M12 F4 Leg 6 (DD7): the vault-removal step in handleRemove. Optional — offline
     // tests omit it and the step is skipped (injection-gated precedent).
-    getVaultStore
+    getVaultStore,
+    // M15 F2 Leg 2 (DD9): handleRemove's bookmark teardown, own try/catch.
+    // Optional (a plain reference, not an accessor) — offline tests that omit
+    // it skip the step (injection-gated precedent, same shape as getVaultStore).
+    bookmarksStore
   });
 
   registerJarDataIpc({
@@ -67,7 +72,10 @@ function registerJarIpc({ ipcMain, jars, session, rerollSeed, revokeJarKey, sett
     retentionSweep,
     wipeJarData,
     broadcast,
-    broadcastJarsChanged
+    broadcastJarsChanged,
+    // M15 F2 Leg 2 (DD9): the Bookmarks clear-data class dispatch. Optional —
+    // offline tests that omit it skip the step (injection-gated precedent).
+    bookmarksStore
   });
 
   return { broadcastJarsChanged };

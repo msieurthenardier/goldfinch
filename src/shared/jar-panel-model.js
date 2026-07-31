@@ -40,6 +40,12 @@ export function panelForDataClass(classId) {
       return 'site-data';
     case 'history':
       return 'history';
+    // M15 Flight 2 "Jar-Scoped Bookmarks", Leg 2 / leg L2-DD-E (FD ruling):
+    // the History panel is the browsing-record panel; "Clear bookmarks"
+    // beside "Clear history" is coherent, and the jars page lists nothing
+    // bookmark-shaped that would justify a dedicated panel.
+    case 'bookmarks':
+      return 'history';
     default:
       return null;
   }

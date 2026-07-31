@@ -19,7 +19,12 @@ function registerJarDataIpc({
   retentionSweep,
   wipeJarData,
   broadcast,
-  broadcastJarsChanged
+  broadcastJarsChanged,
+  // M15 F2 Leg 2 (DD9): the Bookmarks clear-data class dispatch in
+  // handleClearData. A plain optional reference (eagerly-required module
+  // singleton, like historyStore — not a getVaultStore-style accessor);
+  // offline tests that omit it skip the step (injection-gated precedent).
+  bookmarksStore
 }) {
   // Per-jar data controls (M06 Flight 4, Leg 1 / DD2, DD3). Partition lookup is
   // inline `jars.list().find(...)` (the store deliberately exposes no `get(id)`
@@ -55,6 +60,7 @@ function registerJarDataIpc({
     const ses = session.fromPartition(entry.partition);
     const cleared = [];
     let historyDeleted = 0;
+    let bookmarksDeleted = 0;
     try {
       for (const classId of p.classes) {
         const d = jarDataClassById(classId); // already validated above
@@ -64,6 +70,23 @@ function registerJarDataIpc({
           } catch (e) {
             console.error('[history]', e); // house convention (Q1: yes, log)
             return { ok: false, error: 'jars: clear-data — history-failure' };
+          }
+          cleared.push(classId);
+          continue;
+        }
+        // M15 F2 Leg 2 (DD9): the history idiom above, one discriminator
+        // earlier than the storages-null cache fallthrough (else a naive
+        // storages-falsy check would route a bookmarks clear into
+        // ses.clearCache()). Gated on the injection (offline tests that
+        // omit bookmarksStore skip the step — injection-gated precedent).
+        if (d.custom === 'bookmarks') {
+          if (bookmarksStore) {
+            try {
+              bookmarksDeleted = bookmarksStore.clearJar(p.id);
+            } catch (e) {
+              console.error('[bookmarks]', e);
+              return { ok: false, error: 'jars: clear-data — bookmarks-failure' };
+            }
           }
           cleared.push(classId);
           continue;
@@ -102,6 +125,12 @@ function registerJarDataIpc({
     // same as history-ipc's clear).
     if (cleared.includes('history') && historyDeleted > 0) {
       broadcast('history-changed', { jarId: p.id });
+    }
+    // M15 F2 Leg 2 (DD9): the bookmarks clear broadcasts `bookmarks-changed`,
+    // never `jar-data-changed` — handleJarDataChanged's panel-count refresh
+    // is deliberately untouched by this class.
+    if (cleared.includes('bookmarks') && bookmarksDeleted > 0) {
+      broadcast('bookmarks-changed', { jarId: p.id });
     }
     // DD10 (design review, HIGH): jar-data-changed invalidates the Cookies /
     // Other-site-data panels — fired once, carrying only the classes ∩

@@ -120,6 +120,12 @@ class FakeResizeObserver {
 }
 FakeResizeObserver.instances = [];
 
+// M15 F2 Leg 3: bookmarksClient is now jar-scoped (`listFor(jarId)`). These
+// bar-level tests aren't exercising the CACHE's jar-scoping (that's
+// bookmarks-client.test.js's job) — the fixture's `listFor` ignores jarId and
+// always serves the one seeded `list`, so every pre-existing single-jar
+// assertion stays valid; tests that care which jarId the bar passed through
+// (render/contextmenu/open-in-new-tab) assert on it explicitly.
 function harness({ list = [] } = {}) {
   FakeResizeObserver.instances = [];
   const document = new FakeDocument();
@@ -130,26 +136,28 @@ function harness({ list = [] } = {}) {
   const els = { bookmarksBar, bookmarksOverflow };
 
   const calls = [];
-  const bookmarksClient = { list };
+  const bookmarksClient = { listFor: () => list };
   const overlayMenuState = { open: false };
   const overlayMenuClient = {
     open: (...args) => calls.push(['open', ...args]),
     close: (reason) => calls.push(['close', reason]),
     trigger: (menuType, openFn) => { calls.push(['trigger', menuType]); openFn(); },
   };
+  const activeContainer = { id: 'active-jar' };
 
   const deps = {
     document, ResizeObserver: FakeResizeObserver, els,
     bookmarksClient,
     navigate: (url) => calls.push(['navigate', url]),
     createTab: (...args) => calls.push(['createTab', ...args]),
-    openBookmarkEditOverlay: (bookmark, anchorEl) => calls.push(['edit', bookmark, anchorEl === bookmarksOverflow ? 'chevron' : 'item']),
+    openBookmarkEditOverlay: (bookmark, anchorEl, jarId) => calls.push(['edit', bookmark, anchorEl === bookmarksOverflow ? 'chevron' : 'item', jarId]),
+    activeContainer: () => activeContainer,
     overlayMenuClient,
     overlayMenuState,
     rightAnchorOf: (el) => ({ alignRight: 0, from: el === bookmarksOverflow ? 'chevron' : 'other' }),
   };
 
-  return { els, calls, bookmarksClient, overlayMenuState, deps };
+  return { els, calls, bookmarksClient, overlayMenuState, activeContainer, list, deps };
 }
 
 async function create(h) {
@@ -164,7 +172,7 @@ test('render() builds one button per bookmark, ahead of the chevron, in list ord
   ] });
   h.els.bookmarksBar._width = 1000; // roomy — default 0-width fake items trivially fit
   const bar = await create(h);
-  bar.render();
+  bar.render('jar-a'); // M15 F2 Leg 3: render() takes the jarId to render for
 
   const items = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'));
   assert.equal(items.length, 2);
@@ -235,7 +243,11 @@ test('chevron click opens the overflow sheet with the overflowed-items snapshot;
   assert.deepEqual(h.calls.at(-1), ['navigate', 'https://two.test/']);
 
   bar.dispatch('bookmark-edit:0');
-  assert.deepEqual(h.calls.at(-1), ['edit', h.bookmarksClient.list[1], 'chevron']);
+  // M15 F2 Leg 3, L3-DD-E: the popover's captured jar is the BAR'S OWN
+  // rendered jar — null here since this test's render() call never passed
+  // one (defaults to the un-set `currentJarId`); the render() test above
+  // pins the real pass-through value.
+  assert.deepEqual(h.calls.at(-1), ['edit', h.list[1], 'chevron', null]);
 
   // Out-of-range / malformed ids are validated no-ops.
   const before = h.calls.length;
@@ -255,24 +267,28 @@ test('DD9 cache freshness: closeOverflowIfOpen only closes when the sheet state 
   assert.deepEqual(h.calls.at(-1), ['close', 'superseded']);
 });
 
-test('item click: plain click navigates; Ctrl/Cmd+click and middle-click open a BACKGROUND tab via the three-arg createTab form', async () => {
+test('item click: plain click navigates; Ctrl/Cmd+click and middle-click open a BACKGROUND tab via the three-arg createTab form, IN THE ACTIVE TAB\'S CONTAINER', async () => {
   const h = harness({ list: [{ id: 'b1', title: 'One', url: 'https://one.test/' }] });
   const bar = await create(h);
-  bar.render();
+  bar.render('jar-a');
   const item = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-item'));
 
   item.fire('click', { ctrlKey: false, metaKey: false });
   assert.deepEqual(h.calls.at(-1), ['navigate', 'https://one.test/']);
 
+  // M15 F2 Leg 3 DD7b: the container is `activeContainer()` — NEVER `null`
+  // (which would resolve the current default jar / a fresh burner instead
+  // of the bookmark's own jar).
   item.fire('click', { ctrlKey: true });
-  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', null, { background: true }]);
+  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', h.activeContainer, { background: true }]);
 
   item.fire('auxclick', { button: 1 });
-  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', null, { background: true }]);
+  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', h.activeContainer, { background: true }]);
 
   item.fire('auxclick', { button: 2 }); // not middle — must NOT open
-  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', null, { background: true }]);
+  assert.deepEqual(h.calls.at(-1), ['createTab', 'https://one.test/', h.activeContainer, { background: true }]);
 
   item.fire('contextmenu');
-  assert.deepEqual(h.calls.at(-1), ['edit', h.bookmarksClient.list[0], 'item']);
+  // L3-DD-E: the popover's captured jar is the bar's OWN rendered jar ('jar-a').
+  assert.deepEqual(h.calls.at(-1), ['edit', h.list[0], 'item', 'jar-a']);
 });

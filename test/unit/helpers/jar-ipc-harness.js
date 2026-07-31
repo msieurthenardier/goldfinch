@@ -98,6 +98,29 @@ function makeFakeHistoryStore({ throws = {} } = {}) {
   };
 }
 
+// M15 F2 Leg 2 (DD9): a fake bookmarksStore alongside makeFakeHistoryStore
+// above — the established pattern. clearJar(jarId) is the only method
+// jar-registry-ipc.js's handleRemove / jar-data-ipc.js's handleClearData
+// need from the injected reference.
+function makeFakeBookmarksStore({ throws = false } = {}) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  return {
+    seed(jarId, n = 1) {
+      counts.set(jarId, (counts.get(jarId) || 0) + n);
+    },
+    count(jarId) {
+      return counts.get(jarId) || 0;
+    },
+    clearJar(jarId) {
+      if (throws) throw new Error('bookmarks store blew up');
+      const n = counts.get(jarId) || 0;
+      counts.set(jarId, 0);
+      return n;
+    }
+  };
+}
+
 function trustedJarsEvent() {
   return {
     senderFrame: { origin: 'goldfinch://jars', url: 'goldfinch://jars/' },
@@ -124,7 +147,11 @@ function makeHarness(
     // M12 F4 Leg 6: optional accessor for a (real or fake) vault store, injected into
     // registerJarIpc so handleRemove's fail-soft vault-removal step runs. Omitted by
     // default → the step is skipped (the injection-gated precedent).
-    getVaultStore = undefined
+    getVaultStore = undefined,
+    // M15 F2 Leg 2 (DD9): optional plain reference (not an accessor) — omitted by
+    // default so every EXISTING test's broadcast/event sequence is byte-unchanged
+    // (injection-gated precedent, same shape as getVaultStore).
+    bookmarksStore = undefined
   } = {}
 ) {
   appDb.open('', { memory: true });
@@ -196,7 +223,8 @@ function makeHarness(
     settings,
     broadcast,
     historyStore,
-    getVaultStore
+    getVaultStore,
+    bookmarksStore
   });
 
   const invoke = (channel, payload) => handlers.get(channel)({}, payload);
@@ -210,6 +238,7 @@ function makeHarness(
     sessions,
     settings,
     historyStore,
+    bookmarksStore,
     broadcastJarsChanged: result.broadcastJarsChanged,
     invoke,
     invokeInternal,
@@ -221,6 +250,7 @@ module.exports = {
   appDb,
   flush,
   freshStore,
+  makeFakeBookmarksStore,
   makeFakeHistoryStore,
   makeHarness,
   personal,

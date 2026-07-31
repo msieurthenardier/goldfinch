@@ -70,7 +70,14 @@ function harness() {
     isWebTab: (tab) => !!tab && !tab.internal,
     createTab: (url) => state.calls.push(['create', url]),
     openDownloads: () => state.calls.push(['downloads']),
-    bookmarksClient: { findByUrl: (url) => bookmarks.has(url) ? { id: 'bm', url } : null },
+    // M15 F2 Leg 3: jar-scoped — findByUrl/ensureJar both take jarId first.
+    // The fixture ignores jarId for findByUrl (single shared `bookmarks` set
+    // is enough for these star tests); ensureJar calls are tracked so
+    // refreshStar's "prime the cache" behavior is pinned.
+    bookmarksClient: {
+      findByUrl: (jarId, url) => bookmarks.has(url) ? { id: 'bm', url } : null,
+      ensureJar: (jarId) => state.calls.push(['ensureJar', jarId])
+    },
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     shouldQuery: ({ focused, isInternal, isBurner, value }) => focused && !isInternal && !isBurner && !!value.trim(),
     buildSuggestionModel: (items, selectedIndex) => ({ items, selectedIndex }),
@@ -152,7 +159,8 @@ test('DD11: both historySuggest and bookmarksSuggest are queried on input, merge
   await new Promise((resolve) => setTimeout(resolve, 110));
 
   assert.ok(h.state.calls.some(([name, payload]) => name === 'historySuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'));
-  assert.ok(h.state.calls.some(([name, payload]) => name === 'bookmarksSuggest' && payload.query === 'exa'));
+  // M15 F2 Leg 3: bookmarksSuggest is jar-addressed too, beside historySuggest's own.
+  assert.ok(h.state.calls.some(([name, payload]) => name === 'bookmarksSuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'));
 
   h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://history.example/', title: 'History Row' }] });
   h.resolveBookmarksSuggest({ ok: true, suggestions: [{ url: 'https://bm.example/', title: 'Bookmark Row' }] });
@@ -241,27 +249,33 @@ test('zoom readback drops a result after TOCTOU tab switch and find restores sav
   assert.equal(h.state.calls.some(([name, payload]) => name === 'find' && payload.wcId === 12), false);
 });
 
-test('refreshStar: hidden on internal tabs / no live wcId; synchronous cache-driven aria-pressed + .starred otherwise (M15 F1 Leg 2)', async () => {
+test('refreshStar: hidden on internal tabs / burner tabs / no live wcId; synchronous jar-scoped cache-driven aria-pressed + .starred otherwise (M15 F1 Leg 2; jar-aware + burner M15 F2 Leg 3)', async () => {
   const h = harness();
   const controller = await create(h);
 
   controller.refreshStar(null);
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
-  controller.refreshStar({ id: 'internal', internal: true, wcId: 1, url: 'goldfinch://settings' });
+  controller.refreshStar({ id: 'internal', internal: true, wcId: 1, url: 'goldfinch://settings', container: { id: 'internal' } });
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
-  controller.refreshStar({ id: 'no-wc', internal: false, wcId: null, url: 'https://x/' });
+  controller.refreshStar({ id: 'no-wc', internal: false, wcId: null, url: 'https://x/', container: { id: 'jar-a' } });
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
-  const unbookmarked = { id: 'a', internal: false, wcId: 5, url: 'https://unbookmarked.test/' };
+  // L3-DD-C/D: burner tabs also hide the star, alongside internal.
+  controller.refreshStar({ id: 'burner', internal: false, wcId: 2, url: 'https://x/', container: { id: 'burner-1', burner: true } });
+  assert.equal(h.els.star.classList.contains('hidden'), true);
+
+  const unbookmarked = { id: 'a', internal: false, wcId: 5, url: 'https://unbookmarked.test/', container: { id: 'jar-a' } };
   controller.refreshStar(unbookmarked);
   assert.equal(h.els.star.classList.contains('hidden'), false);
   assert.equal(h.els.star.attributes.get('aria-pressed'), 'false');
   assert.equal(h.els.star.classList.contains('starred'), false);
+  // L3-DD-A: a visible, non-suppressed tab primes its jar's cache.
+  assert.ok(h.state.calls.some(([name, jarId]) => name === 'ensureJar' && jarId === 'jar-a'));
 
   h.bookmarks.add('https://bookmarked.test/');
-  const bookmarked = { id: 'b', internal: false, wcId: 6, url: 'https://bookmarked.test/' };
+  const bookmarked = { id: 'b', internal: false, wcId: 6, url: 'https://bookmarked.test/', container: { id: 'jar-a' } };
   controller.refreshStar(bookmarked);
   assert.equal(h.els.star.classList.contains('hidden'), false);
   assert.equal(h.els.star.attributes.get('aria-pressed'), 'true');

@@ -33,9 +33,9 @@ test('JAR_DATA_CLASSES is frozen and every descriptor is frozen', () => {
   for (const c of JAR_DATA_CLASSES) assert.ok(Object.isFrozen(c), `descriptor "${c.id}" should be frozen`);
 });
 
-test('ids are unique and exactly [cookies, storage, cache, history] in order', () => {
+test('ids are unique and exactly [cookies, storage, cache, history, bookmarks] in order', () => {
   const ids = JAR_DATA_CLASSES.map((c) => c.id);
-  assert.deepEqual(ids, ['cookies', 'storage', 'cache', 'history']);
+  assert.deepEqual(ids, ['cookies', 'storage', 'cache', 'history', 'bookmarks']);
   assert.equal(new Set(ids).size, ids.length);
 });
 
@@ -84,11 +84,23 @@ test('history is the null-storages sentinel, discriminated via custom: "history"
   assert.equal(history.custom, 'history');
 });
 
-test('history is the ONLY descriptor carrying a custom discriminator', () => {
+test('history and bookmarks are the ONLY descriptors carrying a custom discriminator', () => {
   for (const c of JAR_DATA_CLASSES) {
-    if (c.id === 'history') continue;
+    if (c.id === 'history' || c.id === 'bookmarks') continue;
     assert.equal(c.custom, undefined, `"${c.id}" should not carry a custom discriminator`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// bookmarks (M15 Flight 2 "Jar-Scoped Bookmarks" / DD9) — the SECOND `custom`
+// discriminator, following the history idiom exactly.
+// ---------------------------------------------------------------------------
+test('bookmarks is the null-storages sentinel, discriminated via custom: "bookmarks", frozen, labeled "Bookmarks"', () => {
+  const bookmarks = jarDataClassById('bookmarks');
+  assert.ok(Object.isFrozen(bookmarks));
+  assert.equal(bookmarks.label, 'Bookmarks');
+  assert.equal(bookmarks.storages, null);
+  assert.equal(bookmarks.custom, 'bookmarks');
 });
 
 // ---------------------------------------------------------------------------

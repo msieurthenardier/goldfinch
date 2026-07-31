@@ -78,6 +78,30 @@ test('jar-wiped activates a non-matching survivor before ordered close', async (
   assert.deepEqual(h.events, [['activate', 'c'], ['close', 'a'], ['close', 'b']]);
 });
 
+test('DD7 regression pin (M15 F2 Leg 3, flight non-blocking suggestion): refreshOpenTabJars matches a tab to its fresh container strictly by id — a REFERENCE REFRESH, never a re-home', async () => {
+  const h = await makeHarness();
+  await h.client.boot;
+  h.events.length = 0;
+  const originalContainer = { id: 'personal', name: 'Personal', color: '#123', partition: 'persist:personal' };
+  const tab = { id: 'tab-1', trusted: false, container: originalContainer, wcId: 1, btn: { querySelector: () => null } };
+  h.ctx.tabs.set(tab.id, tab);
+  h.ctx.activeTabId = tab.id;
+
+  const freshPersonal = { id: 'personal', name: 'Personal Renamed', color: '#fff', partition: 'persist:personal' };
+  h.callbacks.changed({ containers: [freshPersonal], defaultId: 'personal' });
+
+  // `entry.id === tab.container.id` (jars-client.js:24) is the predicate this
+  // pins: same id -> the tab's container reference is swapped to the FRESH
+  // object (this DD7 line is what makes the new re-derive trigger set true —
+  // "no live tab is ever re-homed", only ever reference-refreshed).
+  assert.equal(tab.container, freshPersonal, 'same id -> reference refresh to the fresh container object');
+  assert.notEqual(tab.container, originalContainer);
+  assert.ok(
+    h.events.every(([kind]) => kind !== 'activate' && kind !== 'close'),
+    'a still-resolvable id is never treated as an orphan (no activate/close)'
+  );
+});
+
 test('routing helpers preserve persistent jars and mint fresh burner identities', async () => {
   const h = await makeHarness();
   await h.client.boot;

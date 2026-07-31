@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { registerJarDataIpc } = require('../../src/main/jar-data-ipc');
-const { appDb, flush, makeHarness } = require('./helpers/jar-ipc-harness');
+const { appDb, flush, makeFakeBookmarksStore, makeHarness } = require('./helpers/jar-ipc-harness');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-jar-ipc-'));
@@ -1018,4 +1018,85 @@ test('all four mutating channels tolerate an undefined payload', async (t) => {
   assert.deepEqual(await h.invoke('jars-remove', undefined), { ok: false });
   assert.equal(h.broadcasts().length, 0);
   assert.equal(h.jars.list().length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// jars-clear-data — the `bookmarks` class (M15 Flight 2 "Jar-Scoped
+// Bookmarks", Leg 2 / DD9): the history idiom, one discriminator earlier
+// than the storages-null cache fallthrough; own static error fragment
+// (`bookmarks-failure`); broadcasts `bookmarks-changed` (never
+// `jar-data-changed`) under the n>0 gate. Gated on the bookmarksStore
+// injection (offline tests that omit it skip the step — every OTHER test in
+// this file omits it and must stay unaffected, pinned by the very first
+// test below).
+// ---------------------------------------------------------------------------
+test('jars-clear-data with classes:["bookmarks"] clears via bookmarksStore.clearJar and broadcasts bookmarks-changed (n>0)', async (t) => {
+  const bookmarksStore = makeFakeBookmarksStore();
+  bookmarksStore.seed('personal', 2);
+  const h = makeHarness(t, { bookmarksStore });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['bookmarks'] });
+  assert.deepEqual(result, { ok: true, cleared: ['bookmarks'] });
+  assert.equal(bookmarksStore.count('personal'), 0);
+  // No session call at all for a pure-bookmarks clear (same shape as history).
+  assert.equal(h.events.filter((e) => e.fn === 'clearStorageData' || e.fn === 'clearCache').length, 0);
+  const b = h.broadcasts();
+  assert.equal(b.length, 1);
+  assert.equal(b[0].channel, 'bookmarks-changed');
+  assert.deepEqual(b[0].payload, { jarId: 'personal' });
+});
+
+test('jars-clear-data with classes:["bookmarks"] on an empty jar is ok:true with NO broadcast (n>0 gate)', async (t) => {
+  const h = makeHarness(t, { bookmarksStore: makeFakeBookmarksStore() });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['bookmarks'] });
+  assert.deepEqual(result, { ok: true, cleared: ['bookmarks'] });
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('jars-clear-data with classes:["bookmarks"] NEVER broadcasts jar-data-changed (DD9 — that broadcast is cookies/storage only)', async (t) => {
+  const bookmarksStore = makeFakeBookmarksStore();
+  bookmarksStore.seed('personal', 1);
+  const h = makeHarness(t, { bookmarksStore });
+  await h.invoke('jars-clear-data', { id: 'personal', classes: ['bookmarks'] });
+  assert.ok(h.broadcasts().every((b) => b.channel !== 'jar-data-changed'));
+});
+
+test('jars-clear-data with a throwing bookmarksStore returns bookmarks-failure and touches no session', async (t) => {
+  const h = makeHarness(t, { bookmarksStore: makeFakeBookmarksStore({ throws: true }) });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['bookmarks'] });
+  assert.deepEqual(result, { ok: false, error: 'jars: clear-data — bookmarks-failure' });
+  assert.equal(h.events.filter((e) => e.fn === 'clearStorageData' || e.fn === 'clearCache').length, 0);
+  assert.equal(h.broadcasts().length, 0);
+});
+
+test('jars-clear-data with the cache class still routes to clearCache, NOT bookmarksStore (regression pin for the fallthrough hazard)', async (t) => {
+  const bookmarksStore = makeFakeBookmarksStore();
+  bookmarksStore.seed('personal', 1);
+  const h = makeHarness(t, { bookmarksStore });
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['cache'] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events.map((e) => e.fn), ['clearCache', 'clearStorageData']);
+  assert.equal(bookmarksStore.count('personal'), 1, 'a cache clear must NOT touch bookmarks');
+});
+
+test('jars-clear-data without a bookmarksStore injection skips the step: cleared includes "bookmarks", no broadcast (offline-test gating)', async (t) => {
+  const h = makeHarness(t); // no bookmarksStore injected
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['bookmarks'] });
+  assert.deepEqual(result, { ok: true, cleared: ['bookmarks'] });
+  assert.equal(h.broadcasts().length, 0);
+});
+
+// Every OTHER test in this file omits bookmarksStore entirely — this pins
+// that the injection is additive: the existing history/cookies/cache
+// behavior above is byte-unchanged whether or not bookmarksStore is present.
+test('jars-clear-data with mixed ["history","bookmarks"] clears both, each with its own broadcast', async (t) => {
+  const bookmarksStore = makeFakeBookmarksStore();
+  bookmarksStore.seed('personal', 1);
+  const h = makeHarness(t, { bookmarksStore });
+  h.historyStore.seed('personal', 1000);
+  const result = await h.invoke('jars-clear-data', { id: 'personal', classes: ['history', 'bookmarks'] });
+  assert.deepEqual(result, { ok: true, cleared: ['history', 'bookmarks'] });
+  const b = h.broadcasts();
+  assert.equal(b.length, 2);
+  assert.equal(b[0].channel, 'history-changed');
+  assert.equal(b[1].channel, 'bookmarks-changed');
 });

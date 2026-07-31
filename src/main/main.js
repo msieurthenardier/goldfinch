@@ -1737,7 +1737,12 @@ const { broadcastJarsChanged } = registerJarIpc({
   // Passed as the memoized accessor (not the eager singleton) — mirrors register-vault-ipc.
   // registerJarIpc runs at module scope AFTER getVaultStore is defined (main.js:573),
   // and the accessor is only invoked at delete time, so there is no init-order risk.
-  getVaultStore
+  getVaultStore,
+  // M15 F2 Leg 2 (DD9, leg AC "Injection routing"): handleRemove's bookmark
+  // teardown and the Bookmarks clear-data class both need the store. A
+  // PLAIN optional reference (not a getVaultStore-style accessor) — bookmarksStore
+  // is an eagerly-required module singleton, like historyStore above.
+  bookmarksStore
 });
 
 // Retention sweep engine + its cookie first-seen bookkeeping store (M10
@@ -1772,13 +1777,16 @@ registerHistoryIpc({
   broadcast: broadcastToChromeAndInternal
 });
 
-// Bookmarks IPC (Flight 1 DD3, Leg 1): chrome-only, sender-resolved — no
-// internal-page consumer exists this flight (see register-bookmarks-ipc.js
-// header). Registered at module scope like registerHistoryIpc above; handlers
-// only touch bookmarksStore at invoke time, always after boot.
+// Bookmarks IPC (Flight 1 DD3, Leg 1; jar-addressed M15 F2 Leg 2 / DD3,
+// L2-DD-C): chrome-only, sender-resolved — no internal-page consumer exists
+// this flight (see register-bookmarks-ipc.js header). Registered at module
+// scope like registerHistoryIpc above; handlers only touch bookmarksStore
+// (and jars, for the registry-rejection guard) at invoke time, always after
+// boot.
 registerBookmarksIpc({
   ipcMain,
   bookmarksStore,
+  jars,
   broadcast: broadcastToChromeAndInternal
 });
 

@@ -67,6 +67,10 @@ test('panelForDataClass: history -> history (anticipatory, Flight 3 has no JAR_D
   assert.equal(panelForDataClass('history'), 'history');
 });
 
+test('panelForDataClass: bookmarks -> history (M15 F2 Leg 2 / leg L2-DD-E FD ruling)', () => {
+  assert.equal(panelForDataClass('bookmarks'), 'history');
+});
+
 // ---------------------------------------------------------------------------
 // Fail-closed for unknown ids
 // ---------------------------------------------------------------------------

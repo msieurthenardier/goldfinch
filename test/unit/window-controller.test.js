@@ -16,6 +16,12 @@ class El {
 async function harness() {
   const callbacks = {}; const calls = [];
   const els = Object.fromEntries(['winMin','winMax','winClose','tabs','tabStatus','toggleMedia','togglePrivacy','toggleDevtools','bookmarksBar'].map((name) => [name, new El()]));
+  // index.html's real markup starts #bookmarks-bar with class="hidden" — the
+  // net-visibility-change discipline (M15 F2 Leg 3, L3-DD-C) relies on that
+  // starting DOM state matching the controller's own initial `barVisible =
+  // false`, so the fixture must replicate it (a bare fresh element with no
+  // classes at all would desync the two).
+  els.bookmarksBar.classList.toggle('hidden', true);
   const window = { goldfinch: {
     windowMinimize: () => calls.push('minimize'), windowToggleMaximize: () => calls.push('maximize'), windowClose: () => calls.push('close'),
     windowIsMaximized: async () => false, onWindowMaximizedChange: (fn) => { callbacks.maximized = fn; },
@@ -56,7 +62,7 @@ test('toolbar pins and settings broadcasts stay independent of active-tab type',
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'keys'));
 });
 
-test('applyBookmarksBar toggles visibility and explicitly sends active bounds on every apply', async () => {
+test('applyBookmarksBar toggles visibility and sends active bounds ONLY on a net visibility change (M15 F2 Leg 3, L3-DD-C)', async () => {
   const h = await harness();
   await Promise.resolve(); // let the initial settingsGet('bookmarksBarEnabled') resolve
   assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true, 'off by default');
@@ -64,11 +70,52 @@ test('applyBookmarksBar toggles visibility and explicitly sends active bounds on
 
   h.controller.applyBookmarksBar(true);
   assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
-  assert.ok(h.calls.includes('bounds'), 'sendActiveBounds is called explicitly on every apply');
+  assert.ok(h.calls.includes('bounds'), 'a net change (hidden -> visible) fires the explicit bounds send');
 
   h.calls.length = 0;
   h.controller.applyBookmarksBar(false);
   assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.ok(h.calls.includes('bounds'), 'a net change (visible -> hidden) fires it too');
+
+  // A repeat apply with the SAME value is not a net change — no DOM toggle,
+  // no bounds send (the same-class tab-switch case this discipline exists
+  // to keep quiet).
+  h.calls.length = 0;
+  h.controller.applyBookmarksBar(false);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.equal(h.calls.includes('bounds'), false, 'no net change — no spurious bounds send');
+});
+
+test('setBarSuppressed composes with the setting: enabled + suppressed still hides; suppression alone (setting off) is already-hidden, no net change (L3-DD-C)', async () => {
+  const h = await harness();
+  await Promise.resolve();
+  h.controller.applyBookmarksBar(true); // setting ON — bar visible
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
+  h.calls.length = 0;
+
+  // Activating a burner/internal tab suppresses it even though the setting stays ON.
+  h.controller.setBarSuppressed(true);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.ok(h.calls.includes('bounds'), 'net change (visible -> hidden) — bounds sent');
+
+  // Setting toggled OFF while ALREADY suppressed: enabled&&!suppressed stays
+  // false either way — no net change, no spurious DOM/bounds churn.
+  h.calls.length = 0;
+  h.controller.applyBookmarksBar(false);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.equal(h.calls.includes('bounds'), false, 'still hidden either way — no net change');
+
+  // Switching back to a web tab (suppression lifted) with the setting still
+  // off stays hidden too (enabled is false) — no net change.
+  h.calls.length = 0;
+  h.controller.setBarSuppressed(false);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
+  assert.equal(h.calls.includes('bounds'), false);
+
+  // Re-enable the setting with suppression already lifted: NOW it's a net change.
+  h.calls.length = 0;
+  h.controller.applyBookmarksBar(true);
+  assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
   assert.ok(h.calls.includes('bounds'));
 });
 

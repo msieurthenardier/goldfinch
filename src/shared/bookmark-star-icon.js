@@ -33,8 +33,9 @@ const STAR_PATH_D =
 export function buildBookmarkStarIcon(document) {
   const svg = /** @type {SVGSVGElement} */ (document.createElementNS(SVG_NS, 'svg'));
   svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '11');
-  svg.setAttribute('height', '11');
+  // No `width`/`height` presentation attributes (M15 F2 Leg 3, DD12(b)): they
+  // defeated CSS sizing on the suggestions-row badge — `.sg-badge-star` sizes
+  // it via CSS instead, letting it render at row height.
   svg.setAttribute('fill', 'currentColor');
   svg.setAttribute('stroke', 'none');
   svg.setAttribute('aria-hidden', 'true');

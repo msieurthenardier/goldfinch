@@ -88,16 +88,44 @@ export function createWindowController(deps) {
 
   window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {});
 
-  // Bookmarks bar visibility (M15 F1 Leg 3, DD8) — the applyToolbarPins sibling:
-  // class-toggle only (bar CONTENT is bookmarks-bar.js's job), then an EXPLICIT
-  // sendActiveBounds() so the active guest re-bounds instantly (belt-and-
-  // suspenders over the #webviews ResizeObserver — see the styles.css
-  // INVARIANT comment on #bookmarks-bar for why this can't be an animation).
-  function applyBookmarksBar(enabled) {
-    els.bookmarksBar.classList.toggle('hidden', !enabled);
+  // Bookmarks bar visibility (M15 F1 Leg 3, DD8; composed with activation-
+  // class suppression M15 F2 Leg 3 L3-DD-C) — the applyToolbarPins sibling.
+  // Visible iff the app-wide setting is ON *and* the active tab isn't
+  // suppressing it (burner / internal — L3-DD-C/D). class-toggle only (bar
+  // CONTENT is bookmarks-bar.js's job), then an EXPLICIT sendActiveBounds()
+  // so the active guest re-bounds instantly (belt-and-suspenders over the
+  // #webviews ResizeObserver — see the styles.css INVARIANT comment on
+  // #bookmarks-bar for why this can't be an animation) — but ONLY on a NET
+  // visibility change: two composed inputs (the setting, suppression) can
+  // both fire on the same activation without the resulting visibility
+  // actually flipping (e.g. toggling the setting while already suppressed),
+  // and a same-class tab switch (web -> web) must cause no spurious guest
+  // reflow.
+  let barEnabled = false;
+  let barSuppressed = false;
+  let barVisible = false; // last APPLIED DOM state — matches index.html's default-hidden markup
+
+  function applyBarVisibility() {
+    const visible = barEnabled && !barSuppressed;
+    if (visible === barVisible) return; // no net change — no DOM toggle, no bounds send
+    barVisible = visible;
+    els.bookmarksBar.classList.toggle('hidden', !visible);
     sendActiveBounds();
   }
+
+  function applyBookmarksBar(enabled) {
+    barEnabled = !!enabled;
+    applyBarVisibility();
+  }
   window.goldfinch.settingsGet('bookmarksBarEnabled').then(applyBookmarksBar).catch(() => {});
+
+  /** Activation-class suppression input (M15 F2 Leg 3 L3-DD-C): renderer.js's
+   * `refreshBookmarksSurfaces(tab)` computes burner-or-internal and calls
+   * this on every activation-class event. @param {boolean} suppressed */
+  function setBarSuppressed(suppressed) {
+    barSuppressed = !!suppressed;
+    applyBarVisibility();
+  }
 
   window.goldfinch.onSettingsChanged((all) => {
     if (all && all.homePage !== undefined) setHomePage(all.homePage);
@@ -115,5 +143,5 @@ export function createWindowController(deps) {
 
 
 
-  return { setMaximized, announceTabStatus, applyToolbarPins, applyBookmarksBar };
+  return { setMaximized, announceTabStatus, applyToolbarPins, applyBookmarksBar, setBarSuppressed };
 }

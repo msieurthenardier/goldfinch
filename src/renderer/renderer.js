@@ -7,8 +7,6 @@
 import { BURNER } from '../shared/burner.js';
 import { buildContainerModel } from '../shared/container-menu.js';
 import { buildAutomationIndicatorModel } from '../shared/automation-indicator-model.js';
-import { buildVaultIndicatorModel } from '../shared/vault-indicator-model.js';
-import { parsePickIndex, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { isSafeColor } from '../shared/safe-color.js';
 import { isSafeTabUrl, isSafePosterUrl, isInternalPageUrl } from '../shared/url-safety.js';
 import { toMediaProxyUrl } from '../shared/media-proxy.js';
@@ -25,6 +23,7 @@ import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
+import { createVaultController } from './chrome/vault-controller.js';
 import { createJarsClient } from './chrome/jars-client.js';
 import { createBookmarksClient, bookmarkEntryToEditModel } from './chrome/bookmarks-client.js';
 import { createBookmarksBar } from './chrome/bookmarks-bar.js';
@@ -91,27 +90,41 @@ const jarsClient = createJarsClient({
   inheritFromPartition,
   random: Math.random
 });
-// Bookmarks cache (M15 F1 Leg 2) — the jarsClient sibling: cache + boot +
-// subscribe triad, plus the bookmark business logic the leg's line-budget
-// ruling keeps out of this file (see bookmarks-client.js header). `isInternalTab`
-// is injected lazily, the same `tabController`-not-yet-assigned closure jarsClient
-// uses above.
+// Bookmarks cache (M15 F1 Leg 2; jar-aware M15 F2 Leg 3) — the jarsClient
+// sibling: per-jar cache + boot + subscribe triad, plus the bookmark business
+// logic the leg's line-budget ruling keeps out of this file (see
+// bookmarks-client.js header). `isInternalTab` is injected lazily, the same
+// `tabController`-not-yet-assigned closure jarsClient uses above. `jarsBoot`/
+// `getDefaultJarId` (L3-DD-B) sequence the default-jar boot prefetch behind
+// jarsClient's own boot; `toast` (L3-DD-F) is the rejection-feedback sink.
 const bookmarksClient = createBookmarksClient({
   bridge: window.goldfinch,
   isInternalTab: (tab) => tabController.isInternalTab(tab),
+  jarsBoot: jarsClient.boot,
+  getDefaultJarId: () => jarsClient.defaultId,
+  toast,
   // sync path 5/5 (M15 F1 Leg 2, AC "five sync paths") — covers cross-window
   // edits: re-derive the active tab's star after the cache's own
-  // bookmarks-changed re-query completes (not on the raw broadcast, which
-  // would read a still-stale cache).
+  // bookmarks-changed (or ensureJar first-sight) refresh completes (not on
+  // the raw broadcast, which would read a still-stale cache).
   // Extended inline (M15 F1 Leg 3, AC "Bar rendering" — single-subscriber
   // decision): the SAME post-refresh signal also re-renders the bar and
   // closes the overflow sheet if a change raced it open (DD9 cache
   // freshness). An independent onBookmarksChanged subscription from
   // bookmarks-bar.js is forbidden — it would fire before THIS cache refresh
-  // resolves and could read stale bookmarksClient.list.
-  onChanged: () => {
-    refreshStar(activeTab());
-    bookmarksBarController.render();
+  // resolves and could read stale cache state.
+  // Jar-filtered (M15 F2 Leg 3, Implementation Guidance #6): re-derive star/
+  // bar only when the signal's jar matches the ACTIVE tab's — a changed jar
+  // the operator isn't looking at needs no repaint. A jar that got evicted
+  // out from under the active tab is handled separately: jars-client closes
+  // that orphan tab, and the resulting activation of a survivor already
+  // re-derives via refreshBookmarksSurfaces below (Edge Case "jar deleted
+  // while its tabs are open").
+  onChanged: (jarId) => {
+    const tab = activeTab();
+    if (!tab || !tab.container || tab.container.id !== jarId) return;
+    refreshStar(tab);
+    bookmarksBarController.render(jarId);
     bookmarksBarController.closeOverflowIfOpen();
   }
 });
@@ -143,7 +156,8 @@ tabController = createTabController({
   updateAddressChip,
   renderMedia,
   renderPrivacy,
-  setDevtoolsPressed
+  setDevtoolsPressed,
+  refreshBookmarksSurfaces
 });
 
 const {
@@ -169,6 +183,21 @@ function closeSuggestions(reason) { return navigationController.closeSuggestions
 function resetSuggestionsForActivation() { return navigationController.resetSuggestionsForActivation(); }
 function refreshZoomControl(tab) { return navigationController.refreshZoomControl(tab); }
 function refreshStar(tab) { return navigationController.refreshStar(tab); }
+// M15 F2 Leg 3 (L3-DD-C): the activation-class bar-suppression + bar-render
+// closure — called from tab-controller.js's two activation-class sites
+// (wcId arrival, activateTab body) alongside refreshStar above. Suppressed
+// (burner or internal — reuses the injected isInternalTab predicate rather
+// than re-deriving container.id === 'internal' inline) forwards to
+// window-controller's setBarSuppressed and skips the render; visible primes
+// the tab's jar (ensureJar, once per unseen jar) and renders it.
+function refreshBookmarksSurfaces(tab) {
+  const suppressed = !!(tab && ((tab.container && tab.container.burner) || isInternalTab(tab)));
+  windowController.setBarSuppressed(suppressed);
+  if (!suppressed && tab && tab.container) {
+    bookmarksClient.ensureJar(tab.container.id);
+    bookmarksBarController.render(tab.container.id);
+  }
+}
 function openFind(tab) { return navigationController.openFind(tab); }
 function togglePanel(force) { return mediaController.togglePanel(force); }
 function renderMedia() { return mediaController.renderMedia(); }
@@ -256,6 +285,32 @@ const downloadsController = createDownloadsController({
   triggerOverlayMenu: (menuType, open) => overlayMenuClient.trigger(menuType, open)
 });
 const { showDownloadsIndicatorForAudit, openDownloadsOverlayForAudit } = downloadsController;
+// Vault flow controller (M15 F2 Leg 1 renderer-extraction): the downloads:
+// construction-order precedent generalized — constructed here, ahead of the
+// overlayMenus table (its overlayStates spread into it below) and ahead of
+// overlayMenuClient itself, so openOverlayMenu is a late-bound closure exactly
+// like downloadsController's own. openVaultPage is the module-level wrapper
+// (defined above, reads `pageActions` lazily) — safe to pass now because it is
+// only CALLED after pageActions is assigned, same precedent as openDownloads
+// above feeding downloadsController before pageActions exists.
+const vaultController = createVaultController({
+  els,
+  goldfinch: window.goldfinch,
+  jarsClient,
+  isSafeColor,
+  openVaultPage,
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args)
+});
+const {
+  openVaultSetOverlayForAudit,
+  openVaultRecoveryShowOverlayForAudit,
+  openVaultStepupOverlayForAudit,
+  openVaultAccessKeyShowOverlayForAudit,
+  openVaultImportUnlockOverlayForAudit,
+  openVaultChangeMasterOverlayForAudit,
+  openVaultRecoverOverlayForAudit,
+  openVaultAdminKeyShowOverlayForAudit
+} = vaultController;
 
 /* ---- menu-overlay sheet state (shared monotonic open-token discipline) ---- */
 const overlayMenus = {
@@ -314,96 +369,15 @@ const overlayMenus = {
     ariaTarget: () => null,
     refocus() {}
   },
-  // Human vault flow sheets (M12 F2 Leg 3 pick-and-fill, DD5/DD6). Both are raised
-  // from a guest lock-icon gesture — there is no chrome trigger element, so there is
-  // no aria-expanded target and no trigger refocus (the guest owns focus). The
-  // chrome-unlock leg added the vault-unlock TEMPLATE + secret handler; this leg
-  // wires its trigger→open here alongside the new picker.
-  'vault-unlock': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  'vault-picker': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // Vault capture save/update sheet (M12 F2 Leg 4 capture-save, DD7). Raised from a
-  // main-forwarded login-submit offer — no chrome trigger element, so no aria-expanded
-  // target and no trigger refocus (the guest owns focus). handleOverlayClosed drops the
-  // held record on a non-save close.
-  'vault-capture': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // First-run setup sheets (M12 F3 Leg 4 first-run-setup, DD5). Both are raised from the
-  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — there is
-  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-set
-  // is the master-password entry; vault-recovery-show is the DISMISS-DISABLED one-time key
-  // display (opened with { dismissible: false }).
-  'vault-set': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  'vault-recovery-show': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // Access-key sheets (M12 F3 Leg 5 access-keys, DD5). Both are raised from the
-  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) —
-  // no chrome trigger element, so no aria-expanded target and no trigger refocus. vault-stepup
-  // is the master-password re-auth; vault-accesskey-show is the DISMISS-DISABLED one-time
-  // minted-secret display (opened with { dismissible: false }).
-  'vault-stepup': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  'vault-accesskey-show': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // Import-bundle secret entry (M12 F4 Leg 1 export-import, DD1/DD2). Raised from the
-  // goldfinch://vault page's cross-renderer import request (page → main → chrome) after the
-  // main-side file open — no chrome trigger element, so no aria-expanded target and no trigger
-  // refocus. The destination target + the bundle are held main-side; the sheet collects only the
-  // secret + secretKind over the dedicated Buffer channel.
-  'vault-import-unlock': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // Key-rotation sheets (M12 F4 Leg 2 key-rotation, DD3/DD2). All raised from the
-  // goldfinch://vault page's cross-renderer request path (page → main → chrome) — no chrome
-  // trigger element, so no aria-expanded target and no trigger refocus. vault-change-master is
-  // the old + new master-password entry; vault-recover is the recovery-key + new-master entry
-  // (reachable from the LOCKED page). Recovery rotation's master-password step-up REUSES the
-  // vault-stepup sheet above (mode 'rotate-recovery'), so it needs no entry of its own.
-  'vault-change-master': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  'vault-recover': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
-  // Admin-key provision/rotate display (M12 F4 Leg 3 admin-key-provision, DD4). Raised from the
-  // goldfinch://vault page's cross-renderer request/response path (page → main → chrome) — no chrome
-  // trigger element, so no aria-expanded target and no trigger refocus. vault-adminkey-show is the
-  // DISMISS-DISABLED one-time admin-private-key display (opened with { dismissible: false }); the
-  // master-password step-up REUSES the vault-stepup sheet (mode 'rotate-admin'), so it needs no entry.
-  'vault-adminkey-show': {
-    open: false, token: 0, blurClosedAt: -Infinity,
-    ariaTarget: () => null,
-    refocus() {}
-  },
+  // The 11 vault sheet states (vault-unlock, vault-picker, vault-capture, vault-set,
+  // vault-recovery-show, vault-stepup, vault-accesskey-show, vault-import-unlock,
+  // vault-change-master, vault-recover, vault-adminkey-show) — owned by
+  // vault-controller.js (M15 F2 Leg 1 renderer-extraction), the `downloads:` single-
+  // entry precedent generalized to a spread. None has a chrome trigger element (all
+  // raised from a guest gesture or a cross-renderer vault-page request), so none has
+  // an aria-expanded target or trigger refocus; per-sheet rationale lives with the
+  // states in vault-controller.js.
+  ...vaultController.overlayStates,
   downloads: downloadsController.overlayState
 };
 overlayMenuClient = createOverlayMenus({
@@ -411,7 +385,7 @@ overlayMenuClient = createOverlayMenus({
   states: overlayMenus,
   now: () => performance.now(),
   onActivated: (payload) => {
-    if (!downloadsController.handleActivation(payload)) dispatchOverlayActivation(payload);
+    if (!downloadsController.handleActivation(payload) && !vaultController.handleActivation(payload)) dispatchOverlayActivation(payload);
   },
   onClosed: handleOverlayClosed
 });
@@ -565,14 +539,21 @@ bookmarksBarController = createBookmarksBar({
   navigate,
   createTab,
   openBookmarkEditOverlay,
+  // M15 F2 Leg 3 DD7b: the active tab's container, for the bar's two
+  // open-in-new-tab paths — a `null` container would resolve the current
+  // DEFAULT jar instead of the bookmark's own.
+  activeContainer: () => { const t = activeTab(); return t ? t.container : null; },
   overlayMenuClient,
   overlayMenuState: overlayMenus['bookmarks-overflow'],
   rightAnchorOf // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
 });
-// Initial paint: the bar renders empty until the cache's boot fetch resolves
-// (idempotent — a subsequent bookmarks-changed re-render is a full rebuild
-// either way, per the onChanged closure above).
-bookmarksClient.boot.then(() => bookmarksBarController.render());
+// Initial paint (M15 F2 Leg 3, L3-DD-B): the bar renders the DEFAULT jar's
+// bookmarks once the cache's boot prefetch resolves — before any tab exists,
+// so the common case (first tab lands in the default jar) shows correct
+// content instantly. The first real activation (createTab/activateTab, both
+// call refreshBookmarksSurfaces) re-renders for the actual active tab's jar
+// regardless, so a session-restore into a different jar still lands right.
+bookmarksClient.boot.then(() => bookmarksBarController.render(jarsClient.defaultId));
 
 // Generic channel-1 open (Leg 3): mint token, mark open, send, set aria.
 // Mutual exclusion is main's model-replace (channel 7 'superseded' for the
@@ -600,40 +581,6 @@ const openSiteInfoOverlay = () => openOverlayMenu('site-info', siteInfoModel(act
 // New-container dialog (AC4): the template ignores the anchor (centered via CSS)
 // but the open path stays uniform (fresh token, aria on the ▾ refocus trigger).
 const openNewContainerOverlay = () => openOverlayMenu('new-container', [], containerAnchor(), 0);
-// M12 F3 Leg 4 (first-run-setup, DD5/DD9): a11y SHEET_STATES hooks for the two new setup
-// sheets (scripts/a11y-audit.mjs). vault-set opens empty; vault-recovery-show opens with a
-// synthetic NON-SECRET placeholder key so its read-only display + Copy + acknowledge
-// render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
-// FD-authorized seam additions per the leg's "add both to SHEET_STATES" deliverable — the
-// M09 F5 openTabContextMenuForAudit precedent.
-const openVaultSetOverlayForAudit = () => openOverlayMenu('vault-set', [], null, 0);
-const openVaultRecoveryShowOverlayForAudit = () =>
-  openOverlayMenu('vault-recovery-show', { recoveryKey: 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX' }, null, 0, { dismissible: false });
-// M12 F3 Leg 5 (access-keys, DD5/DD9): a11y SHEET_STATES hooks for the two new access-key
-// sheets. vault-stepup opens with a synthetic NON-SECRET target; vault-accesskey-show opens
-// with a synthetic NON-SECRET placeholder secret+keyId so its read-only display + Copy +
-// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes
-// it). Same evaluate-seam precedent as leg 4's openVault{Set,RecoveryShow}OverlayForAudit.
-const openVaultStepupOverlayForAudit = () => openOverlayMenu('vault-stepup', { target: 'global' }, null, 0);
-const openVaultAccessKeyShowOverlayForAudit = () =>
-  openOverlayMenu('vault-accesskey-show', { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' }, null, 0, { dismissible: false });
-// M12 F4 Leg 1 (export-import, DD9): a11y SHEET_STATES hook for the vault-import-unlock sheet.
-// Opens with an empty array model (the destination target + bundle are held main-side); the sheet
-// renders the secretKind radios + the secret field + Import/Cancel (dialog-style, Escape-dismissible).
-const openVaultImportUnlockOverlayForAudit = () => openOverlayMenu('vault-import-unlock', [], null, 0);
-// M12 F4 Leg 2 (key-rotation, DD9): a11y SHEET_STATES hooks for the two new rotation sheets. Both
-// open with an empty array model (no secret; the destination is the manager itself); each renders
-// its three password fields + error + submit/cancel (dialog-style, Escape-dismissible). Recovery
-// rotation's step-up reuses vault-stepup, already covered above. Same evaluate-seam precedent as
-// the leg-1 openVaultImportUnlockOverlayForAudit.
-const openVaultChangeMasterOverlayForAudit = () => openOverlayMenu('vault-change-master', [], null, 0);
-const openVaultRecoverOverlayForAudit = () => openOverlayMenu('vault-recover', [], null, 0);
-// M12 F4 Leg 3 (admin-key-provision, DD4/DD9): a11y SHEET_STATES hook for the vault-adminkey-show
-// sheet. Opens with a synthetic NON-SECRET placeholder key so its read-only display + Copy +
-// acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
-// Same evaluate-seam precedent as leg-5's openVaultAccessKeyShowOverlayForAudit.
-const openVaultAdminKeyShowOverlayForAudit = () =>
-  openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, { dismissible: false });
 // M14 F1 L2 (auth-challenges): a11y SHEET_STATES hook for the auth-basic credential
 // sheet. Opens with a synthetic NON-SECRET host/realm model so the labeled
 // username/password fields + Sign in/Cancel render (dialog-style, Escape-dismissible).
@@ -655,20 +602,23 @@ const openCertPickerOverlayForAudit = () =>
 // convertChromePointToSheet, overlay-menus.test.js). The FIRST-EVER anchored
 // modal card (leg-2 design review): the sheet applies positionNode to the
 // CARD, not the backdrop (menu-overlay.css / menu-overlay.js).
-/** @param {any} bookmark store entry, translated via bookmarkEntryToEditModel (entry.title → model.name — HAT FIX, Leg 5) @param {HTMLElement} [anchorEl] defaults to the star (leg-2 call sites) */
-function openBookmarkEditOverlay(bookmark, anchorEl = els.star) {
+/** @param {any} bookmark store entry, translated via bookmarkEntryToEditModel (entry.title → model.name — HAT FIX, Leg 5) @param {HTMLElement} [anchorEl] defaults to the star (leg-2 call sites) @param {string|null} [jarId] M15 F2 Leg 3, L3-DD-E: the owning jar, captured HERE at open — never re-resolved at submit (the DD13 TOCTOU) */
+function openBookmarkEditOverlay(bookmark, anchorEl = els.star, jarId = null) {
+  bookmarksClient.captureEditJar(jarId);
   const r = anchorEl.getBoundingClientRect();
   openOverlayMenu('bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0);
 }
 // The ONE shared handler for star click / Ctrl+D / page-context "Bookmark
 // this page" (AC "Star click / Ctrl+D behavior"): bookmarksClient.activateStar
 // resolves the entry to edit (creating it first when unbookmarked) or null
-// (inert — internal tab / no live wcId); a non-null resolution opens the
-// popover.
+// (inert — internal tab / burner tab / no live wcId); a non-null resolution
+// opens the popover, capturing `tab`'s OWN jar (L3-DD-E) — all three entry
+// points (star click, Ctrl+D, page-context) pass the tab the action is
+// actually about, so this one line covers the capture for all three.
 /** @param {any} tab */
 function handleBookmarkStarActivate(tab) {
   bookmarksClient.activateStar(tab).then((bookmark) => {
-    if (bookmark) openBookmarkEditOverlay(bookmark);
+    if (bookmark) openBookmarkEditOverlay(bookmark, els.star, tab && tab.container ? tab.container.id : null);
   });
 }
 // M15 F1 Leg 2 (FD-ruled seam addition): a11y SHEET_STATES hook for the
@@ -697,12 +647,15 @@ const openBookmarksOverflowOverlayForAudit = () =>
 // built from the captured params by the pure shared builder; toolbar mode passes
 // pageCtx.toolbarItem.
 // isBookmarked (M15 F1 Leg 2): computed from THIS chrome's own bookmarks cache
-// keyed on the captured tab's URL — never guest-influenced `params` (AC).
+// keyed on the captured tab's URL and jar — never guest-influenced `params`
+// (AC). canBookmark (M15 F2 Leg 3, L3-DD-D): omits the item entirely for a
+// burner/internal captured tab, rather than a present-but-inert one.
 /** @param {{ x: number, y: number }} anchor */
 const openPageContextOverlaySheet = (anchor) => {
   const srcTab = pageCtx.wcId != null ? findTabByWcId(pageCtx.wcId) : null;
-  const isBookmarked = !!(srcTab && bookmarksClient.findByUrl(srcTab.url));
-  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked }), anchor, 0);
+  const isBookmarked = !!(srcTab && srcTab.container && bookmarksClient.findByUrl(srcTab.container.id, srcTab.url));
+  const canBookmark = !!(srcTab && !isInternalTab(srcTab) && !(srcTab.container && srcTab.container.burner));
+  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked, canBookmark }), anchor, 0);
 };
 
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
@@ -813,38 +766,6 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       if (id === 'create') createContainerAndOpenTab(value);
       break;
     }
-    case 'vault-picker': {
-      // Human fill selection (M12 F2 Leg 3, DD5/DD6). The id is `pick:<i>` — an
-      // INDEX into the last picker model (metadata only; NO password on this path).
-      // Resolve the row, capture the flow's wcId, then dispatch the fill in MAIN
-      // (vaultFillHuman resolves the credential by (vaultId, itemId) under the MRK
-      // and hands it to F1's channel — the return carries no password). On a lock
-      // between pick and fill (`reason:'locked'`), re-raise the unlock prompt →
-      // onVaultLockState re-opens the picker (re-pick), rather than erroring.
-      //
-      // The separated "Manage passwords" footer is not a row: it navigates to the
-      // Secrets page (openVaultPage — a trusted goldfinch://vault tab). No secret, no
-      // fill; clear any pending flow so a later gesture starts clean.
-      if (id === MANAGE_ID) {
-        pendingVaultFlow = null;
-        openVaultPage();
-        break;
-      }
-      const idx = parsePickIndex(id);
-      const item = idx != null ? lastPickerModel[idx] : null;
-      const wcId = pendingVaultFlow ? pendingVaultFlow.wcId : null;
-      pendingVaultFlow = null;
-      if (!item || wcId == null) break;
-      Promise.resolve(window.goldfinch.vaultFillHuman({ wcId, vaultId: item.vaultId, itemId: item.id }))
-        .then((r) => {
-          if (r && r.reason === 'locked') {
-            pendingVaultFlow = { wcId, phase: 'unlocking' };
-            openOverlayMenu('vault-unlock', [], null, 0);
-          }
-        })
-        .catch(() => {});
-      break;
-    }
     case 'auth-basic': {
       // The only channel-4 activation is the NON-SECRET id:'cancel' (M14 F1 L2) —
       // the credential rides the dedicated menuOverlay.authSubmit invoke, never
@@ -859,27 +780,10 @@ function dispatchOverlayActivation({ menuType, id, value }) {
       // id ('cert:<i>' / 'cancel') is a validated no-op here.
       break;
     }
-    case 'vault-recovery-show': {
-      // First-run recovery-key acknowledge (M12 F3 Leg 4). The only activation is
-      // id:'ack' — the deliberate "I've saved it". Main already closed the sheet and the
-      // vault page already moved to unlocked off the setup lock-state broadcast, so there
-      // is nothing more to do here (no secret ever reaches this dispatch — the key lived
-      // only on the sheet).
-      break;
-    }
-    case 'vault-accesskey-show': {
-      // Minted access-key acknowledge (M12 F3 Leg 5). The only activation is id:'ack' — the
-      // deliberate "I've saved it". Main already closed the sheet; the vault page refreshes
-      // its access-key list off its own post-mint path. Nothing reaches this dispatch (the
-      // minted secret lived only on the sheet — never in the page or this chrome dispatch).
-      break;
-    }
-    case 'vault-adminkey-show': {
-      // Minted admin-key acknowledge (M12 F4 Leg 3). The only activation is id:'ack' — the
-      // deliberate "I've saved it". Main already closed the sheet; nothing reaches this dispatch
-      // (the admin private key lived only on the sheet — never in the page or this chrome dispatch).
-      break;
-    }
+    // vault-picker, vault-recovery-show, vault-accesskey-show, vault-adminkey-show:
+    // handled by vaultController.handleActivation (chained ahead of this dispatch —
+    // see the onActivated wiring above), so no case for them lives here (M15 F2 Leg 1
+    // renderer-extraction).
     case 'bookmark-edit': {
       // No channel-4 activation ever rides this menuType — Remove/Done submit
       // over the DEDICATED menu-overlay:bookmark-edit-submit invoke, never
@@ -1130,41 +1034,10 @@ function handleOverlayClosed({ menuType, reason }) {
   if (menuType === 'suggestions') {
     navigationController.handleSuggestionsClosed(reason);
   }
-  // Human vault flow (M12 F2 Leg 3): the user dismissed the unlock prompt (Cancel/
-  // Escape/outside-click) without unlocking — abandon the flow so a later unrelated
-  // unlock (recovery/admin, or another tab) can't spring the picker on this stale
-  // tab. Guarded on the phase + still-locked state: a SUCCESSFUL unlock closes this
-  // sheet too, but by then onVaultLockState has advanced the phase to 'picking' and
-  // lockState.unlocked is true, so this clear is correctly skipped.
-  if (menuType === 'vault-unlock'
-    && pendingVaultFlow && pendingVaultFlow.phase === 'unlocking'
-    && !lockState.unlocked) {
-    pendingVaultFlow = null;
-  }
-  // Unlock-to-save abandoned: the unlock prompt raised for a locked-vault capture was
-  // dismissed WITHOUT unlocking (Cancel/Escape/outside-click) → drop the held credential now
-  // rather than waiting for the 2-min safety timeout. On a SUCCESSFUL unlock, onVaultLockState
-  // already cleared pendingCaptureUnlock (and lockState.unlocked is true), so this is skipped.
-  if (menuType === 'vault-unlock' && pendingCaptureUnlock && !lockState.unlocked) {
-    const captureId = pendingCaptureUnlock;
-    pendingCaptureUnlock = null;
-    pendingCaptureId = null;
-    Promise.resolve(window.goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
-  }
-  // Human vault capture (M12 F2 Leg 4, DD7 — the dismiss-drop path, HIGH): the
-  // save/update sheet closed. Tell main to drop+zeroize the held record NOW (not just
-  // on the 2-min timeout) UNLESS this was a save. 'activated' = a successful save (main
-  // already dropped the record). 'superseded' = a newer capture model-replaced this
-  // sheet: main's capture() already evicted the prior record, and pendingCaptureId now
-  // names the NEW capture — dismissing it would wrongly drop the live one, so skip the
-  // whole block (leaving pendingCaptureId intact for the new offer).
-  if (menuType === 'vault-capture' && reason !== 'superseded') {
-    const captureId = pendingCaptureId;
-    pendingCaptureId = null;
-    if (captureId != null && reason !== 'activated') {
-      Promise.resolve(window.goldfinch.vaultCaptureDismiss(captureId)).catch(() => {});
-    }
-  }
+  // Vault-owned close branches (vault-unlock's two dismiss-abandon guards, the
+  // vault-capture dismiss-drop path) moved wholesale to vault-controller.js
+  // (M15 F2 Leg 1 renderer-extraction) — see its handleClosed.
+  vaultController.handleClosed({ menuType, reason });
 }
 
 /* ------------------------------------------------- page context menu (SC6/DD2/DD3) */
@@ -1484,12 +1357,18 @@ window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
   tab.favicon = fav;
   const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
   if (img) { img.src = fav; img.classList.remove('hidden'); }
-  // Icon passive refresh (M15 F1 Leg 2, DD6): a difference guard prevents
-  // broadcast storms on routine navigation — only issue the mutation when the
-  // cache holds a bookmark matching this tab's URL AND its stored icon
-  // actually differs from the freshly-delivered one.
-  const bm = bookmarksClient.findByUrl(tab.url);
-  if (bm && bm.icon !== fav) window.goldfinch.bookmarkUpdate({ id: bm.id, icon: fav });
+  // Icon passive refresh (M15 F1 Leg 2, DD6; jar-resolved M15 F2 Leg 3,
+  // L3-DD-H/DD7b): resolves the DELIVERING tab's jar — never the active
+  // tab's, this fires for background tabs too. A cache miss for that jar is
+  // a SKIP, not an `ensureJar` trigger — a passive icon refresh must not
+  // populate a cache for a jar the operator isn't looking at. A difference
+  // guard prevents broadcast storms on routine navigation — only issue the
+  // mutation when the cache holds a bookmark matching this tab's URL (in ITS
+  // OWN jar) AND its stored icon actually differs from the freshly-delivered
+  // one.
+  const jarId = tab.container && tab.container.id;
+  const bm = jarId != null ? bookmarksClient.findByUrl(jarId, tab.url) : null;
+  if (bm && bm.icon !== fav) window.goldfinch.bookmarkUpdate({ jarId, id: bm.id, icon: fav });
 });
 
 window.goldfinch.onTabLoading(({ wcId, loading }) => {
@@ -1531,58 +1410,6 @@ window.goldfinch.onTabMediaList(({ wcId, mediaList }) => {
   if (tab.id === ctx.activeTabId) renderMedia();
 });
 
-// Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
-// lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
-//   gesture → (unlock if locked, via the Leg-2 vault-unlock sheet) → pick (the
-//   badged vault-picker sheet) → fill (F1's vault-fill channel, in MAIN only).
-// The chrome never sees a password: the picker model is metadata, the selection is
-// an index, and vaultFillHuman resolves + dispatches the credential entirely in main.
-//
-// `pendingVaultFlow` is phase-tracked so an UNRELATED later unlock (the lock-state
-// broadcast also fires for recovery/admin unlock, and for other tabs) never springs
-// the picker on a stale tab — we continue to the picker only when we are the tab
-// mid-unlock (`phase === 'unlocking'`). Last-wins: a new gesture replaces it, and
-// opening a sheet model-replaces any open one.
-/** @type {{ wcId: number, phase: 'unlocking' | 'picking' } | null} */
-let pendingVaultFlow = null;
-/** @type {any[]} the last picker model — the index→item source for dispatch. */
-let lastPickerModel = [];
-/** @type {string | null} the held capture's id (Leg 4) — the dismiss-drop path needs
- * it when the vault-capture sheet closes without a save. */
-let pendingCaptureId = null;
-/** @type {string | null} the held capture awaiting an unlock-to-save (locked-vault submit):
- * onVaultLockState finalizes the save/update offer for it on a successful unlock. Cleared on
- * finalize OR on an abandoned unlock (the unlock sheet dismissed while still locked). */
-let pendingCaptureUnlock = null;
-
-/** Open the badged vault picker for a tab: read the origin-filtered, metadata-only
- * reachable items (in main) and raise the vault-picker sheet. Enriches each row with
- * a jar display-name badge (Global vs the jar's name) — the store returns vaultId only.
- * @param {number} wcId */
-async function openVaultPicker(wcId) {
-  let model;
-  try {
-    model = await window.goldfinch.vaultReachableItems(wcId);
-  } catch {
-    model = [];
-  }
-  lastPickerModel = Array.isArray(model) ? model : [];
-  // Badge enrichment: map each row's source vaultId to a display label for the sheet
-  // (Global for the global vault, else the jar's name). Kept off the metadata read
-  // (which returns vaultId only); dispatch still reads vaultId + id from the row.
-  for (const row of lastPickerModel) {
-    if (row && row.vaultId && row.vaultId !== 'global') {
-      const jar = jarsClient.containers.find((c) => c.id === row.vaultId);
-      row.badgeLabel = jar ? jar.name : row.vaultId;
-      // The jar's dot color tints the sheet's top-right chicklet. Guard the raw color
-      // through isSafeColor before it ever reaches a style (never trust it into CSS);
-      // Global (skipped here) and colorless/unsafe jars get the neutral chip.
-      row.badgeColor = jar && isSafeColor(jar.color) ? jar.color : null;
-    }
-  }
-  openOverlayMenu('vault-picker', lastPickerModel, null, 0);
-}
-
 // HTTP auth challenge presentation (M14 F1 L2, flight DD2). Main's pending-
 // challenge store decides WHEN a challenge presents (eligibility + queue); the
 // chrome opens the auth-basic sheet through the standard open path with the
@@ -1599,190 +1426,6 @@ window.goldfinch.onAuthChallengePresent(({ host, realm, popup }) => {
 window.goldfinch.onCertChallengePresent(({ certs, host, popup }) => {
   openOverlayMenu('cert-picker', { certs: Array.isArray(certs) ? certs : [], ...(typeof host === 'string' && host ? { host } : {}), ...(popup === true ? { popup: true } : {}) }, null, 0);
 });
-
-window.goldfinch.onVaultGesture(({ wcId }) => {
-  if (!lockState.setUp) return; // manager not set up — no setup UI in F2 (DD; F3 owns setup).
-  if (lockState.unlocked) {
-    pendingVaultFlow = { wcId, phase: 'picking' };
-    openVaultPicker(wcId);
-  } else {
-    // Locked → raise the Leg-2 unlock prompt first; onVaultLockState continues to the
-    // picker on a successful unlock. openOverlayMenu is POSITIONAL (menuType, model,
-    // anchor, startIndex, opts); the vault-unlock card is centered (anchor ignored).
-    pendingVaultFlow = { wcId, phase: 'unlocking' };
-    openOverlayMenu('vault-unlock', [], null, 0);
-  }
-});
-
-// First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). The
-// goldfinch://vault page can't call chrome-trust menuOverlay.* directly, so its not-set-up
-// CTA / locked affordance route page → main (internal-vault-request-*) → chrome (here).
-// Mirrors onVaultGesture — a bare trigger, no secret.
-window.goldfinch.onVaultRequestSetup(() => {
-  // Open the master-password setup sheet. On success main drives vault-recovery-show and
-  // fires the lock-state broadcast → the page moves to unlocked.
-  openOverlayMenu('vault-set', [], null, 0);
-});
-window.goldfinch.onVaultRequestUnlock(() => {
-  // DISTINCT from onVaultGesture's locked branch: open the F2 unlock sheet WITHOUT setting
-  // pendingVaultFlow — the page's unlock must NOT spring the fill picker on success (that
-  // continuation is gated on pendingVaultFlow.phase === 'unlocking', left null here). The
-  // page refreshes off the lock-state broadcast.
-  openOverlayMenu('vault-unlock', [], null, 0);
-});
-// Setup-success → open the read-only recovery-show sheet (M12 F3 Leg 4). Main forwards the
-// recovery key ONLY (admin key deferred to F4). Opened DISMISS-DISABLED so a casual
-// dismiss can't lose the unrecoverable one-time key (Escape/backdrop/blur all inert;
-// only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
-window.goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
-  // `replacing` (rotate-recovery only; setup omits it) reveals the sheet's "this replaces
-  // your previous recovery key" line — the rotation kills the old key (HAT I9). Non-secret.
-  openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, { dismissible: false });
-});
-
-// Access-key mint cross-renderer triggers (M12 F3 Leg 5 access-keys, DD5). The vault page's
-// Mint CTA routes page → main (internal-vault-request-mint carrying the NON-SECRET target) →
-// chrome (here). Open the vault-stepup sheet scoped to that vault; on a successful step-up
-// main drives vault-accesskey-show and the page refreshes its list. Mirrors onVaultRequestSetup
-// (a bare trigger), extended with the target vault id.
-window.goldfinch.onVaultRequestMint(({ target }) => {
-  openOverlayMenu('vault-stepup', { target }, null, 0);
-});
-// Import-bundle cross-renderer trigger (M12 F4 Leg 1 export-import, DD1/DD2; page-modal split M12
-// F5 HAT, I14). The vault page's Import modal picks the destination + bundle file first (page → main
-// internal-vault-pick-import-file: the main-side file open + hold), then on Continue routes page →
-// main (internal-vault-begin-import-unlock) → chrome (here) via the UNCHANGED vault-request-import
-// forward. Open the vault-import-unlock sheet; the destination target + the bundle are held
-// main-side, so the model is an empty array (the sheet collects only the secret + secretKind).
-// On a successful import main closes the sheet + broadcasts lock-state → the page re-renders.
-window.goldfinch.onVaultRequestImport(() => {
-  openOverlayMenu('vault-import-unlock', [], null, 0);
-});
-// Mint-success → open the read-only accesskey-show sheet with the minted { secret, keyId }.
-// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time secret
-// (Escape/backdrop/blur all inert; only acknowledge closes). The secret lives only
-// main → chrome → sheet, never in the page.
-window.goldfinch.onVaultAccessKeyShow(({ secret, keyId }) => {
-  openOverlayMenu('vault-accesskey-show', { secret, keyId }, null, 0, { dismissible: false });
-});
-
-// Key-rotation cross-renderer triggers (M12 F4 Leg 2 key-rotation, DD3/DD2). The vault page's
-// rotation-section actions route page → main (internal-vault-request-*) → chrome (here). Recovery
-// rotation REUSES the vault-stepup sheet (mode 'rotate-recovery') for its master-password step-up;
-// on success main mints the new recovery key + drives vault-recovery-show (the setup idiom).
-// Change-master opens the vault-change-master sheet (old + new + confirm). Recover opens the
-// vault-recover sheet (recovery key + new + confirm) — reachable FROM the LOCKED page; on success
-// the store installs the MRK and the page moves to unlocked off the lock-state broadcast. NO secret
-// crosses these bare triggers — every secret + one-time display lives on the chrome-owned sheet.
-window.goldfinch.onVaultRequestRotateRecovery(() => {
-  openOverlayMenu('vault-stepup', { mode: 'rotate-recovery' }, null, 0);
-});
-// Admin-key provision/rotate cross-renderer trigger (M12 F4 Leg 3 admin-key-provision, DD4). The
-// vault page's Provision/rotate admin key action routes page → main (internal-vault-request-rotate-
-// admin) → chrome (here). REUSES the vault-stepup sheet (mode 'rotate-admin') for its master-password
-// step-up; on success main mints the new admin keypair + drives vault-adminkey-show (post-write). NO
-// secret crosses this bare trigger — the master password + the one-time admin key live on the sheet.
-window.goldfinch.onVaultRequestRotateAdmin(() => {
-  openOverlayMenu('vault-stepup', { mode: 'rotate-admin' }, null, 0);
-});
-// Admin-key rotate-success → open the read-only adminkey-show sheet with the minted { adminPrivateKey }.
-// Opened DISMISS-DISABLED so a casual dismiss can't lose the unrecoverable one-time key (Escape/backdrop/
-// blur all inert; only acknowledge closes). The key lives only main → chrome → sheet, never in the page.
-window.goldfinch.onVaultAdminKeyShow(({ adminPrivateKey }) => {
-  openOverlayMenu('vault-adminkey-show', { adminPrivateKey }, null, 0, { dismissible: false });
-});
-window.goldfinch.onVaultRequestChangeMaster(() => {
-  openOverlayMenu('vault-change-master', [], null, 0);
-});
-window.goldfinch.onVaultRequestRecover(() => {
-  openOverlayMenu('vault-recover', [], null, 0);
-});
-
-// Vault capture offer (M12 F2 Leg 4 capture-save, DD7). Main forwards { captureId,
-// model } after a login-form submit in a set-up, unlocked, persistent-jar tab (model =
-// origin/username/mode/defaultVaultId/choices — NEVER a password; the captured password
-// lives only in the main-side held record). Stash the captureId (the dismiss-drop path
-// reads it in handleOverlayClosed), enrich the SAVE choices with jar display labels
-// (Global vs the jar's name), and open the chrome-owned vault-capture sheet. The Save
-// invoke originates in the SHEET (window.menuOverlay.captureSave); chrome only opens it.
-// Open the vault-capture sheet from a resolved save/update offer (shared by the immediate
-// unlocked path and the unlock-to-save finalize below). Enriches the SAVE choices with jar
-// display labels; captureId rides INSIDE the model so the sheet's Save invoke carries it back.
-function openCaptureSheet(captureId, model) {
-  pendingCaptureId = captureId;
-  const choices = Array.isArray(model.choices)
-    ? model.choices.map((vaultId) => {
-        if (vaultId === 'global') return { vaultId, label: 'Global' };
-        const jar = jarsClient.containers.find((c) => c.id === vaultId);
-        return { vaultId, label: jar ? jar.name : vaultId };
-      })
-    : [];
-  openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
-}
-
-window.goldfinch.onVaultCaptureOffer(({ captureId, model }) => {
-  // Unlock-to-save (locked vault): the credential is held main-side; raise the unlock prompt
-  // first and stash the captureId so onVaultLockState finalizes the save/update offer on a
-  // successful unlock. pendingCaptureId is set too so an ABANDONED unlock still drops the record.
-  if (model && model.mode === 'locked') {
-    pendingCaptureId = captureId;
-    pendingCaptureUnlock = captureId;
-    openOverlayMenu('vault-unlock', [], null, 0);
-    return;
-  }
-  openCaptureSheet(captureId, model);
-});
-
-// Vault lock indicator (M12 F2 Leg 2 chrome-unlock, DD10). A PURE projection of
-// the pushed `vault-lock-state` (single source of truth = vault-store MRK-present)
-// — never a cache. Hidden until the manager is set up; then locked / unlocked.
-// Leg 3 also STASHES the state (`lockState`) so the gesture handler can decide
-// unlock-first-vs-pick, and CONTINUES a mid-unlock flow to the picker.
-let vaultStatePushed = false;
-/** @type {{ setUp: boolean, unlocked: boolean }} the last-known lock state (stashed). */
-let lockState = { setUp: false, unlocked: false };
-function renderVaultIndicator(state) {
-  const el = els.vaultIndicator;
-  if (!el) return;
-  const model = buildVaultIndicatorModel(state);
-  el.classList.toggle('hidden', !model.visible);
-  el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
-  el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
-  const label = model.visible && model.state === 'unlocked'
-    ? 'Password manager unlocked'
-    : 'Password manager locked';
-  el.setAttribute('aria-label', label);
-}
-// Subscribe FIRST, then fetch the initial state — so a transition that fires
-// between subscribe and fetch is not lost, and a fresher push always wins over a
-// late init fetch (DD10 freshness contract).
-window.goldfinch.onVaultLockState((state) => {
-  vaultStatePushed = true;
-  lockState = state;
-  renderVaultIndicator(state);
-  // Continue a mid-unlock flow ONLY when we are the tab that raised the unlock
-  // prompt (phase === 'unlocking') and the store is now unlocked — the phase guard
-  // stops an unrelated later unlock (recovery/admin, or another tab) from springing
-  // the picker on a stale tab.
-  if (pendingVaultFlow && pendingVaultFlow.phase === 'unlocking' && state.unlocked) {
-    pendingVaultFlow.phase = 'picking';
-    openVaultPicker(pendingVaultFlow.wcId);
-  }
-  // Unlock-to-save continuation: a login-form submit into a LOCKED vault held the credential
-  // and raised this unlock prompt; on success finalize the save/update offer and open the
-  // capture sheet. Cleared here so an unrelated later unlock can't re-fire it. A null model
-  // (record timed out / tab re-jarred) simply shows nothing.
-  if (pendingCaptureUnlock && state.unlocked) {
-    const captureId = pendingCaptureUnlock;
-    pendingCaptureUnlock = null;
-    Promise.resolve(window.goldfinch.vaultCaptureFinalize(captureId))
-      .then((offer) => { if (offer && offer.model) openCaptureSheet(offer.captureId, offer.model); })
-      .catch(() => {});
-  }
-});
-window.goldfinch.getVaultLockState()
-  .then((state) => { lockState = state; if (!vaultStatePushed) renderVaultIndicator(state); })
-  .catch(() => {});
 
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
 // EVERY overlay query — empty included (deletion sync: switch-back must restore a
@@ -1828,9 +1471,13 @@ window.goldfinch.onTabNavState(({ wcId, canGoBack, canGoForward }) => {
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
   jarsClient.boot,
-  // Boot-race gate (M15 F1 Leg 2, AC): joins the barrier exactly as
-  // jarsClient.boot does, so the first tab's star renders only after the
-  // bookmarks cache is populated.
+  // Boot-race gate (M15 F1 Leg 2, AC; narrowed M15 F2 Leg 3 L3-DD-B): joins
+  // the barrier exactly as jarsClient.boot does, but now only guarantees the
+  // DEFAULT jar's cache is warm by boot's end — the Flight 1 "first tab's
+  // star renders only after the cache is populated" guarantee narrows to
+  // first-sight-of-EACH-jar (DD6's honest bound), since the cache is per-jar
+  // and jarsClient's own default id is unknowable until jarsClient.boot
+  // resolves.
   bookmarksClient.boot,
   window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
 ]).then(([url, , , bootConfig]) => {

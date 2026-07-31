@@ -72,9 +72,60 @@ CREATE TABLE cookie_seen (
 );
 `;
 
-const CURRENT_VERSION = 2;
+// ---------------------------------------------------------------------------
+// Schema v3 step (M15 Flight 2 "Jar-Scoped Bookmarks", Leg 2 / flight DD1,
+// DD2, DD10; leg L2-DD-A/B/B2). Moves bookmark truth from the app-scoped
+// `documents` blob to a jar-keyed table — the `history-store.js` /
+// `cookie_seen` table precedent inside app.db. `position` is an explicit
+// gap-free `0..n-1` per jar (DD2); the `(jar_id, url)` unique index makes
+// "one bookmark per exact URL, per jar" a database constraint (the SAME url
+// in two DIFFERENT jars is legal and expected — that is the feature). The
+// step also drops the legacy `documents` row (DD10 clean-slate migration) —
+// additive-and-ordered like v1->v2, so a profile at any prior version lands
+// on v3 in one open, and a fresh v0 profile never pauses at an intermediate
+// version.
+// ---------------------------------------------------------------------------
+
+const SCHEMA_V3_SQL = `
+CREATE TABLE bookmarks (
+  id       TEXT PRIMARY KEY,
+  jar_id   TEXT    NOT NULL,
+  url      TEXT    NOT NULL,
+  title    TEXT,
+  icon     TEXT,
+  position INTEGER NOT NULL,
+  added_at INTEGER NOT NULL
+);
+CREATE INDEX bookmarks_jar_pos ON bookmarks (jar_id, position);
+CREATE UNIQUE INDEX bookmarks_jar_url ON bookmarks (jar_id, url);
+`;
+
+const CURRENT_VERSION = 3;
 
 const FILE_NAME = 'app.db';
+
+// Migration-failure classification (L2-DD-B): the ONLY discriminating signal
+// node:sqlite exposes is `err.errcode`, a raw integer SQLite primary result
+// code — `err.code` is the literal string 'ERR_SQLITE_ERROR' for EVERY
+// SQLite-thrown error, useless for classification. `require('node:sqlite').
+// constants` exports no symbolic names for result codes, so these are
+// hardcoded (empirically probed against this repo's Node v22.22.0, live
+// corrupt/not-a-db fixtures — see the app-db.test.js errcode pin test):
+//   11 = SQLITE_CORRUPT ("database disk image is malformed")
+//   26 = SQLITE_NOTADB  ("file is not a database")
+const SQLITE_CORRUPT = 11;
+const SQLITE_NOTADB = 26;
+
+/**
+ * @param {unknown} err
+ * @returns {boolean} whether `err` is one of the two corruption-class SQLite
+ *   result codes (vs. a migration-step bug, e.g. a table collision).
+ */
+function isCorruptionErrcode(err) {
+  return !!err && typeof err === 'object' && (
+    /** @type {any} */ (err).errcode === SQLITE_CORRUPT || /** @type {any} */ (err).errcode === SQLITE_NOTADB
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Module-scoped state (singleton, like history-store / settings-store)
@@ -120,22 +171,62 @@ function quarantineCorruptFile(dbPath) {
 }
 
 /**
+ * Run one `user_version` ladder step in its OWN transaction (leg L2-DD-A /
+ * L2-DD-B2): `bodyFn`'s DDL/DML AND the step's `PRAGMA user_version` bump
+ * both live inside one `BEGIN IMMEDIATE` … `COMMIT` — `user_version` is a
+ * transactional header field, so a throw partway through `bodyFn` leaves the
+ * file at its PRIOR version, durably and consistently (never a durable
+ * partial-step artifact at the OLD version number, which would re-run into
+ * "already exists" on the next open). On throw: best-effort `ROLLBACK` in
+ * its own try/catch (a `ROLLBACK` with no active transaction would itself
+ * throw and must not mask the original error — round-2 review note), then
+ * classify (L2-DD-B): a corruption-class errcode (11 SQLITE_CORRUPT / 26
+ * SQLITE_NOTADB) rethrows UNTAGGED so the outer `open()` catch quarantines
+ * exactly as today; any OTHER throw (e.g. a table-name collision) is tagged
+ * `err.appDbMigrationFailure = true` and rethrown — `open()` propagates it
+ * instead of quarantining, because the file is healthy at its last
+ * committed version and destroying it would be strictly worse than failing
+ * loudly (the house "programmer errors propagate, never dissolve" rule).
+ * @param {import('node:sqlite').DatabaseSync} handle
+ * @param {number} targetVersion
+ * @param {() => void} bodyFn
+ */
+function runLadderStep(handle, targetVersion, bodyFn) {
+  handle.exec('BEGIN IMMEDIATE');
+  try {
+    bodyFn();
+    handle.exec(`PRAGMA user_version = ${targetVersion}`);
+    handle.exec('COMMIT');
+  } catch (err) {
+    try {
+      handle.exec('ROLLBACK');
+    } catch {
+      // best-effort (quarantineCorruptFile idiom) — see doc comment above.
+    }
+    if (!isCorruptionErrcode(err)) {
+      /** @type {any} */ (err).appDbMigrationFailure = true;
+    }
+    throw err;
+  }
+}
+
+/**
  * Open (or create) the database at dbPath, apply pragmas, and step the
- * schema up to `CURRENT_VERSION` via the `user_version` ladder (M10 Flight
- * 2, Leg 3 — the first real ladder step this module has needed; previously
- * `attemptOpen` branched only on version 0). Steps are CUMULATIVE and
- * strictly additive per version, applied in order from whatever version the
- * file is already at:
- *   - 0 → creates schema v1 (`documents`) THEN steps straight through to v2
- *     (`cookie_seen`) in the same open — a fresh profile lands on
- *     `CURRENT_VERSION` directly, never pausing at an intermediate version.
- *   - 1 → applies ONLY the v2 step (`cookie_seen`) — the hypothetical
- *     upgrade path for a real F1-only-shipped v1 file (none exists in the
- *     wild yet; F1 is unreleased — this step protects that scenario
- *     regardless).
- *   - 2 (== CURRENT_VERSION) → no-op; the file is already current.
+ * schema up to `CURRENT_VERSION` via the `user_version` ladder. Steps are
+ * CUMULATIVE and strictly additive per version, applied in order from
+ * whatever version the file is already at, EACH IN ITS OWN TRANSACTION
+ * (leg L2-DD-A/B2 — see runLadderStep):
+ *   - 0 → creates schema v1 (`documents`) THEN steps straight through v2
+ *     (`cookie_seen`) and v3 (`bookmarks`, M15 F2 Leg 2) in the same open —
+ *     a fresh profile lands on `CURRENT_VERSION` directly, never pausing at
+ *     an intermediate version.
+ *   - 1 → applies the v2 step (`cookie_seen`) then v3.
+ *   - 2 → applies ONLY the v3 step (`bookmarks` table + legacy-row delete).
+ *   - 3 (== CURRENT_VERSION) → no-op; the file is already current.
  * Throws on any failure (corrupt file, mid-bootstrap error) — the caller
- * decides whether to quarantine and retry.
+ * decides whether to quarantine and retry, EXCEPT a tagged
+ * `err.appDbMigrationFailure` throw (L2-DD-B), which the caller must
+ * propagate untouched rather than quarantine.
  * @param {string} dbPath
  * @returns {import('node:sqlite').DatabaseSync}
  */
@@ -147,15 +238,19 @@ function attemptOpen(dbPath) {
     const versionRow = /** @type {any} */ (handle.prepare('PRAGMA user_version').get());
     let version = versionRow.user_version;
     if (version === 0) {
-      handle.exec(SCHEMA_V1_SQL);
+      runLadderStep(handle, 1, () => handle.exec(SCHEMA_V1_SQL));
       version = 1;
     }
     if (version === 1) {
-      handle.exec(SCHEMA_V2_SQL);
+      runLadderStep(handle, 2, () => handle.exec(SCHEMA_V2_SQL));
       version = 2;
     }
-    if (version !== versionRow.user_version) {
-      handle.exec(`PRAGMA user_version = ${CURRENT_VERSION}`);
+    if (version === 2) {
+      runLadderStep(handle, CURRENT_VERSION, () => {
+        handle.exec(SCHEMA_V3_SQL);
+        handle.exec("DELETE FROM documents WHERE store = 'bookmarks'");
+      });
+      version = CURRENT_VERSION;
     }
     return handle;
   } catch (err) {
@@ -198,7 +293,30 @@ function prepareStatements() {
     deleteCookieSeenByJar: d.prepare('DELETE FROM cookie_seen WHERE jar_id = ?1'),
     selectExpiredCookieSeen: d.prepare(
       'SELECT name, domain, path, first_seen_ms FROM cookie_seen WHERE jar_id = ?1 AND first_seen_ms < ?2'
-    )
+    ),
+    // bookmarks (M15 F2 Leg 2 / flight DD1-DD3, leg L2-DD-A/C/D) — every
+    // placeholder DISTINCT (house gotcha, cloned discipline). The id-alone-
+    // never-authorizes rule (DD3, history-store.js's deleteVisit precedent)
+    // means every by-id lookup/mutation is scoped `WHERE jar_id = ?1 AND id = ?2`.
+    selectBookmarksByJar: d.prepare(
+      'SELECT id, jar_id, url, title, icon, position, added_at FROM bookmarks WHERE jar_id = ?1 ORDER BY position ASC'
+    ),
+    selectBookmarkByJarAndId: d.prepare(
+      'SELECT id, jar_id, url, title, icon, position, added_at FROM bookmarks WHERE jar_id = ?1 AND id = ?2'
+    ),
+    selectBookmarkByJarAndUrl: d.prepare(
+      'SELECT id, jar_id, url, title, icon, position, added_at FROM bookmarks WHERE jar_id = ?1 AND url = ?2'
+    ),
+    countBookmarksByJar: d.prepare('SELECT COUNT(*) AS c FROM bookmarks WHERE jar_id = ?1'),
+    insertBookmark: d.prepare(
+      'INSERT INTO bookmarks (id, jar_id, url, title, icon, position, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)'
+    ),
+    updateBookmark: d.prepare(
+      'UPDATE bookmarks SET url = ?1, title = ?2, icon = ?3 WHERE jar_id = ?4 AND id = ?5'
+    ),
+    updateBookmarkPosition: d.prepare('UPDATE bookmarks SET position = ?1 WHERE jar_id = ?2 AND id = ?3'),
+    deleteBookmark: d.prepare('DELETE FROM bookmarks WHERE jar_id = ?1 AND id = ?2'),
+    deleteBookmarksByJar: d.prepare('DELETE FROM bookmarks WHERE jar_id = ?1')
   };
 }
 
@@ -209,11 +327,15 @@ function prepareStatements() {
 /**
  * Open (or reopen) the app database at `<userDataPath>/app.db`. Creates the
  * directory first. Applies WAL + synchronous=NORMAL and bootstraps schema v1
- * when `user_version` is 0. NEVER throws on a corrupt existing file: the bad
- * file (and its -wal/-shm siblings) is quarantined to an
- * `app.db.corrupt-<ms-epoch>` sibling and a fresh database is created — the
- * app must boot. Calling open() while already open closes first (safe,
- * idempotent re-open — DD4, used by tests to reset between cases).
+ * when `user_version` is 0. On a corrupt existing file (classified by
+ * `err.errcode` ∈ {11, 26} — L2-DD-B): the bad file (and its -wal/-shm
+ * siblings) is quarantined to an `app.db.corrupt-<ms-epoch>` sibling and a
+ * fresh database is created — the app must boot. On a NON-corruption ladder
+ * failure (`err.appDbMigrationFailure` — e.g. a migration-step bug), the
+ * file is NOT quarantined: it is healthy at its last committed version, and
+ * `open()` propagates the error instead of destroying it (L2-DD-B). Calling
+ * open() while already open closes first (safe, idempotent re-open — DD4,
+ * used by tests to reset between cases).
  * @param {string} userDataPath
  * @param {{ memory?: boolean }} [opts]
  */
@@ -234,7 +356,13 @@ function open(userDataPath, opts = {}) {
 
   try {
     db = attemptOpen(dbPath);
-  } catch {
+  } catch (err) {
+    if (err && /** @type {any} */ (err).appDbMigrationFailure) {
+      // L2-DD-B: a migration-step bug, not corruption — the file is healthy
+      // at its last committed version. Destroying it would be strictly
+      // worse than failing loudly, so propagate rather than quarantine.
+      throw err;
+    }
     quarantineCorruptFile(dbPath);
     db = attemptOpen(dbPath);
   }
@@ -388,6 +516,125 @@ function createCookieSeenStore() {
 }
 
 // ---------------------------------------------------------------------------
+// createBookmarksStore() — the SQL-level seam for the jar-keyed `bookmarks`
+// table (M15 F2 Leg 2 / flight DD1-DD3, leg L2-DD-A/C/D). Owns the prepared
+// statements and SQL-level operations only; validation, id minting, and the
+// per-row read-time drop/repair split (L2-DD-D) live in bookmarks-store.js —
+// the jars.js/settings-store.js SQL/business layering.
+// ---------------------------------------------------------------------------
+
+/** @typedef {{ id: string, jarId: string, url: string, title: string | null, icon: string | null, position: number, addedAt: number }} BookmarkRow */
+
+/** @param {any} row @returns {BookmarkRow} */
+function rowToBookmark(row) {
+  return {
+    id: row.id,
+    jarId: row.jar_id,
+    url: row.url,
+    title: row.title,
+    icon: row.icon,
+    position: row.position,
+    addedAt: row.added_at
+  };
+}
+
+/**
+ * @returns {{
+ *   listByJar(jarId: string): BookmarkRow[],
+ *   findById(jarId: string, id: string): BookmarkRow | null,
+ *   findByUrl(jarId: string, url: string): BookmarkRow | null,
+ *   countByJar(jarId: string): number,
+ *   insert(row: BookmarkRow): void,
+ *   update(jarId: string, id: string, fields: { url: string, title: string | null, icon: string | null }): boolean,
+ *   remove(jarId: string, id: string): boolean,
+ *   reorderPositions(jarId: string, orderedIds: string[]): void,
+ *   clearJar(jarId: string): number
+ * }}
+ */
+function createBookmarksStore() {
+  return {
+    /** Position-ordered (DD2) — display order is ORDER BY position ASC. */
+    listByJar(jarId) {
+      assertOpen();
+      const rows = /** @type {any[]} */ (statements.selectBookmarksByJar.all(jarId));
+      return rows.map(rowToBookmark);
+    },
+    // DD3 / history-store.js's deleteVisit precedent: the id alone never
+    // authorizes a read either — every by-id lookup is jar-scoped.
+    findById(jarId, id) {
+      assertOpen();
+      const row = /** @type {any} */ (statements.selectBookmarkByJarAndId.get(jarId, id));
+      return row ? rowToBookmark(row) : null;
+    },
+    findByUrl(jarId, url) {
+      assertOpen();
+      const row = /** @type {any} */ (statements.selectBookmarkByJarAndUrl.get(jarId, url));
+      return row ? rowToBookmark(row) : null;
+    },
+    countByJar(jarId) {
+      assertOpen();
+      const row = /** @type {any} */ (statements.countBookmarksByJar.get(jarId));
+      return row.c;
+    },
+    insert(row) {
+      assertOpen();
+      statements.insertBookmark.run(row.id, row.jarId, row.url, row.title, row.icon, row.position, row.addedAt);
+    },
+    /** @returns {boolean} whether a row existed and was updated */
+    update(jarId, id, { url, title, icon }) {
+      assertOpen();
+      const result = /** @type {any} */ (statements.updateBookmark.run(url, title, icon, jarId, id));
+      return result.changes > 0;
+    },
+    /** @returns {boolean} whether a row existed and was deleted */
+    remove(jarId, id) {
+      assertOpen();
+      const result = /** @type {any} */ (statements.deleteBookmark.run(jarId, id));
+      return result.changes > 0;
+    },
+    /**
+     * L2-DD-A: every multi-row mutation runs in an explicit transaction — a
+     * throw mid-loop would leave duplicate positions. Rewrites EXACTLY the
+     * given ordered id list to positions 0..n-1 (the caller — bookmarks-
+     * store.js's reorder()/remove() — is responsible for computing the full
+     * jar-relative order, including omitted/preserved entries, before
+     * calling this).
+     * @param {string} jarId
+     * @param {string[]} orderedIds
+     */
+    reorderPositions(jarId, orderedIds) {
+      assertOpen();
+      const d = /** @type {import('node:sqlite').DatabaseSync} */ (db);
+      d.exec('BEGIN IMMEDIATE');
+      try {
+        orderedIds.forEach((id, index) => {
+          statements.updateBookmarkPosition.run(index, jarId, id);
+        });
+        d.exec('COMMIT');
+      } catch (err) {
+        try {
+          d.exec('ROLLBACK');
+        } catch {
+          // best-effort — see runLadderStep's identical note.
+        }
+        throw err;
+      }
+    },
+    /**
+     * DD9 lifecycle: jar teardown (delete) and the Bookmarks clear-data
+     * class both drop every row for a jar in one statement.
+     * @param {string} jarId
+     * @returns {number} rows deleted
+     */
+    clearJar(jarId) {
+      assertOpen();
+      const result = /** @type {any} */ (statements.deleteBookmarksByJar.run(jarId));
+      return result.changes;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -396,5 +643,6 @@ module.exports = {
   close,
   isOpen,
   createDocumentStore,
-  createCookieSeenStore
+  createCookieSeenStore,
+  createBookmarksStore
 };

@@ -1,32 +1,21 @@
 'use strict';
 
-// Unit tests for src/main/bookmarks-store.js (M15 Flight 1 "Bookmarking Core
-// and Surfaces", Leg 1 / DD1, DD2).
+// Unit tests for src/main/bookmarks-store.js — rewritten M15 Flight 2
+// "Jar-Scoped Bookmarks" Leg 2 / flight DD1-DD4, leg L2-DD-A/C/D against the
+// jarId-first, table-backed API. Flight 1's per-field validation contract
+// (drop/repair split) is preserved verbatim, moved from load-time array
+// validation to READ-TIME per-row validation (L2-DD-D).
 //
-// No electron-stub needed — bookmarks-store.js is Electron-free (no
-// require('electron')); the userData path is injected via load(userDataPath).
-// Persists through app-db.js's document-row seam (keyed 'bookmarks'), the
-// jars.js/settings-store.js precedent — appDb.open(dir)/close() bracket every
-// test that touches the store (the jars.test.js pattern), and the module is
-// re-required fresh per test (module-scoped singleton — the downloads-store.test.js
-// cache-bust pattern) so no state leaks between tests.
+// No electron-stub needed — bookmarks-store.js is Electron-free. Persists
+// through app-db.js's `bookmarks` table (schema v3) — appDb.open(dir,
+// { memory: true })/close() bracket every test (fast, no filesystem), and
+// the module is re-required fresh per test (module-scoped singleton) so no
+// state leaks between tests.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
 
 const appDb = require('../../src/main/app-db');
-
-function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-bookmarks-'));
-}
-
-function removeTempDir(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
-}
 
 function freshStore() {
   const resolved = require.resolve('../../src/main/bookmarks-store');
@@ -34,48 +23,41 @@ function freshStore() {
   return require('../../src/main/bookmarks-store');
 }
 
-// Read the raw 'bookmarks' document row payload directly off app.db, bypassing
-// the store — the jars.test.js readRow() precedent.
-function readRow(dir) {
-  const check = new DatabaseSync(path.join(dir, 'app.db'));
-  try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('bookmarks')
-    );
-    return row ? JSON.parse(row.payload) : null;
-  } finally {
-    check.close();
-  }
+/** Read the raw bookmarks table rows directly, bypassing the store. */
+function rawRows(jarId) {
+  return appDb.createBookmarksStore().listByJar(jarId);
 }
 
-function writeRow(dir, payload) {
-  appDb.createDocumentStore('bookmarks').write(JSON.stringify(payload));
-}
-
-/** Run `fn(store)` with a fresh temp dir + open app-db, tearing both down after. */
+/** Run `fn(store)` with a fresh in-memory app-db, tearing it down after. */
 function withStore(fn) {
-  const dir = makeTempDir();
-  appDb.open(dir);
+  appDb.open('', { memory: true });
   try {
     const store = freshStore();
-    fn(store, dir);
+    store.load('/unused/userdata/path');
+    fn(store);
   } finally {
     appDb.close();
-    removeTempDir(dir);
   }
 }
 
 const GOOD_ICON = 'data:image/png;base64,AAAA';
 
 // ---------------------------------------------------------------------------
-// load(): no row yet -> empty, never throws
+// load(): no rows yet -> empty per jar, never throws
 // ---------------------------------------------------------------------------
 
-test('load() with no existing row starts empty', () => {
+test('list(jarId) with no existing rows starts empty', () => {
   withStore((store) => {
-    const result = store.load(process.cwd());
-    assert.deepEqual(result, []);
-    assert.deepEqual(store.list(), []);
+    assert.deepEqual(store.list('personal'), []);
+  });
+});
+
+test('load() reads nothing into memory (stateless) — a mutation via a second fresh require is visible to the first', () => {
+  withStore((store) => {
+    store.add('personal', { url: 'https://example.com/' });
+    const reloaded = freshStore();
+    reloaded.load('/unused/userdata/path');
+    assert.equal(reloaded.list('personal').length, 1, 'truth lives in the table, not an in-memory array');
   });
 });
 
@@ -84,370 +66,393 @@ test('load() with no existing row starts empty', () => {
 // ---------------------------------------------------------------------------
 
 test('round-trip: an added bookmark survives a fresh load()', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const result = store.add({ url: 'https://example.com/', title: 'Example', icon: GOOD_ICON });
+  withStore((store) => {
+    const result = store.add('personal', { url: 'https://example.com/', title: 'Example', icon: GOOD_ICON });
     assert.equal(result.ok, true);
     assert.equal(result.created, true);
 
     const reloaded = freshStore();
-    reloaded.load(dir);
-    assert.equal(reloaded.list().length, 1);
-    const [entry] = reloaded.list();
+    reloaded.load('/unused/userdata/path');
+    assert.equal(reloaded.list('personal').length, 1);
+    const [entry] = reloaded.list('personal');
     assert.equal(entry.url, 'https://example.com/');
     assert.equal(entry.title, 'Example');
     assert.equal(entry.icon, GOOD_ICON);
+    assert.equal(entry.jarId, 'personal');
     assert.equal(typeof entry.addedAt, 'number');
     assert.equal(typeof entry.id, 'string');
+    assert.equal(entry.position, 0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Corrupt envelope -> whole store repairs to empty
+// Per-jar isolation (DD3) — the feature's core claim
 // ---------------------------------------------------------------------------
 
-test('corrupt envelope (wrong shape) repairs the WHOLE store to empty', () => {
-  withStore((store, dir) => {
-    writeRow(dir, { not: 'a bookmarks envelope' });
-    const result = store.load(dir);
-    assert.deepEqual(result, []);
+test('per-jar isolation: the SAME url in TWO jars is legal and independent (different titles, both survive)', () => {
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://shared.example/', title: 'Personal title' });
+    const b = store.add('work', { url: 'https://shared.example/', title: 'Work title' });
+    assert.equal(a.created, true);
+    assert.equal(b.created, true);
+    assert.notEqual(a.bookmark.id, b.bookmark.id);
+    assert.equal(store.list('personal')[0].title, 'Personal title');
+    assert.equal(store.list('work')[0].title, 'Work title');
   });
 });
 
-test('corrupt envelope (unparseable JSON row) repairs to empty, never throws', () => {
-  withStore((store, dir) => {
-    appDb.createDocumentStore('bookmarks').write('{ not json');
-    assert.doesNotThrow(() => store.load(dir));
-    assert.deepEqual(store.list(), []);
+test('a mutation in jar A leaves jar B\'s stored rows byte-identical', () => {
+  withStore((store) => {
+    store.add('work', { url: 'https://untouched.example/', title: 'Untouched' });
+    const before = rawRows('work');
+    store.add('personal', { url: 'https://a.example/' });
+    store.update('personal', store.list('personal')[0].id, { title: 'Renamed' });
+    const after = rawRows('work');
+    assert.deepEqual(after, before);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Bad-entry drop: valid siblings survive
-// ---------------------------------------------------------------------------
-
-test('a single bad entry (invalid url) is dropped; valid siblings are kept', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [
-        { id: 'a', url: 'https://good.example/', title: 'Good', icon: null, addedAt: 1 },
-        { id: 'b', url: 'javascript:alert(1)', title: 'Bad scheme', icon: null, addedAt: 2 },
-        { id: 'c', url: 'about:blank', title: 'Bad about:blank', icon: null, addedAt: 3 },
-        { id: 'd', url: 'not a url at all', title: 'Malformed', icon: null, addedAt: 4 },
-        { id: 'e', url: 'https://also-good.example/', title: 'Also good', icon: null, addedAt: 5 }
-      ]
-    });
-    const result = store.load(dir);
-    assert.deepEqual(result.map((b) => b.id), ['a', 'e']);
-  });
-});
-
-test('a non-object / null entry in the array is dropped, siblings kept', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [
-        { id: 'a', url: 'https://good.example/', title: 'Good', icon: null, addedAt: 1 },
-        null,
-        'string',
-        42,
-        [],
-        { id: 'b', url: 'https://also.example/', title: 'Also', icon: null, addedAt: 2 }
-      ]
-    });
-    const result = store.load(dir);
-    assert.deepEqual(result.map((b) => b.id), ['a', 'b']);
-  });
-});
-
-test('an entry with a missing/non-string id is dropped', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [
-        { url: 'https://no-id.example/', title: 'No id', icon: null, addedAt: 1 },
-        { id: 42, url: 'https://numeric-id.example/', title: 'Numeric id', icon: null, addedAt: 2 },
-        { id: 'ok', url: 'https://ok.example/', title: 'Ok', icon: null, addedAt: 3 }
-      ]
-    });
-    const result = store.load(dir);
-    assert.deepEqual(result.map((b) => b.id), ['ok']);
-  });
-});
-
-test('duplicate ids / duplicate urls on load: first occurrence wins', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [
-        { id: 'dup', url: 'https://a.example/', title: 'First', icon: null, addedAt: 1 },
-        { id: 'dup', url: 'https://b.example/', title: 'Second (dup id)', icon: null, addedAt: 2 },
-        { id: 'other', url: 'https://a.example/', title: 'Dup url', icon: null, addedAt: 3 }
-      ]
-    });
-    const result = store.load(dir);
-    assert.equal(result.length, 1);
-    assert.equal(result[0].id, 'dup');
-    assert.equal(result[0].title, 'First');
+test('list(jarId) for an unknown/empty jar returns []', () => {
+  withStore((store) => {
+    store.add('personal', { url: 'https://example.com/' });
+    assert.deepEqual(store.list('nonexistent-jar'), []);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Entry validation (AC2) — icon normalization, title fallback
+// Read-time per-row validation (L2-DD-D) — drop/repair split, scoped per jar
 // ---------------------------------------------------------------------------
 
-test('load: an empty-string icon normalizes to null; the entry is kept', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [{ id: 'a', url: 'https://example.com/', title: 'T', icon: '', addedAt: 1 }]
-    });
-    const [entry] = store.load(dir);
+test('list(): a single bad row (invalid url) is dropped; valid siblings in the SAME jar are kept', () => {
+  withStore((store) => {
+    const b = appDb.createBookmarksStore();
+    b.insert({ id: 'a', jarId: 'personal', url: 'https://good.example/', title: 'Good', icon: null, position: 0, addedAt: 1 });
+    b.insert({ id: 'b', jarId: 'personal', url: 'about:blank', title: 'Bad about:blank', icon: null, position: 1, addedAt: 2 });
+    b.insert({ id: 'c', jarId: 'personal', url: 'https://also-good.example/', title: 'Also good', icon: null, position: 2, addedAt: 3 });
+    const result = store.list('personal');
+    assert.deepEqual(result.map((r) => r.id), ['a', 'c']);
+  });
+});
+
+test('list(): an empty-string icon normalizes to null; the entry is kept', () => {
+  withStore((store) => {
+    appDb.createBookmarksStore().insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: 'T', icon: '', position: 0, addedAt: 1 });
+    const [entry] = store.list('personal');
     assert.equal(entry.icon, null);
   });
 });
 
-test('load: a non-image data: icon normalizes to null; the entry is kept', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [{ id: 'a', url: 'https://example.com/', title: 'T', icon: 'data:text/html,x', addedAt: 1 }]
-    });
-    const [entry] = store.load(dir);
+test('list(): a non-image data: icon normalizes to null; the entry is kept', () => {
+  withStore((store) => {
+    appDb.createBookmarksStore().insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: 'T', icon: 'data:text/html,x', position: 0, addedAt: 1 });
+    const [entry] = store.list('personal');
     assert.equal(entry.icon, null);
   });
 });
 
-test('load: a missing/empty title falls back to the url', () => {
-  withStore((store, dir) => {
-    writeRow(dir, {
-      version: 1,
-      bookmarks: [
-        { id: 'a', url: 'https://example.com/', title: '', icon: null, addedAt: 1 },
-        { id: 'b', url: 'https://example.org/', icon: null, addedAt: 2 }
-      ]
-    });
-    const [a, b] = store.load(dir);
+test('list(): a missing/empty title falls back to the url', () => {
+  withStore((store) => {
+    const b = appDb.createBookmarksStore();
+    b.insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: '', icon: null, position: 0, addedAt: 1 });
+    b.insert({ id: 'b', jarId: 'personal', url: 'https://example.org/', title: null, icon: null, position: 1, addedAt: 2 });
+    const [a, bRow] = store.list('personal');
     assert.equal(a.title, 'https://example.com/');
-    assert.equal(b.title, 'https://example.org/');
+    assert.equal(bRow.title, 'https://example.org/');
+  });
+});
+
+test('list(): read-time validation never writes back or deletes — the raw row survives a read untouched', () => {
+  withStore((store) => {
+    const b = appDb.createBookmarksStore();
+    b.insert({ id: 'a', jarId: 'personal', url: 'about:blank', title: '', icon: 'data:text/html,x', position: 0, addedAt: 1 });
+    assert.deepEqual(store.list('personal'), [], 'the invalid row is dropped from the READ');
+    const raw = b.findById('personal', 'a');
+    assert.notEqual(raw, null, 'but the row itself is untouched in the table — a read never mutates');
+    assert.equal(raw.url, 'about:blank');
   });
 });
 
 // ---------------------------------------------------------------------------
-// add() — validation, idempotent-by-DD2
+// add() — validation, idempotent-by-DD2, per-jar
 // ---------------------------------------------------------------------------
 
 test('add() rejects an unsafe url', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    assert.deepEqual(store.add({ url: 'javascript:alert(1)' }), { ok: false, reason: 'invalid-url' });
-    assert.deepEqual(store.add({ url: 'about:blank' }), { ok: false, reason: 'invalid-url' });
-    assert.deepEqual(store.list(), []);
+  withStore((store) => {
+    assert.deepEqual(store.add('personal', { url: 'javascript:alert(1)' }), { ok: false, reason: 'invalid-url' });
+    assert.deepEqual(store.add('personal', { url: 'about:blank' }), { ok: false, reason: 'invalid-url' });
+    assert.deepEqual(store.list('personal'), []);
   });
 });
 
-test('add() is idempotent by the DD2 exact-url predicate: re-adding returns the existing entry, created:false', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const first = store.add({ url: 'https://example.com/', title: 'First title' });
+test('add() is idempotent by the DD2 exact-url predicate WITHIN a jar: re-adding returns the existing entry, created:false', () => {
+  withStore((store) => {
+    const first = store.add('personal', { url: 'https://example.com/', title: 'First title' });
     assert.equal(first.created, true);
-    const second = store.add({ url: 'https://example.com/', title: 'Ignored second title' });
+    const second = store.add('personal', { url: 'https://example.com/', title: 'Ignored second title' });
     assert.equal(second.ok, true);
     assert.equal(second.created, false);
     assert.equal(second.bookmark.id, first.bookmark.id);
     assert.equal(second.bookmark.title, 'First title', 're-add does not overwrite the existing entry');
-    assert.equal(store.list().length, 1, 'no duplicate row');
+    assert.equal(store.list('personal').length, 1, 'no duplicate row');
   });
 });
 
 test('add() treats a fragment-different url as a DIFFERENT bookmark (DD2 exact match)', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    store.add({ url: 'https://example.com/page' });
-    const second = store.add({ url: 'https://example.com/page#section' });
+  withStore((store) => {
+    store.add('personal', { url: 'https://example.com/page' });
+    const second = store.add('personal', { url: 'https://example.com/page#section' });
     assert.equal(second.created, true);
-    assert.equal(store.list().length, 2);
+    assert.equal(store.list('personal').length, 2);
   });
 });
 
 test('add() defaults title to the url and icon to null when omitted', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const result = store.add({ url: 'https://example.com/' });
+  withStore((store) => {
+    const result = store.add('personal', { url: 'https://example.com/' });
     assert.equal(result.bookmark.title, 'https://example.com/');
     assert.equal(result.bookmark.icon, null);
   });
 });
 
+test('add() appends at position n (gap-free, DD2)', () => {
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
+    assert.deepEqual([a.position, b.position, c.position], [0, 1, 2]);
+  });
+});
+
 test('list() returns copies, not internal references', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    store.add({ url: 'https://example.com/' });
-    const list1 = store.list();
+  withStore((store) => {
+    store.add('personal', { url: 'https://example.com/' });
+    const list1 = store.list('personal');
     list1[0].title = 'mutated locally';
-    const list2 = store.list();
+    const list2 = store.list('personal');
     assert.notEqual(list2[0].title, 'mutated locally');
   });
 });
 
 // ---------------------------------------------------------------------------
-// update() — including the URL-collision no-op ruling
+// update() — including the per-jar URL-collision no-op ruling
 // ---------------------------------------------------------------------------
 
-test('update(): unknown id returns not-found', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    assert.deepEqual(store.update('nope', { title: 'x' }), { ok: false, reason: 'not-found' });
+test('update(): unknown id in the given jar returns not-found', () => {
+  withStore((store) => {
+    assert.deepEqual(store.update('personal', 'nope', { title: 'x' }), { ok: false, reason: 'not-found' });
+  });
+});
+
+test('update(): a valid id in a DIFFERENT jar returns not-found (the id alone never authorizes a mutation, DD3)', () => {
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/' });
+    assert.deepEqual(store.update('work', bookmark.id, { title: 'x' }), { ok: false, reason: 'not-found' });
+    assert.equal(store.list('personal')[0].title, 'https://example.com/', 'unaffected');
   });
 });
 
 test('update(): renames title/icon and persists', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const { bookmark } = store.add({ url: 'https://example.com/' });
-    const result = store.update(bookmark.id, { title: 'New title', icon: GOOD_ICON });
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/' });
+    const result = store.update('personal', bookmark.id, { title: 'New title', icon: GOOD_ICON });
     assert.equal(result.ok, true);
     assert.equal(result.bookmark.title, 'New title');
     assert.equal(result.bookmark.icon, GOOD_ICON);
 
     const reloaded = freshStore();
-    reloaded.load(dir);
-    assert.equal(reloaded.list()[0].title, 'New title');
+    reloaded.load('/unused/userdata/path');
+    assert.equal(reloaded.list('personal')[0].title, 'New title');
   });
 });
 
 test('update(): rejects an invalid new url without mutating the entry', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const { bookmark } = store.add({ url: 'https://example.com/', title: 'Original' });
-    const result = store.update(bookmark.id, { url: 'javascript:evil()' });
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/', title: 'Original' });
+    const result = store.update('personal', bookmark.id, { url: 'javascript:evil()' });
     assert.deepEqual(result, { ok: false, reason: 'invalid-url' });
-    assert.equal(store.list()[0].url, 'https://example.com/');
-    assert.equal(store.list()[0].title, 'Original');
+    assert.equal(store.list('personal')[0].url, 'https://example.com/');
+    assert.equal(store.list('personal')[0].title, 'Original');
   });
 });
 
-test('update(): a new URL matching a DIFFERENT existing bookmark is rejected as a no-op ({ok:false, reason:"duplicate-url"})', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/', title: 'A' });
-    const b = store.add({ url: 'https://b.example/', title: 'B' });
-    const result = store.update(b.bookmark.id, { url: 'https://a.example/' });
+test('update(): a new URL matching a DIFFERENT existing bookmark in the SAME jar is rejected as a no-op ({ok:false, reason:"duplicate-url"})', () => {
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/', title: 'A' });
+    const b = store.add('personal', { url: 'https://b.example/', title: 'B' });
+    const result = store.update('personal', b.bookmark.id, { url: 'https://a.example/' });
     assert.deepEqual(result, { ok: false, reason: 'duplicate-url' });
-    // Neither entry mutated.
-    assert.equal(store.list().find((x) => x.id === a.bookmark.id).url, 'https://a.example/');
-    assert.equal(store.list().find((x) => x.id === b.bookmark.id).url, 'https://b.example/');
+    assert.equal(store.list('personal').find((x) => x.id === a.bookmark.id).url, 'https://a.example/');
+    assert.equal(store.list('personal').find((x) => x.id === b.bookmark.id).url, 'https://b.example/');
+  });
+});
+
+test('update(): a new URL matching an existing bookmark in a DIFFERENT jar is NOT a collision (per-jar uniqueness, DD1)', () => {
+  withStore((store) => {
+    store.add('work', { url: 'https://a.example/', title: 'Work A' });
+    const b = store.add('personal', { url: 'https://b.example/', title: 'Personal B' });
+    const result = store.update('personal', b.bookmark.id, { url: 'https://a.example/' });
+    assert.equal(result.ok, true);
+    assert.equal(result.bookmark.url, 'https://a.example/');
   });
 });
 
 test('update(): setting a bookmark\'s url to its OWN current url is not a collision', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const { bookmark } = store.add({ url: 'https://example.com/', title: 'Original' });
-    const result = store.update(bookmark.id, { url: 'https://example.com/', title: 'Renamed' });
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/', title: 'Original' });
+    const result = store.update('personal', bookmark.id, { url: 'https://example.com/', title: 'Renamed' });
     assert.equal(result.ok, true);
     assert.equal(result.bookmark.title, 'Renamed');
   });
 });
 
 // ---------------------------------------------------------------------------
-// remove()
+// remove() — including position renormalization (position invariant)
 // ---------------------------------------------------------------------------
 
 test('remove(): unknown id returns not-found', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    assert.deepEqual(store.remove('nope'), { ok: false, reason: 'not-found' });
+  withStore((store) => {
+    assert.deepEqual(store.remove('personal', 'nope'), { ok: false, reason: 'not-found' });
+  });
+});
+
+test('remove(): a valid id in a DIFFERENT jar returns not-found', () => {
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/' });
+    assert.deepEqual(store.remove('work', bookmark.id), { ok: false, reason: 'not-found' });
+    assert.equal(store.list('personal').length, 1, 'unaffected');
   });
 });
 
 test('remove(): deletes the entry and persists', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const { bookmark } = store.add({ url: 'https://example.com/' });
-    const result = store.remove(bookmark.id);
+  withStore((store) => {
+    const { bookmark } = store.add('personal', { url: 'https://example.com/' });
+    const result = store.remove('personal', bookmark.id);
     assert.equal(result.ok, true);
     assert.equal(result.bookmark.id, bookmark.id);
-    assert.deepEqual(store.list(), []);
+    assert.deepEqual(store.list('personal'), []);
 
     const reloaded = freshStore();
-    reloaded.load(dir);
-    assert.deepEqual(reloaded.list(), []);
+    reloaded.load('/unused/userdata/path');
+    assert.deepEqual(reloaded.list('personal'), []);
+  });
+});
+
+test('remove(): position invariant — remaining rows renormalize to a gap-free 0..n-1, preserving relative order', () => {
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
+    store.remove('personal', b.id);
+    const rows = store.list('personal');
+    assert.deepEqual(rows.map((r) => r.id), [a.id, c.id]);
+    assert.deepEqual(rows.map((r) => r.position), [0, 1], 'gap-free after removing the middle entry');
+  });
+});
+
+test('remove(): removing from jar A does not renormalize jar B\'s positions', () => {
+  withStore((store) => {
+    store.add('work', { url: 'https://w1.example/' });
+    store.add('work', { url: 'https://w2.example/' });
+    const workBefore = store.list('work');
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    store.add('personal', { url: 'https://b.example/' });
+    store.remove('personal', a.id);
+    assert.deepEqual(store.list('work'), workBefore);
   });
 });
 
 // ---------------------------------------------------------------------------
-// reorder() — Edge Case: unknown/missing ids ignored, omitted entries preserved
+// reorder() — per jar; Edge Cases: unknown/missing ids ignored, omitted
+// entries preserved, cross-jar ids ignored (never mutate another jar's row)
 // ---------------------------------------------------------------------------
 
-test('reorder(): applies the given order', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/' }).bookmark;
-    const b = store.add({ url: 'https://b.example/' }).bookmark;
-    const c = store.add({ url: 'https://c.example/' }).bookmark;
-    const result = store.reorder([c.id, a.id, b.id]);
+test('reorder(): applies the given order within one jar', () => {
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
+    const result = store.reorder('personal', [c.id, a.id, b.id]);
     assert.deepEqual(result.bookmarks.map((x) => x.id), [c.id, a.id, b.id]);
-    assert.deepEqual(store.list().map((x) => x.id), [c.id, a.id, b.id]);
+    assert.deepEqual(store.list('personal').map((x) => x.id), [c.id, a.id, b.id]);
+    assert.deepEqual(store.list('personal').map((x) => x.position), [0, 1, 2]);
   });
 });
 
 test('reorder(): unknown ids in the list are ignored', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/' }).bookmark;
-    const b = store.add({ url: 'https://b.example/' }).bookmark;
-    const result = store.reorder([b.id, 'not-a-real-id', a.id]);
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const result = store.reorder('personal', [b.id, 'not-a-real-id', a.id]);
     assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id]);
   });
 });
 
+test('reorder(): an id belonging to a DIFFERENT jar is ignored (never mutates another jar\'s row)', () => {
+  withStore((store) => {
+    const workEntry = store.add('work', { url: 'https://work.example/' }).bookmark;
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const result = store.reorder('personal', [b.id, workEntry.id, a.id]);
+    assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id], 'the cross-jar id is dropped, not treated as unknown-and-appended');
+    assert.equal(store.list('work')[0].id, workEntry.id, 'the other jar entry is untouched');
+    assert.equal(store.list('work')[0].position, 0);
+  });
+});
+
 test('reorder(): entries OMITTED from the id list are preserved, appended in PRIOR order — never dropped', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/' }).bookmark;
-    const b = store.add({ url: 'https://b.example/' }).bookmark;
-    const c = store.add({ url: 'https://c.example/' }).bookmark;
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
     // Only mention 'c' — a and b are omitted and must survive, in their prior order.
-    const result = store.reorder([c.id]);
+    const result = store.reorder('personal', [c.id]);
     assert.deepEqual(result.bookmarks.map((x) => x.id), [c.id, a.id, b.id]);
   });
 });
 
 test('reorder(): a malformed (non-array) payload is a no-op over the current order', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/' }).bookmark;
-    const b = store.add({ url: 'https://b.example/' }).bookmark;
-    const result = store.reorder(null);
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const result = store.reorder('personal', null);
     assert.equal(result.ok, true);
     assert.deepEqual(result.bookmarks.map((x) => x.id), [a.id, b.id]);
   });
 });
 
 test('reorder(): a duplicate id within the payload is applied once, at its first position', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    const a = store.add({ url: 'https://a.example/' }).bookmark;
-    const b = store.add({ url: 'https://b.example/' }).bookmark;
-    const result = store.reorder([b.id, b.id, a.id]);
+  withStore((store) => {
+    const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
+    const result = store.reorder('personal', [b.id, b.id, a.id]);
     assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Envelope shape on disk
+// clearJar() — DD9 lifecycle primitive (handleRemove / Bookmarks clear-data
+// class consume this; the wipe-vs-remove distinction itself is pinned in
+// test/unit/bookmarks-jar-lifecycle.test.js against the full IPC composition)
 // ---------------------------------------------------------------------------
 
-test('the persisted row is the { version: 1, bookmarks: [...] } envelope, in display order', () => {
-  withStore((store, dir) => {
-    store.load(dir);
-    store.add({ url: 'https://a.example/' });
-    store.add({ url: 'https://b.example/' });
-    const row = readRow(dir);
-    assert.equal(row.version, 1);
-    assert.equal(row.bookmarks.length, 2);
-    assert.deepEqual(row.bookmarks.map((b) => b.url), ['https://a.example/', 'https://b.example/']);
+test('clearJar(): drops every bookmark for a jar, leaves other jars untouched, returns the deleted count', () => {
+  withStore((store) => {
+    store.add('personal', { url: 'https://a.example/' });
+    store.add('personal', { url: 'https://b.example/' });
+    store.add('work', { url: 'https://c.example/' });
+    assert.equal(store.clearJar('personal'), 2);
+    assert.deepEqual(store.list('personal'), []);
+    assert.equal(store.list('work').length, 1, 'work jar untouched');
+    assert.equal(store.clearJar('personal'), 0, 'a second clear on an empty jar is a safe no-op');
   });
+});
+
+// ---------------------------------------------------------------------------
+// DATA_IMAGE_RE export (Implementation Guidance #7 — preserved, not load-bearing)
+// ---------------------------------------------------------------------------
+
+test('DATA_IMAGE_RE is exported and matches data:image/... only', () => {
+  const store = freshStore();
+  assert.ok(store.DATA_IMAGE_RE.test('data:image/png;base64,AAAA'));
+  assert.ok(!store.DATA_IMAGE_RE.test('data:text/html,x'));
 });

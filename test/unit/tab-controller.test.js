@@ -102,7 +102,11 @@ function createHarness() {
     classifyDragPoint: () => ({ zone: 'reorder', index: 0 }),
     announceTabStatus: noOp, updateNavButtons: noOp, refreshZoomControl: noOp, refreshStar: noOp, fetchCookies: noOp,
     closeSuggestions: noOp, resetSuggestionsForActivation: noOp, updateAddressChip: noOp,
-    renderMedia: noOp, renderPrivacy: noOp, setDevtoolsPressed: noOp
+    renderMedia: noOp, renderPrivacy: noOp, setDevtoolsPressed: noOp,
+    // M15 F2 Leg 3 (DD7 table 3/5, 4/5): the two activation-class bar-render
+    // trigger sites — tracked (not a no-op) so the tests below can pin that
+    // both actually call it.
+    refreshBookmarksSurfaces: (tab) => calls.push(['refreshBookmarksSurfaces', tab && tab.id])
   };
   return { deps, tabs, ctx, els, callbacks, calls, jar };
 }
@@ -133,6 +137,13 @@ test('safe and trusted create paths preserve URL gates, jar routing, strip ARIA,
   assert.equal(internal.btn.getAttribute('aria-selected'), 'true');
   assert.equal(controller.activeTab(), internal);
   assert.deepEqual(h.calls.filter(([name]) => name === 'tabCreate').map(([, payload]) => payload.trusted), [false, true]);
+  // M15 F2 Leg 3 (DD7 table 3/5, 4/5): activateTab's synchronous body (both
+  // createTab calls above self-activate) AND the wcId-arrival path both call
+  // refreshBookmarksSurfaces for the tab they concern.
+  const bookmarksSurfacesIds = new Set(
+    h.calls.filter(([name]) => name === 'refreshBookmarksSurfaces').map(([, id]) => id)
+  );
+  assert.deepEqual(bookmarksSurfacesIds, new Set([web.id, internal.id]));
 });
 
 test('ordered movement, close fallback, and geometry use the live strip and shared context', async () => {
