@@ -221,6 +221,28 @@ Operator triggered `/agentic-workflow flight 2` — treated as approval of the r
 
 - **HAT walkthrough closed — 7 steps: 5 passes, 1 withdrawn as unreachable, 1 failure fixed in-session (which itself took two rounds).** Three inline fixes authorized and landed. Carry to the debrief: **two of the three fixes repaired this flight's own carry-forward work, not its jar-scoping objective.** DD12(a)'s rejection feedback was wired to a surface that cannot render; DD12(b)'s star fix replaced a small-but-visible glyph with an invisible one. The jar-scoping core — the thing the flight exists for — passed every step first time. The pattern worth examining is that opportunistically-bundled cosmetic fixes (justified as "both live in files leg 3 already opens") got materially less verification rigor than the designed work, and both defects were of a class only live observation catches: one surface that renders nothing, one that renders at zero size. Neither unit tests nor three rounds of design review touched either.
 
+### Leg 4 progress — resumption state as of 2026-08-03
+
+**Done and committed.** HAT walkthrough closed (7 steps: 5 pass, 1 withdrawn as unreachable, 1 failed and fixed in-session across two rounds). Three HAT fixes landed (`38c5d62`). Two behavior specs run to completion against the live build:
+
+| Spec | Result | Notes |
+|---|---|---|
+| `bookmarks-jar-scoping` | **17/17 pass**, graduated `draft` → `active` | The flight's own new spec. Spans three sessions and two app restarts; both crew agents were replaced mid-run at checkpoint 13 and briefed from the run log alone. |
+| `bookmarks-omnibox` | **6/6 pass** | First run since this flight inverted its checkpoint 4. Checkpoints 5–6 re-targeted (not retired) before running; its Intent paragraph was found still asserting app scoping and corrected. |
+
+**Spec defects found and fixed by running them** — six in total, which is the more interesting output of this leg than the pass counts. In `bookmarks-jar-scoping`: step 8c could not detect its own target defect on any profile where the test jar is the default jar; step 8's absence claim proved nothing without a differential control; step 13's clause was satisfiable by a weak reading that would miss row-level corruption; step 14 rested on a premise nothing required proving. In `bookmarks-omnibox`: steps 5–6 targeted a row jar scoping makes impossible, and the Intent contradicted the amended step 4. All amended in place with the rationale inline.
+
+**Two recurring crew findings**, each seen in both runs and worth promoting into the crew prompts rather than re-deriving per run: (1) load-bearing claims backed only by inline prose rather than a saved artifact — twice the Validator had to re-derive live, and twice it would have had to rule INCONCLUSIVE had the app not still been reachable; (2) absence claims that need an explicit control to mean anything.
+
+**What remains in leg 4**, in order:
+1. `bookmarks-bar` — 12 checkpoints. Only genuinely new work is checkpoint 12, retargeted by this flight from documents-row byte corruption (a premise leg 2 deleted) to row-level validation: with the app down, inject an invalid row beside valid siblings via `sqlite3`, relaunch, confirm the bad row drops and the good ones render. Checkpoint 11's restart-persistence assertion also gained a jar dimension. The rest re-confirms unchanged behavior.
+2. `bookmarks-star-sync` — 11 checkpoints, single-jar throughout except checkpoint 9, which gained a same-jar clause.
+3. Then land: PR #148 ready for review, flight → `landed`, check off in mission, `/flight-debrief`.
+
+Deliberately carried forward rather than run, matching Flight 1's precedent: the three adjacent specs (`sqlite-store-migration`, `jar-data-controls`, `jar-data-surfaces`) and the six deferred at Flight 1's landing.
+
+**Apparatus essentials for whoever resumes.** Do NOT use the session-registered `mcp__goldfinch__*` tools — they address port 49152, the operator's **installed production browser**, while the instance under test is on 49707; they return plausible results, so the error is silent and would drive a real personal session. Attach instead via the scratchpad wrapper `gf.mjs`, which reads a freshly minted admin key from the launch log (`connectAutomation()`, per `docs/dev-testing.md`). Every restart re-mints the key, so relaunch to the same log path or re-point the wrapper. The full apparatus catalogue — sheet capturable but not clickable, `readAxTree` foreground-first, `evaluate` refused on internal pages, guest-relative click coordinates, `createTab` silently accepting a bare-string container — is in `bookmarks-jar-scoping`'s run log and its amended Preconditions.
+
 **Sheet-a11y disposition still open.** The debrief's action item — fix `resolve.js` or formally accept that sheet a11y is unreachable — was not resolved during this planning session. Leg 2 adds no new sheet state, so nothing here forces the decision; but if a leg proposes one, resolve the disposition first rather than paying the four-legs-of-futile-attempts cost again.
 
 ---
