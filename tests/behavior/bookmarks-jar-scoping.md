@@ -1,9 +1,9 @@
 # Behavior Test: Bookmarks — Jar Ownership, Burner Inertness, and Jar Lifecycle
 
 **Slug**: `bookmarks-jar-scoping`
-**Status**: draft
+**Status**: active
 **Created**: 2026-07-30
-**Last Run**: never
+**Last Run**: 2026-07-31-19-35-58 — 17/17 pass ([run log](bookmarks-jar-scoping/runs/2026-07-31-19-35-58.md))
 
 ## Intent
 
