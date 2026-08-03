@@ -31,6 +31,18 @@
  * possibly-hidden chevron (display:none reads 0-width). */
 const CHEVRON_WIDTH = 24;
 
+/** #bookmarks-bar's own flex `gap` and per-side horizontal `padding` (px) —
+ * fixed literals pinned against styles.css the same way CHEVRON_WIDTH is (no
+ * getComputedStyle round-trip inside a ResizeObserver callback; the CSS rule
+ * carries the matching back-reference comment). M15 F2 Leg 4 behavior-test fix
+ * (`bookmarks-bar` spec): the M15 F1 Leg 3 partition math budgeted for item
+ * widths and the chevron ONLY, so on a full bar the chevron was laid out past
+ * the bar's content edge and clipped away by `overflow: hidden` — DOM-present,
+ * still Tab-focusable, but invisible (a focus-order defect too). The bar's own
+ * chrome — 2×6px padding, 2px between every flex child — has to be paid for. */
+const BAR_GAP = 2;
+const BAR_PADDING_X = 6;
+
 /** Pure: derive a one-character monogram tile letter from a bookmark's title
  * (falling back to its URL, then '#'). @param {string} text @returns {string} */
 export function monogramLetter(text) {
@@ -46,26 +58,41 @@ export function tooltipFor(b) {
 
 /**
  * Pure: which trailing items overflow, given each visible item's measured
- * width, the bar's available content width, and the chevron's reserved
- * footprint. Greedy left-to-right accumulation against a budget that reserves
- * the chevron's width the moment overflow is possible at all (a chevron that
- * itself doesn't fit still renders — DD8 Edge Case "window too narrow for
- * even one item: all items collapse; chevron alone remains").
+ * width, the bar's available CONTENT width (padding already excluded — see
+ * applyOverflowPartition), the chevron's reserved footprint, and the flex gap
+ * between every pair of adjacent children. Greedy left-to-right accumulation
+ * against a budget that reserves the chevron's width the moment overflow is
+ * possible at all (a chevron that itself doesn't fit still renders — DD8 Edge
+ * Case "window too narrow for even one item: all items collapse; chevron alone
+ * remains").
+ *
+ * The gap can't be pre-subtracted by the caller: the number of gaps is
+ * (visibleCount) — one before each item after the first, plus one between the
+ * last visible item and the chevron — and visibleCount is exactly what this
+ * function computes. So both the no-overflow test and the accumulation loop
+ * price gaps themselves (M15 F2 Leg 4 behavior-test fix; ignoring them
+ * over-budgeted the row by up to 2px × children and pushed the chevron out of
+ * the clipped bar).
  * @param {number[]} itemWidths
  * @param {number} availableWidth
  * @param {number} [chevronWidth]
+ * @param {number} [gap]
  * @returns {{ visibleCount: number, overflowing: boolean }}
  */
-export function partitionOverflow(itemWidths, availableWidth, chevronWidth = CHEVRON_WIDTH) {
+export function partitionOverflow(itemWidths, availableWidth, chevronWidth = CHEVRON_WIDTH, gap = BAR_GAP) {
   if (!itemWidths.length) return { visibleCount: 0, overflowing: false };
-  const total = itemWidths.reduce((a, b) => a + b, 0);
+  // Nothing overflows only if every item AND the (n-1) gaps between them fit —
+  // the gap-free version of this test let a set that fits only when gaps are
+  // ignored take the no-overflow branch, clipping the LAST item instead.
+  const total = itemWidths.reduce((a, b) => a + b, 0) + gap * (itemWidths.length - 1);
   if (total <= availableWidth) return { visibleCount: itemWidths.length, overflowing: false };
-  const budget = availableWidth - chevronWidth;
-  let running = 0;
+  let running = 0; // laid-out width of the items admitted so far, gaps included
   let visibleCount = 0;
   for (const w of itemWidths) {
-    if (running + w > budget) break;
-    running += w;
+    const next = running + w + (visibleCount ? gap : 0);
+    // …plus the gap that will sit between the last visible item and the chevron.
+    if (next + gap + chevronWidth > availableWidth) break;
+    running = next;
     visibleCount++;
   }
   return { visibleCount, overflowing: true };
@@ -195,8 +222,14 @@ export function createBookmarksBar({
     return btn;
   }
 
-  /** @param {number} availableWidth */
-  function applyOverflowPartition(availableWidth) {
+  /** Takes the bar's MEASURED (border-box) width, as `getBoundingClientRect()`
+   * reports it, and partitions against its CONTENT width — #bookmarks-bar has
+   * `padding: 0 6px` and no left/right border, so the usable run is 2×
+   * BAR_PADDING_X narrower than the measured box. Passing the border-box width
+   * straight through was half of the M15 F2 Leg 4 chevron-clipping defect.
+   * @param {number} barWidth */
+  function applyOverflowPartition(barWidth) {
+    const availableWidth = Math.max(0, barWidth - BAR_PADDING_X * 2);
     const items = itemEls();
     if (!items.length) {
       els.bookmarksOverflow.classList.add('hidden');
@@ -207,7 +240,7 @@ export function createBookmarksBar({
     // item reads 0-width via getBoundingClientRect under display:none).
     for (const el of items) el.classList.remove('hidden');
     const widths = items.map((el) => el.getBoundingClientRect().width);
-    const { visibleCount, overflowing } = partitionOverflow(widths, availableWidth, CHEVRON_WIDTH);
+    const { visibleCount, overflowing } = partitionOverflow(widths, availableWidth, CHEVRON_WIDTH, BAR_GAP);
     overflowSnapshot = overflowing ? bookmarksClient.listFor(currentJarId).slice(visibleCount) : [];
     items.forEach((el, i) => el.classList.toggle('hidden', i >= visibleCount));
     els.bookmarksOverflow.classList.toggle('hidden', !overflowing);
