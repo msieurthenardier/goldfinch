@@ -7,7 +7,9 @@
 
 ## Intent
 
-Verifies that bookmarked pages surface in address-bar suggestions: matched by name or URL, visually distinguishable from history entries, deduplicated against history (bookmark row wins), ranked ahead of history matches, and available in every cookie jar (the mission's app-scoped ruling) — while jar-scoped history isolation remains intact. Behavior test because the observable is the rendered suggestions sheet driven by live typing against real history + bookmark state across jars.
+Verifies that bookmarked pages surface in address-bar suggestions: matched by name or URL, visually distinguishable from history entries, deduplicated against history (bookmark row wins), ranked ahead of history matches, and **scoped to the jar that owns them** — a bookmark created in one jar never surfaces in another's suggestions — while jar-scoped history isolation remains intact. Behavior test because the observable is the rendered suggestions sheet driven by live typing against real history + bookmark state across jars.
+
+*(This Intent formerly read "available in every cookie jar (the mission's app-scoped ruling)". That ruling was reversed by the M15 Flight 2 diversion, which made bookmarks jar-owned; checkpoint 4 now asserts the opposite of what it once did. Corrected 2026-08-03 during the flight's verification leg, after the amended checkpoint had already been written and run — a reminder that inverting a step leaves the surrounding prose stale unless it is chased deliberately.)*
 
 ## Preconditions
 
