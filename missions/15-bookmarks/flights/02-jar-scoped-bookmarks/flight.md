@@ -1,13 +1,13 @@
 # Flight: Jar-Scoped Bookmarks
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Bookmarks](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Bookmarks are scoped to the cookie jar that owns them: the bar, the star, and address-bar suggestions reflect only the active tab's jar, switching contents when the active tab's jar changes; no bookmark data or indicator crosses a jar boundary. *(behavior-test-backed)*
-- [ ] Bookmarking is inert in burner jars (no star, no bar), and deleting a jar removes its bookmarks with it. *(behavior-test-backed)*
-- [ ] *(re-verified, not re-earned)* Bookmarks — including their names, order, and site icons — survive an app restart; corrupt stored bookmark data repairs to an empty list without blocking startup, and individually invalid entries are dropped while valid ones are kept.
+- [x] Bookmarks are scoped to the cookie jar that owns them: the bar, the star, and address-bar suggestions reflect only the active tab's jar, switching contents when the active tab's jar changes; no bookmark data or indicator crosses a jar boundary. *(behavior-test-backed)*
+- [x] Bookmarking is inert in burner jars (no star, no bar), and deleting a jar removes its bookmarks with it. *(behavior-test-backed)*
+- [x] *(re-verified, not re-earned)* Bookmarks — including their names, order, and site icons — survive an app restart; corrupt stored bookmark data repairs to an empty list without blocking startup, and individually invalid entries are dropped while valid ones are kept.
   - Met in Flight 1 against the JSON-document store. This flight **changes the mechanism** that satisfies it, and degenerates one of its two clauses (see DD4), so the criterion must be re-verified rather than assumed to carry over.
 
 ---
@@ -214,7 +214,8 @@ The flight clears headroom first, then moves truth, then consumers, then verifie
 - [x] `renderer-extraction` — extract a coherent, behavior-neutral slice out of `renderer.js` to restore real `RENDERER_LINE_BUDGET` headroom, satisfying the Flight 1 debrief's recommendation 5. No bookmark work. **Low-risk** (behavior-neutral, single-surface, established pattern — `bookmarks-client.js` and `bookmarks-bar.js` are both prior extractions from this same file) — proceeds without a design review; the flight-end review still covers it. **Landed 2026-07-31**: vault flow extracted to `src/renderer/chrome/vault-controller.js`; `renderer.js` 1933 → 1527, `RENDERER_LINE_BUDGET` 1933 → 1650; suite/typecheck/lint green.
 - [x] `jar-owned-store-and-lifecycle` — app.db schema v3 + bookmarks table + factory; `bookmarks-store.js` rewritten to the jarId-first, position-ordered, row-validating API; all six IPC channels jar-addressed with the not-in-`jars.list()` rejection; `bookmarks-changed { jarId }`; clean-slate legacy-row delete; migration-failure distinguishability; jar-delete teardown wired to `handleRemove` **only**, in its own try/catch; the new Bookmarks data class. Re-targets the pinned tests whose premise shifts. Amends `bookmarks-bar` checkpoint 12, whose premise this leg invalidates. **High-risk** (schema migration + shared-interface break + destructive-path change) — takes a design review. **Landed 2026-07-31**: suite 3278 → 3322; errcode-11 pin resolved with a REAL fixture (header page-count inflation, no fallback needed); see flight-log.md for detail.
 - [x] `jar-aware-chrome-surfaces` — per-jar cache map with synchronous lookup and `jars-changed` eviction; star, bar, overflow, omnibox, favicon back-fill writer, and both bar open-in-new-tab paths all jar-resolved; the two new activation-class bar-render triggers; burner and internal suppression of bar, star, and page-context item; popover jar captured at open; preload and `renderer-globals.d.ts` signature updates; plus the two folded carry-forward fixes (DD12). Authors the new `bookmarks-jar-scoping` behavior spec and inverts `bookmarks-omnibox` checkpoint 4. **High-risk** (cache/freshness behavior + it reverses a shipped, behavior-tested assertion) — takes a design review. **Landed 2026-07-31**: chrome fully jar-aware, app runnable end-to-end; `renderer.js` 1527 → 1579 (budget 1650); suite 3322 → 3335; see flight-log.md for detail.
-- [ ] `hat-and-verification` *(interactive)* — guided HAT over the jar-switch, burner, internal, and lifecycle behavior with inline fixes; run the new `bookmarks-jar-scoping` spec; re-run the three bookmark specs plus `sqlite-store-migration`, `jar-data-controls`, and `jar-data-surfaces`; re-run the six specs deferred at Flight 1 landing, closing that open item.
+- [x] `hat-and-verification` *(interactive)* — guided HAT over the jar-switch, burner, internal, and lifecycle behavior with inline fixes; run the new `bookmarks-jar-scoping` spec; re-run the three bookmark specs plus `sqlite-store-migration`, `jar-data-controls`, and `jar-data-surfaces`; re-run the six specs deferred at Flight 1 landing, closing that open item.
+  - **Landed partially, by operator decision.** The four bookmark specs ran and passed (17/17, 6/6, 14/14, 11/11). The adjacent three and the six Flight-1 deferrals were **not** run — the operator scoped the leg to "mend the spec, run the three amended bookmark specs, and land the flight." **The Flight-1-landing open item this leg was written to close stays open, deferred a second consecutive time.**
 
 ---
 

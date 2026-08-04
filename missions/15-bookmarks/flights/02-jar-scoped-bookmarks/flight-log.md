@@ -250,3 +250,76 @@ Deliberately carried forward rather than run, matching Flight 1's precedent: the
 ## Session Notes
 
 **2026-07-30** — Flight designed. Context loaded from the amended mission, Flight 1's flight/log/debrief, and the three active bookmark behavior specs. Code interrogation covered `bookmarks-store.js`, `register-bookmarks-ipc.js`, `bookmarks-client.js`, `app-db.js`, `history-store.js`, `jar-data-lifecycle.js`, `jar-registry-ipc.js`, `jar-data-ipc.js`, `jar-data-classes.js`, `navigation-controller.js`, `tab-controller.js`, and `renderer.js`. Twelve design decisions recorded; four open questions resolved at planning, one mechanism detail deliberately deferred into leg 1. New behavior spec `bookmarks-jar-scoping` drafted at planning so its apparatus shaped the leg breakdown rather than being retrofitted.
+
+---
+
+## Leg 4 — hat-and-verification — LANDED (2026-08-04)
+
+**Status**: leg `completed`, flight `landed`. Suite **3356 pass / 0 fail**; typecheck and lint clean.
+
+### What ran
+
+All four bookmark behavior specs, all green:
+
+| Spec | Result | Run log |
+|---|---|---|
+| `bookmarks-jar-scoping` | 17/17 — graduated `draft` → `active` | `runs/2026-07-31-19-35-58.md` |
+| `bookmarks-omnibox` | 6/6 | `runs/2026-08-03-19-43-22.md` |
+| `bookmarks-bar` | 14/14 (12 checkpoints, 2 split mid-run) | `runs/2026-08-04-12-58-00.md` |
+| `bookmarks-star-sync` | 11/11 | `runs/2026-08-04-14-45-00.md` |
+
+Preceded by the operator HAT (steps 2–7), which produced three inline fixes committed in `38c5d62`.
+
+### The flight's most consequential finding: a shipped defect, found by the verification leg
+
+`bookmarks-bar` checkpoint 7 **FAILED** on a real defect and is recorded as FAIL with a linked re-verify, not retroactively greened.
+
+The overflow chevron was laid out past the bar's content edge and clipped away by `overflow: hidden` — DOM-present, `display: block`, correct `aria-expanded`, **and invisible**. With bookmarks overflowing, a user had no visible way to reach the overflowed ones; the control was also still keyboard-focusable, so a Tab landed on a target with nothing rendered and no focus indicator (WCAG 2.4.7-adjacent, same root cause).
+
+`partitionOverflow` budgeted for item widths and the chevron only, never subtracting the bar's `padding: 0 6px` or its `gap: 2px` between flex children — about 30px of real layout the math did not know about. Nine items measuring 1368.33px in a 1398px bar left 29.67px for gaps, padding, and a 24px chevron.
+
+**Provenance, independently re-derived by the Validator** via `git log -L 59,72`: `partitionOverflow` was introduced whole in `d9e764e` — **Flight 1** — and untouched since. **Not a Flight 2 regression.** It was latent because Flight 1's fixture had narrow enough items to leave slack; this flight's wider fixture exposed it. Fixed in `457445f`, which also caught that the `total <= availableWidth` no-overflow branch had the same blindness and would clip the last *item* in a different fixture.
+
+That the defect existed at all is the point worth carrying into the debrief: **a behavior test caught a user-visible regression that the unit suite could not**, because every existing `partitionOverflow` case had enough slack to be gap-invariant. The suite was green throughout the defect's entire life.
+
+### Deviation: steps 10–11 not run
+
+The leg was written to also re-run three adjacent specs (`sqlite-store-migration`, `jar-data-controls`, `jar-data-surfaces`) and the six deferred at Flight 1's landing (`page-context-menu`, `settings-shell`, `settings-controls`, `toolbar-pins`, `omnibox-suggestions`, `menu-overlay`).
+
+**They were not run.** The operator scoped the leg explicitly: *"leave the mcp config for now — other than that mend the spec, run the three amended bookmark specs, and land the flight."* This is a deliberate decision, not an oversight — but it means **the Flight-1-landing open item this leg was written to close remains open, deferred for a second consecutive flight.** The debrief should weigh whether a third deferral is acceptable or whether the item needs its own flight.
+
+### Spec defects found and fixed (nine across the four specs)
+
+The runs were as much a test of the specs as of the code.
+
+**`bookmarks-jar-scoping`** (4): checkpoint 8c undetectable when the test jar is the default jar; checkpoint 8's absence claim needing a differential control; checkpoint 13 satisfiable by a weak reading; checkpoint 14's premise requiring no artifact.
+
+**`bookmarks-omnibox`** (2): checkpoints 5–6 targeting a suggestion row jar scoping makes impossible (re-targeted, not retired — the properties they test survive the scoping change and are covered nowhere else); a stale Intent still asserting the app-scoped ruling the flight had inverted.
+
+**`bookmarks-bar`** (2 structural + preconditions): step 4 bundled an automatable claim (the `title` attribute) with one no apparatus here can observe (the rendered tooltip) — split into 4 and **4b `[operator-hover]`**; step 8 bundled the same way and additionally carried an `[a11y]` tag that is **unsatisfiable in principle**, since `secret-sheet` refuses every tier by design — split into 8 and **8b `[operator-keyboard]`**, tag dropped, accessibility assertion moved to the trigger. Step 12 now requires a **mid-list** invalid row: a trailing-only one never exercises order-stitching, so "siblings render in their prior order" passed on an append-then-drop that proved nothing.
+
+**`bookmarks-star-sync`** (2): "no existing bookmarks" was globally scoped and meaningless under jar ownership; checkpoint 6's parenthetical asserted behavior the row's own Actions never exercise; checkpoint 11 now requires the **reversal**, because an implementation that blanks the star on *any* URL change passes forward-only wording while being broken.
+
+**The recurring shape**: four of the nine are assertions written under app scoping that silently assumed one global bookmark collection. Three more are rows bundling an observable claim with an unobservable one. Both are cheap to screen for at authoring time.
+
+### Apparatus catalogue additions
+
+- `goldfinch://` navigation is refused by `isSafeTabUrl` at **every tier including admin**; `evaluate` is refused on internal pages. The working entry point is the chrome's **named kebab-action globals** (`window.kebabActionSettings()`), confirmed from source to be the same function body the menu item dispatches.
+- Menu-overlay sheets refuse **dismissal** gestures (Escape, blur-click), not only interaction inside them.
+- **Ctrl+N via `pressKey` on the chrome target creates a window** — `shortcut-controller.js`'s `new-window` case, the real user path. No resize equivalent exists.
+- `click` accepts `button: 'middle'`; no selector form — resolve coordinates via `getBoundingClientRect()`.
+- The dev instance needs **both** `GOLDFINCH_AUTOMATION_DEV_MINT=1` **and** `GOLDFINCH_AUTOMATION_ADMIN=1`; without the latter the minted `adminKey` is `null` and every admin-tier call 401s.
+- **`navigate()` fragment asymmetry — OPEN follow-up.** Adding a fragment is same-document; removing one triggers a full reload. Undiagnosed as to layer. If it reproduces via direct user action (editing the URL bar to strip a fragment, a back-button transition) it is a real product behavior with implications well past the star — an unwanted reload discarding page state. **Recommended: determine whether it reproduces without the MCP tool in the loop.**
+
+### Methodology promoted out of these runs
+
+1. **Verify attested targets by immutable identifier against a snapshot banked immediately before the action** — never by name or title when similar rows are in play. Proven twice: at `bookmarks-bar` checkpoint 10 an operator's summary named the wrong bookmark and a title-level check would have **confirmed the wrong story**; at `bookmarks-star-sync` checkpoint 8 the operator did not know which window they had acted in, and the id-level diff answered it with no re-run.
+2. **Absence claims need an explicit control**, and load-bearing claims need a **saved artifact**, not prose. Both were recurring findings across the previous two runs and were made standing instructions here.
+3. **Prove same-document vs. reload with a page-context marker** before asserting anything about in-page re-evaluation. This caught a confounded result that otherwise looked clean.
+4. **Source-grep as corroboration for character-level wording claims inside refused-automation sheets** — accepted, but only *paired with* rendered evidence, never substituting for it, since source can diverge from the running build.
+5. **Identify a chrome element before characterising its behavior.** An Executor flagged a "stale breadcrumb" that was the bookmarks bar behaving correctly; a single `evaluate` would have named it.
+
+### Known issues carried forward
+
+- The pre-existing toast surface defect (`#toasts` at y=884 sits under the guest view, so download-failure toasts are silenced) — unchanged from the HAT record.
+- The unresolved Ctrl+click duplicate-tab anomaly from the HAT. This run narrowed it usefully: both the `ctrlKey||metaKey` and `auxclick` branches call a **literally identical** `createTab(...)`, so if real it is event dispatch/routing, not handler logic. Middle-click is verified single-tab/background/correct-jar; **Ctrl+click remains open.**

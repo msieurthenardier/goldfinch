@@ -1,6 +1,6 @@
 # Leg: hat-and-verification
 
-**Status**: in-flight
+**Status**: completed
 **Flight**: [Jar-Scoped Bookmarks](../flight.md)
 
 ## Objective
@@ -34,17 +34,18 @@ Operator-guided acceptance of the jar-scoped bookmark behavior with inline fixes
 
 ## Acceptance Criteria
 
-- [ ] HAT steps 2–7 accepted by the operator (or divergences dispositioned in the flight log)
-- [ ] All specs in steps 8–11 pass, or land with operator-accepted known-issue dispositions recorded beside their run-log paths
-- [ ] `bookmarks-omnibox` steps-5/6 drift resolved
-- [ ] Flight log carries the full HAT record; suite still green after any inline fixes
+- [x] HAT steps 2–7 accepted by the operator (or divergences dispositioned in the flight log)
+- [x] **Steps 8–9 pass** — all four bookmark specs green: `bookmarks-jar-scoping` 17/17 (graduated `draft` → `active`), `bookmarks-omnibox` 6/6, `bookmarks-bar` 14/14 (checkpoint 7 recorded FAIL on a real shipped defect, fixed and re-verified), `bookmarks-star-sync` 11/11
+- [ ] **Steps 10–11 NOT run — deferred by operator decision**, not oversight. The instruction was "leave the mcp config for now — other than that mend the spec, run the three amended bookmark specs, and land the flight." The adjacent three (`sqlite-store-migration`, `jar-data-controls`, `jar-data-surfaces`) and the six deferred at Flight 1's landing (`page-context-menu`, `settings-shell`, `settings-controls`, `toolbar-pins`, `omnibox-suggestions`, `menu-overlay`) carry forward again. **The Flight-1-landing open item they were meant to close therefore stays open — this is the second consecutive flight to defer it**, which the debrief should weigh rather than wave through as routine.
+- [x] `bookmarks-omnibox` steps-5/6 drift resolved — re-targeted rather than retired (`fcc005a`; stale Intent corrected in `7e983ce`)
+- [x] Flight log carries the full HAT record; suite green at **3356 pass / 0 fail** after all inline fixes
 
 ---
 
 ## Post-Completion Checklist
 
-- [ ] All acceptance criteria verified
-- [ ] Update flight-log.md with leg progress entry
-- [ ] Set this leg's status to `completed`
-- [ ] Check off this leg in flight.md; flight to `landed`; check off flight in mission.md
-- [ ] Commit artifacts (+ any inline fixes, each in its own commit per the behavior-test no-amend rule); mark PR #148 ready for review
+- [x] All acceptance criteria verified (with the steps 10–11 deferral recorded above and in the flight log)
+- [x] Update flight-log.md with leg progress entry
+- [x] Set this leg's status to `completed`
+- [x] Check off this leg in flight.md; flight to `landed`; check off flight in mission.md
+- [x] Commit artifacts (+ any inline fixes, each in its own commit per the behavior-test no-amend rule); mark PR #148 ready for review
