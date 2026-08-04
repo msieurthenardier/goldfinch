@@ -29,8 +29,8 @@ A second planning round reviewed the draft against modern-browser parity (Chrome
 - [x] Right-clicking a bookmark — on the bar or inside the overflow menu — offers rename, change URL, and remove; edits take effect immediately in every window and surface (bar, overflow, star state). *(behavior-test-backed)*
 - [ ] Bookmarks can be dragged to reorder within the bar, dragged between the bar and the overflow menu in both directions, and dragged onto the page area to load that bookmark in the current tab (in addition to click). *(behavior-test-backed)*
 - [x] Typing in the address bar surfaces matching bookmarked pages among suggestions, visually distinguishable from history entries and deduplicated against them. *(behavior-test-backed; delivered Flight 1)*
-- [ ] **(added by diversion)** Bookmarks are scoped to the cookie jar that owns them: the bar, the star, and address-bar suggestions reflect only the active tab's jar, switching contents when the active tab's jar changes; no bookmark data or indicator crosses a jar boundary. *(behavior-test-backed)*
-- [ ] **(added by diversion)** Bookmarking is inert in burner jars (no star, no bar), and deleting a jar removes its bookmarks with it. *(behavior-test-backed)*
+- [x] **(added by diversion)** Bookmarks are scoped to the cookie jar that owns them: the bar, the star, and address-bar suggestions reflect only the active tab's jar, switching contents when the active tab's jar changes; no bookmark data or indicator crosses a jar boundary. *(behavior-test-backed)*
+- [x] **(added by diversion)** Bookmarking is inert in burner jars (no star, no bar), and deleting a jar removes its bookmarks with it. *(behavior-test-backed)*
 - [x] Bookmarks — including their names, order, and site icons — survive an app restart; corrupt stored bookmark data repairs to an empty list without blocking startup, and individually invalid entries are dropped while valid ones are kept.
 
 ## Stakeholders
