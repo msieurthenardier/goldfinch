@@ -1,6 +1,6 @@
 # Flight: Jar-Scoped Bookmarks
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Bookmarks](../../mission.md)
 
 ## Contributing to Criteria
