@@ -66,7 +66,7 @@ import { buildVaultAdminKeyCard } from '../shared/vault-adminkey-template.js';
 import { buildVaultImportCard } from '../shared/vault-import-template.js';
 import { buildVaultChangeMasterCard } from '../shared/vault-change-master-template.js';
 import { buildVaultRecoverCard } from '../shared/vault-recover-template.js';
-import { createSheetReport, attachModalCard } from '../shared/modal-card-controller.js';
+import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../shared/modal-card-controller.js';
 
 (() => {
   const root = document.getElementById('menu-root');
@@ -457,8 +457,12 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
   // Backdrop click (outside the card) dismisses — parity with the old chrome
   // dialog's outside-click. The controller's global pointerdown can't see it
   // (the backdrop contains every in-sheet target), so this handler owns it.
-  dialogNode.addEventListener('click', (e) => {
-    if (e.target === dialogNode) {
+  // HAT FIX 2 (M15 F2 Leg 4 HAT fixes — H6): press-gated via
+  // attachBackdropPressGate — a text-selection drag starting inside the card
+  // and releasing on the backdrop must NOT dismiss.
+  attachBackdropPressGate({
+    node: dialogNode,
+    dismiss: () => {
       report.lastStimulus = 'outside-click';
       menuController.close(dialogEntry);
     }
@@ -878,9 +882,14 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
   // === true for the backdrop, so it can't own this; this local handler does).
   // Escape/Tab are handled by the shared controller's menu-keydown (items present →
   // its Escape/Tab branch closes + returns focus; the empty note state has an items
-  // getter returning [], so arrows no-op safely).
-  pickerNode.addEventListener('click', (e) => {
-    if (e.target === pickerNode) {
+  // getter returning [], so arrows no-op safely). HAT FIX 2 (M15 F2 Leg 4 HAT fixes —
+  // H6): press-gated via attachBackdropPressGate — a text-selection drag starting
+  // inside the card and releasing on the backdrop must NOT dismiss. Deliberately NOT
+  // retrofitted onto attachModalCard — the vault-picker's roving keyboard contract is
+  // documented above as NOT using that helper.
+  attachBackdropPressGate({
+    node: pickerNode,
+    dismiss: () => {
       report.lastStimulus = 'outside-click';
       menuController.close(pickerEntry);
     }
@@ -960,9 +969,13 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
   }
 
   // Backdrop click (outside the card) dismisses — vault-picker parity (the
-  // controller's global pointerdown can't own in-sheet backdrop clicks).
-  certPickerNode.addEventListener('click', (e) => {
-    if (e.target === certPickerNode) {
+  // controller's global pointerdown can't own in-sheet backdrop clicks). HAT FIX 2
+  // (M15 F2 Leg 4 HAT fixes — H6): press-gated via attachBackdropPressGate — a
+  // text-selection drag starting inside the card and releasing on the backdrop must
+  // NOT dismiss.
+  attachBackdropPressGate({
+    node: certPickerNode,
+    dismiss: () => {
       report.lastStimulus = 'outside-click';
       menuController.close(certPickerEntry);
     }
@@ -2106,14 +2119,27 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
     positionNode(bookmarkEdit.card, anchor);
   }
 
+  /** Reason-specific inline error copy for a rejected submit (HAT FIX 1, M15
+   * F2 Leg 4 HAT fixes — H5): every rejection class now keeps the sheet open
+   * with THIS line as its feedback surface (a post-close chrome toast is
+   * architecturally invisible behind the guest view). Wording is
+   * implementer's discretion (flight DD12's acceptable-variation ruling).
+   * @param {unknown} [reason] @returns {string} */
+  function bookmarkEditErrorCopy(reason) {
+    if (reason === 'duplicate-url') return 'A bookmark for this web address already exists in this jar.';
+    if (reason === 'not-found') return 'This bookmark could not be found — it may have been removed.';
+    return 'Enter a name and a valid web address';
+  }
+
   /** Submit → the DEDICATED bookmark-edit-submit invoke. `action` is 'save'
    * (Done — carries the current field values) or 'remove' (no fields needed).
    * Client-side: no empty/format guard here — the pre-forward validator is
    * main-side (the single source of truth for what counts as a valid
    * name/url, shared with nothing else to keep in sync). The sheet awaits
-   * { ok }: false → stay open + show a generic inline error (rejection path
-   * (a) — malformed/unsafe/internal URL or an empty field); true → main
-   * already closed the sheet (close-only-on-success).
+   * { ok }: false → stay open + show a reason-specific inline error (a
+   * malformed/unsafe/internal URL or empty field, a same-jar duplicate-url,
+   * or a since-vanished not-found target — HAT FIX 1 folded all three into
+   * one path); true → main already closed the sheet (close-only-on-success).
    * @param {'save' | 'remove'} action */
   async function submitBookmarkEdit(action) {
     if (report.sent || report.token == null || bookmarkEditBusy || bookmarkEditId == null) return;
@@ -2141,7 +2167,7 @@ import { createSheetReport, attachModalCard } from '../shared/modal-card-control
       report.sent = true; // suppress the trailing dismissed; main already closed the sheet.
       menuController.close(bookmarkEditEntry);
     } else {
-      bookmarkEdit.error.textContent = 'Enter a name and a valid web address';
+      bookmarkEdit.error.textContent = bookmarkEditErrorCopy(res && res.reason);
     }
   }
 

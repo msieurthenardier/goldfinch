@@ -205,7 +205,9 @@ export function createNavigationController(deps) {
       // never fails closed.
       Promise.allSettled([
         window.goldfinch.historySuggest({ jarId: tab.container.id, query: value }),
-        window.goldfinch.bookmarksSuggest({ query: value })
+        // M15 F2 L3: bookmarks are jar-scoped now too — the active tab's jar,
+        // beside historySuggest's own (DD7/AC "Omnibox").
+        window.goldfinch.bookmarksSuggest({ jarId: tab.container.id, query: value })
       ]).then(([historyOutcome, bookmarksOutcome]) => {
         // Response-time gate revalidation (flight DD5 HIGH, the kebab-while-
         // typing race): a stale response must never model-replace a menu the
@@ -348,22 +350,27 @@ export function createNavigationController(deps) {
 
   /**
    * Sync the address-bar star to a tab (M15 F1 Leg 2, modeled on
-   * refreshZoomControl above — including its hidden-early-return shape):
-   * hidden entirely on internal tabs / a tab with no live wcId; else a
-   * SYNCHRONOUS cache lookup (no async race guard needed, unlike the zoom
-   * control's live IPC query) sets the filled state. `aria-pressed` reflects
-   * fill state; `title`/`aria-label` are static (set once in index.html,
-   * the toolbar "Label (Chord)" convention) — only the pressed state and the
-   * `.starred` fill-color class change here.
+   * refreshZoomControl above — including its hidden-early-return shape; jar-
+   * resolved M15 F2 Leg 3): hidden entirely on internal tabs, BURNER tabs
+   * (L3-DD-C — star suppression rides this same hide branch), or a tab with
+   * no live wcId; else `ensureJar` primes the tab's jar's cache (once per
+   * unseen jar — a no-op once cached) and a SYNCHRONOUS cache lookup scoped
+   * to that jar (no async race guard needed, unlike the zoom control's live
+   * IPC query) sets the filled state. `aria-pressed` reflects fill state;
+   * `title`/`aria-label` are static (set once in index.html, the toolbar
+   * "Label (Chord)" convention) — only the pressed state and the `.starred`
+   * fill-color class change here.
    * @param {Tab|null} tab
    */
   function refreshStar(tab) {
-    if (!tab || isInternalTab(tab) || tab.wcId == null) {
+    if (!tab || isInternalTab(tab) || tab.wcId == null || (tab.container && tab.container.burner)) {
       els.star.classList.add('hidden');
       return;
     }
     els.star.classList.remove('hidden');
-    const filled = !!(bookmarksClient && bookmarksClient.findByUrl(tab.url));
+    const jarId = tab.container && tab.container.id;
+    if (bookmarksClient && jarId != null) bookmarksClient.ensureJar(jarId);
+    const filled = !!(bookmarksClient && jarId != null && bookmarksClient.findByUrl(jarId, tab.url));
     els.star.setAttribute('aria-pressed', String(filled));
     els.star.classList.toggle('starred', filled);
   }

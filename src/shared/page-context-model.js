@@ -26,6 +26,13 @@
 // beside `action:inspect` (same section, no separator between the two — one
 // separator precedes the whole group, mirroring every other section).
 //
+// `opts.canBookmark` (M15 F2 Leg 3, L3-DD-D): burner/internal tabs can never
+// own a bookmark, so the item is OMITTED entirely (not present-but-inert) —
+// computed chrome-side from the captured tab (exists ∧ ¬internal ∧ ¬burner).
+// Defaults to true when omitted (every pre-Leg-3 2-arg/3-arg call site is
+// unaffected) — only an EXPLICIT `false` suppresses the item; `action:inspect`
+// always renders regardless.
+//
 // Item types (extends the Leg-3 registry vocabulary):
 //   { type: 'item', id, label }   — focusable role="menuitem" button
 //   { type: 'separator' }         — role="separator", non-focusable, skipped by roving
@@ -47,7 +54,7 @@ const UNPIN_LABELS = { media: 'Unpin Media', shields: 'Unpin Shields', devtools:
  * @param {any} params  the guest context-menu params captured at open (or null —
  *   keyboard/toolbar invocations carry no params; yields the Inspect-only menu)
  * @param {('media'|'shields'|'devtools'|null)} [toolbarItem]  toolbar-unpin mode
- * @param {{ isBookmarked?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag
+ * @param {{ isBookmarked?: boolean, canBookmark?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag (canBookmark added M15 F2 Leg 3)
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>}
  */
 export function pageContextModel(params, toolbarItem, opts = {}) {
@@ -127,7 +134,11 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
   // --- always: Bookmark this page + Inspect (one section, no separator between
   //     the two — a single separator precedes the whole group) ---
   sep();
-  item('action:bookmark-page', opts && opts.isBookmarked ? 'Edit bookmark…' : 'Bookmark this page');
+  // L3-DD-D: OMIT (not disable) the bookmark item when the captured tab can't
+  // own one — an explicit `false` only; undefined/omitted opts default to true.
+  if (!opts || opts.canBookmark !== false) {
+    item('action:bookmark-page', opts && opts.isBookmarked ? 'Edit bookmark…' : 'Bookmark this page');
+  }
   item('action:inspect', 'Inspect');
   return model;
 }

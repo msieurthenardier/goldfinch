@@ -1600,10 +1600,19 @@ registerOverlayIpc({
   // No secret rides this path — the channel-4 id carries only a row index.
   certSelectFromSheet: (rec, index) => authChallenges.selectCertFromSheet(rec, index),
   // M15 F1 Leg 2 (flight DD4): the bookmark-edit sheet's submit validator — a
-  // pure, Electron-free per-field check (name/url). Main never touches
-  // bookmarksStore for this channel; on a pass the handler forwards to the
-  // owning chrome, which issues the actual bookmarkUpdate/bookmarkRemove.
-  validateBookmarkEdit: validateBookmarkEditFields
+  // pure, Electron-free per-field check (name/url). On a pass the handler
+  // forwards to the owning chrome, which issues the actual
+  // bookmarkUpdate/bookmarkRemove — chrome remains the sole bookmark-
+  // MUTATION issuer.
+  validateBookmarkEdit: validateBookmarkEditFields,
+  // HAT FIX 1 (M15 F2 Leg 4 HAT fixes — H5): main now gains READ access to
+  // bookmarksStore for this channel ONLY (the `list` binding, never the
+  // store object) — a pre-close consult that catches duplicate-url/not-found
+  // while the sheet's own inline error line can still show it, since a
+  // post-close chrome toast is architecturally invisible behind the guest
+  // view. The distinction is load-bearing: main reads, it never writes —
+  // every bookmark mutation still round-trips through the owning chrome.
+  list: bookmarksStore.list
 });
 
 // DD10: chrome init-time lock-state query (bare ipcMain.handle — file:// chrome
@@ -1737,7 +1746,12 @@ const { broadcastJarsChanged } = registerJarIpc({
   // Passed as the memoized accessor (not the eager singleton) — mirrors register-vault-ipc.
   // registerJarIpc runs at module scope AFTER getVaultStore is defined (main.js:573),
   // and the accessor is only invoked at delete time, so there is no init-order risk.
-  getVaultStore
+  getVaultStore,
+  // M15 F2 Leg 2 (DD9, leg AC "Injection routing"): handleRemove's bookmark
+  // teardown and the Bookmarks clear-data class both need the store. A
+  // PLAIN optional reference (not a getVaultStore-style accessor) — bookmarksStore
+  // is an eagerly-required module singleton, like historyStore above.
+  bookmarksStore
 });
 
 // Retention sweep engine + its cookie first-seen bookkeeping store (M10
@@ -1772,13 +1786,16 @@ registerHistoryIpc({
   broadcast: broadcastToChromeAndInternal
 });
 
-// Bookmarks IPC (Flight 1 DD3, Leg 1): chrome-only, sender-resolved — no
-// internal-page consumer exists this flight (see register-bookmarks-ipc.js
-// header). Registered at module scope like registerHistoryIpc above; handlers
-// only touch bookmarksStore at invoke time, always after boot.
+// Bookmarks IPC (Flight 1 DD3, Leg 1; jar-addressed M15 F2 Leg 2 / DD3,
+// L2-DD-C): chrome-only, sender-resolved — no internal-page consumer exists
+// this flight (see register-bookmarks-ipc.js header). Registered at module
+// scope like registerHistoryIpc above; handlers only touch bookmarksStore
+// (and jars, for the registry-rejection guard) at invoke time, always after
+// boot.
 registerBookmarksIpc({
   ipcMain,
   bookmarksStore,
+  jars,
   broadcast: broadcastToChromeAndInternal
 });
 

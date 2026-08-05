@@ -174,13 +174,19 @@ test('a registration-shaped mention inside a comment (main.js:996 precedent) is 
 
 // ---------------------------------------------------------------------------
 // bookmarks-changed no-snapshot contract (M15 Flight 1 "Bookmarking Core and
-// Surfaces" Leg 1 / DD3, AC5): every mutation (add/update/remove/reorder)
-// broadcasts `bookmarks-changed` with an EMPTY payload — invalidation-not-
+// Surfaces" Leg 1 / DD3, AC5; jar-addressed M15 Flight 2 "Jar-Scoped
+// Bookmarks" Leg 2 / flight DD5): every mutation (add/update/remove/reorder)
+// broadcasts `bookmarks-changed` with `{ jarId }` — invalidation-not-
 // snapshot, the jars-changed/history-changed precedent, pinned here at the
 // IPC-wiring level (the store's own unit tests cover the mutation contracts
 // themselves) — a real registerBookmarksIpc instance over a real (temp-dir,
-// real app-db) bookmarksStore, exercising every channel end-to-end.
+// real app-db) bookmarksStore, exercising every channel end-to-end. The
+// harness's `jars` stub registers exactly one jar id ('personal') — every
+// invoke() payload below carries that jarId, else L2-DD-C's registry
+// rejection would fail every test with `unknown-jar`.
 // ---------------------------------------------------------------------------
+
+const JAR_ID = 'personal';
 
 function makeBookmarksIpcHarness() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-bookmarks-ipc-'));
@@ -190,13 +196,15 @@ function makeBookmarksIpcHarness() {
   const bookmarksStore = require('../../src/main/bookmarks-store');
   bookmarksStore.load(dir);
 
+  const jars = { list: () => [{ id: JAR_ID, name: 'Personal', color: '#4caf50', partition: 'persist:container:personal' }] };
+
   /** @type {Array<{ channel: string, payload: any }>} */
   const events = [];
   const handlers = {};
   const ipcMain = { handle: (channel, fn) => { handlers[channel] = fn; } };
   const broadcast = (channel, payload) => events.push({ channel, payload });
 
-  registerBookmarksIpc({ ipcMain, bookmarksStore, broadcast });
+  registerBookmarksIpc({ ipcMain, bookmarksStore, jars, broadcast });
 
   return {
     events,
@@ -208,21 +216,21 @@ function makeBookmarksIpcHarness() {
   };
 }
 
-test('bookmark-add (created) broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+test('bookmark-add (created) broadcasts bookmarks-changed with { jarId }', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const result = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  const result = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   assert.equal(result.ok, true);
   assert.equal(result.created, true);
-  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: { jarId: JAR_ID } }]);
 });
 
 test('bookmark-add (duplicate URL, DD2 idempotent) does NOT re-broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   h.events.length = 0;
-  const second = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  const second = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   assert.equal(second.created, false);
   assert.deepEqual(h.events, [], 'a duplicate add — Edge Case: only ONE broadcast is needed');
 });
@@ -230,67 +238,106 @@ test('bookmark-add (duplicate URL, DD2 idempotent) does NOT re-broadcast', async
 test('bookmark-add with an invalid url does NOT broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const result = await h.invoke('bookmark-add', { url: 'javascript:alert(1)' });
+  const result = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'javascript:alert(1)' });
   assert.equal(result.ok, false);
   assert.deepEqual(h.events, []);
 });
 
-test('bookmark-update broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+test('bookmark-add with an unknown jarId returns unknown-jar and does NOT broadcast (L2-DD-C)', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const { bookmark } = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  const result = await h.invoke('bookmark-add', { jarId: 'nope', url: 'https://example.com/' });
+  assert.deepEqual(result, { ok: false, reason: 'unknown-jar' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-update broadcasts bookmarks-changed with { jarId }', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const { bookmark } = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   h.events.length = 0;
-  const result = await h.invoke('bookmark-update', { id: bookmark.id, title: 'New title' });
+  const result = await h.invoke('bookmark-update', { jarId: JAR_ID, id: bookmark.id, title: 'New title' });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: { jarId: JAR_ID } }]);
 });
 
 test('bookmark-update rejected by the DD3/AC3 duplicate-url ruling does NOT broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  await h.invoke('bookmark-add', { url: 'https://a.example/' });
-  const b = await h.invoke('bookmark-add', { url: 'https://b.example/' });
+  await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://a.example/' });
+  const b = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://b.example/' });
   h.events.length = 0;
-  const result = await h.invoke('bookmark-update', { id: b.bookmark.id, url: 'https://a.example/' });
+  const result = await h.invoke('bookmark-update', { jarId: JAR_ID, id: b.bookmark.id, url: 'https://a.example/' });
   assert.deepEqual(result, { ok: false, reason: 'duplicate-url' });
   assert.deepEqual(h.events, []);
 });
 
-test('bookmark-remove broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+test('bookmark-update with an unknown jarId returns unknown-jar and does NOT broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const { bookmark } = await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  const { bookmark } = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   h.events.length = 0;
-  const result = await h.invoke('bookmark-remove', { id: bookmark.id });
+  const result = await h.invoke('bookmark-update', { jarId: 'nope', id: bookmark.id, title: 'x' });
+  assert.deepEqual(result, { ok: false, reason: 'unknown-jar' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-remove broadcasts bookmarks-changed with { jarId }', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const { bookmark } = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmark-remove', { jarId: JAR_ID, id: bookmark.id });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: { jarId: JAR_ID } }]);
 });
 
 test('bookmark-remove of an unknown id does NOT broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const result = await h.invoke('bookmark-remove', { id: 'nope' });
+  const result = await h.invoke('bookmark-remove', { jarId: JAR_ID, id: 'nope' });
   assert.deepEqual(result, { ok: false, reason: 'not-found' });
   assert.deepEqual(h.events, []);
 });
 
-test('bookmark-reorder broadcasts bookmarks-changed with an EMPTY payload', async (t) => {
+test('bookmark-remove with an unknown jarId returns unknown-jar and does NOT broadcast', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  const a = await h.invoke('bookmark-add', { url: 'https://a.example/' });
-  const b = await h.invoke('bookmark-add', { url: 'https://b.example/' });
+  const { bookmark } = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
   h.events.length = 0;
-  const result = await h.invoke('bookmark-reorder', { ids: [b.bookmark.id, a.bookmark.id] });
-  assert.equal(result.ok, true);
-  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: {} }]);
+  const result = await h.invoke('bookmark-remove', { jarId: 'nope', id: bookmark.id });
+  assert.deepEqual(result, { ok: false, reason: 'unknown-jar' });
+  assert.deepEqual(h.events, []);
 });
 
-test('bookmarks-get is a pure read — never broadcasts', async (t) => {
+test('bookmark-reorder broadcasts bookmarks-changed with { jarId }', async (t) => {
   const h = makeBookmarksIpcHarness();
   t.after(h.teardown);
-  await h.invoke('bookmark-add', { url: 'https://example.com/' });
+  const a = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://a.example/' });
+  const b = await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://b.example/' });
   h.events.length = 0;
-  const result = await h.invoke('bookmarks-get');
+  const result = await h.invoke('bookmark-reorder', { jarId: JAR_ID, ids: [b.bookmark.id, a.bookmark.id] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(h.events, [{ channel: 'bookmarks-changed', payload: { jarId: JAR_ID } }]);
+});
+
+test('bookmark-reorder with an unknown jarId returns unknown-jar and does NOT broadcast', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  const result = await h.invoke('bookmark-reorder', { jarId: 'nope', ids: [] });
+  assert.deepEqual(result, { ok: false, reason: 'unknown-jar' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmarks-get is a pure read — never broadcasts, and skips the registry check (L2-DD-C)', async (t) => {
+  const h = makeBookmarksIpcHarness();
+  t.after(h.teardown);
+  await h.invoke('bookmark-add', { jarId: JAR_ID, url: 'https://example.com/' });
+  h.events.length = 0;
+  const result = await h.invoke('bookmarks-get', { jarId: JAR_ID });
   assert.equal(result.length, 1);
   assert.deepEqual(h.events, []);
+  // An unknown jar naturally yields zero rows rather than a rejection — a
+  // read must never fail during the jar-delete race window.
+  assert.deepEqual(await h.invoke('bookmarks-get', { jarId: 'nope' }), []);
 });

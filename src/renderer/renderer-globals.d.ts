@@ -13,9 +13,11 @@ interface AutomationSession {
 }
 
 /** One persisted bookmark entry (M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
- * DD1). `icon` is a size-capped `data:image/...` URL or null (monogram fallback). */
+ * DD1; jar-owned as of M15 Flight 2 "Jar-Scoped Bookmarks" Leg 2 DD1). `icon` is a
+ * size-capped `data:image/...` URL or null (monogram fallback). */
 interface BookmarkEntry {
   id: string;
+  jarId: string;
   url: string;
   title: string;
   icon: string | null;
@@ -98,31 +100,34 @@ interface GoldfinchBridge {
   historySuggest(payload: any): Promise<any>;
 
   // --- bookmarks (chrome-trusted; M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
-  // DD3 — sender-resolved, NO internal twin) ---
-  bookmarksGet(): Promise<Array<BookmarkEntry>>;
-  bookmarkAdd(payload: { url: string; title?: string; icon?: string | null }): Promise<
+  // DD3 — sender-resolved, NO internal twin; JAR-ADDRESSED as of M15 Flight 2
+  // "Jar-Scoped Bookmarks" — every channel below carries jarId) ---
+  bookmarksGet(payload: { jarId: string }): Promise<Array<BookmarkEntry>>;
+  bookmarkAdd(payload: { jarId: string; url: string; title?: string; icon?: string | null }): Promise<
     | { ok: true; bookmark: BookmarkEntry; created: boolean }
-    | { ok: false; reason: 'invalid-url' }
+    | { ok: false; reason: 'invalid-url' | 'unknown-jar' }
   >;
-  bookmarkUpdate(payload: { id: string; url?: string; title?: string; icon?: string | null }): Promise<
+  bookmarkUpdate(payload: { jarId: string; id: string; url?: string; title?: string; icon?: string | null }): Promise<
     | { ok: true; bookmark: BookmarkEntry }
-    | { ok: false; reason: 'not-found' | 'invalid-url' | 'duplicate-url' }
+    | { ok: false; reason: 'not-found' | 'invalid-url' | 'duplicate-url' | 'unknown-jar' }
   >;
-  bookmarkRemove(payload: { id: string }): Promise<
+  bookmarkRemove(payload: { jarId: string; id: string }): Promise<
     | { ok: true; bookmark: BookmarkEntry }
-    | { ok: false; reason: 'not-found' }
+    | { ok: false; reason: 'not-found' | 'unknown-jar' }
   >;
-  bookmarkReorder(payload: { ids: string[] }): Promise<{ ok: true; bookmarks: BookmarkEntry[] }>;
-  /** M15 F1 Leg 4 (DD11): app-scoped omnibox suggest source — no jarId param
-   * (bookmarks are app-scoped; may surface in any jar). Envelope mirrors
-   * historySuggest's {ok, suggestions} shape. */
-  bookmarksSuggest(payload: { query: string; limit?: number }): Promise<
+  bookmarkReorder(payload: { jarId: string; ids: string[] }): Promise<
+    | { ok: true; bookmarks: BookmarkEntry[] }
+    | { ok: false; reason: 'unknown-jar' }
+  >;
+  /** M15 F1 Leg 4 (DD11), jar-addressed as of M15 F2 Leg 3: per-jar omnibox
+   * suggest source. Envelope mirrors historySuggest's {ok, suggestions} shape. */
+  bookmarksSuggest(payload: { jarId: string; query: string; limit?: number }): Promise<
     { ok: true; suggestions: BookmarkEntry[] } | { ok: false; suggestions: [] }
   >;
-  /** Fired after every bookmark mutation (add/update/remove/reorder) with an
-   * EMPTY payload — invalidation-not-snapshot (DD3): bookmarks are app-scoped,
-   * so there is no jarId to carry. Subscribers re-query via bookmarksGet(). */
-  onBookmarksChanged(cb: () => void): void;
+  /** Fired after every bookmark mutation (add/update/remove/reorder) with
+   * `{ jarId }` (M15 F2 Leg 2 DD5 — invalidation-not-snapshot). Subscribers
+   * re-query via bookmarksGet({ jarId }). */
+  onBookmarksChanged(cb: (d: { jarId: string }) => void): void;
   /** M15 F1 Leg 2: the bookmark-edit sheet's forwarded submit — main validates/
    * closes, then forwards here; the chrome subscriber issues the actual
    * bookmarkUpdate/bookmarkRemove (chrome is the sole mutation issuer). */

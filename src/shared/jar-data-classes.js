@@ -42,7 +42,13 @@ export const JAR_DATA_CLASSES = Object.freeze([
   Object.freeze({ id: 'cache', label: 'Cache', storages: null }),
   // History (M08 Flight 3 / DD1): also the null-storages sentinel, discriminated
   // from cache via `custom` — see the handler-dispatch note above.
-  Object.freeze({ id: 'history', label: 'History', storages: null, custom: 'history' })
+  Object.freeze({ id: 'history', label: 'History', storages: null, custom: 'history' }),
+  // Bookmarks (M15 Flight 2 "Jar-Scoped Bookmarks", Leg 2 / DD9): a FIFTH
+  // null-storages + `custom` descriptor, same discriminator shape as
+  // history — dispatched in jar-data-ipc.js's handleClearData ahead of the
+  // storages-null cache fallthrough. Maps to the History panel on the jars
+  // page (leg L2-DD-E, src/shared/jar-panel-model.js).
+  Object.freeze({ id: 'bookmarks', label: 'Bookmarks', storages: null, custom: 'bookmarks' })
 ]);
 
 /**

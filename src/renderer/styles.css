@@ -665,6 +665,11 @@ a:focus-visible {
 #bookmarks-bar {
   display: flex;
   align-items: center;
+  /* PINNED PAIR: bookmarks-bar.js mirrors these two as BAR_GAP / BAR_PADDING_X
+     (and #bookmarks-overflow's width below as CHEVRON_WIDTH) — the overflow
+     partition budgets the row in JS and cannot see this rule. Change either
+     value here and you must change it there, or the chevron lands outside the
+     `overflow: hidden` box again (M15 F2 Leg 4 behavior-test defect). */
   gap: 2px;
   padding: 0 6px;
   /* Fixed literal (pinned in CSS with a comment, like other fixed chrome
@@ -756,6 +761,9 @@ a:focus-visible {
 }
 #bookmarks-overflow {
   flex: none;
+  /* PINNED: mirrored as CHEVRON_WIDTH in bookmarks-bar.js (see the pinned-pair
+     note on #bookmarks-bar) — the partition math reserves this footprint
+     rather than measuring a possibly display:none chevron. */
   width: 24px;
   height: 24px;
 }

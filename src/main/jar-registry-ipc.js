@@ -19,7 +19,14 @@ function registerJarRegistryIpc({
   // register-vault-ipc's getVaultStore injection). handleRemove removes the deleted
   // jar's `.gfvault` fail-soft. GATED — offline tests that omit it skip the step
   // (the existing injection-gated precedent).
-  getVaultStore
+  getVaultStore,
+  // M15 F2 Leg 2 (DD9): a plain optional reference (eagerly-required module
+  // singleton, like historyStore — NOT a getVaultStore-style accessor).
+  // handleRemove drops the deleted jar's bookmarks in its OWN try/catch,
+  // never inside the wipeJarData try below (placement matters — design
+  // review: a session-wipe failure must never silently skip this). Offline
+  // tests that omit it skip the step (injection-gated precedent).
+  bookmarksStore
 }) {
   function handleList() {
     return jars.list();
@@ -61,8 +68,9 @@ function registerJarRegistryIpc({
     return jars.getDefault();
   }
 
-  // Delete composition (DD6 + M12 F4 Leg 6 / DD7 + PR#112 finding 8). Order:
-  // deleteVault (fail-CLOSED) → remove → wipe (incl. history purge) → revoke →
+  // Delete composition (DD6 + M12 F4 Leg 6 / DD7 + PR#112 finding 8, bookmark
+  // teardown M15 F2 Leg 2 / DD9). Order: deleteVault (fail-CLOSED) → remove →
+  // wipe (incl. history purge) → bookmark teardown (own try/catch) → revoke →
   // settings-changed → jars-changed. `handleRemove` emits no history broadcast — the
   // section leaves the DOM entirely (flight DD2).
   //
@@ -105,6 +113,22 @@ function registerJarRegistryIpc({
       await wipeJarData(ses, removed.id);
     } catch {
       wiped = false;
+    }
+    // DD9: the deleted jar's bookmarks are dropped in their OWN try/catch —
+    // deliberately NOT inside the wipeJarData try above (design review: a
+    // session-wipe failure must never silently skip this too — orphaned
+    // rows plus a recyclable jar id is exactly the resurrection hazard the
+    // chrome-side cache eviction guards against). Fail-soft, logged, never
+    // flips `ok` (matches the existing wipe-failure fail-soft shape).
+    // Gated on the injection (offline tests that omit bookmarksStore skip
+    // the step, injection-gated precedent — same shape as getVaultStore).
+    if (bookmarksStore) {
+      try {
+        const bookmarksDeleted = bookmarksStore.clearJar(removed.id);
+        if (bookmarksDeleted > 0) broadcast('bookmarks-changed', { jarId: removed.id });
+      } catch (err) {
+        console.error('[bookmarks]', err);
+      }
     }
     // Idempotent, hash-only (no-op when the jar had no automation key). The
     // settings-changed broadcast is unconditional — matching the mint path's

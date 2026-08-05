@@ -33,7 +33,7 @@ export function createTabController(deps) {
     isInternalPageUrl, isSafeTabUrl, resolveNewTabContainer, classifyDragPoint,
     announceTabStatus, updateNavButtons, refreshZoomControl, refreshStar, fetchCookies,
     closeSuggestions, resetSuggestionsForActivation, updateAddressChip,
-    renderMedia, renderPrivacy, setDevtoolsPressed
+    renderMedia, renderPrivacy, setDevtoolsPressed, refreshBookmarksSurfaces
   } = deps;
   // Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
   // design review — folded into DD3): every trusted internal tab used to hardcode
@@ -330,6 +330,10 @@ export function createTabController(deps) {
         // permanently hidden star since they skip loadURL and may never fire
         // did-navigate.
         refreshStar(tab);
+        // Activation-class bar-render trigger 1/2 (M15 F2 Leg 3, DD7 table
+        // 3/5): the wcId-arrival path is also an activation-class event —
+        // suppression + bar content must re-derive here too, not just star.
+        refreshBookmarksSurfaces(tab);
         if (!els.privacyPanel.classList.contains('collapsed')) {
           fetchCookies();
         }
@@ -697,6 +701,9 @@ export function createTabController(deps) {
     updateAddressChip(tab);
     refreshZoomControl(tab);
     refreshStar(tab); // sync path 4/5 (M15 F1 Leg 2) — covers adopt-tab too (single body)
+    // Activation-class bar-render trigger 2/2 (M15 F2 Leg 3, DD7 table 4/5):
+    // covers tab switch AND adopt (single body, same as refreshStar above).
+    refreshBookmarksSurfaces(tab);
 
     if (tab.wcId != null) {
       // Send tab-set-active with bounds (main handles visibility + hides the previous

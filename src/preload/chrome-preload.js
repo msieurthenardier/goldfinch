@@ -59,19 +59,21 @@ contextBridge.exposeInMainWorld('goldfinch', {
 
   // --- bookmarks (chrome-trusted; M15 Flight 1 "Bookmarking Core and Surfaces" Leg 1,
   // DD3 — sender-resolved, NO internal twin: every consumer this flight builds lives
-  // in the chrome; see register-bookmarks-ipc.js) ---
-  bookmarksGet: () => ipcRenderer.invoke('bookmarks-get'),
+  // in the chrome; JAR-ADDRESSED as of M15 Flight 2 "Jar-Scoped Bookmarks" — every
+  // payload below carries jarId; see register-bookmarks-ipc.js) ---
+  bookmarksGet: (payload) => ipcRenderer.invoke('bookmarks-get', payload),
   bookmarkAdd: (payload) => ipcRenderer.invoke('bookmark-add', payload),
   bookmarkUpdate: (payload) => ipcRenderer.invoke('bookmark-update', payload),
   bookmarkRemove: (payload) => ipcRenderer.invoke('bookmark-remove', payload),
   bookmarkReorder: (payload) => ipcRenderer.invoke('bookmark-reorder', payload),
-  // M15 F1 Leg 4 (DD11): app-scoped omnibox suggest source — no jarId. Response
-  // envelope mirrors historySuggest's {ok, suggestions} shape.
+  // M15 F1 Leg 4 (DD11), jar-addressed M15 F2 Leg 3: per-jar omnibox suggest
+  // source. Response envelope mirrors historySuggest's {ok, suggestions} shape.
   bookmarksSuggest: (payload) => ipcRenderer.invoke('bookmarks-suggest', payload),
-  // Fired after every bookmark mutation with an EMPTY payload — invalidation-
-  // not-snapshot (DD3); subscribers re-query via bookmarksGet(). Mirrors
-  // onJarsChanged's raw on() subscription shape (no off* — chrome preload has
-  // no handle-based subscription cleanup, same as onJarWiped).
+  // Fired after every bookmark mutation with `{ jarId }` (M15 F2 Leg 2 DD5 —
+  // invalidation-not-snapshot); subscribers re-query via
+  // bookmarksGet({ jarId }). Mirrors onJarsChanged's raw on() subscription
+  // shape (no off* — chrome preload has no handle-based subscription
+  // cleanup, same as onJarWiped).
   onBookmarksChanged: (cb) => ipcRenderer.on('bookmarks-changed', (_e, d) => cb(d)),
   // M15 F1 Leg 2: the bookmark-edit sheet's forwarded submit ({ id, action:
   // 'save'|'remove', name?, url? }) — main validates/closes, then forwards

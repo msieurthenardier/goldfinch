@@ -91,6 +91,42 @@ export function createSheetReport(bridge) {
 }
 
 /**
+ * Press-gated backdrop dismiss (HAT FIX 2, M15 F2 Leg 4 HAT fixes — H6). Bug:
+ * a text-selection drag that STARTS inside a card and RELEASES on the
+ * backdrop synthesizes a `click` whose `target` resolves to the backdrop
+ * node (the nearest common ancestor) — a naive `e.target === node` check
+ * then dismisses the sheet mid-selection. Fix: gate the dismiss on the PRESS
+ * having ALSO started on the backdrop, not just the click's landing target.
+ *
+ * `pointerdown`, not `mousedown` — the established idiom in this file family
+ * (menu-controller.js's document-level outside-dismiss): it fires before
+ * focus shifts, and this file family's CDP/automation dismissal clicks
+ * dispatch pointerdown→click, so a pointerdown listener observes every real
+ * dismissal too.
+ *
+ * The bug class exists at FOUR sites: `attachModalCard` below, plus three
+ * hand-rolled duplicates in menu-overlay.js (new-container dialog,
+ * vault-picker, cert-picker) that intentionally do NOT use attachModalCard
+ * (it also wires Escape + Tab-cycling, and the vault-picker's roving
+ * keyboard contract is documented above as deliberately not using it — a
+ * retrofit onto attachModalCard would silently change three sheets'
+ * keyboard behavior). This one small helper is used at all four sites
+ * instead, leaving every keyboard contract untouched.
+ * @param {{ node: any, dismiss: () => void }} opts
+ */
+export function attachBackdropPressGate({ node, dismiss }) {
+  let pressStartedOnBackdrop = false;
+  node.addEventListener('pointerdown', (/** @type {any} */ e) => {
+    pressStartedOnBackdrop = e.target === node;
+  });
+  node.addEventListener('click', (/** @type {any} */ e) => {
+    const shouldDismiss = pressStartedOnBackdrop && e.target === node;
+    pressStartedOnBackdrop = false; // reset unconditionally — both branches
+    if (shouldDismiss) dismiss();
+  });
+}
+
+/**
  * Wire a backdrop-card node's dialog-local Escape + Tab-cycle + backdrop-click dismissal.
  * Escape and backdrop-click close ONLY when `dismissible` (default true) — a
  * non-dismissible card (vault-recovery-show) swallows both. Tab-cycling always traps
@@ -127,8 +163,12 @@ export function attachModalCard(opts) {
 
   // Backdrop click (outside the card) dismisses — parity with the inline input-dialog /
   // vault-unlock backdrops. The controller's global pointerdown can't own it (the
-  // backdrop contains every in-sheet target), so this local handler does.
-  node.addEventListener('click', (/** @type {any} */ e) => {
-    if (e.target === node && dismissible) close('outside-click');
+  // backdrop contains every in-sheet target), so this local handler does. HAT FIX 2:
+  // press-gated via attachBackdropPressGate (see its doc comment above) — a
+  // text-selection drag starting inside the card and releasing on the backdrop must
+  // NOT dismiss.
+  attachBackdropPressGate({
+    node,
+    dismiss: () => { if (dismissible) close('outside-click'); }
   });
 }

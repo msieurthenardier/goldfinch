@@ -175,14 +175,19 @@ function makeIpcWithHandle() {
   };
 }
 
-function makeBookmarkEditHarness({ validateBookmarkEdit } = {}) {
+// HAT FIX 1 (M15 F2 Leg 4 HAT fixes — H5) added `list` (the bookmarks store's
+// read-only `list(jarId)` binding, optional — offline overlay tests omit it
+// exactly as before) and `jarId` (the current menu's captured jar, threaded
+// through getCurrentMenu() — omitted, as before HAT fix 1, when a test wants
+// the "no jarId ever captured" shape).
+function makeBookmarkEditHarness({ validateBookmarkEdit, list, jarId } = {}) {
   const ipcMain = makeIpcWithHandle();
   const events = [];
   const chrome = { send(channel, payload) { events.push(['send', channel, payload]); } };
   const sheetSender = { isDestroyed: () => false };
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
-    getCurrentMenu: () => ({ token: 7, menuType: 'bookmark-edit' }),
+    getCurrentMenu: () => ({ token: 7, menuType: 'bookmark-edit', ...(jarId !== undefined ? { jarId } : {}) }),
     closeMenuOverlay: (reason, token) => events.push(['close', reason, token]),
   };
   const rec = { win: {}, sheet };
@@ -197,6 +202,7 @@ function makeBookmarkEditHarness({ validateBookmarkEdit } = {}) {
         ? { ok: true, name, url }
         : { ok: false })
       : validateBookmarkEdit,
+    ...(list !== undefined ? { list } : {}),
   });
   return { ipcMain, events, rec, sheetSender };
 }
@@ -278,4 +284,117 @@ test('bookmark-edit-submit: an unrecognized sender resolves { ok:false } (record
   );
   assert.deepEqual(res, { ok: false });
   assert.deepEqual(h.events, []);
+});
+
+// ---------------------------------------------------------------------------
+// HAT FIX 1 (M15 F2 Leg 4 HAT fixes — H5): the pre-close store consult.
+// duplicate-url and not-found now reject BEFORE the sheet closes (instead of
+// closing/forwarding and surfacing an architecturally invisible post-close
+// chrome toast). Gated on the optional `list` injection.
+// ---------------------------------------------------------------------------
+
+test('bookmark-edit-submit: with no `list` injected, save/remove succeed with zero store consultation (offline overlay shape, unchanged by HAT fix 1)', async () => {
+  const h = makeBookmarkEditHarness();
+  const saveRes = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(saveRes, { ok: true });
+  const removeRes = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.deepEqual(removeRes, { ok: true });
+});
+
+test('bookmark-edit-submit: a same-jar duplicate URL on save rejects {ok:false, reason:"duplicate-url"} — no close, no forward', async () => {
+  const rows = [
+    { id: 'bm-1', url: 'https://old.example.com/' },
+    { id: 'bm-2', url: 'https://example.com/' },
+  ];
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: (jid) => (jid === 'work' ? rows : []) });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: false, reason: 'duplicate-url' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: save keeps its OWN unchanged URL — matching only itself is not a duplicate', async () => {
+  const rows = [{ id: 'bm-1', url: 'https://example.com/' }];
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: () => rows });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-edit-submit', { id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }],
+  ]);
+});
+
+test('bookmark-edit-submit: the SAME URL bookmarked in a DIFFERENT jar does NOT trip duplicate-url (load-bearing for jar scoping)', async () => {
+  const byJar = {
+    work: [{ id: 'bm-1', url: 'https://old.example.com/' }],
+    personal: [{ id: 'bm-9', url: 'https://example.com/' }], // same URL, different jar AND id
+  };
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: (jid) => byJar[jid] || [] });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-edit-submit', { id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }],
+  ]);
+});
+
+test('bookmark-edit-submit: save on a since-vanished id rejects {ok:false, reason:"not-found"} — no close, no forward', async () => {
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: () => [] });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'save', name: 'Example', url: 'https://example.com/' }
+  );
+  assert.deepEqual(res, { ok: false, reason: 'not-found' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: remove on a since-vanished id rejects {ok:false, reason:"not-found"} — no close, no forward (zero-consultation before HAT fix 1)', async () => {
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: () => [] });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.deepEqual(res, { ok: false, reason: 'not-found' });
+  assert.deepEqual(h.events, []);
+});
+
+test('bookmark-edit-submit: remove of a row that still exists in its jar closes and forwards normally', async () => {
+  const rows = [{ id: 'bm-1', url: 'https://example.com/' }];
+  const h = makeBookmarkEditHarness({ jarId: 'work', list: () => rows });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-edit-submit', { id: 'bm-1', action: 'remove' }],
+  ]);
+});
+
+test('bookmark-edit-submit: a current menu with no captured jarId normalizes to null for the store consult (never a bare `undefined`)', async () => {
+  let seenJarId = 'unset';
+  const h = makeBookmarkEditHarness({
+    list: (jid) => { seenJarId = jid; return []; },
+  });
+  const res = await h.ipcMain.handlers.get('menu-overlay:bookmark-edit-submit')(
+    { sender: h.sheetSender },
+    { token: 7, id: 'bm-1', action: 'remove' }
+  );
+  assert.equal(seenJarId, null, 'a non-string jarId is normalized to null before reaching `list`');
+  assert.deepEqual(res, { ok: false, reason: 'not-found' });
 });

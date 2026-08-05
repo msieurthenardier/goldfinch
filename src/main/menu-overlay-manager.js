@@ -81,7 +81,7 @@
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
  *   anchor: any, startIndex?: number, token: number, noFocus?: boolean,
- *   dismissible?: boolean }} MenuOpenPayload
+ *   dismissible?: boolean, jarId?: string }} MenuOpenPayload
  * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 
@@ -117,7 +117,13 @@ function createMenuOverlayManager({
   let ready = false;
   /** @type {Bounds | null} */
   let lastGuestBounds = null;
-  /** @type {{ menuType: string, token: number } | null} */
+  // HAT FIX 1 (M15 F2 Leg 4 HAT fixes): `jarId` is retained CONDITIONALLY —
+  // only when the opening payload actually carries one (typeof === 'string')
+  // — so non-bookmark opens keep this record's shape byte-identical to
+  // before (menu-overlay-manager.test.js's two `getCurrentMenu()` shape
+  // pins). register-overlay-ipc.js's bookmark-edit-submit handler reads it
+  // back to consult the bookmarks store before closing the sheet.
+  /** @type {{ menuType: string, token: number, jarId?: string } | null} */
   let currentMenu = null;
   // M12 F3 Leg 4 (first-run-setup, DD5): whether the current menu may be SOFT-dismissed
   // (Escape / outside-click / window-blur). vault-recovery-show opens with
@@ -286,7 +292,12 @@ function createMenuOverlayManager({
     }
     attachment = nextAtt;
     if (nextAtt.bounds) lastGuestBounds = nextAtt.bounds; // per-window bounds at show (DD7)
-    currentMenu = { menuType: payload.menuType, token: payload.token };
+    // HAT FIX 1: conditional merge — a non-string/absent jarId (every
+    // non-bookmark menuType, plus the bookmark-edit audit-seam fixture)
+    // leaves the record at its pre-fix { menuType, token } shape exactly.
+    currentMenu = typeof payload.jarId === 'string'
+      ? { menuType: payload.menuType, token: payload.token, jarId: payload.jarId }
+      : { menuType: payload.menuType, token: payload.token };
     currentDismissible = payload.dismissible !== false; // DD5 — non-dismissible opt-out
     show();
     // DD5: find bar hidden while a menu is open (parity) — on the FIRST open of

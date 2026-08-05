@@ -1002,7 +1002,11 @@ body {
    the row's own default `align-items: stretch`, stated explicitly for clarity)
    sizes the badge to the row's full content height so the star reads as one
    full-height indicator; `flex: none` keeps it from growing/shrinking away from
-   that height-driven, aspect-locked square (see `.sg-badge-star` below). */
+   that height. The star glyph inside no longer keys off this stretched height
+   at all (see `.sg-badge-star` below) — it's sized to a fixed 16px matching
+   the address-bar star glyph instead (M15 F2 Leg 4 HAT fix #3), so the
+   badge's stretch here is purely a vertical-centering box for the glyph, not
+   its size source. */
 .sg-badge {
   display: flex;
   align-items: center;
@@ -1012,18 +1016,38 @@ body {
   color: var(--accent);
   pointer-events: none;
 }
-/* The star glyph itself sizes off the badge's stretched height (which in turn
-   tracks the row's own two-line content height — see `.sg-option`/`.sg-text`
-   above) rather than a hardcoded pixel guess, so it stays correct if row
-   line-heights ever change. This overrides `buildBookmarkStarIcon`'s
-   width="11"/height="11" presentation attributes (CSS beats presentation
-   attributes regardless of selector specificity) — the builder's own
-   contract/attributes are otherwise untouched. `aspect-ratio: 1 / 1` matches
-   the icon's square 24x24 viewBox, so height:100% alone determines width. */
+/* M15 F2 Leg 4 HAT fix (bookmark star invisible regression): the prior rule
+   here was `height: 100%; width: auto; aspect-ratio: 1 / 1;`, sizing the star
+   off `.sg-badge`'s stretched cross size. That's a percentage-height resolved
+   against a flex-stretched ancestor's height — NOT a definite size this deep
+   in a nested flex chain (`.sg-option` row flex > `.sg-badge`, itself
+   `display:flex`, whose child this svg is a flex item of in turn). It
+   collapsed to zero, making the star fully invisible in live use (operator-
+   reported HAT regression, M15 F2). `aspect-ratio` does not rescue this
+   either — it only yields a definite cross size when the OTHER axis is
+   already definite, and neither axis started definite here.
+   That first fix sized the star in `em` off `.sg-badge`'s own explicit
+   font-size (DD12(b)'s original "scale to row height" framing) — still
+   definite, so it sidestepped the regression above, but landed at 2.25em
+   (~27px against the badge's 12px font-size).
+   M15 F2 Leg 4 HAT fix #3 (follow-up): operator's live-HAT verdict on that
+   value was "visible now, but too big — bigger than the address-bar star,"
+   with an explicit reference to match instead: parity with the address-bar
+   `#star` glyph (`src/renderer/index.html`'s `tb-glyph` SVG, `width="16"
+   height="16"`). That ruling supersedes DD12(b)'s row-relative framing — the
+   target is no longer "scaled to this row's typography" but a fixed size
+   matching one specific other glyph, so a plain `16px` is the honest
+   expression of the current intent; the em-off-font-size indirection only
+   earned its keep while the target was row-relative, which is why
+   `.sg-badge`'s own `font-size` above was dropped along with it (nothing else
+   in the badge depended on it — it existed solely as that em reference).
+   Do NOT revert to height:100%/aspect-ratio — see above; if this needs to
+   change again, keep the sizing source an explicitly definite value (a fixed
+   px, or em/rem against a definite font-size), never a percentage of an
+   ambient flex-stretched height. */
 .sg-badge-star {
-  height: 100%;
-  width: auto;
-  aspect-ratio: 1 / 1;
+  width: 16px;
+  height: 16px;
 }
 /* This document does not load styles.css (menu-overlay.html is a separate
    page) — the standard visually-hidden-but-accessible technique is

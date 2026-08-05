@@ -12,7 +12,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
-const { createSheetReport, attachModalCard } = require('../../src/shared/modal-card-controller.js');
+const {
+  createSheetReport, attachModalCard, attachBackdropPressGate
+} = require('../../src/shared/modal-card-controller.js');
 
 // ---------------------------------------------------------------------------
 // createSheetReport — the one-report-per-open-token machine.
@@ -152,7 +154,26 @@ test('attachModalCard (dismissible): backdrop click closes with outside-click; i
   const { node, a, closes } = makeCard(document, { dismissible: true });
   node.dispatch('click', { target: a }); // inside the card — ignored
   assert.deepEqual(closes, []);
+  // HAT FIX 2 (M15 F2 Leg 4 HAT fixes — H6): backdrop dismiss is now
+  // press-gated — a real backdrop click starts its press ON the backdrop too.
+  node.dispatch('pointerdown', { target: node });
   node.dispatch('click', { target: node }); // the backdrop itself
+  assert.deepEqual(closes, ['outside-click']);
+});
+
+// HAT FIX 2 (M15 F2 Leg 4 HAT fixes — H6): the primary regression case — a
+// text-selection drag that STARTS inside the card and RELEASES on the
+// backdrop synthesizes a click whose target resolves to the backdrop (the
+// nearest common ancestor). Must NOT dismiss: the press did not start there.
+test('attachModalCard (dismissible): a press starting INSIDE the card and releasing on the backdrop does NOT dismiss', () => {
+  const document = createDocument();
+  const { node, a, closes } = makeCard(document, { dismissible: true });
+  node.dispatch('pointerdown', { target: a }); // press starts inside the card
+  node.dispatch('click', { target: node }); // synthesized click resolves to the backdrop
+  assert.deepEqual(closes, [], 'the press did not start on the backdrop — must not dismiss');
+  // A subsequent GENUINE backdrop press+click still dismisses (the gate resets).
+  node.dispatch('pointerdown', { target: node });
+  node.dispatch('click', { target: node });
   assert.deepEqual(closes, ['outside-click']);
 });
 
@@ -170,4 +191,72 @@ test('attachModalCard (dismissible:false): Tab still traps focus (cycle never le
   a.focus();
   node.dispatch('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
   assert.equal(document.activeElement, b, 'Tab cycles even when non-dismissible');
+});
+
+// ---------------------------------------------------------------------------
+// attachBackdropPressGate — the shared HAT FIX 2 (M15 F2 Leg 4 HAT fixes,
+// H6) helper. Exercised directly here since it is the SAME logic wired at
+// all four backdrop sites (attachModalCard above, and menu-overlay.js's
+// three hand-rolled siblings — new-container dialog, vault-picker,
+// cert-picker — which deliberately do NOT go through attachModalCard). A
+// direct unit test of the helper is the practical net for all four: those
+// three sites live in menu-overlay.js, an IIFE with no controller test.
+// ---------------------------------------------------------------------------
+
+function makeBackdropCard(document) {
+  const node = document.createElement('div');
+  const inner = document.createElement('button');
+  node.appendChild(inner);
+  const dismissals = [];
+  attachBackdropPressGate({ node, dismiss: () => dismissals.push('dismiss') });
+  return { node, inner, dismissals };
+}
+
+test('attachBackdropPressGate: press AND click both on the backdrop dismisses', () => {
+  const document = createDocument();
+  const { node, dismissals } = makeBackdropCard(document);
+  node.dispatch('pointerdown', { target: node });
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, ['dismiss']);
+});
+
+test('attachBackdropPressGate: a click with no preceding pointerdown does NOT dismiss', () => {
+  const document = createDocument();
+  const { node, dismissals } = makeBackdropCard(document);
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, []);
+});
+
+test('attachBackdropPressGate: press inside, click target resolving to the backdrop (drag-release) does NOT dismiss', () => {
+  const document = createDocument();
+  const { node, inner, dismissals } = makeBackdropCard(document);
+  node.dispatch('pointerdown', { target: inner });
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, [], 'the press started inside the card, not on the backdrop');
+});
+
+test('attachBackdropPressGate: press on the backdrop, click target resolving inside does NOT dismiss', () => {
+  const document = createDocument();
+  const { node, inner, dismissals } = makeBackdropCard(document);
+  node.dispatch('pointerdown', { target: node });
+  node.dispatch('click', { target: inner });
+  assert.deepEqual(dismissals, [], 'the click itself must also land on the backdrop');
+});
+
+test('attachBackdropPressGate: the gate resets after every click, both dismiss and no-dismiss branches', () => {
+  const document = createDocument();
+  const { node, inner, dismissals } = makeBackdropCard(document);
+  // No-dismiss branch (press inside) resets the flag...
+  node.dispatch('pointerdown', { target: inner });
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, []);
+  // ...so a bare click with no fresh pointerdown still does not dismiss.
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, []);
+  // Dismiss branch resets it too — a stale flag must not survive to the NEXT click.
+  node.dispatch('pointerdown', { target: node });
+  node.dispatch('click', { target: node });
+  assert.deepEqual(dismissals, ['dismiss']);
+  node.dispatch('click', { target: node }); // no fresh pointerdown — must not dismiss again
+  assert.deepEqual(dismissals, ['dismiss']);
 });

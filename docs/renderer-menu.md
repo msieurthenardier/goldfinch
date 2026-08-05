@@ -24,7 +24,8 @@ The sheet page (`src/renderer/menu-overlay.js`) registers one controller entry p
 has no in-document trigger buttons; opens are programmatic on `menu-overlay:init`):
 
 - **`menu` template** (kebab ⋮, container ▾, page-context incl. toolbar-Unpin mode,
-  tab-context — one shared entry) — has `items` (the rendered `role="menuitem"` buttons; separators/notes are
+  tab-context, bookmarks-overflow (M15 F1 Leg 3, the bar's overflow chevron menu) —
+  one shared entry) — has `items` (the rendered `role="menuitem"` buttons; separators/notes are
   excluded by the getter, so roving skips them for free).
 - **`info-popup` template** (site-info 🔒) — **no `items`** (the roving contract no-ops); the
   template's own `keydown` handler covers Escape/Tab dismissal.
@@ -69,10 +70,12 @@ is hoist-safe regardless of source order.
    own Arrow/Enter keydowns and `closeAll()` it mid-navigation. Such consumers open
    programmatically. Post-F8 this is **every** sheet template entry (opens arrive over
    `menu-overlay:init`); it originated with the chrome-era page context menu.
-2. **`!entry.items` roving no-op.** A popup consumer (the `info-popup` and `input-dialog`
-   templates) registers without an `items` getter; the menu-keydown handler returns early at
-   `if (!entry.items) return`, so the roving/arrow contract simply does nothing for it. The
-   template supplies its own Escape/Tab dismissal in its own handler.
+2. **`!entry.items` roving no-op.** A popup consumer (the `info-popup`, `input-dialog`, and
+   `bookmark-edit` (M15 F1 Leg 2, the star/bar/overflow quick-edit popover — the FIRST-EVER
+   anchored modal card) templates) registers without an `items` getter; the menu-keydown
+   handler returns early at `if (!entry.items) return`, so the roving/arrow contract simply
+   does nothing for it. The template supplies its own Escape/Tab dismissal in its own handler
+   (`bookmark-edit`'s 4-way Tab-cycle via `attachModalCard`).
 3. **`focusReturn?` vs default `trigger.focus()`.** On Escape/Tab the controller calls
    `entry.focusReturn()` when present, else `entry.trigger.focus()`. In the sheet document
    this moves focus only *within the sheet*; the user-visible focus return (to the chrome

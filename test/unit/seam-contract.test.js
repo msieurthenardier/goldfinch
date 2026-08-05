@@ -70,6 +70,10 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // M15 F1 Leg 3 (bookmarking, FD ruling): +1 for openBookmarksOverflowOverlayForAudit —
 // the SHEET_STATES 'sheet:bookmarks-overflow' a11y driver for the overflow chevron
 // menu (same every-new-sheet precedent, FD-ruled in the leg's Context).
+// M15 F2 Leg 1 (renderer-extraction): NO membership change — the eight
+// openVault*OverlayForAudit entries above are pure relocations, now imported
+// from the new src/renderer/chrome/vault-controller.js and destructured into
+// bare renderer.js consts so this parser's IDENTIFIER_RE still matches them.
 const SEAM_COUNT = 33;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
@@ -121,7 +125,20 @@ const SEAM_COUNT = 33;
 // the new bookmarks-bar.js per the leg's own line-budget ruling, not here.
 // Planned, deliberate bump per the leg's Context FD ruling; renderer.js
 // extraction remains banked architecture debt.
-const RENDERER_LINE_BUDGET = 1933;
+// M15 F2 Leg 1 (renderer-extraction, FD ruling — the banked architecture debt
+// finally paid): REBASED DOWNWARD, 1933 → 1650. The entire vault flow (11
+// overlay-state entries, the flow state machine + its five state variables,
+// openVaultPicker/openCaptureSheet/renderVaultIndicator, every
+// window.goldfinch.onVault* subscription, the vault-picker activation dispatch
+// + the three show/ack no-op dispatch cases, the vault-unlock/vault-capture
+// overlay-close branches, and the eight vault *ForAudit seam hooks) moved to
+// the new src/renderer/chrome/vault-controller.js, built on the
+// createDownloadsController shape (chained handleActivation/handleClosed,
+// late-bound openOverlayMenu). renderer.js measures 1527 by this test's own
+// metric post-extraction; the budget is set to measured + ~123 headroom
+// (rounded to a clean number, ≤ 1700 per the leg's Outputs) for legs 2-3's
+// planned jar-scoped bookmark call-site growth in this same flight.
+const RENDERER_LINE_BUDGET = 1650;
 
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
@@ -157,7 +174,7 @@ function extractSeamIdentifiers(rendererSource) {
   return identifiers;
 }
 
-test('renderer.js remains a thin composition root within its 1,200-line budget', () => {
+test('renderer.js remains a thin composition root within its RENDERER_LINE_BUDGET line budget', () => {
   const source = fs.readFileSync(RENDERER_JS, 'utf8');
   const lines = source.split(/\r?\n/).length;
   assert.ok(lines <= RENDERER_LINE_BUDGET, `renderer.js has ${lines} lines; budget is ${RENDERER_LINE_BUDGET}`);

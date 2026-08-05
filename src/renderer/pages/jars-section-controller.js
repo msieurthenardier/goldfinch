@@ -557,13 +557,18 @@ const CLEAR_COPY = {
   cookies: "Clears this jar's cookies. Sites in this jar will sign you out.",
   storage: "Clears this jar's site storage — data sites saved locally in this jar.",
   cache: "Clears this jar's cached files. Sites reload them on next visit.",
-  history: "Clears this jar's browsing history."
+  history: "Clears this jar's browsing history.",
+  // M15 F2 Leg 2 (DD9, round-2 review finding): every JAR_DATA_CLASSES id
+  // needs an entry here — an unlisted id renders the literal string
+  // "undefined" in the confirm dialog body (see the totality test below).
+  bookmarks: "Clears this jar's saved bookmarks."
 };
 const CLEAR_OK_NOTE = {
   cookies: 'Cookies cleared.',
   storage: 'Site storage cleared.',
   cache: 'Cache cleared.',
-  history: 'History cleared.'
+  history: 'History cleared.',
+  bookmarks: 'Bookmarks cleared.'
 };
 const WIPE_COPY =
   "Wipes this jar's cookies, site storage, and cache, and rerolls its fingerprint. Open tabs in this jar will close.";
