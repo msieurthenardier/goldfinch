@@ -96,13 +96,13 @@ const jarsClient = createJarsClient({
 // bookmarks-client.js header). `isInternalTab` is injected lazily, the same
 // `tabController`-not-yet-assigned closure jarsClient uses above. `jarsBoot`/
 // `getDefaultJarId` (L3-DD-B) sequence the default-jar boot prefetch behind
-// jarsClient's own boot; `toast` (L3-DD-F) is the rejection-feedback sink.
+// jarsClient's own boot. No `toast`: L3-DD-F's rejection-feedback sink was
+// removed in M15 F3 Leg 2 (DD9) — the residual race is unhandled by design.
 const bookmarksClient = createBookmarksClient({
   bridge: window.goldfinch,
   isInternalTab: (tab) => tabController.isInternalTab(tab),
   jarsBoot: jarsClient.boot,
   getDefaultJarId: () => jarsClient.defaultId,
-  toast,
   // sync path 5/5 (M15 F1 Leg 2, AC "five sync paths") — covers cross-window
   // edits: re-derive the active tab's star after the cache's own
   // bookmarks-changed (or ensureJar first-sight) refresh completes (not on
@@ -545,8 +545,26 @@ bookmarksBarController = createBookmarksBar({
   activeContainer: () => { const t = activeTab(); return t ? t.container : null; },
   overlayMenuClient,
   overlayMenuState: overlayMenus['bookmarks-overflow'],
-  rightAnchorOf // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
+  rightAnchorOf, // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
+  // M15 F3 Leg 4 (drag onto page): the PER-WCID navigation form — `navigate` is
+  // active-tab-only and the drop may land on a background tab's guest (AC9) —
+  // plus the bare bookmark-drag bookend sends.
+  tabNavigate: (payload) => window.goldfinch.tabNavigate(payload),
+  bookmarkDragStarted: () => window.goldfinch.bookmarkDragStarted(),
+  bookmarkDragEnded: () => window.goldfinch.bookmarkDragEnded()
 });
+// Main forwards a bookmark drop as `{ targetWcId }` after checking (and
+// consuming) this window's drag declaration; the bar resolves the url from its
+// own held session and navigates that tab.
+window.goldfinch.onBookmarkDrop((d) => bookmarksBarController.handleDropSignal(d));
+// M15 F3 Leg 5a: the bar → overflow half — main forwards the SHEET's drop index
+// after its own sender/token/menuType gate; the bar resolves the bookmark, jar,
+// and visible count from its dragstart-time hold and commits the reorder.
+window.goldfinch.onBookmarkOverflowDrop((d) => bookmarksBarController.handleOverflowDrop(d));
+// M15 F3 Leg 5b: the overflow → bar half — the sheet is the drag SOURCE, so the
+// chrome has no dragstart/dragend for it. Main forwards the sheet's own start/end
+// lifecycle signals and the bar builds its foreign-drag session from them.
+window.goldfinch.onBookmarkSheetDrag((d) => bookmarksBarController.handleSheetDrag(d));
 // Initial paint (M15 F2 Leg 3, L3-DD-B): the bar renders the DEFAULT jar's
 // bookmarks once the cache's boot prefetch resolves — before any tab exists,
 // so the common case (first tab lands in the default jar) shows correct

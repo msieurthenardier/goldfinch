@@ -97,7 +97,14 @@ export default [
     // Leg 4) and vault-fill-icon.js its testable decorative-icon core (M12 F2 / F5
     // HAT) — same main-world context (uses window/document/Event/timers), CJS-required
     // by the preload, so they carry the identical globals.
-    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-fill-icon.js'],
+    // guest-bookmark-drop.js (M15 F3 Leg 4) is its drag-onto-page core — same
+    // main-world context, CJS-required by the preload, same globals. Its one
+    // require() edge onto src/shared/ (an ESM module, for BOOKMARK_DND_MIME) is
+    // safe ONLY because this preload is BUNDLED by esbuild ahead of load
+    // (scripts/build-preload.mjs) — the preload-graph-ESM-free invariant
+    // (test/unit/preload-graph-esm-free.test.js) governs the NON-bundled
+    // chrome-preload graph, which this file is not part of.
+    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-fill-icon.js', 'src/preload/guest-bookmark-drop.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },

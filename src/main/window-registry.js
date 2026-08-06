@@ -45,6 +45,7 @@
  *   tearoffOverlay: any,
  *   htmlFullscreen: { wcId: number, savedBounds: any, pendingBounds: any } | null,
  *   dragWcId: number | null,
+ *   bookmarkDragActive: boolean,
  *   restoreTabs?: Array<{ url: string, jarId: string, active: boolean }>
  * }} WindowRecord
  */
@@ -97,6 +98,15 @@ function createWindowRegistry() {
       // never declared. Cleared by a grace timer at dragend, or consumed by a
       // successful adopt (main.js owns both). Dies with the record on window close.
       dragWcId: null,
+      // M15 F3 Leg 4 (DD6): THIS window's chrome declared a BOOKMARK drag at
+      // dragstart — the gate the guest's bare drop signal must pass before main
+      // forwards it. Its OWN field, deliberately NOT `dragWcId`: that is a
+      // single slot per record, and sharing it would clobber a tab drag in
+      // flight. Carries no tab and no url — it answers only "is a bookmark drag
+      // in flight in this window", which is all the forward is allowed to know.
+      // Cleared by a grace timer at dragend, or CONSUMED by the first successful
+      // forward (register-tab-ipc.js owns both). Dies with the record.
+      bookmarkDragActive: false,
     };
     windows.set(win.id, record);
     lastFocusedId = win.id;
@@ -226,6 +236,40 @@ function createWindowRegistry() {
     return false;
   }
 
+  /**
+   * The CURRENT menu of the sheet whose webContents is `wc` — `{ menuType, token, jarId? }`
+   * — or `null` (M15 F3 L1, DD1/DD1b). Same `records()` walk and same defensive `typeof`
+   * guards as `isSheetContents` above: a record shape lacking `getView` / `isVisible` /
+   * `getCurrentMenu` must yield `null`, never throw — this is read from inside a LIVE
+   * security guard (`resolveContents`' guard 3), where a TypeError is not a refusal.
+   *
+   * Returns `null` when the matching sheet is NOT `isVisible()`, deliberately:
+   *   - it makes this predicate and `main.js`'s `captureWindow` sheet-layer check
+   *     (DD1c) literally the same predicate rather than two that merely agree, and
+   *   - it disposes structurally of the documented never-settles `capturePage()` case on a
+   *     detached/hidden view — an admitted `captureScreenshot` can never reach a hidden sheet.
+   *
+   * `null` refuses at every tier (DD1d), so a non-matching `wc`, a hidden sheet, and a
+   * sheet with no open menu are all the same answer.
+   * @param {any} wc
+   * @returns {{ menuType: string, token: number, jarId?: string } | null}
+   */
+  function sheetMenuFor(wc) {
+    if (!wc) return null;
+    for (const rec of records()) {
+      const sheet = rec && rec.sheet;
+      if (!sheet || typeof sheet.getView !== 'function') continue;
+      const view = sheet.getView();
+      const swc = view && view.webContents;
+      if (!swc || (typeof swc.isDestroyed === 'function' && swc.isDestroyed())) continue;
+      if (swc !== wc) continue;
+      if (typeof sheet.isVisible !== 'function' || typeof sheet.getCurrentMenu !== 'function') return null;
+      if (!sheet.isVisible()) return null;
+      return sheet.getCurrentMenu() || null;
+    }
+    return null;
+  }
+
   return {
     create,
     get,
@@ -240,6 +284,7 @@ function createWindowRegistry() {
     isTabViewWcId,
     isChromeContents,
     isSheetContents,
+    sheetMenuFor,
   };
 }
 

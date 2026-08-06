@@ -6,9 +6,10 @@
 // evicted-mid-flight drop (L3-DD-A2), the jars-changed eviction subscription,
 // the default-jar boot prefetch (L3-DD-B), the DD2 findByUrl lookup scoped
 // per jar, the shared star-activation decision (activateStar, now also
-// burner-inert), and the bookmark-edit-submit forward handler (now jar-
-// threaded with resolved-rejection feedback, L3-DD-E/F). Real ESM (Node ≥22
-// synchronous require(esm)).
+// burner-inert), and the bookmark-edit-submit forward handler (jar-threaded,
+// L3-DD-E; L3-DD-F's resolved-rejection toast REMOVED in M15 F3 Leg 2, DD9 —
+// the residual race is unhandled by design). Real ESM (Node ≥22 synchronous
+// require(esm)).
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -285,54 +286,43 @@ test('handleEditSubmit: captureEditJar(null) (no jar captured) still forwards �
   assert.deepEqual(bridge.calls, [['remove', { id: 'a', jarId: null }]]);
 });
 
-// L3-DD-F: resolved { ok:false } surfaces via the injected toast; genuine IPC
-// failures still go through the untouched .catch(() => {}).
-test('L3-DD-F: a resolved { ok:false, reason: "duplicate-url" } surfaces distinct toast copy', async () => {
+// M15 F3 Leg 2, DD9: L3-DD-F's `surfaceRejection`/`toast` path is REMOVED.
+// Both call sites are bare `.catch(() => {})` — a resolved { ok:false } is the
+// unhandled residual race (main closes the sheet before forwarding, so the
+// inline-error path is structurally unavailable), and a genuine IPC rejection
+// is swallowed. Neither may throw, and the client takes no `toast` dependency.
+test('DD9: a resolved { ok:false } is an unhandled no-op — no toast dependency, no throw', async () => {
   const bridge = makeBridge();
-  bridge.bookmarkUpdate = async () => ({ ok: false, reason: 'duplicate-url' });
-  const toastCalls = [];
-  const client = createBookmarksClient({ bridge, isInternalTab: () => false, toast: (title, body) => toastCalls.push([title, body]), ...bootDeps() });
+  bridge.bookmarkUpdate = async (p) => { bridge.calls.push(['update', p]); return { ok: false, reason: 'duplicate-url' }; };
+  bridge.bookmarkRemove = async (p) => { bridge.calls.push(['remove', p]); return { ok: false, reason: 'unknown-jar' }; };
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   client.captureEditJar('personal');
   client.handleEditSubmit({ id: 'a', action: 'save', name: 'N', url: 'https://x/' });
-  await Promise.resolve(); await Promise.resolve();
-  assert.equal(toastCalls.length, 1);
-  assert.match(toastCalls[0][1], /already exists/);
-});
-
-test('L3-DD-F: a resolved { ok:false, reason: "not-found"|"unknown-jar" } surfaces DISTINCT (non-duplicate) copy', async () => {
-  const bridge = makeBridge();
-  bridge.bookmarkRemove = async () => ({ ok: false, reason: 'unknown-jar' });
-  const toastCalls = [];
-  const client = createBookmarksClient({ bridge, isInternalTab: () => false, toast: (title, body) => toastCalls.push([title, body]), ...bootDeps() });
-  client.captureEditJar('personal');
   client.handleEditSubmit({ id: 'a', action: 'remove' });
-  await Promise.resolve(); await Promise.resolve();
-  assert.equal(toastCalls.length, 1);
-  assert.doesNotMatch(toastCalls[0][1], /already exists/);
-});
-
-test('L3-DD-F: a resolved { ok:true } never toasts; a genuine IPC rejection is swallowed by .catch, never toasts either', async () => {
-  const bridge = makeBridge();
-  const toastCalls = [];
-  const client = createBookmarksClient({ bridge, isInternalTab: () => false, toast: (title, body) => toastCalls.push([title, body]), ...bootDeps() });
-  client.captureEditJar('personal');
-  client.handleEditSubmit({ id: 'a', action: 'save', name: 'N', url: 'https://x/' }); // default bridge resolves { ok: true }
-  await Promise.resolve(); await Promise.resolve();
-  assert.deepEqual(toastCalls, []);
-
-  bridge.bookmarkRemove = async () => { throw new Error('ipc down'); };
-  client.handleEditSubmit({ id: 'a', action: 'remove' });
-  await Promise.resolve(); await Promise.resolve();
-  assert.deepEqual(toastCalls, [], 'a genuine IPC failure stays on .catch(() => {}), never surfaces a toast');
-});
-
-test('handleEditSubmit tolerates a missing toast dependency (no throw)', async () => {
-  const bridge = makeBridge();
-  bridge.bookmarkUpdate = async () => ({ ok: false, reason: 'duplicate-url' });
-  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() }); // no toast injected
-  client.captureEditJar('personal');
-  client.handleEditSubmit({ id: 'a', action: 'save', name: 'N', url: 'https://x/' });
   await Promise.resolve(); await Promise.resolve(); // must not throw
+  assert.deepEqual(bridge.calls, [
+    ['update', { id: 'a', title: 'N', url: 'https://x/', jarId: 'personal' }],
+    ['remove', { id: 'a', jarId: 'personal' }],
+  ]);
+});
+
+test('DD9: a genuine IPC rejection stays swallowed by .catch(() => {})', async () => {
+  const bridge = makeBridge();
+  bridge.bookmarkRemove = async () => { throw new Error('ipc down'); };
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  client.captureEditJar('personal');
+  client.handleEditSubmit({ id: 'a', action: 'remove' });
+  await Promise.resolve(); await Promise.resolve(); // must not reject
+});
+
+test('DD9: surfaceRejection is gone from the module source', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '../../src/renderer/chrome/bookmarks-client.js'),
+    'utf8',
+  );
+  assert.equal(/surfaceRejection/.test(src), false, 'surfaceRejection must not survive anywhere in bookmarks-client.js');
 });
 
 // ---------------------------------------------------------------------------
@@ -366,4 +356,231 @@ test('bookmarkEntryToEditModel: a missing/empty/non-string title falls back to t
 test('bookmarkEntryToEditModel: a null/undefined entry degrades to an all-blank model, never throws', () => {
   assert.deepEqual(bookmarkEntryToEditModel(null), { id: null, name: '', url: null });
   assert.deepEqual(bookmarkEntryToEditModel(undefined), { id: undefined, name: '', url: undefined });
+});
+
+// ---------------------------------------------------------------------------
+// commitReorder — the drag commit's fresh read (M15 F3 Leg 3, DD6b/DD7, AC6).
+// ---------------------------------------------------------------------------
+
+/** A bridge whose bookmarksGet answers from a MUTABLE store, so a test can
+ * simulate another window's write landing between the cache's last refresh and
+ * the commit's own read. Records every reorder payload. */
+function reorderBridge(initial) {
+  const base = makeBridge();
+  let rows = initial.slice();
+  const reorders = [];
+  return {
+    ...base,
+    reorders,
+    setRows(next) { rows = next.slice(); },
+    bookmarksGet: (payload) => { base.calls.push(['get', payload]); return Promise.resolve(rows.slice()); },
+    bookmarkReorder: async (payload) => { reorders.push(payload); base.calls.push(['reorder', payload]); return { ok: true }; },
+  };
+}
+
+const B = (id) => ({ id, url: `https://${id}.test/`, title: id });
+
+test('commitReorder: builds its id list from a FRESH bookmarksGet, not from the cache (DD6b)', async () => {
+  const bridge = reorderBridge([B('a'), B('b'), B('c')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  // Prime the cache with a DIFFERENT (stale) list — commitReorder must ignore it.
+  bridge.fireBookmarksChanged({ jarId: 'work' });
+  await client.ensureJar('work');
+  bridge.setRows([B('a'), B('b'), B('c')]);
+
+  const issued = await client.commitReorder('work', 'a', 2);
+  assert.equal(issued, true);
+  assert.deepEqual(bridge.reorders, [{ jarId: 'work', ids: ['b', 'c', 'a'] }]);
+});
+
+test('commitReorder: THE DD6b DEFECT — a bookmark added by another window and not yet broadcast is NOT dropped from the payload', async () => {
+  // The cache holds three; another window has just added a fourth, and this
+  // window has not processed the broadcast yet. A cache-derived payload would
+  // omit 'd' — and the store's forgiving rule would then append it silently at
+  // the END, relocating another window's bookmark and returning { ok: true }.
+  const bridge = reorderBridge([B('a'), B('b'), B('c')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  await client.ensureJar('work');
+  assert.deepEqual(client.listFor('work').map((b) => b.id), ['a', 'b', 'c'], 'the cache is one round trip stale');
+
+  bridge.setRows([B('a'), B('b'), B('c'), B('d')]); // the un-broadcast write
+  await client.commitReorder('work', 'a', 2);
+
+  assert.deepEqual(bridge.reorders[0].ids, ['b', 'c', 'a', 'd'],
+    "'d' rides along in its own position — it is neither omitted nor relocated");
+  assert.equal(bridge.reorders[0].ids.includes('d'), true);
+  assert.equal(client.listFor('work').map((b) => b.id).includes('d'), false,
+    'and the commit demonstrably did NOT read through the cache, which still lacks it');
+});
+
+test('commitReorder: a drop back into the original position issues NO call and no broadcast (AC4)', async () => {
+  const bridge = reorderBridge([B('a'), B('b'), B('c')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  const issued = await client.commitReorder('work', 'b', 1); // 'b' is already at index 1
+  assert.equal(issued, false);
+  assert.deepEqual(bridge.reorders, [], 'moveIndex returned the SAME reference — nothing to write');
+});
+
+test('commitReorder: the dragged bookmark vanished mid-drag -> skipped, never an unknown id in the payload (Edge Case)', async () => {
+  const bridge = reorderBridge([B('a'), B('b'), B('c')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  bridge.setRows([B('a'), B('c')]); // another window removed 'b' before this read
+  const issued = await client.commitReorder('work', 'b', 0);
+  assert.equal(issued, false, "indexOf misses -> moveIndex returns the same reference -> no call");
+  assert.deepEqual(bridge.reorders, []);
+});
+
+test('commitReorder: forward and backward moves are exact (moveIndex is imported, not hand-rolled)', async () => {
+  const bridge = reorderBridge([B('a'), B('b'), B('c'), B('d')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  await client.commitReorder('work', 'a', 2); // forward — the classic off-by-one
+  assert.deepEqual(bridge.reorders.at(-1).ids, ['b', 'c', 'a', 'd']);
+  await client.commitReorder('work', 'd', 1); // backward
+  assert.deepEqual(bridge.reorders.at(-1).ids, ['a', 'd', 'b', 'c']);
+  await client.commitReorder('work', 'a', 3); // to the very end
+  assert.deepEqual(bridge.reorders.at(-1).ids, ['b', 'c', 'd', 'a']);
+});
+
+test('commitReorder: degenerate arguments never reach the bridge', async () => {
+  const bridge = reorderBridge([B('a'), B('b')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  assert.equal(await client.commitReorder(null, 'a', 1), false, 'no captured jar (a jar-less/burner surface)');
+  assert.equal(await client.commitReorder('work', undefined, 1), false);
+  assert.equal(await client.commitReorder('work', 'a', -1), false, 'moveIndex no-ops on an out-of-range target');
+  assert.equal(await client.commitReorder('work', 'a', 9), false);
+  assert.deepEqual(bridge.reorders, []);
+  assert.equal(bridge.calls.some((c) => c[0] === 'get'), true, 'the fresh read still happened for the in-range-arg cases');
+});
+
+test('commitReorder: a rejected read or write is swallowed — the cache re-derives to truth independently', async () => {
+  const rejecting = { ...makeBridge(), bookmarksGet: () => Promise.reject(new Error('ipc down')) };
+  const c1 = createBookmarksClient({ bridge: rejecting, isInternalTab: () => false, ...bootDeps() });
+  assert.equal(await c1.commitReorder('work', 'a', 1), false);
+
+  const bridge = reorderBridge([B('a'), B('b')]);
+  bridge.bookmarkReorder = () => Promise.reject(new Error('ipc down'));
+  const c2 = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  assert.equal(await c2.commitReorder('work', 'a', 1), false);
+});
+
+test('commitReorder: a resolved { ok:false, unknown-jar } (jar deleted mid-drag) is a SILENT no-op', async () => {
+  const bridge = reorderBridge([B('a'), B('b')]);
+  bridge.bookmarkReorder = async (payload) => { bridge.reorders.push(payload); return { ok: false, reason: 'unknown-jar' }; };
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  // Consistent with DD9's disposition of the residual-race feedback: no throw,
+  // no operator surface, no unhandled rejection.
+  await client.commitReorder('gone', 'a', 1);
+  assert.deepEqual(bridge.reorders, [{ jarId: 'gone', ids: ['b', 'a'] }]);
+});
+
+test('commitReorder: a non-array read (a malformed response) never becomes a payload', async () => {
+  const bridge = reorderBridge([]);
+  bridge.bookmarksGet = () => Promise.resolve(/** @type {any} */ (null));
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  assert.equal(await client.commitReorder('work', 'a', 0), false);
+  assert.deepEqual(bridge.reorders, []);
+});
+
+// ---------------------------------------------------------------------------
+// commitOverflowDrop — the bar → overflow commit (M15 F3 Leg 5a, AC4/AC10).
+//
+// ⚠ THE INDEX RULE WAS RULED BY THE OPERATOR ON 2026-08-05, after two design-
+// review cycles each proposed a different wrong alternative. Every case below
+// asserts the LITERAL expected full-list order from that ruling. Nothing here
+// re-derives `min(visibleCount + k, n - 1)` — a test that recomputes the formula
+// under test can only prove the formula equals itself, which is exactly how the
+// first two cycles' answers would have gone green.
+//
+// Fixture: order A..L (12), visibleCount 8, so the sheet renders FOUR overflow
+// rows (I,J,K,L) — ≥3, as the AC requires, so k=last and the clamp are both
+// genuinely exercised. The item dragged in from the bar is A.
+// ---------------------------------------------------------------------------
+
+const ORDER_AL = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+
+async function overflowClient() {
+  const bridge = reorderBridge(ORDER_AL.map(B));
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  return { bridge, client };
+}
+
+test('Leg 5a AC4: k=0 — the item lands at the TOP of the overflow run, and I is promoted onto the bar', async () => {
+  const { bridge, client } = await overflowClient();
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 0), true);
+  assert.deepEqual(bridge.reorders, [{
+    jarId: 'work',
+    ids: ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'A', 'J', 'K', 'L'],
+  }]);
+  // Read back the way the operator sees it: positions 8.. are the overflow run.
+  assert.deepEqual(bridge.reorders[0].ids.slice(8), ['A', 'J', 'K', 'L']);
+});
+
+test('Leg 5a AC4: k=1', async () => {
+  const { bridge, client } = await overflowClient();
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 1), true);
+  assert.deepEqual(bridge.reorders[0].ids,
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A', 'K', 'L']);
+  assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'A', 'K', 'L']);
+});
+
+test('Leg 5a AC4: k=2', async () => {
+  const { bridge, client } = await overflowClient();
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 2), true);
+  assert.deepEqual(bridge.reorders[0].ids,
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'A', 'L']);
+  assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'A', 'L']);
+});
+
+test('Leg 5a AC4: k=last (3) — the bottom of the rendered rows', async () => {
+  const { bridge, client } = await overflowClient();
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 3), true);
+  assert.deepEqual(bridge.reorders[0].ids,
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
+  assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'L', 'A']);
+});
+
+test('Leg 5a AC4: k PAST the last row — the CLAMP, which is what stops a SILENT NO-OP', async () => {
+  const { bridge, client } = await overflowClient();
+  // Unclamped this is toIndex 12 === order.length, moveIndex returns the same
+  // array reference, and this function reads that as "nothing moved" — a
+  // deliberate gesture doing nothing at all, which the Edge Cases forbid.
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 4), true, 'it must NOT no-op');
+  assert.deepEqual(bridge.reorders[0].ids,
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
+  assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'L', 'A'], 'A last, same as k=last');
+});
+
+test('Leg 5a AC4/DD6b: the clamp is evaluated against the FRESH order length, not a cached one', async () => {
+  const { bridge, client } = await overflowClient();
+  // Another window removed two entries between the snapshot and this commit. A
+  // clamp against the stale 12 would compute toIndex 11 on a 10-row list — out
+  // of range for moveIndex, so the drop would silently do nothing.
+  bridge.setRows(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].map(B));
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, 4), true);
+  assert.deepEqual(bridge.reorders[0].ids,
+    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A']);
+});
+
+test('Leg 5a AC10/DD6b: the commit re-reads through bookmarksGet for the CAPTURED jar', async () => {
+  const { bridge, client } = await overflowClient();
+  await client.commitOverflowDrop('work', 'A', 8, 0);
+  assert.deepEqual(bridge.calls.filter((c) => c[0] === 'get'), [['get', { jarId: 'work' }]]);
+});
+
+test('Leg 5a AC4: degenerate arguments never reach the store', async () => {
+  const { bridge, client } = await overflowClient();
+  assert.equal(await client.commitOverflowDrop(null, 'A', 8, 0), false, 'no captured jar');
+  assert.equal(await client.commitOverflowDrop('work', undefined, 8, 0), false);
+  assert.equal(await client.commitOverflowDrop('work', 'A', -1, 0), false, 'nonsense visibleCount');
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8, -1), false);
+  assert.equal(await client.commitOverflowDrop('work', 'A', 8.5, 0), false);
+  assert.equal(await client.commitOverflowDrop('work', 'ZZZ', 8, 0), false, 'a bookmark deleted mid-drag');
+  assert.deepEqual(bridge.reorders, []);
+});
+
+test('Leg 5a AC4: commitReorder is UNCHANGED by the shared body — the bar-internal path still works', async () => {
+  const bridge = reorderBridge([B('a'), B('b'), B('c')]);
+  const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
+  assert.equal(await client.commitReorder('work', 'a', 2), true);
+  assert.deepEqual(bridge.reorders, [{ jarId: 'work', ids: ['b', 'c', 'a'] }]);
 });

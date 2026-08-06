@@ -99,6 +99,26 @@ export function keyboardMove(order, id, direction) {
  *
  * Degenerate input (`slotRects` not an array, or empty) returns `0`.
  *
+ * ── THE EXTERNAL-SOURCE CASE (M15 F3 DD3; consumers: Legs 5a AND 5b) ───────
+ * The contract above ("among the remaining slots") presumes the dragged slot
+ * is PRESENT in `slotRects`. When the drag SOURCE lives on another surface —
+ * a bar item dropped into the overflow sheet's row list, an overflow row
+ * dropped onto the bar — it is not, and the caller passes `draggedIndex = -1`.
+ * That is a supported, pinned input, not an accident: no index equals -1, so
+ * the loop skips nothing and the result is the plain insertion index among ALL
+ * the given slots, in `[0, slotRects.length]`. Do NOT "fix" this by clamping to
+ * `slotRects.length - 1` or by treating a negative `draggedIndex` as invalid.
+ *
+ * BOTH directions of the bar ↔ overflow gesture now depend on it, each pairing
+ * the past-the-end answer with its own clamp in `bookmark-drag.js`:
+ *   - bar → overflow (Leg 5a): `overflowDropIndexY` → `overflowDropToIndex`;
+ *   - overflow → bar (Leg 5b): the bar's own visible slot rects → `barDropToIndex`.
+ * The past-the-end answer is the whole input to both clamps — take it away and
+ * a release past the last slot silently stops being a distinguishable position.
+ * Pinned directly in `tab-order.test.js` ("external-source case"), not only
+ * through those two callers.
+ * ──────────────────────────────────────────────────────────────────────────
+ *
  * @param {Array<SlotRect>} slotRects
  * @param {number} pointerX
  * @param {number} draggedIndex

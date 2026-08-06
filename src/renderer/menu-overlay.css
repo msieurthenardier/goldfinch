@@ -90,6 +90,29 @@ body {
   max-height: min(280px, calc(100vh - 12px));
   overflow-y: auto;
 }
+/* Bar → overflow placement indicator (M15 F3 Leg 5a, AC3) — the y-axis sibling
+   of styles.css's `.bm-drop-indicator`, which is x-axis (the bar is a horizontal
+   run; these rows are a vertical list).
+
+   ⚠ PARENTED TO #menu-root, NOT #sheet-menu. renderMenu() starts with
+   `menuNode.textContent = ''`, so an indicator inside #sheet-menu is wiped on
+   every render. #menu-root is already `position: absolute; inset: 0` and is the
+   containing block; #sheet-menu is ALREADY `position: absolute` too — do NOT add
+   `position: relative` to it, that would break positionNode's right/left anchoring.
+
+   Absolutely positioned so it is in NO layout: it cannot move a row, so the row
+   rects the drop index is computed against stay valid while it is shown (leg 3's
+   lesson, applied to the other axis). Instant — no transition, no animation. */
+.sheet-drop-indicator {
+  position: absolute;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  transition: none;
+  animation: none;
+  z-index: 1;
+}
 /* Non-item header row (role="presentation") — chrome .cm-title parity. */
 .cm-title {
   font-size: 10px;
@@ -142,6 +165,14 @@ body {
 .cm-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+/* M15 F3 Leg 5b: the overflow menu's rows are drag SOURCES (the sheet's first
+   ever). Scoped by the data-menu-type attribute renderMenu stamps AND by the
+   reflected `draggable` attribute, so no other menuType's rows are touched —
+   the same gating discipline the JS side uses. `user-select: none` stops a
+   press-and-move from starting a text selection that competes with the drag. */
+#sheet-menu[data-menu-type='bookmarks-overflow'] .cm-item[draggable='true'] {
+  user-select: none;
 }
 
 /* ---------- info-popup template (site-info) ----------

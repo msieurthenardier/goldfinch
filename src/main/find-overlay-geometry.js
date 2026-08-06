@@ -3,7 +3,9 @@
 
 // Pure bounds helper for the floating find-overlay WebContentsView (M05 Flight 7, DD2).
 // Computes the overlay's DIP rect anchored to the TOP-RIGHT strip of the active guest's
-// bounds, mirroring the retired-inset bar's CSS anchor (top: 8px; right: 12px).
+// bounds. The margins below are this module's OWN authority — the pre-overlay inset
+// `#find-bar` whose CSS anchor they were originally copied from is gone, so nothing
+// mirrors them and no CSS rule can drift out from under them.
 //
 // Electron-free by design: unit-tested offline with plain objects (node --test).
 // Bounds are DIP end-to-end (renderer getBoundingClientRect is DIP; setBounds takes DIP) —
@@ -11,8 +13,11 @@
 
 const FIND_OVERLAY_WIDTH = 380; // DIP; clamped to guest width on narrow guests
 const FIND_OVERLAY_HEIGHT = 48; // bar + breathing room for shadow
-const FIND_OVERLAY_MARGIN_TOP = 8; // mirrors #find-bar CSS `top: 8px`
-const FIND_OVERLAY_MARGIN_RIGHT = 12; // mirrors #find-bar CSS `right: 12px`
+// Sole source of truth for the overlay's inset from the guest's top-right corner:
+// the view is positioned by setBounds, and find-overlay.css styles only the contents
+// of the view rect (find-overlay.css's own `#find-bar` sets no top/right).
+const FIND_OVERLAY_MARGIN_TOP = 8; // DIP inset from the guest's top edge
+const FIND_OVERLAY_MARGIN_RIGHT = 12; // DIP inset from the guest's right edge
 
 /**
  * Compute the overlay's window-relative DIP bounds from the active guest's DIP bounds.

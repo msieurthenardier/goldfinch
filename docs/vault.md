@@ -344,15 +344,36 @@ no plaintext key and adding no fourth recovery route.
 - **Web content.** No vault secret is readable from a web page except the single credential a
   fill injects — and master-equivalent secrets never enter any page DOM (they route through
   the chrome-owned sheet).
-- **Automation reach into the secret sheet (PR#112 finding 1).** The chrome-owned menu-overlay
-  **sheet** — where the master password is typed and one-time recovery/access/admin keys render
-  as `textContent` — is refused by the automation resolver at **every tier, admin included**
-  (`resolveContents` throws `automation: secret-sheet` when the target is any window's sheet
-  webContents). Its wcId is still *discoverable* via `enumerateWindows` (`sheetWcId`), but no
-  automation op — `evaluate`, `readDom`, `readAxTree`, `click`, `typeText` — can resolve it, so
-  a script cannot install an input listener on it or read the secrets it renders. (Whole-window
-  **pixel** capture still shows whatever is visibly on screen, exactly as a human sees it — that
-  is the accepted limit below, not a covert channel into a hidden sheet.)
+- **Automation reach into the secret sheet (PR#112 finding 1; narrowed by M15 F3 DD1).** The
+  chrome-owned menu-overlay **sheet** — where the master password is typed and one-time
+  recovery/access/admin keys render as `textContent` — is admitted by the automation resolver
+  **only when BOTH allowlists pass**: the sheet's *current* menuType is in
+  `AUTOMATABLE_MENU_TYPES` (`src/main/automation/resolve.js`; seeded `bookmarks-overflow` and
+  `bookmark-edit` — non-secret bookmark surfaces) **and** the operation is one of exactly three
+  reads (`readDom`, `readAxTree`, `captureScreenshot`). Everything else throws
+  `automation: secret-sheet` at **every tier, admin included**: every `vault-*` and `auth-*`
+  menuType, a `null` current menu (nothing open, or the sheet hidden), every other wcId-first
+  op — `evaluate`, `injectScript`, `click`, `typeText`, `pressKey`, `navigate`, `printToPDF`,
+  `findInPage`, `dragPointer`, … — and any op or menuType added later, which is refused **by
+  default** because it did nothing to be admitted. Its wcId stays *discoverable* via
+  `enumerateWindows` (`sheetWcId`).
+  - **No vault sheet is ever readable.** `vault-unlock` / `vault-set` / `vault-stepup` /
+    `vault-recovery-show` / `vault-accesskey-show` / `vault-adminkey-show` / `vault-import` /
+    `vault-change-master` / `vault-recover` are all off the allowlist, so a script can neither
+    install an input listener on the sheet (no `evaluate`/`injectScript` at any tier, ever) nor
+    read the secrets it renders.
+  - **The DOM is scrubbed at CLOSE, not at the next open (DD1f).** `closeMenuOverlay` sends the
+    sheet a close/reset message that immediately clears the rendered card, so a closed vault
+    card's `textContent` is never co-resident with a later allowlisted menu. Without it the
+    admission above would rest on a false premise.
+  - **Whole-window pixel capture no longer leaks the sheet either (DD1c — a REVERSAL).** This
+    paragraph previously *accepted* `captureWindow` compositing the visible sheet as "what a
+    human sees, not a covert channel". That was a real read path by a second door: at admin
+    tier the composite returned pixels of `vault-unlock` and of the dismiss-locked one-time
+    recovery-key and admin-key displays. `captureWindow`'s sheet layer is now gated on the
+    **same** menuType allowlist (imported, not re-typed), with a post-await re-check on the
+    menuType so a mid-capture model-replace cannot slip vault pixels into the composite. The
+    layer is simply dropped under any non-admitted menu. **Closed, not accepted.**
 
 **What it does NOT protect against (out of scope, stated plainly):**
 

@@ -5,6 +5,12 @@
 // no origin gate. Exposes exactly the DD4 sheet-side channel set:
 //   in:  onInit (menu-overlay:init — channel 3; {menuType, model, anchor,
 //        startIndex, token})
+//   in:  onCloseReset (menu-overlay:close — M15 F3 L1 DD1f; NO payload) — the EAGER
+//        DOM SCRUB. Main sends it on every menu close so the shared sheet document
+//        never retains a closed menu's content (a one-time recovery key's textContent
+//        included). SECURITY-relevant, not tidiness: the automation resolver now admits
+//        three read ops on the sheet under an allowlisted menuType, and a retained DOM
+//        would make that admission unsound. See menu-overlay-manager.js's module header.
 //   out: sendActivated (menu-overlay:activated — channel 4; {id, token, value?} —
 //        `value` is the Leg-3 input-dialog text; passed WHOLE, main validates
 //        shape via sanitizeActivatedValue before forwarding on channel 6),
@@ -19,6 +25,8 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   version: 1,
   platform: process.platform,
   onInit: (cb) => ipcRenderer.on('menu-overlay:init', (_e, d) => cb(d)),
+  // DD1f (M15 F3 L1): main→sheet close/reset. No payload — the message IS the signal.
+  onCloseReset: (cb) => ipcRenderer.on('menu-overlay:close', () => cb()),
   sendActivated: (payload) => ipcRenderer.send('menu-overlay:activated', payload),
   sendDismissed: (payload) => ipcRenderer.send('menu-overlay:dismissed', payload),
   // DD4 (M12 F2 chrome-unlock): the master password's DEDICATED request/response
@@ -80,5 +88,25 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   // on a pre-forward validation failure. `payload` carries { token, id,
   // action: 'save' | 'remove', name?, url? } — never a raw sendActivated
   // (channel-4 is string-only / 24-char capped; DD3-preserving).
-  bookmarkEditSubmit: (payload) => ipcRenderer.invoke('menu-overlay:bookmark-edit-submit', payload)
+  bookmarkEditSubmit: (payload) => ipcRenderer.invoke('menu-overlay:bookmark-edit-submit', payload),
+  // M15 F3 Leg 5a (AC8): the bookmarks-overflow sheet's DEDICATED drop-index
+  // channel. NOT channel-4 `sendActivated` — and the disqualifier is a SIDE
+  // EFFECT, not payload size: `menu-overlay:activated` closes the sheet AND
+  // forwards to the chrome's overflow dispatch, which for a `bookmark:<i>` id
+  // NAVIGATES the current tab. (The 24-char cap applies only to `value`; `id` is
+  // unbounded, so size was never the argument.) A one-way `send` like copyText —
+  // the sheet needs no reply; main gates the message on sheet-sender identity,
+  // open-token freshness, AND `menuType === 'bookmarks-overflow'`, then closes
+  // the sheet and forwards the bare index to the owning chrome.
+  overflowDrop: (payload) => ipcRenderer.send('menu-overlay:overflow-drop', payload),
+  // M15 F3 Leg 5b (AC3): the bookmarks-overflow sheet's DRAG-LIFECYCLE channel —
+  // the reverse direction, where the SHEET is the drag source. `{ token, phase:
+  // 'start' | 'end', index? }`, one-way like overflowDrop. `start` carries the
+  // dragged row's snapshot index and is gated main-side on sheet-sender identity
+  // + open-token freshness + menuType === 'bookmarks-overflow'; `end` carries the
+  // same token but is gated on sender identity ALONE, because by then the sheet
+  // has legitimately blur-closed and no menuType/token could still match — its
+  // freshness check moves to the chrome, the only party that can still evaluate
+  // it (and `end` can only CANCEL a session, never cause a write).
+  sheetDrag: (payload) => ipcRenderer.send('menu-overlay:sheet-drag', payload)
 });

@@ -132,6 +132,30 @@ interface GoldfinchBridge {
    * closes, then forwards here; the chrome subscriber issues the actual
    * bookmarkUpdate/bookmarkRemove (chrome is the sole mutation issuer). */
   onBookmarkEditSubmit(cb: (d: { id: string; action: 'save' | 'remove'; name?: string; url?: string }) => void): void;
+  /** M15 F3 Leg 4 (DD6): the bookmark-drag bookend — bare declaration sends,
+   * gating main's forward of a guest drop signal. Carry no bookmark identity. */
+  bookmarkDragStarted(): void;
+  bookmarkDragEnded(): void;
+  /** M15 F3 Leg 4 (DD6/AC9): a bookmark drop landed in the guest `targetWcId`
+   * (derived main-side from event.sender.id — never renderer-supplied). The url
+   * is resolved chrome-side from the live drag session, never from this
+   * payload. */
+  onBookmarkDrop(cb: (d: { targetWcId: number }) => void): void;
+  /** M15 F3 Leg 5a (AC8): a bar item was released over the bookmarks-overflow
+   * sheet at snapshot-local insertion index `index`. Main accepts the report only
+   * from the sheet's own webContents, under a live open token, and only while
+   * menuType === 'bookmarks-overflow'. The bookmark, its jar, and the visible
+   * count are all resolved chrome-side from the dragstart-time hold — never from
+   * this payload. */
+  onBookmarkOverflowDrop(cb: (d: { index: number }) => void): void;
+  /** M15 F3 Leg 5b (AC3): the overflow sheet's OWN drag lifecycle — the reverse
+   * direction, where a sheet row is the drag source. `start` names the dragged row's
+   * snapshot-local `index`; `end` closes the session. Main accepts `start` only from
+   * the sheet's own webContents, under a live open token, while menuType ===
+   * 'bookmarks-overflow'; `end` is sender-gated there and token-re-checked chrome-side
+   * against the live session. The bookmark and its jar are resolved chrome-side from
+   * the overflow snapshot — never from this payload. */
+  onBookmarkSheetDrag(cb: (d: { phase: 'start' | 'end'; token: number; index?: number }) => void): void;
 
   // --- shields ---
   shieldsGet(): Promise<any>;

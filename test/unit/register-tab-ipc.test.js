@@ -68,6 +68,12 @@ function setup() {
     get: (id) => records.find((record) => record.win.id === id) || null,
     getWindowForChrome: (sender) => records.find((record) => record.chromeView.webContents === sender) || null,
     getWindowForGuest: (wcId) => records.find((record) => record.tabViews.has(wcId)) || null,
+    // M15 F3 Leg 4: routing class 3 (owner-resolved per-tab push) — the real
+    // registry's getChromeForTab is exactly this, resolved at event time.
+    getChromeForTab: (wcId) => {
+      const rec = records.find((record) => record.tabViews.has(wcId));
+      return rec ? rec.chromeView.webContents : null;
+    },
     noteFocus: (id) => log.push(['focus-window', id])
   };
   function makeRecord(id) {
@@ -93,6 +99,7 @@ function setup() {
       bootConfigServed: true,
       pendingChromeSends: [],
       dragWcId: null,
+      bookmarkDragActive: false, // M15 F3 Leg 4 — the bookmark drag's OWN slot
       htmlFullscreen: null,
       findOverlay: {
         isSessionActive: () => false,
@@ -218,6 +225,9 @@ test('registers the complete tab/move channel set exactly once', () => {
     'tab-reopen', 'tab-tear-off'
   ].sort());
   assert.deepEqual([...h.ipcMain.listeners.keys()].sort(), [
+    // M15 F3 Leg 4: the bookmark-drag bookend (chrome-sender) + the guest's bare
+    // drop signal (guest-sender) — three new one-way channels.
+    'bookmark-drag-ended', 'bookmark-drag-started', 'guest-bookmark-drop',
     'tab-close', 'tab-drag-ended', 'tab-drag-started', 'tab-find', 'tab-hide',
     'tab-navigate', 'tab-set-active', 'tab-set-bounds'
   ].sort());
@@ -681,4 +691,193 @@ test('cancel-on-rekey: a REFUSED move cancels no popup challenges (guards preced
   const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
   assert.equal(result, null);
   assert.deepEqual(h.authCalls, []);
+});
+
+// ---------------------------------------------------------------------------
+// M15 F3 Leg 4 (`drag-onto-page`) — the bookmark-drag bookend and the guest's
+// bare drop signal (DD5/DD6; AC5/AC6/AC6b/AC8/AC9).
+//
+// This is the leg's security surface: a `contextIsolation: false` guest, where a
+// hostile page can fabricate a DragEvent and reach our preload handler directly,
+// is the sender of the signal that ends in a navigation. Every test below exists
+// because of that, not for coverage.
+// ---------------------------------------------------------------------------
+
+/** Chrome sends recorded for a record, by channel. */
+function chromeSends(h, record, channel) {
+  return h.log.filter((x) => x[0] === 'send' && x[1] === record.chromeView.webContents.id && x[2] === channel);
+}
+
+test('AC6: main REFUSES a guest drop signal with no bookmark drag declared — no forward at all', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+
+  // The fabricated-DragEvent case: a page with no drag in flight. There is no
+  // declaration, so there is nothing to forward and no navigation can follow.
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  assert.deepEqual(chromeSends(h, record, 'bookmark-drop'), []);
+  assert.equal(record.bookmarkDragActive, false);
+});
+
+test('AC9: with a declaration, the signal forwards the SENDER\'s wcId — resolving tab-switch-mid-drag by construction', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  const background = h.addTab(record, 102);
+  record.activeTabWcId = 101; // the operator switched tabs mid-drag; 102 is NOT active
+
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  assert.equal(record.bookmarkDragActive, true);
+  h.ipcMain.send('guest-bookmark-drop', background.webContents);
+
+  const forwards = chromeSends(h, record, 'bookmark-drop');
+  assert.equal(forwards.length, 1);
+  // The tab that RECEIVED the drop, derived from event.sender.id — never the
+  // active tab, and never anything a renderer named.
+  assert.deepEqual(forwards[0][3], { targetWcId: 102 });
+});
+
+test('AC5/AC6: the declaration carries no bookmark identity — the payload of both sends is ignored entirely', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+  // A chrome (or anything able to reach the chrome bridge) naming a bookmark id
+  // or a url on these channels changes nothing: the handlers read no payload.
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents, { url: 'https://evil.test/', id: 'b1' });
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents, { url: 'https://evil.test/' });
+  const forwards = chromeSends(h, record, 'bookmark-drop');
+  assert.deepEqual(forwards[0][3], { targetWcId: 101 }, 'only the sender-derived wcId ever crosses');
+});
+
+test('AC6b: a successful forward CONSUMES the declaration — one navigation, in one tab, per drag', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const dropped = h.addTab(record, 101);
+  const other = h.addTab(record, 102); // a background tab the operator never dropped on
+
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('guest-bookmark-drop', dropped.webContents);
+  assert.equal(record.bookmarkDragActive, false, 'consumed on the first successful forward');
+
+  // Without the consume, EVERY guest in this window — including background tabs —
+  // could fabricate a DragEvent for the whole drag plus its grace window and
+  // navigate itself, repeatedly, destroying unrelated page state.
+  h.ipcMain.send('guest-bookmark-drop', dropped.webContents);
+  h.ipcMain.send('guest-bookmark-drop', other.webContents);
+  assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1, 'exactly one forward per declared drag');
+});
+
+test('AC6: the bookmark declaration lives on its OWN field — an in-flight TAB drag\'s dragWcId is untouched', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+
+  h.ipcMain.send('tab-drag-started', record.chromeView.webContents, 101);
+  assert.equal(record.dragWcId, 101);
+
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('bookmark-drag-ended', record.chromeView.webContents);
+  assert.equal(record.dragWcId, 101, 'dragWcId is a SINGLE slot per record — sharing it would clobber the tab drag');
+  assert.equal(record.bookmarkDragActive, true, 'the bookmark clear is on a grace timer, never synchronous');
+});
+
+test('the bookmark declaration clears on a GRACE TIMER, at the tab bookend\'s 1500 ms', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('bookmark-drag-ended', record.chromeView.webContents);
+  // AC7's ordering is the DEFAULT case, not an edge one: dragend fires in the
+  // chrome at release while the drop is still crossing the guest's macrotask and
+  // two IPC pipes. An immediate clear here would race a legitimate drop into
+  // "no declaration" — intermittently.
+  const timer = h.timers.at(-1);
+  assert.equal(timer.ms, 1500);
+  assert.equal(record.bookmarkDragActive, true);
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1, 'a drop inside the grace window still forwards');
+
+  // …and once the timer fires, the window is closed.
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('bookmark-drag-ended', record.chromeView.webContents);
+  h.timers.at(-1).fn();
+  assert.equal(record.bookmarkDragActive, false);
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1, 'no forward after the grace expires');
+});
+
+test('a fresh declaration CANCELS a pending grace clear rather than being erased by it', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('bookmark-drag-ended', record.chromeView.webContents);
+  const stale = h.timers.at(-1);
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents); // second drag starts
+  assert.equal(h.timers.includes(stale), false, 'the previous drag\'s clear was cancelled');
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1);
+});
+
+test('a NON-CHROME sender cannot declare a bookmark drag (the bookend is chrome-only)', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+  h.ipcMain.send('bookmark-drag-started', guest.webContents); // a guest trying to declare
+  h.ipcMain.send('bookmark-drag-started', {});
+  assert.equal(record.bookmarkDragActive, false);
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  assert.deepEqual(chromeSends(h, record, 'bookmark-drop'), []);
+});
+
+test('CROSS-WINDOW drop: a drag declared in window A, released on window B\'s guest, is refused (deliberate no-op)', () => {
+  const h = setup();
+  const a = h.makeRecord(1);
+  const b = h.makeRecord(2);
+  h.addTab(a, 101);
+  const bGuest = h.addTab(b, 201);
+
+  h.ipcMain.send('bookmark-drag-started', a.chromeView.webContents);
+  h.ipcMain.send('guest-bookmark-drop', bGuest.webContents);
+  assert.deepEqual(chromeSends(h, b, 'bookmark-drop'), [], 'B never declared a drag');
+  assert.deepEqual(chromeSends(h, a, 'bookmark-drop'), [], 'and the signal is never re-routed to A');
+  assert.equal(a.bookmarkDragActive, true, 'A\'s own declaration survives — its drag has not ended');
+});
+
+test('a signal from a wcId that is not a tab in any window is refused', () => {
+  const h = setup();
+  const record = h.makeRecord(1);
+  h.addTab(record, 101);
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  // The sheet / find overlay / anything else: getWindowForGuest resolves null.
+  h.ipcMain.send('guest-bookmark-drop', { id: 9999 });
+  assert.deepEqual(chromeSends(h, record, 'bookmark-drop'), []);
+  assert.equal(record.bookmarkDragActive, true, 'a refused signal consumes nothing');
+});
+
+test('AC8: the drop navigation dies at the REAL gate — tab-navigate\'s trust-branched URL check', () => {
+  // ⚠ The enforcement point is `tab-navigate`, NOT `will-navigate`: Electron does
+  // not emit will-navigate for a programmatic loadURL, so guest-wiring's guardNav
+  // never runs on this path. This test drives the exact channel the drop
+  // navigation rides, with the hostile url injected at the FORWARD layer — a
+  // test that tried to STORE such a bookmark would be vacuous, since
+  // bookmarks-store's validUrl (isSafeTabUrl && !== about:blank) refuses it.
+  const h = setup();
+  const record = h.makeRecord(1);
+  const guest = h.addTab(record, 101);
+  h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents);
+  h.ipcMain.send('guest-bookmark-drop', guest.webContents);
+  const target = chromeSends(h, record, 'bookmark-drop')[0][3].targetWcId;
+
+  for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'goldfinch://settings/#privacy']) {
+    h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: target, verb: 'loadURL', args: [url] });
+  }
+  assert.deepEqual(h.log.filter((x) => x[0] === 'load' && x[1] === 101), [],
+    'a web guest gets isSafeTabUrl — goldfinch:// included, so the drop path can never reach an internal page');
+
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: target, verb: 'loadURL', args: ['https://example.test/'] });
+  assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'the legitimate bookmark url loads');
+  void guest;
 });

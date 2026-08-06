@@ -581,6 +581,85 @@ function registerOverlayIpc({
     });
   }
 
+  // M15 F3 Leg 5a (AC8/AC8b): the bookmarks-overflow sheet's DROP-INDEX channel.
+  // A bar item was released over the sheet's row list; the sheet reports WHERE
+  // (a snapshot-local insertion index) and nothing else. There is no bookmark id,
+  // no url, and no jar on this wire — the chrome resolves all three from its own
+  // dragstart-time hold — so the message cannot be aimed even if it were forged.
+  //
+  // ⚠ THE THREE GUARDS ARE NAMED HERE AS PREDICATES, NOT INHERITED BY CITING A
+  // PRECEDENT. The sheet is ONE persistent document shared by every menuType
+  // (DD1/DD1a), so a handler that checks only sender identity and token freshness
+  // would accept a drop index while `vault-unlock` is on screen. This flight has
+  // now recorded FOUR findings of exactly that shape (leg 1 ×2, leg 4, leg 5a),
+  // and "cite unlockVault/authSubmit" is precisely the habit the leg-4 log entry
+  // says to stop repeating. The guards, in order:
+  //   1. recordForSheetSender — the sender IS this window's sheet webContents,
+  //      never a payload-declared identity;
+  //   2. token freshness against getCurrentMenu() — a stale open cannot report;
+  //   3. current.menuType === 'bookmarks-overflow' — the only menuType whose
+  //      model this index means anything against.
+  // The close mirrors menu-overlay:activated's ordering (close, then forward) and
+  // is what ends the gesture deterministically, rather than waiting on a
+  // bookmarks-changed broadcast that a no-op commit would never fire.
+  ipcMain.on('menu-overlay:overflow-drop', (event, payload) => {
+    const rec = recordForSheetSender(event.sender);
+    if (!rec || !rec.sheet) return;
+    const { token, index } = payload || {};
+    if (typeof token !== 'number') return;
+    if (!Number.isInteger(index) || index < 0) return;
+    const current = rec.sheet.getCurrentMenu();
+    if (!current || token !== current.token) return;
+    if (current.menuType !== 'bookmarks-overflow') return;
+    rec.sheet.closeMenuOverlay('activated', token);
+    chromeForAttachment(rec.win)?.send('bookmark-overflow-drop', { index });
+  });
+
+  // M15 F3 Leg 5b (AC3): the bookmarks-overflow sheet's DRAG-LIFECYCLE channel —
+  // the reverse direction, where the sheet's rows are the drag SOURCE. The chrome
+  // has no `dragstart`/`dragend` of its own for such a gesture, so these two
+  // signals are the entire bracket: `start` opens the chrome's foreign-drag
+  // session (which suppresses both bar-rebuild paths and the overflow close for
+  // the drag's duration), `end` closes it.
+  //
+  // ⚠ THE GUARDS ARE NAMED HERE AS PREDICATES, NOT INHERITED BY CITING THE
+  // OVERFLOW-DROP CHANNEL. One persistent sheet document hosts every menuType
+  // (DD1/DD1a), and this flight has recorded FOUR findings of a handler that
+  // checked only sender identity and token freshness. For `start`, all three:
+  //   1. recordForSheetSender — the sender IS this window's sheet webContents;
+  //   2. token freshness against getCurrentMenu() — a stale open cannot report;
+  //   3. current.menuType === 'bookmarks-overflow' — no other menu's row index
+  //      means anything, and no other menu may arm a bar-suppressing session.
+  //
+  // ⚠ `end` IS DELIBERATELY GATED ON SENDER IDENTITY ALONE, and that asymmetry is
+  // reasoned, not an omission. By the time a sheet-sourced drag ends, the sheet
+  // has been blur-closed since the drag STARTED (that is what makes this leg's
+  // lifecycle channel necessary at all), so `getCurrentMenu()` is null and a
+  // token/menuType gate would refuse EVERY `end` — turning the clear signal
+  // operator session 4 measured into one that never arrives. The freshness check
+  // is not dropped, it MOVES to the chrome, which still holds the live session
+  // and matches the forwarded token against it. Safe to relax because `end` is
+  // non-destructive by construction: it can only cancel a session, never commit
+  // one — an unexpected `end` costs the operator a no-op, never a wrong write.
+  ipcMain.on('menu-overlay:sheet-drag', (event, payload) => {
+    const rec = recordForSheetSender(event.sender);
+    if (!rec || !rec.sheet) return;
+    const { phase, token, index } = payload || {};
+    if (typeof token !== 'number') return;
+    if (phase === 'end') {
+      chromeForAttachment(rec.win)?.send('bookmark-sheet-drag', { phase: 'end', token });
+      return;
+    }
+    if (phase !== 'start') return;
+    if (!Number.isInteger(index) || index < 0) return;
+    const current = rec.sheet.getCurrentMenu();
+    if (!current || token !== current.token) return;
+    if (current.menuType !== 'bookmarks-overflow') return;
+    // No close here: the sheet's own blur close owns that, and closing from this
+    // handler would race the drag session it is announcing.
+    chromeForAttachment(rec.win)?.send('bookmark-sheet-drag', { phase: 'start', token, index });
+  });
+
   ipcMain.on('find-overlay:open', (event, payload) => {
     if (!registry.getWindowForChrome(event.sender)) return;
     const { wcId, findText } = payload || {};

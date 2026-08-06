@@ -80,6 +80,32 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // here; the chrome subscriber issues the actual bookmarkUpdate/
   // bookmarkRemove (chrome is the sole bookmark-mutation issuer).
   onBookmarkEditSubmit: (cb) => ipcRenderer.on('bookmark-edit-submit', (_e, d) => cb(d)),
+  // M15 F3 Leg 4 (DD6) — the bookmark-drag BOOKEND, the tabDragStarted/Ended
+  // precedent. Both sends are BARE: the declaration answers only "a bookmark
+  // drag is in flight in this window", never which bookmark, so there is nothing
+  // in the payload for a forged send to aim (and guests cannot reach this bridge
+  // at all — it is chrome-only).
+  bookmarkDragStarted: () => ipcRenderer.send('bookmark-drag-started'),
+  bookmarkDragEnded: () => ipcRenderer.send('bookmark-drag-ended'),
+  // The inbound half: main forwards `{ targetWcId }` — the guest that ACTUALLY
+  // received the drop, derived main-side from event.sender.id — after checking
+  // the declaration above and consuming it. The url is never on this wire; the
+  // chrome resolves it from its own live drag session.
+  onBookmarkDrop: (cb) => ipcRenderer.on('bookmark-drop', (_e, d) => cb(d)),
+  // M15 F3 Leg 5a (AC8) — the bar → overflow half. Main forwards `{ index }`, a
+  // snapshot-local insertion index the SHEET reported, after gating it on sheet-
+  // sender identity, open-token freshness, and menuType === 'bookmarks-overflow'.
+  // Same no-authority shape as onBookmarkDrop: no bookmark id, no url, and no jar
+  // on the wire — the chrome resolves all three from its own dragstart-time hold.
+  onBookmarkOverflowDrop: (cb) => ipcRenderer.on('bookmark-overflow-drop', (_e, d) => cb(d)),
+  // M15 F3 Leg 5b (AC3) — the REVERSE direction's lifecycle bracket. Main forwards
+  // `{ phase: 'start' | 'end', token, index? }` from the overflow sheet's own
+  // webContents: a drag started (or ended) inside the sheet, on snapshot-local row
+  // `index`. The chrome has no dragstart/dragend of its own for such a gesture, so
+  // this pair is what opens and closes its foreign-drag session. Same no-authority
+  // shape as the two above: no bookmark id, no url, and no jar on the wire — the
+  // chrome resolves the bookmark from its own overflow snapshot.
+  onBookmarkSheetDrag: (cb) => ipcRenderer.on('bookmark-sheet-drag', (_e, d) => cb(d)),
 
   // --- shields ---
   shieldsGet: () => ipcRenderer.invoke('shields-get'),

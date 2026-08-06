@@ -665,6 +665,16 @@ a:focus-visible {
 #bookmarks-bar {
   display: flex;
   align-items: center;
+  /* Containing block for .bm-drop-indicator (M15 F3 Leg 3, AC5). This rule
+     carried NO `position` declaration before, so the indicator would otherwise
+     have positioned against the viewport. It is a PREREQUISITE of the
+     indicator's absolute positioning, not an afterthought: the indicator has to
+     stay out of the flex flow, or it reflows every item and invalidates the
+     dragstart rect snapshot the drop then commits against. There is no border
+     on this rule, so the padding box (the absolute containing block) starts at
+     the element's own rect.left — bookmarks-bar.js's single viewport→bar-
+     relative subtraction relies on exactly that. */
+  position: relative;
   /* PINNED PAIR: bookmarks-bar.js mirrors these two as BAR_GAP / BAR_PADDING_X
      (and #bookmarks-overflow's width below as CHEVRON_WIDTH) — the overflow
      partition budgets the row in JS and cannot see this rule. Change either
@@ -766,6 +776,30 @@ a:focus-visible {
      rather than measuring a possibly display:none chevron. */
   width: 24px;
   height: 24px;
+}
+/* Drag-reorder insertion indicator (M15 F3 Leg 3, AC5). `position: absolute`
+   is the load-bearing declaration, not a styling choice: an absolutely
+   positioned child of a flex container is OUT OF FLOW and never becomes a flex
+   item, so this box adds no width, shifts no sibling, cannot push the chevron
+   out of #bookmarks-bar's `overflow: hidden`, and — critically — cannot reflow
+   the row and invalidate the dragstart rect snapshot the drop commits against.
+   `top`/`bottom` (never `height`) keep the bar's fixed 30px untouched.
+   NO transition, per the #bookmarks-bar INVARIANT above: this row sits above a
+   separately-composited guest surface, so nothing in it animates.
+   The 2px width lives HERE ONLY — bookmarks-bar.js positions by `left` alone
+   and holds no matching constant (a fourth `export const <NUMBER>` there is a
+   CSS-pin decision, which this deliberately avoids needing). */
+.bm-drop-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  /* Centers the 2px rule on the computed boundary x without JS knowing its
+     width. */
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* ---------- Main / webviews ---------- */
