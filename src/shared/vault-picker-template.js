@@ -69,6 +69,59 @@ function buildCredentialIcon(document) {
 }
 
 /**
+ * Build the per-row PAYMENT-CARD glyph (issue #152) — a card rectangle with a
+ * magnetic stripe, drawn in the same createElementNS/setAttribute discipline as
+ * the credential padlock (NO innerHTML, never a remote asset). Decorative
+ * (aria-hidden); the row's textContent carries the accessible name.
+ * @param {Document} document
+ * @returns {SVGElement}
+ */
+function buildCardIcon(document) {
+  const svg = /** @type {any} */ (document.createElementNS(SVG_NS, 'svg'));
+  svg.setAttribute('class', 'vault-picker-icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const body = document.createElementNS(SVG_NS, 'rect');
+  body.setAttribute('x', '2');
+  body.setAttribute('y', '5');
+  body.setAttribute('width', '20');
+  body.setAttribute('height', '14');
+  body.setAttribute('rx', '2');
+  svg.appendChild(body);
+
+  const stripe = document.createElementNS(SVG_NS, 'path');
+  stripe.setAttribute('d', 'M2 10h20');
+  svg.appendChild(stripe);
+
+  return svg;
+}
+
+/**
+ * The secondary (dimmed) line for a row. A login shows its username; a card shows
+ * its brand and masked last four — the ONLY card digits that ever reach the sheet
+ * (`last4` is a declared non-secret field in vault-item-schema.js; the PAN, CVV and
+ * expiry never leave main). Text only, always a string.
+ * @param {{ type?: string, username?: string|null, brand?: string|null, last4?: string|null }} item
+ * @returns {string}
+ */
+export function secondaryLineFor(item) {
+  if (item && item.type === 'card') {
+    const brand = item.brand != null && item.brand !== '' ? String(item.brand) : '';
+    const last4 = item.last4 != null && item.last4 !== '' ? `•••• ${item.last4}` : '';
+    return [brand, last4].filter(Boolean).join('  ');
+  }
+  return String(item && item.username != null ? item.username : '');
+}
+
+/**
  * The selection id for row `i`.
  * @param {number} i
  * @returns {string}
@@ -124,7 +177,10 @@ export function buildVaultPickerCard(document) {
   card.className = 'new-container-inner vault-picker-inner';
   node.appendChild(card);
 
-  const { header, close } = buildVaultSheetHeader(document, 'Saved logins');
+  // Generic copy since issue #152: the list can hold logins, cards, or both, and the
+  // card is built ONCE (rows are rendered per-open), so the header cannot be model-
+  // dependent. "Saved logins" over a list containing cards would simply be wrong.
+  const { header, close } = buildVaultSheetHeader(document, 'Fill from vault');
   card.appendChild(header);
 
   // The roving list host carries the menu semantics (moved off the card so the fixed header
@@ -132,7 +188,7 @@ export function buildVaultPickerCard(document) {
   const list = document.createElement('div');
   list.className = 'vault-picker-list';
   list.setAttribute('role', 'menu');
-  list.setAttribute('aria-label', 'Choose a saved login to fill');
+  list.setAttribute('aria-label', 'Choose a saved item to fill');
   list.tabIndex = -1;
   card.appendChild(list);
 
@@ -226,7 +282,7 @@ function buildRowBadges(document, item) {
  * the Manage-passwords footer button (the menu-controller's items getter).
  * @param {Document} document
  * @param {HTMLElement} card
- * @param {Array<{ vaultId?: string, id?: string, title?: string|null, username?: string|null, hasTotp?: boolean, badgeLabel?: string, badgeColor?: string|null, widened?: boolean }>} model
+ * @param {Array<{ vaultId?: string, id?: string, type?: string, title?: string|null, username?: string|null, brand?: string|null, last4?: string|null, hasTotp?: boolean, badgeLabel?: string, badgeColor?: string|null, widened?: boolean }>} model
  * @returns {HTMLElement[]}
  */
 export function renderVaultPickerRows(document, card, model) {
@@ -240,11 +296,32 @@ export function renderVaultPickerRows(document, card, model) {
     const note = document.createElement('div');
     note.className = 'cm-item vault-picker-note';
     note.setAttribute('aria-disabled', 'true');
-    note.textContent = 'No saved logins for this site';
+    note.textContent = 'No saved logins or cards to fill here';
     card.appendChild(note);
   }
 
+  // Section headers (issue #152) appear ONLY when both families are present — a
+  // logins-only picker renders exactly as it did before cards existed. Headers are
+  // `aria-hidden` presentational text, NOT menuitems: they never enter `buttons`, so
+  // the roving contract and the `data-pick-index` → model index mapping are both
+  // untouched by them (the index is the position in the FULL model, not in a section).
+  const hasLogins = rows.some((r) => r && r.type !== 'card');
+  const hasCards = rows.some((r) => r && r.type === 'card');
+  const sectioned = hasLogins && hasCards;
+  let lastKind = null;
+
   rows.forEach((item, i) => {
+    const isCard = !!(item && item.type === 'card');
+    const kind = isCard ? 'card' : 'login';
+    if (sectioned && kind !== lastKind) {
+      const heading = document.createElement('div');
+      heading.className = 'vault-picker-section';
+      heading.setAttribute('aria-hidden', 'true');
+      heading.textContent = isCard ? 'Cards' : 'Logins';
+      card.appendChild(heading);
+    }
+    lastKind = kind;
+
     const btn = document.createElement('button');
     btn.className = 'cm-item vault-picker-row';
     btn.type = 'button';
@@ -252,23 +329,27 @@ export function renderVaultPickerRows(document, card, model) {
     btn.tabIndex = -1;
     btn.dataset.pickIndex = String(i);
 
-    btn.appendChild(buildCredentialIcon(document));
+    btn.appendChild(isCard ? buildCardIcon(document) : buildCredentialIcon(document));
 
     const text = document.createElement('span');
     text.className = 'vault-picker-text';
 
+    const secondary = secondaryLineFor(item || {});
+
     const title = document.createElement('span');
     title.className = 'vault-picker-title';
+    // Fall back through: explicit title → the secondary line → a type-appropriate
+    // generic, so a row is never blank.
     const titleText = item && item.title != null && item.title !== ''
       ? item.title
-      : (item && item.username != null && item.username !== '' ? item.username : 'Login');
+      : (secondary !== '' ? secondary : (isCard ? 'Card' : 'Login'));
     title.textContent = String(titleText);
     text.appendChild(title);
 
-    const username = document.createElement('span');
-    username.className = 'vault-picker-username';
-    username.textContent = String(item && item.username != null ? item.username : '');
-    text.appendChild(username);
+    const sub = document.createElement('span');
+    sub.className = 'vault-picker-username';
+    sub.textContent = secondary;
+    text.appendChild(sub);
 
     btn.appendChild(text);
     btn.appendChild(buildRowBadges(document, item || {}));

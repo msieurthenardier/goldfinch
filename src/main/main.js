@@ -933,6 +933,13 @@ function getVaultHuman() {
       fillDelegate: ({ wcId, credential }) => {
         webContents.fromId(wcId)?.send('vault-fill', credential);
       },
+      // Card fill (issue #152): the same shape and the same trust boundary as
+      // fillDelegate above — webContents.send targets the TOP frame only, so a
+      // cross-origin iframe is never reached, and the card is never returned to
+      // chrome. A distinct channel because it lands on different DOM anchors.
+      fillCardDelegate: ({ wcId, card }) => {
+        webContents.fromId(wcId)?.send('vault-fill-card', card);
+      },
       // Leg 4 (capture-save): the held-record safety-drop timer, injected so the
       // ~2-min timeout is unit-testable (mirrors the vault-store idle timer).
       setTimeout: (fn, ms) => setTimeout(fn, ms),

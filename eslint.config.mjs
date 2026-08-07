@@ -104,7 +104,10 @@ export default [
     // (scripts/build-preload.mjs) — the preload-graph-ESM-free invariant
     // (test/unit/preload-graph-esm-free.test.js) governs the NON-bundled
     // chrome-preload graph, which this file is not part of.
-    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-fill-icon.js', 'src/preload/guest-bookmark-drop.js'],
+    // vault-card-fields.js (issue #152) is the payment-card twin of
+    // vault-fill-fields.js — same main-world context, same CJS-required-by-the-preload
+    // shape, so it carries the identical globals.
+    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-card-fields.js', 'src/preload/vault-fill-icon.js', 'src/preload/guest-bookmark-drop.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },

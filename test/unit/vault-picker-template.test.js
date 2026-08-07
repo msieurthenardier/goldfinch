@@ -36,14 +36,14 @@ test('buildVaultPickerCard: centered backdrop + header (title + close) over a ro
   // The menu semantics live on the roving LIST host (moved off the card so the fixed header
   // is not a menuitem and does not scroll away).
   assert.equal(list.attributes.get('role'), 'menu');
-  assert.equal(list.attributes.get('aria-label'), 'Choose a saved login to fill');
+  assert.equal(list.attributes.get('aria-label'), 'Choose a saved item to fill');
   assert.equal(list.tabIndex, -1);
   assert.equal(list.parentNode, card);
   // A fixed header: a title + an accessible close (X) button.
   const header = card.children[0];
   assert.equal(header.className, 'vault-sheet-header');
   assert.equal(header.children[0].className, 'vault-sheet-title');
-  assert.equal(header.children[0].textContent, 'Saved logins');
+  assert.equal(header.children[0].textContent, 'Fill from vault');
   assert.equal(close.tagName, 'BUTTON');
   assert.equal(close.attributes.get('aria-label'), 'Close');
 });
@@ -170,7 +170,7 @@ test('renderVaultPickerRows: empty model → non-focusable note + the Manage foo
   // card = [note, separator, manage].
   assert.equal(list.children.length, 3);
   const note = list.children[0];
-  assert.equal(note.textContent, 'No saved logins for this site');
+  assert.equal(note.textContent, 'No saved logins or cards to fill here');
   assert.equal(note.attributes.get('aria-disabled'), 'true');
   // A note is not a menuitem → the roving items getter excludes it (no role).
   assert.equal(note.attributes.has('role'), false);

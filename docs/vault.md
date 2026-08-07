@@ -261,6 +261,54 @@ a **fail-closed** matcher (`src/shared/origin-match.js`):
 - **Only the picker and fill paths widen** (`widen: true`); **credential capture stays
   exact** — a subdomain submit must never disposition as an update to an eTLD+1 item.
 
+### Payment cards are NOT origin-matched (issue #152)
+
+Everything above governs **logins**. A `card` item is deliberately **not gated on origin at
+all** — neither exactly nor by registrable domain — and `reachableCardItems(jarId)` takes no
+origin argument.
+
+The reasoning is that the two families have different owners. A login belongs to the site that
+issued it, so an origin match is the natural authorization and a mismatch is genuinely
+suspicious. A payment card belongs to the **operator** and is legitimately presented at any
+merchant; gating it on a stored origin would make a card unfillable at every shop the operator
+has not already recorded — that is, all of them. This matches how dedicated password managers
+treat cards, and it is the behavior the feature is for.
+
+What still authorizes a card fill is every *other* gate the login path relies on, unchanged:
+
+| Gate | Applies to cards? |
+|---|---|
+| Vault UNLOCKED | yes |
+| Tab resolves a **persistent jar** (never a burner) | yes |
+| Scope is the tab's own jar vault + the global vault | yes |
+| **Top-frame only** (`webContents.send` + the guest-side `window.top` guard) | yes |
+| Explicit per-fill operator selection in the chrome-owned picker | yes |
+| Stored-origin match | **no — by design** |
+
+Two structural properties keep this from widening anything else:
+
+- **The branch is chosen by the STORED ITEM's own `type`**, inside `fillHuman`, after the item
+  has been resolved from the vault under the MRK. Nothing the guest, the page, or the chrome
+  sends selects it, so a hostile page cannot steer a login request onto the un-origin-gated
+  path.
+- **Cards ride their own main→preload channel** (`vault-fill-card`, distinct from `vault-fill`)
+  because they land on different DOM anchors, and the guest-side gesture binding is
+  **kind-tagged** — a login fill can never consume a card binding, or vice versa.
+
+**Card capture** (a submitted payment form) adds one gate with no login equivalent: the
+submitted number must be **plausibly a card** — 12–19 digits passing Luhn
+(`src/main/vault/card-identity.js`). A password field is self-identifying and a password has no
+checkable structure, but a card field is detected heuristically, so this is what stops a
+false-positive detection from writing an arbitrary submitted form value into the vault as a
+"card". Capture **identity is the full PAN** (digits-compared), never the last four — two cards
+can share a last4, and dispositioning on it would silently overwrite a different card.
+
+The card's PAN, CVV and expiry are **secret** per `vault-item-schema.js` and never leave main:
+the picker row, the capture offer and the sheet carry only `title` / `cardholder` / `brand` /
+`last4`. The **MCP automation surface stays login-only** — `vaultList` and `vaultFill` still
+refuse non-login items, and the documented "never card data" guarantee in
+`docs/mcp-automation.md` is unchanged by this work.
+
 ## Portability
 
 `exportVault(target)` builds a self-contained, portable **bundle** (format

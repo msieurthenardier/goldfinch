@@ -28,6 +28,7 @@
  *   card: HTMLElement,
  *   heading: HTMLElement,
  *   originValue: HTMLElement,
+ *   subjectLabel: HTMLElement,
  *   usernameValue: HTMLElement,
  *   choices: HTMLElement,
  *   error: HTMLElement,
@@ -51,8 +52,10 @@ export function buildVaultCaptureCard(document) {
   heading.className = 'vault-capture-heading';
   card.appendChild(heading);
 
-  const originValue = makeField(document, card, 'Site');
-  const usernameValue = makeField(document, card, 'Username');
+  const originValue = makeField(document, card, 'Site').value;
+  // The second row is Username for a login and Card for a payment card (issue #152),
+  // so its LABEL is re-rendered per offer alongside its value.
+  const { label: subjectLabel, value: usernameValue } = makeField(document, card, 'Username');
 
   const choices = document.createElement('div');
   choices.className = 'vault-capture-choices';
@@ -80,15 +83,16 @@ export function buildVaultCaptureCard(document) {
   actions.appendChild(cancel);
   card.appendChild(actions);
 
-  return { node, card, heading, originValue, usernameValue, choices, error, save, cancel };
+  return { node, card, heading, originValue, subjectLabel, usernameValue, choices, error, save, cancel };
 }
 
 /**
- * A labeled read-only field row ("<label>: <value>"). Returns the value span.
+ * A labeled read-only field row ("<label>: <value>"). Returns both spans so a caller
+ * can re-render the label per offer (the login/card subject row).
  * @param {Document} document
  * @param {HTMLElement} card
  * @param {string} labelText
- * @returns {HTMLElement}
+ * @returns {{ label: HTMLElement, value: HTMLElement }}
  */
 function makeField(document, card, labelText) {
   const row = document.createElement('div');
@@ -101,7 +105,7 @@ function makeField(document, card, labelText) {
   row.appendChild(label);
   row.appendChild(value);
   card.appendChild(row);
-  return value;
+  return { label, value };
 }
 
 /**
@@ -112,17 +116,30 @@ function makeField(document, card, labelText) {
  * (empty for `update`) so the caller can read the selection.
  * @param {Document} document
  * @param {ReturnType<typeof buildVaultCaptureCard>} refs
- * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string }> }} model
+ * @param {{ origin?: string, username?: string|null, mode?: string, defaultVaultId?: string, choices?: Array<string | { vaultId: string, label?: string }>, kind?: string, brand?: string|null, last4?: string|null }} model
  * @returns {{ mode: 'save'|'update', choiceInputs: HTMLInputElement[] }}
  */
 export function renderVaultCaptureCard(document, refs, model) {
   const mode = model && model.mode === 'update' ? 'update' : 'save';
-  refs.heading.textContent = mode === 'update' ? 'Update password?' : 'Save password?';
-  refs.card.setAttribute('aria-label', mode === 'update' ? 'Update password' : 'Save password');
+  const isCard = !!(model && model.kind === 'card');
+  // Copy is per-KIND (issue #152): "Save card?" over a payment capture, and the
+  // subject row becomes Card ("Visa •••• 4242") instead of Username.
+  const noun = isCard ? 'card' : 'password';
+  const heading = `${mode === 'update' ? 'Update' : 'Save'} ${noun}?`;
+  refs.heading.textContent = heading;
+  refs.card.setAttribute('aria-label', heading.slice(0, -1));
   refs.originValue.textContent = String(model && model.origin != null ? model.origin : '');
-  refs.usernameValue.textContent = model && model.username != null && model.username !== ''
-    ? String(model.username)
-    : '(no username)';
+  if (refs.subjectLabel) refs.subjectLabel.textContent = isCard ? 'Card' : 'Username';
+  if (isCard) {
+    // last4 is a declared NON-SECRET field; the PAN never reaches the sheet at all.
+    const brand = model && model.brand != null && model.brand !== '' ? String(model.brand) : '';
+    const last4 = model && model.last4 != null && model.last4 !== '' ? `•••• ${model.last4}` : '';
+    refs.usernameValue.textContent = [brand, last4].filter(Boolean).join('  ') || '(card)';
+  } else {
+    refs.usernameValue.textContent = model && model.username != null && model.username !== ''
+      ? String(model.username)
+      : '(no username)';
+  }
   refs.error.textContent = '';
 
   refs.choices.textContent = '';
