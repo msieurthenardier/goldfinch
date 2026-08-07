@@ -25,6 +25,10 @@ interface MenuOverlayInitPayload {
   anchor: { alignRight?: number; alignLeft?: number; x?: number; y: number };
   startIndex?: number;
   token: number;
+  /** Opt-in: this menu must survive — and hold OS focus across — a focus steal by its
+   * own guest (the locked-vault unlock-to-save prompt, spawned by a submit that also
+   * navigates the page). Absent/false = the ordinary blur-dismissable behavior. */
+  keepFocus?: boolean;
 }
 
 interface MenuOverlayBridge {
@@ -44,6 +48,10 @@ interface MenuOverlayBridge {
   sendActivated(payload: { id: string; token: number; value?: string }): void;
   /** sheet → main: the menu dismissed (channel 5). */
   sendDismissed(payload: { reason: string; token: number }): void;
+  /** sheet → main: a keep-focus menu lost OS focus (no payload). Main re-grabs it for
+   * the sheet — gated on sheet identity, the window still being focused, and the menu's
+   * own `keepFocus` opt-in. Optional so an older preload simply never re-grabs. */
+  requestFocus?(): void;
   /** sheet → main: the DEDICATED vault-unlock secret channel (M12 F2, DD4). The
    * master password rides as a Uint8Array (never channel-4 activated). Returns
    * { ok } — false re-prompts the sheet (wrong password); true closes it. */

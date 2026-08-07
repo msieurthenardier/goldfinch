@@ -59,6 +59,7 @@ test('overlay registrar preserves sender roles, token checks, and close-before-a
     'find-overlay:close', 'find-overlay:open', 'find-overlay:query',
     'menu-overlay:activated', 'menu-overlay:close', 'menu-overlay:dismissed', 'menu-overlay:open',
     'menu-overlay:overflow-drop', // M15 F3 Leg 5a
+    'menu-overlay:refocus', // keep-focus re-grab
     'menu-overlay:sheet-drag', // M15 F3 Leg 5b
     'tearoff-overlay:hide', 'tearoff-overlay:move', 'tearoff-overlay:show',
   ]);
@@ -593,4 +594,56 @@ test('Leg 5b AC3: the payload is VALIDATED-NO-OP on every malformed shape, and o
   assert.deepEqual(h.events, []);
   h.fire(h.sheetSender, { token: 7, phase: 'start', index: 0 }); // …and a good one still works
   assert.equal(h.events.length, 1);
+});
+
+test('menu-overlay:refocus is sheet-sender-gated and never steals focus from another app', () => {
+  const ipcMain = makeIpc();
+  const events = [];
+  const chromeSender = {};
+  const sheetSender = { isDestroyed: () => false };
+  let focused = true;
+  let destroyed = false;
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    getCurrentMenu: () => ({ token: 1, menuType: 'vault-unlock' }),
+    openMenu: () => {},
+    closeMenuOverlay: () => {},
+    reassertFocus: () => { events.push('reassert'); return true; },
+  };
+  const rec = {
+    win: { contentView: {}, isDestroyed: () => destroyed, isFocused: () => focused },
+    sheet, activeTabWcId: null, tabViews: new Map(),
+  };
+  const registry = {
+    records: () => [rec],
+    getWindowForChrome: (sender) => (sender === chromeSender ? rec : null),
+    getWindowForGuest: () => null,
+  };
+  registerOverlayIpc({
+    ipcMain, registry,
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined,
+  });
+  const refocus = ipcMain.listeners.get('menu-overlay:refocus');
+
+  // A foreign sender (the chrome, a guest, anything that is not THIS sheet) is dropped.
+  refocus({ sender: chromeSender });
+  assert.deepEqual(events, [], 'only the sheet itself may ask for its focus back');
+
+  refocus({ sender: sheetSender });
+  assert.deepEqual(events, ['reassert'], 'the sheet is re-focused while its window is focused');
+  events.length = 0;
+
+  // A genuine app-switch blurs the window too: pulling focus back from ANOTHER
+  // application would be far worse than the dismissal it prevents.
+  focused = false;
+  refocus({ sender: sheetSender });
+  assert.deepEqual(events, [], 'no focus grab while the window is unfocused');
+
+  // A window torn down between the report and its delivery must not throw.
+  focused = true;
+  destroyed = true;
+  assert.doesNotThrow(() => refocus({ sender: sheetSender }));
+  assert.deepEqual(events, []);
 });

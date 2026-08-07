@@ -261,6 +261,13 @@ interface GoldfinchBridge {
     /** M08 Flight 4 DD2: gates the sheet's sole focus site (`deliverInit`) — the
      * suggestions controller opens the sheet without stealing OS focus from `#address`. */
     noFocus?: boolean;
+    /** DD5 (M12 F3 Leg 4): false opts the menu out of the SOFT dismiss reasons main-side
+     * (escape / outside-click / blur) — the one-time key displays. */
+    dismissible?: boolean;
+    /** Keep-focus opt-in: this menu is spawned by a gesture that ALSO navigates the guest
+     * (the locked-vault unlock-to-save prompt), so the loading page's focus steal must
+     * neither close it (sheet-side) nor keep its keystrokes (main re-grabs focus). */
+    keepFocus?: boolean;
   }): void;
   /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded' |
    * 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'). */

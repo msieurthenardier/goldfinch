@@ -992,3 +992,87 @@ test('DD1f: the scrub carries NO payload — the message IS the signal (and clea
   // scrub would break that. There is no payload to carry such an instruction.
   assert.equal(scrubSends(createdViews[0])[0][2], undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Keep-focus re-grab (locked-vault unlock-to-save): a menu opened with
+// `keepFocus: true` may pull OS focus back into the sheet after its own guest
+// steals it (the login submit that spawned the held credential also navigates
+// the page). Opt-in, per menu session, and bounded.
+// ---------------------------------------------------------------------------
+
+const focusCalls = (v) => v.calls.filter((c) => c[0] === 'focus').length;
+
+function keepFocusPayload(token, menuType = 'vault-unlock') {
+  return { ...payloadFor(token, menuType), keepFocus: true };
+}
+
+test('reassertFocus re-grabs focus for a keepFocus menu', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(keepFocusPayload(1));
+  const v = createdViews[0];
+  const afterOpen = focusCalls(v); // openMenu's own post-init focus
+  assert.equal(mgr.reassertFocus(), true);
+  assert.equal(focusCalls(v), afterOpen + 1, 'focus re-asserted on the sheet');
+});
+
+test('reassertFocus is inert without the opt-in, with no menu open, and while hidden', () => {
+  setupProto();
+  readySheet();
+  // No menu open at all.
+  assert.equal(mgr.reassertFocus(), false, 'no menu open → no focus');
+  // An ordinary menu never opted in — every other menuType keeps the plain
+  // blur-dismissable behavior, so a stray report must move nothing.
+  mgr.openMenu(payloadFor(1));
+  let v = createdViews[0];
+  let before = focusCalls(v);
+  assert.equal(mgr.reassertFocus(), false, 'no keepFocus → no focus');
+  assert.equal(focusCalls(v), before, 'no focus call for a non-opted-in menu');
+  // Closed (the flag resets with the session): a late report after the menu is gone.
+  setupProto();
+  readySheet();
+  mgr.openMenu(keepFocusPayload(1));
+  mgr.closeMenuOverlay('escape');
+  v = createdViews[0];
+  before = focusCalls(v);
+  assert.equal(mgr.reassertFocus(), false, 'closed menu → no focus');
+  assert.equal(focusCalls(v), before);
+});
+
+test('keepFocus does not leak into the next menu (model-replace resets the flag)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(keepFocusPayload(1));
+  mgr.openMenu(payloadFor(2, 'kebab')); // ordinary menu replaces it
+  const v = createdViews[0];
+  const before = focusCalls(v);
+  assert.equal(mgr.reassertFocus(), false, 'the replacing menu did not opt in');
+  assert.equal(focusCalls(v), before);
+});
+
+test('keepFocus re-grabs are capped per session, and the budget resets on re-open', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(keepFocusPayload(1));
+  const v = createdViews[0];
+  const granted = [];
+  for (let i = 0; i < 12; i++) granted.push(mgr.reassertFocus());
+  const won = granted.filter(Boolean).length;
+  assert.ok(won > 0, 'the first re-grabs are honored');
+  assert.ok(won < granted.length, 'a page that steals focus in a loop hits the ceiling');
+  assert.equal(granted[granted.length - 1], false, 'budget spent');
+  // A fresh open is a fresh session — a later, unrelated prompt is not starved by
+  // the previous one's spent budget.
+  mgr.openMenu(keepFocusPayload(2));
+  assert.equal(mgr.reassertFocus(), true, 'budget reset on re-open');
+  assert.ok(focusCalls(v) > 0);
+});
+
+test('reassertFocus tolerates a destroyed sheet webContents', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(keepFocusPayload(1));
+  createdViews[0].webContents.markDestroyed();
+  assert.doesNotThrow(() => mgr.reassertFocus());
+  assert.equal(mgr.reassertFocus(), false);
+});

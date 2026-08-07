@@ -118,6 +118,23 @@ function registerOverlayIpc({
     rec.sheet.closeMenuOverlay(SHEET_DISMISS_REASONS.has(reason) ? reason : 'blur', token);
   });
 
+  // Keep-focus re-grab (sheet→main, one-way; the locked-vault unlock-to-save prompt).
+  // A keep-focus menu's own spawning gesture also navigates the guest, and the loading
+  // guest pulls OS focus out of the sheet — the sheet reports that blur here and the
+  // manager grabs focus back (bounded per session), so keystrokes meant for a visibly-
+  // focused password card cannot land in the page's fields instead. Sender-validated by
+  // sheet identity like every other sheet→main channel, and GATED ON THE WINDOW STILL
+  // BEING FOCUSED: a genuine app-switch blurs the window too, and stealing focus back
+  // from another application would be far worse than the flicker it prevents (that case
+  // is also already closed main-side by window-factory's win.on('blur')). The manager
+  // re-checks the menu's own opt-in, so a sheet with no keep-focus menu open is a no-op.
+  ipcMain.on('menu-overlay:refocus', (event) => {
+    const rec = recordForSheetSender(event.sender);
+    if (!rec || !rec.sheet || !rec.win) return;
+    if (rec.win.isDestroyed?.() || !rec.win.isFocused?.()) return;
+    rec.sheet.reassertFocus();
+  });
+
   // DD4 (chrome-unlock leg): the master password's DEDICATED request/response
   // secret channel — NOT channel-4 `menu-overlay:activated` (string-only, hard-
   // capped at 24 chars by sanitizeActivatedValue). ipcMain.handle coexists with

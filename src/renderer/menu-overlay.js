@@ -84,6 +84,14 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   // click / submit call site unchanged.
   const report = createSheetReport(window.menuOverlay);
   const reportDismissed = () => report.reportDismissed();
+
+  // Whether the CURRENT render opted into keep-focus (payload.keepFocus): the menu must
+  // survive, and hold OS focus across, a focus steal by its own guest. Exactly one menu
+  // uses it today — the unlock-to-save prompt raised when a login submit into a LOCKED
+  // vault holds the credential, since that same submit navigates the page underneath it.
+  // Set on every init (never left stale) and read by the vault-unlock branch + the
+  // window-blur listener at the bottom of this file.
+  let keepFocusMenu = false;
   /** @param {{ id: string, value?: string }} payload @returns {boolean} */
   const sendActivatedOnce = (payload) => report.sendActivatedOnce(payload);
 
@@ -2512,6 +2520,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     report.silence();
     menuController.closeAll();
     report.begin(token);
+    // Keep-focus opt-in for THIS render (see the blur listener at the bottom of the
+    // file). Assigned unconditionally so a keep-focus menu's flag can never leak into
+    // the next, ordinary one.
+    keepFocusMenu = payload.keepFocus === true;
 
     if (template === 'menu') {
       renderMenu(menuType, model, anchor);
@@ -2541,6 +2553,19 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       // Fixed layout (password + error + Unlock/Cancel), centered via CSS — the
       // anchor is ignored, model may be empty. onOpen clears + focuses the input;
       // it must NOT fall through to the non-focusing 'menu' fallback.
+      //
+      // Keep-focus opens (the unlock-to-save prompt raised by a locked-vault capture)
+      // additionally opt OUT of the controller's incidental window-blur / outside-click
+      // dismissal — the login submit that spawned the held credential ALSO navigates the
+      // page, and the loading guest's focus steal was tearing this prompt down before the
+      // operator could type (the vault-capture entry's dismissible:false precedent, which
+      // fixed exactly this for the already-unlocked branch of the same flow). Escape /
+      // Cancel / the header X / a backdrop click still dismiss it (attachModalCard's own
+      // direct closes), and a real app-switch still closes it main-side (the open call
+      // keeps currentDismissible true), so every decline path is unchanged. ASSIGNED ON
+      // BOTH BRANCHES — the entry is a singleton, so a stale `false` would silently make
+      // every later gesture-raised unlock prompt non-dismissable.
+      vaultEntry.dismissible = !keepFocusMenu;
       menuController.open(vaultEntry, 0);
     } else if (template === 'vault-picker') {
       // Roving list of badged credential rows, centered via CSS — the anchor is
@@ -2625,5 +2650,17 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       // the anchor is deliberately ignored.
       menuController.open(dialogEntry, 0);
     }
+  });
+
+  // Keep-focus re-grab (see `keepFocusMenu` above). menu-controller.js registers its own
+  // window-blur listener FIRST (classic script, parsed before this module), where a
+  // dismissible:false entry early-returns instead of closing — so by the time this runs,
+  // a keep-focus menu is still open and asking for its focus back is meaningful. Every
+  // gate that matters lives main-side (sheet identity, the window still being focused,
+  // the menu's own opt-in); this end only reports the blur. The optional call keeps an
+  // older preload from throwing at boot.
+  window.addEventListener('blur', () => {
+    if (!keepFocusMenu || !menuController.current) return;
+    window.menuOverlay.requestFocus?.();
   });
 })();

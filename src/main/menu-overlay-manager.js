@@ -58,6 +58,16 @@
 //     the same-menuType keyboard-re-open race). Emits channel 7, calls
 //     focusChrome() for 'escape'/'activated'/'input-empty' (the last covers an
 //     automatically emptied focused sheet), runs restoreFindOverlay(reason).
+//   - reassertFocus() — the KEEP-FOCUS re-grab (issue: the locked-vault
+//     unlock-to-save prompt). A menu opened with `keepFocus: true` is one the
+//     spawning gesture ALSO navigates away from (a login-form submit spawns the
+//     capture offer AND loads the next page), and the loading guest pulls OS
+//     focus out of the sheet. The sheet reports that blur back (the sheet→main
+//     refocus channel) and this re-grabs it, so a master password typed into a
+//     visibly-focused card can never land in the page's own fields instead.
+//     Bounded by KEEP_FOCUS_MAX per menu session so a page that re-steals focus
+//     on a loop cannot turn this into a focus tug-of-war; inert for every menu
+//     that did not opt in (the flag defaults false and resets on close).
 //   - M15 F3 L1 (DD1f) REVERSES the old "there is deliberately NO main→sheet
 //     close channel" rule. There is now exactly one: `menu-overlay:close`, sent
 //     by closeMenuOverlay (and by openMenu's model-replace branch when the
@@ -81,6 +91,12 @@
 //     `<body>` data attributes are deliberately NOT cleared by the scrub — DD8's
 //     drag-probe readback depends on its counters surviving the menu close.
 
+// Ceiling on the keep-focus re-grabs one menu session may spend (see the header).
+// A real post-submit navigation steals focus once or twice (redirect chains); a page
+// that keeps stealing it hits this ceiling and simply keeps focus, rather than
+// trading it back and forth with the sheet forever.
+const KEEP_FOCUS_MAX = 5;
+
 /**
  * @typedef {{ x: number, y: number, width: number, height: number }} Bounds
  * @typedef {{
@@ -100,7 +116,7 @@
  * }} ContentViewLike
  * @typedef {{ menuType: string, model: Array<{id: string, label: string}>,
  *   anchor: any, startIndex?: number, token: number, noFocus?: boolean,
- *   dismissible?: boolean, jarId?: string }} MenuOpenPayload
+ *   dismissible?: boolean, jarId?: string, keepFocus?: boolean }} MenuOpenPayload
  * @typedef {{ contentView: ContentViewLike, win?: any, bounds?: (Bounds | null) }} Attachment
  */
 
@@ -150,6 +166,13 @@ function createMenuOverlayManager({
   // one-time recovery key — only the deliberate acknowledge ('activated') or a hard
   // lifecycle close (tab/window teardown) closes it. Defaults true for every other menu.
   let currentDismissible = true;
+  // KEEP-FOCUS (locked-vault unlock-to-save): whether the current menu asked to hold OS
+  // focus across an incidental focus steal by the guest (see the module header). Opt-in
+  // per open, reset on every close — a menu that never sets it behaves exactly as before.
+  let currentKeepFocus = false;
+  // Re-grabs spent by the current menu session; capped so a page that steals focus in a
+  // loop cannot drive an unbounded focus tug-of-war.
+  let keepFocusGrabs = 0;
   /** @type {MenuOpenPayload | null} */
   let pendingInit = null; // at most ONE queued init (latest wins — F7 pattern)
   // DD7 attachment (M09 F6): the contentView/window the sheet is attached to,
@@ -342,6 +365,11 @@ function createMenuOverlayManager({
       ? { menuType: payload.menuType, token: payload.token, jarId: payload.jarId }
       : { menuType: payload.menuType, token: payload.token };
     currentDismissible = payload.dismissible !== false; // DD5 — non-dismissible opt-out
+    // Keep-focus is per menu session (opt-in, default off) and its grab budget resets
+    // with it — a model-replace into a different menu must not inherit the prior one's
+    // flag, and a re-open of the same keep-focus menu gets a fresh budget.
+    currentKeepFocus = payload.keepFocus === true;
+    keepFocusGrabs = 0;
     show();
     // DD5: find bar hidden while a menu is open (parity) — on the FIRST open of
     // a session (model-replace keeps the same open session; the call is
@@ -378,6 +406,7 @@ function createMenuOverlayManager({
     }
     const closed = currentMenu;
     currentMenu = null;
+    currentKeepFocus = false; // the session is over — a later stray refocus report is inert
     pendingInit = null;
     // DD1f (M15 F3 L1): scrub the sheet's DOM EAGERLY, before anything else this close
     // does. Ordered ahead of hide()/channel 7 so the scrub message is queued to the sheet
@@ -408,6 +437,23 @@ function createMenuOverlayManager({
   }
 
   /**
+   * Re-grab OS focus for a keep-focus menu whose sheet was blurred by its own guest
+   * (see the module header). No-op — never an error — for every other case: no menu
+   * open, a menu that did not opt in, a hidden/dead sheet, or a session that has spent
+   * its grab budget. The CALLER owns the "is this window still the focused one" check
+   * (register-overlay-ipc.js): a real app-switch must never pull focus back.
+   * @returns {boolean} whether focus was re-asserted
+   */
+  function reassertFocus() {
+    if (!currentMenu || !currentKeepFocus || !visible) return false;
+    if (!view || view.webContents.isDestroyed()) return false;
+    if (keepFocusGrabs >= KEEP_FOCUS_MAX) return false;
+    keepFocusGrabs++;
+    view.webContents.focus?.();
+    return true;
+  }
+
+  /**
    * Store the latest active-guest DIP bounds (always); apply 1:1 while visible
    * (DD12 — bounds identity with the active guest, no math).
    * @param {Bounds} rounded
@@ -423,6 +469,7 @@ function createMenuOverlayManager({
     hide,
     openMenu,
     closeMenuOverlay,
+    reassertFocus,
     syncBounds,
     teardown,
     isVisible: () => visible,

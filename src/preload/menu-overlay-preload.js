@@ -14,7 +14,8 @@
 //   out: sendActivated (menu-overlay:activated — channel 4; {id, token, value?} —
 //        `value` is the Leg-3 input-dialog text; passed WHOLE, main validates
 //        shape via sanitizeActivatedValue before forwarding on channel 6),
-//        sendDismissed (menu-overlay:dismissed — channel 5; {reason, token})
+//        sendDismissed (menu-overlay:dismissed — channel 5; {reason, token}),
+//        requestFocus (menu-overlay:refocus — the keep-focus re-grab; NO payload)
 // Main validates the sender by identity (the sheet's own webContents) and drops
 // stale tokens. Stays in the eslint node-globals block alongside the other
 // chrome-class preloads.
@@ -29,6 +30,12 @@ contextBridge.exposeInMainWorld('menuOverlay', {
   onCloseReset: (cb) => ipcRenderer.on('menu-overlay:close', () => cb()),
   sendActivated: (payload) => ipcRenderer.send('menu-overlay:activated', payload),
   sendDismissed: (payload) => ipcRenderer.send('menu-overlay:dismissed', payload),
+  // Keep-focus re-grab: a menu opened with `keepFocus` reports its own window blur so
+  // main can pull OS focus back into the sheet (the locked-vault unlock-to-save prompt,
+  // whose spawning submit also navigates the page). No payload — the message IS the
+  // signal; main gates it on sheet-sender identity, the window still being focused, and
+  // the open menu's own opt-in, so it can never move focus for an ordinary menu.
+  requestFocus: () => ipcRenderer.send('menu-overlay:refocus'),
   // DD4 (M12 F2 chrome-unlock): the master password's DEDICATED request/response
   // secret channel. `secret` is a Uint8Array — NEVER routed through sendActivated
   // (channel-4, string-only / 24-char capped). This is the FIRST `invoke` from the
