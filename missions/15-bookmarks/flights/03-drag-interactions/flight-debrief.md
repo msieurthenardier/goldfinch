@@ -125,3 +125,15 @@ The proposed fix ("cite the call path") catches **one** of the four. What catche
 - [ ] Reconcile leg 4 / 5a / 5b acceptance-criteria checkboxes against the flight log, and fix leg 5a's missing AC5
 - [ ] Land the `menu-overlay.js` fake-DOM harness — open since Flight 1, and the file now carries drag lifecycle, not just render bodies
 - [ ] Note: commit `4bdd9f6`'s message says *"Completes mission criterion 6"*, which `5e40741` and `mission.md` contradict. Left unrewritten (a later commit corrects it in sequence); recorded so the permanent record is not read in isolation
+
+---
+
+## Merge Record
+
+Landed on `main` as squash commit `053d016` via PR [#151](https://github.com/msieurthenardier/goldfinch/pull/151) (2026-08-06), following the convention M14 and M15 F1/F2 all used.
+
+**The review requirement was bypassed with an admin override at the operator's explicit instruction, after the blocked state and the open defect were both surfaced.** Recorded here rather than left silent, exactly as Flight 1's debrief did — the guard exists on this repo, and a bypass that leaves no trace is worse than the guard not existing. Note also that **no CI checks are configured for this branch** (`gh pr checks` reported none), so the merge rests on locally-run verification: 3558 pass / 0 fail, typecheck and lint clean.
+
+The flight **shipped with a known user-visible defect** — [#150](https://github.com/msieurthenardier/goldfinch/issues/150), overflow → bar failing on first attempt — accepted by the operator at merge time. Mission criterion 6 is correspondingly unmet.
+
+**The `flight/03-drag-interactions` branch is deliberately retained.** The flight log and both debriefs cite per-commit SHAs (`4bdd9f6`, `5e40741`, `33a324d`, `027b551`, `4563486`, `682161e`) that a squash merge would otherwise orphan — the same reason Flight 1's branch was kept.
