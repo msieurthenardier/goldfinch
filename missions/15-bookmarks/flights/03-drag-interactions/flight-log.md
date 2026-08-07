@@ -715,6 +715,94 @@ Probe removed from both files (`grep` for every probe identifier returns zero fi
 
 ---
 
+## Anomaly — 2026-08-06 — overflow → bar drag fails on the FIRST attempt, succeeds on the second (OPEN)
+
+**Status: open, diagnosed but not fixed. Recorded as a FAIL, not retroactively greened** — the flight's own standing rule (Flight 2 debrief: *"a same-session fix does not retroactively green a real finding"*), and "works on the second try" is a defect a user will hit.
+
+### Symptom
+
+Operator-reproducible, several times: the first overflow → bar drag after opening the overflow menu does nothing; an immediately repeated drag succeeds. Bar → overflow (the forward direction) is unaffected.
+
+### What three instrumented rounds established
+
+Every stage of the reverse path was tagged and read back from `document.documentElement.dataset`.
+
+| Stage | Failing attempt | Passing attempt |
+|---|---|---|
+| Sheet `dragstart` → `start` signal | fires | fires |
+| Chrome `handleSheetDrag` | **`OK idx=1 len=2`** — session armed | `OK idx=1 len=2` |
+| Chrome document `dragover` (accepted, MIME present) | *(not instrumented that round)* | **3** |
+| Chrome document `drop` | **never arrives** | `FOREIGN-COMMIT zoneIdx=5 slots=8 toIndex=5` |
+
+**The foreign session arms correctly on the failing attempt.** The drop simply never reaches the chrome's document handler. Nothing is misclassified — nothing arrives to classify. Both geometry hypotheses (a stale `chevronRect` swallowing the release, a stale `barRect` classifying it `outside`) were **instrumented and refuted**.
+
+### Diagnosis — dwell-sensitivity, not a logic error
+
+HTML5 dispatches `drop` only where a preceding `dragover` called `preventDefault()`. A sheet → bar drag crosses surfaces **late**: the pointer starts over the sheet and enters the chrome only in the final moments. If the release follows quickly, the chrome may not have dispatched a single `dragover` yet, so the drop is rejected and disappears.
+
+The passing attempt recorded **3** chrome-side `dragover`s. The DD8 probe, on a deliberately slow operator gesture, recorded **54**. That gap is the mechanism. It also explains the shape of the bug: the second attempt succeeds because the operator — having just watched one fail — moves more deliberately.
+
+**Bound on confidence**: no failing attempt was captured *with* the `dragover` counter in place (it fired only on the round that passed). The mechanism is consistent with every observation and with the HTML5 spec, but it is an inference from a gap, not a direct measurement. **A fix should re-verify against a failing trace**, not against this reasoning.
+
+### Why it is not fixed inline
+
+The fix spans the sheet, main, and the chrome — the skill's **multi-surface scope trigger**, so it takes a scoped design review before implementation rather than riding the HAT's inline-fix protocol. Candidate directions, all unvetted: have the *sheet* accept and forward the drop (it sees the drag continuously); widen or pre-arm the chrome's accept surface on the `start` signal; or reconsider whether the reverse direction should terminate in the chrome at all.
+
+### Scope
+
+Affects mission criterion 6's bar↔overflow clause in the **overflow → bar** direction only. Bar → overflow, bar reorder, and drag-onto-page are unaffected and passed their HAT steps.
+
+### Diagnostic hygiene
+
+All instrumentation removed; `git diff` on `bookmarks-bar.js` is empty (byte-identical to `4bdd9f6`). Gates after removal: **3558 pass / 0 fail**, typecheck and lint clean.
+
+---
+
+## HAT Record — 2026-08-06 (leg `hat-and-alignment`)
+
+Operator-driven, Flight Director guiding one step at a time. **7 of 8 runnable steps PASS; 1 FAIL (logged, open); 2 blocked and skipped by operator decision.**
+
+| # | Step | Result |
+|---|---|---|
+| 1 | Bar reorder — does it land where the indicator drew? | **PASS** |
+| 2 | Order + icons survive restart | **PASS** — byte-identical across a restart |
+| 3 | Drag onto an ordinary page navigates | **PASS** |
+| 4 | Page with its own dropzone wins | **PASS** |
+| 5 | Spring-load on chevron hover | **PASS** |
+| 6 | Drop into overflow at the indicated gap | **PASS** — arithmetic matched the ruled formula exactly |
+| 7 | Boundary displacement reads sensibly | **PASS** (operator judgement) |
+| 8 | Overflow → bar | **FAIL** — see the 2026-08-06 Anomaly entry |
+| 9 | DD1e vault residue | **BLOCKED → skipped** (operator) |
+| 10 | DD1c capture under `vault-unlock` | **BLOCKED → skipped** (operator) |
+
+### What the passing steps actually settled
+
+- **Step 1** is the first time anything in this repo checked a *drawn* drop position against the *committed* one with a real layout engine. There is no jsdom/happy-dom harness here, so every layout number in a renderer unit test is asserted by its author — this class of claim was unverifiable by construction until now.
+- **Step 2** closes the flight's open question on icon persistence and re-earns mission criterion 2 through a reorder path that had never been exercised.
+- **Step 3 retires leg 4's `dropEffect` risk.** It shipped without setting `dropEffect` in the guest's `dragover`, against `tab-controller.js:499`'s "MANDATORY" note. A physical drag navigated correctly, so the tab-drag rule does not transfer to the guest target. Session 3's evidence generalised.
+- **Step 4** verified DD5's page-wins policy under a real gesture, with page-side evidence: the dropzone received `https://www.debian.org/` — the exact bookmark dragged — via `text/uri-list`, and the tab never moved. This is the criterion whose implementation is subtlest (the `setTimeout(…,0)` macrotask discriminator); a synchronous read would have navigated over the top of it.
+- **Step 6** confirmed `min(visibleCount + k, n - 1)` against a live gesture: `v=8, k=1, n=10 → toIndex 9`, item landed at overflow position 1, one item promoted. That formula took **three attempts and an operator ruling** to get right; two design-review cycles proposed wrong alternatives.
+
+### Operator observation that reclassified a suspected defect
+
+*"When I let go, the slug takes a solid 2 seconds to disappear… **Note the tabs do the exact same thing.**"*
+
+The 2 s matched `DRAG_HOLD_MS` exactly, and the FD's first instinct was a flight-3 defect. The operator's second sentence settled it: tab drag shipped in **M09** and behaves identically, so this is **pre-existing platform behaviour affecting every native HTML5 drag in the app**, not something this flight introduced. The bookmark lands correctly on release, so there is no correctness consequence — only a perceived-latency artifact of the OS drag image on this rig.
+
+**Recorded, not chased.** Worth a mission-level note if it ever bothers anyone: it would be a cross-cutting drag-layer investigation, not a bookmarks one.
+
+### Steps 9–10, skipped
+
+The dev profile (`~/.config/goldfinch-dev`) has **no vault store at all** — `documents` holds only jars/downloads/settings/hygiene/session. Both checks need a live `vault-unlock` sheet, which would mean the operator setting a master password on their dev profile. Both were flagged from the start as *"expected safe, but expected is not measured"*, and both are **leg-1 items, not drag items**. Operator decision: skip.
+
+**They remain genuinely unverified.** DD1e (`vaultInput.value` cleared on open, not close — `menu-overlay.js:618`, `:668`) and DD1c (`captureWindow` omitting the sheet layer under a live `vault-unlock`) are carried forward as outstanding, not as satisfied.
+
+### Diagnostic hygiene
+
+Three rounds of temporary instrumentation were added and fully reverted; `git diff` on `bookmarks-bar.js` returned empty against `4bdd9f6`. Gates after every removal: **3558 pass / 0 fail**, typecheck and lint clean.
+
+---
+
 ## Operator Session 1 — 2026-08-05 — PARTIAL: gate verified live, DD8 probe BLOCKED on the rig
 
 Ran after `automation-gate` and `carried-debt` landed. Two of the session's four items completed; the drag probe is blocked by an environment fault, not by anything in the code.
