@@ -3,7 +3,7 @@
 **Slug**: `vault-card-fill-capture`
 **Status**: active
 **Created**: 2026-08-07
-**Last Run**: 2026-08-07-11-07-27 — [run log](./vault-card-fill-capture/runs/2026-08-07-11-07-27.md) (**PASS**, 34/34 automated cases; the fill step remains operator-only — see *Out of Scope*)
+**Last Run**: 2026-08-07-11-22-53 — [run log](./vault-card-fill-capture/runs/2026-08-07-11-22-53.md) (**FULL PASS**, steps 1–10: 34/34 automated cases in the [prior run](./vault-card-fill-capture/runs/2026-08-07-11-07-27.md), plus the operator-confirmed fill)
 
 ## Intent
 
