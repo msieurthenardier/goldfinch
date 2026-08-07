@@ -1,0 +1,299 @@
+<!--
+  BEHAVIOR-TEST FIXTURE — do not deploy or link from production.
+
+  Exercises the payment-card fill + capture path (issue #152) against the running
+  dev app. Every form below is a DELIBERATE detection variant: the point is to see
+  which ones raise the lock icon, which fill correctly, and — critically — which
+  ones must NOT be detected at all. It lives under tests/behavior/fixtures/ which
+  is excluded from linting/prettier.
+
+  All card data here is FAKE. The seeded card uses the standard 4242… test PAN,
+  which is not a real account number.
+
+  SERVE (from THIS directory, port 8098 — distinct from the vault-login fixture's
+  8099 and the MCP loopback 49707):
+
+      python3 -m http.server 8098
+
+  Reachable at http://127.0.0.1:8098/. Card fill is NOT origin-matched (issue
+  #152), so unlike the vault-login fixture the port does not have to match
+  anything the vault has stored — any http(s) origin should fill. That is itself
+  worth verifying: serve on a second port and confirm the cards still offer.
+
+  Forms are submitted with preventDefault so the page never navigates. Capture
+  still fires: the preload's submit listener is registered in the CAPTURE phase on
+  `document`, so it observes the event before this page's bubble-phase handler
+  cancels it.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Goldfinch Card Fixture</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #101418;
+      color: #e0e0e0;
+    }
+    h1 { color: #f90; font-size: 1.25rem; margin-bottom: 0.25rem; }
+    .marker { color: #0f0; font-size: 0.8rem; margin-bottom: 0.5rem; }
+    .warn {
+      background: #2a1d10; border: 1px solid #a60; color: #fc9;
+      padding: 0.6rem 0.8rem; font-size: 0.8rem; margin-bottom: 1.5rem;
+    }
+    section {
+      border: 1px solid #2a323c; padding: 0.9rem 1rem 1.1rem;
+      margin-bottom: 1.25rem; background: #141920;
+    }
+    section.negative { border-color: #7a3030; background: #1a1214; }
+    h2 { font-size: 0.95rem; margin: 0 0 0.2rem; color: #9cf; }
+    section.negative h2 { color: #f99; }
+    .expect { font-size: 0.75rem; color: #8a94a0; margin-bottom: 0.7rem; }
+    .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    .row > div { flex: 1 1 8rem; }
+    label { display: block; margin: 0.5rem 0 0.2rem; font-size: 0.78rem; color: #aaa; }
+    input, select {
+      width: 100%; padding: 0.42rem; font-size: 0.95rem; box-sizing: border-box;
+      background: #1b2027; color: #e0e0e0; border: 1px solid #38506a;
+    }
+    button {
+      margin-top: 0.8rem; padding: 0.4rem 0.9rem; font-size: 0.9rem;
+      background: #243; color: #cfc; border: 1px solid #4c6; cursor: pointer;
+    }
+    .readout {
+      margin-top: 0.7rem; font-family: ui-monospace, monospace; font-size: 0.72rem;
+      color: #6d8; white-space: pre-wrap; min-height: 1em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Goldfinch Card Fixture</h1>
+  <div class="marker">vault-card-fixture-loaded</div>
+  <div class="warn">
+    <strong>Test fixture.</strong> Not a real merchant. All card data is fake — the
+    seeded PAN is the standard <code>4242&nbsp;4242&nbsp;4242&nbsp;4242</code> test number.
+    Never enter a real card here.
+  </div>
+
+  <!-- 1. The canonical case: fully hinted, combined expiry. -->
+  <section>
+    <h2>1. Fully hinted — combined <code>cc-exp</code></h2>
+    <div class="expect">EXPECT: icon on all four fields; fill populates every one; expiry as <code>MM/YY</code>.</div>
+    <form data-fixture="hinted-combined">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="cc-number" inputmode="numeric">
+      <label>Name on card</label>
+      <input name="ccname" autocomplete="cc-name">
+      <div class="row">
+        <div>
+          <label>Expiry</label>
+          <input name="ccexp" autocomplete="cc-exp" placeholder="MM/YY">
+        </div>
+        <div>
+          <label>Security code</label>
+          <input name="cvc" autocomplete="cc-csc" inputmode="numeric">
+        </div>
+      </div>
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 2. maxLength drives the 4-digit year. -->
+  <section>
+    <h2>2. Combined expiry with <code>maxlength="7"</code></h2>
+    <div class="expect">EXPECT: expiry fills as <code>MM/YYYY</code>, not <code>MM/YY</code>.</div>
+    <form data-fixture="hinted-longyear">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="cc-number">
+      <label>Expiry</label>
+      <input name="ccexp" autocomplete="cc-exp" maxlength="7" placeholder="MM/YYYY">
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 3. Split month/year as SELECTs — option-value matching, and NO icon on them. -->
+  <section>
+    <h2>3. Split month / year <code>&lt;select&gt;</code>s (2-digit year options)</h2>
+    <div class="expect">
+      EXPECT: icon on number + csc only (NOT on the selects — they fight the native dropdown);
+      fill matches the <code>YY</code> option after failing <code>YYYY</code>.
+    </div>
+    <form data-fixture="split-selects">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="cc-number">
+      <div class="row">
+        <div>
+          <label>Month</label>
+          <select name="month" autocomplete="cc-exp-month">
+            <option value=""></option>
+            <option value="01">01</option><option value="02">02</option>
+            <option value="03">03</option><option value="04">04</option>
+            <option value="05">05</option><option value="06">06</option>
+            <option value="07">07</option><option value="08">08</option>
+            <option value="09">09</option><option value="10">10</option>
+            <option value="11">11</option><option value="12">12</option>
+          </select>
+        </div>
+        <div>
+          <label>Year</label>
+          <select name="year" autocomplete="cc-exp-year">
+            <option value=""></option>
+            <option value="26">26</option><option value="27">27</option>
+            <option value="28">28</option><option value="29">29</option>
+            <option value="30">30</option>
+          </select>
+        </div>
+        <div>
+          <label>CVC</label>
+          <input name="cvc" autocomplete="cc-csc">
+        </div>
+      </div>
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 4. Prefixed autocomplete tokens. -->
+  <section>
+    <h2>4. Prefixed tokens — <code>section-pay billing cc-number</code></h2>
+    <div class="expect">EXPECT: identical to case 1 — the tokenizer reads through section/billing prefixes.</div>
+    <form data-fixture="prefixed">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="section-pay billing cc-number">
+      <label>Expiry</label>
+      <input name="ccexp" autocomplete="section-pay billing cc-exp">
+      <label>CVC</label>
+      <input name="cvc" autocomplete="section-pay billing cc-csc">
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 5. No hints at all — the name/id fallback. -->
+  <section>
+    <h2>5. Unhinted — name/id fallback only</h2>
+    <div class="expect">EXPECT: still detected, via the narrow name/id patterns (no <code>autocomplete</code> anywhere).</div>
+    <form data-fixture="unhinted">
+      <label>Card number</label>
+      <input name="card_number">
+      <label>Expiration date</label>
+      <input name="expiration_date" placeholder="MM/YY">
+      <label>CVV</label>
+      <input name="cvv">
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 6. Hinted number + a decoy "expiry"-named field: the fallback must NOT fire. -->
+  <section>
+    <h2>6. Hinted number beside a decoy <code>membership_expiry</code></h2>
+    <div class="expect">
+      EXPECT: the card number fills; <code>membership_expiry</code> stays EMPTY — a form that hints
+      once is trusted to hint completely, so no fallback adoption.
+    </div>
+    <form data-fixture="hinted-with-decoy">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="cc-number">
+      <label>Membership expiry (decoy — must stay empty)</label>
+      <input name="membership_expiry">
+      <button type="submit">Pay</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 7. NEGATIVE: must not be seen as a card form at all. -->
+  <section class="negative">
+    <h2>7. Negative — address/quantity form</h2>
+    <div class="expect">EXPECT: NO lock icon on any field here. None of these is a card number.</div>
+    <form data-fixture="negative-address">
+      <div class="row">
+        <div><label>Phone number</label><input name="phone_number"></div>
+        <div><label>House number</label><input name="house_number"></div>
+      </div>
+      <div class="row">
+        <div><label>Quantity</label><input name="quantity" type="number"></div>
+        <div><label>Order number</label><input name="order_number"></div>
+      </div>
+      <label>Street address</label>
+      <input name="street" autocomplete="street-address">
+      <button type="submit">Save</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 8. NEGATIVE: a non-card number that fails Luhn — capture must refuse. -->
+  <section class="negative">
+    <h2>8. Negative — hinted card field submitted with a NON-card value</h2>
+    <div class="expect">
+      EXPECT: the icon DOES appear (detection is structural), but submitting a Luhn-invalid
+      value raises NO save offer — the plausibility gate refuses it. Try
+      <code>4242424242424241</code> (one digit off).
+    </div>
+    <form data-fixture="negative-luhn">
+      <label>Card number</label>
+      <input name="cardnumber" autocomplete="cc-number" value="4242424242424241">
+      <label>CVC</label>
+      <input name="cvc" autocomplete="cc-csc" value="123">
+      <button type="submit">Submit non-card</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <!-- 9. A login form, to confirm the picker sections + that logins still work. -->
+  <section>
+    <h2>9. Login form (control)</h2>
+    <div class="expect">
+      EXPECT: the picker opened from HERE shows a <em>Logins</em> section only if a login is
+      stored for this origin — but the <em>Cards</em> section should appear regardless, since
+      cards are not origin-matched.
+    </div>
+    <form data-fixture="login-control">
+      <label>Username</label>
+      <input name="username" autocomplete="username">
+      <label>Password</label>
+      <input name="password" type="password" autocomplete="current-password">
+      <button type="submit">Sign in</button>
+      <div class="readout"></div>
+    </form>
+  </section>
+
+  <script>
+    // Show what actually landed in each form, so a fill is verifiable at a glance
+    // without opening devtools. Reads values only — this page never transmits them.
+    function readoutFor(form) {
+      const parts = [];
+      for (const el of form.querySelectorAll('input, select')) {
+        parts.push(`${el.name || '(unnamed)'} = ${JSON.stringify(el.value)}`);
+      }
+      return parts.join('\n');
+    }
+
+    for (const form of document.querySelectorAll('form')) {
+      const out = form.querySelector('.readout');
+
+      // Refresh the readout as fields change — a vault fill dispatches input+change,
+      // so a successful fill updates this live.
+      form.addEventListener('input', () => { out.textContent = readoutFor(form); });
+      form.addEventListener('change', () => { out.textContent = readoutFor(form); });
+
+      // Suppress navigation. The preload's capture-phase listener on `document`
+      // has already observed this event by the time we cancel it, so the save
+      // offer still fires.
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        out.textContent = `submitted (no navigation)\n${readoutFor(form)}`;
+      });
+    }
+
+    console.log('vault-card-fixture-loaded');
+  </script>
+</body>
+</html>
