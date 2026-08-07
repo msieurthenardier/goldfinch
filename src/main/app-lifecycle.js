@@ -217,6 +217,20 @@ function registerAppLifecycle({
         isPopupWcId,
         isTabViewWcId: (id) => registry.isTabViewWcId(id),
         isChromeContents: (contents) => registry.isChromeContents(contents),
+        // M15 F3 L1 (DD1/DD1b) — the menuType half of the sheet gate, threaded here so this
+        // dev seam and main.js's MCP engine stay in parity (the house dual-site rule; both
+        // sites are grep-pinned because the fallback is SILENT).
+        //
+        // ⚠ READ BEFORE EDITING THIS SEAM. This engine does NOT thread `isSheetContents`, so
+        // resolveContents' guard 3 is inert here today and the sheet is refused by guard 5
+        // (`non-tab-contents`) — this seam never sets `allowInternal`. Keep the pair together:
+        // adding `isSheetContents` WITHOUT `sheetMenuFor` would make guard 3 absolute here
+        // while the MCP engine admits three ops (fail-closed, but a silent divergence that
+        // breaks the sheet a11y read and the DD8 probe readback over this seam). The FAIL-OPEN
+        // edit is the mirror one: adding `allowInternal: true` (or dropping `isTabViewWcId`)
+        // here lifts guard 5 while guard 3 has no `isSheetContents` to fire on — the sheet
+        // would then be fully drivable, master-password keylogging included.
+        sheetMenuFor: (contents) => registry.sheetMenuFor(contents),
         chromeForTab,
         raiseWindowForTab,
         getHistoryReads: {

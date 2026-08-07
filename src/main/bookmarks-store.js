@@ -53,9 +53,11 @@ const appDb = require('./app-db');
 const { isSafeTabUrl } = require('../shared/url-safety');
 const { bookmarkUrlsMatch } = require('../shared/bookmark-url');
 
-// Mirrors favicon-fetch.js's DATA_IMAGE_RE exactly. Preserved as an export
-// (Implementation Guidance #7 — no importer today; favicon-fetch.js carries
-// its own copy) though not load-bearing.
+// Mirrors favicon-fetch.js's DATA_IMAGE_RE exactly (deliberate duplication —
+// favicon-fetch.js carries its own copy; there has never been a cross-module
+// importer). MODULE-PRIVATE: the dead export it once carried, and the test
+// pinning that export, were removed in M15 F3 "Drag Interactions" Leg 2
+// (DD10). The constant itself is live — `cleanIcon` below is its one use.
 const DATA_IMAGE_RE = /^data:image\//i;
 
 /** @typedef {{ id: string, jarId: string, url: string, title: string, icon: string | null, position: number, addedAt: number }} Bookmark */
@@ -285,4 +287,4 @@ function clearJar(jarId) {
   return s.clearJar(jarId);
 }
 
-module.exports = { load, list, add, update, remove, reorder, clearJar, DATA_IMAGE_RE };
+module.exports = { load, list, add, update, remove, reorder, clearJar };

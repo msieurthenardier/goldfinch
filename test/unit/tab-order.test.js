@@ -156,3 +156,46 @@ test('dropIndexFromPointer: empty slotRects is a degenerate no-op -> 0', () => {
 test('dropIndexFromPointer: non-array input is a degenerate no-op -> 0', () => {
   assert.equal(dropIndexFromPointer(/** @type {any} */ (null), 100, 0), 0);
 });
+
+// ---------------------------------------------------------------------------
+// THE EXTERNAL-SOURCE CASE (M15 F3 DD3) — `draggedIndex = -1`.
+//
+// Pinned HERE, at the predicate itself, rather than only through its two
+// callers: both directions of the bar ↔ overflow drag now rely on it, and each
+// pairs the past-the-end answer with a clamp of its own (`overflowDropToIndex`,
+// `barDropToIndex`). Without this pin a future reader "tidying" a negative
+// draggedIndex into a rejection, or clamping the result to `length - 1`, breaks
+// two shipped features and no test in this file notices.
+// ---------------------------------------------------------------------------
+
+test('dropIndexFromPointer: EXTERNAL SOURCE (draggedIndex -1) — no slot is excluded', () => {
+  // Contrast with the "excludes the dragged slot" case above, on the same
+  // fixture and the same pointer: with slot 2 excluded the answer is 2; with
+  // NOTHING excluded, the pointer at 260 is past midpoints 50, 150 and 250 —
+  // three slots — and before 350.
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 260, 2), 2);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 260, -1), 3);
+});
+
+test('dropIndexFromPointer: EXTERNAL SOURCE — the range is [0, length], INCLUDING past-the-end', () => {
+  // Every position is distinguishable, and the last one is the whole input to
+  // both callers' clamps: a release past the final slot must NOT collapse onto
+  // the same answer as a release inside it.
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, -10, -1), 0);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 60, -1), 1);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 160, -1), 2);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 260, -1), 3);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 999, -1), 4,
+    'PAST THE END — do not clamp this to length - 1; overflowDropToIndex and barDropToIndex own the clamping');
+  // The tie rule is unchanged by the external-source form: exactly on a midpoint
+  // resolves "before".
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 150, -1), 1);
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 151, -1), 2);
+});
+
+test('dropIndexFromPointer: any absent index behaves as external — -1 is not a special case in the code', () => {
+  // Stated so the pin is understood as "no index equals draggedIndex" rather
+  // than as a magic value with its own branch: -1 is simply the caller-facing
+  // spelling of that.
+  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 999, -1), dropIndexFromPointer(FOUR_SLOTS, 999, 99));
+});

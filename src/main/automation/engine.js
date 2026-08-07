@@ -24,7 +24,7 @@ const find = require('./find');
  *   F7 DD3: takes an OPTIONAL windowId — omitted → the last-focused record (the
  *   pre-F7 contract every existing caller relies on); supplied → that window's
  *   chrome, or null when the id names no registered window.
- * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
+ * @param {{ allowInternal?: boolean, getDownloads?: (() => any) | null, grabWindow?: ((windowId?: number) => Promise<string|null>) | null, listWindows?: (() => Array<{ windowId: number, chrome: any, booted: boolean, ownsTab: (wcId: number) => boolean }>) | null, listPopups?: (() => any[]) | null, enumerateWindows?: (() => any[]) | null, isTabViewWcId?: ((id: number) => boolean) | null, isPopupWcId?: ((id: number) => boolean) | null, isChromeContents?: ((wc: any) => boolean) | null, isSheetContents?: ((wc: any) => boolean) | null, sheetMenuFor?: ((wc: any) => ({ menuType: string, token: number } | null)) | null, chromeForTab?: ((id: number) => any) | null, raiseWindowForTab?: ((id: number) => void) | null, getHistoryReads?: ({ listRecent: (jarId: string, opts: any) => any, search: (jarId: string, query: string, opts: any) => any }) | null, isKnownJar?: ((jarId: string) => boolean) | null }} [opts]
  *   allowInternal — one of admin's TWO relaxations (DD6 / Leg 2 + M05 F8 DD8):
  *   when true, deps carry allowInternal so resolveContents (a) lets the internal
  *   goldfinch://settings session through AND (b) skips the non-tab-contents
@@ -42,6 +42,15 @@ const find = require('./find');
  *   second window's chrome must not classify 'guest' — the leg-1 spike
  *   residual) and resolveContents/resolveContentsForJar apply their chrome
  *   exemption/exclusion to every registered chrome. Absent → identity-only.
+ *   sheetMenuFor — window-registry's live `(wc) => {menuType, token} | null` reader for the
+ *   menu-overlay sheet (M15 F3 L1, DD1/DD1b). It is the menuType HALF of the sheet gate;
+ *   the op half is the `allowSheet` opt-in below. Threaded as a LIVE READER rather than a
+ *   snapshot because deps() has no wcId — the sheet is per-window-record, so a deps-time
+ *   snapshot would compare window A's menu against window B's sheet. Rides base by the
+ *   conditional-spread idiom; absent → resolveContents' guard 3 refuses the sheet exactly
+ *   as it did before this leg (fail-closed by shape). ⚠ SILENT FALLBACK — both live
+ *   injection sites (main.js's MCP engine, app-lifecycle.js's dev seam) are grep-pinned,
+ *   the listWindows precedent.
  *   chromeForTab — main.js's class-3 owner routing (M09 F7 DD6): the OWNING
  *   window's chrome webContents for a tab, resolved AT EVENT TIME. activateTab
  *   dispatches through it instead of executeInRenderer's LAST-FOCUSED chrome,
@@ -97,7 +106,7 @@ const find = require('./find');
  *   `unknown-jar` code rather than a silent empty result.
  * @returns {{ [op: string]: (...args: any[]) => any }}
  */
-function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, listPopups = null, enumerateWindows = null, isTabViewWcId = null, isPopupWcId = null, isChromeContents = null, isSheetContents = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
+function createEngine(getChromeContents, { allowInternal = false, getDownloads = null, grabWindow = null, listWindows = null, listPopups = null, enumerateWindows = null, isTabViewWcId = null, isPopupWcId = null, isChromeContents = null, isSheetContents = null, sheetMenuFor = null, chromeForTab = null, raiseWindowForTab = null, getHistoryReads = null, isKnownJar = null } = {}) {
   const fromId = (/** @type {number} */ id) => webContents.fromId(id);
 
   /**
@@ -106,8 +115,21 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
    * clean automation error instead of a confusing null-deref TypeError mid-smoke.
    * activate is built on `base` (NOT the returned deps) so activateTab never receives an
    * `activate` of its own — avoids any accidental recursion.
+   *
+   * M15 F3 L1 (DD1b) — the ONE argument this function takes: `{ allowSheet }`, the OP half
+   * of the menu-overlay sheet gate. It is an OPT-IN, passed by exactly three dispatch
+   * entries below (captureScreenshot / readDom / readAxTree). Every other op — and every
+   * op added later — calls `deps()` bare and is therefore refused on the sheet by
+   * resolveContents' guard 3. `deps(opName)` was considered and rejected: ~28 mechanical
+   * edits and FAIL-OPEN (a forgotten argument yields undefined), whereas a forgotten
+   * opt-in here simply refuses.
+   *
+   * `activate` is built on `base`, so it INHERITS allowSheet on those three ops. Verified
+   * benign at both live engine sites: tabs.activateTab on a sheet wcId misses chromeForTab,
+   * returns false, and raises nothing.
+   * @param {{ allowSheet?: boolean }} [depsOpts]
    */
-  const deps = () => {
+  const deps = ({ allowSheet = false } = {}) => {
     const chromeContents = getChromeContents();
     const executeInRenderer = (/** @type {string} */ code) => {
       if (!chromeContents) throw new Error('automation: chrome window unavailable');
@@ -136,12 +158,13 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
     // listWindows (F7 DD1) rides base by the SAME conditional-spread idiom: absent →
     // the key is not present at all → tabs.enumerateTabs takes its pre-F7
     // single-window executeInRenderer path.
-    // isSheetContents (PR#112 finding 1) rides base by the SAME conditional-spread idiom. Unlike
-    // isTabViewWcId, its resolver guard is ABSOLUTE — admin's allowInternal does NOT lift it — so
-    // the vault secret sheet is undrivable at every tier.
+    // isSheetContents (PR#112 finding 1) rides base by the SAME conditional-spread idiom. Its
+    // resolver guard is NOT lifted by admin's allowInternal; since M15 F3 L1 it is gated on the
+    // (menuType × op) pair rather than refusing absolutely — sheetMenuFor supplies the menuType
+    // half (same conditional-spread idiom) and allowSheet the op half (per-call, below).
     // listPopups / isPopupWcId (M14 F2 L2, DD1a) ride base by the SAME
     // conditional-spread idiom: absent → no popup rows / no popup widening.
-    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof listPopups === 'function' ? { listPopups } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
+    const base = { fromId, chromeContents, executeInRenderer, executeInChrome, allowInternal, fromPartition: session.fromPartition, grabWindow, ...(allowSheet === true ? { allowSheet: true } : {}), ...(typeof listWindows === 'function' ? { listWindows } : {}), ...(typeof listPopups === 'function' ? { listPopups } : {}), ...(typeof isTabViewWcId === 'function' ? { isTabViewWcId } : {}), ...(typeof isPopupWcId === 'function' ? { isPopupWcId } : {}), ...(typeof isChromeContents === 'function' ? { isChromeContents } : {}), ...(typeof isSheetContents === 'function' ? { isSheetContents } : {}), ...(typeof sheetMenuFor === 'function' ? { sheetMenuFor } : {}), ...(typeof chromeForTab === 'function' ? { chromeForTab } : {}), ...(typeof raiseWindowForTab === 'function' ? { raiseWindowForTab } : {}) };
     // activateTab returns Promise<boolean> (the executeInRenderer result) but the input.js deps
     // type declares activate as (id: number) => Promise<void>. The boolean result is unused by
     // actOn; cast via @type to satisfy the narrower type without widening the input module's API.
@@ -192,7 +215,11 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
       input.dragPointer(wcId, from, to, deps(), opts),
     getZoom: (/** @type {number} */ wcId) => zoom.getZoom(wcId, deps()),
     setZoom: (/** @type {number} */ wcId, /** @type {number} */ factor) => zoom.setZoom(wcId, factor, deps()),
-    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps(), opts),
+    // M15 F3 L1 (DD1a/DD1b) — ONE of the THREE `allowSheet` opt-ins (the others are readDom
+    // and readAxTree below). These three, and only these three, may resolve the menu-overlay
+    // sheet, and only while its current menuType is in AUTOMATABLE_MENU_TYPES. Adding a fourth
+    // is a security decision — read resolve.js's guard-3 comment before you do.
+    captureScreenshot: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.captureScreenshot(wcId, deps({ allowSheet: true }), opts),
     // F7 DD3: accepts the windowId discriminator (omitted → last-focused). Its WIRE
     // SHAPE IS UNCHANGED — a bare base64 string, because mcp-tools.js's imageResult
     // consumes it POSITIONALLY. Wrapping it to add windowId would yield a malformed
@@ -218,8 +245,9 @@ function createEngine(getChromeContents, { allowInternal = false, getDownloads =
       }
       return enumerateWindows();
     },
-    readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps()),
-    readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps(), opts),
+    // M15 F3 L1 (DD1a/DD1b) — the other TWO `allowSheet` opt-ins. See captureScreenshot above.
+    readDom: (/** @type {number} */ wcId) => observe.readDom(wcId, deps({ allowSheet: true })),
+    readAxTree: (/** @type {number} */ wcId, /** @type {any} */ opts) => observe.readAxTree(wcId, deps({ allowSheet: true }), opts),
     evaluate: (/** @type {number} */ wcId, /** @type {string} */ expression) => observe.evaluate(wcId, expression, deps()),
     injectScript: (/** @type {number} */ wcId, /** @type {string} */ script) => observe.injectScript(wcId, script, deps()),
     openDevTools: (/** @type {number} */ wcId) => observe.openDevTools(wcId, deps()),

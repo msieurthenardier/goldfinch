@@ -429,6 +429,47 @@ test('reorder(): a duplicate id within the payload is applied once, at its first
   });
 });
 
+// M15 Flight 3 "Drag Interactions" Leg 3, AC10 — the mission's persistence
+// criterion re-verified on the path drag reorder creates. `reorder()` rewrites
+// `position` ONLY, so names and icons ought to survive; no test covered
+// reorder-then-reload before this one, and the flight raised icon persistence
+// as an open question rather than assuming it. This fresh-load assertion is
+// the autonomous half (the live app relaunch belongs to the HAT).
+test('reorder(): the new order — with names AND icons — survives a fresh load() (AC10)', () => {
+  withStore((store) => {
+    const ICON_A = 'data:image/png;base64,AAAA';
+    const ICON_C = 'data:image/png;base64,CCCC';
+    const a = store.add('personal', { url: 'https://a.example/', title: 'Alpha', icon: ICON_A }).bookmark;
+    const b = store.add('personal', { url: 'https://b.example/', title: 'Bravo' }).bookmark; // no icon: a monogram row
+    const c = store.add('personal', { url: 'https://c.example/', title: 'Charlie', icon: ICON_C }).bookmark;
+    store.add('work', { url: 'https://w.example/', title: 'Work' }); // a second jar must be untouched
+
+    store.reorder('personal', [c.id, a.id, b.id]);
+
+    const reloaded = freshStore();
+    reloaded.load('/unused/userdata/path');
+    const rows = reloaded.list('personal');
+    assert.deepEqual(rows.map((x) => x.id), [c.id, a.id, b.id], 'order survives');
+    assert.deepEqual(rows.map((x) => x.title), ['Charlie', 'Alpha', 'Bravo'], 'names survive');
+    assert.deepEqual(rows.map((x) => x.icon), [ICON_C, ICON_A, null], 'icons survive — including the absent one');
+    assert.deepEqual(rows.map((x) => x.position), [0, 1, 2], 'positions stay gap-free 0..n-1');
+    assert.deepEqual(rows.map((x) => x.url),
+      ['https://c.example/', 'https://a.example/', 'https://b.example/'], 'urls survive');
+    assert.deepEqual(reloaded.list('work').map((x) => x.title), ['Work'], 'the other jar is untouched');
+  });
+});
+
+test('reorder(): successive reorders keep positions gap-free 0..n-1 in the RAW table, not only in list() (AC10)', () => {
+  withStore((store) => {
+    const ids = ['a', 'b', 'c', 'd'].map((n) => store.add('personal', { url: `https://${n}.example/` }).bookmark.id);
+    store.reorder('personal', [ids[3], ids[0], ids[2], ids[1]]);
+    store.reorder('personal', [ids[1], ids[3], ids[0], ids[2]]);
+    const raw = rawRows('personal');
+    assert.deepEqual(raw.map((r) => r.position), [0, 1, 2, 3], 'no drift accumulates across successive rewrites');
+    assert.deepEqual(raw.map((r) => r.id), [ids[1], ids[3], ids[0], ids[2]]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // clearJar() — DD9 lifecycle primitive (handleRemove / Bookmarks clear-data
 // class consume this; the wipe-vs-remove distinction itself is pinned in
@@ -447,12 +488,7 @@ test('clearJar(): drops every bookmark for a jar, leaves other jars untouched, r
   });
 });
 
-// ---------------------------------------------------------------------------
-// DATA_IMAGE_RE export (Implementation Guidance #7 — preserved, not load-bearing)
-// ---------------------------------------------------------------------------
-
-test('DATA_IMAGE_RE is exported and matches data:image/... only', () => {
-  const store = freshStore();
-  assert.ok(store.DATA_IMAGE_RE.test('data:image/png;base64,AAAA'));
-  assert.ok(!store.DATA_IMAGE_RE.test('data:text/html,x'));
-});
+// DATA_IMAGE_RE's dead export, and this file's test pinning it, were removed
+// in M15 F3 "Drag Interactions" Leg 2 (DD10). The constant stays module-
+// private and live — its behavior is covered through `cleanIcon` by the
+// icon-sanitizing add/update cases above, which is where it actually matters.

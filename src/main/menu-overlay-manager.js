@@ -58,9 +58,28 @@
 //     the same-menuType keyboard-re-open race). Emits channel 7, calls
 //     focusChrome() for 'escape'/'activated'/'input-empty' (the last covers an
 //     automatically emptied focused sheet), runs restoreFindOverlay(reason).
-//   - There is deliberately NO main→sheet close channel: the hidden sheet keeps
-//     its rendered menu DOM; the next menu-overlay:init rebuilds it, and the
-//     page's late dismissed{blur} is dropped by the stale-token check.
+//   - M15 F3 L1 (DD1f) REVERSES the old "there is deliberately NO main→sheet
+//     close channel" rule. There is now exactly one: `menu-overlay:close`, sent
+//     by closeMenuOverlay (and by openMenu's model-replace branch when the
+//     menuType actually CHANGES), whose sheet-side handler runs
+//     report.silence() + menuController.closeAll() immediately. The page's late
+//     dismissed{blur} is still dropped by the stale-token check, unchanged.
+//
+//     WHY IT EXISTS — it is a SECURITY mechanism, not tidiness. The sheet is one
+//     persistent document that renders every menu, and it used to keep a closed
+//     menu's DOM (including a one-time recovery key's textContent) until the NEXT
+//     open's init landed. Since M15 F3 the automation resolver admits readDom /
+//     readAxTree / captureScreenshot on the sheet while its CURRENT menuType is
+//     allowlisted (resolve.js's guard 3), and openMenu sets currentMenu + show()
+//     SYNCHRONOUSLY before deliverInit crosses the IPC hop. In that window main
+//     reports an allowlisted menuType while the DOM still holds the PRIOR menu's
+//     secret — a window far narrower than human timing and therefore invisible to
+//     every check this flight has. The eager scrub removes the premise instead of
+//     racing it: the DOM is emptied at CLOSE, so there is nothing to read later.
+//     Do not "simplify" this back into a lazy scrub-on-next-init.
+//
+//     `<body>` data attributes are deliberately NOT cleared by the scrub — DD8's
+//     drag-probe readback depends on its counters surviving the menu close.
 
 /**
  * @typedef {{ x: number, y: number, width: number, height: number }} Bounds
@@ -152,6 +171,17 @@ function createMenuOverlayManager({
     if (!view || view.webContents.isDestroyed()) return;
     view.webContents.send?.('menu-overlay:init', payload);
     if (!payload.noFocus) view.webContents.focus?.();
+  }
+
+  // DD1f (M15 F3 L1): the EAGER DOM SCRUB message — the one main→sheet close
+  // channel. The sheet's handler runs report.silence() then menuController.closeAll(),
+  // so no closed menu's content survives in the shared document. Same view/destroyed
+  // guard as deliverInit; a not-yet-constructed or dead sheet has no DOM to scrub, so
+  // the no-op is correct (not a swallowed failure). See the module header for why this
+  // is load-bearing rather than tidy.
+  function deliverCloseReset() {
+    if (!view || view.webContents.isDestroyed()) return;
+    view.webContents.send?.('menu-overlay:close');
   }
 
   // Full teardown (crash recovery + window `closed`): remove from the stack if
@@ -282,6 +312,19 @@ function createMenuOverlayManager({
       // over even though closeMenuOverlay never ran — observers (the auth
       // pending-challenge store) must see this close too.
       onClosed({ menuType: currentMenu.menuType, reason: 'superseded' });
+      // DD1f, model-replace half (M15 F3 L1). closeMenuOverlay never runs on this path,
+      // so without this the superseded menu's DOM — a vault card's textContent included —
+      // would survive into the window where currentMenu already names the NEW (possibly
+      // allowlisted) menuType. 'superseded' is in the leg's own enumerated set of
+      // main-initiated closes, so it needs the same treatment as the others.
+      //
+      // GATED ON A menuType CHANGE, deliberately: a same-menuType model-replace is the
+      // repaint path (downloads progress ticks, omnibox suggestion repaints), and
+      // menu-overlay.js's in-place downloads update requires `menuController.current` to
+      // still be the downloads entry. An unconditional scrub here would null it and force a
+      // full rebuild — hide flash, stolen focus. A same-menuType replace also cannot leak
+      // across a trust boundary: the residue is the same card's own prior model.
+      if (currentMenu.menuType !== payload.menuType) deliverCloseReset();
       // Cross-window model-replace: detach from the OLD recorded attachment
       // before attaching to the new window (the one case where model-replace
       // must physically move the view).
@@ -336,6 +379,11 @@ function createMenuOverlayManager({
     const closed = currentMenu;
     currentMenu = null;
     pendingInit = null;
+    // DD1f (M15 F3 L1): scrub the sheet's DOM EAGERLY, before anything else this close
+    // does. Ordered ahead of hide()/channel 7 so the scrub message is queued to the sheet
+    // ahead of any subsequent open's init — the next menu's DOM is built on an empty root,
+    // and no later read can find this menu's content.
+    deliverCloseReset();
     hide(); // removes from the RECORDED attachment (DD7)
     const att = attachment;
     attachment = null; // the menu session is over — the next open records afresh

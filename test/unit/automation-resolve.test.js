@@ -9,7 +9,30 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isInternalContents, classifyContents, resolveContents, resolveContentsForJar } = require('../../src/main/automation/resolve');
+const { isInternalContents, classifyContents, resolveContents, resolveContentsForJar, AUTOMATABLE_MENU_TYPES } = require('../../src/main/automation/resolve');
+
+// M15 F3 L1 (AC1) — the allowlist is IMPORTED, never retyped, so a member renamed in
+// resolve.js cannot leave these tests passing against a string that no longer exists.
+const [ADMITTED_MENU_TYPE, SECOND_ADMITTED_MENU_TYPE] = [...AUTOMATABLE_MENU_TYPES];
+// A menuType deliberately NOT on the allowlist, and the reason the allowlist exists at all:
+// the sheet state where the vault's master password is typed.
+const SECRET_MENU_TYPE = 'vault-unlock';
+
+/**
+ * Build the (menuType × op) sheet-gate deps for a fake sheet wc.
+ * @param {any} sheet  the fake sheet webContents
+ * @param {{ menu?: any, allowSheet?: boolean, wireReader?: boolean, allowInternal?: boolean }} [o]
+ */
+function sheetDeps(sheet, { menu = null, allowSheet = false, wireReader = true, allowInternal = false } = {}) {
+  return {
+    fromId: (/** @type {number} */ id) => (id === sheet.id ? sheet : null),
+    chromeContents: null,
+    isSheetContents: (/** @type {any} */ wc) => wc === sheet,
+    ...(allowInternal ? { allowInternal: true } : {}),
+    ...(allowSheet ? { allowSheet: true } : {}),
+    ...(wireReader ? { sheetMenuFor: (/** @type {any} */ wc) => (wc === sheet ? menu : null) } : {}),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // isInternalContents — predicate matrix
@@ -107,26 +130,111 @@ test('resolveContents: valid guest wcId → returns the webContents', () => {
   assert.equal(result, wc);
 });
 
-test('resolveContents: the vault SECRET SHEET wc is refused at EVERY tier, admin included (PR#112 finding 1)', () => {
+// RE-TARGETED, NOT DELETED (M15 F3 L1 AC12). This test formerly asserted that the sheet is
+// refused "at EVERY tier, admin included" — an absolute the leg deliberately narrows to a
+// (menuType × op) admission. What SURVIVES verbatim is everything the absolute was actually
+// protecting: with no op opt-in — which is every op but three, and every op added later — the
+// sheet is still refused at every tier, admin's allowInternal included.
+test('resolveContents: the vault SECRET SHEET wc is refused at every tier for any op that did NOT opt in (PR#112 finding 1, narrowed by M15 F3 L1 DD1a)', () => {
   const sheet = makeGuestWc(50);
   const fromId = (id) => (id === 50 ? sheet : null);
   const isSheetContents = (wc) => wc === sheet;
+  // The sheet is showing an ALLOWLISTED menu — the most permissive menuType half there is.
+  const sheetMenuFor = (wc) => (wc === sheet ? { menuType: ADMITTED_MENU_TYPE, token: 7 } : null);
 
-  // Non-admin (no allowInternal): refused.
+  // Non-admin (no allowInternal), no allowSheet: refused.
   assert.throws(
-    () => resolveContents(50, { fromId, chromeContents: null, isSheetContents }),
+    () => resolveContents(50, { fromId, chromeContents: null, isSheetContents, sheetMenuFor }),
     /automation: secret-sheet/,
   );
   // ADMIN (allowInternal:true) — the relaxation that lifts internal-session + non-tab-contents
-  // does NOT lift this: the secret sheet stays undrivable so it can never be keylogged.
+  // does NOT lift this: without the op opt-in the sheet stays undrivable, so it can never be
+  // keylogged and no non-admitted op can read it, allowlisted menuType or not.
   assert.throws(
-    () => resolveContents(50, { fromId, chromeContents: null, allowInternal: true, isSheetContents }),
+    () => resolveContents(50, { fromId, chromeContents: null, allowInternal: true, isSheetContents, sheetMenuFor }),
     /automation: secret-sheet/,
   );
   // A normal guest tab is unaffected by the predicate.
   const tab = makeGuestWc(51);
   const fromId2 = (id) => (id === 51 ? tab : null);
   assert.equal(resolveContents(51, { fromId: fromId2, chromeContents: null, isSheetContents: (wc) => wc === sheet }), tab);
+});
+
+// ---------------------------------------------------------------------------
+// M15 F3 L1 (DD1/DD1a/DD1b/DD1d) — the sheet's (menuType × op) gate.
+// AC1 (both allowlists, fail-closed shape) and AC2 (null refuses at every tier).
+// ---------------------------------------------------------------------------
+
+test('sheet gate (AC1): admitted ONLY when allowSheet AND the current menuType is on AUTOMATABLE_MENU_TYPES', () => {
+  const sheet = makeGuestWc(60);
+  // BOTH seeded menuTypes are admitted (the allowlist is iterated, not retyped).
+  for (const menuType of AUTOMATABLE_MENU_TYPES) {
+    const deps = sheetDeps(sheet, { menu: { menuType, token: 3 }, allowSheet: true });
+    assert.equal(resolveContents(60, deps), sheet, menuType + ' is admitted for an opted-in op');
+    // ...and still admitted at the admin tier, where allowInternal is also set.
+    assert.equal(resolveContents(60, { ...deps, allowInternal: true }), sheet);
+  }
+});
+
+test('sheet gate (AC1): an opted-in op is STILL refused under a non-allowlisted menuType — allowlist, never denylist (DD1d)', () => {
+  const sheet = makeGuestWc(61);
+  assert.throws(
+    () => resolveContents(61, sheetDeps(sheet, { menu: { menuType: SECRET_MENU_TYPE, token: 1 }, allowSheet: true })),
+    /automation: secret-sheet/,
+    'vault-unlock is not on the allowlist, so even readDom/readAxTree/captureScreenshot are refused'
+  );
+  // A menuType invented by a future flight is refused by DEFAULT — it did nothing to be admitted.
+  assert.throws(
+    () => resolveContents(61, sheetDeps(sheet, { menu: { menuType: 'some-future-menu', token: 1 }, allowSheet: true, allowInternal: true })),
+    /automation: secret-sheet/,
+  );
+});
+
+test('sheet gate (AC1): the predicate is FAIL-CLOSED IN SHAPE — an absent sheetMenuFor injection REFUSES, it does not throw a TypeError', () => {
+  const sheet = makeGuestWc(62);
+  // allowSheet is set (an admitted op) but the menuType reader was never injected — the
+  // offline-test / legacy-caller / half-wired-engine-site case.
+  let err;
+  try {
+    resolveContents(62, sheetDeps(sheet, { allowSheet: true, wireReader: false }));
+  } catch (e) { err = e; }
+  assert.ok(err instanceof Error, 'a refusal, not a crash');
+  assert.ok(!(err instanceof TypeError), 'a TypeError from inside a live security guard is NOT a refusal');
+  assert.match(err.message, /automation: secret-sheet/);
+});
+
+test('sheet gate (AC2): a null current menu refuses at EVERY tier, regardless of allowSheet', () => {
+  const sheet = makeGuestWc(63);
+  // sheetMenuFor returns null when no menu is open OR the sheet is hidden — one answer, one refusal.
+  for (const extra of [{}, { allowSheet: true }, { allowSheet: true, allowInternal: true }]) {
+    assert.throws(
+      () => resolveContents(63, sheetDeps(sheet, { menu: null, ...extra })),
+      /automation: secret-sheet/,
+      'null menu refuses with ' + JSON.stringify(extra)
+    );
+  }
+});
+
+test('sheet gate (AC1/AC2): a menu record with no menuType field refuses (no undefined slipping through the Set)', () => {
+  const sheet = makeGuestWc(64);
+  assert.throws(
+    () => resolveContents(64, sheetDeps(sheet, { menu: { token: 4 }, allowSheet: true })),
+    /automation: secret-sheet/,
+  );
+});
+
+test('sheet gate: the gate applies to the SHEET ONLY — an ordinary tab resolves with allowSheet set and no menu reader', () => {
+  const tab = makeGuestWc(65);
+  assert.equal(
+    resolveContents(65, {
+      fromId: (id) => (id === 65 ? tab : null),
+      chromeContents: null,
+      isSheetContents: () => false,
+      allowSheet: true,
+    }),
+    tab
+  );
+  assert.ok(SECOND_ADMITTED_MENU_TYPE, 'the allowlist seeds at least two menuTypes (bookmarks-overflow + bookmark-edit)');
 });
 
 test('resolveContents: valid chrome wcId → returns the webContents (classifyContents can then identify it)', () => {
@@ -543,7 +651,11 @@ test('popup widening: jar membership rides the EXISTING session-identity check �
   );
 });
 
-test('popup widening: the secret-sheet refusal is UNAFFECTED — isPopupWcId can never admit the sheet (guard order)', () => {
+// RE-TARGETED, NOT DELETED (M15 F3 L1 AC12). The claim being pinned is unchanged — the popup
+// widening cannot admit the sheet — but the sheet's own gate is no longer absolute, so the
+// pin now also asserts that only the SHEET GATE decides: a lying isPopupWcId admits nothing
+// under a non-allowlisted menuType, and it is not what admits the allowlisted one either.
+test('popup widening: the secret-sheet gate is UNAFFECTED — isPopupWcId can never admit the sheet (guard order)', () => {
   const sheet = makeGuestWc(50);
   const deps = {
     fromId: (id) => (id === 50 ? sheet : null),
@@ -553,6 +665,18 @@ test('popup widening: the secret-sheet refusal is UNAFFECTED — isPopupWcId can
     isPopupWcId: () => true, // even a (hypothetically) lying predicate
   };
   assert.throws(() => resolveContents(50, deps), /automation: secret-sheet/);
+  // Still refused with the op opt-in when the menuType is not allowlisted — guard 3 runs
+  // BEFORE the popup-widened guard 5, so the popup predicate never gets a say.
+  assert.throws(
+    () => resolveContents(50, { ...deps, allowSheet: true, sheetMenuFor: () => ({ menuType: SECRET_MENU_TYPE, token: 1 }) }),
+    /automation: secret-sheet/,
+  );
+  // And when the sheet IS admitted, it is the sheet gate that admitted it — guard 5 is
+  // reached and satisfied by the popup predicate, so this asserts guard ORDER, not luck.
+  assert.equal(
+    resolveContents(50, { ...deps, allowSheet: true, sheetMenuFor: () => ({ menuType: ADMITTED_MENU_TYPE, token: 1 }) }),
+    sheet
+  );
 });
 
 test('popup widening: internal-session still throws before the widened guard (a popup is never internal by DD3, pinned anyway)', () => {

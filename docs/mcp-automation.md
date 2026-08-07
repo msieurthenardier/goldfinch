@@ -338,7 +338,39 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   renderer, resolve the overlay views, or read the app-level downloads model. Jar keys calling
   `getChromeTarget` or `downloadsList` get `automation: admin-only` (mirroring `captureWindow`).
   The `wcId` returned by `getChromeTarget` is then passed to the drive/observe tools to act on /
-  read the app shell (tab strip, toolbar, menu triggers).
+  read the app shell (tab strip, toolbar, menu triggers). **The menu-overlay sheet is the one
+  overlay these relaxations do NOT fully open** — see the sheet gate below.
+
+- **The menu-overlay sheet: admitted by (menuType × op), refused by default (M15 F3 DD1).** The
+  sheet is one persistent `WebContents` whose single document renders **every** chrome menu —
+  including the vault's master-password entry and its one-time recovery / access / admin key
+  displays. It was previously refused **absolutely**, at every tier. It is now admitted **only
+  when both of these hold**:
+  1. the sheet's **current** menuType is on the allowlist `AUTOMATABLE_MENU_TYPES`
+     (`src/main/automation/resolve.js`) — today `bookmarks-overflow` and `bookmark-edit`; **and**
+  2. the operation is one of exactly three reads: **`readDom`, `readAxTree`,
+     `captureScreenshot`**.
+
+  Everything else throws `automation: secret-sheet`, at **every tier including admin**: every
+  other menuType, a **`null`** current menu (nothing open, or the sheet is hidden), every other
+  wcId-first op (`evaluate`, `injectScript`, `click`, `typeText`, `pressKey`, `navigate`,
+  `printToPDF`, `findInPage`, `dragPointer`, `openDevTools`, …), and **anything added later** —
+  both halves are allowlists, so a new menuType or a new op is refused because it did nothing to
+  be admitted. Practical consequences for a consumer:
+  - **`evaluate` / `injectScript` never resolve the sheet.** Injected code would outlive the
+    menu it was injected under and still be resident when the same realm renders `vault-unlock`.
+    This is why **axe-core auditing of sheet states is not available** (axe is injected as a
+    library); accessibility-*tree* inspection via `readAxTree` **is**.
+  - **Results can be discarded mid-op.** All three admitted ops snapshot the sheet's
+    `{menuType, token}` after resolving and re-check it after their async work; a menu closed,
+    replaced, or even closed-and-reopened during the op throws
+    `automation: sheet-menu-changed` and returns nothing. Re-issue the read with the menu open.
+  - **`captureWindow` is gated the same way.** Its sheet layer composites only under an admitted
+    menuType (re-checked after the capture), and is silently dropped otherwise — the composite
+    still returns chrome + guests. Pixels of a vault sheet are not obtainable at any tier.
+  - **Jar keys are unaffected by any of this.** They are refused by `automation: out-of-jar`
+    on session identity before the sheet guard is consulted at all (see the note at the top of
+    this section); the change widens the **admin tier only**.
 
 - **Overlay views are non-enumerable but probe-addressable (design choice, M05 F7/F8).** The find
   overlay and the menu-overlay sheet are deliberately **not registered in `tabViews`**, so they
@@ -354,6 +386,15 @@ A request's key resolves to an **identity** — a `jarId` or the literal `admin`
   the overlays are never in `enumerateTabs`, so skipping tabs loses nothing — but it is no longer
   load-bearing for correctness. `activateTab` on a non-tab wcId (an overlay) returns `false`
   harmlessly; see its row below.
+  - **⚠ For the SHEET, "addressable at the admin tier" now means the three admitted reads under
+    an admitted menuType (M15 F3 DD1)** — not the whole op set. The find overlay is unchanged.
+    Prefer `enumerateWindows`' `sheetWcId` / `findWcId` over the probe walk (exact, O(1), no
+    fallback); a `readDom`-based probe against the sheet identifies it only while an allowlisted
+    menu is open, so it is not a reliable discovery instrument. And note the read is
+    **self-gating**: whatever gesture you drove to reach the sheet may itself have closed the
+    menu (`outside-click` / `blur` / `activated` all route through `closeMenuOverlay`, nulling
+    the current menu), so re-open the menu before reading. Values written to the sheet's
+    `<body>` data attributes survive a close — the sheet's DOM scrub does not touch them.
 
 > **Status:** the surface binds identity to the session and enforces jar-scoping + the admin tier.
 > It ships in the installed binary, bound by the Settings `automationEnabled` toggle (audit logging

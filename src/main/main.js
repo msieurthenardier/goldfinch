@@ -106,7 +106,10 @@ const { makeAutomationToggle } = require('./automation/toggle');
 // inline `wc.session?.__goldfinchInternal`; this handler imports isInternalContents so the human
 // path and the MCP ops single-source the SAME internal-detection function (it is ELECTRON-FREE).
 const { toggleDevTools } = require('./devtools');
-const { isInternalContents } = require('./automation/resolve');
+// AUTOMATABLE_MENU_TYPES (M15 F3 L1, DD1c): the sheet-menuType allowlist is IMPORTED from the
+// resolver, never re-typed here — captureWindow's sheet layer and resolveContents' guard 3 must
+// be the SAME predicate, or a pixel read would stay open on a surface a DOM read is refused.
+const { isInternalContents, AUTOMATABLE_MENU_TYPES } = require('./automation/resolve');
 // DD13 (F8 Leg 2): pure dual-export accelerator mapper for the menu-overlay sheet's
 // before-input-event forwarding + the internal-tab guard decision (both unit-tested).
 const { sheetAcceleratorAction, isGuestActionAllowed } = require('../shared/sheet-accelerator');
@@ -596,13 +599,28 @@ async function grabWindow(windowId) {
       }
     }
     const sheetView = grabRec.sheet && grabRec.sheet.isVisible() ? grabRec.sheet.getView() : null;
-    if (sheetView && !sheetView.webContents.isDestroyed()) {
+    // M15 F3 L1 (DD1c) — PRE-EXISTING SECRET-READ PATH, CLOSED. This layer composited the
+    // visible sheet unconditionally, so at admin tier captureWindow returned PIXELS of
+    // `vault-unlock` and of the dismiss-locked one-time recovery-/access-/admin-key displays —
+    // i.e. "the sheet is refused at every tier" was already false by a second door, exactly the
+    // shape DD1a refuses `printToPDF` for. It is now gated on the SAME predicate the resolver's
+    // guard 3 uses: registry.sheetMenuFor() (which itself returns null on a hidden sheet) plus
+    // the imported AUTOMATABLE_MENU_TYPES allowlist. A non-allowlisted or absent menu drops the
+    // layer entirely — the capture still returns chrome + guests, exactly as it does when the
+    // sheet is hidden.
+    const sheetMenuAdmitted = (view) => !!view && !!view.webContents
+      && AUTOMATABLE_MENU_TYPES.has(registry.sheetMenuFor(view.webContents)?.menuType);
+    if (sheetView && sheetMenuAdmitted(sheetView) && !sheetView.webContents.isDestroyed()) {
       try {
         const img = await withCaptureTimeout(
           /** @type {Electron.WebContents} */ (sheetView.webContents).capturePage(), 'sheet overlay layer');
         // DD7 post-await re-check (TOCTOU) — see the find layer above. Null-tolerant for
         // the same reason (leg 1 nulls rec.sheet in the window's `close` handler).
-        if (!grabRec.sheet || !grabRec.sheet.isVisible()) {
+        // M15 F3 L1 (DD1c): the re-check ALSO re-evaluates the menuType, not only isVisible() —
+        // a capture that starts under `bookmarks-overflow` and is MODEL-REPLACED by `vault-unlock`
+        // mid-capture would otherwise composite the vault pixels. This is the same TOCTOU
+        // observe.js's assertSheetMenuStable closes one op over.
+        if (!grabRec.sheet || !grabRec.sheet.isVisible() || !sheetMenuAdmitted(sheetView)) {
           /* detached mid-capture — drop the layer (same disposition as a layer timeout) */
         } else {
           const b = /** @type {Electron.WebContentsView} */ (/** @type {unknown} */ (sheetView)).getBounds();
@@ -955,7 +973,14 @@ async function startMcpServerInstance() {
       // PR#112 finding 1: the vault SECRET SHEET's webContents is refused by resolveContents at
       // EVERY tier (admin included), so no automation op can keylog / read the master password or
       // the one-time recovery/access/admin keys rendered on it.
+      // M15 F3 L1 (DD1/DD1b): the refusal is now (menuType × op) rather than absolute —
+      // sheetMenuFor is the menuType half and MUST be injected wherever isSheetContents is.
+      // Injecting isSheetContents alone leaves the sheet absolutely refused (fail-closed, but
+      // silently divergent from the other engine site); the FAIL-OPEN edit is widening a
+      // relaxation (`allowInternal`, or dropping isTabViewWcId) without this pair present.
+      // Grep-pinned as a PAIR across both engine sites — see app-lifecycle.js's dev seam.
       isSheetContents: (wc) => registry.isSheetContents(wc),
+      sheetMenuFor: (wc) => registry.sheetMenuFor(wc),
       // F7 DD6 (recon S1): owner routing + the window raise for activateTab. Without
       // BOTH, activateTab silently falls back to the pre-F7 last-focused dispatch —
       // a forgotten injection restores S1 with NO test failure anywhere, which is why

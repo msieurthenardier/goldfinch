@@ -671,6 +671,90 @@ ipcMain.on('tab-drag-ended', (event, wcId) => {
   }, DRAG_END_GRACE_MS));
 });
 
+// ---------------------------------------------------------------------------
+// BOOKMARK-DRAG BOOKEND + drop forwarding (M15 F3 "Drag Interactions" Leg 4,
+// DD5/DD6). The tab bookend above is the shape; `guest-vault-gesture`
+// (register-browser-ipc.js) is the shape of the signal half — a
+// contextIsolation:false guest sends a PAYLOAD-FREE gesture and main derives the
+// trusted wcId from `event.sender.id`, never from anything the renderer said.
+//
+// The declaration takes its OWN record field. `dragWcId` is a SINGLE SLOT per
+// window record (window-registry.js) — reusing it would clobber a tab drag in
+// flight, and the two drags can genuinely overlap only in the sense that a
+// hostile page could try to make them.
+//
+// The grace timer is the tab bookend's reasoning verbatim: the guest→main→chrome
+// hop crosses two processes and two IPC pipes with no cross-pipe ordering
+// guarantee against the chrome's own `dragend`, so an immediate clear at
+// `dragend` would race a legitimate drop into "not-dragging" — and `dragend`
+// wins on virtually every real drop.
+const BOOKMARK_DRAG_END_GRACE_MS = 1500;
+/** @type {WeakMap<import('./window-registry').WindowRecord, ReturnType<typeof setTimeout>>} */
+const bookmarkDragClearTimers = new WeakMap();
+
+/** Cancel a record's pending grace clear, if any. @param {any} rec */
+function cancelBookmarkDragClear(rec) {
+  const pending = bookmarkDragClearTimers.get(rec);
+  if (pending) { clearTimeout(pending); bookmarkDragClearTimers.delete(rec); }
+}
+
+ipcMain.on('bookmark-drag-started', (event) => {
+  // CHROME-ONLY by sender identity (guests cannot reach this channel — the
+  // bridge is chrome-only and requireChrome resolves null for any other sender).
+  const rec = requireChrome(event);
+  if (!rec) return;
+  cancelBookmarkDragClear(rec);
+  rec.bookmarkDragActive = true;
+});
+
+ipcMain.on('bookmark-drag-ended', (event) => {
+  const rec = requireChrome(event);
+  if (!rec || !rec.bookmarkDragActive) return;
+  cancelBookmarkDragClear(rec);
+  bookmarkDragClearTimers.set(rec, setTimeout(() => {
+    bookmarkDragClearTimers.delete(rec);
+    rec.bookmarkDragActive = false;
+  }, BOOKMARK_DRAG_END_GRACE_MS));
+});
+
+// The guest's bare drop signal (DD6). It carries NO url and NO id — the payload
+// is not read, and there is nothing in it to read. Everything that decides what
+// happens is derived here:
+//   - WHICH TAB: `event.sender.id`, the guest that actually received the drop.
+//     That is what resolves the flight's tab-switch-mid-drag open question BY
+//     CONSTRUCTION: whatever the operator did mid-gesture, the page they dropped
+//     on is the page that navigates — no "which tab was active" ambiguity, no
+//     mid-drag cancellation logic.
+//   - WHETHER AT ALL: that window's chrome must have DECLARED a bookmark drag.
+//     A page with no drag in flight gets silence.
+//   - WHAT URL: not decided here at all. The chrome resolves it from its own
+//     live drag session; main forwards a bare `{ targetWcId }`.
+//
+// AC6b — the declaration is CONSUMED on the first successful forward, mirroring
+// tab-adopt-by-drop's "one drag = one drop". Without it, during any bookmark
+// drag PLUS its grace window, EVERY guest in that window — including background
+// tabs the operator never dropped on — could fabricate a DragEvent and navigate
+// itself, repeatedly. The contract is one navigation, in one tab, per drag.
+//
+// Internal (goldfinch://) guests are structurally unreachable from here rather
+// than guarded against: they are built with internal-preload.js and
+// contextIsolation:true (see tab-create above), so this leg's drag listeners do
+// not exist in them and no drop signal can originate there. A guard would be
+// dead code that reads as load-bearing.
+ipcMain.on('guest-bookmark-drop', (event) => {
+  const wcId = event.sender.id;
+  const rec = registry.getWindowForGuest(wcId);
+  if (!rec || rec.bookmarkDragActive !== true) return; // no declaration → no forward
+  // Resolve the OWNING window's chrome at event time (routing class 3). A
+  // cross-window drop lands here with the TARGET window's record, which never
+  // declared the drag, and dies at the check above — deliberate no-op.
+  const chrome = registry.getChromeForTab(wcId);
+  if (!chrome || chrome.isDestroyed()) return; // no forward happened → nothing to consume
+  cancelBookmarkDragClear(rec);
+  rec.bookmarkDragActive = false; // consumed (AC6b)
+  chrome.send('bookmark-drop', { targetWcId: wcId });
+});
+
 // The CROSS-WINDOW DROP path (M09 F11 Leg 3, DD1/DD2): a tab dragged from another
 // window's strip and released on THIS window's strip. INVERTS tab-move-to-window's
 // authority shape — source-from-payload, target-from-sender — which is exactly the

@@ -51,6 +51,7 @@
 // isSafeColor is imported (the SAME color domain the product accepts —
 // jars.js re-exports it).
 import { isSafeColor } from '../shared/safe-color.js';
+import { BOOKMARK_DND_MIME, overflowDropIndexY, overflowIndicatorY } from '../shared/bookmark-drag.js';
 import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
 import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
@@ -161,6 +162,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     },
     onClose() {
       menuNode.classList.add('hidden');
+      hideOverflowIndicator();
       reportDismissed();
     },
     // No-op focusReturn: trigger === menu (a now-hidden node) — Escape/Tab must
@@ -168,6 +170,170 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     // trigger focus, resolved per reason.
     focusReturn: () => {}
   });
+
+  /* ───────────────────────── bar → overflow DROP TARGET (M15 F3 Leg 5a) ─────
+   *
+   * Operator session 3 MEASURED this transport: a sheet opened MID-DRAG by a
+   * spring-loaded chevron received 23 dragenter / 200 dragover / 2 drop, with
+   * `application/x-goldfinch-bookmark` intact across the crossing. This is the
+   * receiving half. The sheet is a drop TARGET ONLY — it is deliberately NOT a
+   * drag source (there is still no `draggable` anywhere in this file); the
+   * reverse direction is a different, unmeasured transport and belongs to leg 5b.
+   *
+   * ⚠ EVERYTHING HERE IS GATED TO `bookmarks-overflow` (AC3a). `renderMenu` is
+   * shared by kebab / container / page-context / tab-context, and an ungated drop
+   * target or indicator would attach to all five. The per-row `contextmenu` at
+   * the bottom of renderMenu is the precedent, gated exactly this way. The gate
+   * reads `menuNode.dataset.menuType`, which renderMenu stamps — one source of
+   * truth, no parallel state to drift.
+   *
+   * ⚠ THE INDICATOR IS PARENTED TO `root` (#menu-root), NOT to `menuNode`.
+   * renderMenu opens with `menuNode.textContent = ''`, which would wipe a child
+   * indicator on every render. #menu-root is `position: absolute; inset: 0`, so
+   * it is already an absolute containing block spanning the sheet and viewport
+   * coordinates need no translation. And #sheet-menu is ALREADY
+   * `position: absolute` — do NOT add `position: relative` to it, that would
+   * break positionNode's right/left anchoring.
+   */
+
+  const overflowIndicator = document.createElement('div');
+  overflowIndicator.className = 'sheet-drop-indicator hidden';
+  root.appendChild(overflowIndicator);
+
+  const isOverflowMenu = () => menuNode.dataset.menuType === 'bookmarks-overflow';
+
+  function hideOverflowIndicator() {
+    overflowIndicator.classList.add('hidden');
+  }
+
+  /** The rendered rows' viewport rects, in snapshot order — the input to the
+   * pure y-axis pair. Read live per event rather than snapshotted: the indicator
+   * is absolutely positioned and out of flow (leg 3's lesson), so showing it
+   * cannot move a row, and a fresh read costs nothing at drag rates. */
+  function overflowRowRects() {
+    return items().map((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, height: r.height };
+    });
+  }
+
+  /** Shared gate for both drag handlers: this must be the overflow menu, and the
+   * drag must be carrying OUR type. Without the MIME check the sheet would
+   * `preventDefault()` every drag that crosses it — including native file and
+   * link drags — exactly the mistake DD2 names for the guest side. */
+  function overflowDragEvent(e) {
+    if (!isOverflowMenu()) return null;
+    const dt = e.dataTransfer;
+    if (!dt || !dt.types || !dt.types.includes(BOOKMARK_DND_MIME)) return null;
+    return dt;
+  }
+
+  menuNode.addEventListener('dragover', (e) => {
+    const dt = overflowDragEvent(e);
+    if (!dt) return;
+    e.preventDefault(); // without this the drop is never dispatched at all
+    dt.dropEffect = 'move';
+    const rows = overflowRowRects();
+    const index = overflowDropIndexY(rows, e.clientY);
+    const y = index == null ? null : overflowIndicatorY(rows, index);
+    if (y == null) { hideOverflowIndicator(); return; }
+    // Span the menu's own box so the line reads as "between these two rows"
+    // rather than as a floating tick.
+    const box = menuNode.getBoundingClientRect();
+    overflowIndicator.style.left = `${Math.round(box.left)}px`;
+    overflowIndicator.style.width = `${Math.round(box.width)}px`;
+    overflowIndicator.style.top = `${Math.round(y)}px`;
+    overflowIndicator.classList.remove('hidden');
+  });
+
+  // A child→child transition inside the menu also fires dragleave; only a
+  // departure from the menu box itself should retract the indicator.
+  menuNode.addEventListener('dragleave', (e) => {
+    const related = e && e.relatedTarget;
+    if (related && menuNode.contains(/** @type {Node} */ (related))) return;
+    hideOverflowIndicator();
+  });
+
+  menuNode.addEventListener('drop', (e) => {
+    const dt = overflowDragEvent(e);
+    if (!dt) return;
+    e.preventDefault();
+    hideOverflowIndicator();
+    // A release on the menu's PADDING rather than on a row still resolves — the
+    // y-axis midpoint rule answers `rows.length` for a point below the last row,
+    // which the chrome's clamp turns into "last position" (Edge Case).
+    const index = overflowDropIndexY(overflowRowRects(), e.clientY);
+    if (index == null) return; // unreadable geometry never spends a write
+    const token = report.token;
+    if (typeof token !== 'number') return; // no live open — nothing to answer for
+    // Deliberately NOT sendActivatedOnce: this is not an activation, it must not
+    // consume the one-report-per-token budget, and channel 4 would navigate the
+    // tab (AC8). The dedicated channel carries the index and nothing else.
+    window.menuOverlay.overflowDrop?.({ token, index });
+  });
+
+  /* ───────────────────────── overflow → bar DRAG SOURCE (M15 F3 Leg 5b) ─────
+   *
+   * The sheet's FIRST-EVER drag source. Operator session 4 MEASURED this
+   * transport before a line of it was written: a drag started INSIDE the sheet
+   * delivers 54 `dragover` + 1 `drop` to the chrome with
+   * `application/x-goldfinch-bookmark` intact — and the sheet receives its own
+   * `dragend` despite being blur-closed → `hide()` → `removeChildView` at drag
+   * start, which is why the chrome's lifecycle gate has a real clear signal
+   * (its timer bound is defence-in-depth, not the only recovery).
+   *
+   * ⚠ GATED TO `bookmarks-overflow`, like every other drag affordance here
+   * (AC1). `renderMenu` is shared by kebab / container / page-context /
+   * tab-context; an ungated `draggable = true` would make every menu row in the
+   * app a drag source. Same single `isOverflowMenu()` predicate the drop target
+   * uses — one source of truth, no parallel condition to drift.
+   *
+   * ⚠ WHAT THE PAYLOAD CARRIES — AC2, decided and recorded: the SNAPSHOT INDEX,
+   * never a bookmark id or url. The sheet is a dumb renderer (DD9): its model is
+   * `{id:'bookmark:<i>', label}` and it genuinely does not know either. The
+   * asymmetry this buys, stated rather than discovered: an overflow-sourced drag
+   * populates NO `text/uri-list` / `text/plain`, so dragging a row OUT of the
+   * overflow menu onto a page (leg 4's path) does nothing. Bar-sourced drags are
+   * unaffected — they still carry all three types.
+   */
+
+  /**
+   * Make one overflow row a drag source. `rowId` is its `bookmark:<i>` model id;
+   * the snapshot index parsed out of it is the only thing that crosses.
+   * @param {HTMLElement} btn @param {string} rowId
+   */
+  function attachOverflowDragSource(btn, rowId) {
+    const index = Number(rowId.slice('bookmark:'.length));
+    if (!Number.isInteger(index) || index < 0) return;
+    btn.draggable = true;
+    /** The open token THIS gesture answers for, captured at `dragstart`.
+     * Deliberately not re-read at `dragend`: the sheet is blur-closed the instant
+     * the drag begins, and main's close-reset runs `report.silence()`, so
+     * `report.token` is already null by then. */
+    let dragToken = /** @type {number | null} */ (null);
+    btn.addEventListener('dragstart', (e) => {
+      const dt = e.dataTransfer;
+      const token = report.token;
+      // Refuse rather than start a gesture the chrome could never resolve: with
+      // no token main's start gate refuses, and a source that armed anyway would
+      // drag a row that commits nothing.
+      if (!dt || typeof token !== 'number') { e.preventDefault(); return; }
+      dt.setData(BOOKMARK_DND_MIME, String(index));
+      dt.effectAllowed = 'move';
+      dragToken = token;
+      // The chrome learns WHICH row from this trusted, main-gated signal — never
+      // from the dataTransfer, which a hostile page could also populate with our
+      // type (the DD6 "WHERE from the wire, WHAT from our own state" split, with
+      // the roles swapped: here the trusted channel is the one that carries WHAT).
+      window.menuOverlay.sheetDrag?.({ token, phase: 'start', index });
+    });
+    btn.addEventListener('dragend', () => {
+      const token = dragToken;
+      dragToken = null;
+      if (typeof token !== 'number') return; // never armed — nothing to clear
+      window.menuOverlay.sheetDrag?.({ token, phase: 'end' });
+    });
+  }
 
   /** Rebuild the menu item list from the model. Labels via textContent ONLY (DD8 —
    * the model carries guest-controlled / user-supplied strings; no markup path).
@@ -178,6 +344,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
    * @param {string} menuType @param {any[]} model @param {any} anchor */
   function renderMenu(menuType, model, anchor) {
     menuNode.textContent = '';
+    hideOverflowIndicator(); // the rows it pointed between are gone as of the line above
     menuNode.dataset.menuType = menuType;
     menuNode.setAttribute('aria-label', MENU_LABELS[menuType] || menuType);
     if (MENU_TITLES[menuType]) {
@@ -249,6 +416,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
           const editId = 'bookmark-edit:' + item.id.slice('bookmark:'.length);
           if (sendActivatedOnce({ id: editId })) menuController.close(menuEntry);
         });
+        // M15 F3 Leg 5b (AC1): …and the same rows are drag SOURCES. Gated on the
+        // menuType renderMenu itself stamped a few lines above, through the one
+        // named predicate the drop target already uses.
+        if (isOverflowMenu()) attachOverflowDragSource(btn, item.id);
       }
       menuNode.appendChild(btn);
     }
@@ -2262,6 +2433,31 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     },
     true
   );
+
+  // DD1f (M15 F3 L1) — the EAGER DOM SCRUB, driven by main's one close message.
+  //
+  // Identical body to onInit's pre-render reset below (report.silence() then
+  // menuController.closeAll()), run at CLOSE time instead of waiting for the next open's
+  // init. That difference is the whole point and it is a SECURITY property: the sheet is a
+  // single persistent document rendering every menu, and main now admits readDom /
+  // readAxTree / captureScreenshot on it while its current menuType is allowlisted. Main
+  // flips currentMenu + show() synchronously and only then sends init, so a lazy
+  // scrub-on-next-init leaves a window in which main reports an allowlisted menuType while
+  // this DOM still holds the previous menu's content — a one-time recovery key's textContent
+  // among it. Scrubbing here removes that premise instead of racing it.
+  //
+  // closeAll() runs the closing entry's onClose, which is where the three secret cards clear
+  // their own textContent — so the scrub is complete, not merely a hide. `<body>` data
+  // attributes are deliberately untouched (DD8's drag-probe counters must survive the close).
+  //
+  // Guarded for a preload that predates the channel (an old sheet bundle simply keeps the
+  // pre-DD1f lazy behavior rather than throwing at boot).
+  if (typeof window.menuOverlay.onCloseReset === 'function') {
+    window.menuOverlay.onCloseReset(() => {
+      report.silence();
+      menuController.closeAll();
+    });
+  }
 
   window.menuOverlay.onInit((payload) => {
     const { menuType, model, anchor, startIndex, token } = payload || {};

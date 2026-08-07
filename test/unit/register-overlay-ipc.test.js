@@ -58,6 +58,8 @@ test('overlay registrar preserves sender roles, token checks, and close-before-a
   assert.deepEqual([...ipcMain.listeners.keys()].sort(), [
     'find-overlay:close', 'find-overlay:open', 'find-overlay:query',
     'menu-overlay:activated', 'menu-overlay:close', 'menu-overlay:dismissed', 'menu-overlay:open',
+    'menu-overlay:overflow-drop', // M15 F3 Leg 5a
+    'menu-overlay:sheet-drag', // M15 F3 Leg 5b
     'tearoff-overlay:hide', 'tearoff-overlay:move', 'tearoff-overlay:show',
   ]);
 
@@ -397,4 +399,198 @@ test('bookmark-edit-submit: a current menu with no captured jarId normalizes to 
   );
   assert.equal(seenJarId, null, 'a non-string jarId is normalized to null before reaching `list`');
   assert.deepEqual(res, { ok: false, reason: 'not-found' });
+});
+
+// ---------------------------------------------------------------------------
+// M15 F3 Leg 5a (AC8/AC8b): the bookmarks-overflow DROP-INDEX channel.
+//
+// The sheet is ONE persistent document shared by every menuType, so this
+// handler's guards are the whole of its safety. All three are asserted as
+// PREDICATES here — sender identity, token freshness, AND the menuType — because
+// this flight has recorded four separate findings of a handler that carried only
+// the first two and would therefore accept a message while `vault-unlock` was on
+// screen.
+// ---------------------------------------------------------------------------
+
+function makeOverflowDropHarness({ menuType = 'bookmarks-overflow', token = 7 } = {}) {
+  const ipcMain = makeIpc();
+  const events = [];
+  const chrome = { send: (channel, payload) => events.push(['send', channel, payload]) };
+  const sheetSender = { isDestroyed: () => false };
+  const current = menuType == null ? null : { token, menuType };
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    getCurrentMenu: () => current,
+    closeMenuOverlay: (reason, tok) => events.push(['close', reason, tok]),
+  };
+  const rec = { win: {}, sheet };
+  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  registerOverlayIpc({
+    ipcMain, registry,
+    chromeForAttachment: () => chrome,
+    chromeForTab: () => chrome,
+    sanitizeActivatedValue: () => undefined,
+  });
+  return {
+    events, sheetSender,
+    fire: (sender, payload) => ipcMain.listeners.get('menu-overlay:overflow-drop')({ sender }, payload),
+  };
+}
+
+test('Leg 5a AC8: a valid drop index CLOSES the sheet, then forwards the bare index to the owning chrome', () => {
+  const h = makeOverflowDropHarness();
+  h.fire(h.sheetSender, { token: 7, index: 2 });
+  assert.deepEqual(h.events, [
+    ['close', 'activated', 7],
+    ['send', 'bookmark-overflow-drop', { index: 2 }],
+  ]);
+  // Nothing but the index crosses: no bookmark id, no url, no jar — the chrome
+  // resolves all three from its own dragstart-time hold, so the message cannot
+  // be aimed even if it were forged.
+  assert.deepEqual(Object.keys(h.events[1][2]), ['index']);
+});
+
+test('Leg 5a AC8b: guard 1 — a NON-SHEET sender is refused', () => {
+  const h = makeOverflowDropHarness();
+  h.fire({}, { token: 7, index: 0 });
+  h.fire(undefined, { token: 7, index: 0 });
+  assert.deepEqual(h.events, []);
+});
+
+test('Leg 5a AC8b: guard 2 — a STALE open token is refused', () => {
+  const h = makeOverflowDropHarness({ token: 7 });
+  h.fire(h.sheetSender, { token: 6, index: 0 });
+  assert.deepEqual(h.events, []);
+});
+
+test('Leg 5a AC8b: guard 3 — the menuType predicate. A drop index is REFUSED while vault-unlock is on screen', () => {
+  for (const menuType of ['vault-unlock', 'kebab', 'bookmark-edit', 'auth-basic', 'cert-picker', 'page-context']) {
+    const h = makeOverflowDropHarness({ menuType });
+    h.fire(h.sheetSender, { token: 7, index: 0 });
+    assert.deepEqual(h.events, [], `${menuType} must not be able to report an overflow drop index`);
+  }
+});
+
+test('Leg 5a AC8b: guard 2 — a NULL current menu (sheet hidden / nothing open) is refused', () => {
+  const h = makeOverflowDropHarness({ menuType: null });
+  h.fire(h.sheetSender, { token: 7, index: 0 });
+  assert.deepEqual(h.events, []);
+});
+
+test('Leg 5a AC8: the payload is VALIDATED-NO-OP on every malformed shape', () => {
+  const h = makeOverflowDropHarness();
+  for (const bad of [
+    undefined, null, {}, { token: 7 }, { index: 0 }, { token: '7', index: 0 },
+    { token: 7, index: -1 }, { token: 7, index: 1.5 }, { token: 7, index: '0' },
+    { token: 7, index: null },
+  ]) {
+    h.fire(h.sheetSender, bad);
+  }
+  assert.deepEqual(h.events, []);
+  h.fire(h.sheetSender, { token: 7, index: 0 }); // …and a good one still works
+  assert.equal(h.events.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// M15 F3 Leg 5b (AC3): the bookmarks-overflow DRAG-LIFECYCLE channel.
+//
+// The reverse direction — the sheet is the drag SOURCE, so these two signals are
+// the entire bracket the chrome ever sees. `start` carries all three guards; `end`
+// carries sender identity alone, and that asymmetry is asserted as a deliberate
+// property below (see the handler's own note): by the time a sheet-sourced drag
+// ends, the sheet has been blur-closed since the drag STARTED, so a token/menuType
+// gate would refuse EVERY `end` and the clear signal would never arrive. The
+// freshness check moves to the chrome, which still holds the live session.
+// ---------------------------------------------------------------------------
+
+function makeSheetDragHarness({ menuType = 'bookmarks-overflow', token = 7 } = {}) {
+  const ipcMain = makeIpc();
+  const events = [];
+  const chrome = { send: (channel, payload) => events.push(['send', channel, payload]) };
+  const sheetSender = { isDestroyed: () => false };
+  const current = menuType == null ? null : { token, menuType };
+  const sheet = {
+    getView: () => ({ webContents: sheetSender }),
+    getCurrentMenu: () => current,
+    closeMenuOverlay: (reason, tok) => events.push(['close', reason, tok]),
+  };
+  const rec = { win: {}, sheet };
+  const registry = { records: () => [rec], getWindowForChrome: () => null };
+  registerOverlayIpc({
+    ipcMain, registry,
+    chromeForAttachment: () => chrome,
+    chromeForTab: () => chrome,
+    sanitizeActivatedValue: () => undefined,
+  });
+  return {
+    events, sheetSender,
+    fire: (sender, payload) => ipcMain.listeners.get('menu-overlay:sheet-drag')({ sender }, payload),
+  };
+}
+
+test('Leg 5b AC3: a valid `start` forwards the bare phase/token/index — and does NOT close the sheet', () => {
+  const h = makeSheetDragHarness();
+  h.fire(h.sheetSender, { token: 7, phase: 'start', index: 2 });
+  assert.deepEqual(h.events, [['send', 'bookmark-sheet-drag', { phase: 'start', token: 7, index: 2 }]]);
+  // No close: the sheet's own blur close owns that, and closing from here would
+  // race the drag session this message is announcing.
+  assert.equal(h.events.some((e) => e[0] === 'close'), false);
+  // Nothing but the phase, the token and the index crosses — no bookmark id, no
+  // url, no jar. The chrome resolves those from its own overflow snapshot.
+  assert.deepEqual(Object.keys(h.events[0][2]).sort(), ['index', 'phase', 'token']);
+});
+
+test('Leg 5b AC3: `start` guard 1 — a NON-SHEET sender is refused', () => {
+  const h = makeSheetDragHarness();
+  h.fire({}, { token: 7, phase: 'start', index: 0 });
+  h.fire(undefined, { token: 7, phase: 'start', index: 0 });
+  h.fire({}, { token: 7, phase: 'end' }); // …and `end` is sender-gated too
+  assert.deepEqual(h.events, []);
+});
+
+test('Leg 5b AC3: `start` guard 2 — a STALE open token, and a NULL current menu, are refused', () => {
+  const stale = makeSheetDragHarness({ token: 7 });
+  stale.fire(stale.sheetSender, { token: 6, phase: 'start', index: 0 });
+  assert.deepEqual(stale.events, []);
+
+  const none = makeSheetDragHarness({ menuType: null });
+  none.fire(none.sheetSender, { token: 7, phase: 'start', index: 0 });
+  assert.deepEqual(none.events, []);
+});
+
+test('Leg 5b AC3: `start` guard 3 — the menuType predicate. No other menu may arm a bar-suppressing session', () => {
+  for (const menuType of ['vault-unlock', 'kebab', 'bookmark-edit', 'auth-basic', 'cert-picker', 'page-context']) {
+    const h = makeSheetDragHarness({ menuType });
+    h.fire(h.sheetSender, { token: 7, phase: 'start', index: 0 });
+    assert.deepEqual(h.events, [], `${menuType} must not be able to open a foreign-drag session`);
+  }
+});
+
+test('Leg 5b AC3: `end` is forwarded even though the sheet has legitimately CLOSED — the asymmetry, deliberately', () => {
+  // This is the case that occurs on every single real gesture: the sheet
+  // blur-closes at drag START, so by dragend `getCurrentMenu()` is null. A
+  // token/menuType gate here would refuse 100% of `end` signals and the chrome's
+  // suppression would only ever be released by AC3's timer.
+  const h = makeSheetDragHarness({ menuType: null });
+  h.fire(h.sheetSender, { token: 7, phase: 'end' });
+  assert.deepEqual(h.events, [['send', 'bookmark-sheet-drag', { phase: 'end', token: 7 }]]);
+  // The token still crosses — the freshness check is not dropped, it MOVES to the
+  // chrome, which matches it against its own live session.
+  assert.equal(h.events[0][2].token, 7);
+});
+
+test('Leg 5b AC3: the payload is VALIDATED-NO-OP on every malformed shape, and on unknown phases', () => {
+  const h = makeSheetDragHarness();
+  for (const bad of [
+    undefined, null, {}, { phase: 'start' }, { token: 7 }, { token: '7', phase: 'start', index: 0 },
+    { token: 7, phase: 'start' }, { token: 7, phase: 'start', index: -1 },
+    { token: 7, phase: 'start', index: 1.5 }, { token: 7, phase: 'start', index: '0' },
+    { token: 7, phase: 'start', index: null },
+    { token: 7, phase: 'cancel' }, { token: 7, phase: 'END' }, { token: 7, phase: 0 },
+  ]) {
+    h.fire(h.sheetSender, bad);
+  }
+  assert.deepEqual(h.events, []);
+  h.fire(h.sheetSender, { token: 7, phase: 'start', index: 0 }); // …and a good one still works
+  assert.equal(h.events.length, 1);
 });

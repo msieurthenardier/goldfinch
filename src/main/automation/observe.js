@@ -66,6 +66,64 @@ const { withCaptureTimeout } = require('../capture-timeout');
 const DEFAULT_PAINT_DELAY_MS = 80;
 
 /**
+ * M15 F3 L1 (DD1b) — read the sheet's current `{menuType, token}` for the RESOLVED wc, or
+ * null. Module-private half of the snapshot/re-check pair below.
+ *
+ * The snapshot lives HERE, inside each admitted op after its FIRST resolveContents, and NOT
+ * in engine.js's deps(): deps() is built with no wcId (the target is not known yet) and
+ * sheetMenuFor is per-window-record, so a deps-time snapshot would compare window A's menu
+ * against window B's sheet. Here, `wc` is in hand.
+ *
+ * Returns null for every ordinary tab/chrome target (no sheet matches) — which is exactly
+ * why the comparison below must treat null → null as UNCHANGED.
+ *
+ * @param {any} wc  the resolved webContents
+ * @param {{ sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null) }} deps
+ * @returns {{ menuType: string, token: number } | null}
+ */
+function sheetMenuSnapshot(wc, deps) {
+  return typeof deps.sheetMenuFor === 'function' ? (deps.sheetMenuFor(wc) || null) : null;
+}
+
+/**
+ * M15 F3 L1 (DD1b) — the POST-AWAIT re-check every admitted sheet op runs, on the
+ * main.js grabWindow TOCTOU idiom. `resolveContents` proved the gate at resolve time; the
+ * menu can be closed or model-replaced during the op's async work, so the RESULT is
+ * discarded unless the sheet's menu is byte-for-byte the same menu it was.
+ *
+ * Three deliberate properties:
+ *   - null → null does NOT throw. The snapshot is `sheetMenuFor(wc)`, NOT "the window's
+ *     current menu": for an ordinary tab both reads are null, and treating that as a
+ *     mismatch would fail every tab captureScreenshot taken while a menu happened to open.
+ *   - `token` is compared as well as `menuType`, so a close-and-reopen of the SAME
+ *     allowlisted menu ALSO throws. That is deliberate and is the safe direction — the read
+ *     spans two distinct menu sessions and nothing proves the second rendered before the
+ *     read landed. Do not "fix" it to a menuType-only compare.
+ *   - It applies UNCONDITIONALLY, including on readAxTree's `{automation:'debugger-unavailable'}`
+ *     early return (cdp.js returns without attaching, so nothing was read; re-checking is
+ *     harmless and simpler than a special case).
+ *
+ * @param {any} wc  the FINAL resolved webContents (post-re-resolve where an op re-resolves)
+ * @param {{ sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null) }} deps
+ * @param {{ menuType: string, token: number } | null} before  the first-resolve snapshot
+ * @param {string} op  op name, for the thrown message
+ * @throws {Error} `automation: sheet-menu-changed` when the menu moved under the op
+ */
+function assertSheetMenuStable(wc, deps, before, op) {
+  const after = sheetMenuSnapshot(wc, deps);
+  const same = before === null
+    ? after === null
+    : (after !== null && after.menuType === before.menuType && after.token === before.token);
+  if (!same) {
+    throw new Error(
+      'automation: sheet-menu-changed — ' + op + ' result discarded: the overlay sheet\'s menu changed ' +
+      'during the op (' + (before ? before.menuType + '#' + before.token : 'null') + ' → ' +
+      (after ? after.menuType + '#' + after.token : 'null') + ')'
+    );
+  }
+}
+
+/**
  * Resolve a Promise after `ms` milliseconds. Module-private; the real waitForPaint default
  * uses it for the fixed-delay branch. Tests inject an immediate/no-op waitForPaint so no
  * real timer ever fires.
@@ -119,6 +177,8 @@ function defaultWaitForPaint(wc, { delayMs = DEFAULT_PAINT_DELAY_MS } = {}) {
  *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
+ *   allowSheet?: boolean,
+ *   sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null),
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
@@ -135,6 +195,8 @@ async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPain
   const { chromeContents, isChromeContents, activate } = deps;
   // BOTH resolves forward the full deps so allowInternal flows on each (DD6 / Leg 2).
   let wc = resolveContents(wcId, deps);
+  // M15 F3 L1 (DD1b): snapshot immediately after the FIRST resolve — where wc is in hand.
+  const sheetMenu = sheetMenuSnapshot(wc, deps);
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
@@ -148,6 +210,9 @@ async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPain
   // every isDestroyed() guard above has already passed. Hard-refuse at the bound:
   // this capture IS the op's result, so there is nothing to degrade to.
   const image = await withCaptureTimeout(wc.capturePage(), 'wcId ' + wcId);
+  // M15 F3 L1 (DD1b) post-await re-check: a capture that started under an allowlisted menu
+  // and was model-replaced by e.g. vault-unlock mid-paint must not return those pixels.
+  assertSheetMenuStable(wc, deps, sheetMenu, 'captureScreenshot');
   return image.toPNG().toString('base64');
 }
 
@@ -204,10 +269,14 @@ const READ_DOM_SNIPPET = '(() => ({' +
  *   chromeContents: any,
  *   isChromeContents?: (wc: any) => boolean,
  *   allowInternal?: boolean,
+ *   allowSheet?: boolean,
+ *   sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null),
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
  *   allowInternal — admin's DD6 relaxation, forwarded to resolveContents
+ *   allowSheet / sheetMenuFor — M15 F3 L1 (DD1b): the op-half opt-in and the live menuType
+ *   reader that together admit the menu-overlay sheet under an allowlisted menuType.
  *   NOTE: deps.activate is deliberately NOT read here (F7 DD6). A caller may still supply
  *   it — the engine's shared deps bag carries one for the ops that do raise — and this op
  *   ignores it. That is the contract, pinned by test.
@@ -218,7 +287,15 @@ async function readDom(wcId, deps) {
   // ONE resolve, no async hop ⇒ no stale handle ⇒ no post-activate re-resolve (F7 DD6
   // deleted the activate branch; the re-resolve that guarded it would be dead code).
   const wc = resolveContents(wcId, deps);
-  return wc.executeJavaScript(READ_DOM_SNIPPET);
+  // M15 F3 L1 (DD1b): snapshot after the (only) resolve, re-check after the round trip.
+  // readDom's executeJavaScript is a FULL main→renderer round trip, so what comes back is
+  // whatever the renderer had rendered when the snippet ran — not what main believed at
+  // resolve time. That is a wider exposure than the stale-handle concern the other two ops
+  // guard, which is why this op carries the re-check too (operator ruling 2026-08-05).
+  const sheetMenu = sheetMenuSnapshot(wc, deps);
+  const snapshot = await wc.executeJavaScript(READ_DOM_SNIPPET);
+  assertSheetMenuStable(wc, deps, sheetMenu, 'readDom');
+  return snapshot;
 }
 
 /**
@@ -297,6 +374,8 @@ async function captureWindow({ grabWindow }, { windowId } = {}) {
  *   isChromeContents?: (wc: any) => boolean,
  *   activate?: (id: number) => Promise<void>,
  *   allowInternal?: boolean,
+ *   allowSheet?: boolean,
+ *   sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null),
  * }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through to classify the result)
@@ -310,6 +389,8 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
   void depth; void properties;                  // DD4 Flight-9 stub — accepted, unimplemented in v1
   const { chromeContents, isChromeContents, activate } = deps;
   let wc = resolveContents(wcId, deps);   // throws bad/dead/internal (DD6); allowInternal forwarded
+  // M15 F3 L1 (DD1b): snapshot immediately after the FIRST resolve.
+  const sheetMenu = sheetMenuSnapshot(wc, deps);
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
     await activate(wcId);                        // DD5 foreground-to-act (await BEFORE the lock)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and re-resolving
@@ -322,11 +403,24 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
   // bring-to-front) but only one wins the synchronous lock add() — the other gets 'locked'.
   // NOTE: do NOT re-resolve between withDebuggerSession entry and its internal detach — the wc
   // captured here is the same handle used for attach and detach. This comment guards future edits.
-  return withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
+  //
+  // M15 F3 L1 (DD1b) — RESIDUAL STATE NOTE, named here so it is not rediscovered: the
+  // callback calls `Accessibility.enable` with NO matching `disable`, so accessibility mode
+  // persists on the sheet's shared, never-reloaded document across menu boundaries. That is
+  // outside DD1a's retired "leaves nothing resident" rule (which was retired as a TEST, not as
+  // a concern) and it is not a leak — no caller-supplied code and no readable state are left
+  // behind — but it IS residual state left by an admitted op on the very surface DD1a is about.
+  const result = await withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
     await w.debugger.sendCommand('Accessibility.enable');
     const res = await w.debugger.sendCommand('Accessibility.getFullAXTree');
     return res && Array.isArray(res.nodes) ? res.nodes : [];          // empty = valid success (DD4)
   });
+  // Post-await re-check AFTER withDebuggerSession returns (never between its entry and its
+  // internal detach — see the no-re-resolve note above; `wc` is still the same handle).
+  // Applies unconditionally, INCLUDING to the debugger-unavailable refusal: cdp.js returns
+  // without attaching there, so nothing was read, and re-checking is simpler than a carve-out.
+  assertSheetMenuStable(wc, deps, sheetMenu, 'readAxTree');
+  return result;
 }
 
 /**

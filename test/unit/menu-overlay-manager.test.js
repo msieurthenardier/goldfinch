@@ -424,8 +424,12 @@ test('close before load clears the queued init — a stale seed never fires', ()
   mgr.openMenu(payloadFor(1));
   mgr.closeMenuOverlay('blur');
   createdViews[0].webContents.emit('did-finish-load');
+  // NARROWED to the INIT channel by M15 F3 L1 (DD1f): the close path now also sends
+  // 'menu-overlay:close' (the eager DOM scrub), so a blanket "no send at all" assertion
+  // would fail on the security mechanism rather than on the stale seed it exists to catch.
+  // The subject is unchanged — no channel-3 init may be delivered against a closed menu.
   assert.equal(
-    createdViews[0].calls.some((c) => c[0] === 'send'),
+    createdViews[0].calls.some((c) => c[0] === 'send' && c[1] === 'menu-overlay:init'),
     false,
     'no init delivered against a closed menu'
   );
@@ -887,4 +891,104 @@ test('onClosed default is a no-op (absent injection changes nothing)', () => {
   mgr.openMenu({ menuType: 'kebab', model: [], anchor: null, token: 1 });
   mgr.closeMenuOverlay('escape'); // must not throw
   assert.equal(mgr.isMenuOpen(), false);
+});
+
+// ---------------------------------------------------------------------------
+// M15 F3 L1 (DD1f, AC6) — the EAGER DOM SCRUB channel.
+//
+// The sheet is ONE persistent document rendering every menu, and since this leg the
+// automation resolver admits readDom / readAxTree / captureScreenshot on it while its
+// current menuType is allowlisted. A lazily-scrubbed sheet would therefore expose a
+// closed vault card's textContent in the window between openMenu's SYNCHRONOUS
+// currentMenu/show() and the next init crossing the IPC hop. These pins make the eager
+// scrub executable rather than commented.
+// ---------------------------------------------------------------------------
+
+/** Every 'menu-overlay:close' send recorded on the sheet view. */
+function scrubSends(view) {
+  return view.calls.filter((c) => c[0] === 'send' && c[1] === 'menu-overlay:close');
+}
+
+test('DD1f: closeMenuOverlay sends the sheet the menu-overlay:close scrub', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1));
+  const v = createdViews[0];
+  assert.equal(scrubSends(v).length, 0, 'no scrub before the close');
+  mgr.closeMenuOverlay('escape');
+  assert.equal(scrubSends(v).length, 1, 'exactly one scrub emitted on close');
+});
+
+test('DD1f: EVERY main-initiated close scrubs — including the ones that close a dismissible:false card', () => {
+  for (const reason of ['tab-switch', 'tab-hide', 'tab-close', 'superseded', 'teardown']) {
+    setupProto();
+    readySheet();
+    // dismissible:false is the one-time recovery-key shape — exactly the DOM that must not linger.
+    mgr.openMenu({ ...payloadFor(1, 'vault-recovery-show'), dismissible: false });
+    mgr.closeMenuOverlay(reason);
+    assert.equal(scrubSends(createdViews[0]).length, 1, reason + ' must scrub the sheet DOM');
+  }
+});
+
+test('DD1f: a SOFT dismiss that a dismissible:false card REFUSES does not scrub (the card is still open)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu({ ...payloadFor(1, 'vault-recovery-show'), dismissible: false });
+  mgr.closeMenuOverlay('escape');   // refused by the DD5 non-dismissible guard
+  assert.equal(mgr.isMenuOpen(), true, 'the card is still open');
+  assert.equal(scrubSends(createdViews[0]).length, 0, 'nothing closed, so nothing to scrub');
+});
+
+test('DD1f: the scrub is queued to the sheet BEFORE any subsequent open\'s init', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'vault-recovery-show'));
+  mgr.closeMenuOverlay('tab-switch');
+  mgr.openMenu(payloadFor(2, 'bookmarks-overflow'));
+  const channels = createdViews[0].calls.filter((c) => c[0] === 'send').map((c) => c[1]);
+  const lastScrub = channels.lastIndexOf('menu-overlay:close');
+  const secondInit = channels.lastIndexOf('menu-overlay:init');
+  assert.ok(lastScrub !== -1 && secondInit !== -1, 'both messages were sent');
+  assert.ok(lastScrub < secondInit,
+    'the scrub must precede the next init on the wire — that ordering is what makes the ' +
+    'allowlisted-menuType admission sound');
+});
+
+test('DD1f: an idempotent no-op close (no menu open) sends no scrub', () => {
+  setupProto();
+  readySheet();
+  mgr.closeMenuOverlay('blur');
+  assert.equal(scrubSends(createdViews[0]).length, 0);
+});
+
+test('DD1f: a model-replace to a DIFFERENT menuType scrubs; a same-menuType repaint does NOT', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'vault-recovery-show'));
+  // Cross-menuType model-replace: closeMenuOverlay never runs on this path, so without the
+  // scrub the superseded card's DOM would survive into a window where currentMenu already
+  // names the incoming (possibly allowlisted) menuType.
+  mgr.openMenu(payloadFor(2, 'bookmarks-overflow'));
+  assert.equal(scrubSends(createdViews[0]).length, 1, 'a cross-menuType supersede scrubs');
+
+  // Same-menuType repaint (downloads progress ticks, omnibox suggestion repaints): NOT
+  // scrubbed, deliberately — menu-overlay.js's in-place downloads update requires
+  // menuController.current to still be the downloads entry, and the residue is the same
+  // card's own prior model, never a cross-surface leak.
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1, 'downloads'));
+  mgr.openMenu(payloadFor(2, 'downloads'));
+  assert.equal(scrubSends(createdViews[0]).length, 0, 'a same-menuType repaint must not scrub');
+});
+
+test('DD1f: the scrub carries NO payload — the message IS the signal (and clears no <body> attributes)', () => {
+  setupProto();
+  readySheet();
+  mgr.openMenu(payloadFor(1));
+  mgr.closeMenuOverlay('escape');
+  // DD8's drag probe writes its counters to the sheet's <body> data attributes and reads
+  // them back with readDom AFTER re-opening the menu; a payload-driven "clear these too"
+  // scrub would break that. There is no payload to carry such an instruction.
+  assert.equal(scrubSends(createdViews[0])[0][2], undefined);
 });

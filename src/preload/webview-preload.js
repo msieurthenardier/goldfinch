@@ -10,6 +10,7 @@
 const { ipcRenderer } = require('electron');
 const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-fill-fields');
 const { createVaultIconController } = require('./vault-fill-icon');
+const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 
 function absUrl(src) {
   if (!src) return null;
@@ -353,6 +354,47 @@ if (IS_TOP_FRAME && vaultEligible) {
       /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
     }
   }, true);
+}
+
+// ---------------------------------------------------------------------------
+// Drag a bookmark onto the page (M15 F3 "Drag Interactions" Leg 4, DD5/DD5b/DD6).
+//
+// Two listeners on `window`, BUBBLE phase, registered in EVERY frame (the frame-
+// scope decision and the full mechanism live in guest-bookmark-drop.js's header;
+// this site owns only the document-start captures and the registration).
+//
+// ⚠ `setTimeout` IS CAPTURED HERE, AT DOCUMENT-START, and handed to the core.
+// contextIsolation is off, so the page shares this world: a handler that
+// resolved `window.setTimeout` at DROP time — long after page scripts ran —
+// could be handed a monkeypatched one that runs the deferred `defaultPrevented`
+// read SYNCHRONOUSLY (defeating page-wins) or never (suppressing the
+// navigation). Same annoyance class as the `isTrustedGet` capture above, and the
+// same honest label: annoyance hardening, not a security boundary — DD6 is what
+// makes forgery pointless.
+//
+// The `isTrusted` capture is deliberately NOT used to REFUSE a scripted drop
+// here (deviation recorded in the flight log): the payload is bare, main gates
+// on a chrome-declared drag and CONSUMES that declaration on the first forward,
+// so a fabricated event buys a page at most the navigation the operator was
+// already performing — while refusing untrusted events would also make this
+// leg's own AC1 autonomous verification (driving the finished chain with a
+// synthetic DragEvent, the way leg 3 verified its chain) impossible.
+// ---------------------------------------------------------------------------
+const nativeSetTimeout = (() => {
+  try {
+    if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+      return window.setTimeout.bind(window); // bound: a detached Window operation throws
+    }
+  } catch {
+    /* fall through to the module-scope binding */
+  }
+  return setTimeout;
+})();
+
+if (typeof window !== 'undefined') {
+  const bookmarkDrop = createBookmarkDropListeners({ ipcRenderer, setTimeout: nativeSetTimeout });
+  window.addEventListener('dragover', bookmarkDrop.handleDragOver);
+  window.addEventListener('drop', bookmarkDrop.handleDrop);
 }
 
 // ---------------------------------------------------------------------------

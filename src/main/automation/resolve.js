@@ -30,6 +30,29 @@ function isInternalContents(wc) {
 }
 
 /**
+ * M15 F3 L1 (DD1/DD1d) — the menuType half of the sheet gate.
+ *
+ * The chrome-owned menu-overlay sheet is ONE persistent WebContents whose single
+ * document renders EVERY menu the chrome opens — including the vault's master-password
+ * entry and the one-time recovery / access / admin key displays. Sheet automation is
+ * therefore admitted by TWO allowlists that must BOTH pass (see resolveContents' guard 3):
+ *
+ *   1. the sheet's CURRENT menuType is in this set, and
+ *   2. the OP is one of exactly three reads (see engine.js's `allowSheet` opt-in).
+ *
+ * ALLOWLIST, NEVER A DENYLIST (DD1d). A menuType absent from this set is refused, so a
+ * sheet menuType added by a future flight is refused until someone deliberately admits
+ * it here. `getCurrentMenu()` returning null — no menu open — refuses too.
+ *
+ * ⚠ ADDING A MEMBER IS A SECURITY DECISION. Everything the sheet has rendered since its
+ * last close is co-resident in one document (#menu-root), so admitting a menuType asserts
+ * that the card is secret-free AND that the eager close-scrub (DD1f,
+ * menu-overlay-manager.js's `menu-overlay:close` → the sheet's report.silence() +
+ * menuController.closeAll()) still runs on every close path.
+ */
+const AUTOMATABLE_MENU_TYPES = new Set(['bookmarks-overflow', 'bookmark-edit']);
+
+/**
  * Returns 'chrome' when wc is a chrome renderer contents, 'guest' otherwise.
  *
  * chromeContents is the DD8 accessor's chrome at the call site (injected, not
@@ -72,7 +95,7 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *     excluded from enumerate, to close the bypass path)
  *
  * @param {number} wcId  the webContentsId to resolve
- * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isPopupWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean }} deps
+ * @param {{ fromId: (id: number) => any, chromeContents?: any, allowInternal?: boolean, isTabViewWcId?: (id: number) => boolean, isPopupWcId?: (id: number) => boolean, isChromeContents?: (wc: any) => boolean, isSheetContents?: (wc: any) => boolean, allowSheet?: boolean, sheetMenuFor?: (wc: any) => ({ menuType: string, token: number } | null) }} deps
  *   fromId   — webContents.fromId at the call site (injected)
  *   chromeContents — the accessor chrome webContents (injected; passed through
  *                    for callers that immediately classify the result)
@@ -102,10 +125,24 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  *                   partition-string compare (DD7 discipline — the registry's
  *                   captured partition is census-only). Absent predicate = no
  *                   behavior change.
+ *   allowSheet    — (M15 F3 L1, DD1b) the OP half of the sheet gate. OPT-IN, spread onto
+ *                   deps by exactly three dispatch entries in engine.js
+ *                   (captureScreenshot / readDom / readAxTree). Absent/false — which is
+ *                   every other op, and every op added in future — leaves guard 3 at its
+ *                   pre-M15 absolute refusal. Deliberately NOT `deps(opName)`: that is
+ *                   ~28 edits and FAIL-OPEN (a forgotten argument yields undefined),
+ *                   whereas an opt-in flag makes "a new op is admitted by accident"
+ *                   unrepresentable rather than merely documented.
+ *   sheetMenuFor  — (M15 F3 L1, DD1b) window-registry's LIVE reader
+ *                   `(wc) => { menuType, token } | null` for the sheet owning `wc`
+ *                   (null when no sheet matches, or the matching sheet is hidden /
+ *                   has no open menu). A live reader rather than a snapshot: deps have
+ *                   no wcId, and the sheet is per-window record — see engine.js. Absent
+ *                   predicate = guard 3 refuses exactly as it did before this leg.
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isPopupWcId, isChromeContents, isSheetContents }) {
+function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isPopupWcId, isChromeContents, isSheetContents, allowSheet = false, sheetMenuFor }) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -116,14 +153,54 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
     throw new Error('automation: no-such-contents — wcId ' + wcId + ' is not a live webContents');
   }
 
-  // PR#112 finding 1 — ABSOLUTE, NOT lifted by admin (unlike the two relaxations below).
+  // PR#112 finding 1, NARROWED by M15 F3 L1 (DD1/DD1a/DD1b/DD1d) from an absolute refusal
+  // to a TWO-ALLOWLIST admission. Everything else about it is unchanged: still not lifted by
+  // admin's allowInternal, still the same thrown code.
+  //
   // The menu-overlay SHEET hosts the chrome-owned vault secret sheets (the master password is
   // typed there; one-time recovery/access/admin keys render there as textContent). Its wcId is
-  // discoverable via enumerateWindows, and admin's allowInternal otherwise lets `evaluate` run
-  // arbitrary JS on it — a keylogger / secret-reader with no vault-admin key. Refuse the sheet's
-  // webContents at EVERY tier so no automation op (evaluate/DOM/AX/input/click) can ever reach it.
+  // discoverable via enumerateWindows, so without a guard here admin could keylog / read those
+  // secrets with no vault-admin key.
+  //
+  // The sheet is now admitted iff BOTH allowlists pass:
+  //   (menuType) the sheet's CURRENT menu is in AUTOMATABLE_MENU_TYPES — allowlist, never a
+  //              denylist; `null` (no menu open, or the sheet is hidden) refuses (DD1d), AND
+  //   (op)       the caller opted in with allowSheet — set by exactly three engine.js dispatch
+  //              entries: readDom, readAxTree, captureScreenshot (DD1a).
+  // Every other op stays refused at every tier under every menuType, and an op added later is
+  // refused because it did nothing (DD1a/DD1b).
+  //
+  // WHY readDom IS ADMITTED THOUGH IT EXECUTES SCRIPT. readDom runs READ_DOM_SNIPPET through
+  // wc.executeJavaScript (observe.js). The distinction this allowlist encodes is NOT
+  // "executes script vs doesn't" — it is FIXED APP-AUTHORED SNIPPET vs CALLER-SUPPLIED CODE.
+  // readDom runs one closed IIFE returning { url, title, html }: it registers nothing, leaves
+  // nothing resident, and the caller cannot influence it. evaluate / injectScript run
+  // caller-controlled code into a realm that OUTLIVES the menu it was injected under
+  // (menu-overlay-manager.js: teardown() is the only destroy; hide() is removeChildView alone),
+  // so a listener installed under `bookmarks-overflow` would still be live when the same realm
+  // later renders `vault-unlock`. That residency argument is why evaluate can never be admitted;
+  // it is NOT the rule — printToPDF leaves nothing resident and is still refused, because it is
+  // a full-fidelity content read by a second door.
+  //
+  // WHICH GUARD REFUSES JAR KEYS — do not restate this from memory, it is easy to get wrong.
+  // It is NOT this guard and NOT guard 5. scope.js's memberDeps() threads neither
+  // isSheetContents nor isTabViewWcId, so inside resolveContentsForJar guards 3 and 5 are BOTH
+  // no-ops (each is `typeof … === 'function'`-gated). A jar key is refused by `out-of-jar` from
+  // the session-identity compare in resolveContentsForJar — exactly as docs/mcp-automation.md
+  // states. Guard 5 backstops only at the ENGINE level (main.js's MCP engine /
+  // app-lifecycle.js's dev seam), a path scopeEngine's façade never reaches because facade[op]
+  // calls resolveContentsForJar first. Consequence: THIS LEG WIDENS THE ADMIN TIER ONLY.
+  //
+  // FAIL-CLOSED BY SHAPE: an absent sheetMenuFor injection (offline tests, legacy callers, a
+  // half-wired engine site) must REFUSE — never throw a TypeError from inside a live security
+  // guard. Hence the explicit typeof check before the call.
   if (typeof isSheetContents === 'function' && isSheetContents(wc)) {
-    throw new Error('automation: secret-sheet — wcId ' + wcId + ' is a chrome-owned secret/overlay sheet and is never automatable (any tier)');
+    const admitted = allowSheet === true
+      && typeof sheetMenuFor === 'function'
+      && AUTOMATABLE_MENU_TYPES.has(sheetMenuFor(wc)?.menuType);
+    if (!admitted) {
+      throw new Error('automation: secret-sheet — wcId ' + wcId + ' is a chrome-owned secret/overlay sheet and is never automatable (any tier)');
+    }
   }
 
   // DD5 load-bearing guard: reject internal-session contents at resolve-time.
@@ -228,4 +305,4 @@ function resolveContentsForJar(wcId, jar, deps) {
   return wc;
 }
 
-module.exports = { isInternalContents, classifyContents, resolveContents, resolveContentsForJar };
+module.exports = { isInternalContents, classifyContents, resolveContents, resolveContentsForJar, AUTOMATABLE_MENU_TYPES };

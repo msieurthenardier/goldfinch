@@ -33,6 +33,12 @@ interface MenuOverlayBridge {
   platform: string;
   /** main → sheet: render + open a menu from the model (channel 3). */
   onInit(cb: (d: MenuOverlayInitPayload) => void): void;
+  /** main → sheet: EAGER DOM SCRUB on every menu close (M15 F3 L1, DD1f). No payload.
+   * The handler runs report.silence() + menuController.closeAll() so the shared sheet
+   * document never retains a closed menu's content — the premise the automation
+   * resolver's sheet admission rests on. Optional so an older preload degrades to the
+   * pre-DD1f lazy scrub rather than throwing at boot. */
+  onCloseReset?(cb: () => void): void;
   /** sheet → main: an item was activated (channel 4). `value` (Leg 3) is the
    * input-dialog's text — main validates (string, ≤24) before forwarding. */
   sendActivated(payload: { id: string; token: number; value?: string }): void;
@@ -95,6 +101,23 @@ interface MenuOverlayBridge {
    * a pre-forward validation failure), true means main already closed the sheet
    * (close-only-on-success). */
   bookmarkEditSubmit(payload: { token: number; id: string; action: 'save' | 'remove'; name?: string; url?: string }): Promise<{ ok: boolean }>;
+  /** sheet → main: the DEDICATED bookmarks-overflow DROP-INDEX channel (M15 F3 Leg 5a,
+   * AC8). One-way — a bar item was released over the sheet's row list at snapshot-local
+   * insertion index `index`. Carries NO bookmark id, url, or jar: the chrome resolves all
+   * three from its own dragstart-time hold, so this message cannot be aimed. Main gates it
+   * on sheet-sender identity + open-token freshness + menuType === 'bookmarks-overflow'.
+   * Optional so an older preload degrades to an inert sheet rather than throwing. */
+  overflowDrop?(payload: { token: number; index: number }): void;
+  /** sheet → main: the bookmarks-overflow DRAG-LIFECYCLE channel (M15 F3 Leg 5b, AC3) —
+   * the reverse direction, where the sheet's rows are the drag SOURCE. One-way.
+   * `phase:'start'` carries the dragged row's snapshot-local `index` (the sheet knows no
+   * bookmark id and no url — DD9); `phase:'end'` carries only the same token. Main gates
+   * `start` on sheet-sender identity + open-token freshness + menuType ===
+   * 'bookmarks-overflow', and `end` on sender identity alone — by then the sheet has
+   * legitimately blur-closed, so the token/menuType freshness check moves to the chrome,
+   * the only party that can still evaluate it.
+   * Optional so an older preload degrades to an inert sheet rather than throwing. */
+  sheetDrag?(payload: { token: number; phase: 'start' | 'end'; index?: number }): void;
 }
 
 interface Window {
