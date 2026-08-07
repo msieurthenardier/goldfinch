@@ -1,6 +1,7 @@
 # vault-card fixture
 
-Manual-verification fixture for the payment-card fill + capture path (issue #152).
+Fixture + apparatus for the [`vault-card-fill-capture`](../../vault-card-fill-capture.md) behavior
+test — the payment-card fill + capture path (issue #152).
 
 All card data here is **fake** — the seeded PANs are the standard publicly-documented
 test numbers. They are Luhn-valid, which matters: the capture path's plausibility
@@ -14,7 +15,11 @@ gate rejects Luhn-invalid input, so a made-up number would not round-trip.
   without devtools.
 - **`seed-cards.mjs`** — seeds card items into an **already set-up** vault, so fill is
   testable without hand-entering a card first. (It does not provision a profile —
-  that's `vault-login/build-fixtures.mjs`.)
+  that's `vault-login/build-fixtures.mjs`.) Idempotent by PAN, so it is safe to re-run.
+- **`drive.mjs`** — the apparatus for the automatable steps (detection sweep, capture
+  plausibility gate, gesture round-trip). Read its header before modifying it: it
+  encodes four measured constraints of this surface, two of which otherwise produce
+  convincing false results rather than errors.
 
 ## 1. Seed some cards
 
@@ -54,7 +59,25 @@ GOLDFINCH_AUTOMATION_ADMIN=1 GOLDFINCH_AUTOMATION_DEV_MINT=1 npm run dev:automat
 Open `http://127.0.0.1:8098/` in a **persistent-jar** tab (not a burner — burner tabs
 are structurally excluded) and unlock the vault.
 
-## What to check
+## 4. Run the automatable steps
+
+```
+GOLDFINCH_MCP_PORT=<port> GOLDFINCH_MCP_ADMIN_KEY=<adminKey> \
+  node tests/behavior/fixtures/vault-card/drive.mjs
+```
+
+Covers the detection sweep, the capture plausibility gate, and the gesture round-trip
+(34 cases); exits non-zero on any failure. The port is worth pinning explicitly — if
+49707 is already in use the app falls back to the next free port.
+
+⚠ **The Goldfinch window must hold real OS focus** or the detection suite aborts by
+design: Blink fires no focus events on an unfocused document, so no icon can be placed
+and every negative case would pass vacuously. If it aborts, click the window and re-run.
+
+## What to check by hand
+
+The steps below that the driver covers are marked ✅ — the rest need an operator,
+principally anything past the vault unlock (which is human-only by design).
 
 ### Fill
 
