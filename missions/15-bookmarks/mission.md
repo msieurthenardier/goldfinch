@@ -1,8 +1,11 @@
 # Mission: Bookmarks
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
+
+> **Completed 2026-08-06 with 9 of 10 success criteria met.** Criterion 6's overflow → bar drag direction is **unmet** and tracked as [issue #150](https://github.com/msieurthenardier/goldfinch/issues/150); the other three drag clauses ship and were operator-verified at HAT. The mission is closed because its outcome is substantially delivered and the remainder is tracked, **not** because the criterion was satisfied. See [mission-debrief.md](mission-debrief.md).
+
 
 Users can keep a personal list of web pages **per cookie jar** and return to them without retyping addresses, at parity with what modern browsers offer for flat (folderless) bookmarks. Each jar owns its own bookmarks: switching to a tab in a different jar switches the bookmarks shown, and a jar's bookmarks travel with it (supporting future jar export). Starring a page — from the address bar, the page's right-click menu, or a keyboard shortcut — saves it and offers quick editing; an optional bookmarks bar under the toolbar surfaces the list in every window with names and site icons, click/middle-click-to-open, drag-to-reorder, drag-onto-page-to-load, an overflow menu for bookmarks that don't fit, and in-place editing; bookmarked pages surface in address-bar suggestions. The list persists across restarts and stays consistent across windows.
 
