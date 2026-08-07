@@ -237,7 +237,16 @@ export function createVaultController({
     if (model && model.mode === 'locked') {
       pendingCaptureId = captureId;
       pendingCaptureUnlock = captureId;
-      openOverlayMenu('vault-unlock', [], null, 0);
+      // keepFocus: this prompt is spawned BY a login-form submit, which also navigates the
+      // page; when the submitted page loads it pulls OS focus into the guest. Without the
+      // opt-in the sheet's window-blur dismissal tore this prompt down mid-redirect and the
+      // held credential was dropped — the operator saw the prompt flash and could never save
+      // the password (the same defect the vault-capture sheet fixed for the already-unlocked
+      // branch of this very flow). The flag makes the card survive that incidental blur AND
+      // makes main re-grab focus for it, so the master password cannot be typed into the
+      // page's own fields. Every deliberate decline (Escape / Cancel / X / backdrop / a real
+      // app-switch) still closes it and still drops the held credential via handleClosed.
+      openOverlayMenu('vault-unlock', [], null, 0, { keepFocus: true });
       return;
     }
     openCaptureSheet(captureId, model);
