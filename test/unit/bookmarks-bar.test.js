@@ -1215,7 +1215,12 @@ test('Leg 5b AC4: the foreign session filters the HIDDEN tail — a six-item bar
     'index 0, not 3');
 });
 
-test('Leg 5b AC6: the bar DOES draw a drop indicator for the reverse direction', async () => {
+test('Leg 5b AC6: the bar DOES draw a drop indicator for the reverse direction', async (t) => {
+  // Mock setTimeout as the AC3 sibling below does: `sheetDragStart` arms
+  // FOREIGN_DRAG_MAX_MS (15 s) and this test never delivers `end` nor a
+  // committing drop, so the real timer would hold the event loop open for the
+  // whole 15 s after the assertions finish. Debrief finding (M15 F3).
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar } = await overflowDragHarness();
   const indicator = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-drop-indicator'));
   sheetDragStart(bar, 0);
@@ -1234,7 +1239,11 @@ test('Leg 5b AC6: the bar DOES draw a drop indicator for the reverse direction',
   assert.equal(indicator.classList.contains('hidden'), true);
 });
 
-test('Leg 5b: the chevron SWALLOWS a foreign release too, and never springs for this direction', async () => {
+test('Leg 5b: the chevron SWALLOWS a foreign release too, and never springs for this direction', async (t) => {
+  // Mock setTimeout — this release is deliberately SWALLOWED, so no commit path
+  // clears the foreign latch and the real 15 s timer would leak. See the AC6
+  // test above and the AC3 sibling below. Debrief finding (M15 F3).
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar } = await overflowDragHarness();
   const indicator = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-drop-indicator'));
   sheetDragStart(bar, 0);

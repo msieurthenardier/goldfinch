@@ -343,17 +343,17 @@ The flight opens the instrument, then builds on the measured transport, then bui
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing (suite count and timing captured for the debrief lineage — Flight 2 closed at 3356/0 fail; per the Flight 2 debrief, any timing-regression claim must A/B against its own base commit, since cross-flight deltas under ~6% are indistinguishable from machine drift)
-- [ ] Documentation updated:
+- [x] All legs completed — seven; six autonomous plus the HAT
+- [x] Code committed on `flight/03-drag-interactions` (`4bdd9f6`, `5e40741`). **Not pushed, no PR** — deferred to the operator
+- [x] Tests passing — 3356 → 3558. **Timing NOT A/B'd against the base commit**, which Flight 2's own standing rule requires for any timing claim; recorded as a gap (suite count and timing captured for the debrief lineage — Flight 2 closed at 3356/0 fail; per the Flight 2 debrief, any timing-regression claim must A/B against its own base commit, since cross-flight deltas under ~6% are indistinguishable from machine drift)
+- [x] Documentation updated:
   - `CLAUDE.md:207` — name the CSS↔JS pinned pair (`carried-debt`, DD10)
   - `CLAUDE.md` — add the standing unobservable-surfaces list, **revised by DD1**: the overlay sheet is now *readable but not scriptable*; the toast layer remains wholly unobservable
   - `CLAUDE.md` — the bookmarks bar's drag model, the new `application/x-goldfinch-bookmark` type alongside the tab one, and `bookmark-drag.js`
   - `CLAUDE.md:270` / `docs/mcp-automation.md` — the sheet is conditionally automatable; state the rule as **(menuType × op-class)**, the allowlist, the unconditional residual-op refusal, the `null` refusal, and the post-await re-check. A reader must be able to tell from the docs alone why `readAxTree` is admitted and `evaluate` never is
   - Mission — check off criterion 6, or record the amendment if the probe forced one
-- [ ] Mission Known Issue 2 **re-scoped with evidence** — accessibility-tree inspection reachable, axe-based auditing not (DD1a). Closing it outright would overstate what shipped
-- [ ] Mission Known Issues — add the `captureWindow` sheet-compositing gap and its closure (DD1c), so a pre-existing secret-read path is recorded as found-and-fixed rather than silently patched
+- [x] Mission Known Issue 2 **re-scoped with evidence** *(done at debrief, not at landing — recorded as a process finding)* — accessibility-tree inspection reachable, axe-based auditing not (DD1a). Closing it outright would overstate what shipped
+- [x] Mission Known Issues — the `captureWindow` sheet-compositing gap and its closure *(done at debrief, not at landing — recorded as a process finding)* (DD1c), so a pre-existing secret-read path is recorded as found-and-fixed rather than silently patched
 
 ### Verification
 
