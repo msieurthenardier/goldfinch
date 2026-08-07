@@ -33,6 +33,17 @@ function registerBrowserIpc({
   popupRegistry,
   random = Math.random,
   logger = console,
+  // Opt-in capture-lifecycle trace (`GOLDFINCH_VAULT_TRACE=1`), OFF by default and
+  // therefore silent in every normal run. It exists because the capture → hold →
+  // unlock → finalize sequence spans three processes, so a failure anywhere in it
+  // presented to the operator as "no prompt appeared" with nothing to go on.
+  // What it prints is bounded BY CONSTRUCTION to non-secrets: the opaque main-minted
+  // captureId, the tab's wcId, the disposition mode, and the finalize outcome — never
+  // a password, a username, or an origin. Injected so a test can capture the calls.
+  vaultTrace = process.env.GOLDFINCH_VAULT_TRACE === '1'
+    ? (/** @type {string} */ step, /** @type {any} */ fields) =>
+      logger.info('[vault-capture]', step, JSON.stringify(fields))
+    : () => {},
 }) {
   // Leg 2 (F3 DD2) sender-identity gate. Resolves the SENDER's own window record
   // via identity-compare against every record's chromeView — a non-chrome sender
@@ -149,6 +160,7 @@ function registerBrowserIpc({
     const wcId = event.sender.id;
     const { username, password } = /** @type {any} */ (payload || {});
     const offer = getVaultHuman().capture({ wcId, username, passwordBytes: password });
+    vaultTrace('capture', { wcId, offered: !!offer, mode: offer && offer.model && offer.model.mode });
     if (offer) {
       chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
     }
@@ -181,18 +193,23 @@ function registerBrowserIpc({
   // waiting for the 2-min safety timeout. Chrome-trust bare handle (the same class as
   // vault-fill-human); the captureId is an opaque main-minted handle, not a secret.
   ipcMain.handle('vault-capture-dismiss', (_event, captureId) => {
+    vaultTrace('dismiss', { captureId });
     if (getVaultHuman && typeof captureId === 'string') getVaultHuman().captureDismiss(captureId);
   });
 
   // Vault capture FINALIZE (unlock-to-save continuation): after a login-form submit into a
   // LOCKED vault, capture() held the credential (mode 'locked') and the chrome raised an
   // unlock prompt. On a successful unlock the chrome invokes this to compute the deferred
-  // save/update disposition and open the vault-capture sheet. Returns { captureId, model } or
-  // null (record gone / still locked / tab re-jarred). Same chrome-trust bare handle as
-  // dismiss; the captureId is an opaque main-minted handle, the model carries NO password.
+  // save/update disposition and open the vault-capture sheet. Returns { captureId, model }, or
+  // a discriminated { reason } the chrome turns into an operator-visible message (expired /
+  // locked / tab-changed / unchanged) — never a bare null, because a silent nothing after the
+  // operator typed their master password is indistinguishable from a defect. Same chrome-trust
+  // bare handle as dismiss; the captureId is an opaque main-minted handle, no password.
   ipcMain.handle('vault-capture-finalize', (_event, captureId) => {
     if (!getVaultHuman || typeof captureId !== 'string') return null;
-    return getVaultHuman().captureFinalize(captureId);
+    const res = getVaultHuman().captureFinalize(captureId);
+    vaultTrace('finalize', { captureId, outcome: res && res.model ? `offer:${res.model.mode}` : res && res.reason });
+    return res;
   });
 
   // Vault cross-renderer triggers (M12 F3 Leg 4, first-run-setup, DD5). The internal

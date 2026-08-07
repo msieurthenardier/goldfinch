@@ -557,23 +557,40 @@ function createVaultHuman(deps) {
   /**
    * Finalize a held 'locked' capture AFTER a successful unlock (the chrome's unlock-to-save
    * continuation): compute the deferred save/update disposition and return `{ captureId, model }`
-   * so the chrome opens the vault-capture sheet. Returns null when the record is gone
-   * (timeout / superseded), the vault is still locked (unlock didn't take / re-locked), or the
-   * tab's jar no longer resolves the SAME jar (tab closed / re-jarred) — the record is dropped
-   * in that last case so the captured password never lingers.
+   * so the chrome opens the vault-capture sheet.
+   *
+   * Every OTHER outcome returns a discriminated `{ reason }` rather than a bare null. The
+   * operator has just typed their master password FOR THIS SAVE, so "no sheet appears and
+   * nothing is said" is not an acceptable answer to any of them — the chrome turns each reason
+   * into its own message (operator-reported: a real save that produced total silence, with no
+   * way to tell a correct no-op from a defect). The reasons:
+   *   'expired'     — the record is gone: the 2-minute safety timeout fired, or it was dropped
+   *                   (dismissed / superseded by a newer capture on the same tab).
+   *   'locked'      — the vault is not unlocked after all (unlock didn't take / raced a re-lock).
+   *   'tab-changed' — the tab's jar no longer resolves the SAME jar (tab closed / re-jarred);
+   *                   the record is dropped so the captured password never lingers.
+   *   'unchanged'   — the credential already stored for this origin is identical, so there is
+   *                   genuinely nothing to save; the record is dropped.
    * @param {string} captureId
-   * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } } | null}
+   * @returns {{ captureId: string, model: { origin: string, username: string|null, mode: 'save'|'update', defaultVaultId: string, choices: string[] } }
+   *   | { reason: 'expired' | 'locked' | 'tab-changed' | 'unchanged' }}
    */
   function captureFinalize(captureId) {
     const rec = captures.get(captureId);
-    if (!rec) return null;
-    if (!deps.getVaultStore().isUnlocked()) return null; // unlock didn't take / raced a re-lock
+    if (!rec) return { reason: /** @type {'expired'} */ ('expired') };
+    if (!deps.getVaultStore().isUnlocked()) return { reason: /** @type {'locked'} */ ('locked') };
     const jar = tabJarFor(rec.wcId);
-    if (!jar || jar.id !== rec.jarId) { dropCapture(captureId); return null; }
+    if (!jar || jar.id !== rec.jarId) {
+      dropCapture(captureId);
+      return { reason: /** @type {'tab-changed'} */ ('tab-changed') };
+    }
     // Unchanged item after unlock (dispose → null) → drop, no offer. The card twin
     // disposes by PAN identity; the login twin by origin+username.
     const model = rec.kind === 'card' ? disposeCardCapture(rec) : disposeCapture(rec);
-    if (!model) { dropCapture(captureId); return null; }
+    if (!model) {
+      dropCapture(captureId);
+      return { reason: /** @type {'unchanged'} */ ('unchanged') };
+    }
     return { captureId, model };
   }
 

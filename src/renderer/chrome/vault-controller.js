@@ -24,7 +24,8 @@ import { parsePickIndex, MANAGE_ID } from '../../shared/vault-picker-template.js
  *   jarsClient: any,
  *   isSafeColor: (color: any) => boolean,
  *   openVaultPage: () => void,
- *   openOverlayMenu: (menuType: string, model: any, anchor: any, startIndex?: number, opts?: any) => boolean
+ *   openOverlayMenu: (menuType: string, model: any, anchor: any, startIndex?: number, opts?: any) => boolean,
+ *   toast?: (title: string, body: string) => void
  * }} deps
  */
 export function createVaultController({
@@ -34,6 +35,9 @@ export function createVaultController({
   isSafeColor,
   openVaultPage,
   openOverlayMenu,
+  // Chrome toast surface (the bookmarks-client `toast` precedent). Optional so an
+  // offline unit harness constructs without one; the no-op then simply says nothing.
+  toast = () => {},
 }) {
   // Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
   // lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
@@ -109,6 +113,23 @@ export function createVaultController({
         })
       : [];
     openOverlayMenu('vault-capture', { ...model, choices, captureId }, null, 0);
+  }
+
+  // The unlock-to-save continuation produced no save sheet — tell the operator which of
+  // main's four outcomes it was (`captureFinalize`'s discriminated reason), plus a
+  // catch-all for a rejected invoke. 'unchanged' is the one that is NOT a failure: the
+  // stored password already matches, so there is nothing to save — but silence there reads
+  // exactly like a lost credential, which is why it speaks too.
+  /** @param {any} reason */
+  function reportNoCaptureOffer(reason) {
+    pendingCaptureId = null;
+    const copy = {
+      unchanged: ['Nothing to save', 'That password is already saved in your vault.'],
+      expired: ['Password not saved', 'The request expired before the vault was unlocked. Sign in again to save it.'],
+      'tab-changed': ['Password not saved', 'The tab changed before the password could be saved.'],
+      locked: ['Password not saved', 'The vault is locked.'],
+    }[String(reason)] || ['Password not saved', 'The saved-password prompt could not be opened.'];
+    toast(copy[0], copy[1]);
   }
 
   /** @param {{ setUp: boolean, unlocked: boolean }} state */
@@ -275,8 +296,15 @@ export function createVaultController({
       const captureId = pendingCaptureUnlock;
       pendingCaptureUnlock = null;
       Promise.resolve(goldfinch.vaultCaptureFinalize(captureId))
-        .then((/** @type {any} */ offer) => { if (offer && offer.model) openCaptureSheet(offer.captureId, offer.model); })
-        .catch(() => {});
+        .then((/** @type {any} */ offer) => {
+          if (offer && offer.model) { openCaptureSheet(offer.captureId, offer.model); return; }
+          // No sheet to open — SAY SO. The operator typed their master password expressly to
+          // save this password; the pre-existing silent return made a correct no-op ("already
+          // saved") indistinguishable from a dropped credential, which is how a real failure
+          // went undiagnosed. Reason-distinct copy, the bookmark-edit rejection precedent.
+          reportNoCaptureOffer(offer && offer.reason);
+        })
+        .catch(() => reportNoCaptureOffer('error'));
     }
   });
   goldfinch.getVaultLockState()
@@ -470,6 +498,15 @@ export function createVaultController({
     // dismissed WITHOUT unlocking (Cancel/Escape/outside-click) → drop the held credential now
     // rather than waiting for the 2-min safety timeout. On a SUCCESSFUL unlock, onVaultLockState
     // already cleared pendingCaptureUnlock (and lockState.unlocked is true), so this is skipped.
+    //
+    // NO 'superseded' carve-out here, unlike the vault-capture branch below — deliberately,
+    // and the asymmetry is only apparent. A NEWER capture's unlock prompt is the SAME
+    // menuType, so `open()` bumps this menuType's chrome-side token BEFORE main emits the
+    // superseded channel 7 for the OLD one, and overlay-menus.js drops that stale-token close
+    // without ever reaching here — the case the sibling guard protects against cannot arrive.
+    // What DOES arrive is a supersede by an UNRELATED menu (kebab, suggestions), where
+    // pendingCaptureUnlock still names THIS capture, the prompt is gone, and dropping the held
+    // password promptly is the conservative answer.
     if (menuType === 'vault-unlock' && pendingCaptureUnlock && !lockState.unlocked) {
       const captureId = pendingCaptureUnlock;
       pendingCaptureUnlock = null;

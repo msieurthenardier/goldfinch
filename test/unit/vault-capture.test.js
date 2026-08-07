@@ -181,7 +181,7 @@ test('capture: same username, CHANGED password → UPDATE (the offer is NOT supp
   } finally { rm(dir); }
 });
 
-test('captureFinalize: an unchanged login discovered AFTER unlock → null (no offer)', async () => {
+test("captureFinalize: an unchanged login discovered AFTER unlock → { reason: 'unchanged' } (no offer)", async () => {
   const dir = tmpDir();
   try {
     const { store, human } = await makeHarness(dir);
@@ -191,7 +191,9 @@ test('captureFinalize: an unchanged login discovered AFTER unlock → null (no o
     assert.equal(locked.model.mode, 'locked', 'held for unlock while the vault is locked');
     await store.unlock(MASTER);
     // Disposition (needs unlock) now finds the credential unchanged → no capture sheet.
-    assert.equal(human.captureFinalize(locked.captureId), null);
+    // NOT a bare null: the operator typed their master password for this save, so the
+    // chrome needs a reason to show ("already saved") rather than silently doing nothing.
+    assert.deepEqual(human.captureFinalize(locked.captureId), { reason: 'unchanged' });
   } finally { rm(dir); }
 });
 
@@ -234,7 +236,10 @@ test('captureFinalize: after unlock, resolves the deferred SAVE/UPDATE offer; th
     assert.equal(locked.model.mode, 'locked');
 
     // Still locked → finalize refuses (nothing to show yet).
-    assert.equal(human.captureFinalize(locked.captureId), null, 'finalize is null while still locked');
+    assert.deepEqual(
+      human.captureFinalize(locked.captureId), { reason: 'locked' },
+      'finalize refuses, with a reason, while still locked'
+    );
 
     // Unlock, then finalize → a normal SAVE offer (no saved login for this origin).
     await store.unlock(MASTER);
@@ -251,11 +256,11 @@ test('captureFinalize: after unlock, resolves the deferred SAVE/UPDATE offer; th
   } finally { rm(dir); }
 });
 
-test('captureFinalize: unknown / already-dropped captureId → null', async () => {
+test("captureFinalize: unknown / already-dropped captureId → { reason: 'expired' }", async () => {
   const dir = tmpDir();
   try {
     const { human } = await makeHarness(dir);
-    assert.equal(human.captureFinalize('nope'), null);
+    assert.deepEqual(human.captureFinalize('nope'), { reason: 'expired' });
   } finally { rm(dir); }
 });
 
