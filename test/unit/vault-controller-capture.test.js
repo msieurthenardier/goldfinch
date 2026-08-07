@@ -15,16 +15,22 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createVaultController } = require('../../src/renderer/chrome/vault-controller');
 
-function harness({ unlocked = false } = {}) {
+function harness({ unlocked = false, finalizeResult = null } = {}) {
   const opens = [];
   const dismissed = [];
   const finalized = [];
+  const toasts = [];
   /** @type {Record<string, Function>} */
   const on = {};
   const goldfinch = new Proxy({
     getVaultLockState: () => Promise.resolve({ setUp: true, unlocked }),
     vaultCaptureDismiss: (id) => { dismissed.push(id); return Promise.resolve(); },
-    vaultCaptureFinalize: (id) => { finalized.push(id); return Promise.resolve(null); },
+    vaultCaptureFinalize: (id) => {
+      finalized.push(id);
+      return finalizeResult instanceof Error
+        ? Promise.reject(finalizeResult)
+        : Promise.resolve(finalizeResult);
+    },
   }, {
     get(target, prop) {
       if (prop in target) return target[prop];
@@ -45,9 +51,21 @@ function harness({ unlocked = false } = {}) {
       opens.push({ menuType, model, opts });
       return true;
     },
+    toast: (title, body) => toasts.push([title, body]),
   });
-  return { controller, on, opens, dismissed, finalized };
+  return { controller, on, opens, dismissed, finalized, toasts };
 }
+
+// Fire a locked-vault capture offer and return its captureId.
+function offerLocked(h, captureId = 'abc123') {
+  h.on.onVaultCaptureOffer({
+    captureId,
+    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' },
+  });
+  return captureId;
+}
+
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 test('a LOCKED capture raises the unlock prompt with the keep-focus opt-in', () => {
   const h = harness({ unlocked: false });
@@ -97,4 +115,73 @@ test('a successful unlock finalizes the held capture instead of dropping it', ()
   h.on.onVaultLockState({ setUp: true, unlocked: true });
   assert.deepEqual(h.finalized, ['abc123']);
   assert.deepEqual(h.dismissed, [], 'an unlocked capture is never dropped');
+});
+
+// ---------------------------------------------------------------------------
+// Close handling for the unlock prompt raised over a held capture.
+// ---------------------------------------------------------------------------
+
+test('every unlock-prompt close that reaches the chrome drops the held credential', () => {
+  // 'superseded' is included: a NEWER capture's prompt is the same menuType, so its
+  // stale-token close never reaches here (overlay-menus.js drops it) — what does reach
+  // here is a supersede by an unrelated menu, where the prompt is gone and the held
+  // password should not linger.
+  for (const reason of ['escape', 'outside-click', 'blur', 'activated', 'tab-close', 'superseded']) {
+    const h = harness({ unlocked: false });
+    offerLocked(h);
+    h.controller.handleClosed({ menuType: 'vault-unlock', reason });
+    assert.deepEqual(h.dismissed, ['abc123'], `reason '${reason}' must still drop the record`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// No save sheet → say why. The operator typed their master password expressly
+// to save this password; silence made a correct no-op ("already saved")
+// indistinguishable from a dropped credential.
+// ---------------------------------------------------------------------------
+
+test('each finalize reason produces its own operator-visible message', async () => {
+  const cases = [
+    ['unchanged', 'Nothing to save'],
+    ['expired', 'Password not saved'],
+    ['tab-changed', 'Password not saved'],
+    ['locked', 'Password not saved'],
+    [undefined, 'Password not saved'], // an unrecognized/absent reason still speaks
+  ];
+  for (const [reason, title] of cases) {
+    const h = harness({ unlocked: false, finalizeResult: reason ? { reason } : {} });
+    offerLocked(h);
+    h.on.onVaultLockState({ setUp: true, unlocked: true });
+    await settle();
+    assert.equal(h.opens.length, 1, `reason '${reason}': no save sheet opens`);
+    assert.equal(h.toasts.length, 1, `reason '${reason}': exactly one message`);
+    assert.equal(h.toasts[0][0], title);
+    assert.ok(h.toasts[0][1].length > 0, 'the message has a body');
+  }
+  // The 'unchanged' body must not read as a failure — nothing was lost.
+  const h = harness({ unlocked: false, finalizeResult: { reason: 'unchanged' } });
+  offerLocked(h);
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  await settle();
+  assert.match(h.toasts[0][1], /already saved/i);
+});
+
+test('a rejected finalize invoke speaks too, instead of failing silently', async () => {
+  const h = harness({ unlocked: false, finalizeResult: new Error('ipc gone') });
+  offerLocked(h);
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  await settle();
+  assert.equal(h.toasts.length, 1);
+  assert.equal(h.toasts[0][0], 'Password not saved');
+});
+
+test('a successful finalize opens the save sheet and says nothing', async () => {
+  const h = harness({ unlocked: false, finalizeResult: {
+    captureId: 'abc123', model: { origin: 'https://example.com', username: 'someone', mode: 'save', defaultVaultId: 'work', choices: ['work', 'global'] },
+  } });
+  offerLocked(h);
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  await settle();
+  assert.equal(h.opens.at(-1).menuType, 'vault-capture');
+  assert.deepEqual(h.toasts, [], 'the sheet IS the feedback — no toast on success');
 });

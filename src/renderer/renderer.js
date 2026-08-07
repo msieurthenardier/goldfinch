@@ -299,7 +299,10 @@ const vaultController = createVaultController({
   jarsClient,
   isSafeColor,
   openVaultPage,
-  openOverlayMenu: (...args) => overlayMenuClient.open(...args)
+  openOverlayMenu: (...args) => overlayMenuClient.open(...args),
+  // Late-bound like the bookmarks-client's: `toast` is a hoisted function declaration
+  // here, but the wrapper keeps this construction independent of definition order.
+  toast: (title, body) => toast(title, body)
 });
 const {
   openVaultSetOverlayForAudit,
