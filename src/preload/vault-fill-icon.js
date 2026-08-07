@@ -37,16 +37,26 @@ const COLOR_UNLOCKED = '#137333';
  * into the body) and the label says the vault must be unlocked; when unlocked the
  * shackle is OPEN (the right leg lifts free of the body) and the label offers the
  * fill. Color is applied by the controller (createIcon) via the chip's `color`.
+ *
+ * `kind` names the ANCHOR's field family ('login' | 'card', issue #152) and drives
+ * the accessible name only — the glyph is identical, and the icon stays decorative
+ * and secret-free either way.
  * @param {any} doc  a `document`-like object exposing createElementNS.
  * @param {boolean} [locked]  vault lock state (default true — the safe/closed default).
+ * @param {'login'|'card'} [kind]  the anchor's field family (default 'login').
  * @returns {any} the `<svg>` icon element.
  */
-function buildVaultLockIcon(doc, locked = true) {
+function buildVaultLockIcon(doc, locked = true, kind = 'login') {
   const svg = doc.createElementNS(SVG_NS, 'svg');
   svg.setAttribute(ICON_ATTR, '');
   svg.setAttribute('role', 'img');
+  const noun = kind === 'card' ? 'card' : 'login';
   // State in the accessible name + a marker attribute (also lets tests/CSS see the state).
-  svg.setAttribute('aria-label', locked ? 'Unlock vault to fill login' : 'Fill login from vault');
+  svg.setAttribute('aria-label', locked ? `Unlock vault to fill ${noun}` : `Fill ${noun} from vault`);
+  // NOTE: the kind rides the accessible name ONLY — no `data-kind` attribute. The
+  // icon's attribute set is pinned by vault-fill-icon.test.js as a "holds nothing a
+  // hostile page can read" guard, and a second kind carrier would widen that pin
+  // for pure redundancy.
   svg.setAttribute('data-locked', locked ? 'true' : 'false');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('width', '16');
@@ -85,6 +95,20 @@ function buildVaultLockIcon(doc, locked = true) {
 }
 
 /**
+ * The fields of a card entry that carry the icon (issue #152). The number,
+ * cardholder, combined-expiry and security-code fields — focusing any of them
+ * offers the fill, mirroring the login path's both-fields placement. The SPLIT
+ * `expMonth`/`expYear` fields are deliberately excluded: they are routinely
+ * `<select>`s, where an overlaid icon fights the native dropdown affordance.
+ * @param {{ number?: any, cardholder?: any, expiry?: any, csc?: any }} entry
+ * @returns {any[]}
+ */
+function cardAnchorsOf(entry) {
+  if (!entry) return [];
+  return [entry.number, entry.cardholder, entry.expiry, entry.csc].filter(Boolean);
+}
+
+/**
  * A field is a valid anchor only if it's actually rendered — zero-size /
  * display:none honeypots (0×0 rect, or offsetParent null) get NO icon (else a
  * 0×0 icon lands at the page's top-left corner).
@@ -110,6 +134,9 @@ function isFieldVisible(field) {
  * @param {any} deps.ipcRenderer
  * @param {any} deps.isTrustedGet  captured Event.prototype.isTrusted getter (or null)
  * @param {(doc: any) => Array<{username: any, password: any, form: any}>} deps.findAllLoginFields
+ * @param {(doc: any) => Array<{number: any, cardholder: any, expiry: any, csc: any, form: any}>} [deps.findAllCardFields]
+ *   payment-card entries (issue #152). OPTIONAL: an omitted injection yields no card
+ *   anchors, so every pre-card caller keeps its exact prior behavior.
  * @param {() => boolean} deps.getEnabled  true iff top-frame AND vault-eligible
  * @param {() => boolean} [deps.getVaultLocked]  initial vault lock state (default true — locked).
  * @param {() => number} [deps.now]  clock for the gesture-target TTL (default Date.now).
@@ -120,10 +147,12 @@ function createVaultIconController({
   ipcRenderer,
   isTrustedGet,
   findAllLoginFields,
+  findAllCardFields,
   getEnabled,
   getVaultLocked,
   now,
 }) {
+  const cardEntries = typeof findAllCardFields === 'function' ? findAllCardFields : () => [];
   const clock = typeof now === 'function' ? now : Date.now;
   // Vault lock state driving the icon glyph + color (open/green when unlocked, closed/amber
   // when locked). Seeded from getVaultLocked() (the preload's init query) and updated live via
@@ -138,33 +167,48 @@ function createVaultIconController({
   // guest-side because contextIsolation is off (the guest already round-trips the
   // gesture): a main-side token would be no more trustworthy and adds no security —
   // this is fill-target INTEGRITY for the user's own page, not a cross-process secret.
-  /** @type {{ password: any, expiresAt: number } | null} */
+  // `kind` distinguishes the login binding (a password field) from the card binding
+  // (a card-number field, issue #152) so a `vault-fill` can never consume a target
+  // bound by a card gesture, or vice versa — the two fill channels resolve against
+  // different DOM anchors and a cross-consumption would silently mis-target.
+  /** @type {{ kind: 'login'|'card', field: any, expiresAt: number } | null} */
   let pendingFillTarget = null;
   const FILL_TARGET_TTL_MS = 60 * 1000;
 
-  // Resolve the password field to fill for a focused anchor (username OR password
-  // of a detected login form): find the entry the anchor belongs to and take its
-  // password field. Null when the anchor is not part of any detected login entry.
-  function passwordForAnchor(anchor) {
+  // Resolve the fill target for a focused anchor: the password field of the login
+  // entry the anchor belongs to, or the number field of its card entry. Null when
+  // the anchor is not part of any detected entry.
+  /** @returns {{ kind: 'login'|'card', field: any } | null} */
+  function targetForAnchor(anchor) {
     if (!anchor) return null;
     for (const entry of findAllLoginFields(doc)) {
-      if (entry.password === anchor || entry.username === anchor) return entry.password || null;
+      if (entry.password === anchor || entry.username === anchor) {
+        return entry.password ? { kind: 'login', field: entry.password } : null;
+      }
+    }
+    for (const entry of cardEntries(doc)) {
+      if (cardAnchorsOf(entry).includes(anchor)) {
+        return entry.number ? { kind: 'card', field: entry.number } : null;
+      }
     }
     return null;
   }
 
   /**
    * Consume the pending gesture fill-target (single-use, TTL-checked). Returns the
-   * bound password field when still valid, else null (the fill falls back to the
-   * first-field heuristic). Always clears the binding.
+   * bound field when still valid, else null (the fill falls back to the first-field
+   * heuristic). Always clears the binding — single-use is the security property, so
+   * a kind mismatch still burns the target rather than leaving it for a later fill.
+   * @param {'login'|'card'} [kind]  when given, the binding must match this family.
    * @returns {any}
    */
-  function consumeFillTarget() {
+  function consumeFillTarget(kind) {
     const t = pendingFillTarget;
     pendingFillTarget = null;
     if (!t) return null;
     if (clock() > t.expiresAt) return null;
-    return t.password;
+    if (kind && t.kind !== kind) return null;
+    return t.field;
   }
   // Every injected icon node is tracked so the MEDIA observer can filter out
   // icon-only DOM/style mutations before scheduleScan — otherwise appending an
@@ -196,8 +240,10 @@ function createVaultIconController({
     // eventual `vault-fill` lands on THIS form, not the document's first. The icon's anchor
     // (`_anchor`, set at placement) is the focused username/password field it decorates.
     const anchor = (e && e.currentTarget && e.currentTarget._anchor) || focusedField;
-    const password = passwordForAnchor(anchor);
-    pendingFillTarget = password ? { password, expiresAt: clock() + FILL_TARGET_TTL_MS } : null;
+    const target = targetForAnchor(anchor);
+    pendingFillTarget = target
+      ? { kind: target.kind, field: target.field, expiresAt: clock() + FILL_TARGET_TTL_MS }
+      : null;
     try {
       ipcRenderer.send('guest-vault-gesture', {}); // NO secret — wcId derived in main
     } catch {
@@ -230,8 +276,9 @@ function createVaultIconController({
     e.preventDefault();
   }
 
-  function createIcon() {
-    const el = buildVaultLockIcon(doc, vaultLocked);
+  /** @param {'login'|'card'} kind */
+  function createIcon(kind) {
+    const el = buildVaultLockIcon(doc, vaultLocked, kind);
     const s = el.style;
     s.position = 'absolute';
     s.zIndex = '2147483647';
@@ -292,15 +339,25 @@ function createVaultIconController({
     return false;
   }
 
-  // The set of anchorable login fields (username + password of every detected
-  // login form). Both fields carry the icon (problem 2); each is its own anchor.
-  function loginFieldSet() {
-    const set = new Set();
+  // Every anchorable field mapped to its family: the username + password of each
+  // detected login form (both carry the icon — problem 2), and the number /
+  // cardholder / expiry / csc of each detected card form (issue #152). Logins are
+  // walked FIRST so a field somehow claimed by both families resolves as a login —
+  // the narrower, origin-gated path.
+  /** @returns {Map<any, 'login'|'card'>} */
+  function anchorKinds() {
+    /** @type {Map<any, 'login'|'card'>} */
+    const kinds = new Map();
     for (const entry of findAllLoginFields(doc)) {
-      if (entry.username) set.add(entry.username);
-      if (entry.password) set.add(entry.password);
+      if (entry.username) kinds.set(entry.username, 'login');
+      if (entry.password) kinds.set(entry.password, 'login');
     }
-    return set;
+    for (const entry of cardEntries(doc)) {
+      for (const field of cardAnchorsOf(entry)) {
+        if (!kinds.has(field)) kinds.set(field, 'card');
+      }
+    }
+    return kinds;
   }
 
   // Place / reposition the icon for the currently focused login field (if any),
@@ -312,13 +369,14 @@ function createVaultIconController({
     if (!parent) return;
 
     const activeAnchors = new Set();
-    if (focusedField && loginFieldSet().has(focusedField)) {
+    const kind = focusedField ? anchorKinds().get(focusedField) : undefined;
+    if (focusedField && kind) {
       const rect = isFieldVisible(focusedField);
       if (rect) {
         activeAnchors.add(focusedField);
         let icon = iconByAnchor.get(focusedField);
         if (!icon || !icon.isConnected) {
-          icon = createIcon();
+          icon = createIcon(kind);
           icon._anchor = focusedField;
           iconByAnchor.set(focusedField, icon);
           iconNodes.add(icon);
@@ -345,12 +403,12 @@ function createVaultIconController({
     iconTimer = setTimeout(placeVaultIcons, delay);
   }
 
-  // focusin: if focus landed on a detected login field, show ITS icon (and hide
-  // any other). If it landed anywhere else, hide all icons.
+  // focusin: if focus landed on a detected login OR card field, show ITS icon (and
+  // hide any other). If it landed anywhere else, hide all icons.
   function handleFocusIn(e) {
     if (!getEnabled()) return;
     const target = e && e.target;
-    focusedField = (target && loginFieldSet().has(target)) ? target : null;
+    focusedField = (target && anchorKinds().has(target)) ? target : null;
     placeVaultIcons();
   }
 

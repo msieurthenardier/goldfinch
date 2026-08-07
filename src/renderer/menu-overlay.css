@@ -855,6 +855,17 @@ body {
   color: var(--accent, var(--fg));
   border-color: var(--accent, var(--border));
 }
+.vault-picker-section {
+  /* Logins / Cards group heading (issue #152) — rendered ONLY when both families are
+     present. Presentational (aria-hidden, never a menuitem): the roving contract and
+     the data-pick-index mapping must not see it. */
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 12px 4px;
+}
 .vault-picker-note {
   /* the empty state — centered with generous breathing room so it doesn't read as cramped */
   color: var(--fg-dim);

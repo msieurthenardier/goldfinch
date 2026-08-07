@@ -9,6 +9,7 @@
 
 const { ipcRenderer } = require('electron');
 const { fillLoginForm, findAllLoginFields, findLoginFields } = require('./vault-fill-fields');
+const { fillCardForm, findAllCardFields, findCardFields } = require('./vault-card-fields');
 const { createVaultIconController } = require('./vault-fill-icon');
 const { createBookmarkDropListeners } = require('./guest-bookmark-drop');
 
@@ -252,6 +253,7 @@ const vaultIcons = createVaultIconController({
   ipcRenderer,
   isTrustedGet,
   findAllLoginFields,
+  findAllCardFields,
   getEnabled: () => vaultEligible && IS_TOP_FRAME,
   getVaultLocked: () => vaultLocked,
 });
@@ -313,7 +315,15 @@ ipcRenderer.on('rescan-media', () => send());
 // single-use, TTL-bound target the icon controller recorded on the trusted click. A
 // non-gesture fill (MCP automation) has no pending target → consumeFillTarget() is null
 // → fillLoginForm falls back to the first-password-field heuristic (unchanged behavior).
-ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred, vaultIcons.consumeFillTarget()));
+ipcRenderer.on('vault-fill', (_e, cred) => fillLoginForm(document, cred, vaultIcons.consumeFillTarget('login')));
+
+// Vault CARD fill (issue #152): the card twin of `vault-fill`. Same trust shape — the
+// resolved card arrives ONLY here (never over the MCP wire, which stays login-only) and
+// is filled into the TOP-FRAME card form; `fillCardForm` guards `window.top === window`
+// and `webContents.send` targets the main frame, so a cross-origin iframe is never
+// filled. The gesture-bound target is consumed with an explicit 'card' kind so a login
+// binding can never be redirected into a card form.
+ipcRenderer.on('vault-fill-card', (_e, card) => fillCardForm(document, card, vaultIcons.consumeFillTarget('card')));
 
 // Vault capture (M12 F2 Leg 4, DD7): a capturing `submit` listener on detected login
 // forms (top-frame + vault-eligible only — the same gate as the lock icon; burner /
@@ -343,17 +353,53 @@ if (IS_TOP_FRAME && vaultEligible) {
       const form = /** @type {any} */ (e.target);
       if (!form || typeof form.querySelectorAll !== 'function') return;
       const fields = findLoginFields(form);
-      if (!fields || !fields.password) return;
-      const password = fields.password.value != null ? String(fields.password.value) : '';
-      const username = fields.username && fields.username.value != null
-        ? String(fields.username.value)
+      if (fields && fields.password) {
+        const password = fields.password.value != null ? String(fields.password.value) : '';
+        const username = fields.username && fields.username.value != null
+          ? String(fields.username.value)
+          : '';
+        const passwordBytes = new TextEncoder().encode(password);
+        ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
+        return;
+      }
+      // Payment-card capture (issue #152). Same trusted-submit gate, same
+      // bytes-not-strings discipline for the two real payment secrets (the PAN and
+      // the CVV); the cardholder name and expiry ride as plain strings — they are
+      // low-value alone and main holds them in the zeroizable record regardless.
+      // Main applies the plausibility gate (Luhn + length), so a mis-detected field
+      // never becomes a save offer. A form is a login form OR a card form, never both
+      // in one submit — the login branch returns above.
+      const card = findCardFields(form);
+      if (!card || !card.number) return;
+      const number = card.number.value != null ? String(card.number.value) : '';
+      if (number === '') return;
+      const cvv = card.csc && card.csc.value != null ? String(card.csc.value) : '';
+      const cardholder = card.cardholder && card.cardholder.value != null
+        ? String(card.cardholder.value)
         : '';
-      const passwordBytes = new TextEncoder().encode(password);
-      ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
+      const expiry = readSubmittedExpiry(card);
+      const encoder = new TextEncoder();
+      ipcRenderer.send('guest-vault-capture-card', {
+        number: encoder.encode(number),
+        cvv: encoder.encode(cvv),
+        cardholder,
+        expiry,
+      });
     } catch {
       /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
     }
   }, true);
+}
+
+// The submitted expiry as a single `MM/YY`-ish string, from either the combined
+// `cc-exp` field or the split month/year pair. Returns '' when neither is present or
+// filled — main stores a null expiry rather than a fabricated one.
+function readSubmittedExpiry(card) {
+  if (card.expiry && card.expiry.value) return String(card.expiry.value);
+  const month = card.expMonth && card.expMonth.value ? String(card.expMonth.value) : '';
+  const year = card.expYear && card.expYear.value ? String(card.expYear.value) : '';
+  if (!month || !year) return '';
+  return `${month.padStart(2, '0')}/${year}`;
 }
 
 // ---------------------------------------------------------------------------

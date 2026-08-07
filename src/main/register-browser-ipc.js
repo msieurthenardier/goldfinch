@@ -154,6 +154,27 @@ function registerBrowserIpc({
     }
   });
 
+  // Vault CARD capture (issue #152): a submitted payment form's card arrives here as
+  // { number, cvv } (both Uint8Array) + the non-secret cardholder / expiry strings.
+  // Identical trust shape to guest-vault-capture above — the trusted wcId is
+  // event.sender.id and the ORIGIN is derived in main from the sender URL, never from
+  // the guest. getVaultHuman().captureCard applies the set-up / persistent-jar gate
+  // AND the card-plausibility gate (Luhn + length), holds the PAN and CVV in a
+  // main-side zeroizable record, and returns { captureId, model } (model carries NO
+  // card number) or null. The offer rides the SAME vault-capture-offer channel as a
+  // login — the model's `kind` selects the sheet copy.
+  ipcMain.on('guest-vault-capture-card', (event, payload) => {
+    if (!getVaultHuman) return;
+    const wcId = event.sender.id;
+    const { number, cvv, cardholder, expiry } = /** @type {any} */ (payload || {});
+    const offer = getVaultHuman().captureCard({
+      wcId, numberBytes: number, cvvBytes: cvv, cardholder, expiry,
+    });
+    if (offer) {
+      chromeForTab(wcId)?.send('vault-capture-offer', { captureId: offer.captureId, model: offer.model });
+    }
+  });
+
   // Vault capture DISMISS (M12 F2 Leg 4, DD7): the chrome invokes this when the
   // vault-capture sheet closes WITHOUT a save (Cancel / Escape / outside-click / a
   // lifecycle close), so main drops+zeroizes the held record immediately rather than

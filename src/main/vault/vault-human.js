@@ -28,6 +28,9 @@ const crypto = require('node:crypto');
 const { originMatches } = require('../../shared/origin-match');
 
 const { resolvePersistJar } = require('../persist-jar-gate');
+// Card capture (issue #152): the non-secret descriptors derived from a PAN, plus the
+// plausibility gate that keeps an arbitrary submitted form value out of the vault.
+const { isPlausibleCardNumber, brandForNumber, last4Of, titleForNumber, digitsOf } = require('./card-identity');
 
 // The held captured-credential record's safety-drop timeout (Leg 4): if neither a
 // save nor a dismiss resolves the offer, the record is zeroized+dropped after this
@@ -70,6 +73,11 @@ function originOf(url) {
  * @property {() => Array<{ id: string, partition: string }>} listJars  the persistent jars snapshot.
  * @property {(arg: { wcId: number, credential: { username: any, password: any } }) => void} fillDelegate
  *   the F1 main→preload fill effect (main.js `webContents.fromId(wcId)?.send('vault-fill', credential)`).
+ * @property {(arg: { wcId: number, card: { number: any, cardholder: any, expiry: any, cvv: any } }) => void} [fillCardDelegate]
+ *   the CARD main→preload fill effect (issue #152 — `send('vault-fill-card', card)`). A
+ *   SEPARATE channel from `fillDelegate` because the two land on different DOM anchors
+ *   guest-side. Optional: an omitted injection refuses card fills outright (`ineligible`)
+ *   rather than silently dropping them, so offline fixtures stay honest.
  * @property {(fn: () => void, ms: number) => any} [setTimeout]  capture drop-timer arm (default global) — injected so the timeout is unit-testable.
  * @property {(handle: any) => void} [clearTimeout]  capture drop-timer clear (default global).
  * @property {() => number} [now]  clock (default Date.now) — the record's capturedAt stamp.
@@ -83,9 +91,17 @@ function originOf(url) {
  * @typedef {Object} CaptureRecord
  * @property {string} captureId
  * @property {number} wcId  the owning tab (for last-wins-per-tab supersession).
+ * @property {'login' | 'card'} [kind]  the item family (issue #152; absent = 'login',
+ *   so every pre-card record shape is unchanged).
  * @property {string} origin  derived in main from the sender URL (never guest-supplied).
  * @property {string | null} username
  * @property {Buffer} password
+ * @property {Buffer} [number]  card only — the PAN, zeroized by dropCapture.
+ * @property {Buffer} [cvv]  card only — the security code, zeroized by dropCapture.
+ * @property {string | null} [cardholder]  card only (non-secret).
+ * @property {string | null} [expiry]  card only.
+ * @property {string | null} [brand]  card only — derived from the PAN (non-secret).
+ * @property {string | null} [last4]  card only — derived from the PAN (non-secret).
  * @property {string} jarId  the tab's persistent jar id (fixed at capture; disposition uses it).
  * @property {'save' | 'update' | 'locked'} mode  'locked' = held pending an unlock; the save/update
  *   disposition is deferred to `captureFinalize` (it needs the vault unlocked).
@@ -121,7 +137,12 @@ function createVaultHuman(deps) {
     if (!rec) return;
     captures.delete(captureId);
     if (rec.timer != null) _clearTimeout(rec.timer);
-    if (rec.password && typeof rec.password.fill === 'function') rec.password.fill(0);
+    // Every zeroizable secret the record can hold, login and card alike (issue #152).
+    // A new secret field MUST be added here or it outlives the record.
+    for (const field of ['password', 'number', 'cvv']) {
+      const buf = /** @type {any} */ (rec)[field];
+      if (buf && typeof buf.fill === 'function') buf.fill(0);
+    }
   }
 
   /**
@@ -149,29 +170,47 @@ function createVaultHuman(deps) {
   }
 
   /**
-   * The picker model for the tab: the origin-filtered, badged, metadata-only
-   * reachable login items. `[]` for a burner (no persistent jar), a bad/empty URL,
-   * or a locked/uncreated vault — the reachable read is itself `[]`-safe.
+   * The picker model for the tab: the badged, metadata-only reachable items, LOGINS
+   * FIRST then CARDS (issue #152). `[]` for a burner (no persistent jar), a bad/empty
+   * URL, or a locked/uncreated vault — both reachable reads are themselves `[]`-safe.
+   *
+   * The two families are gathered by DIFFERENT rules and that asymmetry is deliberate:
+   * logins are ORIGIN-FILTERED (a credential belongs to its site), cards are not (a
+   * card belongs to the operator and is used at any merchant — see
+   * `reachableCardItems`). Each row is stamped with its `type` HERE, at the merge
+   * point, rather than inside the store: the login row's key set is pinned as a
+   * metadata-only guard by vault-store-reachable.test.js, and this is presentation
+   * routing for the unified picker, not vault metadata.
    * @param {number} wcId
-   * @returns {Array<{ vaultId: string, id: string, title: string|null, origin: string|null, username: string|null, hasTotp: boolean }>}
+   * @returns {Array<any>}
    */
   function reachableItems(wcId) {
     const origin = tabOriginFor(wcId);
     if (!origin) return [];
     const jar = tabJarFor(wcId);
     if (!jar) return []; // burner / non-persistent — no reachable items (DD9).
+    const store = deps.getVaultStore();
     // Picker path WIDENS (M12 F4 Leg 4 / DD5): a `matchMode:'registrable-domain'` item
     // surfaces on a hardened-matched subdomain, badged via the row's `widened` flag.
-    return deps.getVaultStore().reachableLoginItems(jar.id, origin, { widen: true });
+    const logins = store
+      .reachableLoginItems(jar.id, origin, { widen: true })
+      .map((/** @type {any} */ row) => ({ ...row, type: 'login' }));
+    const cards = typeof store.reachableCardItems === 'function'
+      ? store.reachableCardItems(jar.id).map((/** @type {any} */ row) => ({ ...row, type: 'card' }))
+      : [];
+    return logins.concat(cards);
   }
 
   /**
    * Dispatch the chosen credential through F1's `vault-fill` channel. Re-checks, in
    * ORDER (DD6/DD9): (1) locked; (2) burner → ineligible BEFORE the scope assert
    * (so a `vaultId:'global'` can never fill a burner tab); (3) cross-vault scope
-   * (`vaultId ∈ { 'global', tabJar.id }`); (4) exact-origin. Any refusal returns
-   * `{ filled: false, reason }` and does NOT call the fill delegate. On success the
-   * credential is built + consumed HERE and `{ filled: true }` (no password) is
+   * (`vaultId ∈ { 'global', tabJar.id }`); (4) resolve the item; (5) TYPE-DISPATCH on
+   * the STORED item's own `type` (issue #152) — a `card` skips the origin check by
+   * design and rides `fillCardDelegate`; a `login` takes the exact/widened origin
+   * check and rides `fillDelegate`; any other type is refused. Any refusal returns
+   * `{ filled: false, reason }` and does NOT call either fill delegate. On success the
+   * credential is built + consumed HERE and `{ filled: true }` (no secret) is
    * returned.
    * @param {{ wcId: number, vaultId: string, itemId: string }} sel
    * @returns {{ filled: boolean, reason?: string }}
@@ -205,11 +244,36 @@ function createVaultHuman(deps) {
       }
       throw err;
     }
+    if (!item) return { filled: false, reason: 'origin-mismatch' };
+
+    // (5) TYPE-DISPATCH (issue #152). The branch is chosen by the STORED ITEM's own
+    // `type` — never by anything the guest, the page, or the chrome supplied — so a
+    // hostile page cannot steer a login request onto the un-origin-gated card path.
+    // Fill payloads go out over DIFFERENT channels because they land on different DOM
+    // anchors guest-side.
+    if (item.type === 'card') {
+      // Cards are NOT origin-gated (see reachableCardItems for the full reasoning): a
+      // payment card belongs to the operator, not to a site. Every other gate above —
+      // unlocked, persistent jar, jar scope — has already run, and the fill still
+      // requires the explicit per-fill operator selection that got us here.
+      if (!deps.fillCardDelegate) return { filled: false, reason: 'ineligible' };
+      deps.fillCardDelegate({
+        wcId,
+        card: {
+          number: item.number,
+          cardholder: item.cardholder,
+          expiry: item.expiry,
+          cvv: item.cvv,
+        },
+      });
+      return { filled: true };
+    }
+
     // Origin match — exact by default, widened to the registrable domain for a
     // `matchMode:'registrable-domain'` item behind the fail-closed matcher (M12 F4 Leg 4
     // / DD5). The picker only offers rows that already matched, but re-checking here
     // (with the same widen) keeps the fill gate the authoritative boundary.
-    if (!item || item.type !== 'login' || !tabOrigin || !originMatches(item, tabOrigin, { widen: true })) {
+    if (item.type !== 'login' || !tabOrigin || !originMatches(item, tabOrigin, { widen: true })) {
       return { filled: false, reason: 'origin-mismatch' };
     }
 
@@ -338,6 +402,159 @@ function createVaultHuman(deps) {
   }
 
   /**
+   * The stored cards reachable from a captured record's jar ({global, jar}), as FULL
+   * items (the vault is unlocked here) — the card twin of `reachableLoginItems`'s role
+   * inside `disposeCapture`. Kept local: it reads secrets (the stored PAN) to compare
+   * identity, so it must never be confused with the metadata-only store method of a
+   * similar name.
+   * @param {string} jarId
+   * @returns {Array<{ vaultId: string, item: any }>}
+   */
+  function storedCardsFor(jarId) {
+    const store = deps.getVaultStore();
+    const targets = jarId !== 'global' ? ['global', jarId] : ['global'];
+    const out = [];
+    for (const vaultId of targets) {
+      let items;
+      try {
+        items = store.listItems(vaultId);
+      } catch {
+        continue;
+      }
+      for (const item of items) {
+        if (item && item.type === 'card') out.push({ vaultId, item });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Compute the save/update disposition for a held CARD record against the NOW-UNLOCKED
+   * vault, mutating the record and returning the sheet model — the card twin of
+   * `disposeCapture`. Returns null when there is nothing to offer.
+   *
+   * IDENTITY is the PAN itself (digits-compared, so stored formatting never splits a
+   * match), NOT the last4: two cards can share a last4, and offering to "update" the
+   * wrong one would silently overwrite a different card. An exact PAN match whose CVV,
+   * expiry and cardholder all agree is UNCHANGED → no offer, mirroring the login
+   * path's no-op guard. Prefers a jar-vault match over a global one on a tie, exactly
+   * as the login path does.
+   * @param {any} rec
+   * @returns {any | null}
+   */
+  function disposeCardCapture(rec) {
+    const digits = digitsOf(rec.number.toString('utf8'));
+    const stored = storedCardsFor(rec.jarId);
+    const matches = stored.filter((s) => digitsOf(s.item.number) === digits);
+    const match = matches.find((s) => s.vaultId === rec.jarId) || matches[0];
+
+    const base = {
+      kind: 'card',
+      origin: rec.origin,
+      brand: rec.brand,
+      last4: rec.last4,
+    };
+
+    if (match) {
+      const cvv = rec.cvv.toString('utf8');
+      const unchanged = String(match.item.cvv ?? '') === cvv
+        && String(match.item.expiry ?? '') === String(rec.expiry ?? '')
+        && String(match.item.cardholder ?? '') === String(rec.cardholder ?? '');
+      if (unchanged) return null; // nothing to update → no offer
+      rec.mode = 'update';
+      rec.vaultId = match.vaultId;
+      rec.itemId = match.item.id;
+      rec.choices = [];
+      return { ...base, mode: 'update', defaultVaultId: match.vaultId, choices: [] };
+    }
+
+    rec.mode = 'save';
+    rec.choices = [rec.jarId, 'global'];
+    return { ...base, mode: 'save', defaultVaultId: rec.jarId, choices: [rec.jarId, 'global'] };
+  }
+
+  /**
+   * Capture a freshly-submitted payment card (issue #152) — the card twin of `capture`.
+   * The PAN and CVV arrive as `Uint8Array`s, are copied into zeroizable Buffers HERE,
+   * and the incoming arrays are wiped; neither ever reaches chrome (the offer model
+   * carries only origin / brand / last4 / mode / vault choices).
+   *
+   * GATE, in order: the manager is set up → the tab resolves a PERSISTENT jar → an
+   * origin resolves → the number is PLAUSIBLY A CARD (12–19 digits passing Luhn). That
+   * last gate is what keeps a false-positive field detection from writing an arbitrary
+   * submitted value into the vault as a "card"; it has no login equivalent because a
+   * password field is self-identifying and a password has no checkable structure.
+   *
+   * Like the login path, a LOCKED vault HOLDS the capture (mode 'locked') and defers
+   * the disposition to `captureFinalize` after an unlock.
+   * @param {{ wcId: number, numberBytes: any, cvvBytes: any, cardholder?: any, expiry?: any }} arg
+   * @returns {{ captureId: string, model: any } | null}
+   */
+  function captureCard({ wcId, numberBytes, cvvBytes, cardholder, expiry }) {
+    const store = deps.getVaultStore();
+    const numBytes = numberBytes instanceof Uint8Array ? numberBytes : null;
+    const cvcBytes = cvvBytes instanceof Uint8Array ? cvvBytes : null;
+    const wipe = () => {
+      if (numBytes) numBytes.fill(0);
+      if (cvcBytes) cvcBytes.fill(0);
+    };
+
+    const origin = tabOriginFor(wcId);
+    const jar = tabJarFor(wcId);
+    if (!store.isSetUp() || !jar || !origin || !numBytes) {
+      wipe();
+      return null;
+    }
+
+    const number = Buffer.from(numBytes).toString('utf8');
+    if (!isPlausibleCardNumber(number)) {
+      wipe();
+      return null; // not a card — never offer to save an arbitrary form value
+    }
+
+    // Supersession: evict+zeroize any prior record for this SAME tab first.
+    for (const [id, prior] of captures) {
+      if (prior.wcId === wcId) dropCapture(id);
+    }
+
+    const captureId = crypto.randomBytes(12).toString('hex');
+    /** @type {any} */
+    const rec = {
+      captureId,
+      wcId,
+      kind: 'card',
+      origin,
+      number: Buffer.from(numBytes),
+      cvv: cvcBytes ? Buffer.from(cvcBytes) : Buffer.alloc(0),
+      cardholder: cardholder == null || cardholder === '' ? null : String(cardholder),
+      expiry: expiry == null || expiry === '' ? null : String(expiry),
+      brand: brandForNumber(number),
+      last4: last4Of(number),
+      jarId: jar.id,
+      mode: 'save',
+      choices: [],
+      timer: null,
+      capturedAt: _now(),
+    };
+    wipe(); // the incoming deserialized arrays are separate allocations
+    rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
+    captures.set(captureId, rec);
+
+    if (!store.isUnlocked()) {
+      rec.mode = 'locked';
+      return {
+        captureId,
+        model: { kind: 'card', origin, brand: rec.brand, last4: rec.last4, mode: 'locked' },
+      };
+    }
+
+    const model = disposeCardCapture(rec);
+    if (!model) { dropCapture(captureId); return null; }
+    return { captureId, model };
+  }
+
+  /**
    * Finalize a held 'locked' capture AFTER a successful unlock (the chrome's unlock-to-save
    * continuation): compute the deferred save/update disposition and return `{ captureId, model }`
    * so the chrome opens the vault-capture sheet. Returns null when the record is gone
@@ -353,8 +570,9 @@ function createVaultHuman(deps) {
     if (!deps.getVaultStore().isUnlocked()) return null; // unlock didn't take / raced a re-lock
     const jar = tabJarFor(rec.wcId);
     if (!jar || jar.id !== rec.jarId) { dropCapture(captureId); return null; }
-    // Unchanged login after unlock (disposeCapture → null) → drop, no offer.
-    const model = disposeCapture(rec);
+    // Unchanged item after unlock (dispose → null) → drop, no offer. The card twin
+    // disposes by PAN identity; the login twin by origin+username.
+    const model = rec.kind === 'card' ? disposeCardCapture(rec) : disposeCapture(rec);
     if (!model) { dropCapture(captureId); return null; }
     return { captureId, model };
   }
@@ -389,6 +607,58 @@ function createVaultHuman(deps) {
     const store = deps.getVaultStore();
     // Idle-lock race: the vault may have auto-locked between the offer and the save.
     if (!store.isUnlocked()) return { saved: false, reason: 'locked' };
+
+    // CARD (issue #152) — the same save/update shape as a login, with the card's own
+    // field set. An update MERGES over the existing item for exactly the login path's
+    // reason: `saveItem` wholesale-replaces, so a bare rewrite would drop the
+    // operator's custom title and notes.
+    if (rec.kind === 'card') {
+      const number = rec.number.toString('utf8');
+      let cardTarget;
+      let cardItem;
+      if (rec.mode === 'update') {
+        cardTarget = /** @type {string} */ (rec.vaultId);
+        const existing = store
+          .listItems(cardTarget)
+          .find((/** @type {any} */ i) => i.id === rec.itemId);
+        if (!existing) {
+          dropCapture(captureId);
+          return { saved: false };
+        }
+        cardItem = {
+          ...existing,
+          number,
+          cvv: rec.cvv.toString('utf8'),
+          expiry: rec.expiry,
+          cardholder: rec.cardholder ?? existing.cardholder,
+          brand: rec.brand ?? existing.brand,
+          last4: rec.last4 ?? existing.last4,
+        };
+      } else {
+        if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
+          return { saved: false, reason: 'invalid-vault' };
+        }
+        cardTarget = vaultId;
+        // SAVE only: synthesize a self-describing title ("Visa •••• 4242"), the card
+        // analogue of the login path's hostname title.
+        cardItem = {
+          type: 'card',
+          title: titleForNumber(number),
+          cardholder: rec.cardholder,
+          brand: rec.brand,
+          last4: rec.last4,
+          number,
+          cvv: rec.cvv.toString('utf8'),
+          expiry: rec.expiry,
+        };
+      }
+      try {
+        store.saveItem(cardTarget, cardItem);
+      } finally {
+        dropCapture(captureId);
+      }
+      return { saved: true };
+    }
 
     let target;
     let item;
@@ -452,7 +722,7 @@ function createVaultHuman(deps) {
     dropCapture(captureId);
   }
 
-  return { reachableItems, fillHuman, capture, captureFinalize, captureSave, captureDismiss };
+  return { reachableItems, fillHuman, capture, captureCard, captureFinalize, captureSave, captureDismiss };
 }
 
 module.exports = { createVaultHuman, originOf };

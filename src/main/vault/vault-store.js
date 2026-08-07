@@ -1475,6 +1475,61 @@ class VaultStore {
     return out;
   }
 
+  /**
+   * The reachable payment-CARD items for a tab's jar (issue #152) — the card twin of
+   * `reachableLoginItems`, with ONE deliberate difference: there is **no origin
+   * filter**, and the method takes no origin at all.
+   *
+   * WHY NO ORIGIN GATE (issue #152 design decision): a login belongs to the site that
+   * issued it, so an origin match is the natural authorization. A payment card belongs
+   * to the OPERATOR and is legitimately used at any merchant — gating it on a stored
+   * origin would make cards unfillable at every shop the operator hasn't already
+   * recorded, i.e. all of them. The authorization that remains is the same set the
+   * login path relies on for everything except the origin: the vault must be UNLOCKED,
+   * the tab must resolve a PERSISTENT jar (never a burner), only the tab's own jar
+   * vault + the global vault are visited, the fill is TOP-FRAME only, and nothing is
+   * dispatched without an explicit per-fill operator selection in the chrome-owned
+   * picker. This mirrors how dedicated password managers treat cards.
+   *
+   * METADATA ONLY — the row carries the card's non-secret fields per
+   * `vault-item-schema.js` (title / cardholder / brand / last4). The PAN, CVV and
+   * expiry are secret and NEVER leave main; they are resolved only inside `fillHuman`.
+   *
+   * `[]`-SAFE, never throws — same guards as the login twin.
+   * @param {string | null} jarId  the tab's persistent jar id, or null (burner/none).
+   * @returns {Array<{ vaultId: string, id: string, title: string|null, cardholder: string|null, brand: string|null, last4: string|null }>}
+   */
+  reachableCardItems(jarId) {
+    if (!this.isUnlocked()) return []; // locked → no MRK → nothing reachable.
+    // A burner / non-persistent tab reaches NOTHING, global included — the same
+    // refusal the login twin makes, for the same reason (no metadata leak to a
+    // non-persistent tab).
+    if (!jarId) return [];
+    const targets = jarId !== GLOBAL_ID ? [GLOBAL_ID, jarId] : [GLOBAL_ID];
+    const out = [];
+    for (const id of targets) {
+      let items;
+      try {
+        items = this.listItems(id);
+      } catch {
+        continue; // non-persistent/unknown jar (VaultStateError) or a lock race — skip.
+      }
+      for (const item of /** @type {any[]} */ (items)) {
+        if (item && item.type === 'card') {
+          out.push({
+            vaultId: id,
+            id: item.id,
+            title: item.title ?? null,
+            cardholder: item.cardholder ?? null,
+            brand: item.brand ?? null,
+            last4: item.last4 ?? null,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
   // -------------------------------------------------------------------------
   // Access keys (per-jar automation grants — DD6 step-up)
   // -------------------------------------------------------------------------
