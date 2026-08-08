@@ -189,6 +189,25 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'goldfinch-media', privileges: { stream: true } }
 ]);
 
+// Windows taskbar-pin identity (squawk 0002): claim the SAME AppUserModelID that
+// electron-builder stamps onto the shortcut it creates (package.json's build.appId,
+// literal below). Without this the running process's identity never matches the
+// shortcut's, so Windows can't reconcile the taskbar pin across NSIS's
+// installer-driven uninstall-then-reinstall swap on update (electron-builder
+// #1293, #926, #2514) — the pin survives an ordinary quit/relaunch (same process
+// identity as the OS already knows) but is dropped by an update. Must run before
+// ANY window is created; placed at module load — same pre-ready discipline as
+// registerSchemesAsPrivileged above, and it runs well before app-lifecycle.js's
+// whenReady chain even registers, let alone calls createWindow(). Hardcoded
+// rather than `require()`d from package.json (main.js has no existing
+// read-build-config-at-runtime pattern, and asar:false's packaged layout makes a
+// relative require here needlessly fragile) — the literal is pinned against
+// package.json's build.appId by test/unit/app-user-model-id.test.js so the two
+// can't silently drift.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.goldfinch.browser');
+}
+
 // Fixed internal assets remain an exact host/path allowlist. The extracted
 // builder receives __dirname and path; it never derives a file from a URL.
 const INTERNAL_PAGES = createInternalPageMap({ baseDir: __dirname, path });
