@@ -1,10 +1,11 @@
 # Squawk 0002: Windows taskbar pin lost on update — app never claims its AppUserModelID
 
-**Status**: completed
+**Status**: escalated
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-08
-**Completed**: 2026-08-08
+**Completed**: — *(corrective action shipped in v0.13.4 but did not resolve the defect —
+see Disposition)*
 
 ## Report
 
@@ -111,4 +112,64 @@ assertion failed as intended.
 install → update → observe cycle, which no test here can run. The fix addresses the
 documented root cause; confirmation is an operator step.
 
-**Commit**: `squawk/turnaround-2026-08-08`
+**Commit**: `ca0570f` (PR #159), released in v0.13.4
+
+## Disposition
+
+**Escalated** — the corrective action was implemented, reviewed, and shipped, and the
+defect it targeted is still present. The squawk's own recorded residual ("the taskbar
+behavior itself is unverified; confirmation is an operator step") came back negative.
+
+### Verification result: FAILED
+
+Operator ran two full cycles on real Windows hardware against the v0.13.4 installer:
+
+1. 0.13.3 installed and pinned to the taskbar → ran the 0.13.4 installer → **the pin
+   disappeared midway through the installation** and was still gone once it finished.
+2. Re-pinned on 0.13.4 → ran the installer again → **same result**: pin vanished
+   mid-install, did not return.
+
+### What this tells us — the original diagnosis was incomplete
+
+The report attributed the loss to the running process never claiming the shortcut's
+AppUserModelID. That call now ships (`src/main/main.js:208`) and the pin still dies, so
+that hypothesis is falsified as the operative cause.
+
+**The timing is the evidence.** The pin goes during the *install*, not on first launch of
+the updated app — that is the NSIS uninstall phase deleting the old shortcut and
+executable, and the shell dropping a pin whose target no longer exists. AUMID governs how
+Windows *identifies* a running app against a pinned shortcut; it cannot stop the pin's
+target being removed, and no runtime call can, because the app is not running at that
+moment. The real surface is the installer, not the app.
+
+### The shipped change is retained, not reverted
+
+Normally an escalation confirms no partial changes remain. Deliberately not done here: the
+`setAppUserModelId` call is correct independent of this bug — Windows uses the AUMID for
+window grouping, jump lists, and toast notification identity — and it is inert with
+respect to the failure above. Reverting would give up a real improvement for no gain. It
+stays; it is simply not this defect's fix. `test/unit/app-user-model-id.test.js` stays with
+it.
+
+### Which criteria the remaining work fails
+
+- **No design decisions** — competing approaches with no obvious winner: a custom NSIS
+  include that preserves or restores the pin across the uninstall phase; per-machine vs
+  per-user install layout; suppressing shortcut deletion on the update path specifically.
+- **Bounded blast radius** — the surface is the installer itself, on every Windows user's
+  upgrade path.
+- **Verifiable** — no automated coverage is possible; each iteration costs a manual
+  install → update → observe cycle on real Windows.
+
+Three of four failed → **flight or mission, not a squawk.**
+
+### Recommended vehicle
+
+A flight, planned together with [#101](https://github.com/msieurthenardier/goldfinch/issues/101)
+(signed installers + auto-update via `electron-updater`) rather than independently: moving
+to `electron-updater` replaces uninstall-then-reinstall with an in-place update, which
+would likely dissolve this failure mode instead of patching around it. Fixing the NSIS path
+in isolation risks building something #101 then discards.
+
+GitHub issue [#65](https://github.com/msieurthenardier/goldfinch/issues/65) has been
+reopened with this evidence. Link the flight here once it exists.
