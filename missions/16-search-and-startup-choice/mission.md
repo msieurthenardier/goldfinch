@@ -125,6 +125,10 @@ The welcome page is the first surface in the app that must be **trusted and brow
 
 - [ ] **`openSiteSettingsTab()` will hijack a welcome tab once welcome tabs are common** — `overlay-menus.js:118` finds a tab to reuse with `[...tabs.values()].find(isInternalTab)`, i.e. *any* internal tab, then navigates it to `goldfinch://settings/#privacy`. Harmless today because internal tabs are rare and deliberate. After Flight 2 routes unset new tabs to welcome, a user with a welcome tab open who clicks the site-info "Privacy settings" link would have that tab silently navigated away — discarding any pending search riding with it. **Pre-existing latent defect that this mission activates**; found by architect review 2026-08-09. The predicate should match `goldfinch://settings` specifically rather than "any internal tab."
 
+- [ ] **`homePageCache` is never boot-seeded — a live defect today, found by Flight 1 design review (2026-08-11).** Its only writer is the `settings-changed` broadcast handler (`renderer.js:478` via `window-controller.js:131`); the boot-time `settingsGet('homePage')` feeds only the first `createTab`. So in any window opened after launch, Ctrl+T/burner/new-jar tabs use the hardcoded Google fallback instead of the user's configured home page until some unrelated settings broadcast lands. (`CLAUDE.md`'s caching description claims otherwise and misled Flight 1's first DD4 draft — correction scheduled in Flight 1 leg 1.) Squawk candidate; Flight 2's coalescing-site rewrite must fix or subsume the seeding, not inherit it.
+
+- [ ] **`settings.js:150` guards the home-page field with a truthy check, not a nullish one** — a future `homePage: null` broadcast (Flight 2's clear affordance) would leave the field showing a stale prior value instead of clearing. Found by Flight 1 design review (2026-08-11); harmless in Flight 1 (nothing broadcasts null yet). Flight 2 must flip this guard when the clear affordance lands.
+
 ## Flights
 
 > **Note:** These are tentative suggestions, not commitments. Flights are planned and created one at a time as work progresses. This list will evolve based on discoveries during implementation.
