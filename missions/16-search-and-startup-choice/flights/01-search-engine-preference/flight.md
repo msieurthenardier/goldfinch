@@ -1,12 +1,12 @@
 # Flight: Search Engine as a Preference
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Search and Startup Choice](../../mission.md)
 
 ## Contributing to Criteria
 
 - [x] Address-bar searches go to a search engine the user chose from a curated list; the choice survives restart and takes effect immediately in every open window without a restart. *(behavior-test-backed)*
-- [ ] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)* *(2026-08-24: not observed — the page-context sheet is not automatable via the MCP apparatus (run log `search-engine-preference/runs/2026-08-24-22-41-08.md`, checkpoint 6 inconclusive); structurally covered by the shared `toUrl`; pending a ten-second manual check. Left unchecked on purpose.)*
+- [x] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)* *(2026-08-24: the page-context sheet is not automatable via the MCP apparatus — run log `search-engine-preference/runs/2026-08-24-22-41-08.md` checkpoint 6 inconclusive — so this was **operator-verified by hand at the flight debrief**: right-click "Search for …" with DuckDuckGo selected opened a `duckduckgo.com` tab. Recorded in the run log's Operator Notes.)*
 - [x] Home page and search engine are independent preferences, presented adjacent in Settings; setting either never changes the other. *(this flight: the settable half + adjacency + independence; the clearable half is Flight 2 — see DD6)*
 - [x] Upgrading an existing profile changes nothing the user can observe: searches still reach Google, the home page stays as it was. The previously implicit Google default is now visible in Settings as an explicit selection the user can change. *(behavior-test-backed)*
 - [x] Only engines from the curated list can ever be stored; unknown or corrupt stored values repair without blocking startup. *(this flight: validator + repair-to-Google; "without silently selecting a provider" completes in Flight 2 when the fresh-profile default flips to unset)*
@@ -77,7 +77,7 @@ The curated-allowlist acceptance criterion is backed by a unit test that goes re
 - [x] Mission 16 active; flight branch `flight/01-search-engine-preference` exists
 - [x] Engine table content resolved (mission Open Question 1: eight engines, templates, descriptions, exclusion rationale)
 - [x] Automation surface verified live before behavior-test runs: `npm run dev:automation` boots, MCP attaches, admin key mints (probed 2026-08-11 by FD: fresh scratch profile, port 49709 free-port fallback, 401 unkeyed / 200 authed initialize — see flight log)
-- [ ] Pre-upgrade profile fixture procedure validated once end-to-end (produce a v2 row from a pre-flight build; see DD7)
+- [x] Pre-upgrade profile fixture procedure validated once end-to-end (produce a v2 row from a pre-flight build; see DD7) *(2026-08-24 at the acceptance gate — worktree at `c8563f3`, Settings-driven home-page write, clean quit, row verified `version 2` / no `searchEngine`; see the upgrade run log's Fixture Provenance)*
 
 ### Pre-Flight Checklist
 

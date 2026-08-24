@@ -53,7 +53,7 @@ The welcome page is the first surface in the app that must be **trusted and brow
 ## Success Criteria
 
 - [x] Address-bar searches go to a search engine the user chose from a curated list; the choice survives restart and takes effect immediately in every open window without a restart. *(behavior-test-backed)* *(F1, 2026-08-24)*
-- [ ] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)*
+- [x] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)* *(F1, 2026-08-24 — operator-verified by hand; the context-menu sheet is outside the automation surface)*
 - [ ] Home page and search engine are independent preferences, each settable and clearable on its own, presented adjacent to one another in Settings; setting or clearing either never changes the other. *(behavior-test-backed)*
 - [x] Upgrading an existing profile changes nothing the user can observe: searches still reach Google, the home page stays as it was. The previously implicit Google default is now visible in Settings as an explicit selection the user can change. *(behavior-test-backed)* *(F1, 2026-08-24 — the pre-existing first-new-tab miss, squawk 0005, is unchanged by the upgrade and stays with F2)*
 - [ ] A newly created profile has neither preference set, and Goldfinch never sends a query to a search provider the user did not choose.
