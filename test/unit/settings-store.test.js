@@ -20,6 +20,9 @@ const os = require('os');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const appDb = require('../../src/main/app-db');
+// require(esm) — same synchronous-ESM-from-CJS idiom settings-store.js itself
+// uses for src/shared/ imports (Node ≥22).
+const { SEARCH_ENGINE_IDS } = require('../../src/shared/search-engines');
 
 // ---------------------------------------------------------------------------
 // Helper: create a fresh temp dir and return it, plus a cleanup function.
@@ -68,16 +71,31 @@ function freshStore() {
 // ---------------------------------------------------------------------------
 // Test: defaults on first load (no settings.json present)
 // ---------------------------------------------------------------------------
-test('defaults on first load — no settings.json present', () => {
+// RENAMED (M16 F1 / DD5 — was 'defaults on first load — no settings.json
+// present'): the old name and body pinned "a fresh profile's config exists
+// only in memory, no row write" — the EXACT OPPOSITE of pin-on-load. Renamed
+// rather than deleted-and-re-added so git blame documents the intent shift
+// (Flight Control convention for tests that pin behavior a new design
+// deliberately breaks — design review finding, methodology rule).
+test('defaults on first load — no settings.json present, pinned to disk at v3 (DD5)', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
-    assert.equal(result.version, 2);
+    assert.equal(result.version, 3);
     assert.equal(result.homePage, 'https://www.google.com');
+    assert.equal(result.searchEngine, 'google');
     assert.equal(store.get('homePage'), 'https://www.google.com');
-    assert.equal(store.get('version'), 2);
+    assert.equal(store.get('version'), 3);
+    assert.equal(store.get('searchEngine'), 'google');
+
+    // DD5 pin-on-load: a row-less profile is pinned explicit at v3 immediately
+    // at load, not left row-less until some later set().
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.version, 3);
+    assert.equal(row.homePage, 'https://www.google.com');
+    assert.equal(row.searchEngine, 'google');
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -183,7 +201,10 @@ test('corrupt file repair → defaults, no throw', () => {
       result = store.load(dir);
     });
     assert.equal(result.homePage, 'https://www.google.com');
-    assert.equal(result.version, 2);
+    // v3 (M16 F1 / DD5): the legacy-file import path saves unconditionally, so
+    // even a repaired-to-defaults corrupt file lands on disk at the current
+    // schema version.
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -206,8 +227,10 @@ test('bad-field repair keeps valid siblings', () => {
 
     // homePage should be repaired to default
     assert.equal(result.homePage, 'https://www.google.com', 'invalid homePage should be repaired to default');
-    // the v1 → v2 migration ladder stamps the current schema version
-    assert.equal(result.version, 2);
+    // the migration ladder migrates a v1 row straight to the current schema
+    // version (v3, M16 F1 / DD5) — there is no longer an intermediate v2 stop
+    // reachable via a single load() call.
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -676,9 +699,11 @@ test('automation keys — additive load rides the current schema version (no add
   try {
     const store = freshStore();
     const result = store.load(dir);
-    // v2 is the restoreSession default-flip bump (issue #117) — the additive
-    // automation keys themselves never bumped the schema.
-    assert.equal(result.version, 2);
+    // The additive automation keys themselves never bumped the schema — v3 is
+    // the searchEngine/homePage force-persist bump (M16 F1 / DD5), unrelated
+    // to automation. A fresh profile now lands on v3, not v2, because DD5's
+    // rung is a no-row profile's schema version too (pin-on-load).
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -958,9 +983,10 @@ test('spellcheck — default on first load is false (no settings.json)', () => {
     const result = store.load(dir);
     assert.equal(result.spellcheck, false);
     assert.equal(store.get('spellcheck'), false);
-    // The additive spellcheck key never bumped the schema — v2 is the
-    // restoreSession default flip (issue #117).
-    assert.equal(result.version, 2);
+    // The additive spellcheck key never bumped the schema itself — v3 is the
+    // searchEngine/homePage force-persist bump (M16 F1 / DD5); a fresh profile
+    // lands there via the row-less pin-on-load path.
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -1024,7 +1050,9 @@ test('restoreSession — default on first load is true (fresh profile, issue #11
     const result = store.load(dir);
     assert.equal(result.restoreSession, true);
     assert.equal(store.get('restoreSession'), true);
-    assert.equal(result.version, 2);
+    // v3 (M16 F1 / DD5) — a fresh profile is pinned there via the row-less
+    // pin-on-load path; restoreSession's own default flip was the earlier v2.
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -1142,10 +1170,364 @@ test('bookmarksBarEnabled — config written before this leg (no bookmarksBarEna
 });
 
 // ---------------------------------------------------------------------------
-// v1 → v2 migration (issue #117): save() serializes the WHOLE config, so v1
-// rows carry a serializer-stamped `restoreSession: false` indistinguishable
-// from a deliberate opt-out. The ladder discards the stored value (refills
-// true from DEFAULTS), stamps version 2, and persists the migrated row once.
+// searchEngine (M16 Flight 1 "Search Engine as a Preference" / DD1, DD2, DD8).
+// Curated-allowlist validator built off src/shared/search-engines.js's
+// SEARCH_ENGINE_IDS — null (unset) or exact membership, nothing else.
+//
+// DD8 (M15 debrief house rule) — red-when-neutered: the tests below are
+// designed so that relaxing VALIDATORS.searchEngine to `(v) => v === null ||
+// typeof v === 'string'` makes at least one of them fail. Verified by hand
+// once (see the flight log for the exact failing test name(s)): temporarily
+// neuter the validator, run this file, confirm red, then restore.
+// ---------------------------------------------------------------------------
+
+test('searchEngine — default on first load is "google"', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.searchEngine, 'google');
+    assert.equal(store.get('searchEngine'), 'google');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — every curated id round-trips through set() (DD8 positive control)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    for (const id of SEARCH_ENGINE_IDS) {
+      const updated = store.set('searchEngine', id);
+      assert.equal(updated.searchEngine, id);
+      assert.equal(store.get('searchEngine'), id);
+      // Persists too, not just in memory.
+      const reloaded = store.load(dir);
+      assert.equal(reloaded.searchEngine, id);
+    }
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — null accepted (unset representable, DD2), round-trips through set()', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    store.set('searchEngine', 'duckduckgo'); // move off the default first
+    const updated = store.set('searchEngine', null);
+    assert.equal(updated.searchEngine, null);
+    assert.equal(store.get('searchEngine'), null);
+    const reloaded = store.load(dir);
+    assert.equal(reloaded.searchEngine, null, 'a stored null survives load unchanged — it is valid, not repaired');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// --- DD8 negative controls: set() rejection, prior value kept ---
+
+test('searchEngine — non-curated id ("kagi") rejected by set(), prior value kept', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('searchEngine');
+    assert.throws(
+      () => store.set('searchEngine', 'kagi'),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('searchEngine'), prior);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — URL-shaped string rejected by set(), prior value kept (no user-supplied template)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('searchEngine');
+    assert.throws(
+      () => store.set('searchEngine', 'https://evil.example/?q=%s'),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('searchEngine'), prior);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — empty string rejected by set(), prior value kept (null is the only unset representation)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('searchEngine');
+    assert.throws(
+      () => store.set('searchEngine', ''),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('searchEngine'), prior);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — object value rejected by set(), prior value kept', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const prior = store.get('searchEngine');
+    assert.throws(
+      () => store.set('searchEngine', { id: 'google' }),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+    assert.equal(store.get('searchEngine'), prior);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// --- DD8 negative controls: load() repair, same hostile values ---
+
+test('searchEngine — non-curated / hostile stored values repair to the default at load()', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const hostileValues = ['kagi', 'https://evil.example/?q=%s', '', { id: 'google' }];
+    for (const bad of hostileValues) {
+      // seedRow() overwrites the whole row (write() is an upsert) — one open
+      // db for the whole loop, re-seeded each iteration.
+      seedRow({ version: 3, searchEngine: bad, homePage: 'https://kept.example.com/' });
+      const store = freshStore();
+      const result = store.load(dir);
+      assert.equal(result.searchEngine, 'google', `stored ${JSON.stringify(bad)} should repair to default`);
+      assert.equal(result.homePage, 'https://kept.example.com/', 'valid sibling key is kept');
+    }
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('searchEngine — an id removed from the curated table repairs silently to the default at load()', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Simulates upgrading past a release where an engine was pulled from the
+    // table — the mission's "repair without blocking startup" criterion.
+    seedRow({ version: 3, searchEngine: 'altavista' });
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.searchEngine, 'google');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// homePage: null representable (M16 F1 / DD2) — '' stays invalid so unset
+// never has two stored meanings.
+// ---------------------------------------------------------------------------
+
+test('homePage — null accepted (DD2), round-trips through set() and load()', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    const updated = store.set('homePage', null);
+    assert.equal(updated.homePage, null);
+    const reloaded = store.load(dir);
+    assert.equal(reloaded.homePage, null, 'a stored null survives load unchanged — it is valid, not repaired');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('homePage — empty string in a stored row still repairs to default (not a second unset representation)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 3, homePage: '', searchEngine: 'google' });
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.homePage, 'https://www.google.com', "'' must repair to default, not survive as a second unset sentinel");
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('homePage — set("") still throws (unchanged by the DD2 null-widening)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store = freshStore();
+    store.load(dir);
+    assert.throws(
+      () => store.set('homePage', ''),
+      (err) => err instanceof TypeError && err.message.includes('invalid value')
+    );
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Pin-on-load migration/pinning matrix (M16 F1 / DD5) — the four cases the
+// leg's Verification Steps enumerate: v2 row → v3 pinned; corrupt row →
+// defaults + pinned; no row → defaults + pinned (covered above by the two
+// renamed tests); valid v3 row → untouched (idempotent).
+// ---------------------------------------------------------------------------
+
+test('pin-on-load: a corrupt SETTINGS ROW (not a legacy file) repairs to defaults AND persists the repair', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Write garbage directly to the 'settings' document row (distinct from the
+    // legacy-settings.json corrupt-file case, which already saved
+    // unconditionally before this leg — this is the gap design review found:
+    // parseAndRepair's catch used to hardcode migrated:false).
+    appDb.createDocumentStore('settings').write('{{not valid json!!');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.homePage, 'https://www.google.com');
+    assert.equal(result.searchEngine, 'google');
+    assert.equal(result.version, 3);
+
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.version, 3, 'the corrupt row is repaired in memory AND the repair is persisted');
+    assert.equal(row.homePage, 'https://www.google.com');
+    assert.equal(row.searchEngine, 'google');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('pin-on-load idempotency: a pinned v3 row is not redundantly rewritten in a way that changes its content', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    const store1 = freshStore();
+    store1.load(dir); // row-less pin: writes the row for the first time
+    const afterFirst = JSON.parse(/** @type {string} */ (readRow(dir)));
+
+    const store2 = freshStore();
+    store2.load(dir); // row now present and already v3 — must not be re-migrated
+    const afterSecond = JSON.parse(/** @type {string} */ (readRow(dir)));
+
+    assert.deepEqual(afterSecond, afterFirst, 'repeat load does not change the pinned row\'s content');
+    assert.equal(afterSecond.version, 3);
+    assert.equal(afterSecond.searchEngine, 'google');
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('pin-on-load idempotency: a valid, already-current v3 row with custom values is untouched', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 3, homePage: 'https://custom.example.com/', searchEngine: 'duckduckgo', restoreSession: false });
+
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.homePage, 'https://custom.example.com/');
+    assert.equal(result.searchEngine, 'duckduckgo');
+    assert.equal(result.restoreSession, false);
+
+    // Reload again — still untouched.
+    const result2 = store.load(dir);
+    assert.equal(result2.homePage, 'https://custom.example.com/');
+    assert.equal(result2.searchEngine, 'duckduckgo');
+    assert.equal(result2.restoreSession, false);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('pin-on-load: null homePage/searchEngine in an already-v3 row survive load unchanged (not repaired)', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    seedRow({ version: 3, homePage: null, searchEngine: null });
+
+    const store = freshStore();
+    const result = store.load(dir);
+    assert.equal(result.homePage, null);
+    assert.equal(result.searchEngine, null);
+
+    // A second load must not disturb the nulls either (idempotent — nothing
+    // to migrate, and repairConfig treats a validator-accepted null as valid).
+    const result2 = store.load(dir);
+    assert.equal(result2.homePage, null);
+    assert.equal(result2.searchEngine, null);
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+test('pin-on-load: legacy settings.json containing a hostile searchEngine repairs through the same shared path', () => {
+  const dir = makeTempDir();
+  appDb.open(dir);
+  try {
+    // Proves the legacy-file path shares parseAndRepair with the row path —
+    // no extra code, but the leg's Edge Cases call for a dedicated test.
+    const legacy = JSON.stringify({ version: 1, searchEngine: 'kagi', homePage: 'https://legacy.example.com/' });
+    fs.writeFileSync(path.join(dir, 'settings.json'), legacy, 'utf8');
+
+    const store = freshStore();
+    const result = store.load(dir);
+
+    assert.equal(result.searchEngine, 'google', 'hostile legacy value repairs to default');
+    assert.equal(result.homePage, 'https://legacy.example.com/', 'valid sibling key is kept');
+    assert.equal(result.version, 3);
+    assert.ok(fs.existsSync(path.join(dir, 'settings.json.migrated')));
+  } finally {
+    appDb.close();
+    removeTempDir(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// v1 → v2 migration transform (issue #117): save() serializes the WHOLE
+// config, so v1 rows carry a serializer-stamped `restoreSession: false`
+// indistinguishable from a deliberate opt-out. The ladder discards the stored
+// value (refills true from DEFAULTS) whenever `from < 2`. Per-rung guards
+// (M16 F1 / DD5) mean a v1 row now migrates straight to the CURRENT schema
+// version (v3) in one load() call — there is no longer an intermediate v2
+// stop reachable on its own — so every "stamps version" assertion below
+// targets 3, not 2. The transform itself (the restoreSession discard) is
+// unchanged; only the terminal stamped number moved.
 // ---------------------------------------------------------------------------
 
 // Seed a raw 'settings' row directly (simulating a profile written by 0.10–0.11).
@@ -1153,7 +1535,7 @@ function seedRow(payloadObj) {
   appDb.createDocumentStore('settings').write(JSON.stringify(payloadObj));
 }
 
-test('v1→v2 migration — v1 row with restoreSession:false loads as true and persists as v2', () => {
+test('v1→v3 migration — v1 row with restoreSession:false loads as true and persists at v3', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
@@ -1163,21 +1545,24 @@ test('v1→v2 migration — v1 row with restoreSession:false loads as true and p
     const result = store.load(dir);
 
     assert.equal(result.restoreSession, true, 'serializer-frozen false is discarded → new default');
-    assert.equal(result.version, 2);
+    assert.equal(result.version, 3);
+    assert.equal(result.searchEngine, 'google', 'a v1 row predates searchEngine entirely — fills from DEFAULTS');
     assert.equal(result.homePage, 'https://kept.example.com/', 'sibling keys survive the migration');
 
-    // The migrated row is persisted at load (one-time), stamped v2.
+    // The migrated row is persisted at load (one-time), stamped v3, with
+    // searchEngine now explicit (DD5 force-persist).
     const row = JSON.parse(/** @type {string} */ (readRow(dir)));
-    assert.equal(row.version, 2);
+    assert.equal(row.version, 3);
     assert.equal(row.restoreSession, true);
     assert.equal(row.homePage, 'https://kept.example.com/');
+    assert.equal(row.searchEngine, 'google');
   } finally {
     appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v1→v2 migration — v1 row with restoreSession:true stays true', () => {
+test('v1→v3 migration — v1 row with restoreSession:true stays true', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
@@ -1187,34 +1572,51 @@ test('v1→v2 migration — v1 row with restoreSession:true stays true', () => {
     const result = store.load(dir);
 
     assert.equal(result.restoreSession, true);
-    assert.equal(result.version, 2);
+    assert.equal(result.version, 3);
   } finally {
     appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v1→v2 migration — v2 row with restoreSession:false is NOT re-migrated (stays false)', () => {
+// RENAMED (M16 F1 / DD5 — was 'v1→v2 migration — v2 row with
+// restoreSession:false is NOT re-migrated (stays false)'): the old body
+// asserted the row was NOT rewritten at load — true only while v2 WAS the
+// current schema version. Now a v2 row is exactly DD5's "v2 row → v3 pinned"
+// case: it DOES get rewritten (stamped to v3, searchEngine filled explicit),
+// while the restoreSession:false opt-out is correctly NOT re-discarded (the
+// v1→v2 transform is guarded on `from < 2`, and this row is already v2).
+// Renamed rather than deleted-and-re-added so git blame documents the intent
+// shift (same convention as the two pin-on-load renames above).
+test('v2 row migrates to v3 (searchEngine pinned explicit), restoreSession:false opt-out NOT re-discarded', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
-    seedRow({ version: 2, restoreSession: false });
+    seedRow({ version: 2, restoreSession: false, homePage: 'https://kept.example.com/' });
 
     const store = freshStore();
     const result = store.load(dir);
 
-    assert.equal(result.restoreSession, false, 'a v2 opt-out is respected forever');
-    assert.equal(result.version, 2);
-    // No migration → no row rewrite at load (the seeded payload is untouched).
+    assert.equal(result.restoreSession, false, 'a v2 opt-out is respected forever — the v1→v2 transform does not re-run on a v2 row');
+    assert.equal(result.version, 3);
+    assert.equal(result.searchEngine, 'google', 'absent on the v2 row — fills from DEFAULTS');
+    assert.equal(result.homePage, 'https://kept.example.com/');
+
+    // DD5: the v2→v3 rung's only content is the version stamp, but that stamp
+    // sets `migrated: true` and DOES trip the save-on-migrate persist — so,
+    // unlike the pre-DD5 world, this row IS rewritten at load.
     const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.version, 3);
     assert.equal(row.restoreSession, false);
+    assert.equal(row.searchEngine, 'google');
+    assert.equal(row.homePage, 'https://kept.example.com/');
   } finally {
     appDb.close();
     removeTempDir(dir);
   }
 });
 
-test('v1→v2 migration — a version-less row cannot prove v2 and migrates', () => {
+test('v1→v3 migration — a version-less row cannot prove v2+ and migrates', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
@@ -1224,7 +1626,7 @@ test('v1→v2 migration — a version-less row cannot prove v2 and migrates', ()
     const result = store.load(dir);
 
     assert.equal(result.restoreSession, true);
-    assert.equal(result.version, 2);
+    assert.equal(result.version, 3);
     assert.equal(result.homePage, 'https://kept.example.com/');
   } finally {
     appDb.close();
@@ -1232,12 +1634,12 @@ test('v1→v2 migration — a version-less row cannot prove v2 and migrates', ()
   }
 });
 
-test('v1→v2 migration — legacy settings.json (v1) imports with the new default', () => {
+test('v1→v3 migration — legacy settings.json (v1) imports with the new defaults', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
-    // A pre-0.10 file predates restoreSession entirely — the absent key fills
-    // from DEFAULTS (true) and the imported row is stamped v2.
+    // A pre-0.10 file predates restoreSession AND searchEngine entirely — both
+    // absent keys fill from DEFAULTS and the imported row is stamped v3.
     const legacy = JSON.stringify({ version: 1, homePage: 'https://legacy.example.com/' });
     fs.writeFileSync(path.join(dir, 'settings.json'), legacy, 'utf8');
 
@@ -1245,10 +1647,12 @@ test('v1→v2 migration — legacy settings.json (v1) imports with the new defau
     const result = store.load(dir);
 
     assert.equal(result.restoreSession, true);
-    assert.equal(result.version, 2);
+    assert.equal(result.version, 3);
+    assert.equal(result.searchEngine, 'google');
     const row = JSON.parse(/** @type {string} */ (readRow(dir)));
-    assert.equal(row.version, 2);
+    assert.equal(row.version, 3);
     assert.equal(row.restoreSession, true);
+    assert.equal(row.searchEngine, 'google');
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -1407,14 +1811,28 @@ test('migration: a present row wins over a stray legacy settings.json (no re-imp
   }
 });
 
-test('migration: no row, no legacy file → defaults, no migration side effects', () => {
+// RENAMED (M16 F1 / DD5 — was 'migration: no row, no legacy file → defaults,
+// no migration side effects'): the old body asserted `readRow(dir) === null`
+// — the EXACT OPPOSITE of pin-on-load. Renamed rather than deleted-and-re-
+// added so git blame documents the intent shift (same convention as the
+// 'defaults on first load' rename above; both cover the row-less scenario
+// from different angles — this one also pins the no-legacy-file side effect).
+test('migration: no row, no legacy file → defaults, pinned to disk (DD5 row-less pin-on-load)', () => {
   const dir = makeTempDir();
   appDb.open(dir);
   try {
     const store = freshStore();
     const result = store.load(dir);
     assert.equal(result.homePage, 'https://www.google.com');
-    assert.equal(readRow(dir), null, 'a fresh profile seeds defaults in memory only, no row write');
+    assert.equal(result.searchEngine, 'google');
+    assert.equal(result.version, 3);
+
+    const row = JSON.parse(/** @type {string} */ (readRow(dir)));
+    assert.equal(row.homePage, 'https://www.google.com', 'DD5: a fresh profile is pinned explicit at load, not left row-less');
+    assert.equal(row.searchEngine, 'google');
+    assert.equal(row.version, 3);
+
+    // Still no legacy file was ever present, so no migration-rename side effect.
     assert.ok(!fs.existsSync(path.join(dir, 'settings.json.migrated')));
   } finally {
     appDb.close();

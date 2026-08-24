@@ -3,7 +3,7 @@ export function createWindowController(deps) {
   const {
     window, document, ctx, els, tabs, orderedTabIds, releaseTabWidths,
     keyboardMove, commitTabMove, activateTab, closeTab, activeTab,
-    setHomePage, updateAutomationKeyState, sendActiveBounds
+    setHomePage, setSearchEngine, updateAutomationKeyState, sendActiveBounds
   } = deps;
   // --- custom window controls (win+linux frameless; hidden on macOS) ---
   els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
@@ -119,6 +119,13 @@ export function createWindowController(deps) {
   }
   window.goldfinch.settingsGet('bookmarksBarEnabled').then(applyBookmarksBar).catch(() => {});
 
+  // searchEngineCache boot seed (M16 F1 Leg 2, DD4 — the toolbarPins/
+  // bookmarksBarEnabled idiom above, deliberately NOT homePageCache's
+  // unseeded pattern, squawk 0005's defect): without this, a window opened
+  // after a preference change would search on the hardcoded/default engine
+  // until an unrelated broadcast happened to land in it.
+  window.goldfinch.settingsGet('searchEngine').then(setSearchEngine).catch(() => {});
+
   /** Activation-class suppression input (M15 F2 Leg 3 L3-DD-C): renderer.js's
    * `refreshBookmarksSurfaces(tab)` computes burner-or-internal and calls
    * this on every activation-class event. @param {boolean} suppressed */
@@ -129,6 +136,9 @@ export function createWindowController(deps) {
 
   window.goldfinch.onSettingsChanged((all) => {
     if (all && all.homePage !== undefined) setHomePage(all.homePage);
+    // M16 F1 Leg 2 (DD4): guard is `!== undefined`, never truthiness — null is
+    // a meaningful future value (Flight 2's unset), unlike undefined/absent.
+    if (all && all.searchEngine !== undefined) setSearchEngine(all.searchEngine);
     if (all && all.toolbarPins) applyToolbarPins(all.toolbarPins);
     // Full-object broadcast (settings.getAll()) means all.bookmarksBarEnabled is
     // always present here — the multi-window sync mechanism (Ctrl+Shift+B in one

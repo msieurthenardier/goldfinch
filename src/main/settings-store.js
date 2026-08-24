@@ -22,6 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const { isSafeTabUrl } = require('../shared/url-safety');
+const { SEARCH_ENGINE_IDS } = require('../shared/search-engines');
 const appDb = require('./app-db');
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ const appDb = require('./app-db');
 /**
  * @typedef {{
  *   version: number,
- *   homePage: string,
+ *   homePage: string | null,
  *   toolbarPins: { media: boolean, shields: boolean, devtools: boolean },
  *   automationEnabled: boolean,
  *   automationKeyHashes: Record<string, string>,
@@ -40,7 +41,8 @@ const appDb = require('./app-db');
  *   spellcheck: boolean,
  *   restoreSession: boolean,
  *   vaultAutoLockMinutes: number,
- *   bookmarksBarEnabled: boolean
+ *   bookmarksBarEnabled: boolean,
+ *   searchEngine: string | null
  * }} Settings
  */
 
@@ -48,7 +50,26 @@ const appDb = require('./app-db');
 const DEFAULTS = {
   // v2 (issue #117): the restoreSession default flipped false → true. Stored
   // rows with version < 2 pass through migrateStored() below before repair.
-  version: 2,
+  //
+  // v3 (M16 Flight 1 "Search Engine as a Preference" / DD5): no default
+  // CHANGED — the bump exists only to force a save-on-migrate persist. This is
+  // a DELIBERATE DEPARTURE from this ladder's own convention (see the
+  // automationEnabled comment below: "the version ladder in migrateStored()
+  // exists only for changed defaults on EXISTING keys, never for additive
+  // ones"). searchEngine below is a brand-new additive key that would
+  // ordinarily skip the ladder entirely, exactly like spellcheck or
+  // bookmarksBarEnabled — it doesn't, because the mission's resolved ruling
+  // requires BOTH searchEngine and homePage pinned explicit to disk for every
+  // profile that runs this build, now, while both are legitimately
+  // Google-by-default: an existing profile that never touched settings is, on
+  // disk, indistinguishable from a fresh install, and Flight 2's flip to
+  // unset-by-default must reach only the latter. The v2→v3 migrateStored()
+  // rung below carries no transform of its own — the unconditional version
+  // stamp IS the mechanism, since it flags `migrated: true` and trips load()'s
+  // existing save-on-migrate save(). A row-less profile has no rung to run at
+  // all, so it gets the equivalent best-effort pin directly in load()'s no-row
+  // branch — see the "DD5: row-less pin" comment there.
+  version: 3,
   homePage: 'https://www.google.com',
   toolbarPins: { media: true, shields: true, devtools: false },
   // Automation surface gating (Flight 4). off-by-default: the MCP surface binds
@@ -97,7 +118,22 @@ const DEFAULTS = {
   // window-controller.js's applyBookmarksBar at boot and live via the
   // settings-changed broadcast (multi-window sync); flipped from either the
   // Settings checkbox or Ctrl+Shift+B (toggle-bookmarks-bar main-side channel).
-  bookmarksBarEnabled: false
+  bookmarksBarEnabled: false,
+  // Search engine for address-bar searches and the page "Search for …" context
+  // item (M16 Flight 1 "Search Engine as a Preference" / DD1). Stores a
+  // curated ENGINE ID, never a URL template — VALIDATORS.searchEngine below
+  // checks membership against src/shared/search-engines.js's SEARCH_ENGINE_IDS,
+  // the single table both this validator and (leg 2) the renderer's URL
+  // construction read from, so a stored value can never smuggle an arbitrary
+  // URL. Defaults to 'google', matching the hardcoded Google URL this
+  // preference replaces (navigation-controller.js's toUrl, leg 2) — nothing in
+  // this flight may regress an existing install. `null` is representable (DD2
+  // — homePage and searchEngine share one unset sentinel, since persistence is
+  // a JSON document row with no schema-level "nullable" concept) but is NEVER
+  // the default here; the flip to unset-by-default is Flight 2's, once the
+  // welcome-page surface that handles unset exists. This key is why DEFAULTS.
+  // version bumped to 3 — see the version comment above.
+  searchEngine: 'google'
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -131,11 +167,26 @@ function freshDefaults() {
 /** @type {Record<string, (v: unknown) => boolean>} */
 const VALIDATORS = {
   // about:blank is excluded: isSafeTabUrl admits it but it is not a meaningful
-  // home page (it would silently strand the user on a blank tab).
+  // home page (it would silently strand the user on a blank tab). Widened for
+  // `null` (M16 F1 / DD2): null is the ONE unset representation for this key —
+  // `''` remains invalid, same as before, so unset can never mean two
+  // different stored things. Nothing in this flight WRITES null (Flight 2's
+  // clear affordance does); the validator accepts it now so a null value
+  // survives repair once Flight 2 starts producing it.
   homePage: (v) =>
-    typeof v === 'string' &&
-    isSafeTabUrl(v) &&
-    v.trim().toLowerCase() !== 'about:blank',
+    v === null ||
+    (typeof v === 'string' &&
+      isSafeTabUrl(v) &&
+      v.trim().toLowerCase() !== 'about:blank'),
+
+  // searchEngine (M16 F1 / DD1, DD2): null (unset — see homePage above) or
+  // membership in the curated table's id set. Deliberately a MEMBERSHIP check,
+  // not a shape check (e.g. "is a string") — DD8 (M15 debrief house rule)
+  // requires refusal claims to be executable: relaxing this to `typeof v ===
+  // 'string'` must redden at least one unit test (search-engines.test.js's
+  // negative-control assertions), never silently pass. A removed/renamed
+  // engine id repairs to the default at load, same as any other rejected value.
+  searchEngine: (v) => v === null || SEARCH_ENGINE_IDS.has(/** @type {any} */ (v)),
 
   // toolbarPins: an object of booleans — lenient on which keys are present
   // (forward-compat: a future 3rd pinnable item in DEFAULTS is filled by the
@@ -264,12 +315,28 @@ function repairConfig(stored) {
 // ---------------------------------------------------------------------------
 // Version-gated migration ladder (cumulative steps, run before repairConfig).
 //
+// Per-rung guards (M16 F1 / DD5 implementation trap): each transform is gated
+// on its OWN `from` threshold, not on the single "from < DEFAULTS.version"
+// check that used to double as both "should we migrate at all" and "should we
+// run the v1→v2 transform" — those were the same condition only while
+// DEFAULTS.version was 2. Bumping the version constant without re-guarding the
+// v1→v2 transform would wrongly re-run it (discard restoreSession) on every v2
+// row, not just genuine v1 rows.
+//
 // v1 → v2 (issue #117): the restoreSession default flipped false → true. save()
 // has always serialized the WHOLE config object, so every v1 row touched by any
 // set() carries an explicit `restoreSession: false` stamped by the serializer —
 // indistinguishable from a deliberate opt-out. The step discards the stored
 // value so the key refills from DEFAULTS (true). Accepted trade-off (issue
 // #117): a deliberate 0.10–0.11 opt-out is overridden once; the toggle remains.
+//
+// v2 → v3 (M16 F1 / DD5): NO transform of its own — there is nothing to
+// discard or reshape. The rung's entire content is the unconditional version
+// stamp at the end of this function, whose sole purpose is flagging
+// `migrated: true` so load()'s save-on-migrate path force-persists the
+// resolved config (searchEngine + homePage explicit on disk — see the
+// DEFAULTS.version comment for the full rationale). Do not invent a v3
+// transform here; there isn't one.
 // ---------------------------------------------------------------------------
 
 /**
@@ -280,7 +347,7 @@ function migrateStored(stored) {
   if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
     return { stored, migrated: false };
   }
-  // An absent/non-integer version cannot prove v2 — treat as v1 (migrate).
+  // An absent/non-integer version cannot prove v2+ — treat as v1 (migrate).
   const from =
     typeof stored.version === 'number' && Number.isInteger(stored.version)
       ? stored.version
@@ -290,7 +357,13 @@ function migrateStored(stored) {
   }
   const next = { ...stored };
   // v1 → v2: discard restoreSession (repairConfig refills it from DEFAULTS).
-  delete next.restoreSession;
+  // Re-guarded on `from < 2` specifically — see the per-rung note above — so a
+  // v2 row bumped to v3 does NOT re-discard a deliberate restoreSession:false
+  // opt-out.
+  if (from < 2) {
+    delete next.restoreSession;
+  }
+  // v2 → v3: the stamp itself is the whole rung (see the comment block above).
   next.version = DEFAULTS.version;
   return { stored: next, migrated: true };
 }
@@ -299,15 +372,30 @@ function migrateStored(stored) {
  * Deserialize + migrate + repair raw bytes (a document row payload or legacy
  * JSON file contents). NEVER throws — a deserialize failure (corrupt bytes)
  * repairs to fresh defaults, same as today's corrupt-file handling.
+ *
+ * Returns `needsPersist` rather than reusing migrateStored()'s `migrated` name
+ * (M16 F1 / DD5 design-review finding): the two questions are related but not
+ * identical. `migrated` means "the ladder actually transformed the stored
+ * shape"; `needsPersist` means "the resolved config the caller is about to use
+ * differs from what is currently on disk, so the pin-on-load rule (load()'s
+ * row-present branch) must write it back." Those coincide for a version-ladder
+ * migration, but NOT for corrupt bytes: the catch below resolves to fresh
+ * defaults in memory — a resolved config that, for a genuinely corrupt row,
+ * has never actually been written anywhere — so it must also request a
+ * persist. The old shape hardcoded `migrated: false` here, which meant a
+ * corrupt DOCUMENT ROW (as opposed to a corrupt legacy settings.json, which
+ * saves unconditionally on the other path) was repaired only in memory and
+ * silently never written back — caught by design review, not by the original
+ * implementation.
  * @param {string} raw
- * @returns {{ config: Settings, migrated: boolean }}
+ * @returns {{ config: Settings, needsPersist: boolean }}
  */
 function parseAndRepair(raw) {
   try {
     const { stored, migrated } = migrateStored(codec.deserialize(raw));
-    return { config: repairConfig(stored), migrated };
+    return { config: repairConfig(stored), needsPersist: migrated };
   } catch {
-    return { config: freshDefaults(), migrated: false };
+    return { config: freshDefaults(), needsPersist: true };
   }
 }
 
@@ -341,14 +429,16 @@ function load(userDataPath, opts = {}) {
   if (row !== null) {
     const parsed = parseAndRepair(row);
     config = parsed.config;
-    if (parsed.migrated) {
-      // One-time persist of the migrated (version-stamped) row. Best-effort
-      // inside load()'s never-throw contract — on a failed write the idempotent
-      // ladder simply re-runs at the next load.
+    if (parsed.needsPersist) {
+      // Pin-on-load (M16 F1 / DD5): a version-ladder migration OR a corrupt-row
+      // repair both leave the resolved config different from what's on disk —
+      // persist it. Best-effort inside load()'s never-throw contract: on a
+      // failed write the idempotent ladder/repair simply re-runs at the next
+      // load (Edge Cases: in-memory config is already correct either way).
       try {
         save(config);
       } catch {
-        // best-effort — the in-memory config is already migrated.
+        // best-effort — the in-memory config is already correct.
       }
     }
     return config;
@@ -369,10 +459,31 @@ function load(userDataPath, opts = {}) {
         // best-effort — migration already completed via the row write (DD5).
       }
     } else {
+      // DD5: row-less pin. No settings row AND no legacy settings.json means
+      // this profile has never run with the preference system at all — fresh
+      // install, or (this flight's whole point) an existing profile that
+      // simply never touched Settings. Both are, on disk, indistinguishable
+      // from each other, and per the DEFAULTS.version comment, both must be
+      // pinned Google-explicit now so that "no row" once again means exactly
+      // "never ran this build" after this flight lands — which is what Flight
+      // 2's flip to an unset-by-default fresh profile needs to target.
+      // Best-effort, same never-throw posture as the migration save above: a
+      // failed pin leaves in-memory defaults correct and simply retries next
+      // load (idempotent).
       config = freshDefaults();
+      try {
+        save(config);
+      } catch {
+        // best-effort — the in-memory config is already correct defaults.
+      }
     }
   } catch {
-    // Any error (read failure, etc.) → fall back to defaults.
+    // Any error (read failure, etc.) → fall back to defaults, WITHOUT
+    // attempting a pin (Edge Cases: the never-throw boot contract outranks
+    // pinning in this vanishingly rare path — a save() here would sit inside
+    // the same try that just proved something upstream is throwing, e.g.
+    // fs.existsSync; the idempotent pin above simply retries at the next
+    // load).
     // load() MUST NEVER THROW — the app must still boot.
     config = freshDefaults();
   }

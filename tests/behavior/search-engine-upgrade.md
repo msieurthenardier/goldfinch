@@ -1,9 +1,9 @@
 # Behavior Test: Search Engine Upgrade Neutrality
 
 **Slug**: `search-engine-upgrade`
-**Status**: draft
+**Status**: active
 **Created**: 2026-08-11
-**Last Run**: never
+**Last Run**: 2026-08-24 — partial (4/5 pass; checkpoint 2 failed on pre-existing squawk 0005, reproduced identically on the pre-flight build — not an upgrade regression; see the run log)
 
 ## Intent
 

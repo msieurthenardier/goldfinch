@@ -1,9 +1,9 @@
 # Behavior Test: Search Engine Preference
 
 **Slug**: `search-engine-preference`
-**Status**: draft
+**Status**: active
 **Created**: 2026-08-11
-**Last Run**: never
+**Last Run**: 2026-08-24 — partial (7/8 pass; checkpoint 6 inconclusive: page context-menu sheet not automatable via the MCP apparatus — see the run log)
 
 ## Intent
 

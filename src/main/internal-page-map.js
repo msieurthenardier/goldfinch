@@ -16,7 +16,11 @@ function createInternalPageMap({ baseDir, path }) {
       // Same-origin shared modules must be explicitly served: disk-relative
       // ../shared imports have no route in the custom scheme.
       '/audit-paging.js': shared('audit-paging.js'),
-      '/safe-color.js': shared('safe-color.js')
+      '/safe-color.js': shared('safe-color.js'),
+      // M16 F1 Leg 2 (DD7): the settings page renders its search-engine radio
+      // group from this single source table — no engine data is ever
+      // duplicated in markup or page script.
+      '/search-engines.js': shared('search-engines.js')
     },
     // App-level downloads surface; save-path authority remains main-side.
     downloads: {

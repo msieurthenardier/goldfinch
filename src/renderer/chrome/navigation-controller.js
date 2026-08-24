@@ -6,6 +6,7 @@ export function createNavigationController(deps) {
     window, document, ctx, els,
     activeTab, isInternalTab, isWebTab, createTab, openDownloads,
     bookmarksClient,
+    buildSearchUrl, currentSearchEngine, // M16 F1 Leg 2: toUrl's search fallback
     isInternalPageUrl, shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection,
     acceptSuggestResponse, suggestionsState, closeOverlayMenu,
     openOverlayMenu, leftAnchorOf
@@ -95,7 +96,14 @@ export function createNavigationController(deps) {
     if (/^[a-z]+:\/\//i.test(s) || s.startsWith('about:')) return s;
     // Looks like a domain? (has a dot, no spaces)
     if (/^[^\s]+\.[^\s]{2,}(\/.*)?$/.test(s)) return `https://${s}`;
-    return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
+    // M16 F1 Leg 2 (DD4): search fallback builds from the live searchEngineCache
+    // via the shared table's buildSearchUrl, replacing the old hardcoded Google
+    // URL. This is the ONE Google-coalescing read site in the whole flight —
+    // Flight-1 semantics only (searchEngineCache defaults 'google' and the
+    // curated-allowlist validator keeps it a known id in practice, but the `||
+    // 'google'` here is what guarantees toUrl never resolves a null engine id
+    // into navigate()). Flight 2's unset-routing rewrites this coalescing site.
+    return buildSearchUrl(currentSearchEngine() || 'google', s);
   }
 
   /* ------------------------------------------------------- omnibox suggestions */

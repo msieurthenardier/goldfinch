@@ -14,6 +14,9 @@
          load-order legibility (the module map dedupes evaluation). -->
     <script src="audit-paging.js" type="module"></script>
     <script src="safe-color.js" type="module"></script>
+    <!-- M16 F1 Leg 2 (DD7): the curated search-engine table — the single source
+         the #appearance radio group below is rendered from (settings.js). -->
+    <script src="search-engines.js" type="module"></script>
     <script src="settings.js" type="module"></script>
   </head>
   <body>
@@ -38,6 +41,16 @@
         <input id="home-page-input" type="url" autocomplete="off" spellcheck="false" />
         <button id="home-page-save" type="button">Save</button>
         <p id="home-page-status" role="status"></p>
+        <!-- Search engine control (M16 F1 Leg 2, DD7): adjacent to the home-page
+             control, independent preference (setting either never touches the
+             other). This fieldset is a generic shell only — settings.js renders
+             one radio per engine (id/label/description) from the imported
+             SEARCH_ENGINES table; no engine data is hand-typed here or in the
+             page script. -->
+        <fieldset class="shields-group search-engine-group">
+          <legend>Search engine</legend>
+          <div id="search-engine-options"></div>
+        </fieldset>
         <fieldset class="shields-group startup-toggle-group">
           <legend class="sr-only">Session restore</legend>
           <label class="shield-row startup-toggle-row"><span>Restore session on startup</span><input type="checkbox" id="restore-session-enabled" /></label>

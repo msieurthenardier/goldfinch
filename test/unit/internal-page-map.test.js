@@ -14,6 +14,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/',
     '/audit-paging.js',
     '/safe-color.js',
+    '/search-engines.js',
     '/settings.css',
     '/settings.js'
   ]);
@@ -48,6 +49,7 @@ test('createInternalPageMap returns the exact current host/path allowlist', () =
     '/vault.js'
   ]);
   assert.equal(map.settings['/'], '/app/src/main/../renderer/pages/settings.html');
+  assert.equal(map.settings['/search-engines.js'], '/app/src/main/../shared/search-engines.js');
   assert.equal(map.jars['/jar-page-model.js'], '/app/src/main/../shared/jar-page-model.js');
   assert.equal(map.vault['/'], '/app/src/main/../renderer/pages/vault.html');
   assert.equal(map.vault['/vault-page-model.js'], '/app/src/main/../shared/vault-page-model.js');

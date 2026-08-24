@@ -9,6 +9,8 @@
 import { activeLog, windowPage, reduceAudit, pageList, pageCount } from './audit-paging.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { isSafeColor } from './safe-color.js';
+// @ts-ignore — serving-path vs disk-path mismatch (see above)
+import { SEARCH_ENGINES } from './search-engines.js';
 
 /**
  * settings.js — scroll-spy progressive enhancement.
@@ -150,6 +152,93 @@ async function copyText(text, messageEl) {
     if (all && all.homePage) input.value = all.homePage;
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
+})();
+
+/* ---- search-engine controller (M16 F1 Leg 2 / DD7) ---- */
+
+(function () {
+  // Guard: only run when the internal bridge is present (goldfinch://settings origin).
+  if (!window.goldfinchInternal) return;
+
+  const group = /** @type {HTMLElement|null} */ (document.getElementById('search-engine-options'));
+  if (!group) return;
+
+  // Render one radio per curated engine, entirely from the imported
+  // SEARCH_ENGINES table (id/label/description) — no engine data is
+  // hand-typed in this file or in settings.html (DD7). Built with
+  // createElement + textContent (never innerHTML/template strings): the
+  // description copy ships with the app, not from any external input, but
+  // this keeps the same discipline every other user-facing list on this page
+  // follows (jar names, activity log rows, …).
+  /** @type {Map<string, HTMLInputElement>} */
+  const radios = new Map();
+
+  for (const engine of SEARCH_ENGINES) {
+    const row = document.createElement('div');
+    row.className = 'search-engine-row';
+
+    const label = document.createElement('label');
+    label.className = 'search-engine-option shield-row';
+    label.htmlFor = 'search-engine-' + engine.id;
+
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'search-engine';
+    input.id = 'search-engine-' + engine.id;
+    input.value = engine.id;
+
+    const text = document.createElement('span');
+    text.textContent = engine.label;
+
+    label.appendChild(text);
+    label.appendChild(input);
+    row.appendChild(label);
+
+    const desc = document.createElement('p');
+    desc.className = 'muted search-engine-description';
+    desc.textContent = engine.description;
+    row.appendChild(desc);
+
+    group.appendChild(row);
+    radios.set(engine.id, input);
+
+    // Radio `change` fires only on a real selection change (native browser
+    // behavior — clicking an already-checked radio fires no event), so no
+    // same-value guard is needed here (matches house style — see the Edge
+    // Cases note in the leg spec).
+    input.addEventListener('change', () => {
+      if (input.checked) window.goldfinchInternal.settingsSet('searchEngine', engine.id).catch(() => {});
+    });
+  }
+
+  /**
+   * Check the radio matching `id`, uncheck every other. A `null`/unknown id
+   * (including F1's raw-IPC `searchEngine: null` edge case) leaves every
+   * radio unchecked — an honest rendering of "unset", not a synthetic "none"
+   * option (accepted F1 behavior by design ruling; Flight 2 owns the unset UX).
+   * @param {string|null} id
+   */
+  function applyChecked(id) {
+    for (const [engineId, radio] of radios) {
+      radio.checked = engineId === id;
+    }
+  }
+
+  // Populate from the persisted setting on load. searchEngine is never
+  // `undefined` here (settingsGet resolves an id string or null — DD2), so
+  // applyChecked runs unconditionally.
+  window.goldfinchInternal.settingsGet('searchEngine').then(applyChecked).catch(() => {});
+
+  // Re-sync when another surface (another window's Settings page, a future
+  // clear affordance) changes the setting. Guard is `!== undefined`, never
+  // truthiness — null is a meaningful future value. Capture the handle so we
+  // can remove this listener on pagehide (DD5: prevents accumulation across
+  // reloads — pagehide fires in the OLD document context where handle +
+  // wrapper are valid).
+  const hSearchEngine = window.goldfinchInternal.onSettingsChanged((all) => {
+    if (all && all.searchEngine !== undefined) applyChecked(all.searchEngine);
+  });
+  window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSearchEngine), { once: true });
 })();
 
 /* ---- shields controller ---- */

@@ -1,15 +1,15 @@
 # Flight: Search Engine as a Preference
 
-**Status**: ready
+**Status**: landed
 **Mission**: [Search and Startup Choice](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Address-bar searches go to a search engine the user chose from a curated list; the choice survives restart and takes effect immediately in every open window without a restart. *(behavior-test-backed)*
-- [ ] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)*
-- [ ] Home page and search engine are independent preferences, presented adjacent in Settings; setting either never changes the other. *(this flight: the settable half + adjacency + independence; the clearable half is Flight 2 — see DD6)*
-- [ ] Upgrading an existing profile changes nothing the user can observe: searches still reach Google, the home page stays as it was. The previously implicit Google default is now visible in Settings as an explicit selection the user can change. *(behavior-test-backed)*
-- [ ] Only engines from the curated list can ever be stored; unknown or corrupt stored values repair without blocking startup. *(this flight: validator + repair-to-Google; "without silently selecting a provider" completes in Flight 2 when the fresh-profile default flips to unset)*
+- [x] Address-bar searches go to a search engine the user chose from a curated list; the choice survives restart and takes effect immediately in every open window without a restart. *(behavior-test-backed)*
+- [ ] The page right-click "Search for …" item uses the same chosen engine as the address bar — one choice governs both search entry points. *(behavior-test-backed)* *(2026-08-24: not observed — the page-context sheet is not automatable via the MCP apparatus (run log `search-engine-preference/runs/2026-08-24-22-41-08.md`, checkpoint 6 inconclusive); structurally covered by the shared `toUrl`; pending a ten-second manual check. Left unchecked on purpose.)*
+- [x] Home page and search engine are independent preferences, presented adjacent in Settings; setting either never changes the other. *(this flight: the settable half + adjacency + independence; the clearable half is Flight 2 — see DD6)*
+- [x] Upgrading an existing profile changes nothing the user can observe: searches still reach Google, the home page stays as it was. The previously implicit Google default is now visible in Settings as an explicit selection the user can change. *(behavior-test-backed)*
+- [x] Only engines from the curated list can ever be stored; unknown or corrupt stored values repair without blocking startup. *(this flight: validator + repair-to-Google; "without silently selecting a provider" completes in Flight 2 when the fresh-profile default flips to unset)*
 
 ---
 
@@ -76,14 +76,14 @@ The curated-allowlist acceptance criterion is backed by a unit test that goes re
 
 - [x] Mission 16 active; flight branch `flight/01-search-engine-preference` exists
 - [x] Engine table content resolved (mission Open Question 1: eight engines, templates, descriptions, exclusion rationale)
-- [ ] Automation surface verified live before behavior-test runs: `npm run dev:automation` boots, MCP attaches, admin key mints (probe at run time — decay-prone, per authoring guide)
+- [x] Automation surface verified live before behavior-test runs: `npm run dev:automation` boots, MCP attaches, admin key mints (probed 2026-08-11 by FD: fresh scratch profile, port 49709 free-port fallback, 401 unkeyed / 200 authed initialize — see flight log)
 - [ ] Pre-upgrade profile fixture procedure validated once end-to-end (produce a v2 row from a pre-flight build; see DD7)
 
 ### Pre-Flight Checklist
 
 - [x] All open questions resolved
 - [x] Design decisions documented
-- [ ] Prerequisites verified (two remaining are run-time probes)
+- [x] Prerequisites verified (two remaining are run-time probes — probed live 2026-08-24: automation surface bound and key minted on every launch)
 - [x] Validation approach defined
 - [x] Legs defined (tentative)
 
@@ -101,8 +101,8 @@ Leg 2 wires consumption: `searchEngineCache` + `setSearchEngine` through `window
 
 ### Checkpoints
 
-- [ ] Leg 1 green: schema + migration + pinning land; `npm test`, `npm run typecheck`, `npm run lint` pass; no renderer changes yet — app behavior byte-identical for users
-- [ ] Leg 2 green: engine choice takes effect live in every window; both behavior specs pass; suite still green
+- [x] Leg 1 green: schema + migration + pinning land; `npm test`, `npm run typecheck`, `npm run lint` pass; no renderer changes yet — app behavior byte-identical for users
+- [x] Leg 2 green: engine choice takes effect live in every window; both behavior specs pass; suite still green *(2026-08-24: both specs PARTIAL with dispositions — one apparatus-inconclusive row, one fail on pre-existing squawk 0005 proven neutral by differential; every search-engine claim passed; see flight log)*
 
 ### Adaptation Criteria
 
@@ -118,8 +118,8 @@ Leg 2 wires consumption: `searchEngineCache` + `setSearchEngine` through `window
 
 > **Note:** Tentative; legs are planned and created one at a time as the flight progresses.
 
-- [ ] `preference-core` — shared engine table, settings schema + validators (null-accepting, curated allowlist), v3 ladder (with the `from < 2` re-guard, DD5) + pin-on-load, unit tests (red-when-neutered, migration matrix), CLAUDE.md settings documentation including correcting its inaccurate home-page-caching description (DD4)
-- [ ] `consumers-and-settings-ui` — toUrl lookup + live cache **with explicit boot seed** (DD4), Settings engine radio-group from the shared table (DD7), upgrade fixture procedure, behavior specs promoted and run
+- [x] `preference-core` — shared engine table, settings schema + validators (null-accepting, curated allowlist), v3 ladder (with the `from < 2` re-guard, DD5) + pin-on-load, unit tests (red-when-neutered, migration matrix), CLAUDE.md settings documentation including correcting its inaccurate home-page-caching description (DD4)
+- [x] `consumers-and-settings-ui` — toUrl lookup + live cache **with explicit boot seed** (DD4), Settings engine radio-group from the shared table (DD7), upgrade fixture procedure, behavior specs promoted and run
 
 ---
 
@@ -127,10 +127,10 @@ Leg 2 wires consumption: `searchEngineCache` + `setSearchEngine` through `window
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] All legs completed
+- [ ] Code merged *(PR open on `flight/01-search-engine-preference`)*
+- [x] Tests passing *(3714/3714, typecheck + lint clean, 2026-08-24)*
+- [x] Documentation updated *(CLAUDE.md Settings-store section: `searchEngine`, v3 ladder rationale, `homePageCache` correction, `searchEngineCache` contract)*
 
 ### Verification
 
