@@ -1,10 +1,10 @@
 # Squawk 0009: `INTERNAL_JAR_NAMES` has no `vault` entry — a Vault tab's jar label falls back to "Settings"
 
-**Status**: in-progress
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-24
-**Completed**: —
+**Completed**: 2026-08-24
 
 ## Report
 
@@ -41,7 +41,9 @@ Added a new test, `trusted internal jar name is derived per host, including vaul
   Restored the `vault: 'Secrets'` entry and reran the full suite: 3716/3716 passing again.
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementer's reasoning) — one review round, batch turnaround 2026-08-24
+**Verdict**: confirmed
+**Commit**: `8fa22ba` (`squawk: turnaround 2026-08-24`, PR #166) on `squawk/turnaround-2026-08-24`
+
+Reviewer verified the `Secrets` label against `src/renderer/pages/vault.html` and `src/renderer/chrome/overlay-menus.js:15`, that `vault` is an `INTERNAL_HOSTS` member, and that the harness's `isInternalPageUrl` fake was widened correctly; suite 3716/3716.

@@ -1,10 +1,10 @@
 # Squawk 0007: `search-engine-preference` step 6 relies on a context-menu sheet the automation surface cannot drive or observe
 
-**Status**: in-progress
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-08-24
-**Completed**: —
+**Completed**: 2026-08-24
 
 ## Report
 
@@ -33,7 +33,9 @@ Read-through of the re-authored row: on every run the row now renders a verdict 
 Re-run `/behavior-test search-engine-preference` to confirm live: the re-authored row should render a verdict on every run (operator-observed pass) instead of INCONCLUSIVE.
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementer's reasoning) — one review round, batch turnaround 2026-08-24
+**Verdict**: confirmed
+**Commit**: `8fa22ba` (`squawk: turnaround 2026-08-24`, PR #166) on `squawk/turnaround-2026-08-24`
+
+Reviewer confirmed `AUTOMATABLE_MENU_TYPES` excludes the page-context sheet (`src/main/automation/resolve.js:53`), that `sel:search` dispatches through the same `toUrl` (`src/renderer/renderer.js:892`), that the diff touches only the Preconditions bullet and the step 6 row, and that AUTHORING.md defines only `[a11y]` and `[mixed-frame]` markers — the suite's inline `operator-performed` convention was the right choice.

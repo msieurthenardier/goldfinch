@@ -1,10 +1,10 @@
 # Squawk 0003: broadcast-invariant detection side still matches by raw substring — indirect mutation escapes the net entirely
 
-**Status**: in-progress
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-08
-**Completed**: —
+**Completed**: 2026-08-24
 
 ## Report
 
@@ -169,7 +169,11 @@ scope for a squawk.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementer's reasoning) — one review round, batch turnaround 2026-08-24
+**Verdict**: confirmed
+**Commit**: `8fa22ba` (`squawk: turnaround 2026-08-24`, PR #166) on `squawk/turnaround-2026-08-24`
+
+Reviewer independently ran the suite (3716/3716, ~3.1 s), typecheck and lint clean, and the broadcast-invariant file alone (27/27, zero violations against the nine real registrars). Checked the false-pass question directly: every production `settings.set(` call has the name adjacent to `(`, and the anchored `MUTATION_CALL_RE` can only produce a false *negative* on a gap — fail-safe. Positive control covers helper credit, the pre-fix false-PASS baseline, decoy rejection, and shadowing.
 
 ## Sign-Off
 

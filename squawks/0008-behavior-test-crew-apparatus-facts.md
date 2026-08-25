@@ -1,10 +1,10 @@
 # Squawk 0008: behavior-test crew file lacks the goldfinch apparatus facts every run rediscovers — and the production-browser MCP warning
 
-**Status**: in-progress
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-08-24
-**Completed**: —
+**Completed**: 2026-08-24
 
 ## Report
 
@@ -61,7 +61,9 @@ definitions, signal names, or protocol sections were touched.
 - `npm run lint` passes clean (doc-only change; no source files touched).
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementer's reasoning) — one review round, batch turnaround 2026-08-24
+**Verdict**: confirmed
+**Commit**: `8fa22ba` (`squawk: turnaround 2026-08-24`, PR #166) on `squawk/turnaround-2026-08-24`
+
+Reviewer verified the crew file's structure (`## Crew`, `## Interaction Protocol`, `## Prompts` present; 18 fenced blocks before and after; no signal renamed), the new section's placement before `## Prompts`, and the pointer line inside both Initial prompts; every cited run-log evidence file exists.
