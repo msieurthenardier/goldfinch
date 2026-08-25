@@ -3,7 +3,7 @@
 **Slug**: `welcome-search-handoff`
 **Status**: active
 **Created**: 2026-08-24
-**Last Run**: 2026-08-25 — partial (6/6 automatable rows pass; step 7 operator-pending; run log `welcome-search-handoff/runs/2026-08-25-04-48-18.md`)
+**Last Run**: 2026-08-25 — partial (6/6 automatable rows pass; step 7 operator-verified by hand at the flight debrief; run log `welcome-search-handoff/runs/2026-08-25-04-48-18.md`)
 
 ## Intent
 

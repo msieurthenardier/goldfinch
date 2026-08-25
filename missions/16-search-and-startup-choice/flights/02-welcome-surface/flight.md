@@ -1,6 +1,6 @@
 # Flight: The Welcome Surface
 
-**Status**: landed
+**Status**: completed
 **Mission**: [Search and Startup Choice](../../mission.md)
 
 ## Contributing to Criteria

@@ -3,7 +3,7 @@
 **Slug**: `search-engine-preference`
 **Status**: active
 **Created**: 2026-08-11
-**Last Run**: 2026-08-25 — partial (7/7 automated checkpoints pass; checkpoint 6 operator-performed, pending; re-run at M16 F2 leg 2 with the re-authored fixture; run log `search-engine-preference/runs/2026-08-25-05-35-38.md`)
+**Last Run**: 2026-08-25 — partial (7/7 automated checkpoints pass; checkpoint 6 operator-verified by hand at the flight debrief; re-run at M16 F2 leg 2 with the re-authored fixture; run log `search-engine-preference/runs/2026-08-25-05-35-38.md`)
 
 ## Intent
 
