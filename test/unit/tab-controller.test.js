@@ -80,7 +80,12 @@ function createHarness() {
     tabSetBounds(...args) { calls.push(['tabSetBounds', ...args]); },
     tabHide(...args) { calls.push(['tabHide', ...args]); },
     tabClose(...args) { calls.push(['tabClose', ...args]); },
-    tabDragStarted() {}, tabDragEnded() {}, tabAdoptByDrop: async () => ({ ok: true }), tabTearOff: async () => ({ ok: true }),
+    tabDragStarted() {}, tabDragEnded() {}, tabAdoptByDrop: async () => ({ ok: true }),
+    // Squawk 0011: was `async () => ({ ok: true })` with no `calls` record — every
+    // assertion filtering `h.calls` for 'tabTearOff' was vacuously true regardless of
+    // whether requestTearOff ever actually dispatched. Track it like every other
+    // bridge call above so a guard-removal actually flips a filtered-count assertion.
+    tabTearOff(payload) { calls.push(['tabTearOff', payload]); return Promise.resolve({ ok: true }); },
     tabNavigate(payload) { calls.push(['tabNavigate', payload]); },
     findOverlayOpen() {}, isDevtoolsOpen: async () => false,
     onAdoptTab(fn) { callbacks.adopt = fn; },
@@ -384,7 +389,7 @@ test('applyToolbarAffordances: the toolbar buttons are disabled before wcId arri
   assert.equal(h.els.toggleDevtools.disabled, false);
 });
 
-test('a welcome record shows no dead controls: dragstart and requestTearOff both refuse it', async () => {
+test('a welcome record refuses to start a drag: dragstart preventDefaults on a viewless tab', async () => {
   const h = createHarness();
   const controller = await loadController(h);
   const tab = controller.openWelcomeTab({ reasons: ['home'] });
@@ -392,7 +397,62 @@ test('a welcome record shows no dead controls: dragstart and requestTearOff both
   let prevented = false;
   dragStartFn({ dataTransfer: { setData() {}, effectAllowed: null }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
   assert.equal(prevented, true, 'dragstart on a viewless record must preventDefault (refused)');
-  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'no tear-off IPC was ever sent for it');
+  // dragstart's own gate means no drag session (`dnd`) is ever created for this tab, so
+  // requestTearOff — dragend's only call site — never runs. Squawk 0011: this assertion
+  // alone previously stood in for coverage of requestTearOff's OWN guard, which it does
+  // not exercise. See the two tests below for that guard.
+  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'a refused dragstart never creates a drag session');
+});
+
+// Squawk 0011: `requestTearOff`'s own guard — `if (!tab || tab.wcId == null) return;`
+// (tab-controller.js:703) — is a second, independent line of defense, distinct from
+// dragstart's gate above: it protects against a tab losing its view WHILE a drag is
+// already in flight (e.g. the guest view is torn down mid-drag), which dragstart's own
+// gate cannot see since it only runs once, at the start. `requestTearOff` is not on the
+// controller's returned API (it is dragend's private helper, dragend is its one call
+// site) and dnd (the drag session) is private module state, so the only way to reach it
+// is the full dragstart -> dragend gesture on the tab's own listeners — the same gesture
+// dragstart/dragend are already exercised through elsewhere in this file.
+// `classifyDragPoint` is stubbed per-test (same DI seam `currentHomePage`/
+// `currentSearchEngine` use above) to force dragend's release-point classification into
+// the tear-off zone, so the only outstanding variable is the tab's own `wcId`.
+test('requestTearOff refuses a tab that lost its view mid-drag: no tabTearOff IPC fires', async () => {
+  const h = createHarness();
+  h.deps.classifyDragPoint = () => ({ zone: 'tearOff' });
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://example.test/');
+  await settle(); // tab.wcId arrives (100) — dragstart's own gate needs it set to start the session
+  const dragStartFn = tab.btn.listeners.get('dragstart');
+  dragStartFn({
+    dataTransfer: { setData() {}, effectAllowed: null, setDragImage() {} },
+    preventDefault: () => {}, clientX: 0, clientY: 0
+  });
+  tab.wcId = null; // the view goes away mid-drag — the exact condition requestTearOff's guard exists for
+  h.calls.length = 0;
+  const dragEndFn = tab.btn.listeners.get('dragend');
+  dragEndFn({ clientX: -50, clientY: -50 });
+  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'requestTearOff must refuse a tab with no view, even mid-drag');
+});
+
+test('requestTearOff dispatches tabTearOff for a tab with a live view (positive control)', async () => {
+  const h = createHarness();
+  h.deps.classifyDragPoint = () => ({ zone: 'tearOff' });
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://example.test/');
+  await settle();
+  const dragStartFn = tab.btn.listeners.get('dragstart');
+  dragStartFn({
+    dataTransfer: { setData() {}, effectAllowed: null, setDragImage() {} },
+    preventDefault: () => {}, clientX: 0, clientY: 0
+  });
+  h.calls.length = 0;
+  const dragEndFn = tab.btn.listeners.get('dragend');
+  dragEndFn({ clientX: -50, clientY: -50 });
+  // Proves the harness/gesture actually reaches requestTearOff's dispatch — the guard
+  // test above is not vacuously green because the mechanism never fires at all.
+  const tearOffCall = h.calls.find(([name]) => name === 'tabTearOff');
+  assert.ok(tearOffCall, 'requestTearOff dispatches tabTearOff when the tab still has a view');
+  assert.equal(tearOffCall[1].wcId, tab.wcId);
 });
 
 test('closeTab on a welcome record sends no tabClose and backfills via openNewTab when it was the last tab', async () => {

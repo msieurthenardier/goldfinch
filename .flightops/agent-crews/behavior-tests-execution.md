@@ -164,9 +164,10 @@ The Orchestrator substitutes these in prompts at runtime:
 ## Project Apparatus Notes (goldfinch)
 
 Facts rediscovered live across multiple runs (`bookmarks-jar-scoping`,
-`search-engine-preference`, `search-engine-upgrade`) — read before signalling
-`[READY]` so a crew spawn needs no hand-added apparatus instructions beyond
-run-specific keys/ports.
+`search-engine-preference`, `search-engine-upgrade`, `welcome-home-routing`,
+`welcome-first-launch`, `welcome-search-handoff`, `new-tab-default-routing`) —
+read before signalling `[READY]` so a crew spawn needs no hand-added apparatus
+instructions beyond run-specific keys/ports.
 
 - **Never use session-registered `mcp__goldfinch*` / `mcp__chrome-devtools*`
   tools.** The registrations on the dev machine carry statically pinned keys
@@ -186,26 +187,115 @@ run-specific keys/ports.
   every tier, and not composited by `captureWindow`; a tab switch dismisses a
   stuck sheet, a chrome-targeted Escape does not — see
   `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
-  (Checkpoint 6 / Orchestrator Notes).
+  (Checkpoint 6 / Orchestrator Notes). Allowlisted sheets (`bookmark-edit`,
+  `bookmarks-overflow`) are **read-only** to automation, categorically:
+  `click`/`typeText`/`pressKey`/`dragPointer`/`evaluate`/`injectScript` never
+  opt into the sheet gate — only `captureScreenshot`/`readDom`/`readAxTree`
+  pass `allowSheet: true` (`src/main/automation/engine.js`'s three
+  `deps({ allowSheet: true })` call sites feeding `resolve.js`'s
+  `admitted` check) — no write op ever resolves a sheet wcId, so a refused
+  click/type against a sheet is not evidence that the underlying action (e.g.
+  a bookmark) didn't happen — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
+  (Setup row / Orchestrator Notes).
 - **Coordinates**: `click` on a tab wcId is guest-viewport-relative — read
   from `captureScreenshot {wcId}` (1:1), not from `captureWindow` (includes
   the chrome). `openTab` lands in the last-focused window — focus the
   intended window first — see
   `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
-  (Orchestrator Notes).
+  (Orchestrator Notes). Welcome-surface controls (radios, the Set button, the
+  address bar) instead use chrome-relative coordinates — the same frame as
+  `#address`, no guest-viewport translation; on the Settings page the search
+  engine block's Clear button sits beneath the eighth radio and its position
+  is layout-dependent — locate it by `getBoundingClientRect()`, not a fixed
+  pixel — see
+  `tests/behavior/welcome-search-handoff/runs/2026-08-25-04-48-18.md`
+  (Orchestrator Notes / Executor closing).
 - **Reads**: the address bar's committed URL is authoritative via `evaluate`
   of `#address.value` on the chrome wcId (a11y textbox nodes may expose no
   `value`); the Settings home-page textbox's a11y `value` is
   build/state-dependent — judge from rendered pixels — see
   `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
-  (Checkpoint 3 / Orchestrator Notes).
+  (Checkpoint 3 / Orchestrator Notes). DOM-count probes
+  (`querySelectorAll(...).length`) do not reflect visibility — a hidden
+  block's controls still count, and `#welcome-surface`'s `textContent`
+  includes hidden blocks' text too; use hidden-class flags or an a11y-tree
+  scan (e.g. grep the a11y dump for the absent control's name) as the
+  reliable absence signal — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
+  (Checkpoint 4 / Orchestrator Notes). A freshly rendered welcome panel shows
+  a keyboard-focus ring on its first radio (DuckDuckGo) — outline only,
+  unchecked per a11y, not a selection — see
+  `tests/behavior/welcome-search-handoff/runs/2026-08-25-04-48-18.md`
+  (Orchestrator Notes / Executor closing).
 - **Out-of-band relaunch** (`session-restore` procedure, proven
   2026-08-24): the MCP transport dies with the process and
   `GOLDFINCH_AUTOMATION_DEV_MINT` mints a fresh key per boot — the
   Orchestrator relaunches, re-reads the mint line, rewrites the crew's env,
   and briefs the restored topology — see
   `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
-  (Checkpoint 8 / Orchestrator Notes).
+  (Checkpoint 8 / Orchestrator Notes). Give every restart-adjacent row an
+  explicit Orchestrator PID attestation (the process holding the profile's
+  `app.db`) by default, not only once a Validator asks for it — corroborate
+  with the re-minted automation key hash and wcId renumbering as independent
+  signals of a real relaunch, not tab-list lineage alone — see
+  `tests/behavior/search-engine-preference/runs/2026-08-25-05-35-38.md`
+  (Checkpoints 4/5/8, Orchestrator Notes). The Executor's closing summary is
+  the one artifact transcript loss can drop — on one run its agent session
+  was no longer resumable once `[CLOSING]` was sent after its final
+  per-step report; send `[CLOSING]` to the Executor immediately after that
+  report, before other wrap-up work, to minimize the window — see the same
+  run's Closing Summaries section.
+- **Welcome tabs**: a welcome tab (viewless record, no web contents) is
+  invisible to `enumerateTabs`, and `enumerateWindows` reports
+  `activeTabWcId: null` for it — the tab strip must be read from chrome DOM,
+  not the tab-enumeration API — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
+  (Checkpoint 3 / Orchestrator Notes) and
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
+  (Checkpoint 4).
+- **Bookmarks**: a chrome star click persists a bookmark immediately
+  (`bookmarks-client.js`'s `activateStar` → `bridge.bookmarkAdd`) — the
+  bookmark-edit sheet's Done only edits/closes the sheet. A refused
+  click/type against the sheet is not evidence the bookmark wasn't created;
+  confirm via the `bookmarks` table, not the sheet interaction — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
+  (Setup row / Orchestrator Notes).
+- **Settings layout shift**: inserting a status line ("Saved"/"Cleared —
+  …") after Save/Clear shifts the controls beneath it by roughly 20–24 px —
+  re-capture the Settings guest before every click rather than reusing
+  coordinates from an earlier capture — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
+  (Setup row) and
+  `tests/behavior/new-tab-default-routing/runs/2026-08-25-05-04-03.md`
+  (Orchestrator Notes / Executor closing).
+- **`scroll` parameters**: the tool's own arguments are `wcId, x, y, dx, dy`
+  (`src/main/automation/mcp-tools.js`'s `scroll` entry); the underlying CDP
+  dispatch (`Input.dispatchMouseEvent` in `src/main/automation/input.js`)
+  names the same values `deltaX`/`deltaY` — don't pass `deltaX`/`deltaY` as
+  the call's own argument names — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
+  (Orchestrator Notes / Executor closing).
+- **Cross-window/broadcast baselines**: setting a preference broadcasts
+  live, and can auto-attach another window's already-shown pending welcome
+  tab (DD7) between two steps — this shifts that window's "before" baseline
+  for a later row. Call this out explicitly in the spec row whenever a
+  cross-window step follows one that sets a preference — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
+  (Checkpoint 8 side finding / Orchestrator Notes) and
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
+  (DD7 auto-attach scope observed / Orchestrator Notes).
+- **Anti-automation interstitials**: Google's `/sorry/` interstitial can
+  intercept a scripted search after repeated queries from one IP/session —
+  judge the row on the committed address-bar URL (host `google.com` plus the
+  encoded query, preserved in the tab title and in the interstitial's own
+  `continue=` parameter), not on reaching a live results page; route
+  scripted rows to a non-Google engine (DuckDuckGo, Brave) where the spec
+  allows it — see
+  `tests/behavior/search-engine-upgrade/runs/2026-08-25-03-16-36.md`
+  (Checkpoint 3 / Orchestrator Notes) and
+  `tests/behavior/search-engine-preference/runs/2026-08-25-05-35-38.md`
+  (Checkpoint 2 / Orchestrator Notes).
 
 ## Prompts
 
