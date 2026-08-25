@@ -40,6 +40,9 @@
         <label for="home-page-input">Home page</label>
         <input id="home-page-input" type="url" autocomplete="off" spellcheck="false" />
         <button id="home-page-save" type="button">Save</button>
+        <!-- Clear (M16 F2 Leg 1, DD6): no confirmation — a reversible one-click
+             action, the explanatory status line does the work a modal would. -->
+        <button id="home-page-clear" type="button">Clear</button>
         <p id="home-page-status" role="status"></p>
         <!-- Search engine control (M16 F1 Leg 2, DD7): adjacent to the home-page
              control, independent preference (setting either never touches the
@@ -50,6 +53,11 @@
         <fieldset class="shields-group search-engine-group">
           <legend>Search engine</legend>
           <div id="search-engine-options"></div>
+          <!-- Clear (M16 F2 Leg 2, DD6): no confirmation, same one-click
+               shape as home-page-clear above — a reversible action, the hint
+               line does the explanatory work a modal would. -->
+          <button id="search-engine-clear" type="button">Clear</button>
+          <p id="search-engine-status" role="status"></p>
         </fieldset>
         <fieldset class="shields-group startup-toggle-group">
           <legend class="sr-only">Session restore</legend>

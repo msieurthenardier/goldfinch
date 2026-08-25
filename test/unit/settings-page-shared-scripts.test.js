@@ -108,6 +108,47 @@ test('the search-engines module has an exact internal route (M16 F1 Leg 2 / DD7)
   assert.equal(map['/shared/search-engines.js'], undefined);
 });
 
+test('settings.js defines a persistent home-page unset hint and reflects it from both the initial load and the settings-changed broadcast (M16 F2 Leg 2 acceptance-gate fix)', () => {
+  // Grep-shape structural check, not a DOM assertion — per this file's house
+  // note above, no DOM harness exists for internal pages; live behavior
+  // (the hint appearing/disappearing as homePage changes, including from an
+  // external write) is covered by the welcome-first-launch / welcome-home-routing
+  // behavior specs, not here.
+  const js = fs.readFileSync(SETTINGS_JS, 'utf8');
+  const startMarker = '/* ---- home-page controller ---- */';
+  const endMarker = '/* ---- search-engine controller';
+  const start = js.indexOf(startMarker);
+  const end = js.indexOf(endMarker);
+  assert.ok(
+    start !== -1 && end !== -1 && end > start,
+    'settings.js must have a home-page controller IIFE followed by the search-engine controller IIFE'
+  );
+  const block = js.slice(start, end);
+
+  assert.ok(
+    /const HOME_UNSET_HINT\s*=\s*'No home page chosen/.test(block),
+    'settings.js\'s home-page controller must define HOME_UNSET_HINT, symmetric with the search-engine block\'s UNSET_HINT'
+  );
+  // Grep-AC hygiene rule: no literal search-engine name anywhere in this block.
+  assert.equal(
+    /google/i.test(block),
+    false,
+    'the home-page controller block must not mention any search-engine literal'
+  );
+
+  // The broadcast handler (onSettingsChanged) must render through the SAME
+  // reflect() helper as the initial load — not a bespoke inline assignment —
+  // so the hint (and the field) are never missed on an external write (the
+  // welcome surface's Set, or another window's Settings page).
+  const broadcastMatch = /onSettingsChanged\(\(all\) => \{[\s\S]*?\}\);/.exec(block);
+  assert.ok(broadcastMatch, 'home-page controller must register an onSettingsChanged handler');
+  assert.ok(
+    /reflect\(all\.homePage\)/.test(broadcastMatch[0]),
+    'the settings-changed broadcast handler must call reflect(all.homePage) so the unset hint (and the field) ' +
+      'update on an external write, not just on load'
+  );
+});
+
 test('no engine id/label/description is duplicated in settings.html\'s search-engine fieldset or in settings.js (DD7: single source is search-engines.js)', () => {
   // Scoped to the search-engine fieldset specifically (not the whole document)
   // — settings.html legitimately mentions "Google" elsewhere (the spellcheck

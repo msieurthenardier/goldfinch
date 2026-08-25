@@ -3,11 +3,11 @@
 **Slug**: `search-engine-preference`
 **Status**: active
 **Created**: 2026-08-11
-**Last Run**: 2026-08-24 — partial (7/8 pass; checkpoint 6 inconclusive: page context-menu sheet not automatable via the MCP apparatus — see the run log)
+**Last Run**: 2026-08-25 — partial (7/7 automated checkpoints pass; checkpoint 6 operator-verified by hand at the flight debrief; re-run at M16 F2 leg 2 with the re-authored fixture; run log `search-engine-preference/runs/2026-08-25-05-35-38.md`)
 
 ## Intent
 
-Verifies that the search engine is a real, user-owned preference on a fresh profile: the Google default is explicit and visible in Settings, choosing another engine takes effect immediately in both search entry points (address bar and page context menu) and in every open window without a restart, the choice survives quit-and-relaunch, and the home page preference is untouched by all of it. This is real-environment behavior spanning the settings store, IPC broadcast, and per-window chrome caches — the live multi-window propagation and restart survival have no unit-test seam. Pins mission criteria 1, 2, and the settable/independence half of 3 (M16 F1).
+Verifies that the search engine is a real, user-owned preference on a fresh profile: the Google default is explicit and visible in Settings, choosing another engine takes effect immediately in both search entry points (address bar and page context menu) and in every open window without a restart, the choice survives quit-and-relaunch, and the home page preference is untouched by all of it. This is real-environment behavior spanning the settings store, IPC broadcast, and per-window chrome caches — the live multi-window propagation and restart survival have no unit-test seam. Pins mission criteria 1, 2, and the settable/independence half of 3 (M16 F1). **Fixture note (M16 F2 leg 2):** since this flight, a fresh profile has no engine at all — the fixture below sets Google explicitly before step 1 so this spec's intent (the settable/propagation flow, not the unset-routing welcome surface) stays exercised; unset-routing is `welcome-search-handoff`'s scope.
 
 ## Preconditions
 
@@ -16,6 +16,7 @@ Verifies that the search engine is a real, user-owned preference on a fresh prof
 - Network access is NOT required: every search assertion reads the committed address-bar URL, not the result page.
 - **Step 8 is out-of-band**: the quit/relaunch crosses the MCP transport's lifetime, and `GOLDFINCH_AUTOMATION_DEV_MINT` mints a fresh admin key on every boot — the Orchestrator performs the relaunch, rediscovers the live port, reconnects, and re-reads the newly minted key before the step's observations run (the `session-restore` procedure). That pattern is authored-but-unrun there; treat this spec's first execution of step 8 with the same caution.
 - **Operator present** — apparatus constraint: the page-context menu renders in a chrome-owned overlay sheet outside `AUTOMATABLE_MENU_TYPES` (`src/main/automation/resolve.js:53`), refused by the automation surface at every tier and not composited by `captureWindow`, with no OS-level input tool available on the dev machine; step 6 is operator-performed.
+- **Fixture-setup (M16 F2 leg 2):** set the search engine to Google via Settings before step 1 — after M16 F2 a fresh profile has no engine, and step 1's "Google selected explicitly" premise otherwise no longer holds on a fresh profile.
 
 ## Observables Required
 

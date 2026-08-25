@@ -5,8 +5,10 @@ export function createNavigationController(deps) {
   const {
     window, document, ctx, els,
     activeTab, isInternalTab, isWebTab, createTab, openDownloads,
+    openNewTab, attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
+    openWelcomeTab, refreshWelcome, // M16 F2 Leg 2 (DD3): the search handoff — a new welcome tab beside the page, or an in-place re-render
     bookmarksClient,
-    buildSearchUrl, currentSearchEngine, // M16 F1 Leg 2: toUrl's search fallback
+    buildSearchUrl, currentSearchEngine, capPendingQuery, // M16 F1 Leg 2 / F2 Leg 2: toUrl's search fallback + the pending-query cap
     isInternalPageUrl, shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection,
     acceptSuggestResponse, suggestionsState, closeOverlayMenu,
     openOverlayMenu, leftAnchorOf
@@ -57,21 +59,44 @@ export function createNavigationController(deps) {
   function updateNavButtons() {
     const tab = activeTab();
     if (!tab) { els.back.disabled = true; els.forward.disabled = true; return; }
-    if (isInternalTab(tab)) {
-      // Internal tabs never have navigation history — disable both buttons explicitly.
-      // (No webview to query; tab-nav-state IPC is not sent for internal views.)
+    // Internal tabs never have navigation history; a viewless (welcome) record
+    // has none yet either (M16 F2 Leg 1, DD7) — disable both explicitly in
+    // either case. (No webview to query; tab-nav-state IPC is not sent for
+    // internal views or for a tab with no wcId.)
+    if (isInternalTab(tab) || tab.wcId == null) {
       els.back.disabled = true;
       els.forward.disabled = true;
     }
-    // For web tabs: nav state is pushed via onTabNavState; buttons stay at last known state
+    // For web tabs with a live view: nav state is pushed via onTabNavState; buttons stay at last known state
   }
 
   /* ---------------------------------------------------------------- navigation */
 
+  // M16 F2 Leg 2 (DD3): merged navigate() body — ORDER MATTERS (design review):
+  // (1) empty/whitespace input is not a search and not a URL — no handoff, no
+  // navigation, no welcome tab (NEW: there was no such guard before; Enter on
+  // an empty bar used to search for ''); (2) the null-engine search check runs
+  // BEFORE the welcome-record attach branch — attachView(tab, null) would
+  // silently drop the query, so a search with no engine chosen must be routed
+  // to handoffSearch first even when the active tab is already a welcome
+  // record; (3) leg 1's welcome-record attach, now reached only for a real
+  // URL; (4) the existing internal-tab lock and web-tab tabNavigate tail,
+  // unchanged.
   function navigate(input) {
     const tab = activeTab();
     if (!tab) return;
-    const url = toUrl(input);
+    const s = input.trim();
+    if (s === '') return;
+    const url = toUrl(s);
+    // Capture site 1/2 (DD3): capPendingQuery caps the query to PENDING_QUERY_MAX before it ever reaches the record.
+    if (url == null) { handoffSearch(tab, capPendingQuery(s)); return; }
+    // M16 F2 Leg 1 (DD2): a viewless welcome record acquires its view on its
+    // first navigation, whatever the entry point — attachView validates the
+    // URL and runs the shared onViewCreated continuation once it resolves.
+    if (tab.wcId == null && tab.welcome) {
+      attachView(tab, url);
+      return;
+    }
     // Internal-tab navigation lock (DD6): after toUrl resolution, check whether the
     // active tab is an internal (goldfinch://) tab. If so, reroute any web URL to a
     // new normal tab and leave the internal tab untouched. The address bar is readOnly,
@@ -91,19 +116,35 @@ export function createNavigationController(deps) {
     }
   }
 
+  // handoffSearch(tab, query) (M16 F2 Leg 2, DD3): a search typed with no
+  // engine chosen. An active welcome record gets the reason and query added
+  // IN PLACE (latest query wins — re-render via refreshWelcome); otherwise a
+  // NEW welcome tab opens beside the page the user is on, in the same jar —
+  // the search is never lost and the page the user was viewing is never
+  // discarded.
+  function handoffSearch(tab, query) {
+    if (tab.wcId == null && tab.welcome) {
+      tab.welcome.reasons.add('search');
+      tab.welcome.pendingQuery = query;
+      refreshWelcome(tab);
+      return;
+    }
+    openWelcomeTab({ container: tab.container, reasons: ['search'], pendingQuery: query });
+  }
+
   function toUrl(input) {
     const s = input.trim();
     if (/^[a-z]+:\/\//i.test(s) || s.startsWith('about:')) return s;
     // Looks like a domain? (has a dot, no spaces)
     if (/^[^\s]+\.[^\s]{2,}(\/.*)?$/.test(s)) return `https://${s}`;
-    // M16 F1 Leg 2 (DD4): search fallback builds from the live searchEngineCache
-    // via the shared table's buildSearchUrl, replacing the old hardcoded Google
-    // URL. This is the ONE Google-coalescing read site in the whole flight —
-    // Flight-1 semantics only (searchEngineCache defaults 'google' and the
-    // curated-allowlist validator keeps it a known id in practice, but the `||
-    // 'google'` here is what guarantees toUrl never resolves a null engine id
-    // into navigate()). Flight 2's unset-routing rewrites this coalescing site.
-    return buildSearchUrl(currentSearchEngine() || 'google', s);
+    // M16 F2 Leg 2 (DD3): a search with no engine chosen returns null — the
+    // caller (navigate()) routes a null return to the welcome handoff instead
+    // of ever resolving a query into a URL nobody chose a provider for. The
+    // removed engine fallback is gone — this was the app's last
+    // engine-coalescing read site.
+    const engine = currentSearchEngine();
+    if (engine == null) return null;
+    return buildSearchUrl(engine, s);
   }
 
   /* ------------------------------------------------------- omnibox suggestions */
@@ -307,7 +348,7 @@ export function createNavigationController(deps) {
       else window.goldfinch.tabNavigate({ wcId: t.wcId, verb: 'reload', args: [] });
     }
   });
-  els.newTab.addEventListener('click', () => createTab());
+  els.newTab.addEventListener('click', () => openNewTab()); // M16 F2 Leg 1 (DD4)
   // The ▾ container-picker toggle is registered with its own gate branch (Leg 3):
   // gate OFF in the container-picker section (chrome-DOM menu), gate ON in the
   // menu-overlay sheet branch (menuType 'container').

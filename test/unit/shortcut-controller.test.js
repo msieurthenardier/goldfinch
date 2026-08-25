@@ -20,7 +20,9 @@ function harness() {
   const deps = {
     window, document: { addEventListener: (name, fn) => { listeners[name] = fn; } }, ctx: { activeTabId: 'b' }, els,
     activeTab: () => state.active, isInternalTab: (t) => !!t?.internal, isWebTab: (t) => !!t && !t.internal,
-    openFind: (t) => calls.push(['find', t.id]), createTab: (...x) => calls.push(['create', ...x]), closeTab: (id) => calls.push(['close', id]),
+    openFind: (t) => calls.push(['find', t.id]), createTab: (...x) => calls.push(['create', ...x]),
+    openNewTab: () => calls.push('new-tab'), // M16 F2 Leg 1 (DD4)
+    closeTab: (id) => calls.push(['close', id]),
     jarsClient: { inheritContainerFromPartition: () => ({ id: 'jar' }) }, announceTabStatus: (x) => calls.push(['announce', x]),
     togglePanel: () => calls.push('panel'), togglePrivacy: () => calls.push('privacy'), openDownloads: () => calls.push('downloads'),
     orderedTabIds: () => ['a', 'b', 'c'], activateTab: (id) => { calls.push(['activate', id]); deps.ctx.activeTabId = id; },
@@ -58,6 +60,9 @@ test('every shortcut action maps to its existing tab, window, panel, and navigat
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'activate' && item[1] === 'c'));
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'bookmark-star' && item[1] === 'b'));
   assert.ok(h.calls.includes('toggle-bookmarks-bar'));
+  // M16 F2 Leg 1 (DD4): Ctrl+T routes through openNewTab, never a bare createTab().
+  assert.ok(h.calls.includes('new-tab'));
+  assert.ok(!h.calls.some((item) => Array.isArray(item) && item[0] === 'create'));
   assert.equal(controller.dispatchChromeAction('unknown'), false);
 });
 

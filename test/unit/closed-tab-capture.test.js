@@ -147,6 +147,22 @@ test('captureWindowCloseEntries on an empty/no-persist window returns []', () =>
   assert.deepEqual(captureWindowCloseEntries({ tabViews: burnersOnly, jarsList: JARS, windowId: 1 }), []);
 });
 
+// --- welcome record exclusion (M16 F2 Leg 1, DD9) — structural, not a new rule ---
+
+// A viewless welcome record never calls tab-create, so it never gains a
+// tabViews entry (this module's only input) at all — there is nothing for
+// captureWindowCloseEntries to filter. Pinned by constructing a tabViews Map
+// with one fewer entry than the renderer's strip would show (the "missing"
+// slot standing in for the welcome record) and asserting capture reflects
+// exactly what tabViews holds.
+test('captureWindowCloseEntries: a strip position with no tabViews entry (a welcome record) contributes nothing', () => {
+  const tabViews = new Map();
+  tabViews.set(51, makeTabEntry({ wc: makeWc({ url: 'https://kept.example/' }) }));
+  // wcId 52 would be the welcome tab's slot — no tab-create IPC, no entry here.
+  const entries = captureWindowCloseEntries({ tabViews, jarsList: JARS, windowId: 6 });
+  assert.deepEqual(entries.map((e) => e.url), ['https://kept.example/']);
+});
+
 // --- reopenStripIndex: the DD4 pop rule ----------------------------------------
 
 test('reopenStripIndex honors stripIndex only for the ORIGIN window', () => {

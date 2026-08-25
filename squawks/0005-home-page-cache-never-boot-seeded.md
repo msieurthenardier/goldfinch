@@ -1,10 +1,10 @@
 # Squawk 0005: `homePageCache` is never boot-seeded — new windows fall back to hardcoded Google
 
-**Status**: deferred
+**Status**: completed
 **Type**: defect
 **Severity**: routine
 **Reported**: 2026-08-11
-**Completed**: —
+**Completed**: 2026-08-25
 
 ## Report
 
@@ -22,17 +22,23 @@ Found by M16 Flight 1 design review (2026-08-11), which nearly propagated the sa
 
 ## Corrective Action
 
-*(written at completion)*
+Fixed by M16 Flight 2 leg 1 (DD4, cache unification): `src/renderer/chrome/window-controller.js` now boot-seeds `homePageCache` with `window.goldfinch.settingsGet('homePage').then(setHomePage)` — the same idiom as `toolbarPins`/`bookmarksBarEnabled` and the `searchEngine` seed beside it — so every window has the configured home page before any broadcast lands. The three `|| HOMEPAGE` coalescing sites and the `HOMEPAGE` literal are gone; every new-tab site resolves through `openNewTab(container)`, which routes an unset home page to the welcome surface instead of a hardcoded fallback.
 
-Expected shape: boot-seed via `settingsGet('homePage').then(setHomePage)` per the `toolbarPins` idiom — but see deferral: M16 Flight 2 rewrites the three `|| HOMEPAGE` coalescing sites and must fix or subsume this seeding as part of that design. Do not fix standalone while that flight is pending.
+Original expected shape: boot-seed via `settingsGet('homePage').then(setHomePage)` per the `toolbarPins` idiom — but see deferral: M16 Flight 2 rewrites the three `|| HOMEPAGE` coalescing sites and must fix or subsume this seeding as part of that design. Do not fix standalone while that flight is pending.
 
 ## Verification
 
-*(written at completion — one unit test on the boot-seeding call, plus the reproduce steps above)*
+- `test/unit/window-controller.test.js` — "homePage is boot-seeded via an explicit settingsGet, before any broadcast (squawk 0005 closed)".
+- `test/unit/homepage-literal-scan.test.js` — no `HOMEPAGE`/`google.com` literal remains in `src/renderer/` outside `src/shared/search-engines.js`.
+- Observed live: `welcome-home-routing` run `2026-08-25-02-45-35` step 10 (boot window's first Ctrl+T after a clean relaunch opens the configured home page) and `search-engine-upgrade` run `2026-08-25-03-16-36` step 2 (the row that failed on this defect on 2026-08-24 now passes as authored).
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementers' reasoning) — Mission 16 Flight 2 flight-end review, one round, 2026-08-25
+**Verdict**: confirmed
+**Commit**: `flight/02: The Welcome Surface — viewless welcome tab, search handoff, unset-by-default` on `flight/02-welcome-surface` (the flight-end commit; PR number recorded in the flight debrief)
+
+Reviewer independently ran the suite (3763/3763, ~3.3 s), typecheck and lint clean, and traced the corrective action against the diff. Closed by observation on `welcome-home-routing` (2026-08-25, 10/10): after a clean relaunch the boot window's first Ctrl+T honored the configured home page — `homePageCache` is now seeded from the boot `settingsGet('homePage')` and `HOMEPAGE` is gone (`test/unit/homepage-literal-scan.test.js` pins its absence).
 
 ---
 

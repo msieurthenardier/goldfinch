@@ -204,6 +204,30 @@ test('the move items are flat items in the duplicate section — no submenu, no 
   assert.equal(ids(model)[i + 1], 'tab:move-window:7');
 });
 
+// ---------------------------------------------------------------------------
+// hasView (M16 F2 Leg 1, DD7/DD8): a viewless welcome record has nothing to
+// duplicate and cannot move — duplicate/move-new-window/move-window:* are all
+// omitted; every other item (close family, reopen-closed) is unaffected.
+// ---------------------------------------------------------------------------
+test('hasView:false omits duplicate, move-new-window, and move-window:* — everything else unaffected', () => {
+  const model = tabContextModel({
+    tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3, hasView: false,
+    moveTargets: [win(7, 'GitHub')]
+  });
+  assert.deepEqual(ids(model), ['tab:close', 'tab:close-others', 'tab:close-right', 'tab:reopen-closed']);
+  assert.equal(seps(model), 1); // no duplicate section at all — one separator remains (before reopen-closed)
+});
+
+test('hasView default (omitted) behaves as true — pre-Leg-1 callers (incl. the a11y-audit synthetic model) unaffected', () => {
+  const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 1, stackSize: 1 });
+  assert.ok(ids(model).includes('tab:duplicate'));
+});
+
+test('hasView:false composes with isInternal:true — both gates omit the same items, redundantly', () => {
+  const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 0, stackSize: 0, hasView: false, isInternal: true });
+  assert.deepEqual(ids(model), ['tab:close', 'tab:close-others']);
+});
+
 test('absent moveTargets defaults to none — every pre-F8 caller is unaffected', () => {
   const model = tabContextModel({ tabId: 't1', isLastTab: false, tabsToRight: 2, stackSize: 3 });
   assert.deepEqual(ids(model), [

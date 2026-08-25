@@ -81,6 +81,7 @@ function createHarness() {
     tabHide(...args) { calls.push(['tabHide', ...args]); },
     tabClose(...args) { calls.push(['tabClose', ...args]); },
     tabDragStarted() {}, tabDragEnded() {}, tabAdoptByDrop: async () => ({ ok: true }), tabTearOff: async () => ({ ok: true }),
+    tabNavigate(payload) { calls.push(['tabNavigate', payload]); },
     findOverlayOpen() {}, isDevtoolsOpen: async () => false,
     onAdoptTab(fn) { callbacks.adopt = fn; },
     onTabMovedAway(fn) { callbacks.movedAway = fn; },
@@ -91,11 +92,19 @@ function createHarness() {
   const jar = { id: 'persist', name: 'Default', color: '#123456', partition: 'persist:default' };
   const jarsClient = { containers: [jar], defaultId: jar.id, makeBurner: () => ({ id: 'burner', name: 'Burner', color: '#222222', partition: 'temp', burner: true }) };
   const noOp = () => {};
+  // M16 F2 Leg 1/2: mutable boxes so tests can flip the resolved home page /
+  // search engine mid-test without reconstructing the controller
+  // (currentHomePage/currentSearchEngine are destructured once at
+  // construction; the FUNCTION reference stays the same, only the value it
+  // reads changes).
+  let homePageValue = 'https://home.example/';
+  let searchEngineValue = 'google';
   const deps = {
     window, document, requestAnimationFrame: (fn) => { fn(); return 1; }, ResizeObserver: FakeResizeObserver,
     ctx, els, tabs, jarsClient,
     blankPrivacy: () => ({ net: null, fp: {}, permissions: [], cookies: null }),
-    escapeHtml: String, openTabContextMenu: noOp, currentHomePage: () => 'https://home.example/',
+    escapeHtml: String, openTabContextMenu: noOp, currentHomePage: () => homePageValue,
+    currentSearchEngine: () => searchEngineValue, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule
     isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault)$/.test(url),
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
     resolveNewTabContainer: (containers, defaultId) => containers.find((item) => item.id === defaultId) || null,
@@ -106,9 +115,17 @@ function createHarness() {
     // M15 F2 Leg 3 (DD7 table 3/5, 4/5): the two activation-class bar-render
     // trigger sites — tracked (not a no-op) so the tests below can pin that
     // both actually call it.
-    refreshBookmarksSurfaces: (tab) => calls.push(['refreshBookmarksSurfaces', tab && tab.id])
+    refreshBookmarksSurfaces: (tab) => calls.push(['refreshBookmarksSurfaces', tab && tab.id]),
+    // M16 F2 Leg 1 (DD1/DD7): the welcome-panel toggle — tracked so tests can
+    // pin that activateTab/onViewCreated drive it correctly.
+    showWelcomePanel: (tab) => calls.push(['showWelcomePanel', tab && tab.id]),
+    hideWelcomePanel: () => calls.push(['hideWelcomePanel'])
   };
-  return { deps, tabs, ctx, els, callbacks, calls, jar };
+  return {
+    deps, tabs, ctx, els, callbacks, calls, jar,
+    setHomePage: (v) => { homePageValue = v; },
+    setSearchEngine: (v) => { searchEngineValue = v; }
+  };
 }
 
 async function loadController(harness) {
@@ -200,4 +217,193 @@ test('cross-window adopt and moved-away reuse the strip authority without create
   assert.equal(controller.findTabByWcId(777), null);
   assert.equal(controller.activeTab(), first);
   assert.equal(h.calls.filter(([name]) => name === 'tabClose').length, closesBefore);
+});
+
+// ---------------------------------------------------------------------------
+// M16 F2 Leg 1 (DD1/DD2/DD4): the viewless welcome record, its attach
+// primitive, and the openNewTab resolver.
+// ---------------------------------------------------------------------------
+
+test('openWelcomeTab builds a viewless record with no tabCreate IPC, the right jar, reasons, and strip title', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  await settle();
+  assert.equal(tab.wcId, null);
+  assert.equal(tab.container, h.jar);
+  assert.ok(tab.welcome.reasons.has('home'));
+  assert.equal(tab.welcome.pendingQuery, null);
+  assert.equal(tab.title, 'Welcome to Goldfinch');
+  assert.equal(tab.btn.querySelector('.tab-title').textContent, 'Welcome to Goldfinch');
+  assert.equal(h.calls.filter(([name]) => name === 'tabCreate').length, 0);
+  assert.equal(controller.activeTab(), tab);
+  // Welcome-panel toggle fires on the self-activation this constructor runs.
+  assert.ok(h.calls.some(([name, id]) => name === 'showWelcomePanel' && id === tab.id));
+});
+
+test('the welcome panel hides when switching to an ordinary tab and re-shows when switching back', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const welcome = controller.openWelcomeTab({ reasons: ['home'] });
+  const web = controller.createTab('https://example.test/');
+  await settle();
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+  assert.equal(controller.activeTab(), web);
+  h.calls.length = 0;
+  controller.activateTab(welcome.id);
+  assert.ok(h.calls.some(([name, id]) => name === 'showWelcomePanel' && id === welcome.id));
+  h.calls.length = 0;
+  controller.activateTab(web.id);
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+});
+
+test('openWelcomeTab resolves a burner jar when the resolver yields none', async () => {
+  const h = createHarness();
+  h.deps.resolveNewTabContainer = () => null; // force the makeBurner() fallback
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  assert.equal(tab.container.burner, true);
+});
+
+test('attachView sends exactly one tabCreate with the record\'s partition, clears welcome, and runs onViewCreated', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  h.calls.length = 0;
+  controller.attachView(tab, 'https://example.test/');
+  // Synchronous: welcome cleared and the panel hidden BEFORE tabCreate resolves.
+  assert.equal(tab.welcome, null);
+  assert.ok(h.calls.some(([name]) => name === 'hideWelcomePanel'));
+  await settle();
+  assert.equal(h.calls.filter(([name]) => name === 'tabCreate').length, 1);
+  const [, payload] = h.calls.find(([name]) => name === 'tabCreate');
+  assert.equal(payload.partition, tab.container.partition);
+  assert.equal(payload.trusted, false);
+  assert.equal(tab.wcId, 100);
+  // The record kept its id and strip position (still the only tab).
+  assert.deepEqual(controller.orderedTabIds(), [tab.id]);
+});
+
+test('attachView refuses an unsafe URL and leaves the record untouched (address bar keeps the text)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  controller.attachView(tab, 'javascript:alert(1)');
+  assert.notEqual(tab.welcome, null);
+  assert.equal(tab.wcId, null);
+  assert.equal(h.calls.filter(([name]) => name === 'tabCreate').length, 0);
+});
+
+test('attachView racing a second navigate queues only the latest URL and applies it once the first attach resolves', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  controller.attachView(tab, 'https://first.test/');
+  controller.attachView(tab, 'https://second.test/'); // races the in-flight attach
+  controller.attachView(tab, 'https://third.test/'); // only the latest survives
+  await settle();
+  assert.equal(h.calls.filter(([name]) => name === 'tabCreate').length, 1);
+  const navCalls = h.calls.filter(([name]) => name === 'tabNavigate');
+  assert.equal(navCalls.length, 1);
+  assert.deepEqual(navCalls[0][1], { wcId: tab.wcId, verb: 'loadURL', args: ['https://third.test/'] });
+});
+
+test('openNewTab routes an unset home page to a welcome tab and a set one to createTab', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  h.setHomePage(null);
+  const welcome = controller.openNewTab();
+  assert.ok(welcome.welcome);
+  assert.equal(welcome.welcome.reasons.has('home'), true);
+
+  h.setHomePage('https://home.example/');
+  const web = controller.openNewTab();
+  await settle();
+  assert.equal(web.welcome, undefined);
+  assert.ok(h.calls.some(([name, payload]) => name === 'tabCreate' && payload.url === 'https://home.example/'));
+});
+
+// M16 F2 Leg 2 (DD7): welcomeReasons is pure and unit-pinned directly.
+test('welcomeReasons: home always present, search only when the engine is unset', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  assert.deepEqual(controller.welcomeReasons('https://home.example/', 'google'), ['home']);
+  assert.deepEqual(controller.welcomeReasons(null, 'google'), ['home']);
+  assert.deepEqual(controller.welcomeReasons(null, null), ['home', 'search']);
+  assert.deepEqual(controller.welcomeReasons('https://home.example/', null), ['home', 'search']);
+});
+
+// M16 F2 Leg 2 (DD7): openNewTab opens BOTH blocks when both preferences are
+// unset, and stays a normal tab (regardless of the engine) once the home
+// page is set — the engine is entirely openNewTab's own business only while
+// the home page is unset.
+test('openNewTab opens a welcome tab with {home, search} reasons when both preferences are unset', async () => {
+  const h = createHarness();
+  h.setHomePage(null);
+  h.setSearchEngine(null);
+  const controller = await loadController(h);
+  const welcome = controller.openNewTab();
+  assert.ok(welcome.welcome);
+  assert.deepEqual([...welcome.welcome.reasons].sort(), ['home', 'search']);
+});
+
+test('openNewTab opens a welcome tab with only the {home} reason when the home page is unset but an engine is chosen', async () => {
+  const h = createHarness();
+  h.setHomePage(null);
+  h.setSearchEngine('duckduckgo');
+  const controller = await loadController(h);
+  const welcome = controller.openNewTab();
+  assert.ok(welcome.welcome);
+  assert.deepEqual([...welcome.welcome.reasons], ['home']);
+});
+
+test('openNewTab opens a normal tab when the home page is set, regardless of the engine', async () => {
+  const h = createHarness();
+  h.setHomePage('https://home.example/');
+  h.setSearchEngine(null);
+  const controller = await loadController(h);
+  const web = controller.openNewTab();
+  await settle();
+  assert.equal(web.welcome, undefined);
+  assert.ok(h.calls.some(([name, payload]) => name === 'tabCreate' && payload.url === 'https://home.example/'));
+});
+
+test('applyToolbarAffordances: the toolbar buttons are disabled before wcId arrives and re-enabled once it does (positive control)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://example.test/');
+  // activateTab ran synchronously with wcId still null — buttons must be disabled.
+  assert.equal(h.els.toggleMedia.disabled, true);
+  assert.equal(h.els.togglePrivacy.disabled, true);
+  assert.equal(h.els.toggleDevtools.disabled, true);
+  await settle();
+  // wcId has arrived on the still-active tab — onViewCreated re-runs the affordance check.
+  assert.equal(tab.wcId, 100);
+  assert.equal(h.els.toggleMedia.disabled, false);
+  assert.equal(h.els.togglePrivacy.disabled, false);
+  assert.equal(h.els.toggleDevtools.disabled, false);
+});
+
+test('a welcome record shows no dead controls: dragstart and requestTearOff both refuse it', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  const dragStartFn = tab.btn.listeners.get('dragstart');
+  let prevented = false;
+  dragStartFn({ dataTransfer: { setData() {}, effectAllowed: null }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
+  assert.equal(prevented, true, 'dragstart on a viewless record must preventDefault (refused)');
+  assert.equal(h.calls.filter(([name]) => name === 'tabTearOff').length, 0, 'no tear-off IPC was ever sent for it');
+});
+
+test('closeTab on a welcome record sends no tabClose and backfills via openNewTab when it was the last tab', async () => {
+  const h = createHarness();
+  h.setHomePage(null); // backfill lands on another welcome tab
+  const controller = await loadController(h);
+  const tab = controller.openWelcomeTab({ reasons: ['home'] });
+  h.calls.length = 0;
+  controller.closeTab(tab.id);
+  assert.equal(h.calls.filter(([name]) => name === 'tabClose').length, 0);
+  // Never left the window with zero tabs — the backfill is itself a welcome tab.
+  assert.equal(controller.orderedTabIds().length, 1);
+  assert.ok(controller.activeTab().welcome);
 });

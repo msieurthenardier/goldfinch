@@ -53,14 +53,17 @@
 //   { type: 'separator' }         — role="separator", non-focusable, skipped by roving
 
 /**
- * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number, isInternal?: boolean, moveTargets?: Array<{ windowId: number, label: string }> }} params
+ * @param {{ tabId?: string, isLastTab: boolean, tabsToRight: number, stackSize: number, isInternal?: boolean, hasView?: boolean, moveTargets?: Array<{ windowId: number, label: string }> }} params
  *   moveTargets — the OTHER open windows (M09 F8 DD8), each already captioned
  *   main-side from its active tab's title. This module stays PURE and
  *   Electron-free: it never reaches for a window list, it renders the one it is
  *   handed, so its item count is driven entirely by the caller's window count.
+ *   hasView (M16 F2 Leg 1, DD7/DD8) — a viewless welcome record has nothing
+ *   to duplicate and cannot move (DD8); defaults `true` so every pre-Leg-1
+ *   caller (including the a11y-audit synthetic model) is unaffected.
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>}
  */
-export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false, moveTargets = [] }) {
+export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal = false, hasView = true, moveTargets = [] }) {
   /** @type {Array<{ type: 'item', id: string, label: string } | { type: 'separator' }>} */
   const model = [];
   let needSep = false;
@@ -81,23 +84,27 @@ export function tabContextModel({ isLastTab, tabsToRight, stackSize, isInternal 
   if (!isLastTab) item('tab:close-others', 'Close other tabs');
   if (tabsToRight > 0) item('tab:close-right', 'Close tabs to the right');
 
-  // --- duplicate (always) + move-to-new-window (M09 F6 DD5) + move-to-window:*
-  // (M09 F8 DD8; same section — Chrome adjacency). Both are omitted for internal
-  // tabs (design review M4). move-new-window is ALSO omitted at isLastTab
-  // (sole-tab move to a new window = no-op swap); move-window:* is NOT (M09 F10
-  // L3 — a sole tab may consolidate into an existing window, source then closes). ---
-  sep();
-  item('tab:duplicate', 'Duplicate');
-  if (!isInternal) {
-    // move-new-window stays omitted for a SOLE tab (no-op window swap; M09 F6
-    // DD5). move-window:* is NOT — a sole tab can now consolidate into another
-    // EXISTING window and the emptied source closes (M09 F10 L3), so its gate
-    // drops the isLastTab condition and rides `!isInternal` alone.
-    if (!isLastTab) item('tab:move-new-window', 'Move to new window');
-    // One flat item per OTHER window (M09 F8 DD8) — same section as the
-    // new-window move (Chrome adjacency, the F6 precedent above).
-    for (const t of moveTargets || []) {
-      item(`tab:move-window:${t.windowId}`, `Move to window "${t.label}"`);
+  // --- duplicate (always, when hasView) + move-to-new-window (M09 F6 DD5) +
+  // move-to-window:* (M09 F8 DD8; same section — Chrome adjacency). All three
+  // are omitted for internal tabs (design review M4) AND for a viewless
+  // welcome record (M16 F2 Leg 1, DD7/DD8 — nothing to duplicate, cannot
+  // move). move-new-window is ALSO omitted at isLastTab (sole-tab move to a
+  // new window = no-op swap); move-window:* is NOT (M09 F10 L3 — a sole tab
+  // may consolidate into an existing window, source then closes). ---
+  if (hasView) {
+    sep();
+    item('tab:duplicate', 'Duplicate');
+    if (!isInternal) {
+      // move-new-window stays omitted for a SOLE tab (no-op window swap; M09 F6
+      // DD5). move-window:* is NOT — a sole tab can now consolidate into another
+      // EXISTING window and the emptied source closes (M09 F10 L3), so its gate
+      // drops the isLastTab condition and rides `!isInternal` alone.
+      if (!isLastTab) item('tab:move-new-window', 'Move to new window');
+      // One flat item per OTHER window (M09 F8 DD8) — same section as the
+      // new-window move (Chrome adjacency, the F6 precedent above).
+      for (const t of moveTargets || []) {
+        item(`tab:move-window:${t.windowId}`, `Move to window "${t.label}"`);
+      }
     }
   }
 

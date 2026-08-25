@@ -1,10 +1,10 @@
 # Squawk 0006: `search-engine-upgrade` step 2 asserts a new-tab premise that squawk 0005 already disproves
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-08-24
-**Completed**: —
+**Completed**: 2026-08-25
 
 ## Report
 
@@ -18,13 +18,17 @@
 - Flight artifact DD4 (`missions/16-search-and-startup-choice/flights/01-search-engine-preference/flight.md`) — the corrected text documenting the same gap, dated 2026-08-11, the spec's authoring date.
 
 ## Corrective Action
-*(written at completion)*
+
+No re-authoring. Flight 2 leg 1 fixed the underlying defect (squawk 0005), which made the row true as written — DD5 of the flight predicted this and the FD chose a re-run over a rewrite so the spec keeps asserting the user-facing behavior ("new-tab behavior unchanged") rather than a steady-state workaround.
+
 
 ## Verification
 Re-run `/behavior-test search-engine-upgrade` on a fresh fixture: the re-authored row passes on the Flight 1 build without relying on squawk 0005 being fixed.
 
 ## Sign-Off
-*(written at completion)*
-**Reviewer**:
-**Verdict**:
-**Commit**:
+
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementers' reasoning) — Mission 16 Flight 2 flight-end review, one round, 2026-08-25
+**Verdict**: confirmed
+**Commit**: `flight/02: The Welcome Surface — viewless welcome tab, search handoff, unset-by-default` on `flight/02-welcome-surface` (the flight-end commit; PR number recorded in the flight debrief)
+
+Reviewer independently ran the suite (3763/3763, ~3.3 s), typecheck and lint clean, and traced the corrective action against the diff. Closed without re-authoring: `search-engine-upgrade` re-run 2026-08-25 passed 5/5 with step 2 as written (was 4/5) once squawk 0005 was fixed — the row's premise is true on the Flight 2 build.

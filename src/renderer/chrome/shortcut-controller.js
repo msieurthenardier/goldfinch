@@ -2,7 +2,7 @@
 export function createShortcutController(deps) {
   const {
     window, document, ctx, els, activeTab, isInternalTab, isWebTab,
-    openFind, createTab, closeTab, jarsClient, announceTabStatus,
+    openFind, createTab, openNewTab, closeTab, jarsClient, announceTabStatus,
     togglePanel, togglePrivacy, openDownloads, orderedTabIds, activateTab,
     keydownToAction, handleBookmarkStarActivate
   } = deps;
@@ -52,7 +52,7 @@ export function createShortcutController(deps) {
         return true;
       }
       case 'new-tab':
-        createTab();
+        openNewTab(); // M16 F2 Leg 1 (DD4): homePage ?? welcome
         return true;
       case 'close-tab':
         if (ctx.activeTabId) closeTab(ctx.activeTabId);

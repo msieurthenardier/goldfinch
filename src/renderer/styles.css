@@ -828,6 +828,72 @@ a:focus-visible {
   display: none;
 }
 
+/* Welcome surface (M16 F2 Leg 1, DD1/DD7): a CSS child of #webviews (already
+   position:relative with absolutely-inset children — no rect measurement, no
+   resize wiring needed; a welcome tab never has a guest, so nothing composites
+   over it). Presentable and unstyled — Flight 3 owns the visual language. */
+#welcome-surface {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 48px;
+  color: var(--fg);
+  background: var(--bg);
+}
+#welcome-surface.hidden {
+  display: none;
+}
+#welcome-surface h2 {
+  margin: 0 0 16px;
+}
+#welcome-surface .muted {
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+#welcome-home-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 480px;
+}
+#welcome-home-block label {
+  flex-basis: 100%;
+}
+#welcome-home-input {
+  flex: 1;
+  min-width: 200px;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+#welcome-home-status {
+  flex-basis: 100%;
+  margin: 0;
+  min-height: 1em;
+}
+/* Engine block (M16 F2 Leg 2, DD7) — the home block's sibling shape:
+   presentable and unstyled, Flight 3 owns the visual language. */
+#welcome-engine-block {
+  max-width: 480px;
+  margin-top: 24px;
+}
+#welcome-engine-heading {
+  margin: 0 0 12px;
+}
+.welcome-engine-row {
+  margin-bottom: 12px;
+}
+.welcome-engine-row label {
+  margin-left: 6px;
+}
+#welcome-engine-status {
+  margin: 0;
+  min-height: 1em;
+}
+
 /* ---------- Media panel ---------- */
 #media-panel {
   width: var(--panel-w);

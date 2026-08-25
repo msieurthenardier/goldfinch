@@ -118,11 +118,38 @@ export function getSearchEngine(id) {
 }
 
 /**
+ * Length cap for a pending search query (M16 Flight 2 "The Welcome Surface" /
+ * DD3, mission constraint: "length-capped and never evaluated"). Applied at
+ * both capture sites (navigation-controller.js's handoffSearch,
+ * renderer.js's sel:search dispatch) via capPendingQuery below, AND here in
+ * buildSearchUrl as a second, independent enforcement point — a query can
+ * only reach buildSearchUrl through one of those two capture sites today, but
+ * the cap belongs to the builder's own contract, not to the caller's
+ * discipline. Pre-encode: nothing downstream checks URL length, and
+ * encodeURIComponent can expand a non-ASCII query several-fold — this cap
+ * bounds the INPUT text, not the resulting URL's length.
+ */
+export const PENDING_QUERY_MAX = 2048;
+
+/**
+ * Trim and truncate a query to PENDING_QUERY_MAX characters. Used at every
+ * pending-query capture site so the record never holds more than the cap,
+ * and by buildSearchUrl below as a second enforcement point.
+ * @param {string} text
+ * @returns {string}
+ */
+export function capPendingQuery(text) {
+  return text.trim().slice(0, PENDING_QUERY_MAX);
+}
+
+/**
  * Build a search URL for the given engine id and query, substituting the
  * template's ONE `%s` placeholder with an `encodeURIComponent`-escaped query.
- * Never throws: an unknown engine id returns null (mirrors jarDataClassById's
- * lookup-miss shape) rather than surfacing a stored-data problem as a thrown
- * error from a pure builder.
+ * The query is truncated to PENDING_QUERY_MAX before encoding (DD3) — a
+ * second enforcement point beside the capture-site truncation, never trusting
+ * the caller to have already capped it. Never throws: an unknown engine id
+ * returns null (mirrors jarDataClassById's lookup-miss shape) rather than
+ * surfacing a stored-data problem as a thrown error from a pure builder.
  * @param {string} id
  * @param {string} query
  * @returns {string | null}
@@ -130,5 +157,6 @@ export function getSearchEngine(id) {
 export function buildSearchUrl(id, query) {
   const engine = getSearchEngine(id);
   if (!engine) return null;
-  return engine.template.replace('%s', () => encodeURIComponent(query));
+  const capped = query.slice(0, PENDING_QUERY_MAX);
+  return engine.template.replace('%s', () => encodeURIComponent(capped));
 }

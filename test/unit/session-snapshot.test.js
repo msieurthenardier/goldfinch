@@ -151,6 +151,27 @@ test('two windows, one all-burner (dropped) and one with persist tabs → exactl
 
 // --- version + jarId identity -------------------------------------------------
 
+// --- welcome record exclusion (M16 F2 Leg 1, DD9) — structural, not a new rule ---
+
+// A viewless welcome record never calls tab-create, so main's `tabViews` (this
+// module's ONLY input) never gains an entry for it in the first place — there
+// is nothing for buildSessionSnapshot to filter. Pinned here by constructing a
+// tabViews Map with one fewer entry than the renderer's strip would show (the
+// "missing" second tab standing in for the welcome record) and asserting the
+// snapshot simply reflects what tabViews actually holds.
+test('a window whose strip has an extra (welcome) tab absent from tabViews snapshots only the real entries', () => {
+  const win = makeWindow([
+    [1, makeEntry({ partition: 'persist:jar-work', wc: makeWc({ url: 'https://kept.example/' }) })],
+    // wcId 2 would be the welcome tab's slot in the renderer's strip — it has
+    // no tab-create IPC and therefore no tabViews entry at all, unlike every
+    // case above (which all explicitly filter an EXISTING entry).
+  ]);
+  const out = buildSessionSnapshot({ windows: [win], jarsList: JARS });
+  assert.equal(out.windows.length, 1);
+  assert.equal(out.windows[0].tabs.length, 1);
+  assert.equal(out.windows[0].tabs[0].url, 'https://kept.example/');
+});
+
 test('stamps version:1 and emits jarId === jar.id (the resolved id, not the partition string)', () => {
   const win = makeWindow([
     [1, makeEntry({ partition: 'persist:jar-work', wc: makeWc({ url: 'https://a.example/' }) })],

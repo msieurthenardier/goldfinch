@@ -96,7 +96,7 @@ export function createOverlayMenus({ bridge, states, now, onActivated, onClosed 
 /** Internal-page and site-info action bodies shared by overlay menu dispatch. */
 export function createChromePageActions({
   window, tabs, createTab, activateTab, activeTab, isInternalTab,
-  isInternalPageUrl, deriveSiteInfo, currentHomePage
+  isInternalPageUrl, deriveSiteInfo, openNewTab
 }) {
   function openDownloads() {
     createTab('goldfinch://downloads', null, { trusted: true });
@@ -114,8 +114,26 @@ export function createChromePageActions({
     return !!tab && (isInternalTab(tab) || isInternalPageUrl(tab.url));
   }
 
+  // isSettingsUrl (M16 F2 Leg 1, DD10): host-only match, fragment- and
+  // path-blind ON PURPOSE — every path that creates or navigates the Settings
+  // tab sets tab.url to 'goldfinch://settings/#privacy' (this function's own
+  // createTab call below, the reuse branch's loadURL, and in-page hash
+  // navigation), so a fragment-free/exact-match predicate would never match
+  // an existing Settings tab and would create a duplicate tab on every call
+  // (design review, high). Never any other internal tab (Downloads/Jars/
+  // Vault/welcome) — the old `.find(isInternalTab)` predicate would grab any
+  // of those.
+  function isSettingsUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'goldfinch:' && parsed.host === 'settings';
+    } catch {
+      return false;
+    }
+  }
+
   function openSiteSettingsTab() {
-    const existing = [...tabs.values()].find(isInternalTab);
+    const existing = [...tabs.values()].find((t) => isInternalTab(t) && isSettingsUrl(t.url));
     if (existing && existing.wcId != null) {
       window.goldfinch.tabNavigate({ wcId: existing.wcId, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] });
       activateTab(existing.id);
@@ -142,7 +160,7 @@ export function createChromePageActions({
     const name = String(rawName == null ? '' : rawName).trim();
     if (!name) return;
     const container = await window.goldfinch.newContainerCreate(name);
-    if (container) createTab(currentHomePage(), container);
+    if (container) openNewTab(container); // M16 F2 Leg 1 (DD4)
   }
 
   return { openDownloads, openJarsPage, openVaultPage, openSiteSettingsTab, siteInfoModel, createContainerAndOpenTab };

@@ -74,7 +74,12 @@ const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 // openVault*OverlayForAudit entries above are pure relocations, now imported
 // from the new src/renderer/chrome/vault-controller.js and destructured into
 // bare renderer.js consts so this parser's IDENTIFIER_RE still matches them.
-const SEAM_COUNT = 33;
+// M16 F2 Leg 1 (welcome-home-routing, FD ruling): +1 for openNewTab — NOT an
+// a11y-audit-driven identifier (it adds no chrome/sheet state); the FD ruling
+// is that welcome-home-routing's behavior-spec step 5 needs the burner path
+// to run through the same evaluate-reachable entry point the container-menu
+// dispatch already uses, which this closed set otherwise has no seam for.
+const SEAM_COUNT = 34;
 // Renderer line budget: raised from M11's 1200 to absorb Mission 12's password-manager
 // renderer work (the chrome-owned vault sheets + indicator wiring). See the merge of
 // PR #112; renderer.js extraction remains banked architecture debt.

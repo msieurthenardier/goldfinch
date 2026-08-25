@@ -124,16 +124,46 @@ async function copyText(text, messageEl) {
 
   const input = /** @type {HTMLInputElement|null} */ (document.getElementById('home-page-input'));
   const saveBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('home-page-save'));
+  // Clear (M16 F2 Leg 1, DD6): writes homePage:null through the SAME validated
+  // channel as Save — settings-store's validator already accepts null (F1 DD2).
+  const clearBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('home-page-clear'));
   const status = /** @type {HTMLElement|null} */ (document.getElementById('home-page-status'));
 
-  if (!input || !saveBtn || !status) return;
+  if (!input || !saveBtn || !clearBtn || !status) return;
+
+  // Persistent unset hint (M16 F2 Leg 2 acceptance-gate fix), symmetric with
+  // the search-engine block's UNSET_HINT below: rendered whenever homePage is
+  // null, cleared whenever it is set, so the field is never merely empty with
+  // no explanation — on load AND on every external write (Settings acceptance
+  // spec's "each with its hint").
+  const HOME_UNSET_HINT = 'No home page chosen — new tabs will open the welcome page until you set one.';
+
+  /**
+   * Render the input + status hint from a homePage value. Nullish-aware
+   * (M16 F2 Leg 1, DD6 — Mission KI): `value == null` (unset) leaves the
+   * field empty and shows the hint; the old truthy guard left a PRIOR value
+   * stuck on screen instead and showed no hint at all. Called on load and
+   * from the onSettingsChanged broadcast handler below — NOT from the
+   * Save/Clear click handlers, whose own local messages ('Saved', 'Cleared
+   * — …') are meant to overwrite this on the page that clicked (see ordering
+   * note below).
+   * @param {string|null} value
+   */
+  function reflect(value) {
+    input.value = value == null ? '' : value;
+    status.textContent = value == null ? HOME_UNSET_HINT : '';
+  }
 
   // Populate the input with the persisted home page on load.
-  window.goldfinchInternal.settingsGet('homePage').then((v) => {
-    if (v) input.value = v;
-  });
+  window.goldfinchInternal.settingsGet('homePage').then(reflect);
 
   // Save button: write the new home page via the origin-locked bridge.
+  // Ordering note: `internal-settings-set` (register-settings-ipc.js) calls
+  // broadcastSettings() BEFORE its handler returns, so the settings-changed
+  // broadcast below (reflect) always lands at this same page before this
+  // .then() runs — this local 'Saved' message deliberately overwrites the
+  // broadcast-driven hint on the page that clicked; every OTHER open window
+  // only sees the broadcast's reflect() (hint or blank, per DD6 symmetry).
   saveBtn.addEventListener('click', () => {
     window.goldfinchInternal.settingsSet('homePage', input.value)
       .then(() => {
@@ -144,12 +174,27 @@ async function copyText(text, messageEl) {
       });
   });
 
-  // Keep the input in sync when settings change from another surface (e.g. future chrome UI).
+  clearBtn.addEventListener('click', () => {
+    window.goldfinchInternal.settingsSet('homePage', null)
+      .then(() => {
+        input.value = '';
+        status.textContent = 'Cleared — new tabs will open the welcome page until you set one.';
+      })
+      .catch((e) => {
+        status.textContent = 'Not cleared: ' + (e && e.message ? e.message : 'error');
+      });
+  });
+
+  // Keep the input + hint in sync when settings change from another surface
+  // (the welcome surface's Set, another window's Settings page, or this
+  // page's own Save/Clear broadcast echo — see ordering note above).
   // Capture the handle so we can remove this listener on pagehide (DD5: prevents accumulation
   // across reloads — pagehide fires in the OLD document context where handle + wrapper are valid).
+  // Nullish-aware (M16 F2 Leg 1, DD6): `!== undefined` (present in the broadcast, even as
+  // null) rather than truthiness, so a null broadcast clears the field instead of leaving
+  // stale text — the old truthy guard's bug (Mission KI).
   const hSettings = window.goldfinchInternal.onSettingsChanged((all) => {
-    if (!input) return;
-    if (all && all.homePage) input.value = all.homePage;
+    if (all && all.homePage !== undefined) reflect(all.homePage);
   });
   window.addEventListener('pagehide', () => window.goldfinchInternal.offSettingsChanged(hSettings), { once: true });
 })();
@@ -161,7 +206,14 @@ async function copyText(text, messageEl) {
   if (!window.goldfinchInternal) return;
 
   const group = /** @type {HTMLElement|null} */ (document.getElementById('search-engine-options'));
-  if (!group) return;
+  // Clear (M16 F2 Leg 2, DD6): writes searchEngine:null through the SAME
+  // validated channel as a radio pick — settings-store's validator already
+  // accepts null (F1 DD2).
+  const clearBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('search-engine-clear'));
+  const status = /** @type {HTMLElement|null} */ (document.getElementById('search-engine-status'));
+  if (!group || !clearBtn || !status) return;
+
+  const UNSET_HINT = 'No search engine chosen — the welcome page will ask the first time you search.';
 
   // Render one radio per curated engine, entirely from the imported
   // SEARCH_ENGINES table (id/label/description) — no engine data is
@@ -207,7 +259,11 @@ async function copyText(text, messageEl) {
     // same-value guard is needed here (matches house style — see the Edge
     // Cases note in the leg spec).
     input.addEventListener('change', () => {
-      if (input.checked) window.goldfinchInternal.settingsSet('searchEngine', engine.id).catch(() => {});
+      if (input.checked) {
+        window.goldfinchInternal.settingsSet('searchEngine', engine.id)
+          .then(() => applyChecked(engine.id))
+          .catch(() => {});
+      }
     });
   }
 
@@ -216,25 +272,34 @@ async function copyText(text, messageEl) {
    * (including F1's raw-IPC `searchEngine: null` edge case) leaves every
    * radio unchecked — an honest rendering of "unset", not a synthetic "none"
    * option (accepted F1 behavior by design ruling; Flight 2 owns the unset UX).
+   * Also drives the unset hint line (M16 F2 Leg 2, DD6): shown iff `id` is
+   * null, cleared otherwise.
    * @param {string|null} id
    */
   function applyChecked(id) {
     for (const [engineId, radio] of radios) {
       radio.checked = engineId === id;
     }
+    status.textContent = id == null ? UNSET_HINT : '';
   }
+
+  clearBtn.addEventListener('click', () => {
+    window.goldfinchInternal.settingsSet('searchEngine', null)
+      .then(() => applyChecked(null))
+      .catch(() => {});
+  });
 
   // Populate from the persisted setting on load. searchEngine is never
   // `undefined` here (settingsGet resolves an id string or null — DD2), so
   // applyChecked runs unconditionally.
   window.goldfinchInternal.settingsGet('searchEngine').then(applyChecked).catch(() => {});
 
-  // Re-sync when another surface (another window's Settings page, a future
-  // clear affordance) changes the setting. Guard is `!== undefined`, never
-  // truthiness — null is a meaningful future value. Capture the handle so we
-  // can remove this listener on pagehide (DD5: prevents accumulation across
-  // reloads — pagehide fires in the OLD document context where handle +
-  // wrapper are valid).
+  // Re-sync when another surface (another window's Settings page, the Clear
+  // button above, or this radio group's own change) changes the setting.
+  // Guard is `!== undefined`, never truthiness — null is a meaningful value.
+  // Capture the handle so we can remove this listener on pagehide (DD5:
+  // prevents accumulation across reloads — pagehide fires in the OLD document
+  // context where handle + wrapper are valid).
   const hSearchEngine = window.goldfinchInternal.onSettingsChanged((all) => {
     if (all && all.searchEngine !== undefined) applyChecked(all.searchEngine);
   });
