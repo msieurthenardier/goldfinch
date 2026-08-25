@@ -96,7 +96,7 @@ function createHarness() {
     ctx, els, tabs, jarsClient,
     blankPrivacy: () => ({ net: null, fp: {}, permissions: [], cookies: null }),
     escapeHtml: String, openTabContextMenu: noOp, currentHomePage: () => 'https://home.example/',
-    isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars)$/.test(url),
+    isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault)$/.test(url),
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
     resolveNewTabContainer: (containers, defaultId) => containers.find((item) => item.id === defaultId) || null,
     classifyDragPoint: () => ({ zone: 'reorder', index: 0 }),
@@ -144,6 +144,25 @@ test('safe and trusted create paths preserve URL gates, jar routing, strip ARIA,
     h.calls.filter(([name]) => name === 'refreshBookmarksSurfaces').map(([, id]) => id)
   );
   assert.deepEqual(bookmarksSurfacesIds, new Set([web.id, internal.id]));
+});
+
+test('trusted internal jar name is derived per host, including vault (squawk 0009)', async () => {
+  const h = createHarness();
+  const controller = await loadController(h);
+
+  const settings = controller.createTab('goldfinch://settings', null, { trusted: true });
+  const downloads = controller.createTab('goldfinch://downloads', null, { trusted: true });
+  const jars = controller.createTab('goldfinch://jars', null, { trusted: true });
+  const vault = controller.createTab('goldfinch://vault', null, { trusted: true });
+  await settle();
+
+  assert.equal(settings.container.name, 'Settings');
+  assert.equal(downloads.container.name, 'Downloads');
+  assert.equal(jars.container.name, 'Cookie Jars');
+  // Matches the label the Vault page and kebab menu item both use ("Secrets" —
+  // src/renderer/pages/vault.html's <title>/<h1> and overlay-menus.js's kebab
+  // entry), not the host name.
+  assert.equal(vault.container.name, 'Secrets');
 });
 
 test('ordered movement, close fallback, and geometry use the live strip and shared context', async () => {
