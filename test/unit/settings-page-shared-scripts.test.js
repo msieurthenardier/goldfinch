@@ -173,3 +173,31 @@ test('no engine id/label/description is duplicated in settings.html\'s search-en
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// M16 F3 Leg 1 (DD3): both Clear buttons carry the secondary button variant,
+// and settings.css defines the variant rule and #home-page-clear's gap.
+// Grep-shape per this file's house convention — no DOM harness for internal
+// pages.
+// ---------------------------------------------------------------------------
+test('both Clear buttons carry settings-btn settings-btn--secondary, and settings.css defines the variant + margin (M16 F3 Leg 1, DD3)', () => {
+  const html = fs.readFileSync(SETTINGS_HTML, 'utf8');
+  const settingsCss = fs.readFileSync(path.join(__dirname, '../../src/renderer/pages/settings.css'), 'utf8');
+
+  for (const id of ['home-page-clear', 'search-engine-clear']) {
+    const tagMatch = new RegExp(`<button[^>]*id="${id}"[^>]*>`).exec(html);
+    assert.ok(tagMatch, `settings.html must have a button with id="${id}"`);
+    assert.ok(/class="[^"]*\bsettings-btn\b[^"]*\bsettings-btn--secondary\b[^"]*"/.test(tagMatch[0]) ||
+      /class="[^"]*\bsettings-btn--secondary\b[^"]*\bsettings-btn\b[^"]*"/.test(tagMatch[0]),
+      `#${id} must carry both "settings-btn" and "settings-btn--secondary"`);
+  }
+
+  assert.ok(
+    /\.settings-btn--secondary\s*{/.test(settingsCss),
+    'settings.css must define .settings-btn--secondary'
+  );
+  assert.ok(
+    /#home-page-clear\s*{[^}]*margin-left:\s*8px/.test(settingsCss),
+    "settings.css must give #home-page-clear an explicit margin-left (Save's gap is Save's own rule, not .settings-btn's)"
+  );
+});

@@ -381,6 +381,12 @@ main section p {
   outline-offset: 2px;
 }
 
+/* Clear (M16 F3 Leg 1, DD3): the gap beside Save is Save's OWN margin-left
+   rule above, not `.settings-btn`'s — Clear needs its own explicit gap. */
+#home-page-clear {
+  margin-left: 8px;
+}
+
 /* ── Appearance — pin-icon toggle rows ───────────────────────────────────────── */
 
 /* "Pinned Icons" subheading (HAT fix, Leg 5): scoped to #appearance so it
@@ -528,6 +534,19 @@ main section p {
 .settings-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Secondary variant (M16 F3 Leg 1, DD3): Clear is the reversible, lesser
+   action beside a primary Save/Set — same shape (radius/padding/font/focus
+   ring) as .settings-btn, transparent fill instead of accent. */
+.settings-btn--secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
+.settings-btn--secondary:not(:disabled):hover {
+  background: var(--bg-2);
 }
 
 /* Muted helper text (enabled-note, port-note). */

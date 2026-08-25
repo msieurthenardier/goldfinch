@@ -3,7 +3,7 @@
 **Slug**: `welcome-first-launch`
 **Status**: active
 **Created**: 2026-08-24
-**Last Run**: 2026-08-25 — pass (7/7; checkpoint 3 on a rerun after a gate fix; run log `welcome-first-launch/runs/2026-08-25-04-22-08.md`)
+**Last Run**: 2026-08-25 — pass (7/7; re-run at M16 F3 leg 1 on the restyled build; run log `welcome-first-launch/runs/2026-08-25-20-20-29.md`)
 
 ## Intent
 

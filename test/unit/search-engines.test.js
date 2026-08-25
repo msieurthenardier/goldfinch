@@ -241,6 +241,59 @@ test('no engine label/description is duplicated in welcome-controller.js (DD7: s
 });
 
 // ---------------------------------------------------------------------------
+// M16 F3 Leg 1 (DD2): the welcome surface's DOM contract is frozen — every id,
+// class hook, and `.hidden` toggle the Flight 2 behavior specs and this file's
+// own tests read must survive the restyle. Grep-shape per the house
+// convention (no DOM harness for the chrome). This test must go RED if any one
+// id assignment is removed from welcome-controller.js (hand-neuter check
+// recorded in the flight log).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: the DOM contract (ids, radio prefix, row class, radiogroup role) survives the restyle (M16 F3 Leg 1, DD2)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const CONTRACT_IDS = [
+    'welcome-heading',
+    'welcome-home-block',
+    'welcome-home-input',
+    'welcome-home-set',
+    'welcome-home-status',
+    'welcome-burner-note',
+    'welcome-engine-block',
+    'welcome-engine-heading',
+    'welcome-engine-options',
+    'welcome-engine-status'
+  ];
+  for (const id of CONTRACT_IDS) {
+    const re = new RegExp("\\.id = '" + id + "'");
+    assert.ok(re.test(src), `welcome-controller.js must still assign the DOM-contract id "${id}" (M16 F3 Leg 1, DD2)`);
+  }
+
+  assert.ok(
+    /radio\.id = 'welcome-engine-' \+/.test(src),
+    'the per-engine radio id prefix ("welcome-engine-" + engine.id) must be unchanged'
+  );
+  assert.ok(
+    /row\.className = 'welcome-engine-row'/.test(src),
+    'the per-engine row must still carry the "welcome-engine-row" class the specs and CSS key off'
+  );
+  assert.ok(
+    /'role', 'radiogroup'/.test(src) && /'aria-labelledby', 'welcome-engine-heading'/.test(src),
+    '#welcome-engine-options must carry role="radiogroup" and aria-labelledby="welcome-engine-heading"'
+  );
+
+  const renderMatch = src.match(/function render\(tab\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab) { ... }');
+  const toggles = renderMatch[1].match(/classList\.toggle\('hidden'/g) || [];
+  assert.ok(
+    toggles.length >= 3,
+    'render(tab) must toggle `hidden` on at least the home block, the burner note, and the engine block ' +
+      `(found ${toggles.length})`
+  );
+});
+
+// ---------------------------------------------------------------------------
 // M16 F2 Leg 2 acceptance-gate fix: welcome-controller.js's show(tab) must
 // settle a record whose reasons are now all set (a background welcome
 // record can have its last preference filled in from elsewhere while it is

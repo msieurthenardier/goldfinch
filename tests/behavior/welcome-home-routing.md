@@ -3,7 +3,7 @@
 **Slug**: `welcome-home-routing`
 **Status**: active
 **Created**: 2026-08-24
-**Last Run**: 2026-08-25 — pass (10/10; run log `welcome-home-routing/runs/2026-08-25-02-45-35.md`)
+**Last Run**: 2026-08-25 — pass (10/10; re-run at M16 F3 leg 1 on the restyled build; run log `welcome-home-routing/runs/2026-08-25-20-38-40.md`)
 
 ## Intent
 

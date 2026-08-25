@@ -20,15 +20,51 @@ export function createWelcomeController(deps) {
   const root = els.welcomeSurface;
   root.textContent = '';
 
+  // Layout column (M16 F3 Leg 1, DD1/DD6): a centered column wrapping the
+  // brand header, the notice, and the two cards — additive wrapper DOM only,
+  // no id/class the specs or structural tests read is touched below.
+  const column = document.createElement('div');
+  column.className = 'welcome-column';
+  root.appendChild(column);
+
+  // Brand header (M16 F3 Leg 1, DD1): mark + the existing #welcome-heading +
+  // a new tagline. The heading keeps its id — #welcome-surface's
+  // aria-labelledby target — it is only moved, never renamed.
+  const brandHeader = document.createElement('header');
+  brandHeader.className = 'welcome-brand';
+  column.appendChild(brandHeader);
+
+  const mark = /** @type {HTMLImageElement} */ (document.createElement('img'));
+  mark.className = 'welcome-mark';
+  mark.src = 'assets/goldfinch_color.png';
+  mark.alt = '';
+  brandHeader.appendChild(mark);
+
   const heading = document.createElement('h2');
   heading.id = 'welcome-heading';
   heading.textContent = 'Welcome to Goldfinch';
-  root.appendChild(heading);
+  brandHeader.appendChild(heading);
+
+  const tagline = document.createElement('p');
+  tagline.className = 'welcome-tagline';
+  tagline.textContent = "Set up the two things Goldfinch won't guess for you.";
+  brandHeader.appendChild(tagline);
+
+  // Burner note (DD7, restyled M16 F3 Leg 1 DD4): "This choice is saved for
+  // all of Goldfinch." Moved directly under the brand header so it is read
+  // before either choice; id, text, and the `hidden` toggle target
+  // (`burnerNote`, below) are unchanged — only its class and DOM position move.
+  const burnerNote = document.createElement('p');
+  burnerNote.id = 'welcome-burner-note';
+  burnerNote.className = 'welcome-notice hidden';
+  burnerNote.textContent = 'This choice is saved for all of Goldfinch.';
+  column.appendChild(burnerNote);
 
   // Home-page block (DD7): text input + Set + the "just type an address"
   // hint. Hidden entirely unless the record's reasons include 'home'.
   const homeBlock = document.createElement('div');
   homeBlock.id = 'welcome-home-block';
+  homeBlock.classList.add('welcome-card');
 
   const homeLabel = document.createElement('label');
   homeLabel.htmlFor = 'welcome-home-input';
@@ -58,14 +94,7 @@ export function createWelcomeController(deps) {
   homeStatus.setAttribute('role', 'status');
   homeBlock.appendChild(homeStatus);
 
-  root.appendChild(homeBlock);
-
-  // Burner note (DD7): "This choice is saved for all of Goldfinch."
-  const burnerNote = document.createElement('p');
-  burnerNote.id = 'welcome-burner-note';
-  burnerNote.className = 'muted hidden';
-  burnerNote.textContent = 'This choice is saved for all of Goldfinch.';
-  root.appendChild(burnerNote);
+  column.appendChild(homeBlock);
 
   // Engine block (M16 F2 Leg 2, DD7): heading + the eight-engine radio list,
   // built ONCE from SEARCH_ENGINES (never rebuilt on show/broadcast — the
@@ -74,6 +103,7 @@ export function createWelcomeController(deps) {
   // reasons include 'search' AND no engine is set yet (unsetReasons below).
   const engineBlock = document.createElement('div');
   engineBlock.id = 'welcome-engine-block';
+  engineBlock.classList.add('welcome-card');
 
   const engineHeading = document.createElement('h3');
   engineHeading.id = 'welcome-engine-heading';
@@ -81,6 +111,9 @@ export function createWelcomeController(deps) {
 
   const engineOptions = document.createElement('div');
   engineOptions.id = 'welcome-engine-options';
+  engineOptions.className = 'welcome-engine-grid';
+  engineOptions.setAttribute('role', 'radiogroup');
+  engineOptions.setAttribute('aria-labelledby', 'welcome-engine-heading');
   engineBlock.appendChild(engineOptions);
 
   const engineStatus = document.createElement('p');
@@ -88,7 +121,7 @@ export function createWelcomeController(deps) {
   engineStatus.setAttribute('role', 'status');
   engineBlock.appendChild(engineStatus);
 
-  root.appendChild(engineBlock);
+  column.appendChild(engineBlock);
 
   for (const engine of SEARCH_ENGINES) {
     const row = document.createElement('div');

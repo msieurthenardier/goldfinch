@@ -1,9 +1,9 @@
 # Behavior Test: Welcome Home First
 
 **Slug**: `welcome-home-first`
-**Status**: draft
+**Status**: active
 **Created**: 2026-08-25
-**Last Run**: never
+**Last Run**: 2026-08-25 — pass (5/5; first run, on the M16 F3 leg-1 build; run log `welcome-home-first/runs/2026-08-25-20-08-57.md`)
 
 ## Intent
 
@@ -27,7 +27,7 @@ Pins the one first-launch order Flight 2 reasoned about but never observed: on a
 | 1 | Observe the freshly launched window. | Exactly one tab, titled "Welcome to Goldfinch", showing the welcome surface with **both** the home page block and the search engine block; the address bar is empty and writable; no committed URL. |
 | 2 | In the welcome surface's home page block type `https://example.com` and click **Set** — while the engine block is still showing. | That **same** tab navigates to `https://example.com/` (tab count unchanged, same strip position); the welcome surface is gone from it. `[mixed-frame]` The settings row reads `homePage: "https://example.com"`, `searchEngine: null` — the engine choice was not made for the user. |
 | 3 | Press Ctrl+T. | A **plain** tab opens on `https://example.com/` — no welcome surface, no engine block: new tabs do not re-offer the abandoned engine choice. `[mixed-frame]` The settings row still reads `searchEngine: null`. |
-| 4 | In that tab type `zephyr quartz order` in the address bar and press Enter. | The `example.com` tab is untouched; a **new** welcome tab opens beside it and is the active tab — strip count +1 **read from the chrome DOM strip** (the welcome tab has no wcId yet and does not appear in `enumerateTabs`) — showing the search engine block only, headed with the pending query (*Where should we search for "zephyr quartz order"?*); no provider URL is committed anywhere — separately diff `enumerateTabs` before and after: no new entry, no provider host. |
+| 4 | In that tab type `zephyr quartz order` in the address bar and press Enter. | `[mixed-frame]` The `example.com` tab is untouched; a **new** welcome tab opens beside it and is the active tab — strip count +1 **read from the chrome DOM strip** (the welcome tab has no wcId yet and does not appear in `enumerateTabs`) — showing the search engine block only, headed with the pending query (*Where should we search for "zephyr quartz order"?*); no provider URL is committed anywhere — separately diff `enumerateTabs` before and after: no new entry, no provider host. |
 | 5 | In that welcome tab choose **DuckDuckGo**. | That **same** welcome tab navigates to a `duckduckgo.com` URL containing the encoded query (tab count unchanged) — the abandoned choice, made later, runs the search that prompted it. `[mixed-frame]` The settings row reads `homePage: "https://example.com"`, `searchEngine: "duckduckgo"`. |
 
 ## Out of Scope
