@@ -4,11 +4,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-// M16 F1 Leg 2: the real shared table/builder (require(esm), same synchronous
-// pattern settings-store.test.js and search-engines.test.js already use) —
-// toUrl's search fallback is exercised against the actual buildSearchUrl, not
-// a hand-rolled stand-in.
-const { buildSearchUrl } = require('../../src/shared/search-engines');
+// M16 F1 Leg 2 / F2 Leg 2: the real shared table/builder (require(esm), same
+// synchronous pattern settings-store.test.js and search-engines.test.js
+// already use) — toUrl's search fallback and the pending-query cap are
+// exercised against the actual functions, not hand-rolled stand-ins.
+const { buildSearchUrl, capPendingQuery } = require('../../src/shared/search-engines');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js')).href;
 
@@ -77,6 +77,14 @@ function harness() {
     isInternalTab: (tab) => !!tab?.internal,
     isWebTab: (tab) => !!tab && !tab.internal,
     createTab: (url) => state.calls.push(['create', url]),
+    // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2).
+    openNewTab: () => state.calls.push(['openNewTab']),
+    attachView: (tab, url) => state.calls.push(['attachView', tab && tab.id, url]),
+    // M16 F2 Leg 2 (DD3): the search handoff's two outcomes — a new welcome
+    // tab beside the page, or an in-place re-render of the active one.
+    openWelcomeTab: (opts) => state.calls.push(['openWelcomeTab', opts]),
+    refreshWelcome: (tab) => state.calls.push(['refreshWelcome', tab && tab.id]),
+    capPendingQuery,
     openDownloads: () => state.calls.push(['downloads']),
     // M15 F2 Leg 3: jar-scoped — findByUrl/ensureJar both take jarId first.
     // The fixture ignores jarId for findByUrl (single shared `bookmarks` set
@@ -124,13 +132,15 @@ async function create(h) {
   return createNavigationController(h.deps);
 }
 
+// NARROWED (M16 F2 L2 / DD3 — not a rename, the name/meaning are unchanged):
+// this test used to also pin `toUrl('hello world')` falling back to Google
+// via the removed engine fallback — that assertion moved to the actually-
+// renamed 'toUrl builds the search URL...' test below; internal/web
+// navigation coverage here is untouched.
 test('URL conversion and navigation preserve internal-tab refusal and web-tab capture', async () => {
   const h = harness();
   const controller = await create(h);
   assert.equal(controller.toUrl('example.com/path'), 'https://example.com/path');
-  // Default (no engine set): the coalescing site (`currentSearchEngine() || 'google'`)
-  // falls back to Google — byte-identical to the pre-Leg-2 hardcoded assertion.
-  assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
 
   h.state.active = { id: 'internal', internal: true, wcId: 1 };
   controller.navigate('example.com');
@@ -140,13 +150,48 @@ test('URL conversion and navigation preserve internal-tab refusal and web-tab ca
   assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'loadURL', args: ['https://example.test/'] }]);
 });
 
-// M16 F1 Leg 2 (DD4): toUrl's search fallback now builds from the live
-// searchEngineCache (currentSearchEngine()) via the shared buildSearchUrl,
-// replacing the old hardcoded Google line — covers both a non-default engine
-// and the default explicitly (the AC's "both entry points prove out through
-// the one change" — this is the one change; sel:search shares toUrl via
-// renderer.js, which has no seam in this harness — see the flight log).
-test('toUrl builds the search URL from the current search engine, non-default and default', async () => {
+// M16 F2 Leg 1 (DD2): a viewless welcome record's first navigation attaches a
+// view via attachView, whatever the entry point — never the ordinary
+// tabNavigate IPC (there is no wcId to send it to).
+test('navigate on a welcome record calls attachView, not tabNavigate', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.state.active = { id: 'w', wcId: null, welcome: { reasons: new Set(['home']), pendingQuery: null } };
+  controller.navigate('example.com');
+  assert.deepEqual(h.state.calls.pop(), ['attachView', 'w', 'https://example.com']);
+});
+
+// M16 F2 Leg 1 (DD4): the `+` pill routes through the resolver, not a bare createTab().
+test('the + pill calls openNewTab, not createTab', async () => {
+  const h = harness();
+  await create(h);
+  h.els.newTab.listeners.get('click')();
+  assert.deepEqual(h.state.calls.pop(), ['openNewTab']);
+});
+
+// M16 F2 Leg 1 (DD7): both nav buttons disable on a viewless (welcome) tab,
+// exactly as they already do on an internal tab.
+test('updateNavButtons disables Back/Forward when the active tab has no wcId (welcome record)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.state.active = { id: 'w', internal: false, wcId: null };
+  h.els.back.disabled = false;
+  h.els.forward.disabled = false;
+  controller.updateNavButtons();
+  assert.equal(h.els.back.disabled, true);
+  assert.equal(h.els.forward.disabled, true);
+});
+
+// RENAMED (M16 F2 L2 / DD3 — was 'toUrl builds the search URL from the
+// current search engine, non-default and default', whose third case pinned
+// `currentSearchEngine() === null` coalescing to Google): toUrl now returns
+// null for a search with no engine chosen — the removed engine fallback is
+// gone, and a null return routes through navigate()'s handoffSearch instead
+// (covered by the dedicated handoffSearch tests below). The non-null cases
+// (a chosen non-default engine, and the curated 'google' id chosen
+// explicitly) are unchanged — they are ordinary curated-id lookups, not the
+// coalescing site this DD removes.
+test('toUrl builds the search URL from the current search engine when one is chosen; returns null when none is', async () => {
   const h = harness();
   const controller = await create(h);
 
@@ -156,12 +201,67 @@ test('toUrl builds the search URL from the current search engine, non-default an
   h.state.searchEngine = 'google';
   assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
 
-  // Unset (null) coalesces to Google at the toUrl call site, not by mutating
-  // the cache — the edge case the leg spec calls out (structurally unreachable
-  // once searchEngine is always a validated stored value, but toUrl must not
-  // depend on that invariant holding).
+  // M16 F2 Leg 2 (DD3): unset (null) now returns null from toUrl itself —
+  // never a coalesced URL — so navigate() can route it to the welcome
+  // handoff instead of ever resolving a query into a provider nobody chose.
   h.state.searchEngine = null;
-  assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
+  assert.equal(controller.toUrl('hello world'), null);
+});
+
+// ---------------------------------------------------------------------------
+// M16 F2 Leg 2 (DD3): navigate()'s merged body — the empty-input guard, the
+// null-before-attach ordering, and handoffSearch's two outcomes.
+// ---------------------------------------------------------------------------
+
+test('navigate ignores empty or whitespace-only input — no handoff, no navigation, no welcome tab', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.state.active = { id: 'a', internal: false, wcId: 9 };
+  controller.navigate('');
+  controller.navigate('   ');
+  assert.deepEqual(h.state.calls, []);
+});
+
+test('a search with no engine on a WEB tab opens a new welcome record beside it, with the capped query, and leaves the original tab untouched', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.state.searchEngine = null;
+  const tab = { id: 'web', internal: false, wcId: 9, container: { id: 'jar-a' } };
+  h.state.active = tab;
+  controller.navigate('hello world');
+  assert.deepEqual(h.state.calls.pop(), [
+    'openWelcomeTab',
+    { container: tab.container, reasons: ['search'], pendingQuery: 'hello world' }
+  ]);
+  // The original tab is untouched — no tabNavigate, no attachView against it.
+  assert.equal(h.state.calls.some(([name]) => name === 'navigate' || name === 'attachView'), false);
+});
+
+// M16 F2 Leg 2 (DD3): the null-before-attach ordering — attachView(tab, null)
+// would silently drop the query, so a search on an ALREADY-welcome record
+// must add the reason/query in place, never reach attachView.
+test('a search with no engine on an ACTIVE welcome record adds the reason and query in place — never reaches attachView', async () => {
+  const h = harness();
+  const controller = await create(h);
+  h.state.searchEngine = null;
+  const tab = { id: 'w', wcId: null, welcome: { reasons: new Set(['home']), pendingQuery: null } };
+  h.state.active = tab;
+  controller.navigate('hello world');
+  assert.ok(tab.welcome.reasons.has('search'));
+  assert.equal(tab.welcome.pendingQuery, 'hello world');
+  assert.deepEqual(h.state.calls.pop(), ['refreshWelcome', 'w']);
+  assert.equal(h.state.calls.some(([name]) => name === 'attachView' || name === 'openWelcomeTab'), false);
+});
+
+// A URL typed on a welcome record still attaches (DD3's stated invariant —
+// the null-before-attach ordering only diverts a SEARCH, never a real URL).
+test('a real URL typed on a welcome record still attaches (unaffected by the search-handoff ordering)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  const tab = { id: 'w', wcId: null, welcome: { reasons: new Set(['home']), pendingQuery: null } };
+  h.state.active = tab;
+  controller.navigate('example.com');
+  assert.deepEqual(h.state.calls.pop(), ['attachView', 'w', 'https://example.com']);
 });
 
 test('suggestion responses are rejected after the tab controller invalidates on switch', async () => {

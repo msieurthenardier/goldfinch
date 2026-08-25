@@ -52,25 +52,36 @@ const DEFAULTS = {
   // rows with version < 2 pass through migrateStored() below before repair.
   //
   // v3 (M16 Flight 1 "Search Engine as a Preference" / DD5): no default
-  // CHANGED — the bump exists only to force a save-on-migrate persist. This is
-  // a DELIBERATE DEPARTURE from this ladder's own convention (see the
+  // CHANGED at v3 — the bump existed only to force a save-on-migrate persist.
+  // This was a DELIBERATE DEPARTURE from this ladder's own convention (see the
   // automationEnabled comment below: "the version ladder in migrateStored()
   // exists only for changed defaults on EXISTING keys, never for additive
-  // ones"). searchEngine below is a brand-new additive key that would
-  // ordinarily skip the ladder entirely, exactly like spellcheck or
-  // bookmarksBarEnabled — it doesn't, because the mission's resolved ruling
-  // requires BOTH searchEngine and homePage pinned explicit to disk for every
-  // profile that runs this build, now, while both are legitimately
-  // Google-by-default: an existing profile that never touched settings is, on
-  // disk, indistinguishable from a fresh install, and Flight 2's flip to
-  // unset-by-default must reach only the latter. The v2→v3 migrateStored()
-  // rung below carries no transform of its own — the unconditional version
-  // stamp IS the mechanism, since it flags `migrated: true` and trips load()'s
-  // existing save-on-migrate save(). A row-less profile has no rung to run at
-  // all, so it gets the equivalent best-effort pin directly in load()'s no-row
-  // branch — see the "DD5: row-less pin" comment there.
+  // ones"). searchEngine was a brand-new additive key that would ordinarily
+  // skip the ladder entirely, exactly like spellcheck or bookmarksBarEnabled —
+  // it didn't, because Flight 1's resolved ruling required BOTH searchEngine
+  // and homePage pinned explicit to disk for every profile that ran that
+  // build, while both were still the removed-engine-fallback default: an
+  // existing profile that never touched settings was, on disk,
+  // indistinguishable from a fresh install, and this flight's flip to
+  // unset-by-default (below) must reach only the latter.
+  //
+  // M16 Flight 2 "The Welcome Surface" / DD5: DEFAULTS.homePage and
+  // DEFAULTS.searchEngine flip to `null` (unset) here — NO further version
+  // bump. Flight 1's v2→v3 pin-on-load already wrote both keys explicit into
+  // every profile that had ever run that build, so there is no on-disk
+  // population left for a v4 ladder transform to reach — a stamp-only v4
+  // would be a SECOND departure from the ladder convention with nothing to
+  // force. A row-less profile still gets its resolved defaults (now `null`)
+  // persisted at first load by the unchanged pin mechanism (see the "DD5:
+  // row-less pin" comment in load()'s no-row branch) — the pin mechanism
+  // itself is untouched; only what it pins changed. Repair-to-default now
+  // repairs an unknown/corrupt engine (or home page) to unset rather than
+  // silently selecting a provider on the user's behalf (mission criterion).
+  // Both VALIDATORS below already accept `null` (Flight 1 / DD2), so
+  // repairConfig takes the validator branch, never the `typeof` fallback that
+  // would otherwise mishandle an object-typed null default.
   version: 3,
-  homePage: 'https://www.google.com',
+  homePage: null,
   toolbarPins: { media: true, shields: true, devtools: false },
   // Automation surface gating (Flight 4). off-by-default: the MCP surface binds
   // under --automation-dev but the auth gate 401s everything until this is true
@@ -123,17 +134,15 @@ const DEFAULTS = {
   // item (M16 Flight 1 "Search Engine as a Preference" / DD1). Stores a
   // curated ENGINE ID, never a URL template — VALIDATORS.searchEngine below
   // checks membership against src/shared/search-engines.js's SEARCH_ENGINE_IDS,
-  // the single table both this validator and (leg 2) the renderer's URL
-  // construction read from, so a stored value can never smuggle an arbitrary
-  // URL. Defaults to 'google', matching the hardcoded Google URL this
-  // preference replaces (navigation-controller.js's toUrl, leg 2) — nothing in
-  // this flight may regress an existing install. `null` is representable (DD2
-  // — homePage and searchEngine share one unset sentinel, since persistence is
-  // a JSON document row with no schema-level "nullable" concept) but is NEVER
-  // the default here; the flip to unset-by-default is Flight 2's, once the
-  // welcome-page surface that handles unset exists. This key is why DEFAULTS.
-  // version bumped to 3 — see the version comment above.
-  searchEngine: 'google'
+  // the single table both this validator and the renderer's URL construction
+  // read from, so a stored value can never smuggle an arbitrary URL. `null` is
+  // representable (DD2 — homePage and searchEngine share one unset sentinel,
+  // since persistence is a JSON document row with no schema-level "nullable"
+  // concept) and is now the default (M16 Flight 2 / DD5 — see the version
+  // comment above): a fresh profile has no engine chosen, and the welcome
+  // surface asks the first time a search actually needs one, rather than the
+  // app silently sending it to a provider the user never picked.
+  searchEngine: null
 };
 
 // SHA-256 hex digests are exactly 64 lowercase hex chars.
@@ -170,9 +179,9 @@ const VALIDATORS = {
   // home page (it would silently strand the user on a blank tab). Widened for
   // `null` (M16 F1 / DD2): null is the ONE unset representation for this key —
   // `''` remains invalid, same as before, so unset can never mean two
-  // different stored things. Nothing in this flight WRITES null (Flight 2's
-  // clear affordance does); the validator accepts it now so a null value
-  // survives repair once Flight 2 starts producing it.
+  // different stored things. The Settings Clear button (M16 F2 Leg 1) and the
+  // welcome surface's own preference writes are the paths that produce it now;
+  // it is also DEFAULTS.homePage itself as of M16 F2 Leg 2 / DD5.
   homePage: (v) =>
     v === null ||
     (typeof v === 'string' &&
@@ -460,16 +469,13 @@ function load(userDataPath, opts = {}) {
       }
     } else {
       // DD5: row-less pin. No settings row AND no legacy settings.json means
-      // this profile has never run with the preference system at all — fresh
-      // install, or (this flight's whole point) an existing profile that
-      // simply never touched Settings. Both are, on disk, indistinguishable
-      // from each other, and per the DEFAULTS.version comment, both must be
-      // pinned Google-explicit now so that "no row" once again means exactly
-      // "never ran this build" after this flight lands — which is what Flight
-      // 2's flip to an unset-by-default fresh profile needs to target.
-      // Best-effort, same never-throw posture as the migration save above: a
-      // failed pin leaves in-memory defaults correct and simply retries next
-      // load (idempotent).
+      // this profile has never run with the preference system at all — a
+      // genuinely fresh install (M16 F2 / DD5: pinned `null`/`null` explicit,
+      // not left row-less) or, on an M16 F1 build, an existing profile that
+      // simply never touched Settings (pinned explicit at whatever DEFAULTS
+      // held then). Best-effort, same never-throw posture as the migration
+      // save above: a failed pin leaves in-memory defaults correct and simply
+      // retries next load (idempotent).
       config = freshDefaults();
       try {
         save(config);

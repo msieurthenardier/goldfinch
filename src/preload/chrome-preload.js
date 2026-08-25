@@ -49,9 +49,15 @@ contextBridge.exposeInMainWorld('goldfinch', {
   privacyClearCookies: (payload) => ipcRenderer.invoke('privacy-clear-cookies', payload),
   privacyClearStorage: (payload) => ipcRenderer.invoke('privacy-clear-storage', payload),
 
-  // --- settings (chrome-trusted; read + subscribe only — writing is the settings page's job) ---
+  // --- settings (chrome-trusted; read + subscribe only — writing is the settings page's job,
+  // with ONE exception below) ---
   settingsGet: (key) => ipcRenderer.invoke('settings-get', key),
   onSettingsChanged: (cb) => ipcRenderer.on('settings-changed', (_e, all) => cb(all)),
+  // welcomeSetPreference (M16 F2 Leg 1, DD1): the welcome surface's chrome-bridge
+  // write — restricted main-side to homePage/searchEngine, the toggle-bookmarks-bar
+  // shape (settings.set( directly + its own broadcast) but an invoke (not a bare
+  // send) so the panel can react to a validator rejection.
+  welcomeSetPreference: ({ key, value }) => ipcRenderer.invoke('chrome-welcome-set', { key, value }),
 
   // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history
   // bridge method, bare-handle like settingsGet above) ---

@@ -25,7 +25,10 @@ const IDS = {
   zoomControl: 'zoom-control', zoomOut: 'zoom-out', zoomIn: 'zoom-in',
   zoomReset: 'zoom-reset', zoomPercent: 'zoom-percent',
   // Bookmarks bar (M15 F1 Leg 3): the row itself + its overflow chevron trigger.
-  bookmarksBar: 'bookmarks-bar', bookmarksOverflow: 'bookmarks-overflow'
+  bookmarksBar: 'bookmarks-bar', bookmarksOverflow: 'bookmarks-overflow',
+  // Welcome surface (M16 F2 Leg 1, DD1): the chrome-rendered panel a viewless
+  // welcome tab shows in the guest slot; welcome-controller.js owns its content.
+  welcomeSurface: 'welcome-surface'
 };
 
 export function createChromeContext({ document, goldfinch }) {

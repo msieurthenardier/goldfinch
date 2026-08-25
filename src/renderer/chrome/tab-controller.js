@@ -14,7 +14,10 @@
  *   btn?: HTMLElement,
  *   findOpen?: boolean,
  *   findText?: string,
- *   scriptOpened?: boolean
+ *   scriptOpened?: boolean,
+ *   welcome?: { reasons: Set<string>, pendingQuery: string | null } | null,
+ *   attaching?: boolean,
+ *   pendingUrl?: string | null
  * }} Tab
  */
 
@@ -30,10 +33,16 @@ export function createTabController(deps) {
     window, document, requestAnimationFrame, ResizeObserver,
     ctx, els, tabs, jarsClient,
     blankPrivacy, escapeHtml, openTabContextMenu, currentHomePage,
+    currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences
     isInternalPageUrl, isSafeTabUrl, resolveNewTabContainer, classifyDragPoint,
     announceTabStatus, updateNavButtons, refreshZoomControl, refreshStar, fetchCookies,
     closeSuggestions, resetSuggestionsForActivation, updateAddressChip,
-    renderMedia, renderPrivacy, setDevtoolsPressed, refreshBookmarksSurfaces
+    renderMedia, renderPrivacy, setDevtoolsPressed, refreshBookmarksSurfaces,
+    // M16 F2 Leg 1 (DD1/DD7): the welcome panel is owned by welcome-controller.js;
+    // this controller only toggles it on activation-class events (late-bound
+    // forwarding functions — welcome-controller.js is constructed after this
+    // one, the renderer.js `let controller` idiom).
+    showWelcomePanel, hideWelcomePanel
   } = deps;
   // Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
   // design review — folded into DD3): every trusted internal tab used to hardcode
@@ -253,7 +262,7 @@ export function createTabController(deps) {
   // step 4); `title` is read HERE (renderer-side only, stripped of no further
   // meaning to main) to seed the initial strip title. `insertAt` lands the tab at
   // its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
-  function createTab(url = currentHomePage(), container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false, background = false } = {}) {
+  function createTab(url, container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false, background = false } = {}) {
     // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
     // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
     if (dnd) cancelDnd();
@@ -312,32 +321,7 @@ export function createTabController(deps) {
     // through to main — main's tab-create handler branches on its presence to skip
     // loadURL and call navigationHistory.restore() instead.
     window.goldfinch.tabCreate({ url, partition: jar.partition, trusted, ...(restoreHistory ? { restoreHistory } : {}) }).then((wcId) => {
-      if (!tabs.has(id)) return; // tab was closed before wcId arrived
-      tab.wcId = wcId;
-      // If this tab is still active, refresh state now that wcId is available.
-      if (tab.id === ctx.activeTabId) {
-        // Make the WebContentsView visible now that its wcId has arrived.
-        // activateTab() ran synchronously in createTab() with wcId still null,
-        // so the tab-set-active IPC was skipped — send it here to show the view.
-        // Full slot: find never insets the guest (DD8 — the overlay floats).
-        window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
-        // Track the now-visible view (web or internal) for the outgoing-hide path.
-        ctx.activeViewWcId = tab.wcId;
-        updateNavButtons();
-        refreshZoomControl(tab);
-        // sync path 3/5 (M15 F1 Leg 2, AC "five sync paths"): without this,
-        // restoreHistory-based creates (duplicate/reopen/restore) can boot a
-        // permanently hidden star since they skip loadURL and may never fire
-        // did-navigate.
-        refreshStar(tab);
-        // Activation-class bar-render trigger 1/2 (M15 F2 Leg 3, DD7 table
-        // 3/5): the wcId-arrival path is also an activation-class event —
-        // suppression + bar content must re-derive here too, not just star.
-        refreshBookmarksSurfaces(tab);
-        if (!els.privacyPanel.classList.contains('collapsed')) {
-          fetchCookies();
-        }
-      }
+      onViewCreated(tab, wcId);
     });
 
     // background: true (M15 F1 DD10, Leg 1 AC): skip self-activation for this
@@ -347,6 +331,138 @@ export function createTabController(deps) {
     // ctx.activeTabId), so no further branching is needed there.
     if (!background) activateTab(id);
     return tab;
+  }
+
+  // onViewCreated(tab, wcId) (M16 F2 Leg 1, DD2 — extracted with ZERO behavior
+  // change from createTab's wcId-arrival .then(), then shared with attachView
+  // below so the two paths cannot drift): the closed-before-arrival guard, the
+  // active-tab refresh set, and (new this leg) applyToolbarAffordances +
+  // the welcome-panel hide (a tab that just acquired a view is never a
+  // welcome record any longer, but the panel may still be showing if THIS
+  // tab is the active one).
+  function onViewCreated(tab, wcId) {
+    if (!tabs.has(tab.id)) return; // tab was closed before wcId arrived
+    tab.wcId = wcId;
+    // If this tab is still active, refresh state now that wcId is available.
+    if (tab.id === ctx.activeTabId) {
+      // Make the WebContentsView visible now that its wcId has arrived.
+      // activateTab() ran synchronously with wcId still null, so the
+      // tab-set-active IPC was skipped — send it here to show the view.
+      // Full slot: find never insets the guest (DD8 — the overlay floats).
+      window.goldfinch.tabSetActive(tab.wcId, measureWebviewsSlotDIP());
+      // Track the now-visible view (web or internal) for the outgoing-hide path.
+      ctx.activeViewWcId = tab.wcId;
+      updateNavButtons();
+      // Design review cycle 2 [high]: re-run here too, not just in
+      // activateTab — otherwise every ordinary tab's Media/Shields/DevTools
+      // buttons stay disabled until the operator switches away and back.
+      applyToolbarAffordances(tab);
+      if (!tab.welcome) hideWelcomePanel();
+      refreshZoomControl(tab);
+      // sync path 3/5 (M15 F1 Leg 2, AC "five sync paths"): without this,
+      // restoreHistory-based creates (duplicate/reopen/restore) can boot a
+      // permanently hidden star since they skip loadURL and may never fire
+      // did-navigate.
+      refreshStar(tab);
+      // Activation-class bar-render trigger 1/2 (M15 F2 Leg 3, DD7 table
+      // 3/5): the wcId-arrival path is also an activation-class event —
+      // suppression + bar content must re-derive here too, not just star.
+      refreshBookmarksSurfaces(tab);
+      if (!els.privacyPanel.classList.contains('collapsed')) {
+        fetchCookies();
+      }
+    }
+  }
+
+  // applyToolbarAffordances(tab) (M16 F2 Leg 1, DD7 — extracted from
+  // activateTab's toolbar-disable block): the pinnable buttons act on the
+  // active tab's web content, so they are inert on internal tabs AND on a
+  // viewless (welcome) record — same disable, one more reason. Called from
+  // activateTab AND from onViewCreated (design review cycle 2 [high]) so an
+  // ordinary tab's buttons re-enable the instant its wcId arrives rather than
+  // staying disabled until the next tab switch.
+  function applyToolbarAffordances(tab) {
+    const disabled = isInternalTab(tab) || tab.wcId == null;
+    els.toggleMedia.disabled = disabled;
+    els.togglePrivacy.disabled = disabled;
+    els.toggleDevtools.disabled = disabled;
+  }
+
+  // openWelcomeTab({ container, reasons, pendingQuery }) (M16 F2 Leg 1, DD1/DD3):
+  // the ONE viewless-record constructor. Mirrors createTab's untrusted branch
+  // for jar resolution and strip insertion — no tabCreate IPC, wcId stays
+  // null. tab.url stays '' so updateAddressChip's empty-URL branch keeps the
+  // address bar writable with its placeholder (Implementation Guidance #2).
+  /**
+   * @param {{ container?: Tab['container']|null, reasons: Iterable<string>, pendingQuery?: string|null }} opts
+   * @returns {Tab}
+   */
+  function openWelcomeTab({ container = null, reasons, pendingQuery = null }) {
+    // No `if (dnd) cancelDnd()` here (unlike createTab/closeTab): every call
+    // site (Ctrl+T, the `+` pill, a container-menu item, the boot path) is
+    // driven from OUTSIDE the tab strip's native-DnD pointer capture, so it
+    // cannot race a live drag session in practice — keeping the pinned FIVE
+    // cancelDnd() call sites (AC7, tab-drag-invariants.test.js) exact.
+    const id = `tab-${++ctx.tabSeq}`;
+    const jar = container || resolveNewTabContainer(jarsClient.containers, jarsClient.defaultId) || jarsClient.makeBurner();
+    const tab = buildStripRecord({ id, url: '', jar, trusted: false, title: 'Welcome to Goldfinch' });
+    tab.welcome = { reasons: new Set(reasons), pendingQuery };
+    activateTab(id);
+    return tab;
+  }
+
+  // attachView(tab, url) (M16 F2 Leg 1, DD2): the ONLY place a welcome record
+  // acquires a view. Validates with isSafeTabUrl BEFORE sending — a rejected
+  // URL is a silent no-op (the address bar keeps the typed text). Guards a
+  // second navigate racing an in-flight attach (Edge Cases): only the LATEST
+  // URL survives, applied via tabNavigate once the first attach's wcId lands.
+  function attachView(tab, url) {
+    if (!tab || tab.wcId != null) return; // already has a view — nothing to attach
+    if (tab.attaching) { tab.pendingUrl = url; return; } // queue the latest only
+    if (!isSafeTabUrl(url)) return;
+    tab.attaching = true;
+    tab.welcome = null;
+    if (tab.id === ctx.activeTabId) hideWelcomePanel();
+    window.goldfinch.tabCreate({ url, partition: tab.container.partition, trusted: false }).then((wcId) => {
+      tab.attaching = false;
+      onViewCreated(tab, wcId);
+      if (tab.pendingUrl != null && tab.wcId != null) {
+        const pending = tab.pendingUrl;
+        tab.pendingUrl = null;
+        window.goldfinch.tabNavigate({ wcId: tab.wcId, verb: 'loadURL', args: [pending] });
+      }
+    });
+  }
+
+  // welcomeReasons(home, engine) (M16 F2 Leg 2, DD7): pure — the reasons a
+  // welcome tab should carry, given the two resolved preference values.
+  // Callers only invoke this once they already know the home page is unset
+  // (the caller's own branch on `home == null`) — `home` is accepted anyway
+  // (rather than dropped as an unused parameter) so the signature documents
+  // that intent at every call site and stays symmetric for the boot path,
+  // which computes both from values awaited in its own Promise.all rather
+  // than from the caches (design review [high] — the boot barrier does not
+  // await searchEngine today, so the boot branch must not read the live
+  // cache). Exported for the boot path (renderer.js) and unit-tested.
+  /**
+   * @param {string|null} home
+   * @param {string|null} engine
+   * @returns {string[]}
+   */
+  function welcomeReasons(home, engine) {
+    return ['home', ...(engine == null ? ['search'] : [])];
+  }
+
+  // openNewTab(container?) (M16 F2 Leg 1/2, DD4/DD7): the resolver EVERY "new
+  // tab" call site routes through now that createTab has no default URL
+  // argument. A set home page still wins outright (a normal tab); an unset
+  // home page opens a welcome tab whose reasons cover whichever of
+  // home/search are ALSO unset — both blocks show when neither preference is
+  // set yet.
+  function openNewTab(container = null) {
+    const home = currentHomePage();
+    if (home != null) return createTab(home, container);
+    return openWelcomeTab({ container, reasons: welcomeReasons(home, currentSearchEngine()) });
   }
 
   // orderedTabIds() (M09 F2 DD1): the single accessor for DOM-order tab ids — the
@@ -671,7 +787,7 @@ export function createTabController(deps) {
       // once a tab has been reordered).
       const next = orderedTabIds().pop();
       if (next) activateTab(next);
-      else createTab(); // never leave the window with zero tabs
+      else openNewTab(); // never leave the window with zero tabs
     }
   }
 
@@ -696,6 +812,11 @@ export function createTabController(deps) {
       t.btn.setAttribute('aria-selected', String(isActive));
       t.btn.tabIndex = isActive ? 0 : -1;
     }
+
+    // Welcome-panel toggle (M16 F2 Leg 1, DD1/DD7): driven from every
+    // activation-class event, mirrors onViewCreated's own toggle so the panel
+    // never lags a tab switch.
+    if (tab.welcome) showWelcomePanel(tab); else hideWelcomePanel();
 
     els.address.value = tab.url || '';
     updateAddressChip(tab);
@@ -747,16 +868,15 @@ export function createTabController(deps) {
     }
     updateNavButtons();
 
-    // Tab-scoped toolbar disable (HAT polish). The pinnable buttons (Media, Shields,
-    // DevTools) act on the active tab's web content, so they are functionally inert on
-    // goldfinch:// internal tabs. Drive the native `disabled` property from the active
-    // tab type so the existing `.icon-btn:disabled` style dims them automatically.
-    // This is SEPARATE from applyToolbarPins (pin-driven visibility, DD5) — disabled
-    // state is tab-activation-driven. Switching back to a web tab re-enables all three.
-    const internal = isInternalTab(tab);
-    els.toggleMedia.disabled = internal;
-    els.togglePrivacy.disabled = internal;
-    els.toggleDevtools.disabled = internal;
+    // Tab-scoped toolbar disable (HAT polish; M16 F2 Leg 1 — extracted into
+    // applyToolbarAffordances, now ALSO wcId-gated for a viewless welcome
+    // record). The pinnable buttons (Media, Shields, DevTools) act on the
+    // active tab's web content, so they are functionally inert on goldfinch://
+    // internal tabs and on a tab with no live view yet. This is SEPARATE from
+    // applyToolbarPins (pin-driven visibility, DD5) — disabled state is
+    // tab-activation-driven. Switching to a tab with a live web view
+    // re-enables all three.
+    applyToolbarAffordances(tab);
 
     // DevTools pressed-state reconcile (DD3 rebuild trigger (b): tab activation).
     // Query the newly-active tab's live open state; the ctx.activeTabId === tab.id re-check
@@ -959,7 +1079,7 @@ export function createTabController(deps) {
   // Thin wrappers over the existing tab ops; main drives these via executeJavaScript
   // and applies the authoritative internal-session filter on its side (DD1/DD5).
   //
-  // openTab uses a dom-ready RACE GUARD: createTab() calls activateTab()
+  // openTab uses a dom-ready RACE GUARD: createTab calls activateTab
   // synchronously, and dom-ready can fire before this Promise body runs. We
   // attach the listener first, then re-check tab.wcId immediately so a
   // just-fired dom-ready is never missed into the timeout path.
@@ -1018,6 +1138,10 @@ export function createTabController(deps) {
 
   return {
     createTab,
+    openWelcomeTab,
+    attachView,
+    openNewTab,
+    welcomeReasons,
     closeTab,
     activateTab,
     activeTab,

@@ -1,9 +1,9 @@
 # Behavior Test: Welcome Home Routing
 
 **Slug**: `welcome-home-routing`
-**Status**: draft
+**Status**: active
 **Created**: 2026-08-24
-**Last Run**: never
+**Last Run**: 2026-08-25 — pass (10/10; run log `welcome-home-routing/runs/2026-08-25-02-45-35.md`)
 
 ## Intent
 

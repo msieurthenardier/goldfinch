@@ -21,7 +21,7 @@ import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
-import { buildSearchUrl } from '../shared/search-engines.js'; // M16 F1 Leg 2: toUrl's engine-id → URL lookup, injected into navigation-controller
+import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery } from '../shared/search-engines.js'; // M16 F1 Leg 2 / F2 Leg 2: the curated table (welcome-controller's engine block) + toUrl's engine-id → URL lookup + the pending-query cap
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
@@ -34,6 +34,7 @@ import { createPrivacyController } from './chrome/privacy-controller.js';
 import { createShortcutController } from './chrome/shortcut-controller.js';
 import { createTabController } from './chrome/tab-controller.js';
 import { createWindowController } from './chrome/window-controller.js';
+import { createWelcomeController } from './chrome/welcome-controller.js';
 import {
   buildKebabModel,
   chromePointToSheet as convertChromePointToSheet,
@@ -44,19 +45,14 @@ import {
   rightSheetAnchor
 } from './chrome/overlay-menus.js';
 
-const HOMEPAGE = 'https://www.google.com';
-let homePageCache = HOMEPAGE;
-function currentHomePage() { return homePageCache || HOMEPAGE; }
+// homePageCache (M16 F2 Leg 1, DD4 — squawk 0005 closed): the searchEngineCache
+// SHAPE below — boot-seeded, raw setter, no coalescing; null routes openNewTab
+// to the welcome surface. The removed home-page constant is gone with it.
+let homePageCache = null;
+function currentHomePage() { return homePageCache; }
 
-// searchEngineCache (M16 F1 Leg 2, DD4 — corrected pattern, NOT homePageCache's):
-// stores the value RAW, no coalescing here — null must survive so Flight 2's
-// unset-routing has something to route on. The ONE Google-coalescing read site
-// is navigation-controller.js's toUrl (Flight-1 semantics; Flight 2 rewrites it).
-// Kept fresh by two rebuild triggers only (the leg's declared cache-freshness
-// contract): the explicit boot seed below (window-controller.js) and every
-// settings-changed broadcast (window-controller.js's onSettingsChanged, guarded
-// `!== undefined` — null is a meaningful future value, unlike undefined/absent).
-let searchEngineCache = 'google';
+// searchEngineCache (M16 F1 Leg 2, DD4; pre-seed null'd M16 F2 Leg 2, DD5 [high] — a placeholder would route a pre-seed search to an unchosen provider).
+let searchEngineCache = null;
 function setSearchEngine(value) { searchEngineCache = value; }
 function currentSearchEngine() { return searchEngineCache; }
 
@@ -78,7 +74,8 @@ const { els, tabs } = ctx;
  *   container: { id: string, name: string, color: string, partition: string, burner?: boolean },
  *   btn?: HTMLElement,
  *   findOpen?: boolean,
- *   findText?: string
+ *   findText?: string,
+ *   welcome?: { reasons: Set<string>, pendingQuery: string | null } | null
  * }} Tab
  */
 let tabController;
@@ -89,6 +86,7 @@ let windowController;
 let shortcutController;
 let pageActions;
 let bookmarksBarController;
+let welcomeController;
 const jarsClient = createJarsClient({
   bridge: window.goldfinch,
   ctx,
@@ -155,6 +153,7 @@ tabController = createTabController({
   escapeHtml,
   openTabContextMenu: (id, anchorEl) => openTabContextMenu(id, anchorEl),
   currentHomePage,
+  currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences
   isInternalPageUrl,
   isSafeTabUrl,
   resolveNewTabContainer,
@@ -170,11 +169,15 @@ tabController = createTabController({
   renderMedia,
   renderPrivacy,
   setDevtoolsPressed,
-  refreshBookmarksSurfaces
+  refreshBookmarksSurfaces,
+  showWelcomePanel,
+  hideWelcomePanel
 });
 
 const {
   createTab,
+  openWelcomeTab, attachView, openNewTab, // M16 F2 Leg 1
+  welcomeReasons, // M16 F2 Leg 2 (DD7): shared by the boot path below
   closeTab,
   activateTab,
   activeTab,
@@ -188,6 +191,8 @@ const {
   measureWebviewsSlotDIP,
   sendActiveBounds
 } = tabController;
+function showWelcomePanel(tab) { return welcomeController.show(tab); } // M16 F2 Leg 1
+function hideWelcomePanel() { return welcomeController.hide(); } // M16 F2 Leg 1
 function updateAddressChip(tab) { return navigationController.updateAddressChip(tab); }
 function updateNavButtons() { return navigationController.updateNavButtons(); }
 function navigate(input) { return navigationController.navigate(input); }
@@ -415,7 +420,7 @@ pageActions = createChromePageActions({
   isInternalTab,
   isInternalPageUrl,
   deriveSiteInfo,
-  currentHomePage
+  openNewTab // M16 F2 Leg 1 (DD4)
 });
 
 navigationController = createNavigationController({
@@ -427,10 +432,11 @@ navigationController = createNavigationController({
   isInternalTab,
   isWebTab,
   createTab,
-  openDownloads,
+  openNewTab, attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
+  openWelcomeTab, refreshWelcome: showWelcomePanel, openDownloads, // M16 F2 Leg 2 (DD3): the search handoff
   bookmarksClient,
   isInternalPageUrl,
-  buildSearchUrl, currentSearchEngine, // M16 F1 Leg 2: toUrl's engine lookup + live cache read
+  buildSearchUrl, currentSearchEngine, capPendingQuery, // M16 F1 Leg 2 / F2 Leg 2: toUrl's engine lookup + live cache read + the pending-query cap
   shouldQuery,
   buildSuggestionModel, mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
   moveSelection,
@@ -489,10 +495,18 @@ windowController = createWindowController({
   activateTab,
   closeTab,
   activeTab,
-  setHomePage: (value) => { homePageCache = value || HOMEPAGE; },
+  setHomePage: (value) => { homePageCache = value; }, // M16 F2 Leg 1 (DD4): raw setter, the removed home-page constant is gone
   setSearchEngine, // M16 F1 Leg 2: boot seed + settings-changed handler both write through this
   updateAutomationKeyState,
   sendActiveBounds
+});
+
+// M16 F2 Leg 1 (DD1/DD7): the welcome panel's own controller (chrome DOM in #webviews).
+welcomeController = createWelcomeController({
+  document, els, attachView,
+  welcomeSetPreference: window.goldfinch.welcomeSetPreference,
+  onSettingsChanged: window.goldfinch.onSettingsChanged,
+  SEARCH_ENGINES, buildSearchUrl, currentSearchEngine, currentHomePage // M16 F2 Leg 2 (DD7): engine block data + attach/gating reads
 });
 
 shortcutController = createShortcutController({
@@ -505,6 +519,7 @@ shortcutController = createShortcutController({
   isWebTab,
   openFind,
   createTab,
+  openNewTab, // M16 F2 Leg 1 (DD4): Ctrl+T
   closeTab,
   jarsClient,
   announceTabStatus,
@@ -789,13 +804,13 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         // blink is the accepted variation.
         openNewContainerOverlay();
       } else if (id === 'action:burner') {
-        createTab(currentHomePage(), jarsClient.makeBurner());
+        openNewTab(jarsClient.makeBurner()); // M16 F2 Leg 1 (DD4)
       } else if (id === 'action:manage-jars') {
         openJarsPage();
       } else if (id.startsWith('jar:')) {
         const jarId = id.slice('jar:'.length);
         const c = jarsClient.containers.find((x) => x.id === jarId);
-        if (c) createTab(currentHomePage(), c);
+        if (c) openNewTab(c); // M16 F2 Leg 1 (DD4)
       }
       break;
     }
@@ -888,8 +903,12 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         if (typeof p.selectionText === 'string' && p.selectionText) {
           window.goldfinch.clipboardWriteText(p.selectionText);
         }
-      } else if (id === 'sel:search') {
-        if (typeof p.selectionText === 'string' && p.selectionText) createTab(toUrl(p.selectionText), srcContainer);
+      } else if (id === 'sel:search') { // M16 F2 Leg 2 (DD3): shares the address bar's null-engine handoff
+        if (typeof p.selectionText === 'string' && p.selectionText) {
+          const q = capPendingQuery(p.selectionText), u = toUrl(q); // Capture site 2/2: capped to PENDING_QUERY_MAX
+          if (u == null) openWelcomeTab({ container: srcContainer, reasons: ['search'], pendingQuery: q });
+          else createTab(u, srcContainer);
+        }
       } else if (id.startsWith('edit:')) {
         // Allowlisted edit-action dispatch (main re-validates the allowlist too).
         // Also re-check the captured editFlags that gated menu construction
@@ -1275,6 +1294,7 @@ function openTabContextMenu(id, anchorEl) {
     // M09 F6 (review M4): tab:move-new-window is omitted for internal tabs —
     // app-UI pages never move between windows.
     isInternal: isInternalTab(tabs.get(id) || null),
+    hasView: (tabs.get(id) || {}).wcId != null, // M16 F2 Leg 1 (DD7/DD8): no view → no dead move/duplicate controls
     // M09 F8 DD8: one flat "Move to window …" item per OTHER window. Push-cached
     // above, so this read stays synchronous.
     moveTargets: moveTargetsCache.get()
@@ -1514,6 +1534,7 @@ window.goldfinch.onTabNavState(({ wcId, canGoBack, canGoForward }) => {
 // this can never be blocked by a jars IPC error.
 Promise.all([
   window.goldfinch.settingsGet('homePage').catch(() => null),
+  window.goldfinch.settingsGet('searchEngine').catch(() => null), // M16 F2 Leg 2 (DD5 [high]): awaited, not read from the racing live cache
   jarsClient.boot,
   // Boot-race gate (M15 F1 Leg 2, AC; narrowed M15 F2 Leg 3 L3-DD-B): joins
   // the barrier exactly as jarsClient.boot does, but now only guarantees the
@@ -1524,7 +1545,7 @@ Promise.all([
   // resolves.
   bookmarksClient.boot,
   window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
-]).then(([url, , , bootConfig]) => {
+]).then(([url, engine, , , bootConfig]) => {
   // Session restore (M09 F9 / DD4 / AC5; REWRITTEN M15 F1 DD10 Leg 1): CREATE each
   // saved tab FRESH in its saved jar — never adopt; MINUS restoreHistory/insertAt
   // (DD5); NEVER inheritContainerFromPartition (its default-jar fallback would
@@ -1546,7 +1567,9 @@ Promise.all([
     const toActivate = activeTab || lastTab;
     if (toActivate) activateTab(toActivate.id);
   } else if (!bootConfig || bootConfig.bootTab !== false) {
-    createTab(url || HOMEPAGE);
+    // M16 F2 Leg 1/2 (DD4/DD9/DD7): unset home page → welcome surface.
+    if (url == null) openWelcomeTab({ reasons: welcomeReasons(url, engine) });
+    else createTab(url);
   }
 });
 
@@ -1556,11 +1579,11 @@ Promise.all([
 // page globals — but the evaluate-driven surfaces (chrome-tier `evaluate` in
 // dogfooding/live-boot procedures, behavior-test specs under tests/behavior/,
 // and scripts/a11y-audit.mjs) call these entry points by global name via
-// `executeJavaScript`. This block republishes EXACTLY the FD-approved 33-entry
+// `executeJavaScript`. This block republishes EXACTLY the FD-approved 34-entry
 // set on globalThis, each tagged with its consumer class. It is NOT the
 // classic-script shared-scope collision class (deliberate assignments from
 // module scope, not top-level declares in a shared lexical scope). CLOSED SET:
-// do not grow it without an FD ruling — an evaluate caller outside these 33 is
+// do not grow it without an FD ruling — an evaluate caller outside these 34 is
 // a design change, not a seam addition. (M09 F5 Leg 1 FD ruling: added
 // openTabContextMenuForAudit for the new sheet:tab-context a11y state — see
 // the flight's Checkpoints. M11 F1 Leg 3 FD ruling: added
@@ -1582,7 +1605,8 @@ Promise.all([
 // the same change, per the flight-log FD ruling. M15 F1 Leg 3 FD ruling: added
 // openBookmarksOverflowOverlayForAudit for the new sheet:bookmarks-overflow
 // a11y state (32 → 33, same every-new-sheet precedent) — CLAUDE.md's
-// dual-source note updated in the same change.)
+// dual-source note updated in the same change. M16 F2 Leg 1 FD ruling: added
+// openNewTab (33 → 34, see its inline comment below) — CLAUDE.md's dual-source note updated too.)
 Object.assign(/** @type {any} */ (globalThis), {
   // dogfooding (flight live-boot procedures, docs/mcp-automation.md)
   openJarsPage,
@@ -1590,6 +1614,8 @@ Object.assign(/** @type {any} */ (globalThis), {
   openContainerOverlay, // also driven by scripts/a11y-audit.mjs (SHEET_STATES 'sheet:container')
   // behavior-spec (tests/behavior/*.md drive these by name)
   createTab, // popup-jar-inheritance, jar-data-controls
+  // M16 F2 Leg 1 FD ruling: welcome-home-routing step 5 drives the burner path through the same code the container menu runs
+  openNewTab,
   makeBurner, // popup-jar-inheritance, jar-data-controls
   newIdentity, // farbling-correctness
   measureWebviewsSlotDIP, // panel-slide

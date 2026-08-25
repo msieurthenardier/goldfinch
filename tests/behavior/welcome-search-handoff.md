@@ -1,9 +1,9 @@
 # Behavior Test: Welcome Search Handoff
 
 **Slug**: `welcome-search-handoff`
-**Status**: draft
+**Status**: active
 **Created**: 2026-08-24
-**Last Run**: never
+**Last Run**: 2026-08-25 — partial (6/6 automatable rows pass; step 7 operator-pending; run log `welcome-search-handoff/runs/2026-08-25-04-48-18.md`)
 
 ## Intent
 

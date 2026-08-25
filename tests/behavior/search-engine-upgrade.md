@@ -3,7 +3,7 @@
 **Slug**: `search-engine-upgrade`
 **Status**: active
 **Created**: 2026-08-11
-**Last Run**: 2026-08-24 — partial (4/5 pass; checkpoint 2 failed on pre-existing squawk 0005, reproduced identically on the pre-flight build — not an upgrade regression; see the run log)
+**Last Run**: 2026-08-25 — pass (5/5; run log `search-engine-upgrade/runs/2026-08-25-03-16-36.md`; the 2026-08-24 partial was squawk 0005, fixed by M16 F2 leg 1)
 
 ## Intent
 
@@ -27,7 +27,7 @@ Verifies that upgrading an existing profile to the search-engine-preference buil
 |---|---------|------------------|
 | 1 | With the upgraded build running on the pre-upgrade profile, open `goldfinch://settings` and view the Startup & appearance section. | The home page field shows `https://fixture.example.net` — untouched by the upgrade. A search engine control is visible with Google selected explicitly. [a11y] |
 | 2 | Open a new tab. | The tab opens on `https://fixture.example.net` — new-tab behavior unchanged. |
-| 3 | Focus the address bar, type `zephyr quartz upgrade`, commit with Enter. | The address bar shows a `google.com` search URL containing the encoded query — searches still reach Google without the user having chosen anything. |
+| 3 | Focus the address bar, type `zephyr quartz upgrade`, commit with Enter. | The address bar shows a `google.com` URL containing the encoded query (Google may interpose an anti-automation interstitial; the committed search URL survives in `continue=`) — searches still reach Google without the user having chosen anything. (M16 F2 leg 2, Validator recommendation 2026-08-25.) |
 | 4 | Read the profile's settings document row from the scratch profile directory. | `[mixed-frame]` The row carries `version: 3` with both `searchEngine` and `homePage` present as explicit values (`"google"`, `"https://fixture.example.net"`). Justification: the pinning contract is invisible by design — its entire purpose is that the user observes nothing — so only the stored row distinguishes "migrated and pinned" from "not migrated at all", and Flight 2's default flip depends on this distinction. |
 | 5 | In Settings, select DuckDuckGo, then commit an address-bar search for `zephyr quartz changed`. | The address bar shows a `duckduckgo.com` search URL — the formerly implicit default is a real, changeable selection on this profile. |
 

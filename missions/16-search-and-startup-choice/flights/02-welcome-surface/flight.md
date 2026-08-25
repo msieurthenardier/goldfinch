@@ -1,23 +1,23 @@
 # Flight: The Welcome Surface
 
-**Status**: ready
+**Status**: landed
 **Mission**: [Search and Startup Choice](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Home page and search engine are independent preferences, each settable and clearable on its own, presented adjacent to one another in Settings; setting or clearing either never changes the other. *(this flight: the clearable half — Flight 1 delivered the settable half)*
-- [ ] A newly created profile has neither preference set, and Goldfinch never sends a query to a search provider the user did not choose.
-- [ ] When a preference is needed but unset, the user arrives at a branded Goldfinch page offering to set exactly the missing one — new tab with no home page set, search with no engine set, or both together on first launch. *(this flight: the surface, functional and presentable; visual branding is Flight 3)*
-- [ ] A search typed before an engine was chosen is not lost: after choosing an engine, that search runs.
-- [ ] The welcome page is not a trap — on it, typing an address navigates that same tab (not a second one) and bookmarks remain reachable, so a user can leave without choosing anything.
-- [ ] Adding the welcome surface does not weaken existing internal-page protections: it stays out of browsing history and out of web sessions, web content cannot reach its privileged bridge or forge navigation into it, and every existing internal page keeps its current behavior.
-- [ ] Only engines from the curated list can ever be stored; unknown or corrupt stored values repair without blocking startup and without silently selecting a provider on the user's behalf. *(this flight: the "without silently selecting a provider" half — repair-to-default now repairs to unset)*
+- [x] Home page and search engine are independent preferences, each settable and clearable on its own, presented adjacent to one another in Settings; setting or clearing either never changes the other. *(this flight: the clearable half — Flight 1 delivered the settable half)*
+- [x] A newly created profile has neither preference set, and Goldfinch never sends a query to a search provider the user did not choose.
+- [x] When a preference is needed but unset, the user arrives at a branded Goldfinch page offering to set exactly the missing one — new tab with no home page set, search with no engine set, or both together on first launch. *(this flight: the surface, functional and presentable; visual branding is Flight 3)*
+- [x] A search typed before an engine was chosen is not lost: after choosing an engine, that search runs.
+- [x] The welcome page is not a trap — on it, typing an address navigates that same tab (not a second one) and bookmarks remain reachable, so a user can leave without choosing anything.
+- [x] Adding the welcome surface does not weaken existing internal-page protections: it stays out of browsing history and out of web sessions, web content cannot reach its privileged bridge or forge navigation into it, and every existing internal page keeps its current behavior.
+- [x] Only engines from the curated list can ever be stored; unknown or corrupt stored values repair without blocking startup and without silently selecting a provider on the user's behalf. *(this flight: the "without silently selecting a provider" half — repair-to-default now repairs to unset)*
 
 Carried from reconnaissance (see the flight log's Reconnaissance Report):
-- [ ] Squawk 0005 — `homePageCache` never boot-seeded → claimed by DD4 (fix, not inherit)
-- [ ] Squawk 0006 — `search-engine-upgrade` step 2 premise → claimed by DD5 (the row is true once 0005 is fixed; re-run closes it)
-- [ ] Mission Known Issue — `openSiteSettingsTab()` reuses any internal tab → claimed by DD10
-- [ ] Mission Known Issue — `settings.js` truthy home-page guards (two sites) → claimed by DD6
+- [x] Squawk 0005 — `homePageCache` never boot-seeded → claimed by DD4 (fix, not inherit)
+- [x] Squawk 0006 — `search-engine-upgrade` step 2 premise → claimed by DD5 (the row is true once 0005 is fixed; re-run closes it)
+- [x] Mission Known Issue — `openSiteSettingsTab()` reuses any internal tab → claimed by DD10
+- [x] Mission Known Issue — `settings.js` truthy home-page guards (two sites) → claimed by DD6
 
 ---
 
@@ -92,16 +92,16 @@ A heading and one or two blocks driven by `reasons`: **Home page** (text input +
 ### Prerequisites
 
 - [x] Mission 16 active; Flight 1 completed and merged to `main` (`ab349ea`, PR #165)
-- [ ] Flight branch `flight/02-welcome-surface` created at flight start
-- [ ] Automation surface live before behavior-test runs — decay-prone, probe at run time (`npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1`; port may fall back)
+- [x] Flight branch `flight/02-welcome-surface` created at flight start
+- [x] Automation surface live before behavior-test runs — decay-prone, probe at run time (`npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1`; port may fall back)
 - [x] Fresh-profile scratch fixture procedure (empty `XDG_CONFIG_HOME`) and the out-of-band relaunch procedure — both proven 2026-08-24
-- [ ] Recommended, not blocking: complete squawks 0007 and 0008 as a turnaround before this flight's acceptance gate so the runs inherit the crew-file apparatus notes
+- [x] Recommended, not blocking: complete squawks 0007 and 0008 as a turnaround before this flight's acceptance gate so the runs inherit the crew-file apparatus notes
 
 ### Pre-Flight Checklist
 
 - [x] All open questions resolved (branding routed to Flight 3)
 - [x] Design decisions documented
-- [ ] Prerequisites verified (two are run-time)
+- [x] Prerequisites verified (two are run-time)
 - [x] Validation approach defined
 - [x] Legs defined (tentative)
 
@@ -115,8 +115,8 @@ Two legs, each a coherent slice with its own tests, docs, and behavior run. Leg 
 
 ### Checkpoints
 
-- [ ] Leg 1 green: on an existing profile, clearing the home page makes every new-tab path (Ctrl+T, `+`, burner, new jar, second window, boot) open the welcome surface in the same jar; typing an address on it navigates that same tab; setting the home page from the panel or Settings restores normal new tabs; `npm test` / typecheck / lint green; `welcome-home-routing` passes; `search-engine-upgrade` passes as authored (squawk 0006 closed)
-- [ ] Leg 2 green: a search with no engine lands on a welcome tab carrying the query and runs it once an engine is picked; a fresh profile boots to a both-unset welcome with an explicit `null`/`null` row; `welcome-search-handoff`, `welcome-first-launch`, `new-tab-default-routing`, and `search-engine-preference` pass; suite green
+- [x] Leg 1 green: on an existing profile, clearing the home page makes every new-tab path (Ctrl+T, `+`, burner, new jar, second window, boot) open the welcome surface in the same jar; typing an address on it navigates that same tab; setting the home page from the panel or Settings restores normal new tabs; `npm test` / typecheck / lint green; `welcome-home-routing` passes; `search-engine-upgrade` passes as authored (squawk 0006 closed)
+- [x] Leg 2 green: a search with no engine lands on a welcome tab carrying the query and runs it once an engine is picked; a fresh profile boots to a both-unset welcome with an explicit `null`/`null` row; `welcome-search-handoff`, `welcome-first-launch`, `new-tab-default-routing`, and `search-engine-preference` pass; suite green
 
 ### Adaptation Criteria
 
@@ -136,8 +136,8 @@ Leg design must re-check directly (design review could not complete this pass): 
 
 > **Note:** Tentative; legs are planned and created one at a time as the flight progresses.
 
-- [ ] `welcome-surface-and-home-routing` — viewless welcome record via `openWelcomeTab` + attach primitive (DD1/DD2/DD3-constructor), viewless-tab affordance hygiene and the tear-off refusal test (DD7/DD8), welcome panel with the home-page block (DD7), chrome-bridge write channel, cache unification and `HOMEPAGE` removal (DD4, squawk 0005), `openNewTab` resolver across all new-tab sites, Settings home-page Clear + guard fixes (DD6), `openSiteSettingsTab` fix (DD10), snapshot/closed-tab exclusion tests (DD9), **publish `openNewTab` in the chrome `evaluate` closed set (`renderer.js` `Object.assign(globalThis, …)`) with the FD-ruling comment CLAUDE.md requires** — `welcome-home-routing` step 5 depends on it; runs `welcome-home-routing` and re-runs `search-engine-upgrade` (closes 0006)
-- [ ] `search-handoff-and-fresh-defaults` — `toUrl` null return + pending query (length-capped) from the address bar and `sel:search` → `openWelcomeTab` (DD3), engine block with auto-run (DD7), Settings engine Clear (DD6), `DEFAULTS` flip + repair-to-unset + renamed tests (DD5), first-launch both-unset; runs `welcome-search-handoff` and `welcome-first-launch`, re-runs `new-tab-default-routing` and `search-engine-preference`
+- [x] `welcome-surface-and-home-routing` — viewless welcome record via `openWelcomeTab` + attach primitive (DD1/DD2/DD3-constructor), viewless-tab affordance hygiene and the tear-off refusal test (DD7/DD8), welcome panel with the home-page block (DD7), chrome-bridge write channel, cache unification and `HOMEPAGE` removal (DD4, squawk 0005), `openNewTab` resolver across all new-tab sites, Settings home-page Clear + guard fixes (DD6), `openSiteSettingsTab` fix (DD10), snapshot/closed-tab exclusion tests (DD9), **publish `openNewTab` in the chrome `evaluate` closed set (`renderer.js` `Object.assign(globalThis, …)`) with the FD-ruling comment CLAUDE.md requires** — `welcome-home-routing` step 5 depends on it; runs `welcome-home-routing` and re-runs `search-engine-upgrade` (closes 0006)
+- [x] `search-handoff-and-fresh-defaults` — `toUrl` null return + pending query (length-capped) from the address bar and `sel:search` → `openWelcomeTab` (DD3), engine block with auto-run (DD7), Settings engine Clear (DD6), `DEFAULTS` flip + repair-to-unset + renamed tests (DD5), first-launch both-unset; runs `welcome-search-handoff` and `welcome-first-launch`, re-runs `new-tab-default-routing` and `search-engine-preference`
 
 No HAT leg: Flight 3 is the mission's alignment flight for this surface's look and feel.
 
@@ -147,10 +147,10 @@ No HAT leg: Flight 3 is the mission's alignment flight for this surface's look a
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
+- [x] Tests passing
+- [x] Documentation updated
 
 ### Verification
 

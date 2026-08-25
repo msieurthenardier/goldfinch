@@ -65,6 +65,73 @@ test('activation dispatch is allowlisted to registered menu types', async () => 
   assert.deepEqual(h.events, [['activated', { menuType: 'kebab', id: 'exit' }]]);
 });
 
+// ---------------------------------------------------------------------------
+// openSiteSettingsTab (M16 F2 Leg 1, DD10): reuses ONLY a tab whose URL host
+// is 'settings' — fragment- and path-blind on purpose (every real Settings
+// tab carries the '#privacy' fragment), never any other internal tab.
+// ---------------------------------------------------------------------------
+
+function pageActionsHarness() {
+  const tabs = new Map();
+  const calls = [];
+  let nextId = 0;
+  const window = {
+    goldfinch: { tabNavigate: (payload) => calls.push(['tabNavigate', payload]) }
+  };
+  const createTab = (url, container, opts) => {
+    const id = `tab-${++nextId}`;
+    const tab = { id, url, wcId: opts && opts.trusted ? 500 + nextId : null, trusted: !!(opts && opts.trusted) };
+    tabs.set(id, tab);
+    calls.push(['createTab', url, container, opts]);
+    return tab;
+  };
+  const activateTab = (id) => calls.push(['activateTab', id]);
+  const isInternalTab = (tab) => !!tab && tab.trusted === true;
+  return { tabs, calls, window, createTab, activateTab, isInternalTab };
+}
+
+test('openSiteSettingsTab: no existing internal tab creates one trusted Settings tab', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  actions.openSiteSettingsTab();
+  assert.deepEqual(h.calls, [['createTab', 'goldfinch://settings/#privacy', null, { trusted: true }]]);
+});
+
+test('openSiteSettingsTab: reuses an existing Settings tab matched by HOST ONLY (fragment-bearing fixture)', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const existing = { id: 'settings-1', url: 'goldfinch://settings/#privacy', wcId: 42, trusted: true };
+  h.tabs.set(existing.id, existing);
+  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  actions.openSiteSettingsTab();
+  assert.deepEqual(h.calls, [
+    ['tabNavigate', { wcId: 42, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] }],
+    ['activateTab', 'settings-1']
+  ]);
+});
+
+test('openSiteSettingsTab: never reuses a Downloads tab — creates a new Settings tab instead', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  h.tabs.set('downloads-1', { id: 'downloads-1', url: 'goldfinch://downloads', wcId: 7, trusted: true });
+  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  actions.openSiteSettingsTab();
+  assert.ok(h.calls.some(([name, url]) => name === 'createTab' && url === 'goldfinch://settings/#privacy'));
+  assert.ok(!h.calls.some(([name]) => name === 'tabNavigate'));
+});
+
+test('openSiteSettingsTab: called twice in a row creates no second tab', async () => {
+  const { createChromePageActions } = await import('../../src/renderer/chrome/overlay-menus.js');
+  const h = pageActionsHarness();
+  const actions = createChromePageActions({ ...h, activeTab: () => null, isInternalPageUrl: () => false, deriveSiteInfo: () => ({}), openNewTab: () => {} });
+  actions.openSiteSettingsTab();
+  h.calls.length = 0;
+  actions.openSiteSettingsTab();
+  assert.equal(h.calls.filter(([name]) => name === 'createTab').length, 0);
+  assert.ok(h.calls.some(([name]) => name === 'tabNavigate' || name === 'activateTab'));
+});
+
 test('menu models and chrome-to-sheet anchor conversion retain exact shapes', async () => {
   const { buildKebabModel, chromePointToSheet, leftSheetAnchor, rightSheetAnchor } =
     await import('../../src/renderer/chrome/overlay-menus.js');

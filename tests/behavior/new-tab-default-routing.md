@@ -3,7 +3,7 @@
 **Slug**: `new-tab-default-routing`
 **Status**: active
 **Created**: 2026-07-09
-**Last Run**: 2026-07-10-17-15-42
+**Last Run**: 2026-08-25 — pass (8/8; re-run at M16 F2 leg 2 with the two-preference fixture; run log `new-tab-default-routing/runs/2026-08-25-05-04-03.md`)
 
 ## Intent
 
@@ -24,6 +24,7 @@ half of mission criterion 5 and the fallback half of criterion 6 (M06).
 - MCP client attached to the goldfinch automation server (note: the bound port may be a
   free-port fallback, not the configured 49707 — discover the live port, don't assume).
 - Fresh-profile seed is Personal (default) + Work (M06 F1). No other jars.
+- **Fixture-setup (M16 F2 leg 2 gate):** set the home page to `https://example.com` and the search engine to Google via Settings, then return to the boot tab (it attaches to the home page once nothing is missing) and close the Settings tab, so exactly one web boot tab exists — a fresh profile boots to a viewless welcome tab carrying BOTH the `home` and `search` reasons (`welcomeReasons(null, null)`), which `enumerateTabs` cannot see (no `jarId` to read) until it attaches; setting only the home page leaves `search` unset and the tab correctly stays a welcome tab (DD7), so both preferences must be set before step 1 for the "exactly one boot tab" premise to hold.
 
 ## Observables Required
 

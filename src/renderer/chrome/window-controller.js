@@ -120,11 +120,16 @@ export function createWindowController(deps) {
   window.goldfinch.settingsGet('bookmarksBarEnabled').then(applyBookmarksBar).catch(() => {});
 
   // searchEngineCache boot seed (M16 F1 Leg 2, DD4 — the toolbarPins/
-  // bookmarksBarEnabled idiom above, deliberately NOT homePageCache's
-  // unseeded pattern, squawk 0005's defect): without this, a window opened
-  // after a preference change would search on the hardcoded/default engine
-  // until an unrelated broadcast happened to land in it.
+  // bookmarksBarEnabled idiom above): without this, a window opened after a
+  // preference change would search on the hardcoded/default engine until an
+  // unrelated broadcast happened to land in it.
   window.goldfinch.settingsGet('searchEngine').then(setSearchEngine).catch(() => {});
+  // homePageCache boot seed (M16 F2 Leg 1, DD4 — squawk 0005 CLOSED): the
+  // SAME idiom, now applied to homePageCache too — it no longer has a
+  // distinct unseeded shape. Without this, a window opened after a home-page
+  // change would fall back to the welcome surface/stale value until an
+  // unrelated broadcast happened to land in it.
+  window.goldfinch.settingsGet('homePage').then(setHomePage).catch(() => {});
 
   /** Activation-class suppression input (M15 F2 Leg 3 L3-DD-C): renderer.js's
    * `refreshBookmarksSurfaces(tab)` computes burner-or-internal and calls

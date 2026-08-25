@@ -8,7 +8,7 @@ test('settings registrar preserves bare chrome reads and guarded internal mutati
   const h = makeSettingsIpcHarness();
   assert.equal(h.defaultSessionReads(), 0, 'registration must not touch Electron session before ready');
   assert.deepEqual([...h.bare.keys()].sort(), [
-    'automation:get-activity', 'chrome-clipboard-write', 'settings-get',
+    'automation:get-activity', 'chrome-clipboard-write', 'chrome-welcome-set', 'settings-get',
     'shields-get', 'shields-pause', 'shields-set'
   ]);
   assert.deepEqual([...h.listeners.keys()], ['unpin-toolbar-item', 'toggle-bookmarks-bar']);
@@ -61,6 +61,58 @@ test('automation key mutations and toolbar allowlist always broadcast settings-c
   h.send('unpin-toolbar-item', 'media');
   assert.equal(h.values.toolbarPins.media, false);
   assert.equal(h.events.at(-1)[1], 'settings-changed');
+});
+
+// M16 F2 Leg 1 (DD1): chrome-welcome-set — restricted to homePage/searchEngine,
+// settings.set( direct + its own broadcast (the toggle-bookmarks-bar shape),
+// and a validator throw returns {ok:false} rather than propagating.
+test('chrome-welcome-set: an unknown key is refused with no mutation and no broadcast', async () => {
+  const h = makeSettingsIpcHarness();
+  h.events.length = 0;
+  const result = await h.invoke('chrome-welcome-set', { key: 'toolbarPins', value: {} });
+  assert.deepEqual(result, { ok: false, error: 'unknown key' });
+  assert.deepEqual(h.events, []);
+});
+
+test('chrome-welcome-set: homePage/searchEngine write through settings.set( and broadcast, returning {ok:true}', async () => {
+  const h = makeSettingsIpcHarness();
+  h.events.length = 0;
+  const result = await h.invoke('chrome-welcome-set', { key: 'homePage', value: 'https://example.test/' });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(h.events.map((e) => e.slice(0, 2)), [['set', 'homePage'], ['broadcast', 'settings-changed']]);
+  assert.equal(h.values.homePage, 'https://example.test/');
+});
+
+test('chrome-welcome-set: a validator throw returns {ok:false, error} rather than propagating, with no broadcast', async () => {
+  const { registerSettingsIpc } = require('../../src/main/register-settings-ipc');
+  const bare = new Map();
+  const events = [];
+  const settings = {
+    get: () => undefined,
+    getAll: () => ({}),
+    set: () => { throw new TypeError('invalid homePage'); },
+  };
+  registerSettingsIpc({
+    ipcMain: { handle: (c, fn) => bare.set(c, fn), on: () => {} },
+    registerInternalHandler: () => {},
+    settings,
+    shields: { get: () => ({}), set: () => ({}), setPaused: () => ({}) },
+    broadcast: (channel) => events.push(['broadcast', channel]),
+    applyAutomationEnabledChange: async () => {},
+    applySpellcheck: () => {},
+    getDefaultSession: () => ({}),
+    getAllWebContents: () => [],
+    currentAutomationStatus: () => ({}),
+    rebindMcpServer: async () => {},
+    freePortInRange: async () => 0,
+    clipboard: { writeText: () => {} },
+    jars: { list: () => [] },
+    mintJarKey: () => '', revokeJarKey: () => {}, mintAdminKey: () => '', revokeAdminKey: () => {},
+    getMcpServer: () => null, adminEnabled: () => false,
+  });
+  const result = await bare.get('chrome-welcome-set')({}, { key: 'homePage', value: 'not-a-url' });
+  assert.deepEqual(result, { ok: false, error: 'invalid homePage' });
+  assert.deepEqual(events, []);
 });
 
 test('toggle-bookmarks-bar flips the stored value and broadcasts itself (Ctrl+Shift+B / Settings converge)', () => {

@@ -139,6 +139,24 @@ function registerSettingsIpc({
     settings.set('bookmarksBarEnabled', !settings.get('bookmarksBarEnabled'));
     broadcastSettings();
   });
+
+  // chrome-welcome-set (M16 F2 Leg 1, DD1): the welcome surface's chrome-bridge
+  // write — the toggle-bookmarks-bar shape above, but ipcMain.handle (not .on)
+  // so the panel can react to a validator rejection, and restricted to the two
+  // welcome-relevant keys. `settings.set(` stays literal in this body — the
+  // broadcast-invariant net's detection half is a call-shape regex (squawk
+  // 0003) — and broadcastSettings() is this handler's own call, per CLAUDE.md's
+  // "any handler mutating settings directly must broadcast itself" rule.
+  ipcMain.handle('chrome-welcome-set', (_event, { key, value }) => {
+    if (key !== 'homePage' && key !== 'searchEngine') return { ok: false, error: 'unknown key' };
+    try {
+      settings.set(key, value);
+      broadcastSettings();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message) };
+    }
+  });
 }
 
 module.exports = { registerSettingsIpc };

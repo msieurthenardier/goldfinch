@@ -95,6 +95,8 @@ interface GoldfinchBridge {
   // object — used to read the initial automation key-enabled state at boot.
   settingsGet(key?: string): Promise<any>;
   onSettingsChanged(cb: (all: any) => void): void;
+  // welcomeSetPreference (M16 F2 Leg 1, DD1): the one chrome-initiated settings write.
+  welcomeSetPreference(payload: { key: string, value: any }): Promise<{ ok: boolean, error?: string }>;
 
   // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history bridge method) ---
   historySuggest(payload: any): Promise<any>;

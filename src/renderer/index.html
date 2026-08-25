@@ -161,7 +161,15 @@
 
     <!-- Main area: web content + media panel -->
     <div id="main">
-      <div id="webviews"></div>
+      <div id="webviews">
+        <!-- Welcome surface (M16 F2 Leg 1, DD1): a chrome-rendered panel shown
+             while the active tab is a viewless welcome record (no guest exists
+             to composite over it — CLAUDE.md's WebContentsView z-order note).
+             A CSS child of #webviews (already position:relative with
+             absolutely-inset children) — no rect measurement, no resize
+             wiring. Content is built/updated by welcome-controller.js. -->
+        <section id="welcome-surface" class="hidden" aria-labelledby="welcome-heading"></section>
+      </div>
 
       <aside id="media-panel" class="collapsed" aria-label="Media panel">
         <div id="media-panel-header">

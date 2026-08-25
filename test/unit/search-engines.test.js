@@ -13,7 +13,9 @@ const {
   SEARCH_ENGINES,
   SEARCH_ENGINE_IDS,
   getSearchEngine,
-  buildSearchUrl
+  buildSearchUrl,
+  PENDING_QUERY_MAX,
+  capPendingQuery
 } = require('../../src/shared/search-engines');
 
 // The mission's resolved eight-engine table (mission.md Open Questions,
@@ -170,6 +172,121 @@ test('buildSearchUrl treats a literal %s in the query as ordinary text, not a se
 
 test('buildSearchUrl on an empty query still produces a well-formed URL', () => {
   assert.equal(buildSearchUrl('google', ''), 'https://www.google.com/search?q=');
+});
+
+// ---------------------------------------------------------------------------
+// PENDING_QUERY_MAX / capPendingQuery (M16 F2 Leg 2, DD3 — mission constraint:
+// "length-capped and never evaluated"). Positive control: an over-length
+// input is truncated to EXACTLY the cap, not merely "shorter".
+// ---------------------------------------------------------------------------
+test('PENDING_QUERY_MAX is 2048', () => {
+  assert.equal(PENDING_QUERY_MAX, 2048);
+});
+
+test('capPendingQuery trims surrounding whitespace and passes a short query through unchanged', () => {
+  assert.equal(capPendingQuery('hello world'), 'hello world');
+  assert.equal(capPendingQuery('  hello world  '), 'hello world');
+});
+
+test('capPendingQuery truncates an over-length query to exactly PENDING_QUERY_MAX characters (positive control)', () => {
+  const long = 'x'.repeat(PENDING_QUERY_MAX + 500);
+  const capped = capPendingQuery(long);
+  assert.equal(capped.length, PENDING_QUERY_MAX);
+  assert.equal(capped, 'x'.repeat(PENDING_QUERY_MAX));
+});
+
+test('capPendingQuery on an exactly-cap-length query returns it unchanged', () => {
+  const exact = 'y'.repeat(PENDING_QUERY_MAX);
+  assert.equal(capPendingQuery(exact), exact);
+});
+
+test('a <script>-shaped query is capPendingQuery-safe as plain text (no markup interpretation at this layer)', () => {
+  const hostile = '<script>alert(1)</script>';
+  assert.equal(capPendingQuery(hostile), hostile, 'capPendingQuery is a plain trim+truncate — never sanitizes markup, because it is only ever rendered via textContent and encoded via buildSearchUrl, never assigned to innerHTML');
+});
+
+test('buildSearchUrl truncates an over-length query to PENDING_QUERY_MAX before encoding (second enforcement point)', () => {
+  const long = 'z'.repeat(PENDING_QUERY_MAX + 100);
+  const url = buildSearchUrl('google', long);
+  const expected = 'https://www.google.com/search?q=' + encodeURIComponent('z'.repeat(PENDING_QUERY_MAX));
+  assert.equal(url, expected);
+});
+
+test('buildSearchUrl encodes a <script>-shaped query as data, never as markup', () => {
+  const hostile = '<script>alert(1)</script>';
+  const url = buildSearchUrl('google', hostile);
+  assert.equal(url, 'https://www.google.com/search?q=' + encodeURIComponent(hostile));
+  assert.ok(!url.includes('<script>'), 'the raw tag must never survive unescaped into the URL');
+});
+
+// ---------------------------------------------------------------------------
+// M16 F2 Leg 2 (DD7): no engine id/label/description is duplicated in
+// welcome-controller.js's engine block — the F1 no-duplication pattern
+// (settings-page-shared-scripts.test.js's identical check for settings.html /
+// settings.js), extended to the welcome surface's own consumer. Also pins
+// that settings.html carries the engine-clear affordance (DD6).
+// ---------------------------------------------------------------------------
+test('no engine label/description is duplicated in welcome-controller.js (DD7: single source is search-engines.js)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const welcomeSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+  assert.ok(SEARCH_ENGINES.length > 0, 'sanity: the curated table must be non-empty for this check to mean anything');
+  for (const engine of SEARCH_ENGINES) {
+    assert.ok(
+      !welcomeSrc.includes(engine.label) && !welcomeSrc.includes(engine.description),
+      `welcome-controller.js contains a literal engine label/description for "${engine.id}" — it must render from ` +
+        'the imported SEARCH_ENGINES table, never a hand-typed copy'
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// M16 F2 Leg 2 acceptance-gate fix: welcome-controller.js's show(tab) must
+// settle a record whose reasons are now all set (a background welcome
+// record can have its last preference filled in from elsewhere while it is
+// not the active tab — see settle()'s doc comment) rather than re-rendering
+// an all-blocks-hidden panel. There is no DOM harness for the chrome welcome
+// controller, so this is pinned structurally: show() must delegate through
+// settle() rather than drawing the panel unconditionally, and settle()'s
+// fallback must never call back into show()/render() (that would either
+// silently regress to the old bug or recurse).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: show(tab) delegates to settle(tab) rather than rendering unconditionally (M16 F2 Leg 2 gate fix)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const showMatch = src.match(/function show\(tab\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(showMatch, 'welcome-controller.js must export a function show(tab) { ... }');
+  assert.ok(
+    /settle\(tab\)/.test(showMatch[1]),
+    'show(tab) must call settle(tab) — a background welcome record whose last unset ' +
+      'reason was filled in elsewhere only gets a chance to attach on its NEXT show(), ' +
+      'so show() cannot just render the panel unconditionally (the gate finding: it ' +
+      'rendered an empty, unattached panel instead)'
+  );
+
+  const settleMatch = src.match(/function settle\(tab\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(settleMatch, 'welcome-controller.js must export a function settle(tab) { ... }');
+  assert.ok(
+    !/\bshow\(tab\)/.test(settleMatch[1]),
+    'settle(tab) must never call back into show(tab) — since show(tab) now delegates ' +
+      'to settle(tab), a call the other way would recurse. Its defensive fallback ' +
+      '(nothing unset, no pending query, no home page — not expected to be reachable ' +
+      'in practice) must hide the panel and focus the address bar directly instead'
+  );
+  assert.ok(
+    /render\(tab\)/.test(settleMatch[1]),
+    'settle(tab) should still render(tab) for the ordinary case where a reason remains ' +
+      'unset — only its all-clear fallback avoids re-rendering'
+  );
+});
+
+test('settings.html carries the search-engine Clear affordance (M16 F2 Leg 2, DD6)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const html = fs.readFileSync(path.join(__dirname, '../../src/renderer/pages/settings.html'), 'utf8');
+  assert.ok(html.includes('id="search-engine-clear"'), 'settings.html should have a #search-engine-clear button');
 });
 
 // ---------------------------------------------------------------------------
