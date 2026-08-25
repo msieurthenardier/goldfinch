@@ -25,14 +25,18 @@ async function harness() {
   const window = { goldfinch: {
     windowMinimize: () => calls.push('minimize'), windowToggleMaximize: () => calls.push('maximize'), windowClose: () => calls.push('close'),
     windowIsMaximized: async () => false, onWindowMaximizedChange: (fn) => { callbacks.maximized = fn; },
-    settingsGet: async (key) => key === 'bookmarksBarEnabled' ? false : { media: true, shields: false, devtools: true },
+    // M16 F1 Leg 2: searchEngine's boot seed reads through this same mock —
+    // 'duckduckgo' is a distinct, checkable value (not the 'google' default).
+    settingsGet: async (key) => key === 'bookmarksBarEnabled' ? false : key === 'searchEngine' ? 'duckduckgo' : { media: true, shields: false, devtools: true },
     onSettingsChanged: (fn) => { callbacks.settings = fn; }
   } };
   const deps = {
     window, document: { activeElement: null }, ctx: { activeTabId: null }, els, tabs: new Map(),
     orderedTabIds: () => [], releaseTabWidths: () => {}, keyboardMove: (ids) => ids, commitTabMove: () => {},
     activateTab: () => {}, closeTab: () => {}, activeTab: () => null,
-    setHomePage: (value) => calls.push(['home', value]), updateAutomationKeyState: (value) => calls.push(['keys', value]),
+    setHomePage: (value) => calls.push(['home', value]),
+    setSearchEngine: (value) => calls.push(['searchEngine', value]), // M16 F1 Leg 2
+    updateAutomationKeyState: (value) => calls.push(['keys', value]),
     sendActiveBounds: () => calls.push('bounds')
   };
   const { createWindowController } = await import(moduleUrl);
@@ -117,6 +121,27 @@ test('setBarSuppressed composes with the setting: enabled + suppressed still hid
   h.controller.applyBookmarksBar(true);
   assert.equal(h.els.bookmarksBar.classList.contains('hidden'), false);
   assert.ok(h.calls.includes('bounds'));
+});
+
+// M16 F1 Leg 2 (DD4): searchEngineCache is boot-seeded via an explicit
+// settingsGet — the toolbarPins/bookmarksBarEnabled idiom, deliberately NOT
+// homePageCache's unseeded pattern (squawk 0005). The broadcast handler's
+// guard is `!== undefined`, never truthiness — a `null` payload (a
+// meaningful future value, per DD2) must still reach setSearchEngine.
+test('searchEngine is boot-seeded via an explicit settingsGet, and the broadcast handler applies null but ignores undefined', async () => {
+  const h = await harness();
+  await Promise.resolve(); // let the boot-seed settingsGet('searchEngine') resolve
+  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), ['searchEngine', 'duckduckgo']);
+
+  h.calls.length = 0;
+  // Explicit null IS applied (unset is a meaningful value, not "nothing to do").
+  h.callbacks.settings({ searchEngine: null, toolbarPins: { media: true, shields: true, devtools: true } });
+  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), ['searchEngine', null]);
+
+  h.calls.length = 0;
+  // searchEngine key absent from the broadcast payload (undefined) — no call at all.
+  h.callbacks.settings({ toolbarPins: { media: true, shields: true, devtools: true } });
+  assert.equal(h.calls.some((item) => Array.isArray(item) && item[0] === 'searchEngine'), false);
 });
 
 test('bookmarksBarEnabled syncs live from the settings-changed broadcast (multi-window sync)', async () => {

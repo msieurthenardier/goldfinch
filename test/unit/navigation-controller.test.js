@@ -4,6 +4,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+// M16 F1 Leg 2: the real shared table/builder (require(esm), same synchronous
+// pattern settings-store.test.js and search-engines.test.js already use) —
+// toUrl's search fallback is exercised against the actual buildSearchUrl, not
+// a hand-rolled stand-in.
+const { buildSearchUrl } = require('../../src/shared/search-engines');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js')).href;
 
@@ -35,7 +40,10 @@ function harness() {
   const names = ['address', 'addressChip', 'star', 'back', 'forward', 'reload', 'newTab', 'zoomControl', 'zoomPercent', 'zoomOut', 'zoomIn', 'zoomReset', 'lightbox'];
   const els = Object.fromEntries(names.map((name) => [name, new El()]));
   els.lightbox.classList.add('hidden');
-  const state = { active: null, suggestions: { open: false, token: 0 }, openedModels: [], calls: [] };
+  // M16 F1 Leg 2: searchEngine defaults to null (unset) here — the harness
+  // exercises toUrl's `currentSearchEngine() || 'google'` coalescing site
+  // directly; individual tests set h.state.searchEngine to pin a chosen engine.
+  const state = { active: null, suggestions: { open: false, token: 0 }, openedModels: [], calls: [], searchEngine: null };
   const callbacks = {};
   let suggestResolve;
   let suggestReject;
@@ -78,6 +86,11 @@ function harness() {
       findByUrl: (jarId, url) => bookmarks.has(url) ? { id: 'bm', url } : null,
       ensureJar: (jarId) => state.calls.push(['ensureJar', jarId])
     },
+    // M16 F1 Leg 2: the real buildSearchUrl (imported above) + a live read of
+    // h.state.searchEngine — matches the renderer.js call-site shape exactly
+    // (buildSearchUrl imported, currentSearchEngine() a thin cache accessor).
+    buildSearchUrl,
+    currentSearchEngine: () => state.searchEngine,
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     shouldQuery: ({ focused, isInternal, isBurner, value }) => focused && !isInternal && !isBurner && !!value.trim(),
     buildSuggestionModel: (items, selectedIndex) => ({ items, selectedIndex }),
@@ -115,6 +128,8 @@ test('URL conversion and navigation preserve internal-tab refusal and web-tab ca
   const h = harness();
   const controller = await create(h);
   assert.equal(controller.toUrl('example.com/path'), 'https://example.com/path');
+  // Default (no engine set): the coalescing site (`currentSearchEngine() || 'google'`)
+  // falls back to Google — byte-identical to the pre-Leg-2 hardcoded assertion.
   assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
 
   h.state.active = { id: 'internal', internal: true, wcId: 1 };
@@ -123,6 +138,30 @@ test('URL conversion and navigation preserve internal-tab refusal and web-tab ca
   h.state.active = { id: 'web', internal: false, wcId: 9 };
   controller.navigate('https://example.test/');
   assert.deepEqual(h.state.calls.pop(), ['navigate', { wcId: 9, verb: 'loadURL', args: ['https://example.test/'] }]);
+});
+
+// M16 F1 Leg 2 (DD4): toUrl's search fallback now builds from the live
+// searchEngineCache (currentSearchEngine()) via the shared buildSearchUrl,
+// replacing the old hardcoded Google line — covers both a non-default engine
+// and the default explicitly (the AC's "both entry points prove out through
+// the one change" — this is the one change; sel:search shares toUrl via
+// renderer.js, which has no seam in this harness — see the flight log).
+test('toUrl builds the search URL from the current search engine, non-default and default', async () => {
+  const h = harness();
+  const controller = await create(h);
+
+  h.state.searchEngine = 'duckduckgo';
+  assert.equal(controller.toUrl('hello world'), 'https://duckduckgo.com/?q=hello%20world');
+
+  h.state.searchEngine = 'google';
+  assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
+
+  // Unset (null) coalesces to Google at the toUrl call site, not by mutating
+  // the cache — the edge case the leg spec calls out (structurally unreachable
+  // once searchEngine is always a validated stored value, but toUrl must not
+  // depend on that invariant holding).
+  h.state.searchEngine = null;
+  assert.equal(controller.toUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
 });
 
 test('suggestion responses are rejected after the tab controller invalidates on switch', async () => {

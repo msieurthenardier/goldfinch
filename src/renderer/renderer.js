@@ -21,6 +21,7 @@ import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
+import { buildSearchUrl } from '../shared/search-engines.js'; // M16 F1 Leg 2: toUrl's engine-id → URL lookup, injected into navigation-controller
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
@@ -46,6 +47,18 @@ import {
 const HOMEPAGE = 'https://www.google.com';
 let homePageCache = HOMEPAGE;
 function currentHomePage() { return homePageCache || HOMEPAGE; }
+
+// searchEngineCache (M16 F1 Leg 2, DD4 — corrected pattern, NOT homePageCache's):
+// stores the value RAW, no coalescing here — null must survive so Flight 2's
+// unset-routing has something to route on. The ONE Google-coalescing read site
+// is navigation-controller.js's toUrl (Flight-1 semantics; Flight 2 rewrites it).
+// Kept fresh by two rebuild triggers only (the leg's declared cache-freshness
+// contract): the explicit boot seed below (window-controller.js) and every
+// settings-changed broadcast (window-controller.js's onSettingsChanged, guarded
+// `!== undefined` — null is a meaningful future value, unlike undefined/absent).
+let searchEngineCache = 'google';
+function setSearchEngine(value) { searchEngineCache = value; }
+function currentSearchEngine() { return searchEngineCache; }
 
 const ctx = createChromeContext({ document, goldfinch: window.goldfinch });
 const { els, tabs } = ctx;
@@ -417,6 +430,7 @@ navigationController = createNavigationController({
   openDownloads,
   bookmarksClient,
   isInternalPageUrl,
+  buildSearchUrl, currentSearchEngine, // M16 F1 Leg 2: toUrl's engine lookup + live cache read
   shouldQuery,
   buildSuggestionModel, mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
   moveSelection,
@@ -476,6 +490,7 @@ windowController = createWindowController({
   closeTab,
   activeTab,
   setHomePage: (value) => { homePageCache = value || HOMEPAGE; },
+  setSearchEngine, // M16 F1 Leg 2: boot seed + settings-changed handler both write through this
   updateAutomationKeyState,
   sendActiveBounds
 });
