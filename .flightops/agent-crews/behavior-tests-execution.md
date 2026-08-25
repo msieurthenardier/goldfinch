@@ -161,6 +161,52 @@ The Orchestrator substitutes these in prompts at runtime:
 | `{step-expected}` | The current step's Expected Results cell | Per-step Validator prompt |
 | `{executor-step-report}` | The Executor's structured report (per-step) | Per-step Validator prompt |
 
+## Project Apparatus Notes (goldfinch)
+
+Facts rediscovered live across multiple runs (`bookmarks-jar-scoping`,
+`search-engine-preference`, `search-engine-upgrade`) — read before signalling
+`[READY]` so a crew spawn needs no hand-added apparatus instructions beyond
+run-specific keys/ports.
+
+- **Never use session-registered `mcp__goldfinch*` / `mcp__chrome-devtools*`
+  tools.** The registrations on the dev machine carry statically pinned keys
+  and at least one points at the operator's production browser. Drive the
+  instance under test only through an attach-only client with the run's
+  freshly minted key (`scripts/lib/mcp-client.mjs` pattern) — see
+  `tests/behavior/bookmarks-jar-scoping/runs/2026-07-31-19-35-58.md`.
+- **Reaching internal pages**: `openTab` creates untrusted tabs and
+  `navigate` refuses `goldfinch://` by design; the sanctioned route is
+  `evaluate` on the chrome wcId calling the `globalThis` dogfooding seam
+  (`kebabActionSettings()`, `openJarsPage()`, …) — see
+  `src/renderer/renderer.js`'s `Object.assign(globalThis, …)` block and
+  `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
+  (Checkpoint 1 / Orchestrator Notes).
+- **Sheets**: kebab and page-context menus are outside
+  `AUTOMATABLE_MENU_TYPES` (`src/main/automation/resolve.js:53`), refused at
+  every tier, and not composited by `captureWindow`; a tab switch dismisses a
+  stuck sheet, a chrome-targeted Escape does not — see
+  `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
+  (Checkpoint 6 / Orchestrator Notes).
+- **Coordinates**: `click` on a tab wcId is guest-viewport-relative — read
+  from `captureScreenshot {wcId}` (1:1), not from `captureWindow` (includes
+  the chrome). `openTab` lands in the last-focused window — focus the
+  intended window first — see
+  `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
+  (Orchestrator Notes).
+- **Reads**: the address bar's committed URL is authoritative via `evaluate`
+  of `#address.value` on the chrome wcId (a11y textbox nodes may expose no
+  `value`); the Settings home-page textbox's a11y `value` is
+  build/state-dependent — judge from rendered pixels — see
+  `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
+  (Checkpoint 3 / Orchestrator Notes).
+- **Out-of-band relaunch** (`session-restore` procedure, proven
+  2026-08-24): the MCP transport dies with the process and
+  `GOLDFINCH_AUTOMATION_DEV_MINT` mints a fresh key per boot — the
+  Orchestrator relaunches, re-reads the mint line, rewrites the crew's env,
+  and briefs the restored topology — see
+  `tests/behavior/search-engine-preference/runs/2026-08-24-22-41-08.md`
+  (Checkpoint 8 / Orchestrator Notes).
+
 ## Prompts
 
 ### Executor: Initial
@@ -187,6 +233,9 @@ LIFECYCLE
   If `warm`, skip.
 - Signal `[READY]` with the cache mode noted ("`[READY]` — cache-cold"
   or "`[READY]` — cache-warm"). Wait.
+- PROJECT APPARATUS NOTES: read the `Project Apparatus Notes (goldfinch)`
+  section of this crew file before signalling `[READY]` — in particular the
+  prohibition on session-registered `mcp__goldfinch*` tools.
 - Per step: I will SendMessage you with the step number and Actions.
   Perform them. Capture raw state. Save evidence files to
   {evidence-dir}. Return a structured report. Wait for the next step.
@@ -275,6 +324,9 @@ LIFECYCLE
   (ambiguous Expected Results, missing observability, unsafe
   assumptions). Report them in your `[READY]` message.
 - Then: signal `[READY]` and wait. Do NOT pre-judge upcoming steps.
+- PROJECT APPARATUS NOTES: read the `Project Apparatus Notes (goldfinch)`
+  section of this crew file before signalling `[READY]` — in particular the
+  prohibition on session-registered `mcp__goldfinch*` tools.
 - Per step: I will SendMessage you with (a) the step's Expected
   Results from the spec and (b) the Executor's structured report.
   Judge whether the Expected Results were met. Render PASS / FAIL /

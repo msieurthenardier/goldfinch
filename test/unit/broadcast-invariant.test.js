@@ -56,9 +56,36 @@ const BROADCAST_MARKER = 'settings-changed';
 /** @type {Set<string>} */
 const ALLOWLIST = new Set([]);
 
-/** @param {string} slice */
-function mutatesSettings(slice) {
-  return MUTATION_MARKERS.some((m) => slice.includes(m));
+/**
+ * squawk 0003: the detection half was left as a raw substring test after squawk 0001
+ * hardened the broadcast half to resolve module-scope helper wrappers — a handler that
+ * mutates settings only INDIRECTLY, via a module-scope helper (e.g.
+ * `const setPref = (k, v) => settings.set(k, v);` called from a handler body), contained
+ * no marker of its own and was never classified as mutating at all, so it never even
+ * reached the broadcast check. Mirrors the broadcast half's helper-crediting: a handler
+ * is mutating if its OWN body contains a marker, OR it calls a module-scope helper (see
+ * extractMutationHelperNames) whose own body contains one — UNLESS the handler's slice
+ * locally shadows that helper's name (Finding B, see locallyShadowsName, reused as-is).
+ *
+ * Fail-safe asymmetry preserved: marker text appearing only in a string literal (not a
+ * comment — maskComments already strips comments before this runs) can still produce a
+ * false PASS-as-mutating (a false failure of the net, safe direction); a handler that
+ * mutates only through an uncredited helper shape is the false PASS-as-clean this fix
+ * closes, which is the unsafe direction.
+ * @param {string} slice
+ * @param {Set<string>} [mutationHelperNames] - names of module-scope helpers (see
+ *   extractMutationHelperNames) whose OWN body contains a mutation marker; a handler
+ *   that merely CALLS one of these counts as mutating, UNLESS the handler's own slice
+ *   locally shadows the name (Finding B, see locallyShadowsName).
+ */
+function mutatesSettings(slice, mutationHelperNames) {
+  if (MUTATION_MARKERS.some((m) => slice.includes(m))) return true;
+  if (!mutationHelperNames) return false;
+  for (const name of mutationHelperNames) {
+    if (locallyShadowsName(slice, name)) continue;
+    if (new RegExp(`\\b${name}\\s*\\(`).test(slice)) return true;
+  }
+  return false;
 }
 
 // squawk 0001, fix cycle 2, Finding A: the base check used to be a raw
@@ -267,6 +294,39 @@ function extractBroadcastHelperNames(source) {
 }
 
 // ---------------------------------------------------------------------------
+// squawk 0003: mutation-side mirror of extractBroadcastHelperNames. Finds any
+// module-scope `const NAME = (...) => <expr>;` one-liner (the exact same shape
+// register-settings-ipc.js already uses for broadcastSettings) and credits NAME only
+// when its body is ITSELF, at the top level, a direct call to a real mutation
+// primitive — e.g. `const setPref = (k, v) => settings.set(k, v);`. Mirrors the
+// broadcast side's BROADCAST_CALL_RE anchor-at-start discipline (not a bare substring
+// test over m[2]) for the same reason: a decoy such as
+// `const fakeMutationHelper = () => 'settings.set( marker but does nothing';` must NOT
+// be credited — its body doesn't call a mutation primitive at all, the marker text is
+// just an unrelated string literal that happens to open with a quote, which the
+// anchored regex rejects. Reuses BROADCAST_HELPER_RE (the shape scanned for is
+// identical; only what's credited differs) rather than introducing a second
+// helper-resolution mechanism.
+// ---------------------------------------------------------------------------
+const MUTATION_CALL_RE = /^\s*(?:settings\.set|mintJarKey|revokeJarKey|mintAdminKey|revokeAdminKey)\(/;
+
+/**
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+function extractMutationHelperNames(source) {
+  const masked = maskComments(source);
+  /** @type {Set<string>} */
+  const names = new Set();
+  let m;
+  BROADCAST_HELPER_RE.lastIndex = 0;
+  while ((m = BROADCAST_HELPER_RE.exec(masked))) {
+    if (MUTATION_CALL_RE.test(m[2])) names.add(m[1]);
+  }
+  return names;
+}
+
+// ---------------------------------------------------------------------------
 // The nine registrar modules that replaced main.js/jar-ipc.js post-#99/#105,
 // grouped by the extraction strategy that matches their known registration shape
 // (verified by inspection; the per-group vacuity guards below fail loudly if a
@@ -295,17 +355,19 @@ test('every settings-mutating registrar handler in production source broadcasts 
   for (const file of INLINE_CALLBACK_REGISTRARS) {
     const source = fs.readFileSync(path.join(MAIN_DIR, file), 'utf8');
     const helperNames = extractBroadcastHelperNames(source);
+    const mutationHelperNames = extractMutationHelperNames(source);
     const registrations = extractMainRegistrations(source);
     for (const r of registrations) {
-      all.push({ label: `${file}:${r.label}`, slice: r.slice, helperNames });
+      all.push({ label: `${file}:${r.label}`, slice: r.slice, helperNames, mutationHelperNames });
     }
   }
   for (const file of NAMED_FUNCTION_REGISTRARS) {
     const source = fs.readFileSync(path.join(MAIN_DIR, file), 'utf8');
     const helperNames = extractBroadcastHelperNames(source);
+    const mutationHelperNames = extractMutationHelperNames(source);
     const handlers = extractNamedFunctionHandlers(source);
     for (const r of handlers) {
-      all.push({ label: `${file}:${r.label}`, slice: r.slice, helperNames });
+      all.push({ label: `${file}:${r.label}`, slice: r.slice, helperNames, mutationHelperNames });
     }
   }
   // Sanity: fail loudly if the extraction itself breaks (e.g. a future refactor
@@ -313,7 +375,7 @@ test('every settings-mutating registrar handler in production source broadcasts 
   assert.ok(all.length > 140, `expected well over a hundred registrar handlers across nine modules, found ${all.length}`);
 
   const violations = all
-    .filter((r) => mutatesSettings(r.slice) && !broadcastsSettingsChanged(r.slice, r.helperNames))
+    .filter((r) => mutatesSettings(r.slice, r.mutationHelperNames) && !broadcastsSettingsChanged(r.slice, r.helperNames))
     .filter((r) => !ALLOWLIST.has(r.label))
     .map((r) => r.label);
   assert.deepEqual(violations, [], `handler(s) mutate settings without broadcasting settings-changed: ${violations.join(', ')}`);
@@ -375,6 +437,57 @@ test('mutatesSettings/broadcastsSettingsChanged classify a synthetic mutating-wi
   assert.equal(broadcastsSettingsChanged(bad), false);
   assert.equal(mutatesSettings(good), true);
   assert.equal(broadcastsSettingsChanged(good), true);
+});
+
+test('mutatesSettings credits a handler that mutates only indirectly, through a module-scope helper (squawk 0003)', () => {
+  // The exact shape the squawk describes: a handler whose own body carries no
+  // mutation marker at all, but which calls a module-scope helper that wraps one —
+  // the same DRY shape register-settings-ipc.js already uses on the broadcast side
+  // with broadcastSettings().
+  const genuineMutationHelper = "const setPref = (k, v) => settings.set(k, v);";
+  const mutationHelperNames = extractMutationHelperNames(genuineMutationHelper);
+  assert.deepEqual([...mutationHelperNames], ['setPref']);
+
+  const handlerCallingHelper = "ipcMain.on('toggle-x', () => { setPref('k', 1); })";
+
+  // Without the resolved helper names, the handler's own slice has no marker text at
+  // all — this is the false PASS the squawk reports (regression baseline: proves the
+  // fix, not just the helper of it, is doing the work).
+  assert.equal(
+    mutatesSettings(handlerCallingHelper),
+    false,
+    'a handler with no resolved helper names and no marker of its own must not be classified as mutating by chance'
+  );
+  // With the resolved helper names, the indirect mutation must be caught.
+  assert.equal(mutatesSettings(handlerCallingHelper, mutationHelperNames), true);
+
+  // The handler never broadcasts — end to end, this is a real violation: mutating
+  // (indirectly) without broadcasting.
+  assert.equal(broadcastsSettingsChanged(handlerCallingHelper), false);
+  assert.equal(
+    mutatesSettings(handlerCallingHelper, mutationHelperNames) && !broadcastsSettingsChanged(handlerCallingHelper),
+    true,
+    'a handler that mutates only through an uncredited helper and never broadcasts must be reported as a violation'
+  );
+
+  // A decoy helper that merely mentions the marker text (no real mutation call) must
+  // not be credited — the exact class of squawk 0001's decoy finding, mirrored here.
+  const decoyMutationHelper = "const fakeMutationHelper = () => 'settings.set( marker but does nothing';";
+  assert.deepEqual(
+    [...extractMutationHelperNames(decoyMutationHelper)],
+    [],
+    'a helper whose body only contains the marker as an unrelated string literal must not be credited'
+  );
+
+  // A handler locally shadowing the credited helper name must not be credited either
+  // (Finding B, reused as-is for the mutation side).
+  const shadowedHandler =
+    "ipcMain.on('toggle-y', () => { const setPref = () => {}; setPref('k', 1); })";
+  assert.equal(
+    mutatesSettings(shadowedHandler, mutationHelperNames),
+    false,
+    'a locally-shadowed redeclaration of the mutation helper name must not be credited'
+  );
 });
 
 test('extractBroadcastHelperNames credits a genuine broadcast helper but NOT a decoy that merely mentions the marker string (squawk 0001 review finding)', () => {
