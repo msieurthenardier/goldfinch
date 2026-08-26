@@ -1,6 +1,6 @@
 # Mission: Search and Startup Choice
 
-**Status**: active
+**Status**: completed
 
 ## Outcome
 
