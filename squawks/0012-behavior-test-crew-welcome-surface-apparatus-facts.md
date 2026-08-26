@@ -1,10 +1,10 @@
 # Squawk 0012: Behavior-test crew file lacks the apparatus facts learned on the Mission 16 Flight 2 runs
 
-**Status**: open
+**Status**: completed
 **Type**: servicing
 **Severity**: routine
 **Reported**: 2026-08-25
-**Completed**: —
+**Completed**: 2026-08-25
 
 ## Report
 
@@ -31,12 +31,69 @@ Facts to add:
 
 ## Corrective Action
 
-*(written at completion)*
+Extended `.flightops/agent-crews/behavior-tests-execution.md`'s
+`## Project Apparatus Notes (goldfinch)` section (now lines 164–298) with the
+twelve facts from the six 2026-08-25 runs, in the section's existing style —
+one bullet per fact, each ending in a `— see tests/behavior/<slug>/runs/<ts>.md
+(…)` citation to the run that recorded it — merging three into existing
+bullets per the Flight Director's mapping and adding six new bullets:
+
+- **Sheets** bullet (line 185) gained the read-only clarification: allowlisted
+  sheets admit only `captureScreenshot`/`readDom`/`readAxTree`
+  (`allowSheet: true`) — no write op ever resolves a sheet wcId.
+- **Coordinates** bullet (line 201) gained welcome-surface chrome-relative
+  coordinates and the Settings engine Clear button's rect-based location.
+- **Reads** bullet (line 214) gained the DOM-count/`textContent`
+  visibility-blindness fact and the unchecked-focus-ring fact.
+- **Out-of-band relaunch** bullet (line 231) gained the PID-attestation
+  default and the `[CLOSING]`-timing note for Executor transcript loss.
+- New bullets added: **Welcome tabs** (line 249, `enumerateTabs`/
+  `enumerateWindows` invisibility), **Bookmarks** (line 257, star-click
+  persists immediately), **Settings layout shift** (line 264, ~20–24px
+  post-Save/Clear shift), **`scroll` parameters** (line 272, `dx`/`dy` vs.
+  the CDP `deltaX`/`deltaY` naming), **Cross-window/broadcast baselines**
+  (line 279, DD7 auto-attach shifting a later step's baseline), and
+  **Anti-automation interstitials** (line 288, Google `/sorry/` judged on
+  the committed URL).
+
+Also updated the section's intro sentence (lines 166–169) to list the four
+new run slugs (`welcome-home-routing`, `welcome-first-launch`,
+`welcome-search-handoff`, `new-tab-default-routing`) alongside the three
+already named.
+
+Each code-level claim was verified against source before writing the bullet:
+`AUTOMATABLE_MENU_TYPES` (`src/main/automation/resolve.js:53`) and the three
+`allowSheet: true` call sites (`src/main/automation/engine.js:222,249,250`,
+feeding `resolve.js`'s `admitted` check); the `scroll` tool's `wcId, x, y,
+dx, dy` signature (`src/main/automation/mcp-tools.js:309-322`,
+`src/main/automation/engine.js:211-212`) against the CDP dispatch's
+`deltaX`/`deltaY` naming (`src/main/automation/input.js:364-383`); and
+`enumerateTabs`' chrome-DOM-only enumeration path
+(`src/main/automation/tabs.js:98-131`) that gives a viewless welcome record
+no row. No other file was touched; the `## Prompts` section and all protocol
+text are unchanged (confirmed via `git diff` — a single contiguous hunk
+inside `## Project Apparatus Notes (goldfinch)`).
 
 ## Verification
 
-*(written at completion — a fresh Executor briefed from the crew file alone reaches `[READY]` on a welcome-surface spec without rediscovering any of the above)*
+- `git diff --stat .flightops/agent-crews/behavior-tests-execution.md` shows
+  one file changed, 97 insertions / 7 deletions, and `git diff` shows a
+  single hunk spanning lines 164–298 (the Project Apparatus Notes section) —
+  `## Prompts` and everything after it is byte-for-byte unchanged.
+- All twelve facts are present, each with its run-log citation, at the line
+  numbers listed under Corrective Action above.
+- `npm test` — 3765/3765 passing (0 fail, 0 skipped), matching the expected
+  count with squawk 0011's uncommitted test changes still in the tree.
+- `npm run lint` — clean, no output, 0 errors/warnings.
+- This squawk changed only documentation (`.flightops/agent-crews/
+  behavior-tests-execution.md` and this squawk file) — no source, test, or
+  config files were modified, so a fresh Executor/Validator crew spawn reads
+  the extended notes with no other behavior change.
 
 ## Sign-Off
 
-*(written at completion)*
+**Reviewer**: Reviewer agent (independent, no knowledge of the implementers' reasoning) — one review round, batch turnaround 2026-08-25
+**Verdict**: confirmed
+**Commit**: `squawk: turnaround 2026-08-25 (0011, 0012)` on `squawk/turnaround-2026-08-25` (PR number recorded on the PR itself)
+
+Reviewer confirmed the diff is confined to the Project Apparatus Notes section (Prompts byte-identical), all twelve facts present with run-log citations (six spot-checked against the run logs), every code claim verified in `src/main/automation/` (`AUTOMATABLE_MENU_TYPES`, the three `allowSheet` read-only sites, `scroll`'s `dx`/`dy`, `enumerateTabs`' chrome-DOM path), no identity leaks. Suite 3765/3765, lint clean.
