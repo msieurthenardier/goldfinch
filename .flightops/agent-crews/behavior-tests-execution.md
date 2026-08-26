@@ -164,8 +164,9 @@ The Orchestrator substitutes these in prompts at runtime:
 ## Project Apparatus Notes (goldfinch)
 
 Facts rediscovered live across multiple runs (`bookmarks-jar-scoping`,
-`search-engine-preference`, `search-engine-upgrade`, `welcome-home-routing`,
-`welcome-first-launch`, `welcome-search-handoff`, `new-tab-default-routing`) —
+`search-engine-preference`, `search-engine-upgrade`, `welcome-home-first`,
+`welcome-home-routing`, `welcome-first-launch`, `welcome-search-handoff`,
+`new-tab-default-routing`) —
 read before signalling `[READY]` so a crew spawn needs no hand-added apparatus
 instructions beyond run-specific keys/ports.
 
@@ -227,7 +228,15 @@ instructions beyond run-specific keys/ports.
   a keyboard-focus ring on its first radio (DuckDuckGo) — outline only,
   unchecked per a11y, not a selection — see
   `tests/behavior/welcome-search-handoff/runs/2026-08-25-04-48-18.md`
-  (Orchestrator Notes / Executor closing).
+  (Orchestrator Notes / Executor closing). The welcome blocks hide by a
+  `hidden` **CSS class** — the element's own `hidden` IDL property reads
+  `false` even while it is hidden by class, a false signal on this build;
+  read `className` / `getComputedStyle().display` / rect instead, and gate
+  any inner-block read on `#welcome-surface`'s own display — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-20-38-40.md`
+  (Checkpoint 3 / Validator notes) and
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Orchestrator Notes).
 - **Out-of-band relaunch** (`session-restore` procedure, proven
   2026-08-24): the MCP transport dies with the process and
   `GOLDFINCH_AUTOMATION_DEV_MINT` mints a fresh key per boot — the
@@ -241,11 +250,14 @@ instructions beyond run-specific keys/ports.
   signals of a real relaunch, not tab-list lineage alone — see
   `tests/behavior/search-engine-preference/runs/2026-08-25-05-35-38.md`
   (Checkpoints 4/5/8, Orchestrator Notes). The Executor's closing summary is
-  the one artifact transcript loss can drop — on one run its agent session
-  was no longer resumable once `[CLOSING]` was sent after its final
-  per-step report; send `[CLOSING]` to the Executor immediately after that
-  report, before other wrap-up work, to minimize the window — see the same
-  run's Closing Summaries section.
+  the one artifact transcript loss can drop — three occurrences in this
+  project's runs so far, each after the Executor's final per-step report;
+  send `[CLOSING]` to the Executor immediately after that report, before
+  other wrap-up work, to minimize the window — see the same run's Closing
+  Summaries section and, for the third occurrence,
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Orchestrator Notes: "Executor transcript loss (third occurrence in this
+  project's runs)").
 - **Welcome tabs**: a welcome tab (viewless record, no web contents) is
   invisible to `enumerateTabs`, and `enumerateWindows` reports
   `activeTabWcId: null` for it — the tab strip must be read from chrome DOM,
@@ -269,22 +281,39 @@ instructions beyond run-specific keys/ports.
   (Setup row) and
   `tests/behavior/new-tab-default-routing/runs/2026-08-25-05-04-03.md`
   (Orchestrator Notes / Executor closing).
-- **`scroll` parameters**: the tool's own arguments are `wcId, x, y, dx, dy`
-  (`src/main/automation/mcp-tools.js`'s `scroll` entry); the underlying CDP
-  dispatch (`Input.dispatchMouseEvent` in `src/main/automation/input.js`)
-  names the same values `deltaX`/`deltaY` — don't pass `deltaX`/`deltaY` as
-  the call's own argument names — see
+- **`scroll`/`pressKey` arguments**: `scroll`'s own arguments are
+  `wcId, x, y, dx, dy` (`src/main/automation/mcp-tools.js`'s `scroll` entry);
+  the underlying CDP dispatch (`Input.dispatchMouseEvent` in
+  `src/main/automation/input.js`) names the same values `deltaX`/`deltaY` —
+  don't pass `deltaX`/`deltaY` as the call's own argument names — see
   `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
+  (Orchestrator Notes / Executor closing). `pressKey` accepts `Enter`, not
+  `Return` (`unknown key`) — its vocabulary is
+  `Tab, Enter, Escape, Space, Arrow*, Home, End, Delete, Backspace, ShiftTab`
+  or a single character — see
+  `tests/behavior/welcome-home-first/runs/2026-08-25-20-08-57.md`
   (Orchestrator Notes / Executor closing).
 - **Cross-window/broadcast baselines**: setting a preference broadcasts
-  live, and can auto-attach another window's already-shown pending welcome
-  tab (DD7) between two steps — this shifts that window's "before" baseline
-  for a later row. Call this out explicitly in the spec row whenever a
-  cross-window step follows one that sets a preference — see
+  live to every window — a welcome tab already shown in any window
+  re-renders immediately with the newly saved value and its confirmation
+  line, whether or not that window made the change. As of M16 F3 Leg 2's
+  DD7 pivot (`src/renderer/chrome/welcome-controller.js`'s `settle`/
+  `submitHome`, commit `46b3f5a`) this is re-render only — a shown welcome
+  tab no longer auto-navigates on the broadcast; the surface's one
+  remaining self-navigation is `settle`'s pending-search branch, which
+  attaches only once a query is waiting and an engine resolves.
+  (Historical, pre-pivot: a preference broadcast could instead auto-attach
+  another window's already-shown pending welcome tab (DD7) between two
+  steps, shifting that window's "before" baseline for a later row —
+  retired at the pivot.) Call out a cross-window step that follows one
+  that sets a preference — see
   `tests/behavior/welcome-home-routing/runs/2026-08-25-02-45-35.md`
-  (Checkpoint 8 side finding / Orchestrator Notes) and
+  (Checkpoint 8 side finding / Orchestrator Notes),
   `tests/behavior/welcome-first-launch/runs/2026-08-25-04-22-08.md`
-  (DD7 auto-attach scope observed / Orchestrator Notes).
+  (DD7 auto-attach scope observed / Orchestrator Notes), and
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Checkpoints 8-9 / Orchestrator Notes — retirement confirmed: re-render,
+  no navigation).
 - **Anti-automation interstitials**: Google's `/sorry/` interstitial can
   intercept a scripted search after repeated queries from one IP/session —
   judge the row on the committed address-bar URL (host `google.com` plus the
@@ -296,6 +325,56 @@ instructions beyond run-specific keys/ports.
   (Checkpoint 3 / Orchestrator Notes) and
   `tests/behavior/search-engine-preference/runs/2026-08-25-05-35-38.md`
   (Checkpoint 2 / Orchestrator Notes).
+- **Bookmarks bar**: renders app-wide — on every web-class or welcome tab,
+  in every window, showing the same items — but suppressed on burner-jar
+  tabs as well as internal guests (e.g. Settings); one Executor initially
+  misread it as a stale title strip before recognizing it at a later step.
+  Bookmark items are `button.bm-item` inside `#bookmarks-bar`; the chrome
+  star toggle is `#star` — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-20-38-40.md`
+  (Setup row and Checkpoint 4 / Orchestrator Notes) and
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Checkpoints 3 and 7 / Orchestrator Notes and Validator notes); burner
+  suppression confirmed at Checkpoint 5 of both runs.
+- **Burner tabs**: carry a `.tab-jar` swatch in the strip element
+  (`title="Burner (burner)"`, colour `#ff8c42`) — the positive signal for
+  identifying a burner tab, distinct from the green default-jar swatch,
+  when titles alone would coincide — see
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-20-38-40.md`
+  (Checkpoint 5 / Raw state) and
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Checkpoint 5).
+- **`evaluate` on internal guests**: refused outright on an internal
+  guest's own wcId (e.g. Settings) — "internal-session excluded" —
+  screenshot + a11y are the only readable apparatus there; judge internal-
+  guest DOM state from rendered pixels/a11y, never `evaluate` — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-20-20-29.md`
+  (Orchestrator Notes).
+- **Re-activating a viewless welcome tab**: has no wcId, so `activateTab`
+  cannot target it — click its strip rect instead (`.tab` located by
+  title) — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-20-20-29.md`
+  (Orchestrator Notes / Executor closing) and
+  `tests/behavior/welcome-home-routing/runs/2026-08-25-20-38-40.md`
+  (Checkpoint 6 / Actions taken).
+- **Transient `sheetWcId`**: `enumerateWindows` can gain a `sheetWcId`
+  field (`sheetVisible: false`) after a dismissed sheet or an
+  external-engine navigation — a resolved artifact never enumerated as a
+  tab, not an error — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-25-20-20-29.md`
+  (Checkpoint 5 / Validator notes) and
+  `tests/behavior/welcome-home-routing/runs/2026-08-26-02-29-57.md`
+  (Setup row).
+- **Stored `homePage` value**: persisted exactly as typed (e.g.
+  `https://example.com`, no trailing slash) while navigation normalizes
+  the same value to `https://example.com/` — don't diff the settings-row
+  value against the committed address literally — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-26-02-10-54.md`
+  (Spec notes for the next revision / Orchestrator Notes).
+- **Settings scroll position**: the "Show bookmarks bar" toggle sits below
+  the fold at a 1080 px window height — scroll to it before clicking — see
+  `tests/behavior/welcome-first-launch/runs/2026-08-26-02-10-54.md`
+  (Closing Summaries / Executor closing).
 
 ## Prompts
 

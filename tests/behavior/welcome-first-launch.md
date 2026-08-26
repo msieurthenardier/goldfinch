@@ -13,7 +13,8 @@ Verifies the fresh-profile outcome end to end: a brand-new profile boots with ne
 
 ## Preconditions
 
-- Goldfinch dev build launched against a **fresh, empty** `XDG_CONFIG_HOME` scratch profile with the automation surface and admin key — no fixture setup at all; the first launch IS the test.
+- Goldfinch dev build launched against a **fresh, empty** `XDG_CONFIG_HOME` scratch profile with the automation surface and admin key — the first launch IS the test, with one fixture exception below for row 3's bookmarks-bar check.
+- **Bookmark fixture (row 3):** an empty bookmarks bar has no visual signature on the dark chrome, so row 3 needs one bookmark present to check the bar by content instead. Launch the dev build once against the fresh profile to initialize `app.db`, then quit. With the app down, insert one row into the `bookmarks` table for the fresh-seed default jar (`personal` — `src/main/jars.js`'s `FRESH_SEED`): `sqlite3 <userData>/app.db "INSERT INTO bookmarks (id, jar_id, url, title, icon, position, added_at) VALUES ('fixture-bm','personal','https://example.com/','Fixture Bookmark',NULL,0,0)"`. Relaunch — this second launch is the one the run's steps observe, and is otherwise identical to a genuine first launch (no settings/jars fixture, no tab fixture).
 - MCP client attached with the run's minted key; the session-registered goldfinch MCP tools are never used.
 - Network access is NOT required.
 
@@ -27,12 +28,14 @@ Verifies the fresh-profile outcome end to end: a brand-new profile boots with ne
 | # | Actions | Expected Results |
 |---|---------|------------------|
 | 1 | Observe the freshly launched window. | Exactly one tab, titled "Welcome to Goldfinch", showing the welcome surface with **both** the home page block and the search engine block; the address bar is empty with its placeholder and is writable; no tab has committed any URL. [a11y] |
-| 2 | Read the profile's settings row. | `[mixed-frame]` The row exists with `version: 3`, `homePage: null`, and `searchEngine: null` — both keys present and explicitly unset (pinned at first load, not merely absent). |
-| 3 | Open Settings; enable "Show bookmarks bar"; return to the welcome tab. | The bookmarks bar is visible on the welcome tab (empty, but present) — the bar is not suppressed on this surface. Settings shows an empty home page field and no engine selected, each with its hint. |
-| 4 | In the welcome tab's search engine block choose Brave Search. | The engine block stays, showing Brave Search selected, with a saved confirmation beneath it; the home page block remains; the tab stays a welcome tab. A subsequent Ctrl+T opens another welcome tab with only the home page block. |
-| 5 | In that new welcome tab type `zephyr quartz fresh` in the address bar, Enter. | The tab navigates to a `search.brave.com` search URL containing the query — the chosen engine is live; no welcome surface appears for a search. |
-| 6 | Press Ctrl+T; in the welcome surface's home page block type `https://example.com`, **Set**. *(changed at M16 F3 leg 2, HAT item 6 — DD7 pivot)* | The tab stays a welcome tab: the home page field shows `https://example.com` with a saved confirmation (this tab was opened for the home page only — the engine was already set — so no engine card is shown). Ctrl+T opens `https://example.com/` — the welcome surface no longer appears for new tabs. |
-| 7 | Read the settings row. | `[mixed-frame]` `homePage: "https://example.com"`, `searchEngine: "brave"` — each choice wrote exactly its own key. |
+| 2 | Read the profile's settings row. | The row exists with `version: 3`, `homePage: null`, and `searchEngine: null` — both keys present and explicitly unset (pinned at first load, not merely absent). |
+| 3 | Open Settings; enable "Show bookmarks bar"; return to the welcome tab. | The bookmarks bar is visible on the welcome tab, showing the pre-seeded fixture bookmark (`button.bm-item` inside `#bookmarks-bar`) — the bar is not suppressed on this surface. Settings shows an empty home page field and no engine selected, each with its hint. |
+| 4 | In the welcome tab's search engine block choose Brave Search. | The engine block stays, showing Brave Search selected, with a saved confirmation beneath it; the home page block remains; the tab stays a welcome tab. |
+| 5 | Press Ctrl+T. | Opens another welcome tab with only the home page block. |
+| 6 | In that new welcome tab type `zephyr quartz fresh` in the address bar, Enter. | The tab navigates to a `search.brave.com` search URL containing the query — the chosen engine is live; no welcome surface appears for a search. |
+| 7 | Press Ctrl+T; in the welcome surface's home page block type `https://example.com`, **Set**. *(changed at M16 F3 leg 2, HAT item 6 — DD7 pivot)* | The tab stays a welcome tab: the home page field shows `https://example.com` with a saved confirmation (this tab was opened for the home page only — the engine was already set — so no engine card is shown). |
+| 8 | Press Ctrl+T. | Opens `https://example.com/` — the welcome surface no longer appears for new tabs. |
+| 9 | Read the settings row. | `homePage: "https://example.com"`, `searchEngine: "brave"` — each choice wrote exactly its own key. |
 
 ## Out of Scope
 
