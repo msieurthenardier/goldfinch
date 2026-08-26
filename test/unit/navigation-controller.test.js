@@ -4,11 +4,12 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-// M16 F1 Leg 2 / F2 Leg 2: the real shared table/builder (require(esm), same
-// synchronous pattern settings-store.test.js and search-engines.test.js
-// already use) — toUrl's search fallback and the pending-query cap are
+// M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: the real shared table/builder
+// (require(esm), same synchronous pattern settings-store.test.js and
+// search-engines.test.js already use) — toUrl's search fallback, the
+// pending-query cap, and (HAT item 5) the shared domain-normalize rule are
 // exercised against the actual functions, not hand-rolled stand-ins.
-const { buildSearchUrl, capPendingQuery } = require('../../src/shared/search-engines');
+const { buildSearchUrl, capPendingQuery, normalizeHomePageInput } = require('../../src/shared/search-engines');
 
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js')).href;
 
@@ -98,6 +99,7 @@ function harness() {
     // h.state.searchEngine — matches the renderer.js call-site shape exactly
     // (buildSearchUrl imported, currentSearchEngine() a thin cache accessor).
     buildSearchUrl,
+    normalizeHomePageInput,
     currentSearchEngine: () => state.searchEngine,
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
     shouldQuery: ({ focused, isInternal, isBurner, value }) => focused && !isInternal && !isBurner && !!value.trim(),
@@ -206,6 +208,18 @@ test('toUrl builds the search URL from the current search engine when one is cho
   // handoff instead of ever resolving a query into a provider nobody chose.
   h.state.searchEngine = null;
   assert.equal(controller.toUrl('hello world'), null);
+});
+
+// M16 F3 Leg 2 (HAT item 5 design review, [high]): toUrl's `about:` guard
+// must run BEFORE the reused normalizeHomePageInput domain rule — a typed
+// `about:blank` must never fall through to the search branch. Positive
+// behavioral control (there was none before this leg) pinning the guard's
+// actual runtime effect, alongside the structural pin on the guard line
+// itself.
+test('toUrl returns about:blank unchanged (the about: guard runs before the reused domain-normalize rule)', async () => {
+  const h = harness();
+  const controller = await create(h);
+  assert.equal(controller.toUrl('about:blank'), 'about:blank');
 });
 
 // ---------------------------------------------------------------------------

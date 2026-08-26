@@ -8,7 +8,7 @@ export function createNavigationController(deps) {
     openNewTab, attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
     openWelcomeTab, refreshWelcome, // M16 F2 Leg 2 (DD3): the search handoff — a new welcome tab beside the page, or an in-place re-render
     bookmarksClient,
-    buildSearchUrl, currentSearchEngine, capPendingQuery, // M16 F1 Leg 2 / F2 Leg 2: toUrl's search fallback + the pending-query cap
+    buildSearchUrl, currentSearchEngine, capPendingQuery, normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's search fallback + the pending-query cap + the shared domain-normalize rule (HAT item 5)
     isInternalPageUrl, shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection,
     acceptSuggestResponse, suggestionsState, closeOverlayMenu,
     openOverlayMenu, leftAnchorOf
@@ -135,8 +135,14 @@ export function createNavigationController(deps) {
   function toUrl(input) {
     const s = input.trim();
     if (/^[a-z]+:\/\//i.test(s) || s.startsWith('about:')) return s;
-    // Looks like a domain? (has a dot, no spaces)
-    if (/^[^\s]+\.[^\s]{2,}(\/.*)?$/.test(s)) return `https://${s}`;
+    // Looks like a domain? (has a dot, no spaces) — M16 F3 Leg 2 (HAT item
+    // 5): delegates to the shared normalizeHomePageInput rule (the same rule
+    // the welcome surface's and Settings' home-page fields now apply) rather
+    // than keeping a second copy of the regex. The `about:`/scheme guard
+    // above is NOT part of that shared helper and must stay first — an
+    // `about:blank` must never fall through to the search branch below.
+    const n = normalizeHomePageInput(s);
+    if (n !== s) return n;
     // M16 F2 Leg 2 (DD3): a search with no engine chosen returns null — the
     // caller (navigate()) routes a null return to the welcome handoff instead
     // of ever resolving a query into a URL nobody chose a provider for. The

@@ -21,7 +21,7 @@ import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
 import { resolveRestoreContainer } from '../shared/restore-container.js'; // M09 F9 / DD4: saved jarId → live jar, or null (drop)
-import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery } from '../shared/search-engines.js'; // M16 F1 Leg 2 / F2 Leg 2: the curated table (welcome-controller's engine block) + toUrl's engine-id → URL lookup + the pending-query cap
+import { SEARCH_ENGINES, buildSearchUrl, capPendingQuery, normalizeHomePageInput } from '../shared/search-engines.js'; // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: the curated table (welcome-controller's engine block) + toUrl's engine-id → URL lookup + the pending-query cap + the shared domain-normalize rule (HAT item 5)
 import { createChromeContext, escapeHtml } from './chrome/context.js';
 import { createDownloadsController } from './chrome/downloads-controller.js';
 import { createVaultController } from './chrome/vault-controller.js';
@@ -436,7 +436,7 @@ navigationController = createNavigationController({
   openWelcomeTab, refreshWelcome: showWelcomePanel, openDownloads, // M16 F2 Leg 2 (DD3): the search handoff
   bookmarksClient,
   isInternalPageUrl,
-  buildSearchUrl, currentSearchEngine, capPendingQuery, // M16 F1 Leg 2 / F2 Leg 2: toUrl's engine lookup + live cache read + the pending-query cap
+  buildSearchUrl, currentSearchEngine, capPendingQuery, normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's engine lookup + live cache read + the pending-query cap + the shared domain-normalize rule (HAT item 5)
   shouldQuery,
   buildSuggestionModel, mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
   moveSelection,
@@ -506,7 +506,7 @@ welcomeController = createWelcomeController({
   document, els, attachView,
   welcomeSetPreference: window.goldfinch.welcomeSetPreference,
   onSettingsChanged: window.goldfinch.onSettingsChanged,
-  SEARCH_ENGINES, buildSearchUrl, currentSearchEngine, currentHomePage // M16 F2 Leg 2 (DD7): engine block data + attach/gating reads
+  SEARCH_ENGINES, buildSearchUrl, currentSearchEngine, currentHomePage, normalizeHomePageInput // M16 F2 Leg 2 (DD7) / F3 Leg 2 (HAT item 5): engine block data + attach/gating reads + the domain-normalize rule
 });
 
 shortcutController = createShortcutController({

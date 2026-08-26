@@ -828,69 +828,226 @@ a:focus-visible {
   display: none;
 }
 
-/* Welcome surface (M16 F2 Leg 1, DD1/DD7): a CSS child of #webviews (already
+/* Welcome surface (M16 F3 Leg 1, DD1/DD6): a CSS child of #webviews (already
    position:relative with absolutely-inset children — no rect measurement, no
    resize wiring needed; a welcome tab never has a guest, so nothing composites
-   over it). Presentable and unstyled — Flight 3 owns the visual language. */
+   over it). Branded & minimal (DD1): a centered column carries the brand mark,
+   heading, tagline, the burner notice (DD4), and the two choices as cards; the
+   engine chooser is a two-column grid of radio-cards. Every id/class the
+   Flight 2 specs and the DOM-contract structural test read (see CLAUDE.md's
+   welcome-surface note) is styled here by selector only — none is renamed.
+   Selected/focus state on the radio-cards uses :has() (supported by the
+   bundled Electron/Chromium — confirmed at this leg, see flight-log). */
 #welcome-surface {
   position: absolute;
   inset: 0;
   overflow: auto;
-  padding: 48px;
-  color: var(--fg);
-  background: var(--bg);
+  /* HAT fix (state G): every window has minWidth:900 (window-factory.js) and
+     the media panel is --panel-w:360px, so a viewport media query keyed off
+     the window's own width could never see a narrow surface — the surface
+     only narrows (to ~540px content width) when the media panel is open at
+     the window minimum. container-type:inline-size turns this element into
+     a query container sized by its own (already position:absolute; inset:0)
+     content box, so the grid collapse below reacts to the ACTUAL available
+     width regardless of what else (the panel) is stealing space from the
+     window. Confirmed inert on this element's layout/overflow — it stays
+     absolutely positioned and scrollable exactly as before. */
+  container-type: inline-size;
+  /* Light palette (M16 F3 Leg 2 HAT, item 2): scoped to this surface only —
+     custom properties local to #welcome-surface, so nothing outside it (the
+     address bar, tab strip, bookmarks bar, Settings) is affected; those keep
+     the dark :root tokens above. The brand gold stays the accent (--wl-accent
+     aliases --accent); --wl-accent-strong is a darkened gold used wherever
+     gold needs to read as a border/outline against the light surface (raw
+     --accent is too low-contrast on white for that — the Set button's own
+     text stays --accent-fg, dark on gold, which already passes easily).
+     Opaque per DD6's anti-white-flash rule — background is always set here,
+     never transparent; only the color changed. */
+  --wl-bg: #ffffff;
+  --wl-fg: #1e1f25;
+  --wl-fg-dim: #5c5f6b;
+  --wl-card: #f6f6f8;
+  --wl-border: #d9dbe3;
+  --wl-accent: var(--accent);
+  --wl-accent-strong: color-mix(in srgb, var(--accent) 65%, black);
+  color: var(--wl-fg);
+  background: var(--wl-bg);
 }
 #welcome-surface.hidden {
   display: none;
 }
-#welcome-surface h2 {
-  margin: 0 0 16px;
-}
 #welcome-surface .muted {
-  color: var(--fg-dim);
+  color: var(--wl-fg-dim);
   font-size: 13px;
 }
+
+.welcome-column {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
+.welcome-brand {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.welcome-mark {
+  width: 96px;
+  height: 96px;
+  margin-bottom: 16px;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.welcome-brand h2 {
+  margin: 0 0 6px;
+}
+.welcome-tagline {
+  margin: 0;
+  color: var(--wl-fg-dim);
+  font-size: 13px;
+}
+
+/* Burner notice (DD4): a first-class element, not muted prose — the
+   surface's mitigation for "a preference set from a burner tab persists
+   app-wide." */
+.welcome-notice {
+  margin: 0 0 20px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--wl-accent-strong);
+  background: var(--wl-card);
+  color: var(--wl-fg);
+  font-size: 13px;
+}
+
+.welcome-card {
+  background: var(--wl-card);
+  border: 1px solid var(--wl-border);
+  border-radius: 10px;
+  padding: 20px;
+}
+.welcome-card + .welcome-card {
+  margin-top: 20px;
+}
+
 #welcome-home-block {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  max-width: 480px;
 }
 #welcome-home-block label {
   flex-basis: 100%;
+  font-weight: 600;
 }
 #welcome-home-input {
   flex: 1;
   min-width: 200px;
-  background: var(--bg-2);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 8px;
+  background: var(--wl-bg);
+  color: var(--wl-fg);
+  border: 1px solid var(--wl-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+#welcome-home-input:focus-visible {
+  border-color: var(--wl-accent-strong);
+  outline: 2px solid var(--wl-accent-strong);
+  outline-offset: -1px;
+}
+#welcome-home-set {
+  display: inline-block;
+  background: var(--wl-accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.1s;
+}
+#welcome-home-set:hover {
+  filter: brightness(1.1);
+}
+#welcome-home-set:focus-visible {
+  outline: 2px solid var(--wl-accent-strong);
+  outline-offset: 2px;
 }
 #welcome-home-status {
   flex-basis: 100%;
   margin: 0;
   min-height: 1em;
 }
-/* Engine block (M16 F2 Leg 2, DD7) — the home block's sibling shape:
-   presentable and unstyled, Flight 3 owns the visual language. */
-#welcome-engine-block {
-  max-width: 480px;
-  margin-top: 24px;
-}
+
+/* Engine block (M16 F2 Leg 2, DD7; restyled M16 F3 Leg 1): a two-column grid
+   of radio-cards, collapsing to one column when the surface's own available
+   width drops under 600px (Edge Cases) — see the @container rule and the
+   HAT-fix comment on #welcome-surface below for why this is a container
+   query, not a viewport media query. */
 #welcome-engine-heading {
   margin: 0 0 12px;
+  /* The pending-query heading is user text (Edge Cases) — wrap inside the
+     card, never overflow the column. */
+  overflow-wrap: anywhere;
+}
+.welcome-engine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+/* Threshold 600px = .welcome-column's own max-width. Window minWidth is 900
+   (window-factory.js); with the media panel open (--panel-w: 360px) the
+   surface's available inline-size drops to ~540px at the window minimum —
+   below 600, so the column (which would otherwise render AT 600) is
+   currently narrower than that and the grid collapses to one column. With
+   the panel closed the surface is the full window, minimum 900px — well
+   above 600 — so the grid stays two columns. This container query reacts to
+   #welcome-surface's own box (see container-type above), not the window's
+   outer viewport, which is what let the old @media rule go dead. */
+@container (max-width: 600px) {
+  .welcome-engine-grid {
+    grid-template-columns: 1fr;
+  }
+  .welcome-column {
+    padding: 32px 16px;
+  }
 }
 .welcome-engine-row {
-  margin-bottom: 12px;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 4px;
+  align-items: start;
+  background: var(--wl-bg);
+  border: 1px solid var(--wl-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.welcome-engine-row input[type='radio'] {
+  grid-row: 1 / 3;
+  margin: 3px 0 0;
 }
 .welcome-engine-row label {
-  margin-left: 6px;
+  grid-column: 2;
+  font-weight: 600;
+  cursor: pointer;
+}
+.welcome-engine-row p.muted {
+  grid-column: 2;
+  margin: 0;
+  /* Description copy varies in length (Edge Cases) — never truncated; the
+     grid's row alignment absorbs the difference instead. */
+}
+.welcome-engine-row:has(input:checked) {
+  border-color: var(--wl-accent-strong);
+}
+.welcome-engine-row:has(input:focus-visible) {
+  outline: 2px solid var(--wl-accent-strong);
+  outline-offset: 2px;
 }
 #welcome-engine-status {
-  margin: 0;
+  margin: 12px 0 0;
   min-height: 1em;
 }
 

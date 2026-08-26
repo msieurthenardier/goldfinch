@@ -160,3 +160,37 @@ export function buildSearchUrl(id, query) {
   const capped = query.slice(0, PENDING_QUERY_MAX);
   return engine.template.replace('%s', () => encodeURIComponent(capped));
 }
+
+/**
+ * Normalize a home-page-field input by prepending `https://` to a bare
+ * domain (M16 F3 Leg 2, HAT item 5): a bare `example.com` typed into the
+ * welcome surface's home-page field or Settings' home-page field "looks
+ * like a domain" but carries no scheme, so the store validator
+ * (`isSafeTabUrl`, which requires one) rejects it — even though the address
+ * bar already accepts the same bare domain via its own domain rule. This
+ * function is that same rule, applied at the two home-page write sites so
+ * they agree with the address bar; the store validator is unchanged and
+ * stays the actual gate.
+ *
+ * Lives here, not in navigation-controller.js, to reuse this module's
+ * existing internal-page route (served to Settings at `/search-engines.js`)
+ * and the chrome's existing import of this module — not a topical fit (the
+ * rule has nothing to do with search engines), just the module that was
+ * already reachable from both write sites. `navigation-controller.js`'s
+ * `toUrl` calls this for its own domain branch too, so the rule has exactly
+ * one source instead of two copies of the regex.
+ *
+ * Trims first, then: an empty string, or a value that already carries a
+ * `scheme://` prefix, is returned unchanged (trimmed); a bare-domain-looking
+ * value (has a dot, no whitespace) gets `https://` prepended; anything else
+ * — a bare word, `localhost` (no dot — a documented gap shared with the
+ * address bar's own rule), or free text with spaces — is returned unchanged.
+ * @param {unknown} input
+ * @returns {string}
+ */
+export function normalizeHomePageInput(input) {
+  const s = String(input ?? '').trim();
+  if (s === '' || /^[a-z]+:\/\//i.test(s)) return s;
+  if (/^[^\s]+\.[^\s]{2,}(\/.*)?$/.test(s)) return 'https://' + s;
+  return s;
+}

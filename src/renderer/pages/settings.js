@@ -10,7 +10,7 @@ import { activeLog, windowPage, reduceAudit, pageList, pageCount } from './audit
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
 import { isSafeColor } from './safe-color.js';
 // @ts-ignore — serving-path vs disk-path mismatch (see above)
-import { SEARCH_ENGINES } from './search-engines.js';
+import { SEARCH_ENGINES, normalizeHomePageInput } from './search-engines.js';
 
 /**
  * settings.js — scroll-spy progressive enhancement.
@@ -165,7 +165,13 @@ async function copyText(text, messageEl) {
   // broadcast-driven hint on the page that clicked; every OTHER open window
   // only sees the broadcast's reflect() (hint or blank, per DD6 symmetry).
   saveBtn.addEventListener('click', () => {
-    window.goldfinchInternal.settingsSet('homePage', input.value)
+    // M16 F3 Leg 2, HAT item 5: normalize a bare domain (e.g. `example.com`)
+    // to `https://example.com` before the write, the same rule the address
+    // bar and the welcome surface's home-page field apply — the store
+    // validator (isSafeTabUrl) requires a scheme and stays the actual gate.
+    // This also trims (the field previously sent input.value raw) — an
+    // intended side effect of routing through the shared helper.
+    window.goldfinchInternal.settingsSet('homePage', normalizeHomePageInput(input.value))
       .then(() => {
         status.textContent = 'Saved';
       })
