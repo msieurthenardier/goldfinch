@@ -15,7 +15,8 @@ const {
   getSearchEngine,
   buildSearchUrl,
   PENDING_QUERY_MAX,
-  capPendingQuery
+  capPendingQuery,
+  normalizeHomePageInput
 } = require('../../src/shared/search-engines');
 
 // The mission's resolved eight-engine table (mission.md Open Questions,
@@ -283,8 +284,8 @@ test('welcome-controller.js: the DOM contract (ids, radio prefix, row class, rad
     '#welcome-engine-options must carry role="radiogroup" and aria-labelledby="welcome-engine-heading"'
   );
 
-  const renderMatch = src.match(/function render\(tab\)\s*{([\s\S]*?)\n {2}}/);
-  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab) { ... }');
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
   const toggles = renderMatch[1].match(/classList\.toggle\('hidden'/g) || [];
   assert.ok(
     toggles.length >= 3,
@@ -294,15 +295,16 @@ test('welcome-controller.js: the DOM contract (ids, radio prefix, row class, rad
 });
 
 // ---------------------------------------------------------------------------
-// M16 F2 Leg 2 acceptance-gate fix: welcome-controller.js's show(tab) must
-// settle a record whose reasons are now all set (a background welcome
-// record can have its last preference filled in from elsewhere while it is
-// not the active tab — see settle()'s doc comment) rather than re-rendering
-// an all-blocks-hidden panel. There is no DOM harness for the chrome welcome
-// controller, so this is pinned structurally: show() must delegate through
-// settle() rather than drawing the panel unconditionally, and settle()'s
-// fallback must never call back into show()/render() (that would either
-// silently regress to the old bug or recurse).
+// M16 F2 Leg 2 acceptance-gate fix (settle()'s attach behavior narrowed at
+// M16 F3 Leg 2, HAT item 6, DD7 pivot — the assertions below still hold):
+// welcome-controller.js's show(tab) must settle a record whose reasons are
+// now all set (a background welcome record can have its last preference
+// filled in from elsewhere while it is not the active tab — see settle()'s
+// doc comment) rather than re-rendering unconditionally. There is no DOM
+// harness for the chrome welcome controller, so this is pinned structurally:
+// show() must delegate through settle() rather than drawing the panel
+// directly, and settle() must never call back into show() (that would
+// recurse).
 // ---------------------------------------------------------------------------
 test('welcome-controller.js: show(tab) delegates to settle(tab) rather than rendering unconditionally (M16 F2 Leg 2 gate fix)', () => {
   const fs = require('fs');
@@ -314,25 +316,233 @@ test('welcome-controller.js: show(tab) delegates to settle(tab) rather than rend
   assert.ok(
     /settle\(tab\)/.test(showMatch[1]),
     'show(tab) must call settle(tab) — a background welcome record whose last unset ' +
-      'reason was filled in elsewhere only gets a chance to attach on its NEXT show(), ' +
+      'reason was filled in elsewhere only gets a chance to catch up on its NEXT show(), ' +
       'so show() cannot just render the panel unconditionally (the gate finding: it ' +
       'rendered an empty, unattached panel instead)'
   );
 
-  const settleMatch = src.match(/function settle\(tab\)\s*{([\s\S]*?)\n {2}}/);
-  assert.ok(settleMatch, 'welcome-controller.js must export a function settle(tab) { ... }');
+  const settleMatch = src.match(/function settle\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(settleMatch, 'welcome-controller.js must export a function settle(tab, ...) { ... }');
   assert.ok(
     !/\bshow\(tab\)/.test(settleMatch[1]),
     'settle(tab) must never call back into show(tab) — since show(tab) now delegates ' +
-      'to settle(tab), a call the other way would recurse. Its defensive fallback ' +
-      '(nothing unset, no pending query, no home page — not expected to be reachable ' +
-      'in practice) must hide the panel and focus the address bar directly instead'
+      'to settle(tab), a call the other way would recurse'
   );
   assert.ok(
-    /render\(tab\)/.test(settleMatch[1]),
-    'settle(tab) should still render(tab) for the ordinary case where a reason remains ' +
-      'unset — only its all-clear fallback avoids re-rendering'
+    /render\(tab/.test(settleMatch[1]),
+    'settle(tab) should still render(tab, ...) for the ordinary case — a pending search ' +
+      'with a resolved engine is the only case that skips it (M16 F3 Leg 2, HAT item 6, DD7 pivot)'
   );
+});
+
+// ---------------------------------------------------------------------------
+// M16 F3 Leg 2 (HAT item 3 design review): selecting a search engine no
+// longer hides the engine block — it stays, showing the selection, with a
+// state-derived confirmation line. Grep-shape, same convention as the DD2
+// contract test above (no DOM harness for the chrome).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: render(tab) gates the engine block on reasons.has(\'search\'), not the live unset state (M16 F3 Leg 2, HAT item 3)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
+
+  const engineToggleLine = (renderMatch[1].match(/engineBlock\.classList\.toggle\('hidden'[^\n]*/) || [''])[0];
+  assert.ok(
+    /reasons\.has\('search'\)/.test(renderMatch[1]),
+    'render(tab) must gate the engine block\'s visibility on tab.welcome.reasons.has(\'search\') ' +
+      '(why the tab was opened), not on unsetReasons(...).has(\'search\')'
+  );
+  assert.ok(
+    !/unset\.has\('search'\)/.test(engineToggleLine),
+    'the engine block\'s hidden toggle must not read the unset-state Set — choosing an engine must not hide it'
+  );
+});
+
+test('welcome-controller.js: submitEngine no longer deletes \'search\' from reasons and settles with a search: override (M16 F3 Leg 2, HAT item 3)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const submitEngineMatch = src.match(/async function submitEngine\(id\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(submitEngineMatch, 'welcome-controller.js must export an async function submitEngine(id) { ... }');
+  assert.ok(
+    !/reasons\.delete\('search'\)/.test(submitEngineMatch[1]),
+    'submitEngine must no longer mutate reasons — deleting \'search\' would (once render keys off ' +
+      'reasons.has(\'search\')) hide the block instead of keeping it visible with the selection'
+  );
+  assert.ok(
+    /settle\(tab,\s*{\s*search:\s*id\s*}\)/.test(submitEngineMatch[1]),
+    'submitEngine must call settle(tab, { search: id }) so the just-chosen engine overrides the live ' +
+      '(possibly-stale) searchEngineCache read'
+  );
+});
+
+test('welcome-controller.js: the engine radio sync assigns .checked directly and the file never calls .click() on a radio (M16 F3 Leg 2, HAT item 3)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  assert.ok(
+    /radio\.checked = \(radio\.value === engine\)/.test(src),
+    'render(tab) must sync each radio\'s .checked by direct assignment against the resolved engine'
+  );
+
+  // Strip comment-only lines first — the fix comment above the sync
+  // discusses ".click()" in prose, which would otherwise false-positive
+  // against a naive whole-file regex (same convention as the "Electron-free"
+  // check below).
+  const code = src
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+  assert.ok(
+    !/\.click\(/.test(code),
+    'welcome-controller.js must never call .click() on a radio — programmatic .checked does not fire ' +
+      '`change`, and .click() would re-fire it and re-submit'
+  );
+});
+
+test('welcome-controller.js: render(tab) sets the state-derived "Saved" confirmation when the engine block is shown and an engine is resolved (M16 F3 Leg 2, HAT item 3)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
+  assert.ok(
+    renderMatch[1].includes('Saved — you can always change this in Settings.'),
+    'render(tab) must set #welcome-engine-status to the confirmation text when the engine block is ' +
+      'shown and the resolved engine is non-null'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// M16 F3 Leg 2 (HAT state D): the tagline becomes dynamic, chosen in
+// render(tab, opts) from the same showHome/showEngine booleans it already
+// computes for the two block classList.toggle('hidden', ...) calls — a
+// single-card record (search-only or home-only) no longer reads the
+// two-card "Set up the two things…" copy. Grep-shape, same convention as
+// the other structural tests in this file (no DOM harness for the chrome).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: render(tab) assigns tagline.textContent from the block-visibility booleans (M16 F3 Leg 2, HAT state D)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
+  assert.ok(
+    /tagline\.textContent = /.test(renderMatch[1]),
+    'render(tab) must assign tagline.textContent — the tagline copy is dynamic, chosen per render, ' +
+      'not fixed at build time'
+  );
+});
+
+test('welcome-controller.js: all three tagline copy strings are present in the controller source (M16 F3 Leg 2, HAT state D)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  assert.ok(
+    src.includes("Set up the two things Goldfinch won't guess for you. You can always change these in Settings."),
+    'the "both blocks shown" (and defensive-fallback) tagline copy must be present'
+  );
+  assert.ok(
+    src.includes('Choose where new tabs open. You can always change this in Settings.'),
+    'the "home block only" tagline copy must be present'
+  );
+  assert.ok(
+    src.includes('Choose where your searches go. You can always change this in Settings.'),
+    'the "engine block only" tagline copy must be present'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// M16 F3 Leg 2 (HAT item 6 design review, DD7 pivot): the welcome surface
+// never navigates on its own except to run a pending search once an engine
+// is chosen. Clicking Set on the home card saves and stays — the home page
+// applies to the next new tab, not this one. Grep-shape, same convention as
+// the other structural tests in this file (no DOM harness for the chrome).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: render(tab) gates the home block on reasons.has(\'home\'), symmetric with the engine block (M16 F3 Leg 2, HAT item 6)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
+  assert.ok(
+    /reasons\.has\('home'\)/.test(renderMatch[1]),
+    'render(tab) must gate the home block\'s visibility on tab.welcome.reasons.has(\'home\') ' +
+      '(why the tab was opened), symmetric with the engine block\'s reasons.has(\'search\') check'
+  );
+});
+
+test('welcome-controller.js: submitHome calls settle(tab, { home: ... }) and never attachView (M16 F3 Leg 2, HAT item 6, DD7 pivot)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const submitHomeMatch = src.match(/async function submitHome\(\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(submitHomeMatch, 'welcome-controller.js must export an async function submitHome() { ... }');
+  assert.ok(
+    /settle\(tab,\s*{\s*home:\s*value\s*}\)/.test(submitHomeMatch[1]),
+    'submitHome must call settle(tab, { home: value }) so the just-written home page overrides ' +
+      'the live (possibly-stale) homePageCache read, instead of attaching the tab to it'
+  );
+  assert.ok(
+    !/attachView\(/.test(submitHomeMatch[1]),
+    'submitHome must never call attachView — clicking Set saves and stays; the welcome surface ' +
+      'does not navigate itself away on a successful home-page submit'
+  );
+});
+
+test('welcome-controller.js: render(tab) sets the state-derived "Saved — new tabs will open here." confirmation when the home block is shown and a home page is resolved (M16 F3 Leg 2, HAT item 6)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const renderMatch = src.match(/function render\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(renderMatch, 'welcome-controller.js must export a function render(tab, ...) { ... }');
+  assert.ok(
+    renderMatch[1].includes('Saved — new tabs will open here.'),
+    'render(tab) must set #welcome-home-status to the confirmation text when the home block is ' +
+      'shown and the resolved home page is non-null'
+  );
+});
+
+test('welcome-controller.js: settle(tab) never attaches to the resolved home page — attachView appears exactly once, in the pending-search branch (M16 F3 Leg 2, HAT item 6, DD7 pivot)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+
+  const settleMatch = src.match(/function settle\(tab[^)]*\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(settleMatch, 'welcome-controller.js must export a function settle(tab, ...) { ... }');
+  assert.ok(
+    !/currentHomePage\(\)/.test(settleMatch[1]),
+    'settle(tab) must not read currentHomePage() at all — the DD7 pivot removes the ' +
+      'attach-to-home-page-once-nothing-is-missing branch entirely'
+  );
+  const attachCalls = settleMatch[1].match(/attachView\(/g) || [];
+  assert.equal(
+    attachCalls.length, 1,
+    'settle(tab) must call attachView exactly once — the pending-search branch — with no ' +
+      'other auto-navigation left'
+  );
+  assert.ok(
+    /if \(query != null && engine != null\)/.test(settleMatch[1]),
+    'settle(tab) must gate its one attachView call on a pending query AND a resolved engine'
+  );
+});
+
+test('welcome-controller.js: unsetReasons no longer exists (M16 F3 Leg 2, HAT item 6, DD7 pivot — no callers remain)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+  assert.ok(!/unsetReasons/.test(src), 'unsetReasons must be fully removed from welcome-controller.js');
 });
 
 test('settings.html carries the search-engine Clear affordance (M16 F2 Leg 2, DD6)', () => {
@@ -340,6 +550,103 @@ test('settings.html carries the search-engine Clear affordance (M16 F2 Leg 2, DD
   const path = require('path');
   const html = fs.readFileSync(path.join(__dirname, '../../src/renderer/pages/settings.html'), 'utf8');
   assert.ok(html.includes('id="search-engine-clear"'), 'settings.html should have a #search-engine-clear button');
+});
+
+// ---------------------------------------------------------------------------
+// normalizeHomePageInput (M16 F3 Leg 2, HAT item 5): a bare domain typed into
+// a home-page field is accepted the same way the address bar already accepts
+// one, on both the welcome surface and Settings — the store validator
+// (isSafeTabUrl) stays the actual gate.
+// ---------------------------------------------------------------------------
+test('normalizeHomePageInput prepends https:// to a bare domain', () => {
+  assert.equal(normalizeHomePageInput('example.com'), 'https://example.com');
+});
+
+test('normalizeHomePageInput prepends https:// to a bare domain with a path', () => {
+  assert.equal(normalizeHomePageInput('example.com/path'), 'https://example.com/path');
+});
+
+test('normalizeHomePageInput trims surrounding whitespace before normalizing', () => {
+  assert.equal(normalizeHomePageInput('  example.com  '), 'https://example.com');
+});
+
+test('normalizeHomePageInput leaves an already-schemed URL unchanged', () => {
+  assert.equal(normalizeHomePageInput('https://example.com'), 'https://example.com');
+});
+
+test('normalizeHomePageInput leaves a non-https scheme unchanged', () => {
+  assert.equal(normalizeHomePageInput('http://x'), 'http://x');
+});
+
+test('normalizeHomePageInput leaves about:blank unchanged (the scheme/about: shape is not the domain rule\'s concern)', () => {
+  assert.equal(normalizeHomePageInput('about:blank'), 'about:blank');
+});
+
+test('normalizeHomePageInput leaves "localhost" unchanged (documented gap: the domain rule requires a dot)', () => {
+  assert.equal(normalizeHomePageInput('localhost'), 'localhost');
+});
+
+test('normalizeHomePageInput leaves free text with spaces unchanged', () => {
+  assert.equal(normalizeHomePageInput('foo bar'), 'foo bar');
+});
+
+test('normalizeHomePageInput returns an empty string for an empty/whitespace-only input', () => {
+  assert.equal(normalizeHomePageInput(''), '');
+  assert.equal(normalizeHomePageInput('   '), '');
+});
+
+test('normalizeHomePageInput returns an empty string for null/undefined', () => {
+  assert.equal(normalizeHomePageInput(null), '');
+  assert.equal(normalizeHomePageInput(undefined), '');
+});
+
+// ---------------------------------------------------------------------------
+// M16 F3 Leg 2 (HAT item 5): structural pins (grep-shape, house convention —
+// no DOM harness for the chrome / the internal Settings page) that the
+// domain-normalize fix actually reaches both write sites, and that toUrl's
+// pre-existing about: guard survives the reuse (design review [high]).
+// ---------------------------------------------------------------------------
+test('welcome-controller.js: submitHome normalizes the input through normalizeHomePageInput before writing (M16 F3 Leg 2, HAT item 5)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/welcome-controller.js'), 'utf8');
+  const submitHomeMatch = src.match(/async function submitHome\(\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(submitHomeMatch, 'welcome-controller.js must export an async function submitHome() { ... }');
+  assert.ok(
+    /normalizeHomePageInput\(/.test(submitHomeMatch[1]),
+    'submitHome must normalize homeInput.value through normalizeHomePageInput before it is written'
+  );
+});
+
+test('settings.js: the home-page Save handler normalizes the input through normalizeHomePageInput before writing (M16 F3 Leg 2, HAT item 5)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/pages/settings.js'), 'utf8');
+  const saveMatch = src.match(/saveBtn\.addEventListener\('click', \(\) => {([\s\S]*?)\n {2}}\);/);
+  assert.ok(saveMatch, 'settings.js must register a home-page saveBtn click handler');
+  assert.ok(
+    /normalizeHomePageInput\(/.test(saveMatch[1]),
+    'the home-page Save handler must normalize input.value through normalizeHomePageInput before ' +
+      'settingsSet(\'homePage\', ...)'
+  );
+});
+
+test('navigation-controller.js: toUrl keeps its about: guard and reuses normalizeHomePageInput for the domain rule (M16 F3 Leg 2, HAT item 5)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/navigation-controller.js'), 'utf8');
+  const toUrlMatch = src.match(/function toUrl\(input\)\s*{([\s\S]*?)\n {2}}/);
+  assert.ok(toUrlMatch, 'navigation-controller.js must export a function toUrl(input) { ... }');
+  assert.ok(
+    /s\.startsWith\('about:'\)/.test(toUrlMatch[1]),
+    'toUrl must keep its own about: guard — a typed about:blank must never fall through to the ' +
+      'reused domain-normalize rule or the search branch beyond it (design review [high])'
+  );
+  assert.ok(
+    /normalizeHomePageInput\(/.test(toUrlMatch[1]),
+    'toUrl must reuse normalizeHomePageInput for its domain branch rather than keeping a second copy ' +
+      'of the domain regex'
+  );
 });
 
 // ---------------------------------------------------------------------------

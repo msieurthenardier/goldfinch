@@ -1,16 +1,16 @@
 # Flight: Welcome Branding and Alignment
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Search and Startup Choice](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] When a preference is needed but unset, the user arrives at a **branded** Goldfinch page offering to set exactly the missing one. *(this flight: the branded half — Flight 2 delivered the functional surface)*
-- [ ] Mission open question — Branding: what the branded page actually looks like → resolved by the HAT session in this flight
-- [ ] Flight 2 debrief, operator feedback — Settings Clear buttons render as bare UA buttons (no CSS rule); the welcome page is functionally right but visually underwhelming
-- [ ] Flight 2 debrief, Recommendation 2a — the home-first-then-engine order on a both-unset tab is reasoned about, never observed → `welcome-home-first` spec (leg 1). **Correction at design review**: the debrief's Architect note that "the next new tab will offer it again" is wrong — `openNewTab()` returns a plain home-page tab once a home page is set; the abandoned engine choice returns only through the search handoff. The spec pins the real mechanism.
+- [x] When a preference is needed but unset, the user arrives at a **branded** Goldfinch page offering to set exactly the missing one. *(this flight: the branded half — Flight 2 delivered the functional surface)*
+- [x] Mission open question — Branding: what the branded page actually looks like → resolved by the HAT session in this flight
+- [x] Flight 2 debrief, operator feedback — Settings Clear buttons render as bare UA buttons (no CSS rule); the welcome page is functionally right but visually underwhelming
+- [x] Flight 2 debrief, Recommendation 2a — the home-first-then-engine order on a both-unset tab is reasoned about, never observed → `welcome-home-first` spec (leg 1). **Correction at design review**: the debrief's Architect note that "the next new tab will offer it again" is wrong — `openNewTab()` returns a plain home-page tab once a home page is set; the abandoned engine choice returns only through the search handoff. The spec pins the real mechanism.
 - [x] Flight 2 debrief, Recommendation 2b — the burner welcome path shows the app-wide note → **already covered**: `tests/behavior/welcome-home-routing.md` step 5 asserts "the burner tab is a welcome tab carrying the burner note"; passed on the 2026-08-25 run. Kept as a re-run in this flight's regression net, not re-authored.
-- [ ] Flight 2 debrief — `#welcome-burner-note` is the surface's only mitigation for the burner mental-model mismatch and is muted prose; make it a first-class element
+- [x] Flight 2 debrief — `#welcome-burner-note` is the surface's only mitigation for the burner mental-model mismatch and is muted prose; make it a first-class element
 
 ---
 
@@ -26,7 +26,7 @@ Give the welcome surface its visual identity and let the operator align it by ha
 - [x] Does the restyle need a DOM harness or snapshot tests to be safe? → **DD2/DD5**: no — the DOM contract is pinned by a grep-shape structural test, Flight 2's behavior specs re-run as the regression net, and the visual judgment is the HAT's job. Snapshot baselines are never committed in this repo.
 - [x] Secondary or primary styling for Clear? → **DD3**: secondary. A gold Clear beside a gold Save reads as two equal calls to action; Clear is the reversible, lesser one.
 - [x] Do the engine descriptions stay visible? → **DD1**: yes, compact. A privacy browser's engine list is credible because it explains the privacy-first options; hiding the copy behind a tooltip would lose that. The grid makes eight visible descriptions fit.
-- [ ] Everything the operator wants changed after seeing it → the HAT leg, by design.
+- [x] Everything the operator wants changed after seeing it → the HAT leg, by design. *(Resolved 2026-08-26: six changes made and signed off across states A–H — see the flight log; two of them, the engine block staying visible and Set saving-and-staying, were behavior changes taken through scoped design reviews and pivoted Flight 2's DD7.)*
 
 ### Design Decisions
 
@@ -49,17 +49,17 @@ Give the welcome surface its visual identity and let the operator align it by ha
 ### Prerequisites
 
 - [x] Mission 16 active; Flight 2 completed and merged to `main` (`bb053d3`, PR #167); debrief merged
-- [ ] Squawk turnaround PR #169 merged (crew-file apparatus notes for the behavior re-runs) — recommended before the leg-1 gate, not blocking
+- [x] Squawk turnaround PR #169 merged (crew-file apparatus notes for the behavior re-runs) — recommended before the leg-1 gate, not blocking
 - [x] Flight branch `flight/03-welcome-branding` created at flight start
 - [x] Automation surface live before the leg-1 behavior runs — decay-prone, probe at run time (`npm run dev:automation` with `GOLDFINCH_AUTOMATION_DEV_MINT=1 GOLDFINCH_AUTOMATION_ADMIN=1`)
 - [x] Fresh-profile scratch fixture procedure (empty `XDG_CONFIG_HOME`) — proven 2026-08-24/25
-- [ ] For the HAT: the operator's own dev build running (`npm run dev`), with a scratch profile they are willing to reset to exercise first launch
+- [x] For the HAT: the operator's own dev build running (`npm run dev`), with a scratch profile they are willing to reset to exercise first launch
 
 ### Pre-Flight Checklist
 
 - [x] All open questions resolved (the visual verdict is the HAT's by design)
 - [x] Design decisions documented
-- [ ] Prerequisites verified (three are run-time)
+- [x] Prerequisites verified (three are run-time)
 - [x] Validation approach defined
 - [x] Legs defined (tentative)
 
@@ -74,7 +74,7 @@ Two legs. Leg 1 (autonomous) is a single visual slice: the welcome-surface resty
 ### Checkpoints
 
 - [x] Leg 1 green: the restyled surface renders in every state (both-unset, home-only, engine-only with and without a pending query, burner) with the brand mark and cards; the Clear buttons are styled as secondary; `npm test` / typecheck / lint green with wall-clock recorded; `welcome-home-first` passes; `welcome-first-launch` and `welcome-home-routing` re-runs pass
-- [ ] Leg 2 green: the operator has walked every state on their own build and is satisfied; every inline fix has its structural tests green; the mission's branding question is recorded as resolved
+- [x] Leg 2 green: the operator has walked every state on their own build and is satisfied; every inline fix has its structural tests green; the mission's branding question is recorded as resolved
 
 ### Adaptation Criteria
 
@@ -93,7 +93,7 @@ Two legs. Leg 1 (autonomous) is a single visual slice: the welcome-surface resty
 > **Note:** Tentative; legs are planned and created one at a time as the flight progresses.
 
 - [x] `first-pass-visual-design` — welcome-surface restyle on the dark tokens with the brand mark, cards, and engine grid (DD1/DD6), burner notice (DD4), Settings Clear secondary variant (DD3), DOM-contract and Clear-button structural tests (DD2/DD3), `welcome-home-first` spec authored; FD runs `welcome-home-first`, re-runs `welcome-first-launch` and `welcome-home-routing`
-- [ ] `hat-welcome-alignment` — **HAT leg**: guided walkthrough of the surface in every state and the Settings preference controls on the operator's build; look-and-feel fixes inline (DD8); the mission's branding question closes here
+- [x] `hat-welcome-alignment` — **HAT leg**: guided walkthrough of the surface in every state and the Settings preference controls on the operator's build; look-and-feel fixes inline (DD8); the mission's branding question closes here
 
 ---
 
@@ -101,10 +101,10 @@ Two legs. Leg 1 (autonomous) is a single visual slice: the welcome-surface resty
 
 ### Completion Checklist
 
-- [ ] All legs completed
+- [x] All legs completed
 - [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated (CLAUDE.md's welcome-surface note gains the DOM-contract rule)
+- [x] Tests passing
+- [x] Documentation updated (CLAUDE.md's welcome-surface note gains the DOM-contract rule)
 
 ### Verification
 

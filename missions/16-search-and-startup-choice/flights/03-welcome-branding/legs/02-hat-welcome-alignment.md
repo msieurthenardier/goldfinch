@@ -1,6 +1,6 @@
 # Leg: hat-welcome-alignment
 
-**Status**: ready
+**Status**: completed
 **Flight**: [Welcome Branding and Alignment](../flight.md)
 
 ## Objective
@@ -31,14 +31,14 @@ The operator walks the restyled welcome surface and the Settings preference cont
 
 Each row is an operator verification on their own build; the leg lands when every row carries an operator "satisfied" in the flight log.
 
-- [ ] **A — First launch (both unset)**: on a fresh profile the welcome tab shows the mark, heading, tagline, the home-page card, and the engine card as a two-column grid of radio-cards; the whole thing reads as Goldfinch, not as an unstyled form
-- [ ] **B — Engine choice**: hovering/selecting a radio-card gives a clear selected state (gold border) and a visible focus ring when tabbing; the descriptions are readable at their size
-- [ ] **C — Home-only welcome**: with the engine set and the home page cleared (Settings → Clear), Ctrl+T shows the home-page card alone, centered, not orphaned
-- [ ] **D — Search handoff**: with the engine cleared and a home page set, a typed search opens the welcome tab with the *Where should we search for "…"?* heading — the query reads clearly, a long query wraps inside the card
-- [ ] **E — Burner welcome**: a burner tab's welcome surface shows the notice ("This choice is saved for all of Goldfinch.") prominently above the card
-- [ ] **F — Settings**: the Clear buttons read as secondary actions beside the gold Save; the two unset hints and the "Saved"/"Cleared" status lines look intentional
-- [ ] **G — Narrow window**: at ~600 px wide the grid collapses to one column and nothing overflows horizontally
-- [ ] **H — Overall**: the surface is coherent with the rest of the chrome (dark tokens, gold accent) — the operator is satisfied with the first-run feel
+- [x] **A — First launch (both unset)**: on a fresh profile the welcome tab shows the mark, heading, tagline, the home-page card, and the engine card as a two-column grid of radio-cards; the whole thing reads as Goldfinch, not as an unstyled form
+- [x] **B — Engine choice**: hovering/selecting a radio-card gives a clear selected state (gold border) and a visible focus ring when tabbing; the descriptions are readable at their size
+- [x] **C — Home-only welcome**: with the engine set and the home page cleared (Settings → Clear), Ctrl+T shows the home-page card alone, centered, not orphaned
+- [x] **D — Search handoff**: with the engine cleared and a home page set, a typed search opens the welcome tab with the *Where should we search for "…"?* heading — the query reads clearly, a long query wraps inside the card
+- [x] **E — Burner welcome**: a burner tab's welcome surface shows the notice ("This choice is saved for all of Goldfinch.") prominently above the card
+- [x] **F — Settings**: the Clear buttons read as secondary actions beside the gold Save; the two unset hints and the "Saved"/"Cleared" status lines look intentional
+- [x] **G — Narrow window**: at ~600 px wide the grid collapses to one column and nothing overflows horizontally
+- [x] **H — Overall**: the surface is coherent with the rest of the chrome (dark tokens, gold accent) — the operator is satisfied with the first-run feel
 
 ## Verification Steps
 

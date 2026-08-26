@@ -842,14 +842,42 @@ a:focus-visible {
   position: absolute;
   inset: 0;
   overflow: auto;
-  color: var(--fg);
-  background: var(--bg);
+  /* HAT fix (state G): every window has minWidth:900 (window-factory.js) and
+     the media panel is --panel-w:360px, so a viewport media query keyed off
+     the window's own width could never see a narrow surface — the surface
+     only narrows (to ~540px content width) when the media panel is open at
+     the window minimum. container-type:inline-size turns this element into
+     a query container sized by its own (already position:absolute; inset:0)
+     content box, so the grid collapse below reacts to the ACTUAL available
+     width regardless of what else (the panel) is stealing space from the
+     window. Confirmed inert on this element's layout/overflow — it stays
+     absolutely positioned and scrollable exactly as before. */
+  container-type: inline-size;
+  /* Light palette (M16 F3 Leg 2 HAT, item 2): scoped to this surface only —
+     custom properties local to #welcome-surface, so nothing outside it (the
+     address bar, tab strip, bookmarks bar, Settings) is affected; those keep
+     the dark :root tokens above. The brand gold stays the accent (--wl-accent
+     aliases --accent); --wl-accent-strong is a darkened gold used wherever
+     gold needs to read as a border/outline against the light surface (raw
+     --accent is too low-contrast on white for that — the Set button's own
+     text stays --accent-fg, dark on gold, which already passes easily).
+     Opaque per DD6's anti-white-flash rule — background is always set here,
+     never transparent; only the color changed. */
+  --wl-bg: #ffffff;
+  --wl-fg: #1e1f25;
+  --wl-fg-dim: #5c5f6b;
+  --wl-card: #f6f6f8;
+  --wl-border: #d9dbe3;
+  --wl-accent: var(--accent);
+  --wl-accent-strong: color-mix(in srgb, var(--accent) 65%, black);
+  color: var(--wl-fg);
+  background: var(--wl-bg);
 }
 #welcome-surface.hidden {
   display: none;
 }
 #welcome-surface .muted {
-  color: var(--fg-dim);
+  color: var(--wl-fg-dim);
   font-size: 13px;
 }
 
@@ -864,9 +892,9 @@ a:focus-visible {
   margin-bottom: 20px;
 }
 .welcome-mark {
-  width: 48px;
-  height: 48px;
-  margin-bottom: 12px;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 16px;
   -webkit-user-drag: none;
   user-select: none;
 }
@@ -875,7 +903,7 @@ a:focus-visible {
 }
 .welcome-tagline {
   margin: 0;
-  color: var(--fg-dim);
+  color: var(--wl-fg-dim);
   font-size: 13px;
 }
 
@@ -885,15 +913,15 @@ a:focus-visible {
 .welcome-notice {
   margin: 0 0 20px;
   padding: 8px 12px;
-  border-left: 3px solid var(--accent-muted);
-  background: var(--bg-2);
-  color: var(--fg);
+  border-left: 3px solid var(--wl-accent-strong);
+  background: var(--wl-card);
+  color: var(--wl-fg);
   font-size: 13px;
 }
 
 .welcome-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--wl-card);
+  border: 1px solid var(--wl-border);
   border-radius: 10px;
   padding: 20px;
 }
@@ -914,20 +942,20 @@ a:focus-visible {
 #welcome-home-input {
   flex: 1;
   min-width: 200px;
-  background: var(--bg-3);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  background: var(--wl-bg);
+  color: var(--wl-fg);
+  border: 1px solid var(--wl-border);
   border-radius: 6px;
   padding: 6px 10px;
 }
 #welcome-home-input:focus-visible {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent);
+  border-color: var(--wl-accent-strong);
+  outline: 2px solid var(--wl-accent-strong);
   outline-offset: -1px;
 }
 #welcome-home-set {
   display: inline-block;
-  background: var(--accent);
+  background: var(--wl-accent);
   color: var(--accent-fg);
   border: none;
   border-radius: 6px;
@@ -941,7 +969,7 @@ a:focus-visible {
   filter: brightness(1.1);
 }
 #welcome-home-set:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--wl-accent-strong);
   outline-offset: 2px;
 }
 #welcome-home-status {
@@ -951,7 +979,10 @@ a:focus-visible {
 }
 
 /* Engine block (M16 F2 Leg 2, DD7; restyled M16 F3 Leg 1): a two-column grid
-   of radio-cards, collapsing to one column under ~560px (Edge Cases). */
+   of radio-cards, collapsing to one column when the surface's own available
+   width drops under 600px (Edge Cases) — see the @container rule and the
+   HAT-fix comment on #welcome-surface below for why this is a container
+   query, not a viewport media query. */
 #welcome-engine-heading {
   margin: 0 0 12px;
   /* The pending-query heading is user text (Edge Cases) — wrap inside the
@@ -963,7 +994,16 @@ a:focus-visible {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
-@media (max-width: 560px) {
+/* Threshold 600px = .welcome-column's own max-width. Window minWidth is 900
+   (window-factory.js); with the media panel open (--panel-w: 360px) the
+   surface's available inline-size drops to ~540px at the window minimum —
+   below 600, so the column (which would otherwise render AT 600) is
+   currently narrower than that and the grid collapses to one column. With
+   the panel closed the surface is the full window, minimum 900px — well
+   above 600 — so the grid stays two columns. This container query reacts to
+   #welcome-surface's own box (see container-type above), not the window's
+   outer viewport, which is what let the old @media rule go dead. */
+@container (max-width: 600px) {
   .welcome-engine-grid {
     grid-template-columns: 1fr;
   }
@@ -979,8 +1019,8 @@ a:focus-visible {
   column-gap: 8px;
   row-gap: 4px;
   align-items: start;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
+  background: var(--wl-bg);
+  border: 1px solid var(--wl-border);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -1000,10 +1040,10 @@ a:focus-visible {
      grid's row alignment absorbs the difference instead. */
 }
 .welcome-engine-row:has(input:checked) {
-  border-color: var(--accent);
+  border-color: var(--wl-accent-strong);
 }
 .welcome-engine-row:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--wl-accent-strong);
   outline-offset: 2px;
 }
 #welcome-engine-status {

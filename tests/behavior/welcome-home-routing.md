@@ -3,7 +3,7 @@
 **Slug**: `welcome-home-routing`
 **Status**: active
 **Created**: 2026-08-24
-**Last Run**: 2026-08-25 — pass (10/10; re-run at M16 F3 leg 1 on the restyled build; run log `welcome-home-routing/runs/2026-08-25-20-38-40.md`)
+**Last Run**: 2026-08-26 — pass (10/10; gate run for the M16 F3 leg-2 DD7 pivot on the final build; run log `welcome-home-routing/runs/2026-08-26-02-29-57.md`)
 
 ## Intent
 
@@ -32,9 +32,9 @@ Verifies, on an existing profile, that clearing the home page turns every new-ta
 | 5 | In window 1, open a burner tab — via the chrome seam `openNewTab(makeBurner())` (`evaluate` on the chrome wcId; the container menu itself is a sheet outside the automation surface, so this is the same code path the menu item runs). | The burner tab is a welcome tab carrying the burner note ("saved for all of Goldfinch") in the burner jar. |
 | 6 | On window 1's first welcome tab, type `example.net` in the address bar and press Enter. | That **same** tab navigates to `https://example.net/` — the tab count is unchanged and the tab keeps its strip position; the welcome surface is gone from it. |
 | 7 | Press Ctrl+T, then click the `example.org` bookmark on the bookmarks bar. | The new welcome tab itself navigates to `https://example.org/` (same tab, count unchanged) — bookmarks were reachable from the welcome surface. |
-| 8 | Press Ctrl+T; in the welcome surface's home page block type `https://example.com` and click **Set**. | The welcome surface leaves the tab: the tab is now on `https://example.com/`. Settings (open it) shows `https://example.com` in the home page field; the search engine is still DuckDuckGo. |
-| 9 | In window 2, press Ctrl+T. | The new tab opens on `https://example.com/` — the set preference reached the other window without a restart. |
-| 10 | Quit Goldfinch fully and relaunch against the same profile. Then press Ctrl+T in the restored window. | No welcome tab was restored (the restored tabs are only the web tabs from step 6–9). The new tab opens on `https://example.com/` — the boot window honors the home page on its first new tab. |
+| 8 | Press Ctrl+T; in the welcome surface's home page block type `https://example.com` and click **Set**. *(changed at M16 F3 leg 2, HAT item 6 — DD7 pivot)* | The welcome surface stays on the tab: the home page field shows `https://example.com` with a saved confirmation beneath it; the tab is still a welcome tab. Settings (open it) shows `https://example.com` in the home page field; the search engine is still DuckDuckGo. |
+| 9 | In window 2, press Ctrl+T. *(changed at M16 F3 leg 2, HAT item 6)* | The new tab opens on `https://example.com/` — the set preference reached the other window without a restart. Window 2's original welcome tab is still a welcome tab (it now shows the saved home page; it no longer auto-navigates). |
+| 10 | Quit Goldfinch fully and relaunch against the same profile. Then press Ctrl+T in the restored window. | No welcome tab was restored (the restored tabs are only the web tabs: the fixture's `example.org` tab and the tabs from steps 6, 7, and 9 — the step-8 tab and window 2's original welcome tab are not web tabs, since they never attached). The new tab opens on `https://example.com/` — the boot window honors the home page on its first new tab. |
 
 ## Out of Scope
 
