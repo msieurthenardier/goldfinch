@@ -116,3 +116,4 @@ password, a username, or an origin.
 - `npm test` — offline unit suite (`node --test` over `test/unit/**`); pure helpers, no app.
 - `tests/behavior/` — behavior specs, driven against the running app over the MCP surface.
 - `npm run a11y` — the audit above; live GUI required.
+- `npm run lint` / `npm run typecheck` / `npm run format:check` (or `npm run format` to fix) round out the local gate set that CI also runs.

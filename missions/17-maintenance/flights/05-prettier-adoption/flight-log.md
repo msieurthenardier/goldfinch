@@ -4,7 +4,7 @@
 
 ## Summary
 
-In flight since 2026-08-27. Two legs, two PRs (DD4).
+Landed 2026-08-27, same day, 2/2 legs, one review round each. Leg 1: 319 files reformatted, `RENDERER_LINE_BUDGET` 1650 → 1827, twelve pins re-targeted and neuter-verified, two typing-comment repositions authorized as correctness edits (PR #182, squash `339e808`). Leg 2: `format:check` in the Concourse lint task and a new GH Actions step, `.git-blame-ignore-revs` with the Leg 1 sha, CLAUDE.md/docs (PR recorded below). Gates throughout: 3839/3839, lint, typecheck, prettier. Concourse task run deferred to the operator (local server timeout).
 
 ---
 
@@ -98,6 +98,37 @@ Every neuter check went red on the guarded line's removal/inversion and green on
 - No file under `tests/behavior/` or matching `*.md` was touched by Prettier (`.prettierignore` held).
 - `git diff -w --stat -- src` still shows substantial insertions/deletions even with whitespace ignored — expected per DD1: Prettier's one-line-body and import-list expansions insert real new lines, which `-w` cannot hide. Spot-checked several files; the non-whitespace diff content is exclusively Prettier's line-splitting, no logic changes.
 
+### ci-format-gate
+
+**Status**: landed (AC1–AC7 verified)
+**Started**: 2026-08-27
+**Completed**: 2026-08-27
+
+**Changes Made**
+
+- `package.json`: added `"format:check": "prettier --check ."` beside `"format"`.
+- `ci/tasks/lint.yml`: appended `npm run format:check` as the last line of the `run:` heredoc, after `npm run lint`; rewrote the header comment to `# ESLint + Prettier check over the repo — mirrors the GitHub Actions "Lint" step (ci.yml).`.
+- `.github/workflows/ci.yml`: added a separate `- name: Format check` step (`run: npm run format:check`) immediately after the `Lint` step.
+- `ci/README.md`: Lint row in "What runs where" reworded to `| Lint (ESLint + Prettier check) | tasks/lint.yml | "Lint" + "Format check" |`.
+- `.git-blame-ignore-revs` (new, repo root): header comment explaining the file and the `git config blame.ignoreRevsFile .git-blame-ignore-revs` setup, then `339e808f229d342c114467d0142499d8cffc3eb7 # flight/05 leg 1 — Prettier reformat (#182)`.
+- `CLAUDE.md`: `## Commands` gained three lines — `npm run format`, `npm run format:check` (naming both CI callers), and the `git config blame.ignoreRevsFile` one-liner. `## Patterns` gained one bullet ("Formatting is Prettier's (M17 F5)") pinning the two line budgets (`RENDERER_LINE_BUDGET` 1827, `BOOKMARKS_BAR_LINE_BUDGET` 1100) and retiring the fold-onto-one-line trick — placed at the end of the top-level Patterns bullet list, right after the Seam contract bullet (no closer natural neighbour; the two incidental "line-budget" mentions the Citation Audit flagged are about splitting logic across files, a different concept, and were left untouched).
+- `docs/dev-testing.md`: one sentence appended to "Test layers" pointing at `npm run lint` / `npm run typecheck` / `npm run format:check` (or `npm run format` to fix).
+
+**CI step shape chosen (AC3)**: a separate `- name: Format check` step, not a two-line `run: |` inside the existing `Lint` step. Every other step in `ci.yml` (`Checkout`, `Set up Node`, `Install dependencies`, `Unit tests`, `Type check`, `Lint`, `Dependency audit`, `Package`) already uses a single-line `run:` — per the Implementation Guidance's either-is-acceptable clause, matching that existing convention was the better fit than introducing the file's first multi-line `run: |` block. The Concourse-mirror claim in `ci/tasks/lint.yml`'s header comment stays true: the Concourse task now runs `npm run lint` then `npm run format:check` in one `run:` block, and GitHub Actions runs the same two commands as consecutive steps ("Lint" then "Format check") — same checks, same order, different step granularity.
+
+**AC6 disposition**: `fly` is installed (`/home/<username>/.local/bin/fly`) and `fly targets` lists `local-goldfinch` (team `goldfinch`), so the primary path was attempted: `fly -t local-goldfinch execute -c ci/tasks/lint.yml -i repo=.` and `fly -t local-goldfinch status` both failed with `dial tcp 127.0.0.1:8080: i/o timeout` — the Concourse server itself is unreachable from this environment (not a missing tool or an expired login, so no `fly login` was attempted, per instruction not to log in to anything). Fell back to the task's commands locally (`npm ci` skipped — already installed): `npm run lint && npm run format:check` — both exit 0. **Concourse run deferred to the operator.**
+
+**`git blame` before/after example (AC4)** — `src/renderer/renderer.js` lines 19–20 (`import {` / `  shouldQuery,`, an import-list Prettier reformatted):
+- Plain `git blame`: `339e808f (C 2026-08-27 16:07:33 -0500 19) import {` — misattributed to the Leg 1 reformat commit.
+- `git blame --ignore-revs-file .git-blame-ignore-revs`: `d9e764e5 (C 2026-07-29 21:13:45 -0500 19) import {` — correctly attributes to the commit that actually introduced this import, skipping over the reformat.
+
+**Gate results**
+
+- `npm test`: 3839/3839 pass, 0 fail, 0 skipped, 0 todo.
+- `npm run lint`: clean.
+- `npm run typecheck`: clean.
+- `npx prettier --check .`: clean (all new/edited files individually verified Prettier-clean too; `.git-blame-ignore-revs` has no inferred parser, per DD5, and is never visited by the check).
+
 ---
 
 ## Decisions
@@ -150,3 +181,5 @@ The leg artifact's Inputs and this flight log both record "npm test 3792/3792" /
 - 2026-08-27 — Leg 1 landed with AC6 blocked: `npm run typecheck` fails on two Prettier-induced typing-comment displacements (`src/main/app-db.js` — a `/** @type {any} */` cast re-attached to the wrong parenthesized group in a reformatted `&&` chain; `src/renderer/pages/vault.js` — a `// @ts-ignore` now ten lines above the TS2307 it suppresses, after DD1's import expansion). The Developer stopped because AC5 forbids hand-editing source. **FD ruling**: AC5's intent is "no hand-formatting"; restoring the placement of a typing comment is a correctness edit, not formatting. Two minimal, Prettier-stable edits are authorized and confined to those two sites: bind the cast to a local (`const anyErr = /** @type {any} */ (err);`-style) so it cannot drift again, and move the `// @ts-ignore` onto the line immediately before the module-specifier line it suppresses (the known flat-served-specifier TS2307 — BACKLOG "Internal pages: flat-served import specifiers are untypeable"). Recorded as a Deviation against AC5; the leg is not aborted (no requirement changed — an edge case surfaced). The Reviewer is told to check both edits are the only non-Prettier source changes.
 - 2026-08-27 — Correction to the Recon Report / leg Inputs: the pre-leg test count is **3839**, not 3792. 3792 was measured on the batch-3 turnaround branch before PRs #177–#179 merged (which added 47 tests); the Developer verified 3839 on the actual base `c6cacc4` twice and used it as the AC2 invariant. Measured budgets on this base: `renderer.js` 1650 → 1827 (the Architect's 1829 was measured at `f142f90`, before the turnaround merges touched `renderer.js`); `bookmarks-bar.js` 1040 → 1077. DD2 says "measured", so 1827 is the re-based budget.
 - 2026-08-27 — Leg 1 review: Reviewer (Sonnet) `[HANDOFF:confirmed]` first pass; all four gates re-run live; four pins independently neuter-verified across the DD3 shapes; the two authorized typing-comment edits confirmed semantically identical. Non-blocking: the reformat touched **319** files (the log's 318 omitted `eslint.config.mjs`); and the three `tab-drag-invariants` pins needed shape-1/shape-3 treatment, not the shape-2 absence-window re-anchor DD3 predicted — the prediction was wrong, the fixes are right (per-pin table reflects the true shapes). Leg 1 → `completed`; committing and opening its PR per DD4.
+- 2026-08-27 — Leg 1 merged as PR #182, squash sha `339e808f229d342c114467d0142499d8cffc3eb7`; flight branch re-created from `main` at that sha for Leg 2. Leg 2 `ci-format-gate` designed; risk tier **low** (additive CI/doc wiring, no runtime surface, no shared interface; the one non-obvious step — the blame-ignore file — is verified by a `git blame` comparison in AC4). No per-leg design review; leg-end Reviewer covers it.
+- 2026-08-27 — Leg 2 review: Reviewer `[HANDOFF:confirmed]` first pass, all seven ACs re-verified incl. the blame comparison and all four gates; one non-blocking artifact-sync note (flight checkbox/status), which is Phase 3 work done here by the FD. Leg 2 → `completed`; Flight 5 → `landed`; Flight 5 and mission criterion 7 checked off in Mission 17. Concourse task run still deferred to the operator (`fly` reached `127.0.0.1:8080` timeout) — first push to `main` with the new `lint.yml` will exercise it. `[COMPLETE:flight]`. Debrief via `/flight-debrief`.

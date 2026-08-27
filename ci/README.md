@@ -11,7 +11,7 @@ release path, incl. macOS) is **untouched** and still owns releases.
 |---|---|---|
 | Unit tests | `tasks/test.yml` | "Unit tests" |
 | Type check | `tasks/typecheck.yml` | "Type check" |
-| Lint | `tasks/lint.yml` | "Lint" |
+| Lint (ESLint + Prettier check) | `tasks/lint.yml` | "Lint" + "Format check" |
 | Dependency audit | `tasks/audit.yml` | "Dependency audit" |
 | Package smoke (`--dir`) | `tasks/package-linux.yml` | "Package (no installers)" |
 | Linux installers (AppImage+deb) | `tasks/build-linux.yml` | (fallback only — `build.yml` owns releases) |

@@ -1,5 +1,5 @@
 ---
-# ESLint over the repo — mirrors the GitHub Actions "Lint" step (ci.yml).
+# ESLint + Prettier check over the repo — mirrors the GitHub Actions "Lint" step (ci.yml).
 platform: linux
 
 image_resource:
@@ -19,3 +19,4 @@ run:
       cd repo
       npm ci
       npm run lint
+      npm run format:check
