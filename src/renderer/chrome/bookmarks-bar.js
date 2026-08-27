@@ -270,8 +270,7 @@ export function createBookmarksBar({
    *   bookmarkId: string, jarId: string | null, draggedIndex: number,
    *   slotRects: Array<{left: number, width: number}>,
    *   barRect: { left: number, top: number, right: number, bottom: number },
-   *   chevronRect: { left: number, top: number, right: number, bottom: number },
-   *   dropHandled: boolean
+   *   chevronRect: { left: number, top: number, right: number, bottom: number }
    * } | null}
    */
   let dnd = null;
@@ -540,7 +539,6 @@ export function createBookmarksBar({
         // HIDDEN chevron reads 0,0,0,0 and `isOverChevron` refuses a zero-area
         // rect, so "no overflow → nothing to spring" needs no separate branch.
         chevronRect: edgesOf(els.bookmarksOverflow),
-        dropHandled: false,
       };
       dragActive = true; // AC7: both rebuild paths are suppressed from here
       springDwellStart = null;
@@ -962,11 +960,6 @@ export function createBookmarksBar({
     // session while the commit is still in flight.
     const session = dnd || foreign;
     if (!session) return;
-    // AC8: set SYNCHRONOUSLY — `drop` fires BEFORE `dragend`, and this is what
-    // stops the two from both acting on one release. Local sessions only; a
-    // foreign one is CONSUMED at commit instead (see below), which gives the same
-    // one-outcome-per-release guarantee structurally.
-    if (dnd) dnd.dropHandled = true;
     hideIndicator();
     // Edge Case "release ON the chevron" — RULED: the chevron SWALLOWS it.
     // The chevron is inside barRect, so leg 3's classification would call this a

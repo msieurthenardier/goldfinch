@@ -23,7 +23,11 @@ import { buildVaultSheetHeader } from './vault-sheet-header.js';
 
 // The selection id namespace. `id` (not `value`) carries the index — `value` is
 // main-side capped at 24 chars by sanitizeActivatedValue; `id` is not.
-export const PICK_PREFIX = 'pick:';
+// Not exported: unlike CERT_PICK_PREFIX (mirrored as a local literal in
+// register-overlay-ipc.js because main-process code parses cert-picker ids), the
+// vault-picker id is only ever produced/parsed here, via the exported pickId /
+// parsePickIndex helpers — there is no other consumer of the raw prefix.
+const PICK_PREFIX = 'pick:';
 
 // The selection id for the separated "Manage passwords" footer link. NOT a `pick:<i>`
 // index — the chrome dispatch routes it to openVaultPage() (a navigation, no secret).

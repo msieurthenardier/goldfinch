@@ -84,6 +84,10 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
 - **Exclusions**: `goldfinch://settings` cannot be audited via `--target` (the eval tools
   exclude the internal session even for admin); the find overlay is not audited here (its
   a11y rests on the verbatim attribute carry-over + HAT keyboard pass).
+- **Exit codes** (squawk 0031): `0` clean (no new violations), `1` NEW violations found,
+  `2` apparatus/setup failure (couldn't attach, target not found, missing key, etc. — the
+  audit did not run to completion) — distinct from `1` so a caller can tell "not run" from
+  "red".
 
 ## Test layers
 

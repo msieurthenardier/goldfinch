@@ -24,6 +24,13 @@
 //                                                  # target by URL substring
 //                                                  # instead of the chrome
 //
+// Exit codes (squawk 0031 — apparatus failure must be distinguishable from a
+// red run):
+//   0 — clean: every violation node is in the ACCEPTED baseline
+//   1 — NEW violations found (not in the ACCEPTED baseline)
+//   2 — apparatus/setup failure (fail()): could not attach, target/tool not
+//       found, admin key missing, etc. — the audit did not run to completion
+//
 // `nested-interactive` is ALWAYS disabled: the tab strip's role="tab" wrapping
 // a focusable close <button> is an accepted, documented APG pattern (see
 // missions/.../legs/01-tab-strip-a11y.md "Cross-Leg Note"). With no --rules /
@@ -96,9 +103,12 @@ if (rulesArg) {
   };
 }
 
+// Apparatus/setup failure — attach, target discovery, missing key, etc. Exit 2,
+// distinct from the violations-found exit (1), so a caller can tell "not run"
+// from "red" (squawk 0031).
 function fail(msg) {
   console.error(`a11y-audit: ${msg}`);
-  process.exit(1);
+  process.exit(2);
 }
 
 // ---------- curated a11y baseline (DD7) ----------

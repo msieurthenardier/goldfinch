@@ -171,3 +171,22 @@ test('toolbar mode short-circuits to the single namespaced Unpin item — page s
 test('unknown toolbar item yields an empty model (validated no-op shape)', () => {
   assert.deepEqual(pageContextModel(null, /** @type {any} */ ('bogus')), []);
 });
+
+// ---------------------------------------------------------------------------
+// Vault indicator toolbar mode (squawk 0038, #113 "Lock now" half — the
+// pinnable half is DECLINED; this is NOT an UNPIN_LABELS entry).
+// ---------------------------------------------------------------------------
+test('toolbar mode "vault": unlocked yields the single "Lock now" item, page sections ignored', () => {
+  const model = pageContextModel(fullParams(), /** @type {any} */ ('vault'), { vaultLocked: false });
+  assert.deepEqual(model, [{ type: 'item', id: 'action:vault-lock', label: 'Lock now' }]);
+});
+
+test('toolbar mode "vault": already locked OMITS the item (nothing to lock) — empty model, not disabled', () => {
+  const model = pageContextModel(null, /** @type {any} */ ('vault'), { vaultLocked: true });
+  assert.deepEqual(model, []);
+});
+
+test('toolbar mode "vault": vaultLocked defaults to falsy when opts is omitted (item present)', () => {
+  const model = pageContextModel(null, /** @type {any} */ ('vault'));
+  assert.deepEqual(model, [{ type: 'item', id: 'action:vault-lock', label: 'Lock now' }]);
+});
