@@ -226,7 +226,11 @@ contextBridge.exposeInMainWorld('goldfinch', {
   // stripIndex (M09 F4 Leg 1, optional/additive): the tab's visual position
   // at close time (from the renderer's orderedTabIds(), snapshotted BEFORE
   // DOM removal), carried so main can record it on a closed-tab-stack entry.
-  tabClose: (wcId, stripIndex) => ipcRenderer.send('tab-close', wcId, stripIndex),
+  // opts.skipCapture (squawk 0018, optional/additive): set when closing a
+  // guest view that was never a live strip entry (the closed-before-wcId-
+  // arrived race) — tells main to tear the view down WITHOUT pushing a
+  // closed-tab-stack entry for it.
+  tabClose: (wcId, stripIndex, opts) => ipcRenderer.send('tab-close', wcId, stripIndex, opts),
   // tabReopen (M09 F4 Leg 2, DD2 step 2): pops the closed-tab stack main-side and
   // returns the popped entry (or null on an empty stack, a silent renderer no-op) —
   // {url, title, partition?, stripIndex, navEntries, navIndex, jarFallback}.

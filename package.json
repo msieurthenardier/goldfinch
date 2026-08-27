@@ -78,7 +78,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
     "axe-core": "^4.13.0",
-    "electron": "^43.4.1",
+    "electron": "43.4.1",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "eslint": "^10.9.0",

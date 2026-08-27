@@ -1,6 +1,8 @@
 // @ts-check
 'use strict';
 
+const { isBurnerPartition } = require('../shared/burner');
+
 /**
  * Register the complete tab lifecycle and cross-window move surface.
  * Electron constructors and every ownership authority are injected.
@@ -122,6 +124,16 @@ ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }
   const rec = registry.getWindowForChrome(event.sender);
   if (!rec) return null;
   const view = new WebContentsView({ webPreferences: webPreferencesObj });
+  // Squawk 0036 (#104 carve-out, burner-hardening invariant): a burner tab's
+  // WHOLE POINT is leaving no trace, so its guest MUST NOT let a page discover
+  // the machine's LAN/public IPs via WebRTC ICE candidate gathering (and the
+  // default policy's UDP binds trigger a Windows Firewall prompt on a tab that
+  // is supposed to be invisible). Web branch only, gated on the pinned
+  // `burner:<n>` partition shape — normal jars keep Chromium's default policy
+  // (out of scope; belongs to the #147 fingerprinting mission). No user toggle.
+  if (!trusted && isBurnerPartition(partition)) {
+    view.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+  }
   rec.win.contentView.addChildView(view);
 
   // Seed initial bounds
@@ -166,7 +178,7 @@ ipcMain.handle('tab-create', (event, { url, partition, trusted, restoreHistory }
   return wcId;
 });
 
-ipcMain.on('tab-close', (event, wcId, stripIndex) => {
+ipcMain.on('tab-close', (event, wcId, stripIndex, opts) => {
   // Class 1 (F6 DD2): resolve the OWNING window's record (guest reverse lookup) —
   // also the guard that replaces the former unguarded mainWindow deref below.
   // Leg 2 (F3 DD2): `ownsTab` additionally requires the SENDER to BE that owning
@@ -189,19 +201,27 @@ ipcMain.on('tab-close', (event, wcId, stripIndex) => {
   // `owner` is the guest's reverse-resolved record above), which the pop rule
   // compares against the reopen invoker. Whole block try/catch — capture must
   // never break close.
-  try {
-    const captured = captureClosedTabEntry({
-      tabEntry: entry,
-      jarsList: jars.list(),
-      stripIndex: Number.isInteger(stripIndex) ? stripIndex : APPEND_SENTINEL,
-      windowId: owner.win.id,
-    });
-    if (captured) {
-      closedTabStack.push(captured);
-      broadcastClosedTabStackChanged();
+  //
+  // opts.skipCapture (squawk 0018 / issue #134 item 3): the renderer sends this
+  // when closing a guest view that was never a live strip entry (the tab was
+  // closed while tab-create was still in flight) — there is no real "reopen
+  // this tab" case for a view the user never saw, so capture is skipped
+  // entirely rather than pushing a phantom entry onto the stack.
+  if (!(opts && opts.skipCapture)) {
+    try {
+      const captured = captureClosedTabEntry({
+        tabEntry: entry,
+        jarsList: jars.list(),
+        stripIndex: Number.isInteger(stripIndex) ? stripIndex : APPEND_SENTINEL,
+        windowId: owner.win.id,
+      });
+      if (captured) {
+        closedTabStack.push(captured);
+        broadcastClosedTabStackChanged();
+      }
+    } catch (err) {
+      logger.error('[closed-tab-stack] capture failed:', err);
     }
-  } catch (err) {
-    logger.error('[closed-tab-stack] capture failed:', err);
   }
   if (!owner.win.isDestroyed()) {
     owner.win.contentView.removeChildView(entry.view);

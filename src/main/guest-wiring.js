@@ -18,6 +18,7 @@ const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
 // routes through it like every other window. window-factory is Electron-free;
 // no cycle (it never requires this module).
 const { onWindowClosed } = require('./window-factory');
+const { isBurnerPartition } = require('../shared/burner');
 
 /**
  * M14 F2 L1 — the DD3 popup predicate (pure, exported for the unit matrix),
@@ -276,6 +277,16 @@ function createGuestWiring(deps) {
         ? parentEntry.partition
         : openerRecord.tabViews.get(contents.id)?.partition;
       const popupWcId = popupWc.id;
+
+      // Squawk 0036 (#104 carve-out, burner-hardening invariant): a popup
+      // opened from a burner tab inherits the opener's jar/session (DD1d —
+      // NO partition key in overrideBrowserWindowOptions, so this webContents
+      // never goes through tab-create's own policy call). Applied here off the
+      // SAME captured `partition` the popup's own history/census attribution
+      // already relies on, so it stays correct even after the opener tab dies.
+      if (isBurnerPartition(partition)) {
+        popupWc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+      }
 
       // Full guest discipline first (audited reuse): latch, guardNav trio +
       // guardFrameNav wrapper (the GUEST nav-guard shape — never the wider

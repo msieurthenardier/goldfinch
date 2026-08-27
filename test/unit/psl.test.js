@@ -1,6 +1,7 @@
 'use strict';
 
-// Unit tests for src/main/vault/psl.js (M12 Flight 4, Leg 4 / DD5) — the credential-safe
+// Unit tests for src/main/psl.js (M12 Flight 4, Leg 4 / DD5; relocated out of vault/ by
+// squawk 0035 to be shared with trackers.js) — the credential-safe
 // registrable-domain (eTLD+1) resolver behind the `matchMode:'registrable-domain'` fill
 // opt-in. This is the flight's HIGHEST-RISK surface: a wrong result silently widens a
 // password across sites, so the rule classes (normal / `*` wildcard / `!` exception,
@@ -10,7 +11,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { registrableDomainSafe: rd, isPslStale, SNAPSHOT_MS, PSL_MAX_AGE_MS } = require('../../src/main/vault/psl');
+const { registrableDomainSafe: rd, isPslStale, SNAPSHOT_MS, PSL_MAX_AGE_MS } = require('../../src/main/psl');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

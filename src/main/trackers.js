@@ -1,62 +1,39 @@
 'use strict';
 
 // Lightweight tracker classification: a curated list of well-known tracker
-// domains by category, plus a registrable-domain (eTLD+1) heuristic so any
+// domains by category, plus a registrable-domain (eTLD+1) resolver so any
 // third-party request can be flagged even if it isn't on the list.
 
-// Common two-level public suffixes so "bbc.co.uk" -> "bbc.co.uk", not "co.uk".
-// Also a curated subset of multi-tenant public suffixes (github.io, etc.) so
-// distinct tenants (alice.github.io vs bob.github.io) are not collapsed to the
-// shared suffix — that collapse would make third-party cookie stripping and
-// tracker blocking fail open across tenants.
+const { registrableDomainSafe } = require('./psl');
+
+// registrableDomain is PSL-backed (squawk 0035 / GitHub #81, security audit
+// finding F5). It previously walked a hand-maintained MULTI_SUFFIX set of
+// "common two-level suffixes" (bbc.co.uk, etc.) and curated multi-tenant
+// platforms (github.io, etc.); that set was necessarily incomplete, so an
+// unlisted multi-tenant suffix (e.g. an S3 bucket host, an unlisted
+// *.github.io-style platform) silently collapsed distinct tenants onto the
+// same "site", making third-party cookie stripping and tracker blocking fail
+// OPEN across tenants.
 //
-// NOT a full Public Suffix List: residual gap for unlisted multi-tenant /
-// multi-level suffixes (and 3+-label PSL entries the last2 walk cannot see,
-// e.g. s3.amazonaws.com is a host under amazonaws.com here, not its own
-// suffix entry). Dependency-free by design — do not pull in a PSL package.
-const MULTI_SUFFIX = new Set([
-  'co.uk',
-  'org.uk',
-  'ac.uk',
-  'gov.uk',
-  'me.uk',
-  'co.jp',
-  'or.jp',
-  'ne.jp',
-  'com.au',
-  'net.au',
-  'org.au',
-  'co.nz',
-  'co.in',
-  'co.za',
-  'co.kr',
-  'com.br',
-  'com.cn',
-  'com.mx',
-  'com.tr',
-  'com.tw',
-  'com.hk',
-  'com.sg',
-  // multi-tenant platforms (curated subset — see note above)
-  'github.io',
-  'gitlab.io',
-  'herokuapp.com',
-  'appspot.com',
-  'amazonaws.com',
-  'web.app',
-  'firebaseapp.com',
-  'pages.dev',
-  'workers.dev',
-  'vercel.app',
-  'netlify.app',
-  'netlify.com',
-  'azurewebsites.net',
-  'cloudfront.net',
-  'fly.dev',
-  'deno.dev',
-  'surge.sh',
-  'glitch.me'
-]);
+// Delegating to src/main/psl.js (the same vendored, fail-closed Public Suffix
+// List parser the vault's registrable-domain credential match uses — moved
+// out of vault/ to share here) fixes that: multi-tenant PSL entries
+// (github.io, s3.amazonaws.com, vercel.app, …) resolve tenants to distinct
+// registrable domains. Per operator ruling 2026-08-27, an UNLISTED suffix is
+// acceptable to fail closed here too: rather than guessing at a split, an
+// unresolvable host is treated as its own whole-hostname identity (below),
+// which never merges two distinct hosts into one "site" incorrectly.
+//
+// CAUGHT IN REVIEW (2026-08-27): "unlisted suffix" only fails closed when PSL
+// returns null. Four of the old MULTI_SUFFIX platform entries — amazonaws.com,
+// netlify.com, surge.sh, glitch.me — sit directly under a real ICANN TLD
+// (.com, .sh, .me) with no matching PRIVATE-section rule in the vendored
+// .dat, so PSL resolves them via the ICANN TLD rule alone and returns a
+// non-null but WRONG registrable domain that drops the tenant label (e.g.
+// tenant-a.netlify.com -> netlify.com) — re-opening the exact cross-tenant
+// merge this squawk fixes, for those four. SUPPLEMENT_SUFFIX below restores
+// the old curated split for exactly this confirmed-absent set; see its
+// comment for the check and the PSL-wins condition.
 
 // IP literals are already their full identity — label-slicing them yields
 // bogus domains (e.g. "192.168.1.10" → "1.10") that collide across hosts.
@@ -68,14 +45,51 @@ function isIpLiteral(hostname) {
   return false;
 }
 
+// Curated supplement to the PSL, NOT a replacement for it. Checked 2026-08-27
+// against the vendored public_suffix_list.dat (snapshot 2026-07-20): these
+// are exactly the pre-squawk-0035 MULTI_SUFFIX entries confirmed absent from
+// the .dat's PRIVATE section (verified by calling registrableDomainSafe on a
+// synthetic tenant host for every old MULTI_SUFFIX entry and diffing against
+// the expected split — the other entries, e.g. github.io, s3.amazonaws.com,
+// vercel.app, all resolve correctly via the PSL alone). Each of these sits
+// under a real ICANN TLD (.com, .sh, .me), so PSL doesn't fail closed for
+// them — it returns the bare TLD-level split, silently merging tenants. If
+// the .dat later gains a matching PRIVATE-section rule, PSL's own answer will
+// stop being the bare suffix (see the `safe === suffix` guard in
+// registrableDomain below) and this supplement stops firing on its own —
+// PSL always wins once it has a more specific answer.
+const SUPPLEMENT_SUFFIX = new Set([
+  'amazonaws.com',
+  'netlify.com',
+  'surge.sh',
+  'glitch.me'
+]);
+
 function registrableDomain(hostname) {
   if (!hostname) return '';
   if (isIpLiteral(hostname)) return hostname;
-  const parts = hostname.split('.').filter(Boolean);
-  if (parts.length <= 2) return parts.join('.');
-  const last2 = parts.slice(-2).join('.');
-  if (MULTI_SUFFIX.has(last2)) return parts.slice(-3).join('.');
-  return last2;
+  const safe = registrableDomainSafe(hostname);
+  if (safe != null) {
+    const parts = hostname.split('.').filter(Boolean);
+    if (parts.length >= 3) {
+      const suffix = parts.slice(-2).join('.');
+      // Override only when PSL's answer IS the bare supplement suffix (no
+      // deeper PSL rule fired) — a tenant label is being dropped. A more
+      // specific PSL match (e.g. s3.amazonaws.com's own PRIVATE rule) never
+      // equals the bare 2-label suffix here, so it's left untouched.
+      if (SUPPLEMENT_SUFFIX.has(suffix) && safe === suffix) {
+        return parts.slice(-3).join('.');
+      }
+    }
+    return safe;
+  }
+  // PSL couldn't resolve it (unlisted TLD, the host IS a public suffix, a
+  // single label like "localhost", or an over-stale snapshot) — fail closed
+  // by treating the whole hostname as its own identity rather than guessing
+  // at a split. Never merges two distinct hosts; may under-strip a
+  // legitimate subdomain on an unlisted suffix, which is the accepted
+  // tradeoff (operator ruling 2026-08-27).
+  return hostname.split('.').filter(Boolean).join('.');
 }
 
 function hostnameOf(url) {

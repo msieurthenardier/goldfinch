@@ -76,8 +76,40 @@ function registerSettingsIpc({
     return currentAutomationStatus();
   });
   registerInternalHandler(ipcMain, 'automation:find-free-port', async () => ({ port: await freePortInRange() }));
-  registerInternalHandler(ipcMain, 'clipboard:write', (_event, text) => {
-    clipboard.writeText(String(text == null ? '' : text));
+
+  // clipboard:write is the generic internal clipboard sink: the vault's secret Copy
+  // (vault.js) AND the settings page's navigator.clipboard fallback (DD4/copyText)
+  // both ride it. Squawk 0021: a copied vault SECRET must not sit in the OS
+  // clipboard forever. Scoped via an explicit `opts.secret` flag (an optional 3rd
+  // arg — every existing caller that omits it keeps its exact prior behavior, no
+  // bridge-shape change) rather than a new channel. One pending timer, re-armed per
+  // copy; cleared only if the clipboard STILL holds exactly what we wrote (never
+  // clobber a later copy). Electron-free / no injection seam by design (the
+  // capture-timeout.js precedent): the only ambient dependency is the global
+  // setTimeout/clearTimeout pair, driven in tests by node:test MockTimers.
+  const CLIPBOARD_SECRET_CLEAR_MS = 20000;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let clipboardClearTimer = null;
+  registerInternalHandler(ipcMain, 'clipboard:write', (_event, text, opts) => {
+    const value = String(text == null ? '' : text);
+    clipboard.writeText(value);
+
+    if (clipboardClearTimer !== null) {
+      clearTimeout(clipboardClearTimer);
+      clipboardClearTimer = null;
+    }
+
+    if (opts && opts.secret === true) {
+      clipboardClearTimer = setTimeout(() => {
+        clipboardClearTimer = null;
+        // Only clear if the clipboard still holds exactly what we copied — an
+        // empty/changed clipboard means the operator copied something else since,
+        // and that copy must never be clobbered.
+        if (clipboard.readText() === value) clipboard.writeText('');
+      }, CLIPBOARD_SECRET_CLEAR_MS);
+      if (typeof clipboardClearTimer.unref === 'function') clipboardClearTimer.unref();
+    }
+
     return { ok: true };
   });
 

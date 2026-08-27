@@ -290,8 +290,11 @@ interface GoldfinchBridge {
   tabCreate(payload: { url: string; partition: string; trusted: boolean }): Promise<number>;
   /** Close/destroy a web tab view (fire-and-forget). `stripIndex` (M09 F4 Leg 1,
    * optional/additive) is the tab's visual strip position at close time, snapshotted
-   * pre-DOM-removal — rides to main for a closed-tab-stack entry's positional reopen. */
-  tabClose(wcId: number, stripIndex?: number): void;
+   * pre-DOM-removal — rides to main for a closed-tab-stack entry's positional reopen.
+   * `opts.skipCapture` (squawk 0018, optional/additive): closes a guest view that was
+   * never a live strip entry (closed-before-wcId-arrived race) without pushing a
+   * closed-tab-stack entry for it. */
+  tabClose(wcId: number, stripIndex?: number, opts?: { skipCapture?: boolean }): void;
   /** Pop the closed-tab stack (M09 F4 Leg 2, DD2 step 2; invoke). Returns the popped
    * entry, or `null` on an empty stack (renderer no-ops silently). `partition` is
    * present iff the entry's original jar still exists (main-side resolved against
@@ -509,7 +512,7 @@ interface GoldfinchInternalBridge {
   automationGetStatus(): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
   automationSetPort(port: number): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
   automationFindFreePort(): Promise<{ port: number | null }>;
-  clipboardWrite(text: string): Promise<{ ok: boolean }>;
+  clipboardWrite(text: string, opts?: { secret?: boolean }): Promise<{ ok: boolean }>;
   automationListKeys(): Promise<{ jars: Array<{ id: string; name: string; color: string; hasKey: boolean }>; adminEnabled: boolean; adminKeySet: boolean }>;
   automationJarKeyMint(jarId: string): Promise<{ key: string }>;
   automationJarKeyRevoke(jarId: string): Promise<{ ok: boolean }>;

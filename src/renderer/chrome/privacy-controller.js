@@ -409,9 +409,14 @@ export function createPrivacyController(deps) {
       s.innerHTML = `<div class="ps-title">Jar</div><div class="ps-main">—</div>`;
       return s;
     }
+    // isSafeColor-guarded like every other jar-color sink (peer idiom: pages/settings.js,
+    // pages/jars-section-controller.js, pages/vault.js, menu-overlay.js) — c.color rides
+    // straight into an innerHTML style attribute, so an unsafe value falls back to neutral
+    // rather than breaking out of the attribute.
+    const dotColor = isSafeColor(c.color) ? c.color : '#9aa0ac';
     s.innerHTML =
       `<div class="ps-title">Jar</div>` +
-      `<div class="ps-main"><span class="cm-dot" style="background:${c.color}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
+      `<div class="ps-main"><span class="cm-dot" style="background:${dotColor}"></span> ${escapeHtml(c.name)}${c.burner ? ' · burner (evaporates on close)' : ''}</div>`;
     const row = document.createElement('div');
     row.className = 'privacy-buttons';
     const btn = document.createElement('button');

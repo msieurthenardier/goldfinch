@@ -832,8 +832,9 @@ the live indicator + log viewer against this contract. The shape below is the de
   returned an `isError` result; `errorCode` carries the discriminated refusal code parsed from the
   `automation: <code> — …` message (e.g. `out-of-jar`, `admin-only`, `internal-session`,
   `bad-handle`) — or `"error"` for a bare/unexpected throw, and `null` on success. `detail` is a
-  short per-op context string for operator auditability — e.g. `url=https://…` for `navigate`/
-  `openTab`, `(x,y)` for `click`/`scroll`, `(fx,fy)->(tx,ty)` for `dragPointer`, `key=Enter` for
+  short per-op context string for operator auditability — e.g. `url=https://host/path` (query
+  string and fragment stripped — squawk 0023) for `navigate`/`openTab`, `(x,y)` for
+  `click`/`scroll`, `(fx,fy)->(tx,ty)` for `dragPointer`, `key=Enter` for
   `pressKey` (chords append the
   modifiers, e.g. `key=M+control`), `text(N chars)` for
   `typeText` (**length only — content is never logged**); `null` for ops where `targetWcId`

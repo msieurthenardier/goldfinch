@@ -150,7 +150,7 @@ tabController = createTabController({
   tabs,
   jarsClient,
   blankPrivacy,
-  escapeHtml,
+  escapeHtml, isSafeColor, // squawk 0020: jar-color innerHTML sink guard
   openTabContextMenu: (id, anchorEl) => openTabContextMenu(id, anchorEl),
   currentHomePage,
   currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences

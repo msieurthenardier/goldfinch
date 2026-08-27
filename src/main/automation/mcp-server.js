@@ -63,12 +63,47 @@ const { createVaultContext } = require('../vault/vault-context');
 const ERROR_CODE_RE = /^automation:\s*([a-z-]+)\s+—/;
 
 /**
+ * Redact a URL for the audit log (squawk 0023): a `navigate`/`openTab` target
+ * may be a magic-link or `?token=…` URL, and the query string + fragment are
+ * where that secret lives — the log must keep scheme + host + path only.
+ *
+ * Scoped to values that actually look like an absolute URL (contain `://`);
+ * a plain non-URL string is returned untouched rather than force-parsed. A
+ * value that DOES look URL-shaped but fails `new URL()` is fully redacted —
+ * never logged raw — since an unparsable string could still contain a secret
+ * verbatim. On a successful parse, the ORIGINAL string is sliced at the
+ * earlier of its first `?`/`#` (not re-serialized from the parsed URL), so a
+ * query/fragment-free input is returned byte-for-byte unchanged.
+ *
+ * @param {*} rawUrl
+ * @returns {string}
+ */
+function redactUrlForAudit(rawUrl) {
+  const s = String(rawUrl);
+  if (!s.includes('://')) return s;
+  try {
+    new URL(s); // parse-validate only — the ORIGINAL string is sliced below, not this.
+  } catch {
+    return '(redacted)';
+  }
+  const qIdx = s.indexOf('?');
+  const hIdx = s.indexOf('#');
+  let cut = s.length;
+  if (qIdx !== -1) cut = Math.min(cut, qIdx);
+  if (hIdx !== -1) cut = Math.min(cut, hIdx);
+  return s.slice(0, cut);
+}
+
+/**
  * Derive a short, human-readable context string for an audit log entry — the
  * "where/what" complement to the op name and targetWcId already recorded.
  *
  * Privacy rule: `typeText` MUST NOT log the content; it records only the
  * character count so an operator can audit that typing happened without ever
- * exposing a typed secret (password, token, etc.) to the log.
+ * exposing a typed secret (password, token, etc.) to the log. Likewise, any
+ * URL logged (`navigate`/`openTab`) goes through `redactUrlForAudit` — the
+ * query string and fragment (where a magic-link/`?token=` secret would live)
+ * are stripped before the entry is recorded (squawk 0023).
  *
  * Null-safe: `args` may be undefined (e.g. when a tool is called with no
  * arguments). All other ops whose wcId already names the tab return `null`.
@@ -78,7 +113,10 @@ const ERROR_CODE_RE = /^automation:\s*([a-z-]+)\s+—/;
  * resolved fill origin, `vaultUnlock` records the unlocked-vault count. It defaults
  * to `undefined`, so every existing 2-arg caller keeps its exact prior behavior.
  * The secret invariant holds: no accessKey / admin private key / password / TOTP
- * secret / recovery code is ever read from args OR the result.
+ * secret / recovery code is ever read from args OR the result. The vault ops'
+ * `origin` detail below is exempt from `redactUrlForAudit` on purpose — it is a
+ * `scheme://host[:port]` Origin (see `origin-guard.js`), never a full URL, so it
+ * structurally carries no query/fragment to strip.
  *
  * @param {string} op  MCP tool name
  * @param {Record<string, any> | undefined} args  tool call arguments
@@ -101,9 +139,9 @@ function deriveAuditDetail(op, args, result) {
   };
   switch (op) {
     case 'navigate':
-      return args.url != null ? 'url=' + String(args.url) : null;
+      return args.url != null ? 'url=' + redactUrlForAudit(args.url) : null;
     case 'openTab': {
-      let detail = args.url != null ? 'url=' + String(args.url) : null;
+      let detail = args.url != null ? 'url=' + redactUrlForAudit(args.url) : null;
       if (detail && args.jarId != null) detail += ' jar=' + String(args.jarId);
       return detail;
     }
@@ -1192,4 +1230,5 @@ module.exports = {
   revokeJarKey,
   revokeAdminKey,
   deriveAuditDetail,
+  redactUrlForAudit,
 };

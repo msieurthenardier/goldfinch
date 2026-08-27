@@ -1,6 +1,8 @@
 // @ts-check
 'use strict';
 
+const { isSafeColor } = require('../shared/safe-color');
+
 // Move-to-new-window payload rules (M09 Flight 6, DD5 + leg-4 design review H2).
 // Pure, Electron-free (the window-registry / closed-tab-capture precedent) so the
 // shape rules are unit-pinned offline.
@@ -48,6 +50,11 @@ function validateMoveTabPayload(payload) {
   ) {
     return null;
   }
+  // Defense-in-depth (squawk 0020): the color rides through to a chrome innerHTML
+  // sink (`style="background:${color}"`) on the target window — reject rather than
+  // relay an unsafe value, matching this validator's fail-closed shape discipline
+  // (isSafeColor is the SAME product color domain jars.js/cleanColor gates on).
+  if (!isSafeColor(container.color)) return null;
   return {
     wcId,
     url,

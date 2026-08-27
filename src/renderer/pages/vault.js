@@ -1525,11 +1525,13 @@ function init() {
 
       // Copy fetches the current stored secret and writes it to the OS clipboard
       // WITHOUT putting it in the DOM (reuses the existing clipboard:write sink).
+      // { secret: true } marks this a SECRET copy so main auto-clears the clipboard
+      // ~20s later if it still holds this exact value (squawk 0021).
       controls.appendChild(iconButton('copy', 'Copy', () => {
         bridge.vaultReveal({ vaultId: ctx.vaultId, itemId: ctx.itemId }).then((res) => {
           if (!res || res.locked) { refresh(); return; }
           const secret = res.item ? (res.item[name] == null ? '' : String(res.item[name])) : '';
-          bridge.clipboardWrite(secret);
+          bridge.clipboardWrite(secret, { secret: true });
         }).catch(() => {});
       }));
       wrap.appendChild(controls);

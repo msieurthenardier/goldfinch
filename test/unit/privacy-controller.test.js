@@ -64,6 +64,43 @@ async function create(h) {
   return controller;
 }
 
+// renderPrivacy() also builds the Trackers/Third-party/Cookies/Fingerprinting
+// sections, which need a fuller net/cookies fixture than the other tests in
+// this file exercise (they never drive togglePrivacy(true) / renderPrivacy()
+// directly — the base tabA fixture's `cookies: []` shape is never read as a
+// `{ first, third, list }` object elsewhere).
+const fullNet = { firstParty: 'example.test', trackers: { count: 3, blocked: 3, allowed: 0 }, thirdPartyCount: 0, thirdPartyList: [], stripped: 0, cookiesBlocked: 0 };
+const fullCookies = { first: 0, third: 0, list: [] };
+
+test('an unsafe jar color is gated by isSafeColor before it reaches the pJar() innerHTML sink (squawk 0020)', async () => {
+  const h = harness();
+  h.tabA.container = { ...h.tabA.container, color: '"><script>alert(1)</script>' };
+  h.tabA.privacy = { ...h.tabA.privacy, net: fullNet, cookies: fullCookies };
+  h.deps.isSafeColor = (color) => color !== h.tabA.container.color; // reject only the injected value
+  const controller = await create(h);
+
+  controller.togglePrivacy(true);
+
+  const jarSection = h.els.privacyBody.children.find((child) => child.innerHTML.includes('ps-title">Jar'));
+  assert.ok(jarSection, 'the Jar section rendered');
+  assert.doesNotMatch(jarSection.innerHTML, /<script>/);
+  assert.doesNotMatch(jarSection.innerHTML, /style="background:"><script>/);
+  assert.match(jarSection.innerHTML, /style="background:#9aa0ac"/);
+});
+
+test('a safe jar color rides through to the pJar() dot unchanged', async () => {
+  const h = harness();
+  h.tabA.container = { ...h.tabA.container, color: '#abc123' };
+  h.tabA.privacy = { ...h.tabA.privacy, net: fullNet, cookies: fullCookies };
+  h.deps.isSafeColor = (color) => typeof color === 'string' && color.startsWith('#');
+  const controller = await create(h);
+
+  controller.togglePrivacy(true);
+
+  const jarSection = h.els.privacyBody.children.find((child) => child.innerHTML.includes('ps-title">Jar'));
+  assert.match(jarSection.innerHTML, /style="background:#abc123"/);
+});
+
 test('Shields changes and site pause persist without implicit reload', async () => {
   const h = harness(); const controller = await create(h);
   await controller.setShield('block', false);

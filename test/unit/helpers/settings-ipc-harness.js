@@ -28,6 +28,15 @@ function makeSettingsIpcHarness() {
   const jarSession = { id: 'jar' };
   const internalSession = { id: 'internal', __goldfinchInternal: true };
 
+  // Fake OS clipboard: tracks the current value so squawk 0021's read-back-and-compare
+  // auto-clear (clipboard:write's `opts.secret` path) can be exercised — a plain
+  // write-only spy can't express "still holds what we wrote" vs. "changed since".
+  let clipboardValue = '';
+  const clipboard = {
+    writeText: (text) => { clipboardValue = text; events.push(['clipboard', text]); },
+    readText: () => clipboardValue,
+  };
+
   registerSettingsIpc({
     ipcMain,
     registerInternalHandler,
@@ -47,7 +56,7 @@ function makeSettingsIpcHarness() {
     currentAutomationStatus: () => ({ enabled: true, port: values.automationPort || 0 }),
     rebindMcpServer: async () => events.push(['rebind']),
     freePortInRange: async () => 43123,
-    clipboard: { writeText: (text) => events.push(['clipboard', text]) },
+    clipboard,
     jars: { list: () => [{ id: 'personal', name: 'Personal', color: '#fff' }] },
     mintJarKey: (id, store) => { store.set('automationKeyHashes', { [id]: 'hash' }); return 'jar-key'; },
     revokeJarKey: (id, store) => store.set('automationKeyHashes', { [id]: undefined }),
@@ -63,6 +72,7 @@ function makeSettingsIpcHarness() {
     internal,
     events,
     values,
+    clipboard,
     defaultSessionReads: () => defaultSessionReads,
     invoke: (channel, ...args) => bare.get(channel)({}, ...args),
     invokeInternal: (channel, ...args) => internal.get(channel)({}, ...args),

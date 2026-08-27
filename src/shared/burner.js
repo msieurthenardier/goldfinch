@@ -24,3 +24,14 @@
 // page controllers converted.
 
 export const BURNER = Object.freeze({ id: 'burner', name: 'Burner', color: '#ff8c42' });
+
+// Squawk 0036 (#104 carve-out): burner session partitions are pinned as
+// `burner:<n>` — colon separator, no `persist:` prefix (see the shape table in
+// inherit-container.js) — so this is a pure string check, not a new identity
+// concept. The smallest shared hook for the two burner-only WebRTC
+// IP-handling-policy call sites (register-tab-ipc.js's tab-create web branch,
+// guest-wiring.js's popup did-create-window path): both must agree on what
+// counts as "the burner branch" without duplicating the pinned format.
+export function isBurnerPartition(partition) {
+  return typeof partition === 'string' && partition.startsWith('burner:');
+}
