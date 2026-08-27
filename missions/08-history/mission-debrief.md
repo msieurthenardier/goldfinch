@@ -161,10 +161,11 @@ justifies and de-risks the follow-on store-migration mission.
 ## Action Items
 
 ### Follow-on missions (charter-named, seeded)
-- [ ] **Storage-substrate migration** — re-home the settings + downloads JSON stores onto
+- [x] **Storage-substrate migration** — re-home the settings + downloads JSON stores onto
       the proven `node:sqlite` substrate. The store template is documented and de-risked;
       this migration owes the experimental-API-tax re-run and should decide whether to
       unify the two coexisting paging primitives (cursor vs. offset).
+      *— done: `settings-store.js` and `downloads-store.js` both call `appDb.createDocumentStore(...)`, backed by `node:sqlite`'s `DatabaseSync`, ticked 2026-08-27 (maintenance sweep)*
 - [ ] **Electron 42→43 major bump** (deferred to the post-mission maintenance sweep) — gates
       a full history store-suite re-run, since the whole mission rests on the experimental
       `node:sqlite` API.
@@ -177,9 +178,10 @@ justifies and de-risks the follow-on store-migration mission.
       behavior test — already in mission Known Issues + BACKLOG.
 
 ### Quick-win debt (low effort, real value)
-- [ ] Consolidate the automation tool-count invariant to one shared constant (it's asserted
+- [x] Consolidate the automation tool-count invariant to one shared constant (it's asserted
       across `mcp-server.js`, `mcp-tools.js`, and the test's `EXPECTED_TOOL_COUNT`; a stale
       count wedges the whole suite past the 120s gate).
+      *— done: `mcp-tools.js`'s `TOOLS` array is built by spreading the per-family arrays with no separate hardcoded count in main code; only `test/unit/automation-mcp-server.test.js`'s `EXPECTED_TOOL_COUNT` remains, ticked 2026-08-27 (maintenance sweep)*
 - [ ] Add a thin smoke assertion for the main.js `did-navigate` → recorder wire.
 - [ ] Honest omnibox close reasons on error paths (`'superseded'` not `'input-empty'`);
       prune F4 dead surface (`internal-history-suggest`, `lastQuery`/`blurClosedAt`/`refocus`).
@@ -193,9 +195,10 @@ justifies and de-risks the follow-on store-migration mission.
       multiply.
 
 ### Documentation / conventions
-- [ ] Write one consolidated reference for the jars-page 4-module subsystem contract
+- [x] Write one consolidated reference for the jars-page 4-module subsystem contract
       (mount-boundary discipline, `selectTab` sole-switch-path, render-never-writes-count,
       three-point onboarding) — currently only in scattered doc-comments.
+      *— done: CLAUDE.md:91 documents `jars.js` as composition root plus `jars-page-state.js` / `jars-nav-controller.js` / `jars-section-controller.js` / `jars-create-controller.js`, ticked 2026-08-27 (maintenance sweep)*
 - [ ] Verify CLAUDE.md's jars-panel-organization paragraph describes the tab strip, not the
       superseded collapsible panels.
 - [ ] Land the behavior-test authoring lessons in `.claude/skills/behavior-test/AUTHORING.md`.

@@ -31,6 +31,34 @@ has no in-document trigger buttons; opens are programmatic on `menu-overlay:init
   template's own `keydown` handler covers Escape/Tab dismissal.
 - **`input-dialog` template** (new-container dialog) — **no `items`**; the dialog owns its own
   Tab-cycle (input → Create → Cancel) and Escape handling.
+- **`vault-*` family** (eleven templates, all centered modal cards): `vault-unlock`
+  (master-password unlock prompt), `vault-picker` (saved-login picker for pick-and-fill —
+  **has `items`**, a roving row list), `vault-capture` (save/update-password prompt),
+  `vault-set` (first-run master-password setup), `vault-recovery-show` (one-time
+  recovery-key display, dismiss-disabled), `vault-stepup` (step-up master-password
+  re-auth, reused for access-key mint and for recovery/admin-key rotation),
+  `vault-accesskey-show` (one-time minted access-key display, dismiss-disabled),
+  `vault-adminkey-show` (one-time minted admin-key display, dismiss-disabled),
+  `vault-import` (import-bundle secret entry), `vault-change-master` (master-password
+  change), and `vault-recover` (recover-after-forgotten-master) — every member but
+  `vault-picker` registers **without `items`**, Tab-cycling and Escape handled by the
+  shared modal-card helper (or, for the dismiss-disabled pair, disabled outright).
+- **`auth-basic` template** (HTTP basic-auth credential prompt, M14 F1 L2) — **no
+  `items`**; the password leaves only via the dedicated dual-zeroized `authSubmit`
+  channel, never channel-4.
+- **`cert-picker` template** (TLS client-certificate chooser, M14 F1 L3) — **has
+  `items`** (a roving row list); the selection resolves main-side against the
+  pending-challenge store.
+- **`downloads` template** (downloads popup, M11 Flight 1 Leg 3) — **no `items`**;
+  presentation-only, the local keydown owns Escape and Tab-cycling through the row
+  buttons.
+- **`bookmark-edit` template** (star/bar/overflow quick-edit popover, M15 F1 Leg 2) —
+  **no `items`**; the first-ever anchored modal card, positioned via `positionNode` on
+  the card itself rather than centered.
+- **`suggestions` template** (address-bar suggestions, M08 Flight 4 Leg 2) — **no
+  `items`**; a listbox fully model-replaced by the chrome on every keystroke, and
+  `onOpen` moves no focus (the sheet's non-focusing regime) so keystrokes keep flowing
+  to the chrome's own `#address` field.
 
 ## The `MenuEntry` shape
 

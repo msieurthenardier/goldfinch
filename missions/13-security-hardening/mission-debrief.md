@@ -80,7 +80,8 @@ The mission achieved its stated outcome: **all six audit findings from issue #13
 
 - [ ] Merge PR stack #135 → #136 → #137 to `main` in order (human decision — see Methodology Feedback).
 - [ ] Close issue #131 once #137 lands on `main` (not before).
-- [ ] Add a regression test pinning the `__goldfinchNavGuarded` latch-before-first-navigation ordering.
+- [x] Add a regression test pinning the `__goldfinchNavGuarded` latch-before-first-navigation ordering.
+      *— done: `test/unit/latch-ordering-invariant.test.js` pins `__goldfinchNavGuarded` as the first statement of `wireGuestContents`, ticked 2026-08-27 (maintenance sweep)*
 - [ ] Re-run vault fill/capture behavior specs under `sandbox:true` to close Known Issue #2.
 - [ ] Extend the `tab-scheme-guard` fixture with a subframe self-nav vector + a cross-scheme 302 endpoint; then run the extended spec.
 - [ ] Consider a small future flight for the deferred chrome-view sandbox flip (low urgency; bundle with a chrome-preload refactor).
