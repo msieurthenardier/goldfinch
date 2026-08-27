@@ -27,6 +27,7 @@ const { createHistoryRecorder } = require('./history-recorder');
 const { registerHistoryIpc } = require('./history-ipc');
 const { createFaviconFetcher } = require('./favicon-fetch');
 const { isSafeTabUrl, isInternalPageUrl } = require('../shared/url-safety');
+const { devUserDataPath } = require('../shared/dev-profile');
 const { parseMediaProxyUrl } = require('../shared/media-proxy');
 const { INTERNAL_PARTITION } = require('../shared/internal-page');
 const { createMediaProxyHandler } = require('./media-proxy-handler');
@@ -206,6 +207,26 @@ protocol.registerSchemesAsPrivileged([
 // can't silently drift.
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.goldfinch.browser');
+}
+
+// Dev-profile isolation (squawk 0017, GitHub issue #121): claim the -dev userData
+// path at MODULE LOAD, before app.whenReady() — NOT inside initProfileAndStores'
+// whenReady().then(...) callback, where it ran until now. Electron resolves the
+// browser process's own --user-data-dir (and so every Chromium CHILD process's
+// inherited copy) during startup, ahead of the ready event; a setPath that only
+// runs after whenReady is too late for that resolution, so dev-launched child
+// processes kept carrying the REAL profile's --user-data-dir even though the main
+// process itself read/wrote the -dev directory. Same pre-ready placement
+// discipline as registerSchemesAsPrivileged and setAppUserModelId above (squawk
+// 0002's precedent). Keyed off app.isPackaged alone, same as before — no flag to
+// forget, so a dev launch can never touch the real profile.
+//
+// initProfileAndStores (init-profile.js) keeps ONLY the store-load ordering that
+// follows this redirect (appDb.open, then shields/settings/jars/downloads/
+// bookmarks.load) — it no longer performs the redirect itself, but every
+// getPath('userData') it makes now already resolves the -dev path set here.
+if (!app.isPackaged) {
+  app.setPath('userData', devUserDataPath(app.getPath('userData')));
 }
 
 // Fixed internal assets remain an exact host/path allowlist. The extracted

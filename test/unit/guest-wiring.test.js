@@ -36,6 +36,7 @@ class FakeContents extends EventEmitter {
   // Rejected on purpose: callers MUST attach their own .catch (a missing one
   // surfaces here as an unhandled rejection failing the suite).
   executeJavaScript(code) { this.execCalls.push(code); return Promise.reject(new Error('no page')); }
+  setWebRTCIPHandlingPolicy(policy) { this.webrtcPolicy = policy; }
 }
 
 function setup() {
@@ -598,6 +599,26 @@ test('did-create-window registers the popup with eager partition, wires full gue
   // tabViews only, and the registry-miss is also what keeps htmlFullscreen out
   // of the popup path (its enter() early-returns; pinned in html-fullscreen.test.js).
   assert.equal(h.records.get(7).tabViews.has(701), false);
+});
+
+// Squawk 0036 (#104 carve-out): a popup opened from a burner tab inherits the
+// opener's session (DD1d — no partition key in overrideBrowserWindowOptions),
+// so it never passes through tab-create's own WebRTC-policy call. The smallest
+// shared hook (isBurnerPartition, src/shared/burner.js) must be applied here
+// off the SAME captured partition the popup's census/history attribution uses.
+test('did-create-window applies the burner WebRTC IP-handling policy when the opener partition is a burner, and only then', () => {
+  const burnerHarness = popupHarness(7);
+  burnerHarness.record.tabViews.set(7, { partition: 'burner:99' });
+  const burnerWin = new FakePopupWindow(701);
+  burnerHarness.wc.emit('did-create-window', burnerWin);
+  assert.equal(burnerWin.webContents.webrtcPolicy, 'disable_non_proxied_udp',
+    'a burner-opened popup gets the hardening policy');
+
+  const normalHarness = popupHarness(8);
+  const normalWin = new FakePopupWindow(801);
+  normalHarness.wc.emit('did-create-window', normalWin);
+  assert.equal(normalWin.webContents.webrtcPolicy, undefined,
+    'a normal-jar popup (default persist:jar-a partition) never receives the burner-only policy call');
 });
 
 test('popup nav guards carry the GUEST shape — a file: navigation is refused (never ALLOWED_NONGUEST_SCHEMES)', () => {

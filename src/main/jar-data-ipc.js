@@ -321,9 +321,10 @@ function registerJarDataIpc({
   // `CookiesGetFilter.domain`, which SUBDOMAIN-matches (Electron's own
   // `cookies.get` doc) and could hand back a parent-domain cookie's value
   // for a child-domain request. One-line limitation note (jar-data-helpers.js
-  // habit): this identity tuple's uniqueness is contingent on Electron 42's
-  // `Cookie` shape carrying no CHIPS/partitioned-cookie field — re-check this
-  // assumption on any Electron version bump.
+  // habit): this identity tuple's uniqueness is contingent on the `Cookie`
+  // shape carrying no CHIPS/partitioned-cookie field — verified on Electron
+  // 43.2.0, 2026-08-27 (squawk 0019); re-check this assumption on any
+  // Electron version bump.
   async function handleCookiesValue(_e, p) {
     if (p === null || typeof p !== 'object') return { ok: false, error: 'jars: cookies-value — malformed-payload' };
     const entry = jars.list().find((j) => j.id === p.id);

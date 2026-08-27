@@ -35,9 +35,13 @@ class FakeElement {
     this._parts = new Map();
   }
   set className(value) { value.split(/\s+/).filter(Boolean).forEach((name) => this.classList.add(name)); }
-  set innerHTML(_value) {
+  set innerHTML(value) {
+    // Squawk 0020: keep the raw markup so tests can assert on the jar-color
+    // dot's style attribute (isSafeColor guard), same as every real innerHTML sink.
+    this._rawHTML = value;
     for (const selector of ['.tab-title', '.tab-close', '.tab-fav']) this._parts.set(selector, new FakeElement(selector));
   }
+  get innerHTML() { return this._rawHTML || ''; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   addEventListener(name, fn) { this.listeners.set(name, fn); }
@@ -108,7 +112,8 @@ function createHarness() {
     window, document, requestAnimationFrame: (fn) => { fn(); return 1; }, ResizeObserver: FakeResizeObserver,
     ctx, els, tabs, jarsClient,
     blankPrivacy: () => ({ net: null, fp: {}, permissions: [], cookies: null }),
-    escapeHtml: String, openTabContextMenu: noOp, currentHomePage: () => homePageValue,
+    escapeHtml: String, isSafeColor: (color) => typeof color === 'string' && color.startsWith('#'),
+    openTabContextMenu: noOp, currentHomePage: () => homePageValue,
     currentSearchEngine: () => searchEngineValue, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule
     isInternalPageUrl: (url) => /^goldfinch:\/\/(settings|downloads|jars|vault)$/.test(url),
     isSafeTabUrl: (url) => /^https?:/.test(url) || url === 'about:blank',
@@ -139,6 +144,30 @@ async function loadController(harness) {
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('an unsafe jar color is gated by isSafeColor before it reaches the tab-strip innerHTML sink (squawk 0020)', async () => {
+  const h = createHarness();
+  h.jar.color = '"><script>alert(1)</script>'; // fails the harness isSafeColor stub (no leading '#')
+  const controller = await loadController(h);
+
+  const web = controller.createTab('https://example.test/');
+  await settle();
+
+  assert.doesNotMatch(web.btn.innerHTML, /<script>/);
+  assert.doesNotMatch(web.btn.innerHTML, /style="background:"><script>/);
+  assert.match(web.btn.innerHTML, /style="background:#9aa0ac"/);
+});
+
+test('a safe jar color rides through to the tab-strip dot unchanged', async () => {
+  const h = createHarness();
+  h.jar.color = '#abc123';
+  const controller = await loadController(h);
+
+  const web = controller.createTab('https://example.test/');
+  await settle();
+
+  assert.match(web.btn.innerHTML, /style="background:#abc123"/);
+});
 
 test('safe and trusted create paths preserve URL gates, jar routing, strip ARIA, and activation', async () => {
   const h = createHarness();
@@ -466,4 +495,47 @@ test('closeTab on a welcome record sends no tabClose and backfills via openNewTa
   // Never left the window with zero tabs — the backfill is itself a welcome tab.
   assert.equal(controller.orderedTabIds().length, 1);
   assert.ok(controller.activeTab().welcome);
+});
+
+// Squawk 0018 / issue #134 item 3: tab-create is synchronous main-side (view
+// constructed and attached before the invoke resolves), so a tab closed while
+// the invoke is still in flight leaves onViewCreated's `!tabs.has(tab.id)`
+// early return with a live, orphaned guest view nothing will ever close.
+test('onViewCreated closes the orphaned view via tabClose with skipCapture when the tab closed before wcId arrived', async () => {
+  const h = createHarness();
+  // Control tabCreate's resolution timing directly so the test can close the
+  // tab BEFORE the wcId arrives, reproducing the race deterministically
+  // instead of relying on timing. Queue resolvers in call order — closing the
+  // window's only tab backfills via openNewTab (a SECOND tabCreate call), so a
+  // single shared `resolveCreate` variable would get clobbered by it.
+  const pendingResolvers = [];
+  h.deps.window.goldfinch.tabCreate = (payload) => {
+    h.calls.push(['tabCreate', payload]);
+    return new Promise((resolve) => { pendingResolvers.push(resolve); });
+  };
+  const controller = await loadController(h);
+  const tab = controller.createTab('https://example.test/');
+  assert.equal(tab.wcId, null);
+  assert.equal(pendingResolvers.length, 1);
+
+  // Close the tab while tab-create is still in flight — the exact race: no
+  // tabClose IPC fires here since tab.wcId is still null (closeTab's own
+  // `if (tab.wcId != null)` guard, unaffected by this fix). It was the only
+  // tab, so closeTab backfills via openNewTab — a second, unrelated tabCreate.
+  controller.closeTab(tab.id);
+  assert.equal(h.calls.filter(([name]) => name === 'tabClose').length, 0);
+  assert.equal(pendingResolvers.length, 2);
+
+  // Main "returns" the ORIGINAL tab's wcId now, after the tab is already gone
+  // from `tabs` — the backfill tab's own create is left unresolved/untouched.
+  h.calls.length = 0;
+  pendingResolvers[0](999);
+  await settle();
+
+  const closeCalls = h.calls.filter(([name]) => name === 'tabClose');
+  assert.equal(closeCalls.length, 1, 'the orphaned view must be closed exactly once');
+  assert.deepEqual(closeCalls[0], ['tabClose', 999, -1, { skipCapture: true }]);
+  // No tab record was resurrected for the orphan.
+  assert.equal(controller.findTabByWcId(999), null);
+  assert.equal([...h.tabs.values()].some((t) => t.wcId === 999), false);
 });

@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
-const { createMcpServer, mintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail } = require('../../src/main/automation/mcp-server');
+const { createMcpServer, mintJarKey, revokeJarKey, revokeAdminKey, deriveAuditDetail, redactUrlForAudit } = require('../../src/main/automation/mcp-server');
 const { hashKey, validateKey } = require('../../src/main/automation/automation-auth');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -1234,6 +1234,59 @@ test('deriveAuditDetail — openTab returns url=<url>', () => {
 
 test('deriveAuditDetail — openTab with jarId appends jar=<jarId>', () => {
   assert.equal(deriveAuditDetail('openTab', { url: 'https://x.example', jarId: 'work' }), 'url=https://x.example jar=work');
+});
+
+// ---------------------------------------------------------------------------
+// squawk 0023: a navigate/openTab URL is redacted before it lands in the audit
+// entry — query string + fragment (where a magic-link/`?token=` secret would
+// live) are stripped, keeping scheme + host + path only.
+// ---------------------------------------------------------------------------
+
+test('deriveAuditDetail — navigate strips query string and fragment', () => {
+  assert.equal(
+    deriveAuditDetail('navigate', { wcId: 1, url: 'https://example.com/reset?token=abc#frag' }),
+    'url=https://example.com/reset'
+  );
+});
+
+test('deriveAuditDetail — openTab strips query string and fragment', () => {
+  assert.equal(
+    deriveAuditDetail('openTab', { url: 'https://example.com/reset?token=abc#frag', jarId: 'work' }),
+    'url=https://example.com/reset jar=work'
+  );
+});
+
+test('redactUrlForAudit — "?token=abc#frag" is cut down to path only', () => {
+  assert.equal(redactUrlForAudit('https://example.com/reset?token=abc#frag'), 'https://example.com/reset');
+});
+
+test('redactUrlForAudit — a query-string-only URL (no fragment) is cut down to path only', () => {
+  assert.equal(redactUrlForAudit('https://example.com/reset?token=abc'), 'https://example.com/reset');
+});
+
+test('redactUrlForAudit — a fragment-only URL (no query) is cut down to path only', () => {
+  assert.equal(redactUrlForAudit('https://example.com/reset#frag'), 'https://example.com/reset');
+});
+
+test('redactUrlForAudit — a URL with neither query nor fragment is returned byte-for-byte unchanged', () => {
+  assert.equal(redactUrlForAudit('https://example.com/path'), 'https://example.com/path');
+  assert.equal(redactUrlForAudit('https://example.com'), 'https://example.com');
+});
+
+test('redactUrlForAudit — a non-URL string (no "://") is returned untouched', () => {
+  assert.equal(redactUrlForAudit('not-a-url-at-all'), 'not-a-url-at-all');
+  assert.equal(redactUrlForAudit('about:blank'), 'about:blank');
+});
+
+test('redactUrlForAudit — an unparsable URL-ish value ("://" present, new URL() throws) is redacted', () => {
+  assert.equal(redactUrlForAudit('http://[bad-ipv6'), '(redacted)');
+  assert.equal(redactUrlForAudit('https://'), '(redacted)');
+});
+
+test('redactUrlForAudit — non-string input is coerced then redacted/untouched consistently', () => {
+  assert.equal(redactUrlForAudit(null), 'null');
+  assert.equal(redactUrlForAudit(undefined), 'undefined');
+  assert.equal(redactUrlForAudit(42), '42');
 });
 
 test('deriveAuditDetail — click returns (x,y) with defaults omitted', () => {

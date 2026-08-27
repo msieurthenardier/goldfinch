@@ -32,7 +32,7 @@ export function createTabController(deps) {
   const {
     window, document, requestAnimationFrame, ResizeObserver,
     ctx, els, tabs, jarsClient,
-    blankPrivacy, escapeHtml, openTabContextMenu, currentHomePage,
+    blankPrivacy, escapeHtml, isSafeColor, openTabContextMenu, currentHomePage,
     currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences
     isInternalPageUrl, isSafeTabUrl, resolveNewTabContainer, classifyDragPoint,
     announceTabStatus, updateNavButtons, refreshZoomControl, refreshStar, fetchCookies,
@@ -109,10 +109,15 @@ export function createTabController(deps) {
     btn.setAttribute('aria-label', 'New tab');
     // Colored dot for every jar; the internal (Settings) pseudo-jar is chrome, not a
     // user container — no dot.
+    // isSafeColor-guarded like every other jar-color sink (peer idiom: pages/settings.js,
+    // pages/jars-section-controller.js, pages/vault.js, menu-overlay.js) — jar.color rides
+    // straight into an innerHTML style attribute, so an unsafe value falls back to neutral
+    // rather than breaking out of the attribute.
+    const dotColor = isSafeColor(jar.color) ? jar.color : '#9aa0ac';
     const dot =
       jar.id === 'internal'
         ? ''
-        : `<span class="tab-jar" style="background:${jar.color}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
+        : `<span class="tab-jar" style="background:${dotColor}" title="${escapeHtml(jar.name)}${jar.burner ? ' (burner)' : ''}"></span>`;
     // .tab-row wraps the visible content (flex row + padding): a CSS container query cannot
     // restyle the element that establishes the container itself, so the padding-compress
     // disclosure stage (styles.css) needs a descendant of `.tab` (the query container) to
@@ -341,7 +346,18 @@ export function createTabController(deps) {
   // welcome record any longer, but the panel may still be showing if THIS
   // tab is the active one).
   function onViewCreated(tab, wcId) {
-    if (!tabs.has(tab.id)) return; // tab was closed before wcId arrived
+    if (!tabs.has(tab.id)) {
+      // Squawk 0018 / issue #134 item 3: the tab was closed while tab-create
+      // was in flight. Main already constructed and attached a guest view for
+      // this wcId (tab-create is synchronous main-side) — nothing else will
+      // ever close it, so close it now through the ordinary close IPC.
+      // stripIndex is moot (this wcId never had a strip entry) but -1 mirrors
+      // the append-sentinel shape close sends normally; skipCapture stops
+      // main from pushing a phantom closed-tab-stack entry for a tab the user
+      // never actually saw.
+      window.goldfinch.tabClose(wcId, -1, { skipCapture: true });
+      return;
+    }
     tab.wcId = wcId;
     // If this tab is still active, refresh state now that wcId is available.
     if (tab.id === ctx.activeTabId) {

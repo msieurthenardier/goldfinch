@@ -4,6 +4,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeSettingsIpcHarness } = require('./helpers/settings-ipc-harness');
 
+// Let the microtask queue drain around single-step MockTimers ticks (the real
+// setImmediate survives MockTimers' setTimeout interception) — CLAUDE.md's
+// MockTimers recipe, exemplar test/unit/capture-timeout.test.js.
+const drain = () => new Promise((r) => setImmediate(r));
+
 test('settings registrar preserves bare chrome reads and guarded internal mutations', () => {
   const h = makeSettingsIpcHarness();
   assert.equal(h.defaultSessionReads(), 0, 'registration must not touch Electron session before ready');
@@ -131,4 +136,87 @@ test('toggle-bookmarks-bar flips the stored value and broadcasts itself (Ctrl+Sh
   h.send('toggle-bookmarks-bar');
   assert.equal(h.values.bookmarksBarEnabled, false);
   assert.equal(h.events.at(-1)[1], 'settings-changed');
+});
+
+// clipboard:write — squawk 0021: a vault SECRET copy (opts.secret:true) auto-clears
+// the OS clipboard ~20s later, but ONLY if it still holds exactly what was copied.
+// The non-secret settings-page fallback (DD4/copyText) omits opts entirely and must
+// keep behaving exactly as before (no timer, no clear, ever).
+
+test('clipboard:write (secret): clears the clipboard 20s later if it still holds the copied value', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = makeSettingsIpcHarness();
+
+  const result = await h.invokeInternal('clipboard:write', 'hunter2', { secret: true });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(h.clipboard.readText(), 'hunter2');
+
+  await drain();
+  t.mock.timers.tick(20000);
+  await drain();
+
+  assert.equal(h.clipboard.readText(), '', 'the secret must be cleared 20s after the copy');
+});
+
+test('clipboard:write (secret): leaves a changed clipboard alone (never clobbers a later copy)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = makeSettingsIpcHarness();
+
+  await h.invokeInternal('clipboard:write', 'hunter2', { secret: true });
+  // The operator copied something else (in this app or another) before the window elapsed.
+  h.clipboard.writeText('something-else');
+
+  await drain();
+  t.mock.timers.tick(20000);
+  await drain();
+
+  assert.equal(h.clipboard.readText(), 'something-else');
+});
+
+test('clipboard:write (secret): a second copy re-arms the timer and resets the 20s window', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = makeSettingsIpcHarness();
+
+  await h.invokeInternal('clipboard:write', 'first-secret', { secret: true });
+
+  t.mock.timers.tick(15000); // 15s into the FIRST copy's window
+  await h.invokeInternal('clipboard:write', 'second-secret', { secret: true }); // re-copy resets the clock
+  assert.equal(h.clipboard.readText(), 'second-secret');
+
+  t.mock.timers.tick(10000); // 25s since copy 1, but only 10s since copy 2 — must NOT clear yet
+  await drain();
+  assert.equal(h.clipboard.readText(), 'second-secret', 're-arming must reset the window, not just extend it');
+
+  t.mock.timers.tick(10000); // 20s since copy 2 — now it clears
+  await drain();
+  assert.equal(h.clipboard.readText(), '');
+});
+
+test('clipboard:write (no opts): a non-secret copy never auto-clears (settings-page DD4 fallback unaffected)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = makeSettingsIpcHarness();
+
+  await h.invokeInternal('clipboard:write', 'mcp://example.test/config');
+
+  await drain();
+  t.mock.timers.tick(60000);
+  await drain();
+
+  assert.equal(h.clipboard.readText(), 'mcp://example.test/config');
+});
+
+test('clipboard:write: a later non-secret copy cancels a still-pending secret-clear timer', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = makeSettingsIpcHarness();
+
+  await h.invokeInternal('clipboard:write', 'hunter2', { secret: true });
+  // A plain (non-secret) copy before the window elapses — the pending clear must not
+  // survive to wipe this unrelated later copy.
+  await h.invokeInternal('clipboard:write', 'https://example.test/');
+
+  await drain();
+  t.mock.timers.tick(20000);
+  await drain();
+
+  assert.equal(h.clipboard.readText(), 'https://example.test/');
 });

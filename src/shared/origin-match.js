@@ -25,7 +25,7 @@
 // makes registrableDomainSafe return null → this degrades to exact) and by keeping the
 // .dat current. Widening is an explicit per-credential opt-in; exact origin is the default.
 
-const { registrableDomainSafe } = require('../main/vault/psl.js');
+const { registrableDomainSafe } = require('../main/psl.js');
 
 /**
  * Parse an opaque `scheme://host:port` origin into { protocol, host }, or null when it

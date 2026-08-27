@@ -10,10 +10,11 @@
 // true — an UNLISTED public suffix (e.g. a missing `co.id`) silently over-collapses
 // (`alice.co.id` + `bad.co.id` → `co.id`), a password leak that "fall back to exact
 // on uncertainty" cannot catch (`co.id` is shape-indistinguishable from a real
-// registrable domain). The full PSL is the credential-safe answer. This module must
-// NEVER be replaced by trackers.js's `registrableDomain`/`MULTI_SUFFIX` — that matcher
-// is tracker-classification and deliberately treats unlisted / bare multi-tenant
-// suffixes as registrable, which would LEAK credentials across tenants.
+// registrable domain). The full PSL is the credential-safe answer. This module's
+// fail-closed (return null on any uncertainty) contract must never be weakened for
+// the credential-fill call site — trackers.js (squawk 0035) reuses this SAME module
+// for tracker classification, but layers its own fallback on top for hosts this
+// module returns null for; it does not get its own looser algorithm back.
 //
 // DATA SOURCE (vendored, redistributable):
 //   URL:      https://publicsuffix.org/list/public_suffix_list.dat
@@ -21,7 +22,7 @@
 //   License:  Mozilla Public License v2.0 (MPL-2.0) — bundling the .dat as a DATA
 //             asset (not an npm package) preserves goldfinch's zero-runtime-dep ethos.
 //   REFRESH:  the list drifts as registries change. Re-fetch periodically from the URL
-//             above (and ONLY that URL) and overwrite src/main/vault/public_suffix_list.dat;
+//             above (and ONLY that URL) and overwrite src/main/public_suffix_list.dat;
 //             the parser rebuilds its index (and re-reads the snapshot date) at module load.
 //
 // STALENESS IS NOT PURELY FAIL-CLOSED (corrected, PR#112 finding 10). An UNLISTED suffix

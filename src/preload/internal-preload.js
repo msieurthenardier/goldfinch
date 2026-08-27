@@ -151,11 +151,16 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
 
     /**
      * Write text to the system clipboard (fallback when navigator.clipboard is
-     * blocked at runtime under contextIsolation + sandbox — DD4).
+     * blocked at runtime under contextIsolation + sandbox — DD4). Pass
+     * `{ secret: true }` for a secret value (e.g. a vault password) so main
+     * auto-clears the clipboard ~20s later if it still holds this exact value
+     * (squawk 0021) — omit it for a non-secret copy, which behaves exactly as
+     * before.
      * @param {string} text
+     * @param {{ secret?: boolean }} [opts]
      * @returns {Promise<{ ok: boolean }>}
      */
-    clipboardWrite: (text) => ipcRenderer.invoke('clipboard:write', text),
+    clipboardWrite: (text, opts) => ipcRenderer.invoke('clipboard:write', text, opts),
 
     // Automation key management (Flight 5, Leg 3 / SC9). Mint returns the
     // show-once plaintext; list/revoke deal in hashes only (never plaintext).

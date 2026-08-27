@@ -39,7 +39,7 @@ Module layout:
 | Human fill orchestration (picker model, gesture fill, capture) | `src/main/vault/vault-human.js` |
 | Item schema SSOT (per-type secret/non-secret maps) | `src/shared/vault-item-schema.js` |
 | Origin matcher (exact vs. registrable-domain opt-in) | `src/shared/origin-match.js` |
-| Vendored Public Suffix List resolver | `src/main/vault/psl.js` (+ `public_suffix_list.dat`) |
+| Vendored Public Suffix List resolver (shared with `trackers.js`, squawk 0035) | `src/main/psl.js` (+ `public_suffix_list.dat`) |
 | Chrome-owned entry/display sheets | `src/renderer/menu-overlay.js` + `src/shared/vault-*-template.js` |
 | MCP vault tools + audit | `src/main/automation/mcp-tools.js`, `mcp-server.js` |
 
@@ -237,7 +237,7 @@ Fill matching is **exact-origin by default**. A per-item opt-in
 a **fail-closed** matcher (`src/shared/origin-match.js`):
 
 - Widening requires the same scheme *and* a non-null, equal registrable domain on both hosts,
-  computed by a **vendored Public Suffix List** resolver (`src/main/vault/psl.js`, parsing
+  computed by a **vendored Public Suffix List** resolver (`src/main/psl.js`, parsing
   `public_suffix_list.dat`). Any uncertainty — a non-opt-in item, an unparseable/opaque
   origin, a scheme mismatch, or a PSL miss on *either* host — degrades to the exact
   byte-for-byte compare.

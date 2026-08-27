@@ -43,6 +43,7 @@ class FakeContents extends EventEmitter {
   stop() { this.log.push(['stop', this.id]); }
   findInPage(text, options) { this.log.push(['find', this.id, text, options]); }
   stopFindInPage(action) { this.log.push(['stop-find', this.id, action]); }
+  setWebRTCIPHandlingPolicy(policy) { this.log.push(['webrtc-policy', this.id, policy]); }
 }
 
 class FakeView {
@@ -268,6 +269,36 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
   });
   assert.equal('plugins' in h.views[1].opts.webPreferences, false,
     'internal branch webPreferences must not carry a plugins key (DD5 scopes the relaxation to web guests)');
+});
+
+// Squawk 0036 (#104 carve-out): burner tabs must not leak LAN/public IPs via
+// WebRTC ICE candidate gathering — a burner-hardening invariant, no user
+// toggle. Gated on the pinned `burner:<n>` partition shape (isBurnerPartition,
+// src/shared/burner.js), never on trust level alone (internal tabs never reach
+// this branch; normal jars must NOT get the call — out of scope, #147).
+test('tab-create sets the disable_non_proxied_udp WebRTC policy for a burner partition, and only there', async () => {
+  const h = setup();
+  const source = h.makeRecord(1);
+
+  await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/', partition: 'burner:42', trusted: false
+  });
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'webrtc-policy'),
+    [['webrtc-policy', h.views[0].webContents.id, 'disable_non_proxied_udp']],
+    'burner web guest gets the policy exactly once'
+  );
+
+  await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'https://example.test/', partition: 'persist:jar-a', trusted: false
+  });
+  await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
+    url: 'goldfinch://settings', partition: 'ignored', trusted: true
+  });
+  assert.equal(
+    h.log.filter((x) => x[0] === 'webrtc-policy').length, 1,
+    'a normal-jar web guest and an internal guest never receive the burner-only policy call'
+  );
 });
 
 test('move-to-window derives source from sender, treats windowId as a destination request, and mutates synchronously', () => {

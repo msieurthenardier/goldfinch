@@ -97,6 +97,22 @@ test('malformed payloads are refused with null, never a throw', () => {
   }
 });
 
+test('an unsafe container color is refused (squawk 0020 — color rides into a chrome innerHTML style sink)', () => {
+  const unsafe = [
+    '"><script>alert(1)</script>',
+    'red;background:url(javascript:alert(1))',
+    'javascript:alert(1)',
+    '',
+  ];
+  for (const color of unsafe) {
+    assert.equal(
+      validateMoveTabPayload({ ...GOOD, container: { ...CONTAINER, color } }),
+      null,
+      `must refuse color ${JSON.stringify(color)}`
+    );
+  }
+});
+
 // --- buildAdoptPayload ----------------------------------------------------------
 
 const liveWc = (url, title) => ({ isDestroyed: () => false, getURL: () => url, getTitle: () => title });

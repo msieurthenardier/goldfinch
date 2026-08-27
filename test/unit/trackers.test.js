@@ -61,6 +61,83 @@ test('F5 registrableDomain: other multi-tenant suffixes isolate tenants', () => 
   assert.equal(registrableDomain('app.herokuapp.com'), 'app.herokuapp.com');
 });
 
+// Squawk 0035 (GitHub #81, F5): registrableDomain is now PSL-backed
+// (src/main/psl.js) instead of the hand-maintained MULTI_SUFFIX set — these
+// pin the multi-tenant fix and the operator-approved fail-closed fallback.
+test('squawk 0035: two S3-bucket hostnames under the shared amazonaws.com suffix are different sites', () => {
+  const bucketA = registrableDomain('my-app-assets.s3.amazonaws.com');
+  const bucketB = registrableDomain('unrelated-tenant.s3.amazonaws.com');
+  assert.equal(bucketA, 'my-app-assets.s3.amazonaws.com');
+  assert.equal(bucketB, 'unrelated-tenant.s3.amazonaws.com');
+  assert.notEqual(bucketA, bucketB, 's3.amazonaws.com is a listed PSL suffix — buckets must not collapse to it');
+});
+
+test('squawk 0035 classify: two S3-bucket hostnames are third-party to each other', () => {
+  const result = classify('https://unrelated-tenant.s3.amazonaws.com/x.js', 'my-app-assets.s3.amazonaws.com');
+  assert.equal(result.thirdParty, true);
+  assert.equal(result.domain, 'unrelated-tenant.s3.amazonaws.com');
+});
+
+test('squawk 0035: two github.io tenants remain distinct sites (PSL-backed, not the old curated set)', () => {
+  const tenantA = registrableDomain('research-tools.github.io');
+  const tenantB = registrableDomain('unrelated-org.github.io');
+  assert.notEqual(tenantA, tenantB);
+  assert.equal(tenantA, 'research-tools.github.io');
+  assert.equal(tenantB, 'unrelated-org.github.io');
+});
+
+test('squawk 0035: an unlisted TLD fails closed to the whole hostname (registrableDomainSafe returns null; never merges two distinct hosts)', () => {
+  // "madeupzzznotatld" is not in the vendored PSL, so registrableDomainSafe()
+  // returns null (same fail-closed case pinned in test/unit/psl.test.js).
+  // trackers.js's fallback treats the full host as its own identity rather
+  // than guessing at a suffix split — an accepted tradeoff (operator ruling
+  // 2026-08-27): it may under-strip a legitimate subdomain, but it can never
+  // wrongly collapse two unrelated hosts onto the same "site".
+  const hostA = registrableDomain('tenant-a.madeupzzznotatld');
+  const hostB = registrableDomain('tenant-b.madeupzzznotatld');
+  assert.equal(hostA, 'tenant-a.madeupzzznotatld');
+  assert.equal(hostB, 'tenant-b.madeupzzznotatld');
+  assert.notEqual(hostA, hostB);
+});
+
+// Squawk 0035 review fix (BLOCKING): four old MULTI_SUFFIX platform entries
+// (amazonaws.com, netlify.com, surge.sh, glitch.me) sit under a real ICANN
+// TLD with no matching PSL PRIVATE-section rule, so registrableDomainSafe()
+// resolves them via the bare TLD alone — a non-null but WRONG split that
+// drops the tenant label. SUPPLEMENT_SUFFIX restores the old curated split
+// for exactly these four.
+test('squawk 0035 review fix: two tenants under each supplemented suffix are different sites', () => {
+  for (const suffix of ['amazonaws.com', 'netlify.com', 'surge.sh', 'glitch.me']) {
+    const a = registrableDomain(`tenant-a.${suffix}`);
+    const b = registrableDomain(`tenant-b.${suffix}`);
+    assert.equal(a, `tenant-a.${suffix}`, `${suffix}: tenant-a should keep its label`);
+    assert.equal(b, `tenant-b.${suffix}`, `${suffix}: tenant-b should keep its label`);
+    assert.notEqual(a, b, `${suffix}: distinct tenants must not collapse`);
+  }
+});
+
+test('squawk 0035 review fix classify: tenants under a supplemented suffix are third-party to each other', () => {
+  const result = classify('https://tenant-b.netlify.com/asset.js', 'tenant-a.netlify.com');
+  assert.equal(result.thirdParty, true);
+  assert.equal(result.domain, 'tenant-b.netlify.com');
+});
+
+test('squawk 0035 review fix: a suffix that IS in the PSL still resolves via the PSL, not the supplement', () => {
+  // s3.amazonaws.com and github.io are PSL PRIVATE-section entries in their
+  // own right — the supplement must not shadow the PSL's (correct, deeper)
+  // answer for these.
+  assert.equal(registrableDomain('my-app-assets.s3.amazonaws.com'), 'my-app-assets.s3.amazonaws.com');
+  assert.equal(registrableDomain('unrelated-tenant.s3.amazonaws.com'), 'unrelated-tenant.s3.amazonaws.com');
+  assert.equal(registrableDomain('research-tools.github.io'), 'research-tools.github.io');
+});
+
+test('squawk 0035 review fix: bare supplement suffix host (no tenant label) is unaffected', () => {
+  assert.equal(registrableDomain('amazonaws.com'), 'amazonaws.com');
+  assert.equal(registrableDomain('netlify.com'), 'netlify.com');
+  assert.equal(registrableDomain('surge.sh'), 'surge.sh');
+  assert.equal(registrableDomain('glitch.me'), 'glitch.me');
+});
+
 // F6: IP literals must not be label-sliced
 test('F6 registrableDomain: IPv4 literal returned unchanged', () => {
   assert.equal(registrableDomain('192.168.1.10'), '192.168.1.10');
