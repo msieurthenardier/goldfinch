@@ -185,8 +185,8 @@ accept a DevTools-open blind spot vs. decide the value isn't worth the CDP depen
 
 ## Renderer crash / sleep-resume resilience (chrome + guest views) + crash observability
 
-**Status:** defect-driven flight seed — likely a maintenance-mission flight, not its own mission.
-**Captured:** 2026-07-11, from a live incident on the operator's installed (packaged) Windows build.
+Tracked in #133 (canonical — newer acceptance criteria and file:line cites). The field-incident
+evidence below is not reproduced in the issue body; kept here for reference.
 
 ### The incident (the evidence)
 
@@ -209,40 +209,6 @@ dark gray, buttons dead — but CSS hover still working**. Live diagnosis establ
   to the Windows Application log, and Goldfinch never starts `crashReporter`, so there is **no
   ground truth anywhere** about which process died or why. Silence in the logs ≠ nothing died.
 
-### The gap
-
-Crash recovery exists **only for the two overlay views** — the find overlay (`main.js` ~291) and
-the menu-overlay sheet (`menu-overlay-manager.js` ~154) both have the **AC7 teardown-and-rebuild
-`render-process-gone` pattern** (M05 F7/F8). The **chrome view and guest tabs have none**; there
-are no `unresponsive` handlers and no `powerMonitor` hooks. A crashed guest silently renders gray
-forever; a crashed chrome renderer bricks the whole UI until the user kills the process tree.
-
-### Fix shape (three legs, roughly)
-
-1. **Chrome view `render-process-gone` → reload + reconcile.** Reload the chrome document and
-   reconcile main's tab state with the fresh renderer (main still holds the live guest views; the
-   fresh chrome knows nothing about them — decide re-announce vs. teardown). **Ordering hazards —
-   this is why it wants a spec'd leg, not a drive-by patch:** the pending-init queues, the
-   find-overlay session state (`findOverlayTabWcId`), and the sheet's chrome-wcId assumptions all
-   assume a stable chrome renderer.
-2. **Guest tab `render-process-gone` → visible recovery.** Auto-`reload()` the tab, or notify the
-   chrome to render a "tab crashed — reload" affordance, instead of the silent gray surface.
-   (Extends the AC7 pattern from overlays to tabs.)
-3. **Observability.** `crashReporter.start({ uploadToServer: false })` for local dumps under
-   `userData`, plus log `render-process-gone` `details.reason` (`oom` / `killed` / `crashed`) per
-   process — so the next incident self-identifies instead of needing live forensics. Optionally
-   `powerMonitor.on('resume')` as a cheap post-resume health-check trigger and `unresponsive`
-   handlers for symmetry.
-
-### Scope notes
-
-- Recovery must respect the **internal-page trust model**: reloading a crashed internal
-  (`goldfinch://`) tab goes through the trusted-nav rules (`isInternalPageUrl`), never a relaxed gate.
-- Verification is awkward by nature (killing renderers on purpose): `wc.forcefullyCrashRenderer()`
-  is the test lever for both the chrome and guest paths; drive it over the automation surface.
-- Cheap first leg candidate: observability (leg 3) alone is small, zero-risk, and converts the
-  next field incident into data — worth doing even if 1–2 wait.
-
 ---
 
 ## Internal pages: flat-served import specifiers are untypeable (TS2307)
@@ -261,47 +227,9 @@ Do NOT restructure the protocol map for this — it is trust-sensitive (traversa
 
 ---
 
-## Electron major bump: 42 → 43 (post-history maintenance sweep item)
-
-**Status:** small deferred upgrade — routed to the post-mission-08 full-category maintenance
-sweep (operator ruling at mission-08 sign-off, 2026-07-12). **Not a mission.**
-**Captured:** 2026-07-12, during mission-08 (per-jar browsing history) planning.
-
-At mission-08 sign-off Goldfinch took the in-line **patch bump 42.4.0 → 42.6.1** (Node 24.18,
-Chrome 148.0.7778.280; full unit suite + typecheck green). The **major bump to 43.x**
-(Chrome 150, same Node 24.18 line) was deliberately deferred: Electron 42 is still in support
-(latest three majors), majors can shift renderer/main behavior right after the M05
-WebContentsView migration settled, and the next full-category maintenance sweep is already
-queued for right after the history mission — the natural home for it.
-
-Notes for that sweep:
-- 43.1.0 bundles the same Node line (24.18), so `node:sqlite` posture (mission-08 substrate)
-  is unchanged — still experimental; re-check the `ExperimentalWarning` and API surface on
-  the new runtime as part of the bump.
-- Re-run the behavior-test net after the bump — chrome/guest event timing is the risk class
-  a major moves.
-
----
-
 ## Internal-page keyboard focus (guest-view focus on tab activation)
 
-**Status:** follow-up seed — surfaced at Mission 08 Flight 6 HAT (2026-07-13).
-
-Activating an internal `goldfinch://` tab (settings/downloads/jars) raises the
-guest `WebContentsView` to the top so mouse input works (`tab-set-active`,
-`src/main/main.js:2215`, `addChildView`) but never calls
-`webContents.focus()` on it. OS keyboard focus stays on the chrome view, so
-pressing Tab inside an internal page jumps to the address bar and cycles the
-chrome toolbar rather than traversing the page's own controls — internal
-pages are effectively keyboard-inoperable.
-
-Pre-existing and never test-covered (`tab-keyboard-operability` covers the
-tab STRIP, not internal page content). The fix (focus the guest on
-activation) is cross-cutting: `main.js:2241` already documents that
-refocusing a guest can steal focus from tab-strip keyboard nav, and it must
-not fight the find-overlay or menu-overlay-sheet focus handoffs. Warrants its
-own flight: design the focus-handoff rules, then a behavior test covering
-internal-page Tab traversal + the find/sheet/tab-strip interactions.
+Tracked in #174 (which absorbs this seed and M08 H8); see Mission 17 Flight 1.
 
 ---
 

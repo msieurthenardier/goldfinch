@@ -348,7 +348,7 @@ every `.gfvault` file are untouched:
 | `rotateRecovery` | master-password re-unwrap | mints a fresh recovery key, re-wraps `mrk.recovery`, returns the new one-time display |
 | `changeMasterPassword` | **old**-password re-unwrap | re-wraps `mrk.master` under the new password |
 | `recoverMasterPassword` | the **recovery key IS the step-up** | works **from locked**: the recovery key unwraps and installs the MRK (leaving the user unlocked), then re-wraps `mrk.master` under a new password |
-| `rotateAdminKey` | master-password re-unwrap | mints a **fresh** X25519 keypair unconditionally (also the from-scratch provision), re-seals `mrk.admin`, overwrites `adminPublicKeyB64`, returns the new one-time private key; the prior admin key is invalidated |
+| `rotateAdminKey` | master-password re-unwrap | mints a **fresh** X25519 keypair unconditionally (also the from-scratch provision), re-seals `mrk.admin`, overwrites `adminPublicKeyB64`, returns the new one-time private key; the prior admin key can no longer unwrap the MRK |
 
 `recoverMasterPassword` is a single dedicated op — not an `authenticated` flag on
 `changeMasterPassword` (which would bypass the old-password step-up). `rotateAdminKey` mints
@@ -430,6 +430,11 @@ no plaintext key and adding no fourth recovery route.
   the exposure window, not a defense against in-process compromise.
 - **A keylogger at master entry.** Capturing the master password as the human types it into
   the sheet is outside the vault's control.
+- **A party that already extracted the MRK.** Rotation re-wraps envelopes; it never re-keys
+  the MRK itself. If the MRK was already extracted — via a returned recovery key or a
+  rotated-out admin key used against a copied `manager.json`, or a memory capture while
+  unlocked — no subsequent rotation revokes that access. Compromise-mode rotation (minting a
+  fresh MRK) is not implemented.
 
 **The admin key — break-glass / multi-vault.** The X25519 admin key is the intended path for
 opening every vault at once (multi-vault automation, operator break-glass). Handing the admin

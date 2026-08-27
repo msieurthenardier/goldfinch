@@ -46,6 +46,10 @@ export GOLDFINCH_MCP_ADMIN_KEY=<adminKey>   # admin/chrome work (a11y chrome swe
 export GOLDFINCH_MCP_KEY=<jarKey>           # jar-scoped guest work
 ```
 
+Every `GOLDFINCH_*` variable read by `src/`/`scripts/` has a placeholder entry in
+`.env.example` at the repo root — copy it to `.env` (gitignored) and fill in real values as a
+starting point.
+
 ## Attaching a consumer
 
 Attach model: the app is launched out-of-band; the script connects to the already-running
@@ -88,6 +92,24 @@ axe-core audit (`scripts/a11y-audit.mjs`) against the RUNNING app over the MCP s
   `2` apparatus/setup failure (couldn't attach, target not found, missing key, etc. — the
   audit did not run to completion) — distinct from `1` so a caller can tell "not run" from
   "red".
+
+## Debug flags
+
+### `GOLDFINCH_VAULT_TRACE`
+
+Opt-in trace of the vault capture → hold → unlock → finalize lifecycle
+(`src/main/register-browser-ipc.js`). That sequence spans three processes, so a failure
+anywhere in it otherwise presents to the operator as "no prompt appeared" with nothing to go
+on. OFF by default and therefore silent in every normal run.
+
+```bash
+GOLDFINCH_VAULT_TRACE=1 npm run dev:automation
+```
+
+Logs each step (tagged `[vault-capture]`) to the main process's console via `logger.info`.
+What it prints is bounded **by construction** to non-secrets — the opaque main-minted
+`captureId`, the tab's `wcId`, the disposition mode, and the finalize outcome — **never** a
+password, a username, or an origin.
 
 ## Test layers
 
