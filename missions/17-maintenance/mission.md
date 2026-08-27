@@ -50,6 +50,9 @@ and are not part of this mission.
 - [ ] `manager.json` KDF parameters are validated on read with a ruled
       legacy-compat policy, and a fresh-profile bundle adopt forces recovery
       and admin key rotation before the profile is usable (F2, F8)
+- [ ] Prettier is enforced: `prettier --check .` is clean on `main` and runs in
+      both CI definitions; the `renderer.js` line budget is re-based on the
+      formatted size and both budgets still guard growth (escalated from squawk 0039; Flight 5)
 - [ ] All existing gates stay green throughout (suite, typecheck, lint;
       `npm run a11y` where UI pages are touched)
 
@@ -92,7 +95,7 @@ and the next mission's crew. N/A beyond that.
 
 ## Known Issues
 
-- [ ] **Prettier enforcement needs a flight, not a squawk** — escalated from [squawk 0039](../../squawks/0039-prettier-drift-not-enforced.md) on 2026-08-27. `npm run format` reformats 318 files cleanly but pushes `renderer.js` from 1650 to 1827 lines (repealing the line budget by accident) and breaks 13 mutation-testing pins in 9 test files. Decision owed: tune `.prettierrc` toward house style (likely a larger `printWidth`; measure first) vs. accept defaults and re-base the budgets + re-pin the matchers. The CI `format:check` wiring rides along either way. Operator ruling to enforce stands; plan with `/flight` under this mission (optional flight, no dependency on Flights 1–4).
+- [ ] **Prettier enforcement needs a flight, not a squawk** — escalated from [squawk 0039](../../squawks/0039-prettier-drift-not-enforced.md) on 2026-08-27. `npm run format` reformats 318 files cleanly but pushes `renderer.js` from 1650 to 1829 lines (by the budget pin's metric) (repealing the line budget by accident) and breaks 13 mutation-testing pins in 9 test files. Decision owed: tune `.prettierrc` toward house style (likely a larger `printWidth`; measure first) vs. accept defaults and re-base the budgets + re-pin the matchers. The CI `format:check` wiring rides along either way. Operator ruling to enforce stands. **Planned 2026-08-27 as [Flight 5: Prettier Adoption](flights/05-prettier-adoption/flight.md)** — the spike showed option (a) is not achievable (Prettier has no setting that preserves one-line function bodies), so the operator chose (b): accept defaults, re-base the budgets.
 
 ## Flights
 
@@ -114,7 +117,15 @@ and the next mission's crew. N/A beyond that.
 - [ ] Flight 4: **Vault trust-boundary hardening** — `validateImportedKdf`
       from `_readManager` with a legacy-compat ruling (F2); forced
       `rotateRecovery` + `rotateAdminKey` after a fresh adopt (F8)
-- [ ] Flight 5 *(optional, only if 1–4 land early)*: **DOM harness for chrome
+- [ ] Flight 5: **Prettier adoption** — one-time reformat under the existing
+      `.prettierrc`, `renderer.js` budget re-based 1650 → 1829 (measured by the
+      pin's metric), the 12 broken source-text pins re-targeted without weakening, `format:check`
+      wired into both CI definitions (escalated from squawk 0039; no
+      dependency on Flights 1–4. Ordering is a rebase-cost question, not a
+      conflict risk: land it while no other branch is open, and any branch
+      opened before it merges re-runs `npm run format` after merging `main`
+      instead of resolving 318 files of hunks. Two PRs, one per leg — DD4)
+- [ ] Flight 6 *(optional, only if the others land early)*: **DOM harness for chrome
       controllers** — extend `tab-controller.test.js`'s factory-deps harness
       to `welcome-controller.js` (F13), extract `test/unit/helpers/fake-dom.js`
       (F18), pin `internal-preload.js` (F16)
