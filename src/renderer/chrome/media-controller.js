@@ -472,7 +472,7 @@ export function createMediaController(deps) {
       link.textContent = ' — Show folder';
       link.addEventListener('click', () => window.goldfinch.showItemInFolder(dir));
       el.appendChild(link);
-      setTimeout(() => el.remove(), 8000);
+      armDismiss(el, 8000);
     }
     bulk.active = false;
     bulk.toastEl = null;
@@ -584,12 +584,65 @@ export function createMediaController(deps) {
 
   const toastEls = new Map(); // url -> element
 
+  // Arms a toast's auto-removal after `ms`, pausing the countdown while the
+  // toast is hovered (mouseenter/mouseleave) or holds focus (focusin/focusout
+  // — bubbles from any focusable child) and resuming with the REMAINING time
+  // on leave/blur, not a fresh timer (WCAG 2.2.1, squawk 0032). Hover and focus
+  // are tracked independently so leaving one while the other still holds keeps
+  // the countdown paused. Listeners are torn down the moment the toast is
+  // actually removed so they don't outlive the element.
+  function armDismiss(el, ms) {
+    let remaining = ms;
+    let armedAt = Date.now();
+    let timer = setTimeout(dismiss, remaining);
+    let hovering = false;
+    let focused = false;
+
+    function pause() {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      remaining -= Date.now() - armedAt;
+      if (remaining < 0) remaining = 0;
+    }
+
+    function resume() {
+      if (timer || hovering || focused) return;
+      armedAt = Date.now();
+      timer = setTimeout(dismiss, remaining);
+    }
+
+    function dismiss() {
+      cleanup();
+      el.remove();
+    }
+
+    function cleanup() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      el.removeEventListener('mouseenter', onEnter);
+      el.removeEventListener('mouseleave', onLeave);
+      el.removeEventListener('focusin', onFocusIn);
+      el.removeEventListener('focusout', onFocusOut);
+    }
+
+    function onEnter() { hovering = true; pause(); }
+    function onLeave() { hovering = false; resume(); }
+    function onFocusIn() { focused = true; pause(); }
+    function onFocusOut() { focused = false; resume(); }
+
+    el.addEventListener('mouseenter', onEnter);
+    el.addEventListener('mouseleave', onLeave);
+    el.addEventListener('focusin', onFocusIn);
+    el.addEventListener('focusout', onFocusOut);
+  }
+
   function toast(title, body) {
     const el = document.createElement('div');
     el.className = 'toast';
     el.innerHTML = `<div class="toast-title">${escapeHtml(title)}</div><div>${escapeHtml(body || '')}</div>`;
     els.toasts.appendChild(el);
-    setTimeout(() => el.remove(), 5000);
+    armDismiss(el, 5000);
     return el;
   }
 

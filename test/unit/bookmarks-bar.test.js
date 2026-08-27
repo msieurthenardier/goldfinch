@@ -1,18 +1,49 @@
 'use strict';
 
-const { test } = require('node:test');
+const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 
-const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/bookmarks-bar.js')).href;
+// require(esm) — Node >=22 loads the ESM module synchronously (the
+// bookmarks-bar-css-pin.test.js precedent, for the exact same module). One
+// require for the whole file, never cache-busted: bookmarks-bar.js has no
+// module-scope mutable state (only constants), so there is nothing to reset
+// between tests.
+const {
+  monogramLetter,
+  tooltipFor,
+  partitionOverflow,
+  overflowSheetModel,
+  resolveOverflowRowId,
+  createBookmarksBar,
+} = require('../../src/renderer/chrome/bookmarks-bar.js');
+
+// Squawk 0024: the file's ~2s of extra wall time was NOT the repeated
+// `await import(moduleUrl)` the maintenance report blamed (Node's ESM cache
+// already served every one of those 35+ calls from cache — re-measured in
+// isolation at <5ms total). The real cause: `createBookmarksBar`'s dragend
+// handler unconditionally arms a REAL `setTimeout(…, DRAG_HOLD_MS)` (2000ms)
+// grace timer every time a drag ends, and only the tests below line ~950
+// happened to run under `t.mock.timers.enable(…)`. Every earlier
+// dragstart+dragend test (AC7/AC8/AC9/Leg 5a, ~20 of them) left a REAL
+// 2-second timer armed and uncleared — `bookmarks-bar.js` has no
+// teardown/dispose hook the test file can reach to clear it — and Node's
+// `--test` worker does not exit until the event loop drains, so the run sat
+// idle for the ~2s it took those timers to fire for real. Enabling mock
+// timers once, for the whole file, turns every one of those into a virtual
+// timer that never fires unless a test explicitly ticks it — behavior-neutral
+// for every existing assertion (none of the pre-existing tests observed or
+// relied on that grace timer firing), and harmless to compose with the
+// per-test `t.mock.timers.enable(…)` calls below (verified: enabling again on
+// an already-mocked tracker is a no-op, and a per-test teardown does not
+// disable this file-level mock).
+mock.timers.enable({ apis: ['setTimeout'] });
 
 // ---------------------------------------------------------------------------
 // Pure-function truth tables (no DOM).
 // ---------------------------------------------------------------------------
 
 test('monogramLetter — first char uppercased, falls back to "#" for empty', async () => {
-  const { monogramLetter } = await import(moduleUrl);
   assert.equal(monogramLetter('example'), 'E');
   assert.equal(monogramLetter('  lowercase'), 'L');
   assert.equal(monogramLetter(''), '#');
@@ -20,7 +51,6 @@ test('monogramLetter — first char uppercased, falls back to "#" for empty', as
 });
 
 test('tooltipFor — "{title}\\n{url}", title falls back to the url', async () => {
-  const { tooltipFor } = await import(moduleUrl);
   assert.equal(tooltipFor({ title: 'Example', url: 'https://example.com/' }), 'Example\nhttps://example.com/');
   assert.equal(tooltipFor({ url: 'https://example.com/' }), 'https://example.com/\nhttps://example.com/');
   assert.equal(tooltipFor({}), '\n');
@@ -32,38 +62,32 @@ test('tooltipFor — "{title}\\n{url}", title falls back to the url', async () =
 // gap-invariant at these numbers — they had slack, which is exactly why the
 // original defect survived them (see the regression case at the end).
 test('partitionOverflow — everything fits, nothing overflows', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // 120 of items + 2 gaps (4) = 124 <= 200.
   assert.deepEqual(partitionOverflow([40, 40, 40], 200, 24, 2), { visibleCount: 3, overflowing: false });
 });
 
 test('partitionOverflow — zero items never overflows (empty-state AC)', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   assert.deepEqual(partitionOverflow([], 200, 24, 2), { visibleCount: 0, overflowing: false });
 });
 
 test('partitionOverflow — trailing items collapse, chevron footprint reserved', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // One item costs 40 + the gap before the chevron (2) + the chevron (24) = 66
   // <= 100. Two cost 40+2+40 + 2 + 24 = 108 > 100, so only the first fits.
   assert.deepEqual(partitionOverflow([40, 40, 40], 100, 24, 2), { visibleCount: 1, overflowing: true });
 });
 
 test('partitionOverflow — window too narrow for even one item: all collapse (Edge Case)', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // 80 + 2 + 24 = 106 > 50 — nothing is admitted; the chevron alone remains.
   assert.deepEqual(partitionOverflow([80, 40], 50, 24, 2), { visibleCount: 0, overflowing: true });
 });
 
 test('partitionOverflow — gap defaults to the bar\'s own 2px when omitted', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // Pins the default: 3×33 = 99 fits a 100 run only with gaps ignored;
   // with the real gaps (99 + 4 = 103) it does not.
   assert.deepEqual(partitionOverflow([33, 33, 33], 100), { visibleCount: 2, overflowing: true });
 });
 
 test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the no-overflow branch prices gaps too', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // Items sum to EXACTLY the available run, so the old gap-free test
   // (`total <= availableWidth` → 100 <= 100) declared "all four fit" and the
   // trailing item was laid out past the `overflow: hidden` edge. With gaps
@@ -73,7 +97,6 @@ test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the no-overflow branch pr
 });
 
 test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the chevron\'s footprint stays inside the bar on a full row', async () => {
-  const { partitionOverflow } = await import(moduleUrl);
   // The shipped defect at its observed scale: a 1398px bar (content run 1386
   // after 2×6px padding) on a full row. The OLD math summed raw item widths
   // against a `availableWidth - chevron` budget and never paid for the 2px
@@ -101,7 +124,6 @@ test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the chevron\'s footprint 
 });
 
 test('overflowSheetModel — snapshot-local index ids, label falls back to url', async () => {
-  const { overflowSheetModel } = await import(moduleUrl);
   const model = overflowSheetModel([{ title: 'A', url: 'https://a.test/' }, { url: 'https://b.test/' }]);
   assert.deepEqual(model, [
     { id: 'bookmark:0', label: 'A' },
@@ -110,7 +132,6 @@ test('overflowSheetModel — snapshot-local index ids, label falls back to url',
 });
 
 test('resolveOverflowRowId — VALIDATED-NO-OP: malformed/out-of-range ids resolve null, never throw', async () => {
-  const { resolveOverflowRowId } = await import(moduleUrl);
   const snapshot = [{ url: 'https://a.test/' }, { url: 'https://b.test/' }];
   assert.deepEqual(resolveOverflowRowId('bookmark:0', snapshot), { kind: 'bookmark', index: 0, bookmark: snapshot[0] });
   assert.deepEqual(resolveOverflowRowId('bookmark-edit:1', snapshot), { kind: 'bookmark-edit', index: 1, bookmark: snapshot[1] });
@@ -123,7 +144,7 @@ test('resolveOverflowRowId — VALIDATED-NO-OP: malformed/out-of-range ids resol
 
 // ---------------------------------------------------------------------------
 // DOM-level render/overflow/dispatch (fake DOM harness, the tab-controller.js
-// precedent — dynamic import + hand-rolled fakes, no real browser).
+// precedent — require(esm) + hand-rolled fakes, no real browser).
 // ---------------------------------------------------------------------------
 
 class FakeClassList {
@@ -274,7 +295,6 @@ function harness({ list = [] } = {}) {
 }
 
 async function create(h) {
-  const { createBookmarksBar } = await import(moduleUrl);
   return createBookmarksBar(h.deps);
 }
 
@@ -556,7 +576,7 @@ test('AC4/AC8: a drop inside the bar commits ONE reorder, against the jar captur
   assert.deepEqual(commits[0], ['commitReorder', 'jar-a', 'b1', 2]);
 });
 
-test('AC8: `dropHandled` is set synchronously — dragend after a drop cannot double-commit', async () => {
+test('AC8: dragend clears the drag session — a stray drop after dragend cannot double-commit', async () => {
   const { h, items } = await dragHarness();
   const dt = startDrag(items[0]);
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 260, clientY: 115 });

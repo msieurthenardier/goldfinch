@@ -2,6 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -17,6 +18,7 @@ class El {
   set className(value) { value.split(/\s+/).filter(Boolean).forEach((x) => this.classList.add(x)); }
   set innerHTML(_value) { this.children = []; }
   addEventListener(name, fn) { this.listeners.set(name, fn); }
+  removeEventListener(name, fn) { if (this.listeners.get(name) === fn) this.listeners.delete(name); }
   appendChild(child) { this.children.push(child); return child; }
   insertAdjacentHTML() {}
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
@@ -150,4 +152,63 @@ test('image thumb, poster, inline player, lightbox, and docked audio all route t
   controller.openLightbox(image);
   const lightboxImg = h.els.lightboxStage.children[0];
   assert.equal(lightboxImg.src, `proxy:${h.tab.wcId}:${image.url}`);
+});
+
+// Squawk 0032: toast auto-dismiss must pause on hover/focus and resume with the
+// REMAINING time (WCAG 2.2.1). Date is mocked alongside setTimeout so armDismiss's
+// Date.now()-based elapsed tracking advances in lockstep with tick().
+
+test('squawk 0032: a toast left alone auto-dismisses at the full deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const h = harness();
+  const controller = await create(h);
+  const el = controller.toast('Title', 'Body');
+
+  t.mock.timers.tick(4999);
+  assert.equal(el.removed, undefined);
+  t.mock.timers.tick(1);
+  assert.equal(el.removed, true);
+});
+
+test('squawk 0032: hovering pauses the dismiss countdown and mouseleave resumes with the remaining time', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const h = harness();
+  const controller = await create(h);
+  const el = controller.toast('Title', 'Body');
+
+  t.mock.timers.tick(3000); // t=3s into the 5000ms deadline: 2000ms remaining
+  el.listeners.get('mouseenter')();
+  t.mock.timers.tick(7000); // t=10s while paused — untouched
+  assert.equal(el.removed, undefined);
+  el.listeners.get('mouseleave')(); // resumes with the 2000ms remaining, not a fresh 5000ms
+  t.mock.timers.tick(1999);
+  assert.equal(el.removed, undefined);
+  t.mock.timers.tick(1);
+  assert.equal(el.removed, true);
+});
+
+test('squawk 0032: holding focus pauses the dismiss countdown and focusout resumes with the remaining time', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const h = harness();
+  const controller = await create(h);
+  const el = controller.toast('Title', 'Body');
+
+  t.mock.timers.tick(3000); // t=3s into the 5000ms deadline: 2000ms remaining
+  el.listeners.get('focusin')();
+  t.mock.timers.tick(7000); // t=10s while paused — untouched
+  assert.equal(el.removed, undefined);
+  el.listeners.get('focusout')(); // resumes with the 2000ms remaining, not a fresh 5000ms
+  t.mock.timers.tick(1999);
+  assert.equal(el.removed, undefined);
+  t.mock.timers.tick(1);
+  assert.equal(el.removed, true);
+});
+
+test('squawk 0032: both toast auto-dismiss sites route through the shared armDismiss helper', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '../../src/renderer/chrome/media-controller.js'),
+    'utf8'
+  );
+  const sites = src.match(/armDismiss\(el, \d+\)/g) || [];
+  assert.equal(sites.length, 2, 'expected the bulk-download and single toast() sites to both call armDismiss');
 });

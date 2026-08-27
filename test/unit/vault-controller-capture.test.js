@@ -15,11 +15,24 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createVaultController } = require('../../src/renderer/chrome/vault-controller');
 
-function harness({ unlocked = false, finalizeResult = null } = {}) {
+// Minimal fake DOM element for the vault-indicator contextmenu-wiring cases below:
+// records the listener so a test can fire a synthetic 'contextmenu' event.
+function fakeVaultIndicatorEl() {
+  /** @type {Record<string, Function>} */
+  const listeners = {};
+  return {
+    addEventListener(type, fn) { listeners[type] = fn; },
+    fire(type, evt) { listeners[type] && listeners[type](evt); },
+  };
+}
+
+function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = null, vaultLockRejects = false } = {}) {
   const opens = [];
   const dismissed = [];
   const finalized = [];
   const toasts = [];
+  const vaultLockCalls = [];
+  const toolbarContextMenuCalls = [];
   /** @type {Record<string, Function>} */
   const on = {};
   const goldfinch = new Proxy({
@@ -30,6 +43,10 @@ function harness({ unlocked = false, finalizeResult = null } = {}) {
       return finalizeResult instanceof Error
         ? Promise.reject(finalizeResult)
         : Promise.resolve(finalizeResult);
+    },
+    vaultLock: () => {
+      vaultLockCalls.push(true);
+      return vaultLockRejects ? Promise.reject(new Error('ipc gone')) : Promise.resolve({ ok: true });
     },
   }, {
     get(target, prop) {
@@ -42,18 +59,19 @@ function harness({ unlocked = false, finalizeResult = null } = {}) {
     },
   });
   const controller = createVaultController({
-    els: { vaultIndicator: null },
+    els: { vaultIndicator: vaultIndicatorEl },
     goldfinch,
     jarsClient: { containers: [] },
     isSafeColor: () => false,
     openVaultPage: () => {},
+    openToolbarContextMenu: (item, anchorEl) => toolbarContextMenuCalls.push({ item, anchorEl }),
     openOverlayMenu: (menuType, model, anchor, startIndex, opts) => {
       opens.push({ menuType, model, opts });
       return true;
     },
     toast: (title, body) => toasts.push([title, body]),
   });
-  return { controller, on, opens, dismissed, finalized, toasts };
+  return { controller, on, opens, dismissed, finalized, toasts, vaultLockCalls, toolbarContextMenuCalls };
 }
 
 // Fire a locked-vault capture offer and return its captureId.
@@ -184,4 +202,45 @@ test('a successful finalize opens the save sheet and says nothing', async () => 
   await settle();
   assert.equal(h.opens.at(-1).menuType, 'vault-capture');
   assert.deepEqual(h.toasts, [], 'the sheet IS the feedback — no toast on success');
+});
+
+// ---------------------------------------------------------------------------
+// Vault indicator "Lock now" context menu (squawk 0038, GitHub #113 "Lock now"
+// half — the pinnable half is DECLINED by operator ruling: no toolbarPins entry,
+// no Settings change, the indicator itself never moves).
+// ---------------------------------------------------------------------------
+
+test('right-click on the vault indicator opens the toolbar-mode sheet via openToolbarContextMenu', () => {
+  const indicator = fakeVaultIndicatorEl();
+  const h = harness({ unlocked: true, vaultIndicatorEl: indicator });
+  let prevented = false;
+  indicator.fire('contextmenu', { preventDefault: () => { prevented = true; } });
+  assert.ok(prevented, 'the native OS context menu is suppressed');
+  assert.deepEqual(h.toolbarContextMenuCalls, [{ item: 'vault', anchorEl: indicator }]);
+});
+
+test('no vaultIndicator element (offline harness / not-yet-attached DOM) never throws wiring up', () => {
+  assert.doesNotThrow(() => harness({ vaultIndicatorEl: null }));
+});
+
+test('isVaultLocked reflects the stashed lock-state broadcast, not a re-fetch', () => {
+  const h = harness({ unlocked: false });
+  assert.equal(h.controller.isVaultLocked(), true, 'locked before any broadcast (initial default)');
+  h.on.onVaultLockState({ setUp: true, unlocked: true });
+  assert.equal(h.controller.isVaultLocked(), false, 'unlocked after the broadcast');
+  h.on.onVaultLockState({ setUp: true, unlocked: false });
+  assert.equal(h.controller.isVaultLocked(), true, 'locked again after a re-lock broadcast');
+});
+
+test('lockNow() calls the existing explicit vault-lock bridge path (goldfinch.vaultLock)', () => {
+  const h = harness({ unlocked: true });
+  h.controller.lockNow();
+  assert.deepEqual(h.vaultLockCalls, [true]);
+});
+
+test('a rejected lockNow() invoke never throws (fire-and-forget, like the vault page\'s own Lock now button)', async () => {
+  const h = harness({ unlocked: true, vaultLockRejects: true });
+  assert.doesNotThrow(() => h.controller.lockNow());
+  await settle();
+  assert.deepEqual(h.vaultLockCalls, [true], 'the bridge call was still made');
 });

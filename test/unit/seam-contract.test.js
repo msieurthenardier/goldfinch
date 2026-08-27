@@ -32,6 +32,7 @@ const path = require('path');
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const RENDERER_JS = path.join(REPO_ROOT, 'src/renderer/renderer.js');
+const BOOKMARKS_BAR_JS = path.join(REPO_ROOT, 'src/renderer/chrome/bookmarks-bar.js');
 const A11Y_AUDIT_MJS = path.join(REPO_ROOT, 'scripts/a11y-audit.mjs');
 
 // The FD-approved closed-set size (CLAUDE.md "Renderer evaluate-seam
@@ -145,6 +146,21 @@ const SEAM_COUNT = 34;
 // planned jar-scoped bookmark call-site growth in this same flight.
 const RENDERER_LINE_BUDGET = 1650;
 
+// Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
+// overflow rendering, measurement, and dispatch business logic lives in
+// bookmarks-bar.js per the M15 F1 Leg 3 line-budget ruling above — this pin
+// gives that file the same drift protection RENDERER_LINE_BUDGET gives
+// renderer.js. bookmarks-bar.js measures 1047 by this test's own
+// split-array metric (one above `wc -l` for a newline-terminated file, same
+// counting convention as RENDERER_LINE_BUDGET); the budget is set to
+// measured + 53 headroom, rounded to a clean number (1100), a small buffer
+// for incidental drift rather than planned feature growth — no bar/overflow
+// work is scheduled. This pin protects the drag-session/render extraction
+// seam (bookmarks-bar.js owns both concerns today) until that split
+// happens; if it fails legitimately because the split is landing, raise
+// the budget as part of that leg rather than bumping it in isolation.
+const BOOKMARKS_BAR_LINE_BUDGET = 1100;
+
 const SEAM_ANCHOR = 'Object.assign(/** @type {any} */ (globalThis), {';
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
 
@@ -183,6 +199,15 @@ test('renderer.js remains a thin composition root within its RENDERER_LINE_BUDGE
   const source = fs.readFileSync(RENDERER_JS, 'utf8');
   const lines = source.split(/\r?\n/).length;
   assert.ok(lines <= RENDERER_LINE_BUDGET, `renderer.js has ${lines} lines; budget is ${RENDERER_LINE_BUDGET}`);
+});
+
+test('bookmarks-bar.js stays within its BOOKMARKS_BAR_LINE_BUDGET line budget', () => {
+  const source = fs.readFileSync(BOOKMARKS_BAR_JS, 'utf8');
+  const lines = source.split(/\r?\n/).length;
+  assert.ok(
+    lines <= BOOKMARKS_BAR_LINE_BUDGET,
+    `bookmarks-bar.js has ${lines} lines; budget is ${BOOKMARKS_BAR_LINE_BUDGET}`
+  );
 });
 
 // ---------------------------------------------------------------------------

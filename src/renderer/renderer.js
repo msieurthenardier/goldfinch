@@ -316,7 +316,7 @@ const vaultController = createVaultController({
   goldfinch: window.goldfinch,
   jarsClient,
   isSafeColor,
-  openVaultPage,
+  openVaultPage, openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl), // squawk 0038
   openOverlayMenu: (...args) => overlayMenuClient.open(...args),
   // Late-bound like the bookmarks-client's: `toast` is a hoisted function declaration
   // here, but the wrapper keeps this construction independent of definition order.
@@ -714,7 +714,7 @@ const openPageContextOverlaySheet = (anchor) => {
   const srcTab = pageCtx.wcId != null ? findTabByWcId(pageCtx.wcId) : null;
   const isBookmarked = !!(srcTab && srcTab.container && bookmarksClient.findByUrl(srcTab.container.id, srcTab.url));
   const canBookmark = !!(srcTab && !isInternalTab(srcTab) && !(srcTab.container && srcTab.container.burner));
-  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked, canBookmark }), anchor, 0);
+  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked, canBookmark, vaultLocked: vaultController.isVaultLocked() }), anchor, 0); // squawk 0038
 };
 
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
@@ -953,7 +953,7 @@ function dispatchOverlayActivation({ menuType, id, value }) {
           // (page-context stays escape-only).
           els.address.focus();
         }
-      }
+      } else if (id === 'action:vault-lock') { vaultController.lockNow(); } // squawk 0038: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
       break;
     }
     case 'tab-context': {
@@ -1114,9 +1114,9 @@ function handleOverlayClosed({ menuType, reason }) {
 // Module-scoped state: the LAST forwarded { wcId, params } and the focus-return
 // target captured at open. Acted-on wcId is the one captured at right-click
 // (TOCTOU — never re-resolved via activeTab() for dispatch).
-/** @type {{ wcId: number|null, params: any, returnFocus: HTMLElement|null, toolbarItem: ('media'|'shields'|'devtools'|null) }} */
+/** @type {{ wcId: number|null, params: any, returnFocus: HTMLElement|null, toolbarItem: ('media'|'shields'|'devtools'|'vault'|null) }} */
 const pageCtx = { wcId: null, params: null, returnFocus: null,
-  toolbarItem: null };  // 'media' | 'shields' | 'devtools' | null  (null = page-content mode)
+  toolbarItem: null };  // 'media' | 'shields' | 'devtools' | 'vault' | null  (null = page-content mode)
 
 /** Derive a download filename from a media URL's basename (mirrors media-panel naming). */
 function basenameFromUrl(url) {
@@ -1165,9 +1165,9 @@ document.addEventListener('keydown', (e) => {
   if (!els.lightbox.classList.contains('hidden')) return;
   const target = /** @type {HTMLElement|null} */ (document.activeElement);
   if (!target || target === document.body) return;
-  // Gate: toolbar pin buttons fire both contextmenu AND this keydown — the contextmenu
-  // listener already opens the toolbar Unpin menu; return early here to avoid double-firing.
-  if (target === els.toggleMedia || target === els.togglePrivacy || target === els.toggleDevtools) return;
+  // Gate: toolbar pin buttons + the vault indicator (squawk 0038, same shape) fire both
+  // contextmenu AND this keydown — their own contextmenu listeners already open the sheet.
+  if (target === els.toggleMedia || target === els.togglePrivacy || target === els.toggleDevtools || target === els.vaultIndicator) return;
   // Gate (M09 F5 Leg 1, DD2 integration point): a focused tab fires both a native
   // `contextmenu` event (handled by the tab's own listener, wired at creation —
   // opens the TAB menu) AND this generic keydown — same double-fire shape as the
@@ -1186,10 +1186,10 @@ document.addEventListener('keydown', (e) => {
 });
 
 /**
- * Toolbar-mode invocation: right-click a pinned toolbar icon to get a single "Unpin {item}"
- * item, anchored at the clicked button (menuType 'page-context', toolbar short-circuit).
- * @param {'media'|'shields'|'devtools'} item
- * @param {HTMLElement} anchorEl  the toolbar button that was right-clicked
+ * Toolbar-mode invocation: right-click a pinned toolbar icon (or the vault indicator,
+ * squawk 0038 — not pinnable, same compact single-item menu), anchored at the button.
+ * @param {'media'|'shields'|'devtools'|'vault'} item
+ * @param {HTMLElement} anchorEl  the toolbar/indicator button that was right-clicked
  */
 function openToolbarContextMenu(item, anchorEl) {
   const r = anchorEl.getBoundingClientRect();

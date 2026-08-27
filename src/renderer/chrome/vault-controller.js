@@ -25,6 +25,7 @@ import { parsePickIndex, MANAGE_ID } from '../../shared/vault-picker-template.js
  *   isSafeColor: (color: any) => boolean,
  *   openVaultPage: () => void,
  *   openOverlayMenu: (menuType: string, model: any, anchor: any, startIndex?: number, opts?: any) => boolean,
+ *   openToolbarContextMenu?: (item: 'media'|'shields'|'devtools'|'vault', anchorEl: any) => void,
  *   toast?: (title: string, body: string) => void
  * }} deps
  */
@@ -35,6 +36,11 @@ export function createVaultController({
   isSafeColor,
   openVaultPage,
   openOverlayMenu,
+  // Toolbar-mode page-context sheet opener (squawk 0038 — the same closure
+  // media/privacy/devtools controllers receive for their pin buttons' right-click
+  // "Unpin …" menu; CLAUDE.md's Toolbar-pins pattern). Optional so an offline unit
+  // harness constructs without it; the no-op then simply never opens the sheet.
+  openToolbarContextMenu = () => {},
   // Chrome toast surface (the bookmarks-client `toast` precedent). Optional so an
   // offline unit harness constructs without one; the no-op then simply says nothing.
   toast = () => {},
@@ -144,6 +150,38 @@ export function createVaultController({
       ? 'Password manager unlocked'
       : 'Password manager locked';
     el.setAttribute('aria-label', label);
+  }
+
+  /** Whether the vault is currently locked (squawk 0038's "Lock now" context-menu item
+   * omit gate) — reads the stashed `lockState` (DD10 freshness contract: a pure
+   * projection of the pushed vault-lock-state, never re-fetched). Also true before the
+   * manager is set up; the indicator itself is hidden then (unreachable in practice). */
+  function isVaultLocked() {
+    return !lockState.unlocked;
+  }
+
+  /** The vault indicator's context-menu "Lock now" action: the SAME explicit
+   * vault-lock path the goldfinch://vault page's inline "Lock now" button drives
+   * (`bridge.lockVault()` there → `internal-vault-lock`; `goldfinch.vaultLock()` here →
+   * `vault-lock` — both bare `ipcMain.handle`s over the shared main-side `vaultLockNow()`,
+   * idempotent + global, Mission 12). No local state mutation: the store's `onLock` hook
+   * already fires the `vault-lock-state` broadcast that re-renders the indicator. */
+  function lockNow() {
+    Promise.resolve(goldfinch.vaultLock()).catch(() => {});
+  }
+
+  // Right-click → the shared toolbar-mode page-context sheet (squawk 0038, GitHub #113
+  // "Lock now" half — the pinnable half is DECLINED by operator ruling: the indicator
+  // stays put and is NEVER added to toolbarPins/UNPIN_LABELS). Same wiring shape as the
+  // media/shields/devtools pin buttons' own contextmenu listeners (CLAUDE.md's Toolbar-
+  // pins pattern); the model omits "Lock now" when already locked (page-context-model.js,
+  // opts.vaultLocked below). Guarded on `els.vaultIndicator` for the offline harnesses
+  // that construct with `els: { vaultIndicator: null }` (no DOM).
+  if (els.vaultIndicator) {
+    els.vaultIndicator.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openToolbarContextMenu('vault', els.vaultIndicator);
+    });
   }
 
   goldfinch.onVaultGesture(({ wcId }) => {
@@ -568,6 +606,8 @@ export function createVaultController({
     overlayStates,
     handleActivation,
     handleClosed,
+    isVaultLocked,
+    lockNow,
     openVaultSetOverlayForAudit,
     openVaultRecoveryShowOverlayForAudit,
     openVaultStepupOverlayForAudit,

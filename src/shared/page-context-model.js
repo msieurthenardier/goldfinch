@@ -53,8 +53,8 @@ const UNPIN_LABELS = { media: 'Unpin Media', shields: 'Unpin Shields', devtools:
  * Build the typed page-context menu model from the captured context-menu params.
  * @param {any} params  the guest context-menu params captured at open (or null —
  *   keyboard/toolbar invocations carry no params; yields the Inspect-only menu)
- * @param {('media'|'shields'|'devtools'|null)} [toolbarItem]  toolbar-unpin mode
- * @param {{ isBookmarked?: boolean, canBookmark?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag (canBookmark added M15 F2 Leg 3)
+ * @param {('media'|'shields'|'devtools'|'vault'|null)} [toolbarItem]  toolbar-unpin mode (media/shields/devtools) or the vault indicator's Lock-now mode (squawk 0038)
+ * @param {{ isBookmarked?: boolean, canBookmark?: boolean, vaultLocked?: boolean }} [opts]  M15 F1 Leg 2 — extensible options bag (canBookmark added M15 F2 Leg 3; vaultLocked added squawk 0038)
  * @returns {Array<{ type: 'item', id: string, label: string } | { type: 'separator' } | { type: 'note', text: string }>}
  */
 export function pageContextModel(params, toolbarItem, opts = {}) {
@@ -63,6 +63,15 @@ export function pageContextModel(params, toolbarItem, opts = {}) {
 
   // --- toolbar-mode: single "Unpin {item}" — short-circuit; no page sections. ---
   if (toolbarItem) {
+    // Squawk 0038 (#113 "Lock now" half — the pinnable half is DECLINED by operator
+    // ruling; the vault indicator stays put, never enters toolbarPins/UNPIN_LABELS).
+    // A single "Lock now" item, OMITTED — not disabled — when the vault is already
+    // locked (nothing to lock; the L3-DD-D omit-not-disable convention above, and the
+    // "no dead controls" house test convention rules out a present-but-inert item).
+    if (toolbarItem === 'vault') {
+      if (!opts.vaultLocked) model.push({ type: 'item', id: 'action:vault-lock', label: 'Lock now' });
+      return model;
+    }
     const label = UNPIN_LABELS[toolbarItem];
     if (label) model.push({ type: 'item', id: 'action:unpin:' + toolbarItem, label });
     return model;
