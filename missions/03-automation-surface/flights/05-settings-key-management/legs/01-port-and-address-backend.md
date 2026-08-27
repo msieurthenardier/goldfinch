@@ -39,7 +39,7 @@ What exists after this leg completes:
 - [ ] **AC7** — `npm test`, `npm run typecheck`, `npm run lint` all pass, including new unit tests covering AC1 (validator), AC3 (precedence: env-wins, setting-when-no-env, default-when-neither, invalid-env-falls-through), and AC4 (`freePortInRange` returns free / skips an occupied port).
 
 ## Verification Steps
-- AC1/AC3/AC4/AC7: `cd /home/cprch/projects/goldfinch && npm test` — new cases green.
+- AC1/AC3/AC4/AC7: `cd ~/projects/goldfinch && npm test` — new cases green.
 - AC2: `grep -n 7777 src/main/automation/mcp-server.js` returns nothing.
 - AC5/AC6: `grep -n "automation:get-status\|automation:find-free-port" src/main/main.js` shows both via `registerInternalHandler`; `npm run typecheck && npm run lint` clean. (Live IPC exercise is leg 2 / verify-integration once the bridge exists.)
 
