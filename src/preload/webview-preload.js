@@ -208,7 +208,7 @@ function scheduleScan(delay = 400) {
 
 // Top-frame gate FIRST: no query, no icons, no listeners inside a subframe (a
 // cross-origin iframe login must never raise the prompt via the shared tab wcId).
-const IS_TOP_FRAME = (typeof window === 'undefined') || window.top === window;
+const IS_TOP_FRAME = typeof window === 'undefined' || window.top === window;
 
 // Eligibility: main answers when this tab's session resolves to a PERSISTENT jar
 // (resolvePersistJar). Mirrors the `shields-farble` sync-IPC idiom. Main now returns
@@ -236,8 +236,7 @@ if (IS_TOP_FRAME) {
 // the prompt — it can NEVER complete a chrome-owned fill, DD1/DD3).
 const isTrustedGet = (() => {
   try {
-    return (typeof Event !== 'undefined')
-      && Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
+    return typeof Event !== 'undefined' && Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted').get;
   } catch {
     return null;
   }
@@ -255,7 +254,7 @@ const vaultIcons = createVaultIconController({
   findAllLoginFields,
   findAllCardFields,
   getEnabled: () => vaultEligible && IS_TOP_FRAME,
-  getVaultLocked: () => vaultLocked,
+  getVaultLocked: () => vaultLocked
 });
 
 // The icon appears ONLY while its field is focused (problem 3): a username or
@@ -347,48 +346,48 @@ ipcRenderer.on('vault-fill-card', (_e, card) => fillCardForm(document, card, vau
 // dispatch one — i.e. a real user submit — which is exactly the credential this
 // listener is meant to capture.
 if (IS_TOP_FRAME && vaultEligible) {
-  document.addEventListener('submit', (e) => {
-    if (!(isTrustedGet ? isTrustedGet.call(e) : e.isTrusted)) return;
-    try {
-      const form = /** @type {any} */ (e.target);
-      if (!form || typeof form.querySelectorAll !== 'function') return;
-      const fields = findLoginFields(form);
-      if (fields && fields.password) {
-        const password = fields.password.value != null ? String(fields.password.value) : '';
-        const username = fields.username && fields.username.value != null
-          ? String(fields.username.value)
-          : '';
-        const passwordBytes = new TextEncoder().encode(password);
-        ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
-        return;
+  document.addEventListener(
+    'submit',
+    (e) => {
+      if (!(isTrustedGet ? isTrustedGet.call(e) : e.isTrusted)) return;
+      try {
+        const form = /** @type {any} */ (e.target);
+        if (!form || typeof form.querySelectorAll !== 'function') return;
+        const fields = findLoginFields(form);
+        if (fields && fields.password) {
+          const password = fields.password.value != null ? String(fields.password.value) : '';
+          const username = fields.username && fields.username.value != null ? String(fields.username.value) : '';
+          const passwordBytes = new TextEncoder().encode(password);
+          ipcRenderer.send('guest-vault-capture', { username, password: passwordBytes });
+          return;
+        }
+        // Payment-card capture (issue #152). Same trusted-submit gate, same
+        // bytes-not-strings discipline for the two real payment secrets (the PAN and
+        // the CVV); the cardholder name and expiry ride as plain strings — they are
+        // low-value alone and main holds them in the zeroizable record regardless.
+        // Main applies the plausibility gate (Luhn + length), so a mis-detected field
+        // never becomes a save offer. A form is a login form OR a card form, never both
+        // in one submit — the login branch returns above.
+        const card = findCardFields(form);
+        if (!card || !card.number) return;
+        const number = card.number.value != null ? String(card.number.value) : '';
+        if (number === '') return;
+        const cvv = card.csc && card.csc.value != null ? String(card.csc.value) : '';
+        const cardholder = card.cardholder && card.cardholder.value != null ? String(card.cardholder.value) : '';
+        const expiry = readSubmittedExpiry(card);
+        const encoder = new TextEncoder();
+        ipcRenderer.send('guest-vault-capture-card', {
+          number: encoder.encode(number),
+          cvv: encoder.encode(cvv),
+          cardholder,
+          expiry
+        });
+      } catch {
+        /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
       }
-      // Payment-card capture (issue #152). Same trusted-submit gate, same
-      // bytes-not-strings discipline for the two real payment secrets (the PAN and
-      // the CVV); the cardholder name and expiry ride as plain strings — they are
-      // low-value alone and main holds them in the zeroizable record regardless.
-      // Main applies the plausibility gate (Luhn + length), so a mis-detected field
-      // never becomes a save offer. A form is a login form OR a card form, never both
-      // in one submit — the login branch returns above.
-      const card = findCardFields(form);
-      if (!card || !card.number) return;
-      const number = card.number.value != null ? String(card.number.value) : '';
-      if (number === '') return;
-      const cvv = card.csc && card.csc.value != null ? String(card.csc.value) : '';
-      const cardholder = card.cardholder && card.cardholder.value != null
-        ? String(card.cardholder.value)
-        : '';
-      const expiry = readSubmittedExpiry(card);
-      const encoder = new TextEncoder();
-      ipcRenderer.send('guest-vault-capture-card', {
-        number: encoder.encode(number),
-        cvv: encoder.encode(cvv),
-        cardholder,
-        expiry,
-      });
-    } catch {
-      /* page mutated / navigated mid-submit — drop the capture (no offer this time) */
-    }
-  }, true);
+    },
+    true
+  );
 }
 
 // The submitted expiry as a single `MM/YY`-ish string, from either the combined

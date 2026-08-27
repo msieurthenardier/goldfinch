@@ -19,8 +19,12 @@ function makeIpc() {
   return {
     handlers,
     listeners,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -35,7 +39,7 @@ function makeHarness({ setupResult, setupThrows } = {}) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType: 'vault-set' }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
@@ -51,11 +55,12 @@ function makeHarness({ setupResult, setupThrows } = {}) {
   };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    vaultSetup,
+    vaultSetup
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:vault-setup');
@@ -72,8 +77,14 @@ test('valid setup → { ok:true }; Buffer hand-off + BOTH arrays zeroed; sheet c
   assert.equal(captured.isBuffer, true, 'setup received a Buffer, not a Uint8Array');
   assert.equal(captured.bytes, 'hunter2hunter2');
   // DUAL-zeroize: both the copied Buffer AND the incoming Uint8Array are cleared.
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   // Sheet closed 'activated'; chrome told to open recovery-show.
   assert.deepEqual(closeCalls, [['activated', 7]]);
   assert.equal(chromeSends.length, 1);
@@ -91,8 +102,14 @@ test('setup throws (already set up) → invoke rejects, both arrays still zeroed
 
   await assert.rejects(handler({ sender: sheetSender }, { token: 7, secret }), /already set up/);
 
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized even on throw');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized even on throw');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized even on throw'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized even on throw'
+  );
   assert.deepEqual(closeCalls, [], 'sheet not closed on failure');
   assert.deepEqual(chromeSends, [], 'no recovery-show on failure');
 });

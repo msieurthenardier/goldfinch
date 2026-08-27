@@ -56,7 +56,11 @@ function validateExportPath(savePath, { allowOverwrite = false } = {}) {
   }
   // lstat (NOT stat) so a symlink is seen as a symlink, never followed to its target.
   let targetStat;
-  try { targetStat = fs.lstatSync(resolved); } catch { targetStat = undefined; }
+  try {
+    targetStat = fs.lstatSync(resolved);
+  } catch {
+    targetStat = undefined;
+  }
   if (targetStat) {
     // A symlink redirects the write to an arbitrary file outside the visible target — never in scope.
     if (targetStat.isSymbolicLink()) {
@@ -75,7 +79,11 @@ function validateExportPath(savePath, { allowOverwrite = false } = {}) {
   // The parent directory must exist and be a directory.
   const parent = path.dirname(resolved);
   let parentStat;
-  try { parentStat = fs.statSync(parent); } catch { parentStat = undefined; }
+  try {
+    parentStat = fs.statSync(parent);
+  } catch {
+    parentStat = undefined;
+  }
   if (!parentStat || !parentStat.isDirectory()) {
     return { ok: false, reason: 'no-parent' };
   }

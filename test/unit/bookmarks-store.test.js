@@ -101,7 +101,7 @@ test('per-jar isolation: the SAME url in TWO jars is legal and independent (diff
   });
 });
 
-test('a mutation in jar A leaves jar B\'s stored rows byte-identical', () => {
+test("a mutation in jar A leaves jar B's stored rows byte-identical", () => {
   withStore((store) => {
     store.add('work', { url: 'https://untouched.example/', title: 'Untouched' });
     const before = rawRows('work');
@@ -126,17 +126,52 @@ test('list(jarId) for an unknown/empty jar returns []', () => {
 test('list(): a single bad row (invalid url) is dropped; valid siblings in the SAME jar are kept', () => {
   withStore((store) => {
     const b = appDb.createBookmarksStore();
-    b.insert({ id: 'a', jarId: 'personal', url: 'https://good.example/', title: 'Good', icon: null, position: 0, addedAt: 1 });
-    b.insert({ id: 'b', jarId: 'personal', url: 'about:blank', title: 'Bad about:blank', icon: null, position: 1, addedAt: 2 });
-    b.insert({ id: 'c', jarId: 'personal', url: 'https://also-good.example/', title: 'Also good', icon: null, position: 2, addedAt: 3 });
+    b.insert({
+      id: 'a',
+      jarId: 'personal',
+      url: 'https://good.example/',
+      title: 'Good',
+      icon: null,
+      position: 0,
+      addedAt: 1
+    });
+    b.insert({
+      id: 'b',
+      jarId: 'personal',
+      url: 'about:blank',
+      title: 'Bad about:blank',
+      icon: null,
+      position: 1,
+      addedAt: 2
+    });
+    b.insert({
+      id: 'c',
+      jarId: 'personal',
+      url: 'https://also-good.example/',
+      title: 'Also good',
+      icon: null,
+      position: 2,
+      addedAt: 3
+    });
     const result = store.list('personal');
-    assert.deepEqual(result.map((r) => r.id), ['a', 'c']);
+    assert.deepEqual(
+      result.map((r) => r.id),
+      ['a', 'c']
+    );
   });
 });
 
 test('list(): an empty-string icon normalizes to null; the entry is kept', () => {
   withStore((store) => {
-    appDb.createBookmarksStore().insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: 'T', icon: '', position: 0, addedAt: 1 });
+    appDb.createBookmarksStore().insert({
+      id: 'a',
+      jarId: 'personal',
+      url: 'https://example.com/',
+      title: 'T',
+      icon: '',
+      position: 0,
+      addedAt: 1
+    });
     const [entry] = store.list('personal');
     assert.equal(entry.icon, null);
   });
@@ -144,7 +179,15 @@ test('list(): an empty-string icon normalizes to null; the entry is kept', () =>
 
 test('list(): a non-image data: icon normalizes to null; the entry is kept', () => {
   withStore((store) => {
-    appDb.createBookmarksStore().insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: 'T', icon: 'data:text/html,x', position: 0, addedAt: 1 });
+    appDb.createBookmarksStore().insert({
+      id: 'a',
+      jarId: 'personal',
+      url: 'https://example.com/',
+      title: 'T',
+      icon: 'data:text/html,x',
+      position: 0,
+      addedAt: 1
+    });
     const [entry] = store.list('personal');
     assert.equal(entry.icon, null);
   });
@@ -153,8 +196,24 @@ test('list(): a non-image data: icon normalizes to null; the entry is kept', () 
 test('list(): a missing/empty title falls back to the url', () => {
   withStore((store) => {
     const b = appDb.createBookmarksStore();
-    b.insert({ id: 'a', jarId: 'personal', url: 'https://example.com/', title: '', icon: null, position: 0, addedAt: 1 });
-    b.insert({ id: 'b', jarId: 'personal', url: 'https://example.org/', title: null, icon: null, position: 1, addedAt: 2 });
+    b.insert({
+      id: 'a',
+      jarId: 'personal',
+      url: 'https://example.com/',
+      title: '',
+      icon: null,
+      position: 0,
+      addedAt: 1
+    });
+    b.insert({
+      id: 'b',
+      jarId: 'personal',
+      url: 'https://example.org/',
+      title: null,
+      icon: null,
+      position: 1,
+      addedAt: 2
+    });
     const [a, bRow] = store.list('personal');
     assert.equal(a.title, 'https://example.com/');
     assert.equal(bRow.title, 'https://example.org/');
@@ -164,7 +223,15 @@ test('list(): a missing/empty title falls back to the url', () => {
 test('list(): read-time validation never writes back or deletes — the raw row survives a read untouched', () => {
   withStore((store) => {
     const b = appDb.createBookmarksStore();
-    b.insert({ id: 'a', jarId: 'personal', url: 'about:blank', title: '', icon: 'data:text/html,x', position: 0, addedAt: 1 });
+    b.insert({
+      id: 'a',
+      jarId: 'personal',
+      url: 'about:blank',
+      title: '',
+      icon: 'data:text/html,x',
+      position: 0,
+      addedAt: 1
+    });
     assert.deepEqual(store.list('personal'), [], 'the invalid row is dropped from the READ');
     const raw = b.findById('personal', 'a');
     assert.notEqual(raw, null, 'but the row itself is untouched in the table — a read never mutates');
@@ -296,7 +363,7 @@ test('update(): a new URL matching an existing bookmark in a DIFFERENT jar is NO
   });
 });
 
-test('update(): setting a bookmark\'s url to its OWN current url is not a collision', () => {
+test("update(): setting a bookmark's url to its OWN current url is not a collision", () => {
   withStore((store) => {
     const { bookmark } = store.add('personal', { url: 'https://example.com/', title: 'Original' });
     const result = store.update('personal', bookmark.id, { url: 'https://example.com/', title: 'Renamed' });
@@ -344,12 +411,19 @@ test('remove(): position invariant — remaining rows renormalize to a gap-free 
     const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
     store.remove('personal', b.id);
     const rows = store.list('personal');
-    assert.deepEqual(rows.map((r) => r.id), [a.id, c.id]);
-    assert.deepEqual(rows.map((r) => r.position), [0, 1], 'gap-free after removing the middle entry');
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      [a.id, c.id]
+    );
+    assert.deepEqual(
+      rows.map((r) => r.position),
+      [0, 1],
+      'gap-free after removing the middle entry'
+    );
   });
 });
 
-test('remove(): removing from jar A does not renormalize jar B\'s positions', () => {
+test("remove(): removing from jar A does not renormalize jar B's positions", () => {
   withStore((store) => {
     store.add('work', { url: 'https://w1.example/' });
     store.add('work', { url: 'https://w2.example/' });
@@ -372,9 +446,18 @@ test('reorder(): applies the given order within one jar', () => {
     const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
     const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
     const result = store.reorder('personal', [c.id, a.id, b.id]);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [c.id, a.id, b.id]);
-    assert.deepEqual(store.list('personal').map((x) => x.id), [c.id, a.id, b.id]);
-    assert.deepEqual(store.list('personal').map((x) => x.position), [0, 1, 2]);
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [c.id, a.id, b.id]
+    );
+    assert.deepEqual(
+      store.list('personal').map((x) => x.id),
+      [c.id, a.id, b.id]
+    );
+    assert.deepEqual(
+      store.list('personal').map((x) => x.position),
+      [0, 1, 2]
+    );
   });
 });
 
@@ -383,17 +466,24 @@ test('reorder(): unknown ids in the list are ignored', () => {
     const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
     const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
     const result = store.reorder('personal', [b.id, 'not-a-real-id', a.id]);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id]);
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [b.id, a.id]
+    );
   });
 });
 
-test('reorder(): an id belonging to a DIFFERENT jar is ignored (never mutates another jar\'s row)', () => {
+test("reorder(): an id belonging to a DIFFERENT jar is ignored (never mutates another jar's row)", () => {
   withStore((store) => {
     const workEntry = store.add('work', { url: 'https://work.example/' }).bookmark;
     const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
     const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
     const result = store.reorder('personal', [b.id, workEntry.id, a.id]);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id], 'the cross-jar id is dropped, not treated as unknown-and-appended');
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [b.id, a.id],
+      'the cross-jar id is dropped, not treated as unknown-and-appended'
+    );
     assert.equal(store.list('work')[0].id, workEntry.id, 'the other jar entry is untouched');
     assert.equal(store.list('work')[0].position, 0);
   });
@@ -406,7 +496,10 @@ test('reorder(): entries OMITTED from the id list are preserved, appended in PRI
     const c = store.add('personal', { url: 'https://c.example/' }).bookmark;
     // Only mention 'c' — a and b are omitted and must survive, in their prior order.
     const result = store.reorder('personal', [c.id]);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [c.id, a.id, b.id]);
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [c.id, a.id, b.id]
+    );
   });
 });
 
@@ -416,7 +509,10 @@ test('reorder(): a malformed (non-array) payload is a no-op over the current ord
     const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
     const result = store.reorder('personal', null);
     assert.equal(result.ok, true);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [a.id, b.id]);
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [a.id, b.id]
+    );
   });
 });
 
@@ -425,7 +521,10 @@ test('reorder(): a duplicate id within the payload is applied once, at its first
     const a = store.add('personal', { url: 'https://a.example/' }).bookmark;
     const b = store.add('personal', { url: 'https://b.example/' }).bookmark;
     const result = store.reorder('personal', [b.id, b.id, a.id]);
-    assert.deepEqual(result.bookmarks.map((x) => x.id), [b.id, a.id]);
+    assert.deepEqual(
+      result.bookmarks.map((x) => x.id),
+      [b.id, a.id]
+    );
   });
 });
 
@@ -449,13 +548,36 @@ test('reorder(): the new order — with names AND icons — survives a fresh loa
     const reloaded = freshStore();
     reloaded.load('/unused/userdata/path');
     const rows = reloaded.list('personal');
-    assert.deepEqual(rows.map((x) => x.id), [c.id, a.id, b.id], 'order survives');
-    assert.deepEqual(rows.map((x) => x.title), ['Charlie', 'Alpha', 'Bravo'], 'names survive');
-    assert.deepEqual(rows.map((x) => x.icon), [ICON_C, ICON_A, null], 'icons survive — including the absent one');
-    assert.deepEqual(rows.map((x) => x.position), [0, 1, 2], 'positions stay gap-free 0..n-1');
-    assert.deepEqual(rows.map((x) => x.url),
-      ['https://c.example/', 'https://a.example/', 'https://b.example/'], 'urls survive');
-    assert.deepEqual(reloaded.list('work').map((x) => x.title), ['Work'], 'the other jar is untouched');
+    assert.deepEqual(
+      rows.map((x) => x.id),
+      [c.id, a.id, b.id],
+      'order survives'
+    );
+    assert.deepEqual(
+      rows.map((x) => x.title),
+      ['Charlie', 'Alpha', 'Bravo'],
+      'names survive'
+    );
+    assert.deepEqual(
+      rows.map((x) => x.icon),
+      [ICON_C, ICON_A, null],
+      'icons survive — including the absent one'
+    );
+    assert.deepEqual(
+      rows.map((x) => x.position),
+      [0, 1, 2],
+      'positions stay gap-free 0..n-1'
+    );
+    assert.deepEqual(
+      rows.map((x) => x.url),
+      ['https://c.example/', 'https://a.example/', 'https://b.example/'],
+      'urls survive'
+    );
+    assert.deepEqual(
+      reloaded.list('work').map((x) => x.title),
+      ['Work'],
+      'the other jar is untouched'
+    );
   });
 });
 
@@ -465,8 +587,15 @@ test('reorder(): successive reorders keep positions gap-free 0..n-1 in the RAW t
     store.reorder('personal', [ids[3], ids[0], ids[2], ids[1]]);
     store.reorder('personal', [ids[1], ids[3], ids[0], ids[2]]);
     const raw = rawRows('personal');
-    assert.deepEqual(raw.map((r) => r.position), [0, 1, 2, 3], 'no drift accumulates across successive rewrites');
-    assert.deepEqual(raw.map((r) => r.id), [ids[1], ids[3], ids[0], ids[2]]);
+    assert.deepEqual(
+      raw.map((r) => r.position),
+      [0, 1, 2, 3],
+      'no drift accumulates across successive rewrites'
+    );
+    assert.deepEqual(
+      raw.map((r) => r.id),
+      [ids[1], ids[3], ids[0], ids[2]]
+    );
   });
 });
 

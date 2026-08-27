@@ -18,8 +18,12 @@ function makeIpc() {
   return {
     listeners,
     handlers,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -30,7 +34,7 @@ function makeHarness({ delegateResult = { answered: true } } = {}) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType: 'auth-basic' }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
@@ -45,17 +49,18 @@ function makeHarness({ delegateResult = { answered: true } } = {}) {
       username,
       isBuffer: Buffer.isBuffer(buf),
       bytes: Buffer.from(buf).toString('utf8'),
-      buf,
+      buf
     });
     return delegateResult;
   };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    authAnswerFromSheet,
+    authAnswerFromSheet
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:auth-submit');
@@ -69,7 +74,7 @@ test('registration is gated on the injection — absent delegate registers no ha
     registry: { records: () => [], getWindowForChrome: () => null },
     chromeForAttachment: () => null,
     chromeForTab: () => null,
-    sanitizeActivatedValue: () => undefined,
+    sanitizeActivatedValue: () => undefined
   });
   assert.equal(ipcMain.handlers.has('menu-overlay:auth-submit'), false);
 });
@@ -85,8 +90,14 @@ test('valid submit: Buffer hand-off to the store (record + username + password b
   assert.equal(calls[0].username, 'fixtureuser');
   assert.equal(calls[0].isBuffer, true, 'the store receives a zeroizable Buffer copy');
   assert.equal(calls[0].bytes, 'fixturepass');
-  assert.ok(calls[0].buf.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    calls[0].buf.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   assert.deepEqual(closeCalls, [], 'the handler NEVER closes the sheet — the store owns the close (8b)');
 });
 
@@ -106,8 +117,8 @@ test('a throwing delegate still zeroizes BOTH arrays (finally runs) and rejects 
     sheet: {
       getView: () => ({ webContents: sheetSender }),
       getCurrentMenu: () => ({ token: 7, menuType: 'auth-basic' }),
-      closeMenuOverlay: () => {},
-    },
+      closeMenuOverlay: () => {}
+    }
   };
   let seenBuf = null;
   registerOverlayIpc({
@@ -116,19 +127,34 @@ test('a throwing delegate still zeroizes BOTH arrays (finally runs) and rejects 
     chromeForAttachment: () => null,
     chromeForTab: () => null,
     sanitizeActivatedValue: () => undefined,
-    authAnswerFromSheet: (_r, _u, buf) => { seenBuf = buf; throw new Error('store exploded'); },
+    authAnswerFromSheet: (_r, _u, buf) => {
+      seenBuf = buf;
+      throw new Error('store exploded');
+    }
   });
   const handler = ipcMain.handlers.get('menu-overlay:auth-submit');
   const secret = new TextEncoder().encode('pw');
-  await assert.rejects(async () => handler({ sender: sheetSender }, { token: 7, username: 'u', secret }), /store exploded/);
-  assert.ok(secret.every((b) => b === 0), 'incoming array zeroized on a throw');
-  assert.ok(seenBuf.every((b) => b === 0), 'Buffer copy zeroized on a throw');
+  await assert.rejects(
+    async () => handler({ sender: sheetSender }, { token: 7, username: 'u', secret }),
+    /store exploded/
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming array zeroized on a throw'
+  );
+  assert.ok(
+    seenBuf.every((b) => b === 0),
+    'Buffer copy zeroized on a throw'
+  );
 });
 
 test('wrong sender is rejected → { answered:false }, delegate never called', async () => {
   const { handler, calls } = makeHarness();
   const secret = new TextEncoder().encode('pw');
-  const res = await handler({ sender: { isDestroyed: () => false } /* not the sheet */ }, { token: 7, username: 'u', secret });
+  const res = await handler(
+    { sender: { isDestroyed: () => false } /* not the sheet */ },
+    { token: 7, username: 'u', secret }
+  );
   assert.deepEqual(res, { answered: false });
   assert.equal(calls.length, 0);
 });
@@ -143,7 +169,9 @@ test('stale token is rejected → { answered:false }, delegate never called', as
 
 test('a non-Uint8Array secret or non-string username is rejected → { answered:false }', async () => {
   const { handler, sheetSender, calls } = makeHarness();
-  assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, username: 'u', secret: 'pw' }), { answered: false });
+  assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, username: 'u', secret: 'pw' }), {
+    answered: false
+  });
   assert.deepEqual(
     await handler({ sender: sheetSender }, { token: 7, username: 42, secret: new TextEncoder().encode('pw') }),
     { answered: false }

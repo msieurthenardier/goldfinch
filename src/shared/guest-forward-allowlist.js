@@ -32,9 +32,15 @@
 const TAB_CYCLE_JUMP_ACTIONS = [
   'tab-next',
   'tab-prev',
-  'tab-jump-1', 'tab-jump-2', 'tab-jump-3', 'tab-jump-4',
-  'tab-jump-5', 'tab-jump-6', 'tab-jump-7', 'tab-jump-8',
-  'tab-jump-last',
+  'tab-jump-1',
+  'tab-jump-2',
+  'tab-jump-3',
+  'tab-jump-4',
+  'tab-jump-5',
+  'tab-jump-6',
+  'tab-jump-7',
+  'tab-jump-8',
+  'tab-jump-last'
 ];
 
 // reopen-closed-tab (M09 F4 Leg 2, DD2 step 1): RETIRES the Ctrl+Shift+T
@@ -73,7 +79,7 @@ const WEB_CHROME_ACTIONS = new Set([
   'reopen-closed-tab',
   'bookmark-page',
   'toggle-bookmarks-bar',
-  ...TAB_CYCLE_JUMP_ACTIONS,
+  ...TAB_CYCLE_JUMP_ACTIONS
 ]);
 
 const INTERNAL_CHROME_ACTIONS = new Set([
@@ -82,7 +88,7 @@ const INTERNAL_CHROME_ACTIONS = new Set([
   'new-window',
   'reopen-closed-tab',
   'toggle-bookmarks-bar',
-  ...TAB_CYCLE_JUMP_ACTIONS,
+  ...TAB_CYCLE_JUMP_ACTIONS
 ]);
 
 /**
@@ -123,5 +129,5 @@ module.exports = {
   isChromeActionForwardable,
   isRepeatSafeAction,
   WEB_CHROME_ACTIONS,
-  INTERNAL_CHROME_ACTIONS,
+  INTERNAL_CHROME_ACTIONS
 };

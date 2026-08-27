@@ -54,7 +54,7 @@ const SCRYPT_PARAMS = Object.freeze({
   N: 2 ** 17,
   r: 8,
   p: 2,
-  maxmem: 192 * 1024 * 1024,
+  maxmem: 192 * 1024 * 1024
 });
 
 // GCM sizing.
@@ -198,8 +198,13 @@ function gcmEncrypt(plaintext, key, aad) {
  * @returns {Buffer}
  */
 function gcmDecrypt(blob, key, aad) {
-  if (!blob || typeof blob !== 'object'
-    || typeof blob.iv !== 'string' || typeof blob.ct !== 'string' || typeof blob.tag !== 'string') {
+  if (
+    !blob ||
+    typeof blob !== 'object' ||
+    typeof blob.iv !== 'string' ||
+    typeof blob.ct !== 'string' ||
+    typeof blob.tag !== 'string'
+  ) {
     throw new VaultAuthError('gcm: malformed ciphertext bundle');
   }
   let iv;
@@ -432,7 +437,11 @@ function wrapAccess(vaultKey, accessSecret, keyId, opts = {}) {
 function unwrapAccess(env, accessSecret, opts = {}) {
   const version = opts.version ?? VERSION;
   if (typeof env.salt !== 'string') throw new VaultFormatError('access envelope: missing salt');
-  const wrappingKey = deriveHkdfKey(Buffer.from(accessSecret, 'utf8'), Buffer.from(env.salt, 'base64'), HKDF_ACCESS_INFO);
+  const wrappingKey = deriveHkdfKey(
+    Buffer.from(accessSecret, 'utf8'),
+    Buffer.from(env.salt, 'base64'),
+    HKDF_ACCESS_INFO
+  );
   return unwrapVaultKey(env, wrappingKey, envelopeAad(env.keyId, env.type, version));
 }
 
@@ -588,7 +597,7 @@ function parseRecoveryKey(display) {
 function generateAccessKey() {
   return {
     secret: crypto.randomBytes(32).toString('base64url'),
-    keyId: crypto.randomBytes(8).toString('base64url'),
+    keyId: crypto.randomBytes(8).toString('base64url')
   };
 }
 
@@ -609,7 +618,7 @@ function generateAdminKeypair() {
     publicKey,
     privateKey,
     publicKeyB64: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
-    privateKeyB64: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'),
+    privateKeyB64: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
   };
 }
 
@@ -677,7 +686,7 @@ function serializeVault(vaultObj) {
     vaultId: vaultId ?? crypto.randomBytes(16).toString('hex'),
     kdf: kdf ?? SCRYPT_PARAMS,
     envelopes,
-    items,
+    items
   };
   return JSON.stringify(doc);
 }
@@ -703,14 +712,25 @@ function parseVault(input) {
   if (doc.version !== VERSION) throw new VaultFormatError(`parseVault: unsupported version "${doc.version}"`);
   if (!doc.kdf || typeof doc.kdf !== 'object') throw new VaultFormatError('parseVault: missing kdf');
   if (!Array.isArray(doc.envelopes)) throw new VaultFormatError('parseVault: envelopes must be an array');
-  if (!doc.items || typeof doc.items !== 'object'
-    || typeof doc.items.iv !== 'string' || typeof doc.items.ct !== 'string' || typeof doc.items.tag !== 'string') {
+  if (
+    !doc.items ||
+    typeof doc.items !== 'object' ||
+    typeof doc.items.iv !== 'string' ||
+    typeof doc.items.ct !== 'string' ||
+    typeof doc.items.tag !== 'string'
+  ) {
     throw new VaultFormatError('parseVault: malformed items blob');
   }
   for (const env of doc.envelopes) {
-    if (!env || typeof env !== 'object'
-      || typeof env.keyId !== 'string' || typeof env.type !== 'string'
-      || typeof env.iv !== 'string' || typeof env.ct !== 'string' || typeof env.tag !== 'string') {
+    if (
+      !env ||
+      typeof env !== 'object' ||
+      typeof env.keyId !== 'string' ||
+      typeof env.type !== 'string' ||
+      typeof env.iv !== 'string' ||
+      typeof env.ct !== 'string' ||
+      typeof env.tag !== 'string'
+    ) {
       throw new VaultFormatError('parseVault: malformed envelope');
     }
   }
@@ -765,10 +785,11 @@ function totp(base32Secret, opts, timestampMs) {
   const hmac = crypto.createHmac(normalizeAlgorithm(algorithm), key).update(counterBuf).digest();
   // RFC 4226 dynamic truncation.
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const binary = ((hmac[offset] & 0x7f) << 24)
-    | ((hmac[offset + 1] & 0xff) << 16)
-    | ((hmac[offset + 2] & 0xff) << 8)
-    | (hmac[offset + 3] & 0xff);
+  const binary =
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff);
   return String(binary % 10 ** digits).padStart(digits, '0');
 }
 
@@ -836,7 +857,7 @@ function normalizeTotpField(raw) {
   if (p.issuer) params.set('issuer', p.issuer);
   // The label is the URI path segment; percent-encode it so any character (incl. a
   // colon issuer-prefix or spaces) round-trips through `parseOtpauth`'s new URL().
-  const label = p.label != null ? p.label : (p.issuer || '');
+  const label = p.label != null ? p.label : p.issuer || '';
   return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
 }
 
@@ -884,7 +905,7 @@ function parseOtpauth(uri) {
     digits: digitsParam ? parseInt(digitsParam, 10) : 6,
     period: periodParam ? parseInt(periodParam, 10) : 30,
     ...(issuer ? { issuer } : {}),
-    ...(label ? { label } : {}),
+    ...(label ? { label } : {})
   };
 }
 
@@ -934,5 +955,5 @@ module.exports = {
   totp,
   parseOtpauth,
   normalizeTotpField,
-  totpSecondsRemaining,
+  totpSecondsRemaining
 };

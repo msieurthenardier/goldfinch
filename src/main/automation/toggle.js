@@ -51,9 +51,18 @@ function makeAutomationToggle({ start, stop, getServer, setServer, isDevOverride
   // in finally avoids clearing inFlight when a later op has already extended it.
   function runSerialized(body) {
     const prior = inFlight;
-    const mine = (async () => { await Promise.resolve(prior).catch(() => {}); return body(); })();
+    const mine = (async () => {
+      await Promise.resolve(prior).catch(() => {});
+      return body();
+    })();
     inFlight = mine;
-    return (async () => { try { return await mine; } finally { if (inFlight === mine) inFlight = null; } })();
+    return (async () => {
+      try {
+        return await mine;
+      } finally {
+        if (inFlight === mine) inFlight = null;
+      }
+    })();
   }
 
   /**

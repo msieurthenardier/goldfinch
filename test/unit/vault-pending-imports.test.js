@@ -39,7 +39,7 @@ test('two windows hold INDEPENDENT records — neither can see/consume the other
   assert.equal(store.peek(B).bundle.tag, 'B', 'B is unaffected by A being consumed');
 });
 
-test('a second window re-holding does NOT overwrite the first window\'s record', () => {
+test("a second window re-holding does NOT overwrite the first window's record", () => {
   const store = createPendingImportStore(seqHandles());
   store.hold(100, { bundle: { tag: 'A' }, destinationTarget: 'work' });
   store.hold(200, { bundle: { tag: 'B-overwrite-attempt' }, destinationTarget: 'global' });
@@ -48,14 +48,14 @@ test('a second window re-holding does NOT overwrite the first window\'s record',
   assert.equal(store.peek(100).destinationTarget, 'work');
 });
 
-test('setOverwrite is window-scoped: window B cannot flip window A\'s destructive overwrite flag', () => {
+test("setOverwrite is window-scoped: window B cannot flip window A's destructive overwrite flag", () => {
   const store = createPendingImportStore(seqHandles());
   const hA = store.hold(100, { bundle: { tag: 'A' }, destinationTarget: 'work' });
   store.hold(200, { bundle: { tag: 'B' }, destinationTarget: 'personal' });
 
   // A window operating on B's key can never touch A's record.
   store.setOverwrite(200, true, /* B's own handle irrelevant here */ undefined);
-  assert.equal(store.peek(100).overwrite, false, 'A\'s overwrite is untouched by a B-keyed call');
+  assert.equal(store.peek(100).overwrite, false, "A's overwrite is untouched by a B-keyed call");
 
   // A's own window can set its overwrite with its matching handle.
   store.setOverwrite(100, true, hA);

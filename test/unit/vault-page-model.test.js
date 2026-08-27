@@ -81,17 +81,23 @@ test('nav entries = a Settings entry then a Vaults group whose children are the 
     jars
   );
   // Two top-level entries: Settings, then the Vaults group.
-  assert.deepEqual(entries.map((e) => [e.id, e.kind]), [
-    [SETTINGS_ID, 'settings'],
-    [VAULTS_ID, 'group']
-  ]);
+  assert.deepEqual(
+    entries.map((e) => [e.id, e.kind]),
+    [
+      [SETTINGS_ID, 'settings'],
+      [VAULTS_ID, 'group']
+    ]
+  );
   assert.equal(entries[1].label, 'Vaults');
   // Each vault is an indented child of the Vaults group, in order.
-  assert.deepEqual(childrenOf(entries).map((e) => [e.id, e.kind]), [
-    ['global', 'global'],
-    ['personal', 'jar'],
-    ['work', 'jar']
-  ]);
+  assert.deepEqual(
+    childrenOf(entries).map((e) => [e.id, e.kind]),
+    [
+      ['global', 'global'],
+      ['personal', 'jar'],
+      ['work', 'jar']
+    ]
+  );
 });
 
 test('the global vault (not a persistent jar) is kind "global"; jars are kind "jar" with their color', () => {
@@ -124,11 +130,20 @@ test('a jar with no color joins to null (the controller applies the fallback)', 
 });
 
 test('empty vaults → Settings + an empty Vaults group; malformed inputs degrade safely', () => {
-  assert.deepEqual(vaultNavEntries([], jars).map((e) => e.id), [SETTINGS_ID, VAULTS_ID]);
+  assert.deepEqual(
+    vaultNavEntries([], jars).map((e) => e.id),
+    [SETTINGS_ID, VAULTS_ID]
+  );
   assert.deepEqual(childrenOf(vaultNavEntries([], jars)), []);
-  assert.deepEqual(vaultNavEntries(undefined, undefined).map((e) => e.id), [SETTINGS_ID, VAULTS_ID]);
+  assert.deepEqual(
+    vaultNavEntries(undefined, undefined).map((e) => e.id),
+    [SETTINGS_ID, VAULTS_ID]
+  );
   assert.deepEqual(childrenOf(vaultNavEntries(undefined, undefined)), []);
   // a vault row missing its id is dropped from the group's children
   const entries = vaultNavEntries([{ label: 'orphan' }, { vaultId: 'work', label: 'Work' }], jars);
-  assert.deepEqual(childrenOf(entries).map((e) => e.id), ['work']);
+  assert.deepEqual(
+    childrenOf(entries).map((e) => e.id),
+    ['work']
+  );
 });

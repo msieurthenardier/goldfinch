@@ -22,9 +22,17 @@ function makeWc({ open = false } = {}) {
     _openCalls: /** @type {any[]} */ ([]),
     _closeCount: 0,
     _devToolsOpen: open,
-    openDevTools(/** @type {any} */ opts) { this._openCalls.push(opts); this._devToolsOpen = true; },
-    closeDevTools() { this._closeCount += 1; this._devToolsOpen = false; },
-    isDevToolsOpened() { return this._devToolsOpen; },
+    openDevTools(/** @type {any} */ opts) {
+      this._openCalls.push(opts);
+      this._devToolsOpen = true;
+    },
+    closeDevTools() {
+      this._closeCount += 1;
+      this._devToolsOpen = false;
+    },
+    isDevToolsOpened() {
+      return this._devToolsOpen;
+    }
   };
 }
 
@@ -72,9 +80,13 @@ test('toggleDevTools: returns the AUTHORITATIVE post-state read, not an assumed 
   // reports AFTER the action — the authoritative value the renderer button trusts.
   const wc = {
     _openCalls: /** @type {any[]} */ ([]),
-    openDevTools(/** @type {any} */ opts) { this._openCalls.push(opts); /* but stays "closed" */ },
+    openDevTools(/** @type {any} */ opts) {
+      this._openCalls.push(opts); /* but stays "closed" */
+    },
     closeDevTools() {},
-    isDevToolsOpened() { return false; }, // never reports open
+    isDevToolsOpened() {
+      return false;
+    } // never reports open
   };
   const result = toggleDevTools(wc);
   assert.equal(wc._openCalls.length, 1, 'it attempted to open (was reported closed)');

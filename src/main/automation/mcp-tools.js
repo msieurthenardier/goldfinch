@@ -129,26 +129,32 @@ const PRESS_KEY_NAMES =
 const DRIVE_TOOLS = [
   {
     name: 'enumerateTabs',
-    description: 'List all drivable (dom-ready) tabs across ALL windows as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes ZERO rows — call enumerateWindows and poll until every `booted` is true if a total census is required. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows\' tabs for its own jar, never the window topology. Script-opened POPUP windows appear as extra rows (after the tab rows) marked `popup: true`, with `active: false` and windowId = the OWNER window\'s; a jar key sees only popups whose session is its own jar (a burner-opened popup is admin-visible only). Popup wcIds are drivable like tab wcIds.',
+    description:
+      "List all drivable (dom-ready) tabs across ALL windows as an array of { wcId, url, title, jarId, active, windowId }. windowId is stamped from the window registry, which is authoritative for ownership. A window whose chrome has not finished booting contributes ZERO rows — call enumerateWindows and poll until every `booted` is true if a total census is required. Admin listings include the internal goldfinch:// tabs; jar-key listings never do (session filter) — a jar key sees all windows' tabs for its own jar, never the window topology. Script-opened POPUP windows appear as extra rows (after the tab rows) marked `popup: true`, with `active: false` and windowId = the OWNER window's; a jar key sees only popups whose session is its own jar (a burner-opened popup is admin-visible only). Popup wcIds are drivable like tab wcIds.",
     inputSchema: { type: 'object', properties: {} },
-    call: (engine) => engine.enumerateTabs(),
+    call: (engine) => engine.enumerateTabs()
   },
   {
     name: 'openTab',
-    description: 'Open a new tab at the given URL. Optional jarId targets a specific container/jar. ' +
+    description:
+      'Open a new tab at the given URL. Optional jarId targets a specific container/jar. ' +
       'A jar key may only open tabs in its own jar (foreign jarId → refused with out-of-jar). ' +
       'Admin may target any jar. An unknown jarId is refused (unknown-jar) — never a silent fallback. ' +
-      'Omit jarId to open in the default container (admin/unscoped) or in the jar key\'s own jar. ' +
-      'Returns the new tab\'s wcId, or null if the URL was rejected renderer-side or no handle became available within the timeout.',
+      "Omit jarId to open in the default container (admin/unscoped) or in the jar key's own jar. " +
+      "Returns the new tab's wcId, or null if the URL was rejected renderer-side or no handle became available within the timeout.",
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'http(s) URL to open' },
-        jarId: { type: 'string', description: 'Target container/jar id. Omit to use the default (or own jar for a jar key). A jar key may only supply its own jarId; admin may supply any. An unknown jarId is refused.' },
+        jarId: {
+          type: 'string',
+          description:
+            'Target container/jar id. Omit to use the default (or own jar for a jar key). A jar key may only supply its own jarId; admin may supply any. An unknown jarId is refused.'
+        }
       },
-      required: ['url'],
+      required: ['url']
     },
-    call: (engine, { url, jarId }) => engine.openTab(url, jarId),
+    call: (engine, { url, jarId }) => engine.openTab(url, jarId)
   },
   {
     name: 'closeTab',
@@ -156,19 +162,20 @@ const DRIVE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.closeTab(wcId),
+    call: (engine, { wcId }) => engine.closeTab(wcId)
   },
   {
     name: 'activateTab',
-    description: 'Bring the tab identified by wcId to the foreground. Returns a boolean success signal. A POPUP wcId returns false (a popup is not a tab in any window\'s strip and no window is raised) — popups are floating windows; drive them directly, no activation step exists or is needed.',
+    description:
+      "Bring the tab identified by wcId to the foreground. Returns a boolean success signal. A POPUP wcId returns false (a popup is not a tab in any window's strip and no window is raised) — popups are floating windows; drive them directly, no activation step exists or is needed.",
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.activateTab(wcId),
+    call: (engine, { wcId }) => engine.activateTab(wcId)
   },
   {
     name: 'navigate',
@@ -177,11 +184,11 @@ const DRIVE_TOOLS = [
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        url: { type: 'string', description: 'http(s) URL to load' },
+        url: { type: 'string', description: 'http(s) URL to load' }
       },
-      required: ['wcId', 'url'],
+      required: ['wcId', 'url']
     },
-    call: (engine, { wcId, url }) => engine.navigate(wcId, url),
+    call: (engine, { wcId, url }) => engine.navigate(wcId, url)
   },
   {
     name: 'goBack',
@@ -189,9 +196,9 @@ const DRIVE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.goBack(wcId),
+    call: (engine, { wcId }) => engine.goBack(wcId)
   },
   {
     name: 'goForward',
@@ -199,9 +206,9 @@ const DRIVE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.goForward(wcId),
+    call: (engine, { wcId }) => engine.goForward(wcId)
   },
   {
     name: 'reload',
@@ -209,75 +216,84 @@ const DRIVE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.reload(wcId),
+    call: (engine, { wcId }) => engine.reload(wcId)
   },
   {
     name: 'getZoom',
-    description: 'Get the current page zoom factor of the tab identified by wcId (1.0 = 100%). Refuses internal goldfinch:// pages.',
+    description:
+      'Get the current page zoom factor of the tab identified by wcId (1.0 = 100%). Refuses internal goldfinch:// pages.',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.getZoom(wcId),
+    call: (engine, { wcId }) => engine.getZoom(wcId)
   },
   {
     name: 'setZoom',
-    description: 'Set the page zoom factor of the tab identified by wcId (1.0 = 100%; clamped to [0.25, 5.0]). Refuses internal goldfinch:// pages. Returns the applied factor.',
+    description:
+      'Set the page zoom factor of the tab identified by wcId (1.0 = 100%; clamped to [0.25, 5.0]). Refuses internal goldfinch:// pages. Returns the applied factor.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        factor: { type: 'number', description: 'zoom factor; 1.0 = 100%, clamped to [0.25, 5.0]' },
+        factor: { type: 'number', description: 'zoom factor; 1.0 = 100%, clamped to [0.25, 5.0]' }
       },
-      required: ['wcId', 'factor'],
+      required: ['wcId', 'factor']
     },
-    call: (engine, { wcId, factor }) => engine.setZoom(wcId, factor),
+    call: (engine, { wcId, factor }) => engine.setZoom(wcId, factor)
   },
   {
     name: 'printToPDF',
-    description: 'Render the tab identified by wcId to a PDF and return it as base64. Refuses internal goldfinch:// pages. Foreground-first (activates a backgrounded tab before rendering).',
+    description:
+      'Render the tab identified by wcId to a PDF and return it as base64. Refuses internal goldfinch:// pages. Foreground-first (activates a backgrounded tab before rendering).',
     inputSchema: {
       type: 'object',
       properties: {
-        wcId: { type: 'integer', description: 'webContents id of the target tab' },
+        wcId: { type: 'integer', description: 'webContents id of the target tab' }
       },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.printToPDF(wcId),
+    call: (engine, { wcId }) => engine.printToPDF(wcId)
   },
   {
     name: 'findInPage',
-    description: 'Search for text in the tab identified by wcId; returns { activeMatchOrdinal, matches }. Use findNext:true to step (forward:true/false) through matches; matchCase for case-sensitive. Refuses internal goldfinch:// pages.',
+    description:
+      'Search for text in the tab identified by wcId; returns { activeMatchOrdinal, matches }. Use findNext:true to step (forward:true/false) through matches; matchCase for case-sensitive. Refuses internal goldfinch:// pages.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
         text: { type: 'string', description: 'text to search for' },
         forward: { type: 'boolean', description: 'step direction when findNext; default true' },
-        findNext: { type: 'boolean', description: 'true = step to next/prev match; false/omitted = new search; default false' },
-        matchCase: { type: 'boolean', description: 'case-sensitive match; default false' },
+        findNext: {
+          type: 'boolean',
+          description: 'true = step to next/prev match; false/omitted = new search; default false'
+        },
+        matchCase: { type: 'boolean', description: 'case-sensitive match; default false' }
       },
-      required: ['wcId', 'text'],
+      required: ['wcId', 'text']
     },
     call: (engine, { wcId, text, forward, findNext, matchCase }) =>
-      engine.findInPage(wcId, text, { forward, findNext, matchCase }),
+      engine.findInPage(wcId, text, { forward, findNext, matchCase })
   },
   {
     name: 'stopFindInPage',
-    description: 'Clear the find session on the tab identified by wcId (clearSelection). Returns {"ok":true}. Refuses internal goldfinch:// pages.',
+    description:
+      'Clear the find session on the tab identified by wcId (clearSelection). Returns {"ok":true}. Refuses internal goldfinch:// pages.',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
-    call: (engine, { wcId }) => engine.stopFindInPage(wcId),
+    call: (engine, { wcId }) => engine.stopFindInPage(wcId)
   },
   {
     name: 'click',
-    description: 'Synthetic mouse click at (x, y) in the target tab\'s viewport. Coordinates are guest-viewport-relative.',
+    description:
+      "Synthetic mouse click at (x, y) in the target tab's viewport. Coordinates are guest-viewport-relative.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -285,29 +301,29 @@ const DRIVE_TOOLS = [
         x: { type: 'number', description: 'viewport x coordinate' },
         y: { type: 'number', description: 'viewport y coordinate' },
         button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'mouse button (default left)' },
-        clickCount: { type: 'integer', description: 'click count (default 1; 2 for double-click)' },
+        clickCount: { type: 'integer', description: 'click count (default 1; 2 for double-click)' }
       },
-      required: ['wcId', 'x', 'y'],
+      required: ['wcId', 'x', 'y']
     },
-    call: (engine, { wcId, x, y, button, clickCount }) =>
-      engine.click(wcId, x, y, { button, clickCount }),
+    call: (engine, { wcId, x, y, button, clickCount }) => engine.click(wcId, x, y, { button, clickCount })
   },
   {
     name: 'typeText',
-    description: 'Type text character-by-character into the focused element of the target tab. For named keys (Enter/Tab/…) use pressKey.',
+    description:
+      'Type text character-by-character into the focused element of the target tab. For named keys (Enter/Tab/…) use pressKey.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        text: { type: 'string', description: 'text to type' },
+        text: { type: 'string', description: 'text to type' }
       },
-      required: ['wcId', 'text'],
+      required: ['wcId', 'text']
     },
-    call: (engine, { wcId, text }) => engine.typeText(wcId, text),
+    call: (engine, { wcId, text }) => engine.typeText(wcId, text)
   },
   {
     name: 'scroll',
-    description: 'Synthetic scroll-wheel event at (x, y) in the target tab\'s viewport by pixel deltas (dx, dy).',
+    description: "Synthetic scroll-wheel event at (x, y) in the target tab's viewport by pixel deltas (dx, dy).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -315,35 +331,46 @@ const DRIVE_TOOLS = [
         x: { type: 'number', description: 'viewport x coordinate of the wheel event' },
         y: { type: 'number', description: 'viewport y coordinate of the wheel event' },
         dx: { type: 'number', description: 'pixel delta on the X axis' },
-        dy: { type: 'number', description: 'pixel delta on the Y axis' },
+        dy: { type: 'number', description: 'pixel delta on the Y axis' }
       },
-      required: ['wcId', 'x', 'y', 'dx', 'dy'],
+      required: ['wcId', 'x', 'y', 'dx', 'dy']
     },
-    call: (engine, { wcId, x, y, dx, dy }) => engine.scroll(wcId, x, y, dx, dy),
+    call: (engine, { wcId, x, y, dx, dy }) => engine.scroll(wcId, x, y, dx, dy)
   },
   {
     name: 'pressKey',
     description:
       'Press a named key (keyDown + keyUp) in the target tab. The key is given as `name` (preferred) or `key` (accepted alias) — exactly one is required, alongside wcId. Valid key names: ' +
-      PRESS_KEY_NAMES + ', or a single printable letter/digit (e.g. "M", "1") for use with `modifiers`. ' +
+      PRESS_KEY_NAMES +
+      ', or a single printable letter/digit (e.g. "M", "1") for use with `modifiers`. ' +
       'Pass `modifiers` to send a chord (e.g. name "M" + modifiers ["control"] = Ctrl+M).',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        name: { type: 'string', description: 'friendly key name (preferred) — one of: ' + PRESS_KEY_NAMES + ', or a single printable letter/digit for chords' },
-        key: { type: 'string', description: 'accepted alias for `name` — one of: ' + PRESS_KEY_NAMES + ', or a single printable letter/digit for chords' },
+        name: {
+          type: 'string',
+          description:
+            'friendly key name (preferred) — one of: ' +
+            PRESS_KEY_NAMES +
+            ', or a single printable letter/digit for chords'
+        },
+        key: {
+          type: 'string',
+          description:
+            'accepted alias for `name` — one of: ' + PRESS_KEY_NAMES + ', or a single printable letter/digit for chords'
+        },
         modifiers: {
           type: 'array',
           items: { type: 'string', enum: ['control', 'shift', 'alt', 'meta'] },
-          description: 'optional modifier keys held during the press (e.g. ["control"] for Ctrl+M)',
-        },
+          description: 'optional modifier keys held during the press (e.g. ["control"] for Ctrl+M)'
+        }
       },
       // wcId is always required; the key may arrive as `name` (preferred) or `key`
       // (alias). The "at least one of name/key" contract is enforced in `call`
       // (runtime guard) rather than a top-level schema combinator, which strict
       // MCP consumers reject (#56/SC9).
-      required: ['wcId'],
+      required: ['wcId']
     },
     // name primary, key alias (??: an explicit `name` wins; falls back to `key`).
     call: (engine, args) => {
@@ -355,11 +382,12 @@ const DRIVE_TOOLS = [
         throw new Error("automation: pressKey requires 'name' or 'key'");
       }
       return engine.pressKey(args.wcId, args.name ?? args.key, args.modifiers);
-    },
+    }
   },
   {
     name: 'dragPointer',
-    description: 'Synthetic pointer drag in the target tab\'s viewport (M09 F2 Leg 2 DD4): mouseDown at `from`, ' +
+    description:
+      "Synthetic pointer drag in the target tab's viewport (M09 F2 Leg 2 DD4): mouseDown at `from`, " +
       'N interpolated mouseMove events with the button held, then mouseUp at `to`. Coordinates are viewport-relative ' +
       '(same space as click). Use for drag-and-drop gestures a plain click cannot express (e.g. tab reorder). ' +
       '`steps` (default 12) controls the number of interpolated intermediate mouseMove events; each event is paced ' +
@@ -369,26 +397,29 @@ const DRIVE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        wcId: { type: 'integer', description: 'webContents id of the target tab (or the chrome wcId from getChromeTarget)' },
+        wcId: {
+          type: 'integer',
+          description: 'webContents id of the target tab (or the chrome wcId from getChromeTarget)'
+        },
         from: {
           type: 'object',
           properties: { x: { type: 'number' }, y: { type: 'number' } },
           required: ['x', 'y'],
-          description: 'drag start point (viewport coordinates)',
+          description: 'drag start point (viewport coordinates)'
         },
         to: {
           type: 'object',
           properties: { x: { type: 'number' }, y: { type: 'number' } },
           required: ['x', 'y'],
-          description: 'drag end point (viewport coordinates)',
+          description: 'drag end point (viewport coordinates)'
         },
         steps: { type: 'integer', description: 'number of interpolated intermediate mouseMove events (default 12)' },
-        stepDelayMs: { type: 'integer', description: 'delay (ms) between paced events (default 4)' },
+        stepDelayMs: { type: 'integer', description: 'delay (ms) between paced events (default 4)' }
       },
-      required: ['wcId', 'from', 'to'],
+      required: ['wcId', 'from', 'to']
     },
-    call: (engine, { wcId, from, to, steps, stepDelayMs }) => engine.dragPointer(wcId, from, to, { steps, stepDelayMs }),
-  },
+    call: (engine, { wcId, from, to, steps, stepDelayMs }) => engine.dragPointer(wcId, from, to, { steps, stepDelayMs })
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -405,62 +436,70 @@ const DRIVE_TOOLS = [
 const OBSERVE_TOOLS = [
   {
     name: 'captureScreenshot',
-    description: 'Capture a PNG screenshot of the tab identified by wcId (foreground-first; the tab is brought to front before capture). Returns image content. Optional delayMs tunes the paint-settle wait after foregrounding.',
+    description:
+      'Capture a PNG screenshot of the tab identified by wcId (foreground-first; the tab is brought to front before capture). Returns image content. Optional delayMs tunes the paint-settle wait after foregrounding.',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        delayMs: { type: 'integer', description: 'paint-settle delay (ms) after foregrounding before capture (optional tuning)' },
+        delayMs: {
+          type: 'integer',
+          description: 'paint-settle delay (ms) after foregrounding before capture (optional tuning)'
+        }
       },
-      required: ['wcId'],
+      required: ['wcId']
     },
     // delayMs absent → pass undefined (NOT {} / {delayMs:undefined}) so observe's
     // `{ delayMs } = {}` default + DEFAULT_PAINT_DELAY_MS apply cleanly (DD7 opts arg).
     call: (engine, { wcId, delayMs }) => engine.captureScreenshot(wcId, delayMs == null ? undefined : { delayMs }),
-    shape: imageResult,
+    shape: imageResult
   },
   {
     name: 'captureWindow',
-    description: 'Capture a PNG screenshot of a whole browser window (chrome + composited guests). windowId is OPTIONAL: omitted captures the last-focused window; an unknown id is refused with automation: no-such-window. Returns image content. Call enumerateWindows to learn the window ids (and which one is last-focused) — this op returns pixels, not topology.',
+    description:
+      'Capture a PNG screenshot of a whole browser window (chrome + composited guests). windowId is OPTIONAL: omitted captures the last-focused window; an unknown id is refused with automation: no-such-window. Returns image content. Call enumerateWindows to learn the window ids (and which one is last-focused) — this op returns pixels, not topology.',
     inputSchema: { type: 'object', properties: { windowId: { type: 'integer' } } },
     call: (engine, { windowId }) => engine.captureWindow({ windowId }),
     // F7 DD3: shape stays imageResult — this op's WIRE SHAPE IS UNCHANGED. imageResult
     // consumes the engine's return POSITIONALLY (a bare base64 string), so bolting a
     // windowId field onto it would yield a malformed image with NO error. Topology is
     // read via enumerateWindows, at the admin tier where it belongs.
-    shape: imageResult,
+    shape: imageResult
   },
   {
     name: 'readDom',
-    description: 'Read the live DOM of the tab identified by wcId. Does NOT foreground its target (M09 F7 DD6): a background tab — including one in another, unfocused window — is read where it sits, without activating it or raising its window. Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).',
+    description:
+      'Read the live DOM of the tab identified by wcId. Does NOT foreground its target (M09 F7 DD6): a background tab — including one in another, unfocused window — is read where it sits, without activating it or raising its window. Returns { url, title, html } as JSON text — the full live document.documentElement outerHTML (no trimming).',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
     // No `shape`: the { url, title, html } object rides the default JSON-text serialize.
-    call: (engine, { wcId }) => engine.readDom(wcId),
+    call: (engine, { wcId }) => engine.readDom(wcId)
   },
   {
     name: 'readAxTree',
-    description: 'Read the accessibility tree of the tab identified by wcId (foreground-first; uses the in-process debugger). Returns the AXNode array as JSON text on success, or a { automation: "debugger-unavailable", reason, wcId } object (a NORMAL result, not an error) when the debugger is busy — react by retrying or closing DevTools. CAVEAT (DD8): returned AXNodes carry backendNodeId/frameId that are CDP-session-scoped and stale-on-detach — informational only, NOT live references; address elements by coordinates/selectors for now.',
+    description:
+      'Read the accessibility tree of the tab identified by wcId (foreground-first; uses the in-process debugger). Returns the AXNode array as JSON text on success, or a { automation: "debugger-unavailable", reason, wcId } object (a NORMAL result, not an error) when the debugger is busy — react by retrying or closing DevTools. CAVEAT (DD8): returned AXNodes carry backendNodeId/frameId that are CDP-session-scoped and stale-on-detach — informational only, NOT live references; address elements by coordinates/selectors for now.',
     inputSchema: {
       // wcId ONLY: the engine op's depth/properties opts are an unimplemented Flight-9 stub
       // (observe.js ignores them) — exposing an ignored param would overpromise (DD8), so omit them.
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
     // No `shape` — DELIBERATE (DD6): the default serialize JSON-texts BOTH the success array
     // AND the debugger-unavailable refusal object as NORMAL results. The refusal is RETURNED
     // (not thrown) by the engine, so it is not an error — the agent must see it and react. Only
     // genuine throws (resolveContents bad/dead/internal, post-attach sendCommand failure) reach
     // callTool's try/catch → isError. No custom mapping is needed or wanted here.
-    call: (engine, { wcId }) => engine.readAxTree(wcId),
+    call: (engine, { wcId }) => engine.readAxTree(wcId)
   },
   {
     name: 'evaluate',
-    description: 'Evaluate a JavaScript expression in the target tab\'s MAIN WORLD via webContents.executeJavaScript (no CDP). ' +
+    description:
+      "Evaluate a JavaScript expression in the target tab's MAIN WORLD via webContents.executeJavaScript (no CDP). " +
       'Does NOT foreground its target (M09 F7 DD6): a background tab — including one in another, unfocused window — is evaluated where it sits, without activating it or raising its window. ' +
       'A returned Promise is natively awaited, so an async expression like axe.run(document) resolves before its value crosses back. ' +
       'The RETURN VALUE must be JSON-serializable — it is returned as JSON text. A non-JSON-serializable return (function, DOM node, circular object) ' +
@@ -470,16 +509,21 @@ const OBSERVE_TOOLS = [
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        expression: { type: 'string', description: 'JavaScript expression to evaluate in the guest main world; a returned Promise is awaited; the resolved value must be JSON-serializable' },
+        expression: {
+          type: 'string',
+          description:
+            'JavaScript expression to evaluate in the guest main world; a returned Promise is awaited; the resolved value must be JSON-serializable'
+        }
       },
-      required: ['wcId', 'expression'],
+      required: ['wcId', 'expression']
     },
     // No `shape`: the JSON-serializable return value rides the default JSON-text serialize.
-    call: (engine, { wcId, expression }) => engine.evaluate(wcId, expression),
+    call: (engine, { wcId, expression }) => engine.evaluate(wcId, expression)
   },
   {
     name: 'injectScript',
-    description: 'Inject and run a script in the target tab\'s MAIN WORLD via webContents.executeJavaScript (no CDP). ' +
+    description:
+      "Inject and run a script in the target tab's MAIN WORLD via webContents.executeJavaScript (no CDP). " +
       'VOID: defines globals / patches prototypes (e.g. the axe-core source, a farbling hook) and returns {"ok":true}. ' +
       'Unlike evaluate it SKIPS foreground-to-act activation (defining a global needs no paint). ' +
       'It makes NO persistence guarantee — globals it defines are not promised to survive across a later evaluate gap (a navigation clears them); ' +
@@ -489,13 +533,16 @@ const OBSERVE_TOOLS = [
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab' },
-        script: { type: 'string', description: 'JavaScript source to run in the guest main world (defines globals / patches prototypes)' },
+        script: {
+          type: 'string',
+          description: 'JavaScript source to run in the guest main world (defines globals / patches prototypes)'
+        }
       },
-      required: ['wcId', 'script'],
+      required: ['wcId', 'script']
     },
     // No `shape`: void return → {"ok":true} via the default serialize.
-    call: (engine, { wcId, script }) => engine.injectScript(wcId, script),
-  },
+    call: (engine, { wcId, script }) => engine.injectScript(wcId, script)
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -511,7 +558,8 @@ const OBSERVE_TOOLS = [
 const DEVTOOLS_TOOLS = [
   {
     name: 'openDevTools',
-    description: 'Open the DevTools front-end (detached OS window — {mode:"detach"}, WSLg-friendly) on the tab identified by wcId. ' +
+    description:
+      'Open the DevTools front-end (detached OS window — {mode:"detach"}, WSLg-friendly) on the tab identified by wcId. ' +
       'Returns {"ok":true} (void). Jar-scoped guests / admin chrome; the internal goldfinch://settings session is ALWAYS excluded (even for admin). ' +
       'Opening DevTools establishes a CDP client on the tab, so a CONCURRENT readAxTree/scroll (which attach the in-process debugger) will surface a ' +
       '"debugger-unavailable" / attach-failed result — that is EXPECTED, not a regression. By contrast evaluate/injectScript keep working under DevTools ' +
@@ -519,24 +567,25 @@ const DEVTOOLS_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
     // No `shape`: void return → {"ok":true} via the default serialize.
-    call: (engine, { wcId }) => engine.openDevTools(wcId),
+    call: (engine, { wcId }) => engine.openDevTools(wcId)
   },
   {
     name: 'closeDevTools',
-    description: 'Close the DevTools front-end on the tab identified by wcId, releasing the CDP client (so a subsequent readAxTree/scroll can attach again). ' +
+    description:
+      'Close the DevTools front-end on the tab identified by wcId, releasing the CDP client (so a subsequent readAxTree/scroll can attach again). ' +
       'Returns {"ok":true} (void). IDEMPOTENT — closing when DevTools is not open is a no-op. ' +
       'The internal goldfinch://settings session is ALWAYS excluded (even for admin).',
     inputSchema: {
       type: 'object',
       properties: { wcId: { type: 'integer', description: 'webContents id of the target tab' } },
-      required: ['wcId'],
+      required: ['wcId']
     },
     // No `shape`: void return → {"ok":true} via the default serialize.
-    call: (engine, { wcId }) => engine.closeDevTools(wcId),
-  },
+    call: (engine, { wcId }) => engine.closeDevTools(wcId)
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -552,22 +601,24 @@ const DEVTOOLS_TOOLS = [
 const CHROME_TOOLS = [
   {
     name: 'getChromeTarget',
-    description: 'ADMIN ONLY. Return a chrome renderer\'s automation target: { wcId, kind: "chrome", url, windowId }. The returned wcId is passed to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). windowId is OPTIONAL: omitted returns the last-focused window\'s chrome; an unknown id is refused with automation: no-such-window. Jar keys are refused with automation: admin-only.',
+    description:
+      'ADMIN ONLY. Return a chrome renderer\'s automation target: { wcId, kind: "chrome", url, windowId }. The returned wcId is passed to the drive/observe tools to act on / read the app shell (tab strip, toolbar, menus). windowId is OPTIONAL: omitted returns the last-focused window\'s chrome; an unknown id is refused with automation: no-such-window. Jar keys are refused with automation: admin-only.',
     inputSchema: { type: 'object', properties: { windowId: { type: 'integer' } } },
-    call: (engine, { windowId }) => engine.getChromeTarget({ windowId }),
+    call: (engine, { windowId }) => engine.getChromeTarget({ windowId })
   },
   {
     name: 'enumerateWindows',
-    description: 'ADMIN ONLY. List every open browser window as an array of { windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }. The single window-topology discovery primitive: it resolves per-window overlay wcIds exactly (no id-space probing), and `booted` is the completeness signal for enumerateTabs — a window whose chrome has not booted contributes zero tab rows, so poll until every booted is true for a total census. sheetWcId/findWcId are ABSENT when that overlay has never been created (they are lazy); sheetVisible/findVisible are separate so "instantiated but hidden" is distinguishable from "never shown". lastFocused is main-side tracked, NOT an OS-focus claim. Script-opened POPUP windows are appended as extra entries of the DISTINCT shape { popupWcId, openerWindowId, url, title } — discriminate on popupWcId presence (popup entries carry no windowId). Jar keys are refused with automation: admin-only.',
+    description:
+      'ADMIN ONLY. List every open browser window as an array of { windowId, chromeWcId, booted, activeTabWcId, lastFocused, sheetWcId?, sheetVisible, findWcId?, findVisible }. The single window-topology discovery primitive: it resolves per-window overlay wcIds exactly (no id-space probing), and `booted` is the completeness signal for enumerateTabs — a window whose chrome has not booted contributes zero tab rows, so poll until every booted is true for a total census. sheetWcId/findWcId are ABSENT when that overlay has never been created (they are lazy); sheetVisible/findVisible are separate so "instantiated but hidden" is distinguishable from "never shown". lastFocused is main-side tracked, NOT an OS-focus claim. Script-opened POPUP windows are appended as extra entries of the DISTINCT shape { popupWcId, openerWindowId, url, title } — discriminate on popupWcId presence (popup entries carry no windowId). Jar keys are refused with automation: admin-only.',
     inputSchema: { type: 'object', properties: {} }, // no input, mirrors getChromeTarget's pre-F7 schema
-    call: (engine) => engine.enumerateWindows(),
+    call: (engine) => engine.enumerateWindows()
   },
   {
     name: 'downloadsList',
     description: 'List the app-level downloads (in-progress + completed history). Admin-only.',
     inputSchema: { type: 'object', properties: {} }, // no input, mirrors getChromeTarget
-    call: (engine) => engine.getDownloadsList(),
-  },
+    call: (engine) => engine.getDownloadsList()
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -584,18 +635,28 @@ const CHROME_TOOLS = [
 const HISTORY_TOOLS = [
   {
     name: 'getHistory',
-    description: 'Read browsing-history visits. Jar key: jarId is OPTIONAL and, if supplied, MUST be its own jar (a foreign jarId is refused with automation: out-of-jar). Admin: jarId is REQUIRED (admin has no implicit jar) and may name any known jar (an unknown jarId is refused with automation: unknown-jar). Provide query for a text search over url/title (before is not accepted together with query — automation: bad-args). Omit query to list recent visits (before pages backward). limit applies to either mode. Returns { jarId, visits } as JSON text.',
+    description:
+      'Read browsing-history visits. Jar key: jarId is OPTIONAL and, if supplied, MUST be its own jar (a foreign jarId is refused with automation: out-of-jar). Admin: jarId is REQUIRED (admin has no implicit jar) and may name any known jar (an unknown jarId is refused with automation: unknown-jar). Provide query for a text search over url/title (before is not accepted together with query — automation: bad-args). Omit query to list recent visits (before pages backward). limit applies to either mode. Returns { jarId, visits } as JSON text.',
     inputSchema: {
       type: 'object',
       properties: {
-        jarId: { type: 'string', description: 'Target jar id. Jar key: optional, must be its own jar if supplied. Admin: required.' },
-        query: { type: 'string', description: 'Text search query over recorded visits. Omit for recent visits. Cannot be combined with before.' },
+        jarId: {
+          type: 'string',
+          description: 'Target jar id. Jar key: optional, must be its own jar if supplied. Admin: required.'
+        },
+        query: {
+          type: 'string',
+          description: 'Text search query over recorded visits. Omit for recent visits. Cannot be combined with before.'
+        },
         limit: { type: 'integer', description: 'Max visits to return.' },
-        before: { type: 'integer', description: 'Pagination cursor for the recent-visits listing (not accepted together with query).' },
-      },
+        before: {
+          type: 'integer',
+          description: 'Pagination cursor for the recent-visits listing (not accepted together with query).'
+        }
+      }
     },
-    call: (engine, { jarId, query, limit, before }) => engine.getHistory(jarId, { query, limit, before }),
-  },
+    call: (engine, { jarId, query, limit, before }) => engine.getHistory(jarId, { query, limit, before })
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -619,8 +680,9 @@ const HISTORY_TOOLS = [
 const VAULT_TOOLS = [
   {
     name: 'vaultUnlock',
-    description: 'Unlock the password vaults reachable by THIS automation session, using the presented access secret. ' +
-      'A JAR key\'s session interprets accessKey as that jar\'s per-jar vault access secret and unlocks ONLY that jar\'s vault ' +
+    description:
+      'Unlock the password vaults reachable by THIS automation session, using the presented access secret. ' +
+      "A JAR key's session interprets accessKey as that jar's per-jar vault access secret and unlocks ONLY that jar's vault " +
       '(a per-jar access key holds no envelope for the global vault or sibling jars — global logins via automation require the admin key). ' +
       'An ADMIN session interprets accessKey as the X25519 admin private key (base64) and unlocks EVERY vault. ' +
       'Returns { unlocked: [vaultId, …] } — a wrong/foreign key unlocks nothing ({ unlocked: [] }), a NORMAL result, not an error. ' +
@@ -628,44 +690,57 @@ const VAULT_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        accessKey: { type: 'string', description: 'the per-jar vault access secret (jar session) or the X25519 admin private key in base64 (admin session)' },
+        accessKey: {
+          type: 'string',
+          description:
+            'the per-jar vault access secret (jar session) or the X25519 admin private key in base64 (admin session)'
+        }
       },
-      required: ['accessKey'],
+      required: ['accessKey']
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.unlock(args.accessKey),
+    call: (engine, args, vault) => vault.unlock(args.accessKey)
   },
   {
     name: 'vaultList',
-    description: 'List METADATA of the login items in this session\'s unlocked vaults: { vaultId, id, title, origin, username, hasTotp }. ' +
+    description:
+      "List METADATA of the login items in this session's unlocked vaults: { vaultId, id, title, origin, username, hasTotp }. " +
       'Metadata only — NEVER the password, TOTP secret, or card data. Only unlocked vaults contribute; an empty (locked) session lists nothing. ' +
       'Use the returned item id with vaultTotp / vaultFill.',
     inputSchema: { type: 'object', properties: {} },
     usesEngine: false,
-    call: (engine, args, vault) => vault.list(),
+    call: (engine, args, vault) => vault.list()
   },
   {
     name: 'vaultTotp',
-    description: 'Return ONLY the current TOTP code for a named unlocked item: { id, code }. ' +
+    description:
+      'Return ONLY the current TOTP code for a named unlocked item: { id, code }. ' +
       'code is null when the item is absent, not in an unlocked vault, has no TOTP, or is AMBIGUOUS — an item id can repeat ' +
-      'across vaults (e.g. the same bundle imported twice), so in a multi-vault session pass the item\'s vaultId (from vaultList) ' +
+      "across vaults (e.g. the same bundle imported twice), so in a multi-vault session pass the item's vaultId (from vaultList) " +
       'to select the intended one. The TOTP secret itself is never returned.',
     inputSchema: {
       type: 'object',
       properties: {
-        itemId: { type: 'string', description: 'the vault item id (from vaultList) whose current TOTP code to compute' },
-        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+        itemId: {
+          type: 'string',
+          description: 'the vault item id (from vaultList) whose current TOTP code to compute'
+        },
+        vaultId: {
+          type: 'string',
+          description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults'
+        }
       },
-      required: ['itemId'],
+      required: ['itemId']
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.totp(args.itemId, args.vaultId),
+    call: (engine, args, vault) => vault.totp(args.itemId, args.vaultId)
   },
   {
     name: 'vaultFill',
-    description: 'Fill an origin-matched login credential into the target tab (wcId). Resolves the item by id from an unlocked reachable vault, ' +
+    description:
+      'Fill an origin-matched login credential into the target tab (wcId). Resolves the item by id from an unlocked reachable vault, ' +
       'enforces jar membership (a jar session naming a foreign/sibling tab is refused with automation: out-of-jar) and a top-frame origin match ' +
-      'against the item, then performs the fill via Goldfinch\'s internal fill effect. ' +
+      "against the item, then performs the fill via Goldfinch's internal fill effect. " +
       'The credential/password is NEVER returned — the result is { filled: true, id, origin } on success (origin = the resolved top-frame ' +
       'origin the fill matched against; non-secret, no credential/password), or a NORMAL { filled: false, reason } ' +
       '(reason "locked" / "no-match" / "origin-mismatch" / "ambiguous") when nothing was filled. "ambiguous" means the item id ' +
@@ -676,36 +751,46 @@ const VAULT_TOOLS = [
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the target tab to fill into' },
         itemId: { type: 'string', description: 'the login item id (from vaultList) to fill' },
-        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+        vaultId: {
+          type: 'string',
+          description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults'
+        }
       },
-      required: ['wcId', 'itemId'],
+      required: ['wcId', 'itemId']
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
+    call: (engine, args, vault) => vault.fill({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId })
   },
   {
     name: 'vaultAnswerAuth',
-    description: 'Answer the target tab\'s pending HTTP auth challenge (the browser-owned basic-auth prompt) with an origin-matched ' +
+    description:
+      "Answer the target tab's pending HTTP auth challenge (the browser-owned basic-auth prompt) with an origin-matched " +
       'login credential from an unlocked reachable vault. Resolves the item by id, enforces jar membership (a jar session naming a ' +
-      'foreign/sibling tab is refused with automation: out-of-jar) and an origin match against the CHALLENGE URL\'s origin, then ' +
-      'resolves the challenge\'s native callback inside Goldfinch — a visible credential sheet for that challenge closes without ' +
+      "foreign/sibling tab is refused with automation: out-of-jar) and an origin match against the CHALLENGE URL's origin, then " +
+      "resolves the challenge's native callback inside Goldfinch — a visible credential sheet for that challenge closes without " +
       're-presenting. The credential/password is NEVER returned — the result is { answered: true, id, origin } on success, or a ' +
       'NORMAL { answered: false, reason } (reason "locked" / "no-challenge" / "no-match" / "origin-mismatch" / "ambiguous") when ' +
       'nothing was answered. "no-challenge" means the tab has no pending auth prompt. Requires wcId. A POPUP wcId works the same ' +
-      'way (a popup challenge presents on its opener\'s window; the origin match is still against the challenge URL, and ' +
+      "way (a popup challenge presents on its opener's window; the origin match is still against the challenge URL, and " +
       'certificate challenges remain invisible to this tool).',
     inputSchema: {
       type: 'object',
       properties: {
         wcId: { type: 'integer', description: 'webContents id of the tab whose pending auth challenge to answer' },
-        itemId: { type: 'string', description: 'the login item id (from vaultList) whose credential answers the challenge' },
-        vaultId: { type: 'string', description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults' },
+        itemId: {
+          type: 'string',
+          description: 'the login item id (from vaultList) whose credential answers the challenge'
+        },
+        vaultId: {
+          type: 'string',
+          description: 'optional vault id (from vaultList) disambiguating an item id shared across vaults'
+        }
       },
-      required: ['wcId', 'itemId'],
+      required: ['wcId', 'itemId']
     },
     usesEngine: false,
-    call: (engine, args, vault) => vault.answerAuth({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId }),
-  },
+    call: (engine, args, vault) => vault.answerAuth({ wcId: args.wcId, itemId: args.itemId, vaultId: args.vaultId })
+  }
 ];
 
 // The full tool table — 18 drive + 6 observe (4 + 2 Flight-9 eval) + 2 devtools + 3

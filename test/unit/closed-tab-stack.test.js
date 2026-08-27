@@ -22,7 +22,7 @@ function makeEntry(overrides = {}) {
     navEntries: [{ url: 'https://example.com/', title: 'Example' }],
     navIndex: 0,
     closedAt: 1700000000000,
-    ...overrides,
+    ...overrides
   };
 }
 
@@ -111,10 +111,10 @@ test('entry-shape passthrough — push/pop preserves every field unchanged', () 
     stripIndex: 4,
     navEntries: [
       { url: 'https://example.com/', title: 'Home' },
-      { url: 'https://example.com/deep/path?x=1', title: 'Deep Page' },
+      { url: 'https://example.com/deep/path?x=1', title: 'Deep Page' }
     ],
     navIndex: 1,
-    closedAt: 1234567890,
+    closedAt: 1234567890
   });
   stack.push(entry);
   const popped = stack.pop();
@@ -156,7 +156,7 @@ test('fromJSON() bounds an over-capacity snapshot to maxEntries, keeping the NEW
     'https://28.example/',
     'https://27.example/',
     'https://26.example/',
-    'https://25.example/',
+    'https://25.example/'
   ]);
 });
 

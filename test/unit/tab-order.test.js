@@ -185,8 +185,11 @@ test('dropIndexFromPointer: EXTERNAL SOURCE — the range is [0, length], INCLUD
   assert.equal(dropIndexFromPointer(FOUR_SLOTS, 60, -1), 1);
   assert.equal(dropIndexFromPointer(FOUR_SLOTS, 160, -1), 2);
   assert.equal(dropIndexFromPointer(FOUR_SLOTS, 260, -1), 3);
-  assert.equal(dropIndexFromPointer(FOUR_SLOTS, 999, -1), 4,
-    'PAST THE END — do not clamp this to length - 1; overflowDropToIndex and barDropToIndex own the clamping');
+  assert.equal(
+    dropIndexFromPointer(FOUR_SLOTS, 999, -1),
+    4,
+    'PAST THE END — do not clamp this to length - 1; overflowDropToIndex and barDropToIndex own the clamping'
+  );
   // The tie rule is unchanged by the external-source form: exactly on a midpoint
   // resolves "before".
   assert.equal(dropIndexFromPointer(FOUR_SLOTS, 150, -1), 1);

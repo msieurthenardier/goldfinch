@@ -18,7 +18,7 @@ const {
   overflowIndicatorY,
   overflowDropToIndex,
   barDropToIndex,
-  isOverChevron,
+  isOverChevron
 } = require('../../src/shared/bookmark-drag.js');
 const { dropIndexFromPointer, moveIndex } = require('../../src/shared/tab-order.js');
 
@@ -42,28 +42,27 @@ test('BOOKMARK_DND_MIME is the DD2 custom type, single-sourced', () => {
 // ---------------------------------------------------------------------------
 
 test('visibleSlotRects — passes visible slots through in order, {left,width} only', () => {
-  assert.deepEqual(
-    visibleSlotRects([slot(0, 100), slot(100, 60), slot(160, 40)]),
-    [{ left: 0, width: 100 }, { left: 100, width: 60 }, { left: 160, width: 40 }],
-  );
+  assert.deepEqual(visibleSlotRects([slot(0, 100), slot(100, 60), slot(160, 40)]), [
+    { left: 0, width: 100 },
+    { left: 100, width: 60 },
+    { left: 160, width: 40 }
+  ]);
 });
 
 test('visibleSlotRects — the display:none overflow TAIL is filtered out', () => {
   // Hidden items report a zero-width rect AT LEFT 0 (that is what display:none
   // does to getBoundingClientRect), which is precisely why they must not reach
   // dropIndexFromPointer.
-  const assembled = visibleSlotRects([
-    slot(0, 100), slot(100, 100), slot(0, 0, true), slot(0, 0, true),
+  const assembled = visibleSlotRects([slot(0, 100), slot(100, 100), slot(0, 0, true), slot(0, 0, true)]);
+  assert.deepEqual(assembled, [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 }
   ]);
-  assert.deepEqual(assembled, [{ left: 0, width: 100 }, { left: 100, width: 100 }]);
 });
 
 test('visibleSlotRects — DISCRIMINATING case: visible items on BOTH sides of the pointer AND hidden items', () => {
   // Four visible items across 0..400, then two overflowed ones at left 0.
-  const items = [
-    slot(0, 100), slot(100, 100), slot(200, 100), slot(300, 100),
-    slot(0, 0, true), slot(0, 0, true),
-  ];
+  const items = [slot(0, 100), slot(100, 100), slot(200, 100), slot(300, 100), slot(0, 0, true), slot(0, 0, true)];
   const filtered = visibleSlotRects(items);
   const raw = items.map((i) => i.rect); // what a careless implementation would pass
 
@@ -78,7 +77,7 @@ test('visibleSlotRects — DISCRIMINATING case: visible items on BOTH sides of t
   assert.equal(
     dropIndexFromPointer(raw, pointerX, draggedIndex) - dropIndexFromPointer(filtered, pointerX, draggedIndex),
     2,
-    'the inflation is exactly the number of hidden items — the defect this filtering exists to prevent',
+    'the inflation is exactly the number of hidden items — the defect this filtering exists to prevent'
   );
 });
 
@@ -89,8 +88,11 @@ test('visibleSlotRects — because the hide is a strict tail, the returned index
   const assembled = visibleSlotRects(items);
   assert.equal(assembled.length, 3);
   assembled.forEach((rect, i) => {
-    assert.deepEqual(rect, { left: items[i].rect.left, width: items[i].rect.width },
-      `assembled[${i}] must describe full-list item ${i}`);
+    assert.deepEqual(
+      rect,
+      { left: items[i].rect.left, width: items[i].rect.width },
+      `assembled[${i}] must describe full-list item ${i}`
+    );
   });
 });
 
@@ -108,10 +110,7 @@ test('visibleSlotRects — degenerate input resolves to the NON-DESTRUCTIVE outc
 });
 
 test('visibleSlotRects — an unreadable HIDDEN item is harmless (never measured)', () => {
-  assert.deepEqual(
-    visibleSlotRects([slot(0, 100), { rect: null, hidden: true }]),
-    [{ left: 0, width: 100 }],
-  );
+  assert.deepEqual(visibleSlotRects([slot(0, 100), { rect: null, hidden: true }]), [{ left: 0, width: 100 }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -119,18 +118,25 @@ test('visibleSlotRects — an unreadable HIDDEN item is harmless (never measured
 // ---------------------------------------------------------------------------
 
 test('classifyBookmarkDrop — inside the bar reorders, index is EXACTLY dropIndexFromPointer', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   for (const x of [10, 60, 150, 250, 299]) {
     assert.deepEqual(
       classifyBookmarkDrop(BAR, slots, x, 115, 0),
       { zone: 'reorder', index: dropIndexFromPointer(slots, x, 0) },
-      `x=${x}: the module adds the y-test and nothing else`,
+      `x=${x}: the module adds the y-test and nothing else`
     );
   }
 });
 
 test('classifyBookmarkDrop — outside the bar on ANY edge is `outside`, no index', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 }
+  ];
   assert.deepEqual(classifyBookmarkDrop(BAR, slots, -1, 115, 0), { zone: 'outside' }); // left
   assert.deepEqual(classifyBookmarkDrop(BAR, slots, 401, 115, 0), { zone: 'outside' }); // right
   assert.deepEqual(classifyBookmarkDrop(BAR, slots, 50, 99, 0), { zone: 'outside' }); // above
@@ -139,7 +145,12 @@ test('classifyBookmarkDrop — outside the bar on ANY edge is `outside`, no inde
 
 test('classifyBookmarkDrop — all four edges are INCLUSIVE (a pointer on the boundary still reorders)', () => {
   const slots = [{ left: 0, width: 100 }];
-  for (const [x, y] of [[0, 100], [400, 130], [0, 130], [400, 100]]) {
+  for (const [x, y] of [
+    [0, 100],
+    [400, 130],
+    [0, 130],
+    [400, 100]
+  ]) {
     assert.equal(classifyBookmarkDrop(BAR, slots, x, y, 0).zone, 'reorder', `(${x},${y}) is on the boundary`);
   }
 });
@@ -181,7 +192,11 @@ test('isInsideBar — exported predicate is the positive phrasing (unreadable ->
 // ---------------------------------------------------------------------------
 
 test('classifyBookmarkDrop + moveIndex compose exactly — forward move is not off-by-one', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   const order = ['a', 'b', 'c'];
   // Drag 'a' (index 0) to past 'c''s midpoint (250 > 250 is false; use 260).
   const zone = classifyBookmarkDrop(BAR, slots, 260, 115, 0);
@@ -190,7 +205,11 @@ test('classifyBookmarkDrop + moveIndex compose exactly — forward move is not o
 });
 
 test('classifyBookmarkDrop + moveIndex compose exactly — backward move', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   const order = ['a', 'b', 'c'];
   const zone = classifyBookmarkDrop(BAR, slots, 110, 115, 2); // drag 'c' back over 'b'
   assert.deepEqual(zone, { zone: 'reorder', index: 1 });
@@ -198,7 +217,11 @@ test('classifyBookmarkDrop + moveIndex compose exactly — backward move', () =>
 });
 
 test('moveIndex returns the SAME REFERENCE for a drop back into the original position (AC4)', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   const order = ['a', 'b', 'c'];
   const zone = classifyBookmarkDrop(BAR, slots, 60, 115, 0); // still in slot 0's half
   assert.deepEqual(zone, { zone: 'reorder', index: 0 });
@@ -215,7 +238,11 @@ test('moveIndex no-ops when the dragged id vanished mid-drag (Edge Case)', () =>
 // ---------------------------------------------------------------------------
 
 test('indicatorX — points at the left edge of the slot that would FOLLOW the drop', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   // Dragging slot 0: remaining run is [slot1, slot2].
   assert.equal(indicatorX(slots, 0, 0), 100); // before slot1
   assert.equal(indicatorX(slots, 1, 0), 200); // between slot1 and slot2
@@ -223,7 +250,11 @@ test('indicatorX — points at the left edge of the slot that would FOLLOW the d
 });
 
 test('indicatorX — the dragged slot is excluded from the remaining run', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }, { left: 200, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 },
+    { left: 200, width: 100 }
+  ];
   // Dragging slot 1: remaining run is [slot0, slot2].
   assert.equal(indicatorX(slots, 0, 1), 0);
   assert.equal(indicatorX(slots, 1, 1), 200);
@@ -231,7 +262,10 @@ test('indicatorX — the dragged slot is excluded from the remaining run', () =>
 });
 
 test('indicatorX — an external drag source (draggedIndex -1) leaves every slot in the run', () => {
-  const slots = [{ left: 0, width: 100 }, { left: 100, width: 100 }];
+  const slots = [
+    { left: 0, width: 100 },
+    { left: 100, width: 100 }
+  ];
   assert.equal(indicatorX(slots, 0, -1), 0);
   assert.equal(indicatorX(slots, 2, -1), 200);
 });
@@ -240,8 +274,28 @@ test('indicatorX — degenerate inputs return null so the caller HIDES rather th
   assert.equal(indicatorX([], 0, 0), null);
   assert.equal(indicatorX(/** @type {any} */ (null), 0, 0), null);
   assert.equal(indicatorX([{ left: 0, width: 10 }], 0, 0), null, 'the only slot is the dragged one — nothing remains');
-  assert.equal(indicatorX([{ left: 0, width: 10 }, { left: 10, width: 10 }], -1, 0), null);
-  assert.equal(indicatorX([{ left: 0, width: 10 }, { left: 10, width: 10 }], 1.5, 0), null);
+  assert.equal(
+    indicatorX(
+      [
+        { left: 0, width: 10 },
+        { left: 10, width: 10 }
+      ],
+      -1,
+      0
+    ),
+    null
+  );
+  assert.equal(
+    indicatorX(
+      [
+        { left: 0, width: 10 },
+        { left: 10, width: 10 }
+      ],
+      1.5,
+      0
+    ),
+    null
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -259,10 +313,16 @@ test('the module is pure — no DOM and no Electron reachable from its CODE', ()
   for (const forbidden of ['require(', 'document.', 'window.', 'getBoundingClientRect', 'electron']) {
     assert.equal(code.includes(forbidden), false, `bookmark-drag.js must stay pure — found "${forbidden}" in code`);
   }
-  assert.match(src, /^import \{ dropIndexFromPointer \} from '\.\/tab-order\.js';$/m,
-    'the midpoint rule is IMPORTED unchanged, never re-implemented here');
-  assert.equal(/function dropIndexFromPointer|left \+ width \/ 2/.test(code), false,
-    'the midpoint rule must not be re-derived here — it is imported');
+  assert.match(
+    src,
+    /^import \{ dropIndexFromPointer \} from '\.\/tab-order\.js';$/m,
+    'the midpoint rule is IMPORTED unchanged, never re-implemented here'
+  );
+  assert.equal(
+    /function dropIndexFromPointer|left \+ width \/ 2/.test(code),
+    false,
+    'the midpoint rule must not be re-derived here — it is imported'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -280,7 +340,7 @@ test('Leg 5a overflowDropIndexY — the midpoint rule, on the y axis', () => {
   assert.equal(overflowDropIndexY(ROWS, 237), 2);
   assert.equal(overflowDropIndexY(ROWS, 261), 3);
   assert.equal(overflowDropIndexY(ROWS, 285), 4, 'past the last row — the PAST-THE-END answer the clamp consumes');
-  assert.equal(overflowDropIndexY(ROWS, 9999), 4, 'a release on the menu\'s bottom padding resolves to end-of-list');
+  assert.equal(overflowDropIndexY(ROWS, 9999), 4, "a release on the menu's bottom padding resolves to end-of-list");
 });
 
 test('Leg 5a overflowDropIndexY — it DELEGATES to dropIndexFromPointer, external-source form', () => {
@@ -322,8 +382,8 @@ test('Leg 5a overflowIndicatorY — the top edge of the following row, or the bo
 // ---------------------------------------------------------------------------
 
 test('Leg 5a AC4: toIndex = min(visibleCount + k, n - 1) — pinned at k=0, k=1, k=last, k=past-the-end', () => {
-  const n = 12;       // order A..L
-  const visible = 8;  // overflow rows I,J,K,L
+  const n = 12; // order A..L
+  const visible = 8; // overflow rows I,J,K,L
   assert.equal(overflowDropToIndex(visible, 0, n), 8);
   assert.equal(overflowDropToIndex(visible, 1, n), 9);
   assert.equal(overflowDropToIndex(visible, 2, n), 10);
@@ -334,23 +394,36 @@ test('Leg 5a AC4: toIndex = min(visibleCount + k, n - 1) — pinned at k=0, k=1,
 test('Leg 5a AC4: the CLAMP is load-bearing — without it the drop is a SILENT NO-OP', () => {
   const order = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
   // The unclamped value moveIndex would receive for a drop past the last row.
-  assert.equal(moveIndex(order, 0, 8 + 4), order,
-    'toIndex === order.length is moveIndex\'s out-of-range no-op — SAME ARRAY REFERENCE, ' +
-    'which commitReorder reads as "nothing moved" and never calls the store');
+  assert.equal(
+    moveIndex(order, 0, 8 + 4),
+    order,
+    "toIndex === order.length is moveIndex's out-of-range no-op — SAME ARRAY REFERENCE, " +
+      'which commitReorder reads as "nothing moved" and never calls the store'
+  );
   // Clamped, the same gesture is a real move.
   assert.notEqual(moveIndex(order, 0, overflowDropToIndex(8, 4, order.length)), order);
 });
 
-test('Leg 5a AC4: degenerate input resolves to moveIndex\'s no-op, not to position 0', () => {
+test("Leg 5a AC4: degenerate input resolves to moveIndex's no-op, not to position 0", () => {
   for (const args of [
-    [-1, 0, 12], [8, -1, 12], [8, 0, 0], [8.5, 0, 12], [8, 0.5, 12], [8, 0, 12.5],
-    ['8', 0, 12], [8, null, 12], [8, 0, undefined],
+    [-1, 0, 12],
+    [8, -1, 12],
+    [8, 0, 0],
+    [8.5, 0, 12],
+    [8, 0.5, 12],
+    [8, 0, 12.5],
+    ['8', 0, 12],
+    [8, null, 12],
+    [8, 0, undefined]
   ]) {
     assert.equal(overflowDropToIndex(...args), -1, JSON.stringify(args));
   }
   const order = ['a', 'b', 'c'];
-  assert.equal(moveIndex(order, 0, overflowDropToIndex(-1, 0, 3)), order,
-    '-1 is out of range for moveIndex, so it returns the SAME reference and commitReorder skips the store call');
+  assert.equal(
+    moveIndex(order, 0, overflowDropToIndex(-1, 0, 3)),
+    order,
+    '-1 is out of range for moveIndex, so it returns the SAME reference and commitReorder skips the store call'
+  );
 });
 
 test('Leg 5a isOverChevron — containment, and a ZERO-AREA (hidden) chevron never hits', () => {
@@ -405,10 +478,23 @@ test('Leg 5b barDropToIndex — the whole range on ONE fixture, every term load-
   assert.equal(barDropToIndex(3, 5), 3);
 });
 
-test('Leg 5b barDropToIndex — degenerate input resolves to moveIndex\'s no-op, not to position 0', () => {
-  for (const [k, v] of [[-1, 3], [1.5, 3], [NaN, 3], ['1', 3], [null, 3], [0, 0], [0, -1], [0, 1.5], [0, '3']]) {
-    assert.equal(barDropToIndex(/** @type {any} */ (k), /** @type {any} */ (v)), -1,
-      `barDropToIndex(${String(k)}, ${String(v)}) must refuse rather than guess`);
+test("Leg 5b barDropToIndex — degenerate input resolves to moveIndex's no-op, not to position 0", () => {
+  for (const [k, v] of [
+    [-1, 3],
+    [1.5, 3],
+    [NaN, 3],
+    ['1', 3],
+    [null, 3],
+    [0, 0],
+    [0, -1],
+    [0, 1.5],
+    [0, '3']
+  ]) {
+    assert.equal(
+      barDropToIndex(/** @type {any} */ (k), /** @type {any} */ (v)),
+      -1,
+      `barDropToIndex(${String(k)}, ${String(v)}) must refuse rather than guess`
+    );
   }
   // …and -1 is the NON-DESTRUCTIVE outcome because moveIndex no-ops on it —
   // asserted as a fact about moveIndex, not as a claim about our code.

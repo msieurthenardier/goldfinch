@@ -104,20 +104,14 @@ test('open() on an empty temp dir creates history.db with schema v1 objects', ()
           check.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','trigger')").all()
         ).map((r) => r.name)
       );
-      for (const expected of [
-        'visits',
-        'visits_fts',
-        'visits_ai',
-        'visits_ad',
-        'visits_au'
-      ]) {
+      for (const expected of ['visits', 'visits_fts', 'visits_ai', 'visits_ad', 'visits_au']) {
         assert.ok(names.has(expected), `sqlite_master should contain ${expected}`);
       }
 
       const indexNames = new Set(
-        /** @type {any[]} */ (
-          check.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all()
-        ).map((r) => r.name)
+        /** @type {any[]} */ (check.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all()).map(
+          (r) => r.name
+        )
       );
       assert.ok(indexNames.has('visits_jar_time'));
       assert.ok(indexNames.has('visits_jar_url'));
@@ -170,7 +164,10 @@ test('full API round-trips: record -> listRecent -> setTitle -> search -> delete
 
     // listRecent: DESC order
     const recent = store.listRecent('a');
-    assert.deepEqual(recent.map((r) => r.id), [id2, id1]);
+    assert.deepEqual(
+      recent.map((r) => r.id),
+      [id2, id1]
+    );
     assert.equal(recent[1].title, 'Example Page');
     assert.equal(recent[0].title, null);
 
@@ -182,10 +179,7 @@ test('full API round-trips: record -> listRecent -> setTitle -> search -> delete
 
     // search
     const found = store.search('a', 'exam');
-    assert.deepEqual(
-      found.map((r) => r.id).sort(),
-      [id1, id2].sort()
-    );
+    assert.deepEqual(found.map((r) => r.id).sort(), [id1, id2].sort());
 
     // countByJar
     assert.equal(store.countByJar('a'), 2);
@@ -220,26 +214,15 @@ test('recordVisit validates jarId/url/visitedAt and throws TypeError', () => {
     const store = freshStore();
     store.open(dir);
 
-    assert.throws(
-      () => store.recordVisit({ jarId: '', url: 'https://x/', visitedAt: 1 }),
-      TypeError
-    );
-    assert.throws(
-      () => store.recordVisit({ jarId: 'a', url: '', visitedAt: 1 }),
-      TypeError
-    );
-    assert.throws(
-      () => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: NaN }),
-      TypeError
-    );
+    assert.throws(() => store.recordVisit({ jarId: '', url: 'https://x/', visitedAt: 1 }), TypeError);
+    assert.throws(() => store.recordVisit({ jarId: 'a', url: '', visitedAt: 1 }), TypeError);
+    assert.throws(() => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: NaN }), TypeError);
     assert.throws(
       () => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: /** @type {any} */ ('x') }),
       TypeError
     );
     // title omitted (nullable/optional) must not throw.
-    assert.doesNotThrow(() =>
-      store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: 1 })
-    );
+    assert.doesNotThrow(() => store.recordVisit({ jarId: 'a', url: 'https://x/', visitedAt: 1 }));
   } finally {
     removeTempDir(dir);
   }
@@ -260,10 +243,7 @@ test('cross-jar isolation: reads, deletes, clears, and cursors never cross jars'
 
     // listRecent(A) only returns A rows.
     const aRecent = store.listRecent('a');
-    assert.deepEqual(
-      aRecent.map((r) => r.id).sort(),
-      [aId1, aId2].sort()
-    );
+    assert.deepEqual(aRecent.map((r) => r.id).sort(), [aId1, aId2].sort());
 
     // search(A) only returns A rows, even for a token also present in jar B's title.
     const aSearch = store.search('a', 'One Two');
@@ -320,7 +300,10 @@ test('search: prefix matching works ("exam" matches https://example.com/...)', (
       visitedAt: 1000
     });
     const results = store.search('a', 'exam');
-    assert.deepEqual(results.map((r) => r.id), [id]);
+    assert.deepEqual(
+      results.map((r) => r.id),
+      [id]
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -355,11 +338,17 @@ test('title backfill: setTitle updates the row AND the FTS shadow', () => {
       visitedAt: 1000
     });
 
-    assert.deepEqual(store.search('a', 'Distinctive').map((r) => r.id), [id]);
+    assert.deepEqual(
+      store.search('a', 'Distinctive').map((r) => r.id),
+      [id]
+    );
 
     store.setTitle(id, 'Brand New Title');
 
-    assert.deepEqual(store.search('a', 'Brand').map((r) => r.id), [id]);
+    assert.deepEqual(
+      store.search('a', 'Brand').map((r) => r.id),
+      [id]
+    );
     assert.deepEqual(store.search('a', 'Distinctive'), [], 'old title no longer indexed');
   } finally {
     removeTempDir(dir);
@@ -436,10 +425,10 @@ test('suggest: frequent-old outranks recent-rare — repeated old visits can out
     }
 
     const results = store.suggest('a', 'example', { now: SUGGEST_NOW, limit: 10 });
-    assert.deepEqual(results.map((r) => r.url), [
-      'https://frequent.example/',
-      'https://recent.example/'
-    ]);
+    assert.deepEqual(
+      results.map((r) => r.url),
+      ['https://frequent.example/', 'https://recent.example/']
+    );
     assert.equal(results[0].score, 110);
     assert.equal(results[1].score, 100);
   } finally {
@@ -459,11 +448,10 @@ test('suggest: tie-break stability — equal score and equal lastVisitedAt order
     store.recordVisit({ jarId: 'a', url: 'https://mmm.example/', title: 'tie', visitedAt: sameVisitedAt });
 
     const results = store.suggest('a', 'tie', { now: SUGGEST_NOW });
-    assert.deepEqual(results.map((r) => r.url), [
-      'https://aaa.example/',
-      'https://mmm.example/',
-      'https://zzz.example/'
-    ]);
+    assert.deepEqual(
+      results.map((r) => r.url),
+      ['https://aaa.example/', 'https://mmm.example/', 'https://zzz.example/']
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -479,10 +467,16 @@ test('suggest: per-jar isolation — suggestions never cross jars', () => {
     store.recordVisit({ jarId: 'b', url: 'https://b.example/', title: 'isolate', visitedAt: SUGGEST_NOW - DAY_MS });
 
     const aResults = store.suggest('a', 'isolate', { now: SUGGEST_NOW });
-    assert.deepEqual(aResults.map((r) => r.url), ['https://a.example/']);
+    assert.deepEqual(
+      aResults.map((r) => r.url),
+      ['https://a.example/']
+    );
 
     const bResults = store.suggest('b', 'isolate', { now: SUGGEST_NOW });
-    assert.deepEqual(bResults.map((r) => r.url), ['https://b.example/']);
+    assert.deepEqual(
+      bResults.map((r) => r.url),
+      ['https://b.example/']
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -532,13 +526,16 @@ test('suggest: token-prefix row — "exampl" matches https://examplezzz.com/ (sa
     });
 
     const results = store.suggest('a', 'exampl', { now: SUGGEST_NOW });
-    assert.deepEqual(results.map((r) => r.url), ['https://examplezzz.com/']);
+    assert.deepEqual(
+      results.map((r) => r.url),
+      ['https://examplezzz.com/']
+    );
   } finally {
     removeTempDir(dir);
   }
 });
 
-test('suggest: limit clamp — SUGGEST_MIN_LIMIT/SUGGEST_MAX_LIMIT (1-10), distinct from the store\'s 1-500', () => {
+test("suggest: limit clamp — SUGGEST_MIN_LIMIT/SUGGEST_MAX_LIMIT (1-10), distinct from the store's 1-500", () => {
   const dir = makeTempDir();
   try {
     const store = freshStore();
@@ -578,7 +575,10 @@ test('suggest: empty/whitespace/operator-injection queries are safe', () => {
     assert.deepEqual(store.suggest('a', '', { now: SUGGEST_NOW }), []);
     assert.deepEqual(store.suggest('a', '   ', { now: SUGGEST_NOW }), []);
     for (const q of ['"', '*', '(', ')', '-word', 'NEAR', '"unterminated', 'a" OR "b', '(a OR b)']) {
-      assert.doesNotThrow(() => store.suggest('a', q, { now: SUGGEST_NOW }), `query ${JSON.stringify(q)} must not throw`);
+      assert.doesNotThrow(
+        () => store.suggest('a', q, { now: SUGGEST_NOW }),
+        `query ${JSON.stringify(q)} must not throw`
+      );
     }
   } finally {
     removeTempDir(dir);
@@ -593,8 +593,16 @@ test('suggest validates jarId/query types and requires a finite now (TypeError, 
     assert.throws(() => store.suggest('', 'x', { now: SUGGEST_NOW }), TypeError);
     assert.throws(() => store.suggest(/** @type {any} */ (42), 'x', { now: SUGGEST_NOW }), TypeError);
     assert.throws(() => store.suggest('a', /** @type {any} */ (42), { now: SUGGEST_NOW }), TypeError);
-    assert.throws(() => store.suggest('a', 'x'), TypeError, 'now has no default — omitting the opts bag entirely must throw');
-    assert.throws(() => store.suggest('a', 'x', /** @type {any} */ ({})), TypeError, 'now has no default — an opts bag without now must throw');
+    assert.throws(
+      () => store.suggest('a', 'x'),
+      TypeError,
+      'now has no default — omitting the opts bag entirely must throw'
+    );
+    assert.throws(
+      () => store.suggest('a', 'x', /** @type {any} */ ({})),
+      TypeError,
+      'now has no default — an opts bag without now must throw'
+    );
     assert.throws(() => store.suggest('a', 'x', { now: NaN }), TypeError);
     assert.throws(() => store.suggest('a', 'x', { now: /** @type {any} */ ('1') }), TypeError);
   } finally {
@@ -685,7 +693,10 @@ test('pruneOneJar deletes only rows older than the cutoff for the given jar and 
 
     const deleted = store.pruneOneJar('a', 30, now);
     assert.equal(deleted, 1);
-    assert.deepEqual(store.listRecent('a').map((r) => r.id), [freshId]);
+    assert.deepEqual(
+      store.listRecent('a').map((r) => r.id),
+      [freshId]
+    );
     void oldId;
   } finally {
     removeTempDir(dir);
@@ -759,7 +770,10 @@ test('persistence: close -> reopen on the same dir -> rows still there', () => {
     store = freshStore();
     store.open(dir);
     const rows = store.listRecent('a');
-    assert.deepEqual(rows.map((r) => r.id), [id]);
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      [id]
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -811,7 +825,10 @@ test('corrupt-file recovery: garbage bytes in history.db -> open() succeeds, qua
 
     // Store must be fully functional post-recovery.
     const id = store.recordVisit({ jarId: 'a', url: 'https://example.com/', visitedAt: 1000 });
-    assert.deepEqual(store.listRecent('a').map((r) => r.id), [id]);
+    assert.deepEqual(
+      store.listRecent('a').map((r) => r.id),
+      [id]
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -873,9 +890,19 @@ test('listByPage: page boundaries — full pages, no dupes/gaps across the whole
     const page2 = store.listByPage('a', { page: 2, pageSize: 2 });
     const page3 = store.listByPage('a', { page: 3, pageSize: 2 }); // last, partial
 
-    assert.deepEqual(page1.map((r) => r.id), expectedOrder.slice(0, 2));
-    assert.deepEqual(page2.map((r) => r.id), expectedOrder.slice(2, 4));
-    assert.deepEqual(page3.map((r) => r.id), expectedOrder.slice(4, 5), 'last page is a partial page');
+    assert.deepEqual(
+      page1.map((r) => r.id),
+      expectedOrder.slice(0, 2)
+    );
+    assert.deepEqual(
+      page2.map((r) => r.id),
+      expectedOrder.slice(2, 4)
+    );
+    assert.deepEqual(
+      page3.map((r) => r.id),
+      expectedOrder.slice(4, 5),
+      'last page is a partial page'
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -895,7 +922,7 @@ test('listByPage: out-of-range page returns an empty array, never throws', () =>
   }
 });
 
-test('listByPage: page 1 order is identical to listRecent\'s first page', () => {
+test("listByPage: page 1 order is identical to listRecent's first page", () => {
   const dir = makeTempDir();
   try {
     const store = freshStore();
@@ -906,7 +933,10 @@ test('listByPage: page 1 order is identical to listRecent\'s first page', () => 
 
     const viaPage = store.listByPage('a', { page: 1, pageSize: 50 });
     const viaRecent = store.listRecent('a', { limit: 50 });
-    assert.deepEqual(viaPage.map((r) => r.id), viaRecent.map((r) => r.id));
+    assert.deepEqual(
+      viaPage.map((r) => r.id),
+      viaRecent.map((r) => r.id)
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -930,7 +960,11 @@ test('listByPage: page/pageSize are clamped — non-positive/fractional page flo
       );
     }
     assert.equal(store.listByPage('a', { page: 1, pageSize: 0 }).length, 1, 'pageSize clamped up to 1');
-    assert.equal(store.listByPage('a', { page: 1, pageSize: 5000 }).length, 5, 'pageSize clamped down to 500, only 5 rows exist');
+    assert.equal(
+      store.listByPage('a', { page: 1, pageSize: 5000 }).length,
+      5,
+      'pageSize clamped down to 500, only 5 rows exist'
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -942,7 +976,10 @@ test('listByPage: default page/pageSize (no opts) returns page 1 at the default 
     const store = freshStore();
     store.open(dir);
     store.recordVisit({ jarId: 'a', url: 'https://x/0', visitedAt: 1000 });
-    assert.deepEqual(store.listByPage('a').map((r) => r.url), ['https://x/0']);
+    assert.deepEqual(
+      store.listByPage('a').map((r) => r.url),
+      ['https://x/0']
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -957,7 +994,10 @@ test('listByPage: cross-jar isolation — paging jar A never returns jar B rows'
     store.recordVisit({ jarId: 'b', url: 'https://b.example/', visitedAt: 1000 });
 
     const aRows = store.listByPage('a', { page: 1, pageSize: 50 });
-    assert.deepEqual(aRows.map((r) => r.url), ['https://a.example/']);
+    assert.deepEqual(
+      aRows.map((r) => r.url),
+      ['https://a.example/']
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -993,7 +1033,10 @@ test('unicode in query/title is handled by the default tokenizer', () => {
       visitedAt: 1000
     });
     const results = store.search('a', 'Café');
-    assert.deepEqual(results.map((r) => r.id), [id]);
+    assert.deepEqual(
+      results.map((r) => r.id),
+      [id]
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -1007,7 +1050,10 @@ test('null title is accepted; FTS treats it as empty until setTitle backfills', 
     const id = store.recordVisit({ jarId: 'a', url: 'https://example.com/notitle', visitedAt: 1000 });
     assert.equal(store.listRecent('a')[0].title, null);
     store.setTitle(id, 'Filled In');
-    assert.deepEqual(store.search('a', 'Filled').map((r) => r.id), [id]);
+    assert.deepEqual(
+      store.search('a', 'Filled').map((r) => r.id),
+      [id]
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -1044,7 +1090,10 @@ test('originsForJar: distinct origins (scheme/host/port) stay distinct rows', ()
     store.recordVisit({ jarId: 'a', url: 'https://example.com:8443/', visitedAt: 1200 }); // distinct port
     store.recordVisit({ jarId: 'a', url: 'https://other.example/', visitedAt: 1300 }); // distinct host
 
-    const origins = store.originsForJar('a').map((r) => r.origin).sort();
+    const origins = store
+      .originsForJar('a')
+      .map((r) => r.origin)
+      .sort();
     assert.deepEqual(origins, [
       'http://example.com',
       'https://example.com',
@@ -1064,8 +1113,14 @@ test('originsForJar: per-jar isolation — never crosses jars', () => {
     store.recordVisit({ jarId: 'a', url: 'https://a.example/', visitedAt: 1000 });
     store.recordVisit({ jarId: 'b', url: 'https://b.example/', visitedAt: 1000 });
 
-    assert.deepEqual(store.originsForJar('a').map((r) => r.origin), ['https://a.example']);
-    assert.deepEqual(store.originsForJar('b').map((r) => r.origin), ['https://b.example']);
+    assert.deepEqual(
+      store.originsForJar('a').map((r) => r.origin),
+      ['https://a.example']
+    );
+    assert.deepEqual(
+      store.originsForJar('b').map((r) => r.origin),
+      ['https://b.example']
+    );
   } finally {
     removeTempDir(dir);
   }

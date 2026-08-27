@@ -19,8 +19,8 @@
 //                                      arrows/typing all live in the chrome
 //   downloads    (downloads popup)   — role="dialog" download-row list, NO items
 //                                      getter (chrome-popup regime); local keydown
-  //                                      owns Escape (close) + Tab/Shift+Tab (CYCLE
-  //                                      through the scroll region + buttons);
+//                                      owns Escape (close) + Tab/Shift+Tab (CYCLE
+//                                      through the scroll region + buttons);
 //                                      live model-replace, one-shot activation
 //
 // EVERY template registers a menuController entry and opens via menuController.open,
@@ -56,7 +56,13 @@ import { buildVaultUnlockCard } from '../shared/vault-unlock-template.js';
 import { buildAuthBasicCard } from '../shared/auth-basic-template.js';
 import { buildBookmarkEditCard, applyBookmarkEditModel } from '../shared/bookmark-edit-template.js';
 import { buildBookmarkStarIcon } from '../shared/bookmark-star-icon.js';
-import { buildCertPickerCard, renderCertPickerRows, renderCertPickerSubtitle, certPickId, CERT_CANCEL_ID } from '../shared/cert-picker-template.js';
+import {
+  buildCertPickerCard,
+  renderCertPickerRows,
+  renderCertPickerSubtitle,
+  certPickId,
+  CERT_CANCEL_ID
+} from '../shared/cert-picker-template.js';
 import { buildVaultPickerCard, renderVaultPickerRows, pickId, MANAGE_ID } from '../shared/vault-picker-template.js';
 import { buildVaultCaptureCard, renderVaultCaptureCard, selectedVaultId } from '../shared/vault-capture-template.js';
 import { buildVaultSetCard } from '../shared/vault-set-template.js';
@@ -244,7 +250,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     const rows = overflowRowRects();
     const index = overflowDropIndexY(rows, e.clientY);
     const y = index == null ? null : overflowIndicatorY(rows, index);
-    if (y == null) { hideOverflowIndicator(); return; }
+    if (y == null) {
+      hideOverflowIndicator();
+      return;
+    }
     // Span the menu's own box so the line reads as "between these two rows"
     // rather than as a floating tick.
     const box = menuNode.getBoundingClientRect();
@@ -325,7 +334,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       // Refuse rather than start a gesture the chrome could never resolve: with
       // no token main's start gate refuses, and a source that armed anyway would
       // drag a row that commits nothing.
-      if (!dt || typeof token !== 'number') { e.preventDefault(); return; }
+      if (!dt || typeof token !== 'number') {
+        e.preventDefault();
+        return;
+      }
       dt.setData(BOOKMARK_DND_MIME, String(index));
       dt.effectAllowed = 'move';
       dragToken = token;
@@ -849,7 +861,9 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  vaultUnlockBtn.addEventListener('click', () => { void submitVault(); });
+  vaultUnlockBtn.addEventListener('click', () => {
+    void submitVault();
+  });
   // Cancel is user-explicit like Escape: dismissed{reason:'escape'} → chrome
   // returns focus to the trigger (wired by the pick-and-fill leg).
   vaultCancelBtn.addEventListener('click', () => {
@@ -873,7 +887,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   attachModalCard({
     node: vaultNode,
     getCycle: () => [vaultCloseBtn, vaultInput, vaultUnlockBtn, vaultCancelBtn],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultEntry);
+    }
   });
 
   /* --------------------------------------------------------- template: auth-basic */
@@ -958,7 +975,9 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  auth.submit.addEventListener('click', () => { void submitAuth(); });
+  auth.submit.addEventListener('click', () => {
+    void submitAuth();
+  });
   // Cancel — the leg contract: channel-4 `activated` with the NON-SECRET id
   // 'cancel' (an explicit resolution-family close; the store cancels the
   // challenge via its 'activated' bucket mapping).
@@ -981,7 +1000,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   attachModalCard({
     node: authNode,
     getCycle: () => [auth.close, auth.username, auth.password, auth.submit, auth.cancel],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(authEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(authEntry);
+    }
   });
 
   /* ------------------------------------------------------- template: vault-picker */
@@ -1129,7 +1151,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
    * feeds the site-attribution subtitle — copy-line renders, nothing else changes).
    * @param {any[] | { certs?: any[], host?: string, popup?: boolean }} model */
   function renderCertPicker(model) {
-    const rows = Array.isArray(model) ? model : (model && Array.isArray(model.certs) ? model.certs : []);
+    const rows = Array.isArray(model) ? model : model && Array.isArray(model.certs) ? model.certs : [];
     const popup = !Array.isArray(model) && !!model && model.popup === true;
     const host = !Array.isArray(model) && model && typeof model.host === 'string' ? model.host : '';
     renderCertPickerSubtitle(certPicker.subtitle, host);
@@ -1240,13 +1262,14 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       report.sent = true; // suppress the trailing dismissed; main also closes the sheet.
       menuController.close(captureEntry);
     } else {
-      capture.error.textContent = res && res.reason === 'locked'
-        ? 'The manager locked — unlock it and try again'
-        : 'Couldn’t save the password';
+      capture.error.textContent =
+        res && res.reason === 'locked' ? 'The manager locked — unlock it and try again' : 'Couldn’t save the password';
     }
   }
 
-  capture.save.addEventListener('click', () => { void submitCapture(); });
+  capture.save.addEventListener('click', () => {
+    void submitCapture();
+  });
   capture.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(captureEntry);
@@ -1264,7 +1287,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   attachModalCard({
     node: captureNode,
     getCycle: () => [...captureChoiceInputs, capture.save, capture.cancel],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(captureEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(captureEntry);
+    }
   });
 
   /** Render the capture card from the offer model + stash the captureId + choices.
@@ -1355,20 +1381,28 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  vaultSet.submit.addEventListener('click', () => { void submitVaultSet(); });
+  vaultSet.submit.addEventListener('click', () => {
+    void submitVaultSet();
+  });
   vaultSet.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(vaultSetEntry);
   });
   const vaultSetEnter = (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitVaultSet(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultSet();
+    }
   };
   vaultSet.input.addEventListener('keydown', vaultSetEnter);
   vaultSet.confirm.addEventListener('keydown', vaultSetEnter);
   attachModalCard({
     node: vaultSetNode,
     getCycle: () => [vaultSet.input, vaultSet.confirm, vaultSet.submit, vaultSet.cancel],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultSetEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultSetEntry);
+    }
   });
 
   /* ----------------------------------------------- template: vault-recovery-show */
@@ -1419,7 +1453,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     node: recoveryNode,
     getCycle: () => [recovery.keyValue, recovery.copy, recovery.acknowledge],
     dismissible: false,
-    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+    close: () => {} // dismiss-disabled — Escape/backdrop never close (see above)
   });
 
   /** Render the recovery key into the read-only display (textContent only) + stash it for
@@ -1498,15 +1532,16 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     vaultStepupBusy = true;
     let res;
     try {
-      res = mode === 'rotate-recovery'
-        // M12 F4 Leg 2: recovery rotation's master-password step-up. On success main mints the
-        // new recovery key + drives vault-recovery-show (post-write). No target.
-        ? await window.menuOverlay.rotateRecovery({ token, secret })
-        : mode === 'rotate-admin'
-        // M12 F4 Leg 3: admin-key rotation/provision's master-password step-up. On success main
-        // mints the new admin keypair + drives vault-adminkey-show (post-write). No target.
-        ? await window.menuOverlay.rotateAdminKey({ token, secret })
-        : await window.menuOverlay.stepupMint({ token, secret, target });
+      res =
+        mode === 'rotate-recovery'
+          ? // M12 F4 Leg 2: recovery rotation's master-password step-up. On success main mints the
+            // new recovery key + drives vault-recovery-show (post-write). No target.
+            await window.menuOverlay.rotateRecovery({ token, secret })
+          : mode === 'rotate-admin'
+            ? // M12 F4 Leg 3: admin-key rotation/provision's master-password step-up. On success main
+              // mints the new admin keypair + drives vault-adminkey-show (post-write). No target.
+              await window.menuOverlay.rotateAdminKey({ token, secret })
+            : await window.menuOverlay.stepupMint({ token, secret, target });
     } catch {
       // A rejected invoke degrades to an inline error, not a crash.
       res = { ok: false };
@@ -1521,28 +1556,37 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
       report.sent = true; // suppress the trailing dismissed; main closes + opens the one-time display.
       menuController.close(vaultStepupEntry);
     } else {
-      vaultStepup.error.textContent = mode === 'rotate-recovery'
-        ? 'Wrong master password. The recovery key was not rotated.'
-        : mode === 'rotate-admin'
-        ? 'Wrong master password. The admin key was not rotated.'
-        : 'Wrong master password. Nothing was minted.';
+      vaultStepup.error.textContent =
+        mode === 'rotate-recovery'
+          ? 'Wrong master password. The recovery key was not rotated.'
+          : mode === 'rotate-admin'
+            ? 'Wrong master password. The admin key was not rotated.'
+            : 'Wrong master password. Nothing was minted.';
       vaultStepup.input.value = '';
       vaultStepup.input.focus();
     }
   }
 
-  vaultStepup.submit.addEventListener('click', () => { void submitVaultStepup(); });
+  vaultStepup.submit.addEventListener('click', () => {
+    void submitVaultStepup();
+  });
   vaultStepup.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(vaultStepupEntry);
   });
   vaultStepup.input.addEventListener('keydown', (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitVaultStepup(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultStepup();
+    }
   });
   attachModalCard({
     node: vaultStepupNode,
     getCycle: () => [vaultStepup.input, vaultStepup.submit, vaultStepup.cancel],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultStepupEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultStepupEntry);
+    }
   });
 
   /** Stash the step-up mode + (for mint) the target vault id from the object model. Re-read each
@@ -1552,9 +1596,8 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
    * is the F3 access-key step-up.
    * @param {any} model */
   function renderStepup(model) {
-    vaultStepupMode = model && (model.mode === 'rotate-recovery' || model.mode === 'rotate-admin')
-      ? model.mode
-      : 'mint';
+    vaultStepupMode =
+      model && (model.mode === 'rotate-recovery' || model.mode === 'rotate-admin') ? model.mode : 'mint';
     vaultStepupTarget = model && typeof model.target === 'string' ? model.target : undefined;
     if (vaultStepupMode === 'rotate-recovery') {
       vaultStepup.lede.textContent =
@@ -1619,7 +1662,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     node: accessKeyNode,
     getCycle: () => [accessKey.keyIdValue, accessKey.secretValue, accessKey.copy, accessKey.acknowledge],
     dismissible: false,
-    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+    close: () => {} // dismiss-disabled — Escape/backdrop never close (see above)
   });
 
   /** Render the minted secret + keyId into the read-only displays (textContent only) + stash
@@ -1679,7 +1722,7 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     node: adminKeyNode,
     getCycle: () => [adminKey.keyValue, adminKey.copy, adminKey.acknowledge],
     dismissible: false,
-    close: () => {}, // dismiss-disabled — Escape/backdrop never close (see above)
+    close: () => {} // dismiss-disabled — Escape/backdrop never close (see above)
   });
 
   /** Render the minted admin private key into the read-only display (textContent only) + stash
@@ -1776,21 +1819,32 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  vaultImport.submit.addEventListener('click', () => { void submitVaultImport(); });
+  vaultImport.submit.addEventListener('click', () => {
+    void submitVaultImport();
+  });
   vaultImport.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(vaultImportEntry);
   });
   vaultImport.input.addEventListener('keydown', (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitVaultImport(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultImport();
+    }
   });
   attachModalCard({
     node: vaultImportNode,
     getCycle: () => [
-      vaultImport.masterRadio, vaultImport.recoveryRadio, vaultImport.input,
-      vaultImport.submit, vaultImport.cancel,
+      vaultImport.masterRadio,
+      vaultImport.recoveryRadio,
+      vaultImport.input,
+      vaultImport.submit,
+      vaultImport.cancel
     ],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultImportEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultImportEntry);
+    }
   });
 
   /* -------------------------------------------------- template: vault-change-master */
@@ -1881,13 +1935,18 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  vaultChangeMaster.submit.addEventListener('click', () => { void submitVaultChangeMaster(); });
+  vaultChangeMaster.submit.addEventListener('click', () => {
+    void submitVaultChangeMaster();
+  });
   vaultChangeMaster.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(vaultChangeMasterEntry);
   });
   const vaultChangeMasterEnter = (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitVaultChangeMaster(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultChangeMaster();
+    }
   };
   vaultChangeMaster.oldInput.addEventListener('keydown', vaultChangeMasterEnter);
   vaultChangeMaster.newInput.addEventListener('keydown', vaultChangeMasterEnter);
@@ -1895,10 +1954,16 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   attachModalCard({
     node: vaultChangeMasterNode,
     getCycle: () => [
-      vaultChangeMaster.oldInput, vaultChangeMaster.newInput, vaultChangeMaster.confirm,
-      vaultChangeMaster.submit, vaultChangeMaster.cancel,
+      vaultChangeMaster.oldInput,
+      vaultChangeMaster.newInput,
+      vaultChangeMaster.confirm,
+      vaultChangeMaster.submit,
+      vaultChangeMaster.cancel
     ],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultChangeMasterEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultChangeMasterEntry);
+    }
   });
 
   /* --------------------------------------------------------- template: vault-recover */
@@ -1988,13 +2053,18 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  vaultRecover.submit.addEventListener('click', () => { void submitVaultRecover(); });
+  vaultRecover.submit.addEventListener('click', () => {
+    void submitVaultRecover();
+  });
   vaultRecover.cancel.addEventListener('click', () => {
     report.lastStimulus = 'escape';
     menuController.close(vaultRecoverEntry);
   });
   const vaultRecoverEnter = (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitVaultRecover(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitVaultRecover();
+    }
   };
   vaultRecover.recoveryInput.addEventListener('keydown', vaultRecoverEnter);
   vaultRecover.newInput.addEventListener('keydown', vaultRecoverEnter);
@@ -2002,10 +2072,16 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
   attachModalCard({
     node: vaultRecoverNode,
     getCycle: () => [
-      vaultRecover.recoveryInput, vaultRecover.newInput, vaultRecover.confirm,
-      vaultRecover.submit, vaultRecover.cancel,
+      vaultRecover.recoveryInput,
+      vaultRecover.newInput,
+      vaultRecover.confirm,
+      vaultRecover.submit,
+      vaultRecover.cancel
     ],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(vaultRecoverEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(vaultRecoverEntry);
+    }
   });
 
   /* ----------------------------------------------------------- template: downloads */
@@ -2087,7 +2163,10 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
     const p = document.createElementNS(NS, 'path');
-    p.setAttribute('d', 'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z');
+    p.setAttribute(
+      'd',
+      'M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'
+    );
     svg.appendChild(p);
     return svg;
   }
@@ -2350,17 +2429,27 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     }
   }
 
-  bookmarkEdit.done.addEventListener('click', () => { void submitBookmarkEdit('save'); });
-  bookmarkEdit.remove.addEventListener('click', () => { void submitBookmarkEdit('remove'); });
+  bookmarkEdit.done.addEventListener('click', () => {
+    void submitBookmarkEdit('save');
+  });
+  bookmarkEdit.remove.addEventListener('click', () => {
+    void submitBookmarkEdit('remove');
+  });
   const bookmarkEditEnterSubmits = (/** @type {any} */ e) => {
-    if (e.key === 'Enter') { e.preventDefault(); void submitBookmarkEdit('save'); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void submitBookmarkEdit('save');
+    }
   };
   bookmarkEdit.name.addEventListener('keydown', bookmarkEditEnterSubmits);
   bookmarkEdit.url.addEventListener('keydown', bookmarkEditEnterSubmits);
   attachModalCard({
     node: bookmarkEditNode,
     getCycle: () => [bookmarkEdit.name, bookmarkEdit.url, bookmarkEdit.remove, bookmarkEdit.done],
-    close: (stimulus) => { report.lastStimulus = stimulus; menuController.close(bookmarkEditEntry); },
+    close: (stimulus) => {
+      report.lastStimulus = stimulus;
+      menuController.close(bookmarkEditEntry);
+    }
   });
 
   /* ----------------------------------------------------- registry + init dispatch */
@@ -2488,13 +2577,19 @@ import { createSheetReport, attachModalCard, attachBackdropPressGate } from '../
     // so every real cert challenge bailed AFTER main had already shown the
     // sheet — a visible blank sheet with no card (contract-pinned in
     // cert-picker-template.test.js).
-    const modelShapeOk = template === 'cert-picker'
-      ? !!model && typeof model === 'object'
-      : (template === 'suggestions' || template === 'vault-capture'
-        || template === 'vault-recovery-show' || template === 'vault-stepup' || template === 'vault-accesskey-show'
-        || template === 'vault-adminkey-show' || template === 'auth-basic' || template === 'bookmark-edit')
-        ? model && typeof model === 'object' && !Array.isArray(model)
-        : Array.isArray(model);
+    const modelShapeOk =
+      template === 'cert-picker'
+        ? !!model && typeof model === 'object'
+        : template === 'suggestions' ||
+            template === 'vault-capture' ||
+            template === 'vault-recovery-show' ||
+            template === 'vault-stepup' ||
+            template === 'vault-accesskey-show' ||
+            template === 'vault-adminkey-show' ||
+            template === 'auth-basic' ||
+            template === 'bookmark-edit'
+          ? model && typeof model === 'object' && !Array.isArray(model)
+          : Array.isArray(model);
     if (!modelShapeOk) return;
 
     // In-place downloads update (Leg 4, Option 1): a repaint that arrives while

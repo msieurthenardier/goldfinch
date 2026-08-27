@@ -66,9 +66,7 @@ function readStore(dir) {
 function readRow(dir) {
   const check = new DatabaseSync(path.join(dir, 'app.db'));
   try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('jars')
-    );
+    const row = /** @type {any} */ (check.prepare('SELECT payload FROM documents WHERE store = ?1').get('jars'));
     return row ? JSON.parse(row.payload) : null;
   } finally {
     check.close();
@@ -201,10 +199,7 @@ test('no floor: missing default entry is NOT injected', () => {
   const input = [validPersonal, validWork];
   const result = validateContainers(input);
   assert.equal(result.length, 2, 'only the survivors — nothing injected');
-  assert.ok(
-    !result.some((c) => c.id === 'default'),
-    'no default entry must be conjured from thin air'
-  );
+  assert.ok(!result.some((c) => c.id === 'default'), 'no default entry must be conjured from thin air');
 });
 
 test('no floor: empty input validates to an empty array', () => {
@@ -511,7 +506,10 @@ test('load of a valid v2 envelope restores containers + defaultId', () => {
     writeStore(dir, v2([validPersonal, validWork], 'work'));
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(store.getDefault().id, 'work');
   } finally {
     appDb.close();
@@ -619,7 +617,10 @@ test('v1 migration: operator-shaped array survives whole, defaultId default, mig
     writeStore(dir, [validDefault, validPersonal, validWork, validBanking, custom]);
     let store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking', 'scratch']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking', 'scratch']
+    );
     assert.equal(store.getDefault().id, 'default');
     const row = readRow(dir);
     assert.ok(row !== null, 'the migrated result becomes the row');
@@ -631,7 +632,10 @@ test('v1 migration: operator-shaped array survives whole, defaultId default, mig
     // row-present path), and must not touch the row again.
     store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking', 'scratch']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking', 'scratch']
+    );
     assert.equal(store.getDefault().id, 'default');
     assert.deepEqual(readRow(dir), row, 'second load must not rewrite the row');
   } finally {
@@ -647,7 +651,10 @@ test('v1 migration: array without a default entry → defaultId lands on the fir
     writeStore(dir, [validPersonal, validWork]);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(store.getDefault().id, 'personal', "no surviving 'default' → first surviving entry");
     assert.equal(readRow(dir).defaultId, 'personal');
   } finally {
@@ -664,10 +671,17 @@ test('v1 migration: reserved burner id migrates under the remapped jar-burner id
     writeStore(dir, [validDefault, saved]);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'jar-burner']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'jar-burner']
+    );
     const remapped = store.list().find((c) => c.id === 'jar-burner');
     assert.equal(remapped.partition, 'persist:container:burner', 'partition string preserved by the remap');
-    assert.equal(readRow(dir).containers.some((c) => c.id === 'burner'), false, 'the reserved id never reaches the row');
+    assert.equal(
+      readRow(dir).containers.some((c) => c.id === 'burner'),
+      false,
+      'the reserved id never reaches the row'
+    );
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -682,7 +696,10 @@ test('v1 array validating to zero entries + probe dir present → legacy seed (f
     probeDir(dir);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking']
+    );
     assert.equal(store.getDefault().id, 'default');
     assert.equal(readRow(dir).defaultId, 'default');
     assert.ok(!fs.existsSync(storeFile(dir)), 'the unusable v1 file is consumed by the seed migration');
@@ -700,7 +717,10 @@ test('v1 array validating to zero entries without probe dir → fresh seed; the 
     writeStore(dir, [1, 'x', { id: 123 }]);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(store.getDefault().id, 'personal');
     assert.ok(!fs.existsSync(storeFile(dir)));
     assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
@@ -717,10 +737,16 @@ test('no file + probe dir present → legacy seed by content; row seeded (nothin
     probeDir(dir);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking']
+    );
     assert.equal(store.getDefault().id, 'default');
     assert.deepEqual(
-      store.list().filter((c) => c.partition === 'persist:goldfinch').map((c) => c.id),
+      store
+        .list()
+        .filter((c) => c.partition === 'persist:goldfinch')
+        .map((c) => c.id),
       ['default'],
       'persist:goldfinch on default only'
     );
@@ -746,10 +772,18 @@ test('v2-shaped envelope with an unknown (future) version → containers preserv
     // Keep it in memory (validated), but never rewrite it during load — and
     // never write a row — so a later compatible release can recover the
     // original untouched, and the probe re-runs every boot.
-    assert.deepEqual(store.list().map((c) => c.id), ['personal'], 'unknown version = preserve, not reseed');
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal'],
+      'unknown version = preserve, not reseed'
+    );
     assert.equal(store.getDefault().id, 'personal', 'absent defaultId "x" repairs to the first surviving jar');
     assert.equal(readStore(dir).version, 3, 'the unknown envelope is left untouched on disk');
-    assert.equal(readRow(dir), null, 'the carve-out writes NO row — the probe re-runs every boot until a compatible build handles it');
+    assert.equal(
+      readRow(dir),
+      null,
+      'the carve-out writes NO row — the probe re-runs every boot until a compatible build handles it'
+    );
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -776,7 +810,10 @@ test('missing file without probe dir → fresh seed (Personal default + Work); r
   try {
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(store.getDefault().id, 'personal', 'Personal is the fresh-seed default');
     const row = readRow(dir);
     assert.equal(row.version, 2, 'the fresh seed is persisted to the row inside the same load() call');
@@ -793,12 +830,19 @@ test('launch-#2 pin: fresh seed persists, so a probe dir appearing later does NO
   try {
     let store = freshStore();
     store.load(dir); // true first run: no file, no probe dir → fresh seed, saved to the row
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     // main.js pre-warms persist:goldfinch on every launch — simulate launch #2.
     probeDir(dir);
     store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work'], 'STILL Personal+Work — the saved seed outlives the probe');
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work'],
+      'STILL Personal+Work — the saved seed outlives the probe'
+    );
     assert.equal(store.getDefault().id, 'personal');
   } finally {
     appDb.close();
@@ -819,13 +863,20 @@ test('userData dir not yet created (true first boot) → app-db creates it; seed
   try {
     let store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(readRow(dir).version, 2, 'seed persisted even though the dir had to be created');
     // Launch #2 with the probe dir present (pre-warm fired) must NOT flip to legacy.
     probeDir(dir);
     store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work'], 'saved seed wins over the probe');
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work'],
+      'saved seed wins over the probe'
+    );
     assert.equal(store.getDefault().id, 'personal');
   } finally {
     appDb.close();
@@ -841,7 +892,10 @@ test('corrupt JSON + probe dir present → legacy seed; the corrupt file is cons
     probeDir(dir);
     const store = freshStore();
     assert.doesNotThrow(() => store.load(dir));
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking']
+    );
     assert.equal(store.getDefault().id, 'default', 'post-first-run corrupt means the LEGACY seed, never fresh');
     assert.equal(readRow(dir).version, 2);
     assert.ok(!fs.existsSync(storeFile(dir)));
@@ -859,7 +913,10 @@ test('corrupt JSON without probe dir → fresh seed; the corrupt file is consume
     writeStore(dir, '{not json!!!');
     const store = freshStore();
     assert.doesNotThrow(() => store.load(dir));
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     assert.equal(store.getDefault().id, 'personal');
     assert.equal(readRow(dir).version, 2);
     assert.ok(!fs.existsSync(storeFile(dir)));
@@ -880,7 +937,11 @@ test('empty v2 envelope is NOT reseeded — empty-is-valid migrates to the row l
     assert.deepEqual(store.list(), []);
     assert.equal(store.getDefault(), BURNER);
     const row = readRow(dir);
-    assert.deepEqual(row, { version: 2, defaultId: null, containers: [] }, 'a valid empty store migrates to the row, never reseeded (DD2)');
+    assert.deepEqual(
+      row,
+      { version: 2, defaultId: null, containers: [] },
+      'a valid empty store migrates to the row, never reseeded (DD2)'
+    );
     assert.ok(!fs.existsSync(storeFile(dir)), 'the legacy file is renamed away like any known-shape migration');
     assert.ok(fs.existsSync(storeFile(dir) + '.migrated'));
   } finally {
@@ -904,7 +965,10 @@ test('upgrade path: a v2 file shaped exactly like the real dev-profile (three co
     writeStore(dir, v2([validDefault, validPersonal, validWork], 'default'));
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work']
+    );
     for (const c of store.list()) {
       assert.equal(c.retentionDays, 30, `${c.id} should upgrade to the default retention`);
     }
@@ -920,7 +984,10 @@ test('seed path: a fresh install (no file, no probe dir) seeds jars carrying ret
   try {
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['personal', 'work']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal', 'work']
+    );
     for (const c of store.list()) {
       assert.equal(c.retentionDays, 30);
     }
@@ -941,7 +1008,10 @@ test('seed path: a legacy v1 bare-array file (no retentionDays) migrates to the 
     writeStore(dir, [validDefault, validPersonal, validWork, validBanking]);
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((c) => c.id), ['default', 'personal', 'work', 'banking']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['default', 'personal', 'work', 'banking']
+    );
     for (const c of store.list()) {
       assert.equal(c.retentionDays, 30);
     }
@@ -958,7 +1028,13 @@ test('persisted round-trip: a custom retentionDays value on disk survives load u
   const dir = makeTempDir();
   appDb.open(dir);
   try {
-    const custom = { id: 'personal', name: 'Personal', color: '#4caf50', partition: 'persist:container:personal', retentionDays: 90 };
+    const custom = {
+      id: 'personal',
+      name: 'Personal',
+      color: '#4caf50',
+      partition: 'persist:container:personal',
+      retentionDays: 90
+    };
     writeStore(dir, v2([custom], 'personal'));
     const store = freshStore();
     store.load(dir);
@@ -1242,7 +1318,10 @@ test('remove returns the removed container (the IPC layer needs its partition)',
       partition: 'persist:container:work',
       retentionDays: 30
     });
-    assert.deepEqual(store.list().map((c) => c.id), ['personal']);
+    assert.deepEqual(
+      store.list().map((c) => c.id),
+      ['personal']
+    );
   } finally {
     appDb.close();
     removeTempDir(dir);

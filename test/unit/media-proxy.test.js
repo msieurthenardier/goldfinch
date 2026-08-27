@@ -76,7 +76,7 @@ for (const passthrough of [
   'not a url at all',
   'javascript:alert(1)',
   'ftp://example.com/file.txt',
-  '',
+  ''
 ]) {
   test(`toMediaProxyUrl passes through unchanged: ${JSON.stringify(passthrough)}`, () => {
     assert.equal(toMediaProxyUrl(1, passthrough), passthrough);

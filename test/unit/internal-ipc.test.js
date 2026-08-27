@@ -162,7 +162,7 @@ test('registerInternalHandler: marker on sender (not session) is insufficient â€
   const wrongPathEvent = {
     senderFrame: { origin: 'goldfinch://settings', url: 'goldfinch://settings/' },
     sender: {
-      __goldfinchInternal: true,  // marker on sender, NOT on sender.session
+      __goldfinchInternal: true, // marker on sender, NOT on sender.session
       session: {}
     }
   };

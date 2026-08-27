@@ -11,23 +11,27 @@ const { buildVaultIndicatorModel } = require('../../src/shared/vault-indicator-m
 
 test('not set up → hidden (regardless of the unlocked flag)', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: false, unlocked: false }), {
-    visible: false, state: 'locked',
+    visible: false,
+    state: 'locked'
   });
   // A nonsensical unlocked-while-not-set-up snapshot still hides (visibility gates on setUp).
   assert.deepEqual(buildVaultIndicatorModel({ setUp: false, unlocked: true }), {
-    visible: false, state: 'locked',
+    visible: false,
+    state: 'locked'
   });
 });
 
 test('set up + locked → visible, locked', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: true, unlocked: false }), {
-    visible: true, state: 'locked',
+    visible: true,
+    state: 'locked'
   });
 });
 
 test('set up + unlocked → visible, unlocked', () => {
   assert.deepEqual(buildVaultIndicatorModel({ setUp: true, unlocked: true }), {
-    visible: true, state: 'unlocked',
+    visible: true,
+    state: 'unlocked'
   });
 });
 
@@ -37,6 +41,7 @@ test('never throws on malformed / partial / missing input (defensive coercion)',
   assert.deepEqual(buildVaultIndicatorModel({}), { visible: false, state: 'locked' });
   // Truthy-but-non-boolean fields coerce.
   assert.deepEqual(buildVaultIndicatorModel({ setUp: 1, unlocked: 'yes' }), {
-    visible: true, state: 'unlocked',
+    visible: true,
+    state: 'unlocked'
   });
 });

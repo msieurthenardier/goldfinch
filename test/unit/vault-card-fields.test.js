@@ -15,7 +15,7 @@ const {
   findAllCardFields,
   isLiveCardNumberField,
   parseExpiry,
-  fillCardForm,
+  fillCardForm
 } = require('../../src/preload/vault-card-fields');
 
 class FakeInput {
@@ -81,7 +81,7 @@ function makeDoc(forms, loose = []) {
     tagName: undefined,
     querySelectorAll(selector) {
       return selector === 'input, select' ? all.slice() : [];
-    },
+    }
   };
 }
 
@@ -90,7 +90,7 @@ function cardForm() {
     number: new FakeInput({ autocomplete: 'cc-number', name: 'cardnumber' }),
     name: new FakeInput({ autocomplete: 'cc-name', name: 'ccname' }),
     exp: new FakeInput({ autocomplete: 'cc-exp', name: 'ccexp' }),
-    csc: new FakeInput({ autocomplete: 'cc-csc', name: 'cvc' }),
+    csc: new FakeInput({ autocomplete: 'cc-csc', name: 'cvc' })
   };
 }
 
@@ -99,10 +99,7 @@ function cardForm() {
 test('autocompleteRoleOf reads the cc-* token through section/billing prefixes', () => {
   assert.equal(autocompleteRoleOf(new FakeInput({ autocomplete: 'cc-number' })), 'number');
   assert.equal(autocompleteRoleOf(new FakeInput({ autocomplete: 'billing cc-number' })), 'number');
-  assert.equal(
-    autocompleteRoleOf(new FakeInput({ autocomplete: 'section-payment shipping cc-csc' })),
-    'csc'
-  );
+  assert.equal(autocompleteRoleOf(new FakeInput({ autocomplete: 'section-payment shipping cc-csc' })), 'csc');
   assert.equal(autocompleteRoleOf(new FakeInput({ autocomplete: 'CC-EXP-MONTH' })), 'expMonth');
   assert.equal(autocompleteRoleOf(new FakeInput({ autocomplete: 'username' })), null);
   assert.equal(autocompleteRoleOf(new FakeInput({})), null);
@@ -158,7 +155,7 @@ test('two card forms on one page yield two entries, each scoped to its own form'
   assert.equal(entries.length, 2);
   assert.equal(entries[0].number, a.number);
   assert.equal(entries[0].expiry, a.exp);
-  assert.equal(entries[0].csc, null, 'form A has no csc — B\'s must not leak across');
+  assert.equal(entries[0].csc, null, "form A has no csc — B's must not leak across");
   assert.equal(entries[1].number, b.number);
   assert.equal(entries[1].csc, b.csc);
 });
@@ -230,7 +227,7 @@ const CARD = {
   number: '4242 4242 4242 4242',
   cardholder: 'A Lovelace',
   expiry: '12/28',
-  cvv: '123',
+  cvv: '123'
 };
 
 test('fills every detected field and dispatches input+change', () => {
@@ -245,7 +242,7 @@ test('fills every detected field and dispatches input+change', () => {
   for (const field of [f.number, f.name, f.exp, f.csc]) {
     assert.deepEqual(field.events, [
       { type: 'input', bubbles: true },
-      { type: 'change', bubbles: true },
+      { type: 'change', bubbles: true }
     ]);
   }
 });

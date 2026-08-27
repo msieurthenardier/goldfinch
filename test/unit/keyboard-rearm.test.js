@@ -109,7 +109,7 @@ function analyzeHandler(body) {
 
 // --- the net --------------------------------------------------------------------
 
-test("register-tab-ipc `tab-set-active` reads outgoing focus and conditionally focuses the incoming guest", () => {
+test('register-tab-ipc `tab-set-active` reads outgoing focus and conditionally focuses the incoming guest', () => {
   const body = extractHandlerBody(maskComments(fs.readFileSync(MAIN_JS, 'utf8')), HANDLER);
 
   // Vacuity guard: fail loudly if the handler was renamed/refactored out of reach rather
@@ -161,8 +161,7 @@ test('the scan PASSES the real fix shape (read into guard + guarded incoming foc
 });
 
 test('direction 1 — removing the conditional focus (never .focus() the incoming) FAILS', () => {
-  const mutated = GOOD
-    .replace('    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {\n', '')
+  const mutated = GOOD.replace('    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {\n', '')
     .replace('      entry.view.webContents.focus();\n', '')
     .replace('    }\n  }', '  }');
   const body = extractHandlerBody(maskComments(mutated), HANDLER);
@@ -173,9 +172,13 @@ test('direction 1 — removing the conditional focus (never .focus() the incomin
 });
 
 test('direction 2 — focusing unconditionally (no isFocused guard) FAILS', () => {
-  const mutated = GOOD
-    .replace('  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();\n', '')
-    .replace('    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {', '    if (!entry.view.webContents.isDestroyed()) {');
+  const mutated = GOOD.replace(
+    '  const wasPageFocused = owner.activeTabWcId != null && !!getTabContents(owner.activeTabWcId)?.isFocused();\n',
+    ''
+  ).replace(
+    '    if (wasPageFocused && !entry.view.webContents.isDestroyed()) {',
+    '    if (!entry.view.webContents.isDestroyed()) {'
+  );
   const body = extractHandlerBody(maskComments(mutated), HANDLER);
   assert.notEqual(body, null);
   const r = analyzeHandler(/** @type {string} */ (body));

@@ -17,7 +17,7 @@ const { withCaptureTimeout, CAPTURE_TIMEOUT_MS } = require('../../src/main/captu
 // interception, so an awaited settle actually lands before the next tick).
 const drain = () => new Promise((r) => setImmediate(r));
 
-test('capture-timeout: the budget is find.js\'s 3000ms (the ONE thing borrowed, besides the done guard)', () => {
+test("capture-timeout: the budget is find.js's 3000ms (the ONE thing borrowed, besides the done guard)", () => {
   assert.equal(CAPTURE_TIMEOUT_MS, 3000);
 });
 
@@ -33,13 +33,16 @@ test('capture-timeout: a capture that settles BEFORE the bound resolves with its
   // global at CALL time, so patching it here is seen by the module.)
   const realClear = globalThis.clearTimeout;
   const cleared = [];
-  globalThis.clearTimeout = (/** @type {any} */ h) => { cleared.push(h); return realClear(h); };
+  globalThis.clearTimeout = (/** @type {any} */ h) => {
+    cleared.push(h);
+    return realClear(h);
+  };
 
   try {
     const image = { toPNG: () => Buffer.from('PNG') };
     const result = await withCaptureTimeout(Promise.resolve(image), 'chrome');
 
-    assert.equal(result, image, 'the capture\'s value passes through verbatim');
+    assert.equal(result, image, "the capture's value passes through verbatim");
     assert.equal(cleared.length, 1, 'clearTimeout MUST run on the happy path — no dangling handle');
   } finally {
     globalThis.clearTimeout = realClear;
@@ -54,10 +57,13 @@ test('capture-timeout: CONTROL for the clearTimeout pin — the spy DOES observe
 
   const realClear = globalThis.clearTimeout;
   const cleared = [];
-  globalThis.clearTimeout = (/** @type {any} */ h) => { cleared.push(h); return realClear(h); };
+  globalThis.clearTimeout = (/** @type {any} */ h) => {
+    cleared.push(h);
+    return realClear(h);
+  };
 
   try {
-    setTimeout(() => {}, 3000);   // deliberately never cleared
+    setTimeout(() => {}, 3000); // deliberately never cleared
     assert.equal(cleared.length, 0, 'the spy reports zero clears when nothing clears — it is not vacuously green');
   } finally {
     globalThis.clearTimeout = realClear;
@@ -74,8 +80,11 @@ test('capture-timeout: a capture that NEVER settles REJECTS at the bound with th
   const p = withCaptureTimeout(never, 'find overlay layer');
   const assertion = assert.rejects(
     () => p,
-    (err) => err instanceof Error &&
-      /^automation: capture-timeout — find overlay layer did not settle within 3000ms \(the view may be detached\)$/.test(err.message),
+    (err) =>
+      err instanceof Error &&
+      /^automation: capture-timeout — find overlay layer did not settle within 3000ms \(the view may be detached\)$/.test(
+        err.message
+      )
   );
 
   await drain();
@@ -90,7 +99,10 @@ test('capture-timeout: the LABEL names the target in the refusal (Promise.all hi
   // refusal would name the symptom but not the target. Both labels must survive verbatim.
   const mk = (label) => {
     const p = withCaptureTimeout(new Promise(() => {}), label);
-    return assert.rejects(() => p, (err) => err.message.includes(label));
+    return assert.rejects(
+      () => p,
+      (err) => err.message.includes(label)
+    );
   };
   const chrome = mk('chrome');
   const guest = mk('active guest');
@@ -106,7 +118,7 @@ test('capture-timeout: a capture that REJECTS before the bound propagates that r
   const cause = new Error('capturePage exploded for its own reasons');
   await assert.rejects(
     () => withCaptureTimeout(Promise.reject(cause), 'chrome'),
-    (err) => err === cause,   // identity: the caller must read the REAL cause
+    (err) => err === cause // identity: the caller must read the REAL cause
   );
 });
 
@@ -116,9 +128,14 @@ test('capture-timeout: the done guard — a capture settling AFTER the timeout f
   // find.js:130-135's guard, borrowed. A late settle on an already-rejected promise
   // would be an unhandled rejection / double-settle without it.
   let resolveLate;
-  const late = new Promise((r) => { resolveLate = r; });
+  const late = new Promise((r) => {
+    resolveLate = r;
+  });
   const p = withCaptureTimeout(late, 'sheet overlay layer');
-  const assertion = assert.rejects(() => p, (err) => /capture-timeout/.test(err.message));
+  const assertion = assert.rejects(
+    () => p,
+    (err) => /capture-timeout/.test(err.message)
+  );
 
   await drain();
   t.mock.timers.tick(3000);
@@ -135,9 +152,14 @@ test('capture-timeout: a LATE REJECTION after the bound is also swallowed by the
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   let rejectLate;
-  const late = new Promise((_r, j) => { rejectLate = j; });
+  const late = new Promise((_r, j) => {
+    rejectLate = j;
+  });
   const p = withCaptureTimeout(late, 'chrome');
-  const assertion = assert.rejects(() => p, (err) => /capture-timeout/.test(err.message));
+  const assertion = assert.rejects(
+    () => p,
+    (err) => /capture-timeout/.test(err.message)
+  );
 
   await drain();
   t.mock.timers.tick(3000);
@@ -152,7 +174,10 @@ test('capture-timeout: timeoutMs is overridable (the bound is policy, not a cons
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   const p = withCaptureTimeout(new Promise(() => {}), 'chrome', { timeoutMs: 50 });
-  const assertion = assert.rejects(() => p, (err) => /did not settle within 50ms/.test(err.message));
+  const assertion = assert.rejects(
+    () => p,
+    (err) => /did not settle within 50ms/.test(err.message)
+  );
 
   await drain();
   t.mock.timers.tick(50);
@@ -164,7 +189,7 @@ test('capture-timeout: timeoutMs is overridable (the bound is policy, not a cons
 // find.js" refactor fails loudly, with the reason in the test name.
 // ---------------------------------------------------------------------------
 
-test('capture-timeout: a timeout REJECTS — find.js\'s benign finish(last) semantics are deliberately not carried', async (t) => {
+test("capture-timeout: a timeout REJECTS — find.js's benign finish(last) semantics are deliberately not carried", async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   // find.js:155 does finish(last) where last = {activeMatchOrdinal:0, matches:0}
@@ -175,8 +200,14 @@ test('capture-timeout: a timeout REJECTS — find.js\'s benign finish(last) sema
   // semantic: reject. Layer degradation is the CALL SITE's policy (main.js), never
   // this module's, so no call site can inherit a benign settle by accident.
   let settled = null;
-  const p = withCaptureTimeout(new Promise(() => {}), 'chrome')
-    .then((v) => { settled = { resolved: v }; }, (e) => { settled = { rejected: e }; });
+  const p = withCaptureTimeout(new Promise(() => {}), 'chrome').then(
+    (v) => {
+      settled = { resolved: v };
+    },
+    (e) => {
+      settled = { rejected: e };
+    }
+  );
 
   await drain();
   t.mock.timers.tick(3000);
@@ -184,6 +215,8 @@ test('capture-timeout: a timeout REJECTS — find.js\'s benign finish(last) sema
 
   assert.ok(settled.rejected, 'a timeout MUST reject — it must NEVER resolve with any value');
   assert.equal(settled.resolved, undefined, 'no benign value may be resolved on timeout');
-  assert.ok(/^automation: capture-timeout — /.test(settled.rejected.message),
-    'the rejection is NAMED so the caller can tell a timeout from any other capture failure');
+  assert.ok(
+    /^automation: capture-timeout — /.test(settled.rejected.message),
+    'the rejection is NAMED so the caller can tell a timeout from any other capture failure'
+  );
 });

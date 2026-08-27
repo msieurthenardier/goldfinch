@@ -40,18 +40,18 @@ function makeCapturingHarness() {
     registrableDomain: (h) => h,
     hostnameOf: (u) => new URL(u).hostname,
     shields: { active: () => false },
-    getVaultHuman: () => ({}),
+    getVaultHuman: () => ({})
   });
   return { wrapped, sends, chrome };
 }
 
 const internalEvent = (id) => ({
   senderFrame: { origin: 'goldfinch://vault' },
-  sender: { id, session: { __goldfinchInternal: true } },
+  sender: { id, session: { __goldfinchInternal: true } }
 });
 const webEvent = (id) => ({
   senderFrame: { origin: 'https://evil.example' },
-  sender: { id, session: {} },
+  sender: { id, session: {} }
 });
 
 test('all three request channels are registered through the internal origin gate', () => {
@@ -101,13 +101,17 @@ test('internal sender: rotate-recovery / change-master / recover each forward th
   assert.deepEqual(sends, [
     ['vault-request-rotate-recovery', undefined],
     ['vault-request-change-master', undefined],
-    ['vault-request-recover', undefined],
+    ['vault-request-recover', undefined]
   ]);
 });
 
 test('non-internal sender is REJECTED for each rotation/recover trigger (no forward)', () => {
   const { wrapped, sends } = makeCapturingHarness();
-  for (const ch of ['internal-vault-request-rotate-recovery', 'internal-vault-request-change-master', 'internal-vault-request-recover']) {
+  for (const ch of [
+    'internal-vault-request-rotate-recovery',
+    'internal-vault-request-change-master',
+    'internal-vault-request-recover'
+  ]) {
     assert.throws(() => wrapped.get(ch)(webEvent(9)), new RegExp(`forbidden: non-internal sender for ${ch}`));
   }
   assert.deepEqual(sends, []);
@@ -117,15 +121,15 @@ test('non-internal sender is REJECTED before the body runs (no forward)', () => 
   const { wrapped, sends } = makeCapturingHarness();
   assert.throws(
     () => wrapped.get('internal-vault-request-setup')(webEvent(9)),
-    /forbidden: non-internal sender for internal-vault-request-setup/,
+    /forbidden: non-internal sender for internal-vault-request-setup/
   );
   assert.throws(
     () => wrapped.get('internal-vault-request-unlock')(webEvent(9)),
-    /forbidden: non-internal sender for internal-vault-request-unlock/,
+    /forbidden: non-internal sender for internal-vault-request-unlock/
   );
   assert.throws(
     () => wrapped.get('internal-vault-request-mint')(webEvent(9), 'work'),
-    /forbidden: non-internal sender for internal-vault-request-mint/,
+    /forbidden: non-internal sender for internal-vault-request-mint/
   );
   assert.deepEqual(sends, [], 'a rejected request forwards nothing to chrome');
 });
@@ -183,8 +187,13 @@ function makeImportHarness({ beginResult } = {}) {
       beginChromeIds.push(chromeId); // finding 5: the owning-chrome id is threaded in.
       return beginResult || { ok: true, path: '/x/bundle.gfvaultbundle' };
     },
-    clearPendingVaultImport: (chromeId, handle) => { clearCalls += 1; clearArgs.push([chromeId, handle]); },
-    setPendingVaultImportOverwrite: (chromeId, overwrite) => { overwriteCalls.push(overwrite); },
+    clearPendingVaultImport: (chromeId, handle) => {
+      clearCalls += 1;
+      clearArgs.push([chromeId, handle]);
+    },
+    setPendingVaultImportOverwrite: (chromeId, overwrite) => {
+      overwriteCalls.push(overwrite);
+    }
   });
   return { wrapped, sends, beginCalls, beginChromeIds, clearArgs, overwriteCalls, clearCallsCount: () => clearCalls };
 }
@@ -254,15 +263,15 @@ test('non-internal sender is REJECTED for each import channel (no delegate run, 
   // runs (the same shape as the setup/unlock/mint rejections above).
   assert.throws(
     () => wrapped.get('internal-vault-pick-import-file')(webEvent(9), 'work'),
-    /forbidden: non-internal sender for internal-vault-pick-import-file/,
+    /forbidden: non-internal sender for internal-vault-pick-import-file/
   );
   assert.throws(
     () => wrapped.get('internal-vault-begin-import-unlock')(webEvent(9)),
-    /forbidden: non-internal sender for internal-vault-begin-import-unlock/,
+    /forbidden: non-internal sender for internal-vault-begin-import-unlock/
   );
   assert.throws(
     () => wrapped.get('internal-vault-clear-pending-import')(webEvent(9)),
-    /forbidden: non-internal sender for internal-vault-clear-pending-import/,
+    /forbidden: non-internal sender for internal-vault-clear-pending-import/
   );
   assert.deepEqual(beginCalls, [], 'the file-open delegate never runs for a foreign sender');
   assert.deepEqual(sends, []);

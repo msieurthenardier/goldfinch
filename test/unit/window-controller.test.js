@@ -8,36 +8,84 @@ const { pathToFileURL } = require('node:url');
 const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/window-controller.js')).href;
 
 class El {
-  constructor() { this.listeners = new Map(); this.attributes = new Map(); this.classList = { values: new Set(), toggle: (x, on) => on ? this.classList.values.add(x) : this.classList.values.delete(x), contains: (x) => this.classList.values.has(x) }; this.textContent = ''; }
-  addEventListener(name, fn) { this.listeners.set(name, fn); }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  constructor() {
+    this.listeners = new Map();
+    this.attributes = new Map();
+    this.classList = {
+      values: new Set(),
+      toggle: (x, on) => (on ? this.classList.values.add(x) : this.classList.values.delete(x)),
+      contains: (x) => this.classList.values.has(x)
+    };
+    this.textContent = '';
+  }
+  addEventListener(name, fn) {
+    this.listeners.set(name, fn);
+  }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
 }
 
 async function harness() {
-  const callbacks = {}; const calls = [];
-  const els = Object.fromEntries(['winMin','winMax','winClose','tabs','tabStatus','toggleMedia','togglePrivacy','toggleDevtools','bookmarksBar'].map((name) => [name, new El()]));
+  const callbacks = {};
+  const calls = [];
+  const els = Object.fromEntries(
+    [
+      'winMin',
+      'winMax',
+      'winClose',
+      'tabs',
+      'tabStatus',
+      'toggleMedia',
+      'togglePrivacy',
+      'toggleDevtools',
+      'bookmarksBar'
+    ].map((name) => [name, new El()])
+  );
   // index.html's real markup starts #bookmarks-bar with class="hidden" — the
   // net-visibility-change discipline (M15 F2 Leg 3, L3-DD-C) relies on that
   // starting DOM state matching the controller's own initial `barVisible =
   // false`, so the fixture must replicate it (a bare fresh element with no
   // classes at all would desync the two).
   els.bookmarksBar.classList.toggle('hidden', true);
-  const window = { goldfinch: {
-    windowMinimize: () => calls.push('minimize'), windowToggleMaximize: () => calls.push('maximize'), windowClose: () => calls.push('close'),
-    windowIsMaximized: async () => false, onWindowMaximizedChange: (fn) => { callbacks.maximized = fn; },
-    // M16 F1 Leg 2 / M16 F2 Leg 1: searchEngine's AND homePage's boot seeds
-    // read through this same mock — 'duckduckgo' / 'https://home.example/'
-    // are distinct, checkable values (neither is a default).
-    settingsGet: async (key) => key === 'bookmarksBarEnabled' ? false
-      : key === 'searchEngine' ? 'duckduckgo'
-      : key === 'homePage' ? 'https://home.example/'
-      : { media: true, shields: false, devtools: true },
-    onSettingsChanged: (fn) => { callbacks.settings = fn; }
-  } };
+  const window = {
+    goldfinch: {
+      windowMinimize: () => calls.push('minimize'),
+      windowToggleMaximize: () => calls.push('maximize'),
+      windowClose: () => calls.push('close'),
+      windowIsMaximized: async () => false,
+      onWindowMaximizedChange: (fn) => {
+        callbacks.maximized = fn;
+      },
+      // M16 F1 Leg 2 / M16 F2 Leg 1: searchEngine's AND homePage's boot seeds
+      // read through this same mock — 'duckduckgo' / 'https://home.example/'
+      // are distinct, checkable values (neither is a default).
+      settingsGet: async (key) =>
+        key === 'bookmarksBarEnabled'
+          ? false
+          : key === 'searchEngine'
+            ? 'duckduckgo'
+            : key === 'homePage'
+              ? 'https://home.example/'
+              : { media: true, shields: false, devtools: true },
+      onSettingsChanged: (fn) => {
+        callbacks.settings = fn;
+      }
+    }
+  };
   const deps = {
-    window, document: { activeElement: null }, ctx: { activeTabId: null }, els, tabs: new Map(),
-    orderedTabIds: () => [], releaseTabWidths: () => {}, keyboardMove: (ids) => ids, commitTabMove: () => {},
-    activateTab: () => {}, closeTab: () => {}, activeTab: () => null,
+    window,
+    document: { activeElement: null },
+    ctx: { activeTabId: null },
+    els,
+    tabs: new Map(),
+    orderedTabIds: () => [],
+    releaseTabWidths: () => {},
+    keyboardMove: (ids) => ids,
+    commitTabMove: () => {},
+    activateTab: () => {},
+    closeTab: () => {},
+    activeTab: () => null,
     setHomePage: (value) => calls.push(['home', value]),
     setSearchEngine: (value) => calls.push(['searchEngine', value]), // M16 F1 Leg 2
     updateAutomationKeyState: (value) => calls.push(['keys', value]),
@@ -55,7 +103,9 @@ test('maximize state and window controls preserve labels and bridge mappings', a
   assert.equal(h.els.winMax.attributes.get('data-state'), 'maximized');
   assert.equal(h.els.winMax.attributes.get('aria-label'), 'Restore');
   assert.equal(h.els.winMax.title, 'Restore');
-  h.els.winMin.listeners.get('click')(); h.els.winMax.listeners.get('click')(); h.els.winClose.listeners.get('click')();
+  h.els.winMin.listeners.get('click')();
+  h.els.winMax.listeners.get('click')();
+  h.els.winClose.listeners.get('click')();
   assert.deepEqual(h.calls.slice(-3), ['minimize', 'maximize', 'close']);
 });
 
@@ -65,7 +115,11 @@ test('toolbar pins and settings broadcasts stay independent of active-tab type',
   assert.equal(h.els.toggleMedia.classList.contains('hidden'), true);
   assert.equal(h.els.togglePrivacy.classList.contains('hidden'), false);
   assert.equal(h.els.toggleDevtools.classList.contains('hidden'), true);
-  h.callbacks.settings({ homePage: 'https://home.test/', toolbarPins: { media: true, shields: true, devtools: true }, automationKeyHashes: [] });
+  h.callbacks.settings({
+    homePage: 'https://home.test/',
+    toolbarPins: { media: true, shields: true, devtools: true },
+    automationKeyHashes: []
+  });
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'home'));
   assert.ok(h.calls.some((item) => Array.isArray(item) && item[0] === 'keys'));
 });
@@ -137,17 +191,26 @@ test('setBarSuppressed composes with the setting: enabled + suppressed still hid
 test('searchEngine is boot-seeded via an explicit settingsGet, and the broadcast handler applies null but ignores undefined', async () => {
   const h = await harness();
   await Promise.resolve(); // let the boot-seed settingsGet('searchEngine') resolve
-  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), ['searchEngine', 'duckduckgo']);
+  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), [
+    'searchEngine',
+    'duckduckgo'
+  ]);
 
   h.calls.length = 0;
   // Explicit null IS applied (unset is a meaningful value, not "nothing to do").
   h.callbacks.settings({ searchEngine: null, toolbarPins: { media: true, shields: true, devtools: true } });
-  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), ['searchEngine', null]);
+  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'searchEngine').pop(), [
+    'searchEngine',
+    null
+  ]);
 
   h.calls.length = 0;
   // searchEngine key absent from the broadcast payload (undefined) — no call at all.
   h.callbacks.settings({ toolbarPins: { media: true, shields: true, devtools: true } });
-  assert.equal(h.calls.some((item) => Array.isArray(item) && item[0] === 'searchEngine'), false);
+  assert.equal(
+    h.calls.some((item) => Array.isArray(item) && item[0] === 'searchEngine'),
+    false
+  );
 });
 
 // M16 F2 Leg 1 (DD4, squawk 0005 CLOSED): homePageCache gets the identical
@@ -157,7 +220,10 @@ test('searchEngine is boot-seeded via an explicit settingsGet, and the broadcast
 test('homePage is boot-seeded via an explicit settingsGet, before any broadcast (squawk 0005 closed)', async () => {
   const h = await harness();
   await Promise.resolve(); // let the boot-seed settingsGet('homePage') resolve
-  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'home').pop(), ['home', 'https://home.example/']);
+  assert.deepEqual(h.calls.filter((item) => Array.isArray(item) && item[0] === 'home').pop(), [
+    'home',
+    'https://home.example/'
+  ]);
 });
 
 test('bookmarksBarEnabled syncs live from the settings-changed broadcast (multi-window sync)', async () => {

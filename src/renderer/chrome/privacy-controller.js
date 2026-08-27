@@ -3,9 +3,23 @@
 /** @param {any} deps */
 export function createPrivacyController(deps) {
   const {
-    window, document, ctx, els, activeTab, findTabByWcId, isInternalTab, isWebTab,
-    togglePanel, sendActiveBounds, openToolbarContextMenu, toast, jarsClient,
-    buildAutomationIndicatorModel, isSafeColor, escapeHtml, isInternalPageUrl
+    window,
+    document,
+    ctx,
+    els,
+    activeTab,
+    findTabByWcId,
+    isInternalTab,
+    isWebTab,
+    togglePanel,
+    sendActiveBounds,
+    openToolbarContextMenu,
+    toast,
+    jarsClient,
+    buildAutomationIndicatorModel,
+    isSafeColor,
+    escapeHtml,
+    isInternalPageUrl
   } = deps;
   /* --------------------------------------------------------- privacy panel */
 
@@ -42,8 +56,14 @@ export function createPrivacyController(deps) {
     }
   }
 
-  els.togglePrivacy.addEventListener('click', () => { togglePrivacy(); sendActiveBounds(); });
-  els.togglePrivacy.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('shields', els.togglePrivacy); });
+  els.togglePrivacy.addEventListener('click', () => {
+    togglePrivacy();
+    sendActiveBounds();
+  });
+  els.togglePrivacy.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openToolbarContextMenu('shields', els.togglePrivacy);
+  });
 
   /* ------------------------------------------------------------------ devtools toggle */
 
@@ -67,7 +87,10 @@ export function createPrivacyController(deps) {
     const open = await window.goldfinch.toggleDevtools({ webContentsId: t.wcId });
     setDevtoolsPressed(!!open);
   });
-  els.toggleDevtools.addEventListener('contextmenu', (e) => { e.preventDefault(); openToolbarContextMenu('devtools', els.toggleDevtools); });
+  els.toggleDevtools.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    openToolbarContextMenu('devtools', els.toggleDevtools);
+  });
 
   // Live update from the Leg-1 devtools-state-changed event (catches a DevTools-window-
   // initiated close). Apply only when the change targets the currently-active tab.
@@ -75,7 +98,10 @@ export function createPrivacyController(deps) {
     const t = activeTab();
     if (t && t.wcId === wcId) setDevtoolsPressed(!!open);
   });
-  els.privacyClose.addEventListener('click', () => { togglePrivacy(false); sendActiveBounds(); });
+  els.privacyClose.addEventListener('click', () => {
+    togglePrivacy(false);
+    sendActiveBounds();
+  });
   // Non-modal: Escape closes the privacy panel; togglePrivacy restores focus to the toggle.
   els.privacyPanel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -179,7 +205,7 @@ export function createPrivacyController(deps) {
    */
   function jarDisplayName(jarId) {
     const c = jarsClient.containers.find((x) => x.id === jarId);
-    return c ? c.name : (jarId || 'jar');
+    return c ? c.name : jarId || 'jar';
   }
 
   /**
@@ -189,12 +215,11 @@ export function createPrivacyController(deps) {
    * @returns {{ enabledJarKeyCount: number, adminKeyEnabled: boolean }}
    */
   function computeAutomationKeyState(all) {
-    const hashes = (all && all.automationKeyHashes && typeof all.automationKeyHashes === 'object')
-      ? all.automationKeyHashes
-      : {};
+    const hashes =
+      all && all.automationKeyHashes && typeof all.automationKeyHashes === 'object' ? all.automationKeyHashes : {};
     return {
       enabledJarKeyCount: Object.keys(hashes).length,
-      adminKeyEnabled: !!(all && all.automationAdminKeyHash),
+      adminKeyEnabled: !!(all && all.automationAdminKeyHash)
     };
   }
 
@@ -218,11 +243,16 @@ export function createPrivacyController(deps) {
       adminKeyEnabled: lastKeyState.adminKeyEnabled,
       activeJarIds,
       adminActive,
-      containers: jarsClient.containers,
+      containers: jarsClient.containers
     });
 
     els.automationIndicator.classList.toggle('hidden', !model.visible);
-    els.automationIndicator.classList.remove('automation-idle', 'automation-jar', 'automation-multi', 'automation-admin');
+    els.automationIndicator.classList.remove(
+      'automation-idle',
+      'automation-jar',
+      'automation-multi',
+      'automation-admin'
+    );
 
     if (!model.visible) {
       els.automationIndicatorBadge.textContent = '';
@@ -236,9 +266,8 @@ export function createPrivacyController(deps) {
     els.automationIndicator.classList.add('automation-' + model.mode);
     // Defense in depth (F7 spec): re-validate before ever writing to an inline style,
     // even though buildAutomationIndicatorModel already gated `color` on isSafeColor.
-    els.automationIndicator.style.color = (model.mode === 'jar' && model.color && isSafeColor(model.color))
-      ? model.color
-      : '';
+    els.automationIndicator.style.color =
+      model.mode === 'jar' && model.color && isSafeColor(model.color) ? model.color : '';
 
     if (model.count > 0) {
       els.automationIndicatorBadge.textContent = String(model.count);
@@ -278,11 +307,17 @@ export function createPrivacyController(deps) {
   }
 
   // Initial snapshot (catches sessions attached before the chrome loaded) + live updates.
-  window.goldfinch.automationGetActivity().then(updateAutomationIndicator).catch(() => {});
+  window.goldfinch
+    .automationGetActivity()
+    .then(updateAutomationIndicator)
+    .catch(() => {});
   window.goldfinch.onAutomationActivity(updateAutomationIndicator);
   // Initial key state — settingsGet() with no key returns the full settings object
   // (settings-get: (_e, key) => key ? settings.get(key) : settings.getAll()).
-  window.goldfinch.settingsGet().then(updateAutomationKeyState).catch(() => {});
+  window.goldfinch
+    .settingsGet()
+    .then(updateAutomationKeyState)
+    .catch(() => {});
 
   function currentSite() {
     const tab = activeTab();
@@ -474,7 +509,9 @@ export function createPrivacyController(deps) {
     );
 
     // Trackers — blocked vs allowed
-    const trk = net ? net.trackers : { ads: [], analytics: [], social: [], other: [], count: 0, blocked: 0, allowed: 0 };
+    const trk = net
+      ? net.trackers
+      : { ads: [], analytics: [], social: [], other: [], count: 0, blocked: 0, allowed: 0 };
     const tLabel = trk.count ? `${trk.blocked} blocked · ${trk.allowed} allowed` : 'no trackers detected';
     const tSec = pBigStat('Trackers', trk.count, tLabel);
     for (const cat of ['ads', 'analytics', 'social', 'other']) {
@@ -551,7 +588,7 @@ export function createPrivacyController(deps) {
     d.innerHTML = `<div class="ps-cat">${escapeHtml(cat)} (${entries.length})</div>`;
     const list = document.createElement('div');
     list.className = 'ps-list';
-    list.tabIndex = 0;   // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
+    list.tabIndex = 0; // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
     for (const e of entries) {
       const item = document.createElement('div');
       item.className = 'ps-item status';
@@ -566,7 +603,7 @@ export function createPrivacyController(deps) {
   function pList(items) {
     const l = document.createElement('div');
     l.className = 'ps-list';
-    l.tabIndex = 0;   // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
+    l.tabIndex = 0; // scrollable region must be keyboard-focusable so it can be arrow-scrolled (a11y)
     l.innerHTML = items.map((i) => `<div class="ps-item">${escapeHtml(i)}</div>`).join('');
     return l;
   }
@@ -577,7 +614,6 @@ export function createPrivacyController(deps) {
     b.addEventListener('click', fn);
     return b;
   }
-
 
   return {
     blankPrivacy,

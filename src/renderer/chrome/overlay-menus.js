@@ -95,8 +95,15 @@ export function createOverlayMenus({ bridge, states, now, onActivated, onClosed 
 
 /** Internal-page and site-info action bodies shared by overlay menu dispatch. */
 export function createChromePageActions({
-  window, tabs, createTab, activateTab, activeTab, isInternalTab,
-  isInternalPageUrl, deriveSiteInfo, openNewTab
+  window,
+  tabs,
+  createTab,
+  activateTab,
+  activeTab,
+  isInternalTab,
+  isInternalPageUrl,
+  deriveSiteInfo,
+  openNewTab
 }) {
   function openDownloads() {
     createTab('goldfinch://downloads', null, { trusted: true });

@@ -53,7 +53,10 @@
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     let v = n;
     let i = 0;
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
     return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
   }
 
@@ -72,9 +75,7 @@
     if (state === 'interrupted') return 'Failed';
     // Electron keeps state='progressing' while paused; check the boolean.
     if (rec.paused) {
-      const size = rec.total > 0
-        ? fmtSize(rec.received) + ' of ' + fmtSize(rec.total)
-        : fmtSize(rec.received);
+      const size = rec.total > 0 ? fmtSize(rec.received) + ' of ' + fmtSize(rec.total) : fmtSize(rec.received);
       return size ? 'Paused · ' + size : 'Paused';
     }
     // progressing
@@ -92,7 +93,8 @@
    * @param {HTMLElement} [noticeEl]
    */
   function runAction(id, action, noticeEl) {
-    bridge.downloadsAction(id, action)
+    bridge
+      .downloadsAction(id, action)
       .then((res) => {
         if (res && res.error && noticeEl) {
           noticeEl.textContent = 'Could not open file (it may have been moved or deleted).';
@@ -103,7 +105,9 @@
           refresh();
         }
       })
-      .catch(() => { refresh(); });
+      .catch(() => {
+        refresh();
+      });
   }
 
   /**
@@ -209,7 +213,10 @@
 
   /** Re-fetch the full list and render. */
   function refresh() {
-    return bridge.downloadsList().then(render).catch(() => {});
+    return bridge
+      .downloadsList()
+      .then(render)
+      .catch(() => {});
   }
 
   /**
@@ -255,7 +262,10 @@
 
   // ── Wire-up ──
   clearBtn.addEventListener('click', () => {
-    bridge.downloadsClear().then(refresh).catch(() => {});
+    bridge
+      .downloadsClear()
+      .then(refresh)
+      .catch(() => {});
   });
 
   // Initial load.

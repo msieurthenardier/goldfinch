@@ -6,7 +6,13 @@
 const { bookmarkUrlsMatch } = require('../shared/bookmark-url');
 
 const MENU_CLOSE_REASONS = new Set([
-  'toggle', 'superseded', 'escape', 'blur', 'navigation', 'input-empty', 'activated'
+  'toggle',
+  'superseded',
+  'escape',
+  'blur',
+  'navigation',
+  'input-empty',
+  'activated'
 ]);
 const SHEET_DISMISS_REASONS = new Set(['escape', 'outside-click', 'blur']);
 
@@ -51,7 +57,7 @@ function registerOverlayIpc({
   // comment. A plain optional reference (leg 2's jar-ipc.js precedent, not a
   // getVaultStore-style accessor): offline overlay tests that don't inject
   // it get the pre-fix no-consultation shape, byte-unchanged.
-  list,
+  list
 }) {
   function recordForOverlaySender(sender, key) {
     if (!sender) return null;
@@ -70,9 +76,7 @@ function registerOverlayIpc({
     const rec = registry.getWindowForChrome(event.sender);
     if (!rec || !rec.sheet) return;
     const activeEntry = rec.activeTabWcId != null ? rec.tabViews.get(rec.activeTabWcId) : null;
-    const bounds = activeEntry && !activeEntry.view.webContents.isDestroyed()
-      ? activeEntry.view.getBounds()
-      : null;
+    const bounds = activeEntry && !activeEntry.view.webContents.isDestroyed() ? activeEntry.view.getBounds() : null;
     rec.sheet.openMenu(payload, { contentView: rec.win.contentView, win: rec.win, bounds });
   });
 
@@ -214,7 +218,7 @@ function registerOverlayIpc({
         // Recovery key ONLY — main→chrome→sheet (channel-3 init carries the model). The
         // admin key is NOT surfaced here (F4's from-scratch admin-provision path owns it).
         chromeForAttachment(rec.win)?.send('vault-recovery-show', {
-          recoveryKey: res && res.recoveryKeyDisplay,
+          recoveryKey: res && res.recoveryKeyDisplay
         });
         return { ok: true };
       } finally {
@@ -253,7 +257,7 @@ function registerOverlayIpc({
           // model). Shown ONCE on the dismiss-locked vault-accesskey-show sheet.
           chromeForAttachment(rec.win)?.send('vault-accesskey-show', {
             secret: res.secret,
-            keyId: res.keyId,
+            keyId: res.keyId
           });
           return { ok: true };
         }
@@ -339,7 +343,7 @@ function registerOverlayIpc({
           // old key, a footgun if unstated (HAT I9). NON-SECRET flag; the key rides as before.
           chromeForAttachment(rec.win)?.send('vault-recovery-show', {
             recoveryKey: res.recoveryKeyDisplay,
-            replacing: true,
+            replacing: true
           });
           return { ok: true };
         }
@@ -377,7 +381,7 @@ function registerOverlayIpc({
           // The new one-time admin private key — main→chrome→sheet (channel-3 init carries the model).
           // Shown ONCE on the dismiss-locked vault-adminkey-show sheet, opened AFTER the write.
           chromeForAttachment(rec.win)?.send('vault-adminkey-show', {
-            adminPrivateKey: res.adminPrivateKeyB64,
+            adminPrivateKey: res.adminPrivateKeyB64
           });
           return { ok: true };
         }
@@ -402,8 +406,7 @@ function registerOverlayIpc({
       const rec = recordForSheetSender(event.sender);
       if (!rec || !rec.sheet) return { ok: false };
       const { token, oldSecret, newSecret } = payload || {};
-      if (typeof token !== 'number'
-        || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+      if (typeof token !== 'number' || !(oldSecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
         return { ok: false };
       }
       const current = rec.sheet.getCurrentMenu();
@@ -439,8 +442,7 @@ function registerOverlayIpc({
       const rec = recordForSheetSender(event.sender);
       if (!rec || !rec.sheet) return { ok: false };
       const { token, recoverySecret, newSecret } = payload || {};
-      if (typeof token !== 'number'
-        || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
+      if (typeof token !== 'number' || !(recoverySecret instanceof Uint8Array) || !(newSecret instanceof Uint8Array)) {
         return { ok: false };
       }
       const current = rec.sheet.getCurrentMenu();
@@ -564,7 +566,7 @@ function registerOverlayIpc({
       if (action !== 'remove') {
         validated = validateBookmarkEdit({
           name: payload && payload.name,
-          url: payload && payload.url,
+          url: payload && payload.url
         });
         if (!validated.ok) return { ok: false };
       }
@@ -575,8 +577,8 @@ function registerOverlayIpc({
         const row = rows.find((r) => r.id === id);
         if (!row) return { ok: false, reason: 'not-found' };
         if (
-          action !== 'remove'
-          && rows.find((r) => r.id !== id && bookmarkUrlsMatch(r.url, /** @type {any} */ (validated).url))
+          action !== 'remove' &&
+          rows.find((r) => r.id !== id && bookmarkUrlsMatch(r.url, /** @type {any} */ (validated).url))
         ) {
           return { ok: false, reason: 'duplicate-url' };
         }
@@ -592,7 +594,7 @@ function registerOverlayIpc({
         id,
         action: 'save',
         name: /** @type {any} */ (validated).name,
-        url: /** @type {any} */ (validated).url,
+        url: /** @type {any} */ (validated).url
       });
       return { ok: true };
     });
@@ -680,10 +682,7 @@ function registerOverlayIpc({
   ipcMain.on('find-overlay:open', (event, payload) => {
     if (!registry.getWindowForChrome(event.sender)) return;
     const { wcId, findText } = payload || {};
-    registry.getWindowForGuest(wcId)?.findOverlay?.openSession(
-      wcId,
-      typeof findText === 'string' ? findText : ''
-    );
+    registry.getWindowForGuest(wcId)?.findOverlay?.openSession(wcId, typeof findText === 'string' ? findText : '');
   });
 
   ipcMain.on('find-overlay:close', (event) => {

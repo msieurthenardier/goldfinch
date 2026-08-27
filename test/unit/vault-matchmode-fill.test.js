@@ -28,9 +28,15 @@ const MASTER = 'correct horse battery staple';
 const JARS = [{ id: 'work', partition: 'persist:container:work' }];
 const APEX = 'https://example.com';
 
-function tmpDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-mm-')); }
-function rm(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
-function bytesOf(str) { return new TextEncoder().encode(str); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-mm-'));
+}
+function rm(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+function bytesOf(str) {
+  return new TextEncoder().encode(str);
+}
 function makeStore(dir) {
   return vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
 }
@@ -38,8 +44,14 @@ function makeStore(dir) {
 // A registrable-domain login stored at the apex in the 'work' jar.
 function seedApex(store, over = {}) {
   return store.saveItem('work', {
-    id: 'rd', type: 'login', title: 'Example', username: 'u@ex', password: 'pw',
-    origin: APEX, matchMode: 'registrable-domain', ...over,
+    id: 'rd',
+    type: 'login',
+    title: 'Example',
+    username: 'u@ex',
+    password: 'pw',
+    origin: APEX,
+    matchMode: 'registrable-domain',
+    ...over
   });
 }
 
@@ -55,11 +67,19 @@ function makeCtxWorld(urlByWcId) {
   const fromId = (wcId) => {
     const url = urlByWcId[wcId];
     if (url == null) return null;
-    return { id: wcId, session: sessionFor('persist:container:work'), getURL: () => url, isDestroyed() { return false; } };
+    return {
+      id: wcId,
+      session: sessionFor('persist:container:work'),
+      getURL: () => url,
+      isDestroyed() {
+        return false;
+      }
+    };
   };
   return {
-    fromId, fromPartition: sessionFor,
-    deps: { jars: { list: () => JARS }, fromId, fromPartition: sessionFor, getChromeContents: () => ({ id: 0 }) },
+    fromId,
+    fromPartition: sessionFor,
+    deps: { jars: { list: () => JARS }, fromId, fromPartition: sessionFor, getChromeContents: () => ({ id: 0 }) }
   };
 }
 
@@ -74,23 +94,39 @@ test('automation fill (vault-context) honors matchMode: subdomain fills, sibling
 
     const world = makeCtxWorld({
       10: 'https://accounts.example.com/login', // subdomain match → fill
-      11: 'https://accounts.other.com/login',   // different registrable domain → refuse
-      12: 'http://accounts.example.com/login',   // scheme mismatch → refuse
-      13: 'https://example.com/login',           // exact apex → fill
+      11: 'https://accounts.other.com/login', // different registrable domain → refuse
+      12: 'http://accounts.example.com/login', // scheme mismatch → refuse
+      13: 'https://example.com/login' // exact apex → fill
     });
     const calls = [];
     const store = makeStore(dir);
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: (a) => calls.push(a) });
     ctx.unlock('work', work.secret);
 
-    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'rd' }, world.deps), { filled: true, id: 'rd', origin: 'https://accounts.example.com' });
-    assert.deepEqual(ctx.fill('work', { wcId: 13, itemId: 'rd' }, world.deps), { filled: true, id: 'rd', origin: 'https://example.com' });
-    assert.deepEqual(ctx.fill('work', { wcId: 11, itemId: 'rd' }, world.deps), { filled: false, reason: 'origin-mismatch' });
-    assert.deepEqual(ctx.fill('work', { wcId: 12, itemId: 'rd' }, world.deps), { filled: false, reason: 'origin-mismatch' });
+    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'rd' }, world.deps), {
+      filled: true,
+      id: 'rd',
+      origin: 'https://accounts.example.com'
+    });
+    assert.deepEqual(ctx.fill('work', { wcId: 13, itemId: 'rd' }, world.deps), {
+      filled: true,
+      id: 'rd',
+      origin: 'https://example.com'
+    });
+    assert.deepEqual(ctx.fill('work', { wcId: 11, itemId: 'rd' }, world.deps), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
+    assert.deepEqual(ctx.fill('work', { wcId: 12, itemId: 'rd' }, world.deps), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
 
     assert.equal(calls.length, 2, 'delegate called only on the two accepted fills');
     for (const c of calls) assert.deepEqual(c.credential, { username: 'u@ex', password: 'pw' });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('automation fill: an EXACT-mode item does NOT widen to a subdomain', async () => {
@@ -108,15 +144,22 @@ test('automation fill: an EXACT-mode item does NOT widen to a subdomain', async 
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: (a) => calls.push(a) });
     ctx.unlock('work', work.secret);
 
-    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'rd' }, world.deps), { filled: false, reason: 'origin-mismatch' });
+    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'rd' }, world.deps), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
     assert.equal(calls.length, 0);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 /* =============================================== 2. human fill + 3. picker + 4. capture */
 
 function makeHuman(store, { urls }) {
-  const entries = new Map(Object.keys(urls).map((k) => [Number(k), { partition: 'persist:container:work', trusted: false }]));
+  const entries = new Map(
+    Object.keys(urls).map((k) => [Number(k), { partition: 'persist:container:work', trusted: false }])
+  );
   const fillCalls = [];
   const human = createVaultHuman({
     getVaultStore: () => store,
@@ -126,7 +169,7 @@ function makeHuman(store, { urls }) {
     fillDelegate: (arg) => fillCalls.push(arg),
     setTimeout: (_fn, _ms) => ({ id: 0, unref() {} }), // capture drop-timer: never fires in-test
     clearTimeout: () => {},
-    now: () => 1000,
+    now: () => 1000
   });
   return { human, fillCalls };
 }
@@ -140,17 +183,25 @@ test('human fill (vault-human) honors matchMode: subdomain fills, sibling/scheme
     const { human, fillCalls } = makeHuman(store, {
       urls: {
         10: 'https://accounts.example.com/login', // subdomain → fill
-        11: 'https://accounts.other.com/login',   // sibling → refuse
-        12: 'http://accounts.example.com/login',   // scheme mismatch → refuse
-      },
+        11: 'https://accounts.other.com/login', // sibling → refuse
+        12: 'http://accounts.example.com/login' // scheme mismatch → refuse
+      }
     });
 
     assert.deepEqual(human.fillHuman({ wcId: 10, vaultId: 'work', itemId: 'rd' }), { filled: true });
-    assert.deepEqual(human.fillHuman({ wcId: 11, vaultId: 'work', itemId: 'rd' }), { filled: false, reason: 'origin-mismatch' });
-    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'work', itemId: 'rd' }), { filled: false, reason: 'origin-mismatch' });
+    assert.deepEqual(human.fillHuman({ wcId: 11, vaultId: 'work', itemId: 'rd' }), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
+    assert.deepEqual(human.fillHuman({ wcId: 12, vaultId: 'work', itemId: 'rd' }), {
+      filled: false,
+      reason: 'origin-mismatch'
+    });
     assert.equal(fillCalls.length, 1);
     assert.deepEqual(fillCalls[0].credential, { username: 'u@ex', password: 'pw' });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('picker (reachableItems) surfaces a widened offer on a matched subdomain, flagged widened', async () => {
@@ -160,7 +211,7 @@ test('picker (reachableItems) surfaces a widened offer on a matched subdomain, f
     await store.setup({ masterPassword: MASTER });
     seedApex(store);
     const { human } = makeHuman(store, {
-      urls: { 10: 'https://accounts.example.com/login', 11: 'https://bob.github.io/login' },
+      urls: { 10: 'https://accounts.example.com/login', 11: 'https://bob.github.io/login' }
     });
 
     const rows = human.reachableItems(10);
@@ -170,7 +221,9 @@ test('picker (reachableItems) surfaces a widened offer on a matched subdomain, f
 
     // No row across an unrelated tenant.
     assert.deepEqual(human.reachableItems(11), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('CAPTURE STAYS EXACT: a subdomain submit does NOT update the eTLD+1 item nor rewrite its origin', async () => {
@@ -202,5 +255,7 @@ test('CAPTURE STAYS EXACT: a subdomain submit does NOT update the eTLD+1 item no
     // A distinct new item now exists at the subdomain origin.
     const fresh = items.find((i) => i.origin === 'https://accounts.example.com');
     assert.ok(fresh && fresh.id !== 'rd', 'the subdomain submit created a separate item');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

@@ -122,9 +122,8 @@ const SQLITE_NOTADB = 26;
  *   result codes (vs. a migration-step bug, e.g. a table collision).
  */
 function isCorruptionErrcode(err) {
-  return !!err && typeof err === 'object' && (
-    /** @type {any} */ (err).errcode === SQLITE_CORRUPT || /** @type {any} */ (err).errcode === SQLITE_NOTADB
-  );
+  const anyErr = /** @type {any} */ (err);
+  return !!err && typeof err === 'object' && (anyErr.errcode === SQLITE_CORRUPT || anyErr.errcode === SQLITE_NOTADB);
 }
 
 // ---------------------------------------------------------------------------
@@ -311,9 +310,7 @@ function prepareStatements() {
     insertBookmark: d.prepare(
       'INSERT INTO bookmarks (id, jar_id, url, title, icon, position, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)'
     ),
-    updateBookmark: d.prepare(
-      'UPDATE bookmarks SET url = ?1, title = ?2, icon = ?3 WHERE jar_id = ?4 AND id = ?5'
-    ),
+    updateBookmark: d.prepare('UPDATE bookmarks SET url = ?1, title = ?2, icon = ?3 WHERE jar_id = ?4 AND id = ?5'),
     updateBookmarkPosition: d.prepare('UPDATE bookmarks SET position = ?1 WHERE jar_id = ?2 AND id = ?3'),
     deleteBookmark: d.prepare('DELETE FROM bookmarks WHERE jar_id = ?1 AND id = ?2'),
     deleteBookmarksByJar: d.prepare('DELETE FROM bookmarks WHERE jar_id = ?1')
@@ -470,9 +467,7 @@ function createCookieSeenStore() {
      */
     insertIfAbsent(jarId, name, domain, path, firstSeenMs) {
       assertOpen();
-      const result = /** @type {any} */ (
-        statements.insertCookieSeen.run(jarId, name, domain, path, firstSeenMs)
-      );
+      const result = /** @type {any} */ (statements.insertCookieSeen.run(jarId, name, domain, path, firstSeenMs));
       return result.changes > 0;
     },
     /**
@@ -484,9 +479,7 @@ function createCookieSeenStore() {
      */
     deleteByIdentity(jarId, name, domain, path) {
       assertOpen();
-      const result = /** @type {any} */ (
-        statements.deleteCookieSeenByIdentity.run(jarId, name, domain, path)
-      );
+      const result = /** @type {any} */ (statements.deleteCookieSeenByIdentity.run(jarId, name, domain, path));
       return result.changes > 0;
     },
     /**

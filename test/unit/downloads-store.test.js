@@ -33,9 +33,7 @@ function removeTempDir(dir) {
 function readRow(dir) {
   const check = new DatabaseSync(path.join(dir, 'app.db'));
   try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('downloads')
-    );
+    const row = /** @type {any} */ (check.prepare('SELECT payload FROM documents WHERE store = ?1').get('downloads'));
     return row ? row.payload : null;
   } finally {
     check.close();
@@ -168,7 +166,11 @@ test('getNextId is monotonic and never lowered by prune or remove', () => {
     // Remove the highest remaining id (600).
     store.remove(600);
     all = store.list();
-    assert.equal(all.find((r) => r.id === 600), undefined, '600 removed');
+    assert.equal(
+      all.find((r) => r.id === 600),
+      undefined,
+      '600 removed'
+    );
 
     // getNextId is STILL greater than every id ever issued (600), unaffected by prune/remove.
     const next = store.getNextId();
@@ -215,8 +217,15 @@ test('append clamps to the newest 500 by id (drop-oldest)', () => {
     }
     const all = store.list();
     assert.equal(all.length, 500, '501st append drops the oldest');
-    assert.equal(all.find((r) => r.id === 1), undefined, 'oldest (id 1) dropped');
-    assert.ok(all.find((r) => r.id === 501), 'newest (id 501) kept');
+    assert.equal(
+      all.find((r) => r.id === 1),
+      undefined,
+      'oldest (id 1) dropped'
+    );
+    assert.ok(
+      all.find((r) => r.id === 501),
+      'newest (id 501) kept'
+    );
   } finally {
     appDb.close();
     removeTempDir(dir);
@@ -230,11 +239,7 @@ test('load applies the same 500-cap clamp', () => {
     // Hand-write a file with 600 records.
     const records = [];
     for (let id = 1; id <= 600; id++) records.push(rec(id));
-    fs.writeFileSync(
-      path.join(dir, 'downloads.json'),
-      JSON.stringify({ version: 1, nextId: 601, records }),
-      'utf8'
-    );
+    fs.writeFileSync(path.join(dir, 'downloads.json'), JSON.stringify({ version: 1, nextId: 601, records }), 'utf8');
     const store = freshStore();
     store.load(dir);
     const all = store.list();
@@ -264,14 +269,13 @@ test('per-record validator drops malformed entries on load', () => {
       null, // not an object → drop
       rec(6, { state: 'interrupted' }) // valid
     ];
-    fs.writeFileSync(
-      path.join(dir, 'downloads.json'),
-      JSON.stringify({ version: 1, nextId: 7, records }),
-      'utf8'
-    );
+    fs.writeFileSync(path.join(dir, 'downloads.json'), JSON.stringify({ version: 1, nextId: 7, records }), 'utf8');
     const store = freshStore();
     store.load(dir);
-    const ids = store.list().map((r) => r.id).sort((a, b) => a - b);
+    const ids = store
+      .list()
+      .map((r) => r.id)
+      .sort((a, b) => a - b);
     assert.deepEqual(ids, [1, 6], 'only valid terminal records survive');
   } finally {
     appDb.close();
@@ -348,7 +352,10 @@ test('remove filters out the record and persists; nextId untouched', () => {
 
     store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((r) => r.id), [b]);
+    assert.deepEqual(
+      store.list().map((r) => r.id),
+      [b]
+    );
     assert.ok(store.getNextId() > b, 'nextId never lowered by remove');
   } finally {
     appDb.close();
@@ -459,7 +466,10 @@ test('migration: legacy downloads.json is imported once, records intact, then re
 
     const store = freshStore();
     store.load(dir);
-    assert.deepEqual(store.list().map((r) => r.id), [1, 2]);
+    assert.deepEqual(
+      store.list().map((r) => r.id),
+      [1, 2]
+    );
     assert.equal(store.getNextId(), 3);
 
     const row = readRow(dir);
@@ -513,7 +523,11 @@ test('migration: a present row wins over a stray legacy downloads.json (no re-im
 
     const store2 = freshStore();
     store2.load(dir);
-    assert.deepEqual(store2.list().map((r) => r.id), [1], 'row wins; stray JSON is not re-imported');
+    assert.deepEqual(
+      store2.list().map((r) => r.id),
+      [1],
+      'row wins; stray JSON is not re-imported'
+    );
 
     assert.ok(fs.existsSync(path.join(dir, 'downloads.json')));
     assert.ok(!fs.existsSync(path.join(dir, 'downloads.json.migrated')));

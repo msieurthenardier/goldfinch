@@ -10,7 +10,9 @@ const { createPopupRegistry } = require('../../src/main/popup-registry');
 
 function deferred() {
   let resolve;
-  const promise = new Promise((res) => { resolve = res; });
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
   return { promise, resolve };
 }
 
@@ -29,28 +31,53 @@ class FakeContents extends EventEmitter {
       canGoForward: () => false
     };
   }
-  setWindowOpenHandler(fn) { this.openHandler = fn; }
-  isDestroyed() { return this.destroyed; }
-  getURL() { return this.url; }
-  print(_opts, cb) { this.printCalls++; cb(true); }
+  setWindowOpenHandler(fn) {
+    this.openHandler = fn;
+  }
+  isDestroyed() {
+    return this.destroyed;
+  }
+  getURL() {
+    return this.url;
+  }
+  print(_opts, cb) {
+    this.printCalls++;
+    cb(true);
+  }
   // Rejected on purpose: callers MUST attach their own .catch (a missing one
   // surfaces here as an unhandled rejection failing the suite).
-  executeJavaScript(code) { this.execCalls.push(code); return Promise.reject(new Error('no page')); }
-  setWebRTCIPHandlingPolicy(policy) { this.webrtcPolicy = policy; }
+  executeJavaScript(code) {
+    this.execCalls.push(code);
+    return Promise.reject(new Error('no page'));
+  }
+  setWebRTCIPHandlingPolicy(policy) {
+    this.webrtcPolicy = policy;
+  }
 }
 
 function setup() {
   const sends = [];
   const calls = [];
-  const chrome = { focus: () => calls.push('focus-chrome'), send: (channel, payload) => sends.push([channel, payload]) };
+  const chrome = {
+    focus: () => calls.push('focus-chrome'),
+    send: (channel, payload) => sends.push([channel, payload])
+  };
   const records = new Map();
   const registry = {
-    getWindowForGuest(id) { return records.get(id) || null; }
+    getWindowForGuest(id) {
+      return records.get(id) || null;
+    }
   };
   let historyRecorder = {
-    handleNavigation(payload) { calls.push(['history-nav', payload]); },
-    handleTitleUpdated(id, title) { calls.push(['history-title', id, title]); },
-    forgetTab(id) { calls.push(['history-forget', id]); }
+    handleNavigation(payload) {
+      calls.push(['history-nav', payload]);
+    },
+    handleTitleUpdated(id, title) {
+      calls.push(['history-title', id, title]);
+    },
+    forgetTab(id) {
+      calls.push(['history-forget', id]);
+    }
   };
   // The favicon-fetch harness has its first async cases (AC6): a test overrides
   // this via setFaviconRequest to hand back a controllable deferred promise, so
@@ -73,8 +100,14 @@ function setup() {
     },
     // M14 F1 L2: navigation-away auth invalidation — a recording fake.
     authChallenges: { cancelForTab: (wcId, reason) => calls.push(['auth-cancel', wcId, reason]) },
-    crossViewNavAction: (input) => { calls.push('classify-cross-view'); return input.key === 'l' ? 'focus-address' : null; },
-    keydownToAction: (input) => { calls.push('classify-chrome'); return input.key === 't' ? 'new-tab' : null; },
+    crossViewNavAction: (input) => {
+      calls.push('classify-cross-view');
+      return input.key === 'l' ? 'focus-address' : null;
+    },
+    keydownToAction: (input) => {
+      calls.push('classify-chrome');
+      return input.key === 't' ? 'new-tab' : null;
+    },
     isChromeActionForwardable: (action) => action === 'new-tab',
     isRepeatSafeAction: () => false,
     isInternalPageUrl: (url) => url.startsWith('goldfinch://settings'),
@@ -93,14 +126,30 @@ function setup() {
     logger: { warn() {} }
   });
   return {
-    wiring, sends, calls, records, chrome, fullscreenIds, popupRegistry,
-    setHistoryRecorder: (value) => { historyRecorder = value; },
-    setFaviconRequest: (fn) => { faviconRequest = fn; }
+    wiring,
+    sends,
+    calls,
+    records,
+    chrome,
+    fullscreenIds,
+    popupRegistry,
+    setHistoryRecorder: (value) => {
+      historyRecorder = value;
+    },
+    setFaviconRequest: (fn) => {
+      faviconRequest = fn;
+    }
   };
 }
 
 function inputEvent(url) {
-  return { url, prevented: false, preventDefault() { this.prevented = true; } };
+  return {
+    url,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    }
+  };
 }
 
 test('popup inherits the opener partition, targets owning chrome, and always denies native creation', () => {
@@ -147,7 +196,9 @@ test('will-frame-navigate and will-redirect enforce the same predicate as will-n
     url: 'javascript:alert(1)',
     isMainFrame: false,
     prevented: false,
-    preventDefault() { this.prevented = true; }
+    preventDefault() {
+      this.prevented = true;
+    }
   };
   web.emit('will-frame-navigate', subframeBad);
   assert.equal(subframeBad.prevented, true, 'subframe nav to a disallowed scheme must be prevented');
@@ -156,7 +207,9 @@ test('will-frame-navigate and will-redirect enforce the same predicate as will-n
     url: 'https://example.test/frame',
     isMainFrame: false,
     prevented: false,
-    preventDefault() { this.prevented = true; }
+    preventDefault() {
+      this.prevented = true;
+    }
   };
   web.emit('will-frame-navigate', subframeGood);
   assert.equal(subframeGood.prevented, false, 'subframe nav to an allowed https URL must NOT be prevented');
@@ -180,7 +233,14 @@ test('will-frame-navigate and will-redirect enforce the same predicate as will-n
 const PDF_VIEWER_URL = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/stream-uuid';
 
 function navEvent(url, extra = {}) {
-  return { url, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+  return {
+    url,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    ...extra
+  };
 }
 
 test('PDF-viewer carve-out: a will-frame-navigate SUBFRAME event to the pinned viewer id is allowed (DD5)', () => {
@@ -329,10 +389,13 @@ test('html fullscreen events wire to the module on web guests only', () => {
   assert.equal(internal.listenerCount('leave-html-full-screen'), 0);
   web.emit('enter-html-full-screen');
   web.emit('leave-html-full-screen');
-  assert.deepEqual(h.calls.filter((x) => Array.isArray(x) && String(x[0]).startsWith('fs-')), [
-    ['fs-enter', 5],
-    ['fs-exit', 5]
-  ]);
+  assert.deepEqual(
+    h.calls.filter((x) => Array.isArray(x) && String(x[0]).startsWith('fs-')),
+    [
+      ['fs-enter', 5],
+      ['fs-exit', 5]
+    ]
+  );
 });
 
 // M14 F1 L1 (DD1): defensive Esc — page-side exit ask, no preventDefault, only
@@ -405,7 +468,10 @@ test('page-favicon-updated routes through the favicon fetcher and forwards a dat
   const wc = new FakeContents(11);
   let capturedArgs = null;
   const pending = deferred();
-  h.setFaviconRequest((args) => { capturedArgs = args; return pending.promise; });
+  h.setFaviconRequest((args) => {
+    capturedArgs = args;
+    return pending.promise;
+  });
   h.wiring.wireTabViewEvents({ webContents: wc }, 11, 'persist:jar-a');
 
   wc.emit('page-favicon-updated', {}, ['https://example.test/favicon.ico']);
@@ -462,8 +528,12 @@ class FakePopupWindow extends EventEmitter {
     this.webContents = new FakeContents(wcId, false);
     this.destroyed = false;
   }
-  isDestroyed() { return this.destroyed; }
-  destroy() { this.destroyed = true; }
+  isDestroyed() {
+    return this.destroyed;
+  }
+  destroy() {
+    this.destroyed = true;
+  }
 }
 
 /** A live opener record whose chrome sends land in `sends`. */
@@ -471,8 +541,15 @@ function popupHarness(openerWcId = 7) {
   const h = setup();
   const wc = new FakeContents(openerWcId);
   const record = {
-    win: { destroyed: false, isDestroyed() { return this.destroyed; } },
-    chromeView: { webContents: { isDestroyed: () => false, send: (channel, payload) => h.sends.push([channel, payload]) } },
+    win: {
+      destroyed: false,
+      isDestroyed() {
+        return this.destroyed;
+      }
+    },
+    chromeView: {
+      webContents: { isDestroyed: () => false, send: (channel, payload) => h.sends.push([channel, payload]) }
+    },
     tabViews: new Map([[openerWcId, { partition: 'persist:jar-a' }]]),
     activeTabWcId: openerWcId
   };
@@ -535,18 +612,27 @@ test('qualifying window.open returns allow with the exact DD1d posture — and N
   const h = popupHarness();
   const result = h.wc.openHandler(QUALIFYING);
   assert.deepEqual(result, EXPECTED_ALLOW);
-  assert.deepEqual(Object.keys(result).sort(), ['action', 'overrideBrowserWindowOptions'],
-    'the allow return carries exactly these two keys — the adopt hook is the spike-proven opener-wedging taboo');
-  assert.equal('partition' in result.overrideBrowserWindowOptions.webPreferences, false,
-    'no partition key — the session is automatically the opener jar (spike-verified)');
+  assert.deepEqual(
+    Object.keys(result).sort(),
+    ['action', 'overrideBrowserWindowOptions'],
+    'the allow return carries exactly these two keys — the adopt hook is the spike-proven opener-wedging taboo'
+  );
+  assert.equal(
+    'partition' in result.overrideBrowserWindowOptions.webPreferences,
+    false,
+    'no partition key — the session is automatically the opener jar (spike-verified)'
+  );
   assert.deepEqual(h.sends, [], 'no deny-convert forward on the allow path');
 });
 
 test('DD2 source-scan pin: guest-wiring.js contains an allow return and no adopt-hook identifier anywhere', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'guest-wiring.js'), 'utf8');
   assert.ok(src.includes("action: 'allow'"), 'the allow path exists');
-  assert.equal(/\bcreateWindow\b/.test(src), false,
-    'no createWindow key/identifier may appear in guest-wiring.js — the adopt hook wedges the opener renderer (DD2)');
+  assert.equal(
+    /\bcreateWindow\b/.test(src),
+    false,
+    'no createWindow key/identifier may appear in guest-wiring.js — the adopt hook wedges the opener renderer (DD2)'
+  );
 });
 
 test('named-no-features arrives as foreground-tab and keeps deny-convert (the flight-logged named consequence)', () => {
@@ -554,15 +640,27 @@ test('named-no-features arrives as foreground-tab and keeps deny-convert (the fl
   // Chromium classifies `window.open(url, 'name')` with NO features as
   // foreground-tab (premise-confirmed live) — the disposition conjunction
   // intentionally narrows DD3's "features OR named" reading.
-  const result = h.wc.openHandler({ url: 'https://popup.test/', frameName: 'namedNoFeatures', features: '', disposition: 'foreground-tab' });
+  const result = h.wc.openHandler({
+    url: 'https://popup.test/',
+    frameName: 'namedNoFeatures',
+    features: '',
+    disposition: 'foreground-tab'
+  });
   assert.deepEqual(result, { action: 'deny' });
-  assert.deepEqual(h.sends, [['open-tab', { url: 'https://popup.test/', openerPartition: 'persist:jar-a' }]],
-    'deny-convert forwards to the owning chrome');
+  assert.deepEqual(
+    h.sends,
+    [['open-tab', { url: 'https://popup.test/', openerPartition: 'persist:jar-a' }]],
+    'deny-convert forwards to the owning chrome'
+  );
 });
 
 test('tab-intent dispositions, unsafe URLs, and internal openers always deny(-convert)', () => {
   const h = popupHarness();
-  assert.deepEqual(h.wc.openHandler({ ...QUALIFYING, disposition: 'background-tab' }), { action: 'deny' }, 'middle-click');
+  assert.deepEqual(
+    h.wc.openHandler({ ...QUALIFYING, disposition: 'background-tab' }),
+    { action: 'deny' },
+    'middle-click'
+  );
   assert.deepEqual(h.wc.openHandler({ ...QUALIFYING, url: 'file:///etc/passwd' }), { action: 'deny' }, 'unsafe URL');
 
   const internal = new FakeContents(2, true);
@@ -611,14 +709,20 @@ test('did-create-window applies the burner WebRTC IP-handling policy when the op
   burnerHarness.record.tabViews.set(7, { partition: 'burner:99' });
   const burnerWin = new FakePopupWindow(701);
   burnerHarness.wc.emit('did-create-window', burnerWin);
-  assert.equal(burnerWin.webContents.webrtcPolicy, 'disable_non_proxied_udp',
-    'a burner-opened popup gets the hardening policy');
+  assert.equal(
+    burnerWin.webContents.webrtcPolicy,
+    'disable_non_proxied_udp',
+    'a burner-opened popup gets the hardening policy'
+  );
 
   const normalHarness = popupHarness(8);
   const normalWin = new FakePopupWindow(801);
   normalHarness.wc.emit('did-create-window', normalWin);
-  assert.equal(normalWin.webContents.webrtcPolicy, undefined,
-    'a normal-jar popup (default persist:jar-a partition) never receives the burner-only policy call');
+  assert.equal(
+    normalWin.webContents.webrtcPolicy,
+    undefined,
+    'a normal-jar popup (default persist:jar-a partition) never receives the burner-only policy call'
+  );
 });
 
 test('popup nav guards carry the GUEST shape — a file: navigation is refused (never ALLOWED_NONGUEST_SCHEMES)', () => {
@@ -654,7 +758,10 @@ test('popup HTML fullscreen stays native: the popup wcId resolves NO window reco
   // getWindowForGuest miss (pinned in html-fullscreen.test.js: "unowned wcId is
   // a no-op"), so `record.htmlFullscreen` is never touched by popup wcIds.
   win.webContents.emit('enter-html-full-screen');
-  assert.deepEqual(h.calls.filter((c) => Array.isArray(c) && c[0] === 'fs-enter'), [['fs-enter', 701]]);
+  assert.deepEqual(
+    h.calls.filter((c) => Array.isArray(c) && c[0] === 'fs-enter'),
+    [['fs-enter', 701]]
+  );
   assert.equal(h.records.get(701), undefined, 'popup wcId resolves no record — the early-return premise');
 });
 
@@ -674,7 +781,9 @@ test('popup history records under the opener jar and titles feed the recorder (D
     { wcId: 701, partition: 'persist:jar-a', url: 'https://popup.test/landed' },
     { wcId: 701, partition: 'persist:jar-a', url: 'https://popup.test/landed' }
   ]);
-  assert.ok(h.calls.some((c) => Array.isArray(c) && c[0] === 'history-title' && c[1] === 701 && c[2] === 'Popup title'));
+  assert.ok(
+    h.calls.some((c) => Array.isArray(c) && c[0] === 'history-title' && c[1] === 701 && c[2] === 'Popup title')
+  );
 });
 
 test('popup teardown rides closed AND destroyed (destroy() skips close), deregisters, and forgets history — idempotently', () => {
@@ -685,8 +794,10 @@ test('popup teardown rides closed AND destroyed (destroy() skips close), deregis
 
   win.emit('closed');
   assert.equal(h.popupRegistry.isPopupWcId(701), false, 'deregistered at window closed');
-  assert.ok(h.calls.some((c) => Array.isArray(c) && c[0] === 'history-forget' && c[1] === 701),
-    'forgetTab ran (the window-factory close loop only covers tabViews)');
+  assert.ok(
+    h.calls.some((c) => Array.isArray(c) && c[0] === 'history-forget' && c[1] === 701),
+    'forgetTab ran (the window-factory close loop only covers tabViews)'
+  );
 
   assert.doesNotThrow(() => win.webContents.emit('destroyed'), 'the contents-destroyed twin is idempotent');
   assert.equal(h.popupRegistry.isPopupWcId(701), false);
@@ -716,8 +827,11 @@ test('popup did-start-navigation resolve-cancels pending challenges — main-fra
   assert.deepEqual(authCancels(), [], 'subframe and same-document navigations never cancel');
 
   popupWc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
-  assert.deepEqual(authCancels(), [['auth-cancel', 701, 'navigated']],
-    'a real popup navigation cancels with the tab-parity reason — DD2 max-staleness holds for popups');
+  assert.deepEqual(
+    authCancels(),
+    [['auth-cancel', 701, 'navigated']],
+    'a real popup navigation cancels with the tab-parity reason — DD2 max-staleness holds for popups'
+  );
 
   popupWc.destroyed = true;
   popupWc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
@@ -734,7 +848,12 @@ test('popup-originated window.open resolves the owner popup-registry-first: deny
   // target=_blank inside the popup ("forgot password" inside an OAuth popup):
   // chromeForTab misses popups by construction — the forward must reach the
   // opener record's chrome with the CAPTURED partition, never vanish.
-  const result = popupWc.openHandler({ url: 'https://reset.test/', frameName: '', features: '', disposition: 'foreground-tab' });
+  const result = popupWc.openHandler({
+    url: 'https://reset.test/',
+    frameName: '',
+    features: '',
+    disposition: 'foreground-tab'
+  });
   assert.deepEqual(result, { action: 'deny' });
   assert.deepEqual(h.sends, [['open-tab', { url: 'https://reset.test/', openerPartition: 'persist:jar-a' }]]);
 });
@@ -765,8 +884,10 @@ test('popup-originated window.open with a DEAD owning record denies with no forw
   h.sends.length = 0;
 
   assert.deepEqual(popupWc.openHandler(QUALIFYING), { action: 'deny' }, 'qualifying request refused on a dead record');
-  assert.deepEqual(popupWc.openHandler({ url: 'https://x.test/', frameName: '', features: '', disposition: 'foreground-tab' }),
-    { action: 'deny' });
+  assert.deepEqual(
+    popupWc.openHandler({ url: 'https://x.test/', frameName: '', features: '', disposition: 'foreground-tab' }),
+    { action: 'deny' }
+  );
   assert.deepEqual(h.sends, [], 'no forward anywhere once the owner is dead');
 });
 
@@ -786,10 +907,16 @@ test('did-start-navigation cancels the tab pending auth challenges — main-fram
   h.wiring.wireTabViewEvents({ webContents: wc }, 31, 'persist:jar-a');
 
   wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
-  assert.deepEqual(h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel'), [['auth-cancel', 31, 'navigated']]);
+  assert.deepEqual(
+    h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel'),
+    [['auth-cancel', 31, 'navigated']]
+  );
 
   wc.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false }); // subframe
   wc.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true }); // hash/pushState
-  assert.equal(h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel').length, 1,
-    'subframe and same-document navigations never cancel');
+  assert.equal(
+    h.calls.filter((c) => Array.isArray(c) && c[0] === 'auth-cancel').length,
+    1,
+    'subframe and same-document navigations never cancel'
+  );
 });

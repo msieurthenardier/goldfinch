@@ -36,7 +36,7 @@ function makeStore(dir, overrides = {}) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     listJars: () => JARS,
-    ...overrides,
+    ...overrides
   });
 }
 function vaultPath(dir, id) {
@@ -117,19 +117,28 @@ test('all three unlock paths (master / recovery / admin) open the manager', asyn
     let s = makeStore(dir);
     await s.unlock(MASTER);
     assert.equal(s.isUnlocked(), true);
-    assert.deepEqual(s.listItems('global').map((i) => i.title), ['Seed']);
+    assert.deepEqual(
+      s.listItems('global').map((i) => i.title),
+      ['Seed']
+    );
 
     // (b) recovery
     s = makeStore(dir);
     s.unlockWithRecovery(recoveryKeyDisplay);
     assert.equal(s.isUnlocked(), true);
-    assert.deepEqual(s.listItems('global').map((i) => i.title), ['Seed']);
+    assert.deepEqual(
+      s.listItems('global').map((i) => i.title),
+      ['Seed']
+    );
 
     // (c) admin private key
     s = makeStore(dir);
     s.unlockWithAdmin(adminPrivateKeyB64);
     assert.equal(s.isUnlocked(), true);
-    assert.deepEqual(s.listItems('global').map((i) => i.title), ['Seed']);
+    assert.deepEqual(
+      s.listItems('global').map((i) => i.title),
+      ['Seed']
+    );
   } finally {
     rm(dir);
   }
@@ -149,15 +158,24 @@ test('a wrong secret on any path throws and leaves the manager LOCKED', async ()
     assert.equal(s.mrk, null, 'mrk stays null after a failed unlock');
 
     // a save/mint while locked throws
-    assert.throws(() => s.saveItem('global', loginItem()), (e) => e instanceof vs.VaultLockedError);
+    assert.throws(
+      () => s.saveItem('global', loginItem()),
+      (e) => e instanceof vs.VaultLockedError
+    );
 
     // wrong recovery (valid 20-byte material, wrong value)
-    assert.throws(() => s.unlockWithRecovery('A'.repeat(32)), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.unlockWithRecovery('A'.repeat(32)),
+      (e) => e instanceof vs.VaultAuthError
+    );
     assert.equal(s.isUnlocked(), false);
 
     // wrong admin key
     const otherAdmin = vc.generateAdminKeypair();
-    assert.throws(() => s.unlockWithAdmin(otherAdmin.privateKeyB64), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.unlockWithAdmin(otherAdmin.privateKeyB64),
+      (e) => e instanceof vs.VaultAuthError
+    );
     assert.equal(s.isUnlocked(), false);
     assert.equal(s.mrk, null);
   } finally {
@@ -185,7 +203,8 @@ test('recovery unlocks a forgotten master, then a new master can be set (items u
     // changeMasterPassword now REQUIRES the old password (an old-password step-up), which a
     // forgotten-master user by definition cannot supply, so recover is the dedicated path.
     await store.recoverMasterPassword({
-      recoveryDisplay: recoveryKeyDisplay, newMasterPassword: 'brand-new-master',
+      recoveryDisplay: recoveryKeyDisplay,
+      newMasterPassword: 'brand-new-master'
     });
     assert.equal(store.isUnlocked(), true, 'recover leaves the manager unlocked');
 
@@ -195,7 +214,10 @@ test('recovery unlocks a forgotten master, then a new master can be set (items u
     // The NEW master unlocks; the OLD one no longer does.
     store.lockNow();
     await store.unlock('brand-new-master');
-    assert.deepEqual(store.listItems('global').map((i) => i.title), ['Kept']);
+    assert.deepEqual(
+      store.listItems('global').map((i) => i.title),
+      ['Kept']
+    );
 
     store.lockNow();
     await assert.rejects(store.unlock(MASTER), (e) => e instanceof vs.VaultAuthError);
@@ -223,12 +245,18 @@ test('a jar vault created lazily after setup is recoverable by recovery AND admi
     // Recovery (created after setup) opens it.
     let s = makeStore(dir);
     s.unlockWithRecovery(recoveryKeyDisplay);
-    assert.deepEqual(s.listItems('work').map((i) => i.title), ['Work login']);
+    assert.deepEqual(
+      s.listItems('work').map((i) => i.title),
+      ['Work login']
+    );
 
     // Admin key opens it too.
     s = makeStore(dir);
     s.unlockWithAdmin(adminPrivateKeyB64);
-    assert.deepEqual(s.listItems('work').map((i) => i.title), ['Work login']);
+    assert.deepEqual(
+      s.listItems('work').map((i) => i.title),
+      ['Work login']
+    );
   } finally {
     rm(dir);
   }
@@ -244,7 +272,10 @@ test('saveItem upserts by id and listItems reflects the update', async () => {
     assert.equal(store.listItems('global').length, 2);
     // Update the first by id.
     store.saveItem('global', { id: a.id, type: 'login', title: 'One-edited', password: 'x' });
-    const titles = store.listItems('global').map((i) => i.title).sort();
+    const titles = store
+      .listItems('global')
+      .map((i) => i.title)
+      .sort();
     assert.deepEqual(titles, ['One-edited', 'Two']);
   } finally {
     rm(dir);
@@ -262,7 +293,10 @@ test('saving to a burner / unknown jar id is refused with no file created', asyn
     await store.setup({ masterPassword: MASTER });
 
     for (const badId of ['burner', 'not-a-jar', 'personal-typo']) {
-      assert.throws(() => store.saveItem(badId, loginItem()), (e) => e instanceof vs.VaultStateError);
+      assert.throws(
+        () => store.saveItem(badId, loginItem()),
+        (e) => e instanceof vs.VaultStateError
+      );
       assert.ok(!fs.existsSync(vaultPath(dir, badId)), `no vault file created for "${badId}"`);
     }
     // A jar that IS in listJars() is accepted.
@@ -294,11 +328,20 @@ test('lockNow zeroizes the MRK + vault keys and drops references', async () => {
     assert.equal(store.isUnlocked(), false);
     assert.equal(store.mrk, null);
     assert.equal(store.vaultKeys.size, 0);
-    assert.ok(mrkRef.every((b) => b === 0), 'the MRK buffer is zeroized in place');
-    assert.ok(vaultKeyRef.every((b) => b === 0), 'the vault-key buffer is zeroized in place');
+    assert.ok(
+      mrkRef.every((b) => b === 0),
+      'the MRK buffer is zeroized in place'
+    );
+    assert.ok(
+      vaultKeyRef.every((b) => b === 0),
+      'the vault-key buffer is zeroized in place'
+    );
 
     // Reading items requires a fresh unlock.
-    assert.throws(() => store.listItems('global'), (e) => e instanceof vs.VaultLockedError);
+    assert.throws(
+      () => store.listItems('global'),
+      (e) => e instanceof vs.VaultLockedError
+    );
   } finally {
     rm(dir);
   }
@@ -311,7 +354,11 @@ test('lockNow fires the onLock hook EXACTLY once — the single vault-lock-state
     // onLock stands in for main.js's broadcastVaultLockState. The internal-vault-lock and the
     // chrome-trust vault-lock channel handlers BOTH just call this store's lockNow() and must
     // NOT re-broadcast — so one lockNow() must yield exactly one onLock (no double-broadcast).
-    const store = makeStore(dir, { onLock: () => { onLockCalls += 1; } });
+    const store = makeStore(dir, {
+      onLock: () => {
+        onLockCalls += 1;
+      }
+    });
     await store.setup({ masterPassword: MASTER });
     store.saveItem('global', loginItem());
 
@@ -346,7 +393,7 @@ test('the idle timer arms from the setting, resets on each op, and locks on fire
       },
       clearTimeout: () => {
         cleared += 1;
-      },
+      }
     });
 
     await store.setup({ masterPassword: MASTER });
@@ -363,7 +410,10 @@ test('the idle timer arms from the setting, resets on each op, and locks on fire
     const mrkRef = store.mrk;
     armed.fn();
     assert.equal(store.isUnlocked(), false, 'the manager locks when the idle timer fires');
-    assert.ok(mrkRef.every((b) => b === 0), 'firing the timer zeroizes the MRK');
+    assert.ok(
+      mrkRef.every((b) => b === 0),
+      'firing the timer zeroizes the MRK'
+    );
   } finally {
     rm(dir);
   }
@@ -407,16 +457,28 @@ test('an access key opens ONLY its own vault; revoke takes effect immediately', 
     const reader = makeStore(dir);
     const workKey = reader.unlockVaultWithAccessKey('work', secret);
     const workDoc = vc.parseVault(fs.readFileSync(vaultPath(dir, 'work')));
-    assert.deepEqual(vc.decryptItems(workDoc.items, workKey).map((i) => i.title), ['Work item']);
+    assert.deepEqual(
+      vc.decryptItems(workDoc.items, workKey).map((i) => i.title),
+      ['Work item']
+    );
 
     // It does NOT open the global vault (no access envelope there) nor a sibling.
-    assert.throws(() => reader.unlockVaultWithAccessKey('global', secret), (e) => e instanceof vs.VaultAuthError);
-    assert.throws(() => reader.unlockVaultWithAccessKey('personal', secret), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => reader.unlockVaultWithAccessKey('global', secret),
+      (e) => e instanceof vs.VaultAuthError
+    );
+    assert.throws(
+      () => reader.unlockVaultWithAccessKey('personal', secret),
+      (e) => e instanceof vs.VaultAuthError
+    );
 
     // Revoke — immediate effect for a fresh reader.
     assert.equal(store.revokeAccessKey('work', keyId), true);
     const reader2 = makeStore(dir);
-    assert.throws(() => reader2.unlockVaultWithAccessKey('work', secret), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => reader2.unlockVaultWithAccessKey('work', secret),
+      (e) => e instanceof vs.VaultAuthError
+    );
   } finally {
     rm(dir);
   }
@@ -465,12 +527,21 @@ test('listAccessKeys is MRK-gated (locked → VaultLockedError) and allowlist-re
     assert.deepEqual(store.listAccessKeys('global'), []);
 
     // A burner/unknown target is rejected by _resolveTarget (no raw-path construction).
-    assert.throws(() => store.listAccessKeys('burner-xyz'), (e) => e instanceof vs.VaultStateError);
-    assert.throws(() => store.listAccessKeys('../../etc/passwd'), (e) => e instanceof vs.VaultStateError);
+    assert.throws(
+      () => store.listAccessKeys('burner-xyz'),
+      (e) => e instanceof vs.VaultStateError
+    );
+    assert.throws(
+      () => store.listAccessKeys('../../etc/passwd'),
+      (e) => e instanceof vs.VaultStateError
+    );
 
     // Locked → VaultLockedError (policy MRK-gate — uniform locked-routing).
     store.lockNow();
-    assert.throws(() => store.listAccessKeys('work'), (e) => e instanceof vs.VaultLockedError);
+    assert.throws(
+      () => store.listAccessKeys('work'),
+      (e) => e instanceof vs.VaultLockedError
+    );
   } finally {
     rm(dir);
   }
@@ -483,7 +554,10 @@ test('resolveTarget is the PUBLIC allowlist passthrough for the revoke handler (
     await store.setup({ masterPassword: MASTER });
     assert.equal(store.resolveTarget('work'), 'work');
     assert.equal(store.resolveTarget('global'), 'global');
-    assert.throws(() => store.resolveTarget('burner-xyz'), (e) => e instanceof vs.VaultStateError);
+    assert.throws(
+      () => store.resolveTarget('burner-xyz'),
+      (e) => e instanceof vs.VaultStateError
+    );
     // Needs no MRK — the allowlist is manager-lock-independent.
     store.lockNow();
     assert.equal(store.resolveTarget('work'), 'work');
@@ -510,7 +584,10 @@ test('mintAccessKey accepts a Buffer step-up master password (no widening) and m
     const reader = makeStore(dir);
     const workKey = reader.unlockVaultWithAccessKey('work', secret);
     const workDoc = vc.parseVault(fs.readFileSync(vaultPath(dir, 'work')));
-    assert.deepEqual(vc.decryptItems(workDoc.items, workKey).map((i) => i.title), ['Work']);
+    assert.deepEqual(
+      vc.decryptItems(workDoc.items, workKey).map((i) => i.title),
+      ['Work']
+    );
 
     // A WRONG Buffer step-up password refuses (VaultAuthError) and mints nothing.
     await assert.rejects(
@@ -580,7 +657,10 @@ test('a corrupt manager.json throws at load and is never quarantined', async () 
     fs.mkdirSync(path.join(dir, 'vaults'), { recursive: true });
     fs.writeFileSync(managerPath(dir), '{{ not json', 'utf8');
 
-    assert.throws(() => makeStore(dir), (e) => e instanceof vs.VaultFormatError);
+    assert.throws(
+      () => makeStore(dir),
+      (e) => e instanceof vs.VaultFormatError
+    );
 
     // The file is untouched — no rename / .bak / recreate.
     assert.deepEqual(fs.readdirSync(path.join(dir, 'vaults')), ['manager.json']);
@@ -601,7 +681,10 @@ test('a corrupt .gfvault throws on access and is never quarantined', async () =>
 
     const s = makeStore(dir);
     await s.unlock(MASTER);
-    assert.throws(() => s.listItems('work'), (e) => e instanceof vs.VaultFormatError);
+    assert.throws(
+      () => s.listItems('work'),
+      (e) => e instanceof vs.VaultFormatError
+    );
     // File still present, unchanged (loud, not quarantined).
     assert.equal(fs.readFileSync(vaultPath(dir, 'work'), 'utf8'), 'not a vault document');
   } finally {
@@ -626,19 +709,22 @@ test('the mrk-envelope AAD is load-bearing: a version-mismatched AAD fails unwra
     const badEnv = {
       keyId: 'mrk',
       type: 'mrk',
-      ...vc.wrapVaultKey(vaultKey, mrk, Buffer.from('gfvault/mrk-env/v2')),
+      ...vc.wrapVaultKey(vaultKey, mrk, Buffer.from('gfvault/mrk-env/v2'))
     };
     const json = vc.serializeVault({
       vaultId: 'global',
       envelopes: [badEnv],
-      items: vc.encryptItems([], vaultKey),
+      items: vc.encryptItems([], vaultKey)
     });
     fs.writeFileSync(vaultPath(dir, 'global'), json, 'utf8');
 
     const s = makeStore(dir);
     await s.unlock(MASTER);
     // The store unwraps with the correct AAD (v1) → GCM authentication fails.
-    assert.throws(() => s.listItems('global'), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.listItems('global'),
+      (e) => e instanceof vs.VaultAuthError
+    );
   } finally {
     rm(dir);
   }
@@ -659,7 +745,10 @@ test('flipping a byte of the mrk envelope ciphertext fails authentication', asyn
 
     const s = makeStore(dir);
     await s.unlock(MASTER);
-    assert.throws(() => s.listItems('global'), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.listItems('global'),
+      (e) => e instanceof vs.VaultAuthError
+    );
   } finally {
     rm(dir);
   }
@@ -680,7 +769,8 @@ test('no plaintext password / recovery / admin-priv / item-secret is written to 
 
     // Concatenate every persisted file as raw bytes.
     const vdir = path.join(dir, 'vaults');
-    const blob = fs.readdirSync(vdir)
+    const blob = fs
+      .readdirSync(vdir)
       .map((n) => fs.readFileSync(path.join(vdir, n)))
       .reduce((acc, b) => Buffer.concat([acc, b]), Buffer.alloc(0))
       .toString('latin1');
@@ -735,7 +825,10 @@ test('deleteVault unlinks an existing jar .gfvault and evicts+zeroizes the cache
     assert.deepEqual(result, { deleted: true });
     assert.ok(!fs.existsSync(vaultPath(dir, 'work')), 'the .gfvault file is gone');
     assert.equal(store.vaultKeys.has('work'), false, 'the cached key is evicted');
-    assert.ok(keyRef.every((b) => b === 0), 'the evicted key buffer is zeroized in place');
+    assert.ok(
+      keyRef.every((b) => b === 0),
+      'the evicted key buffer is zeroized in place'
+    );
     // The GLOBAL vault is untouched by a jar delete.
     assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'the global vault survives');
   } finally {
@@ -762,10 +855,16 @@ test('deleteVault refuses the GLOBAL vault and never unlinks it', async () => {
     const store = makeStore(dir);
     await store.setup({ masterPassword: MASTER });
     assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'global vault exists');
-    assert.throws(() => store.deleteVault(vs.GLOBAL_ID), (e) => e instanceof vs.VaultStateError);
+    assert.throws(
+      () => store.deleteVault(vs.GLOBAL_ID),
+      (e) => e instanceof vs.VaultStateError
+    );
     assert.ok(fs.existsSync(vaultPath(dir, 'global')), 'the global vault file is still there');
     // The literal 'global' resolves to GLOBAL_ID and is refused just the same.
-    assert.throws(() => store.deleteVault('global'), (e) => e instanceof vs.VaultStateError);
+    assert.throws(
+      () => store.deleteVault('global'),
+      (e) => e instanceof vs.VaultStateError
+    );
   } finally {
     rm(dir);
   }

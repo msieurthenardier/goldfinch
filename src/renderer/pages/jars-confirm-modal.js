@@ -76,7 +76,15 @@
  * }} deps
  * @returns {{ captureTrigger: () => void, update: () => void }}
  */
-export function createConfirmModal({ dataActions, titles, getUi, closeTransient, getSectionRefs, setSectionStatus, fallbackFocusEl }) {
+export function createConfirmModal({
+  dataActions,
+  titles,
+  getUi,
+  closeTransient,
+  getSectionRefs,
+  setSectionStatus,
+  fallbackFocusEl
+}) {
   const backdrop = document.createElement('div');
   backdrop.id = 'jars-confirm-backdrop';
   backdrop.className = 'jar-modal-backdrop';
@@ -249,7 +257,8 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
       cancelBtn.disabled = true;
       if (triggerBtn) triggerBtn.disabled = true;
       inFlight = true;
-      entry.run(id)
+      entry
+        .run(id)
         .then((result) => {
           if (triggerBtn) triggerBtn.disabled = false;
           const ui = getUi();
@@ -351,9 +360,7 @@ export function createConfirmModal({ dataActions, titles, getUi, closeTransient,
     }
     if (e.key === 'Tab' && confirmBtnEl && cancelBtnEl) {
       e.preventDefault();
-      const cycle = exportBtnEl
-        ? [exportBtnEl, confirmBtnEl, cancelBtnEl]
-        : [confirmBtnEl, cancelBtnEl];
+      const cycle = exportBtnEl ? [exportBtnEl, confirmBtnEl, cancelBtnEl] : [confirmBtnEl, cancelBtnEl];
       const i = cycle.indexOf(/** @type {any} */ (document.activeElement));
       const n = (i + (e.shiftKey ? -1 : 1) + cycle.length) % cycle.length;
       cycle[n].focus();

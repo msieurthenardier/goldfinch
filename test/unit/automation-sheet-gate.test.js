@@ -37,11 +37,11 @@ Module._cache[electronResolved] = {
   loaded: true,
   exports: {
     webContents: { fromId: (/** @type {number} */ id) => (id === SHEET_WCID ? sheetWc : null) },
-    session: { fromPartition: () => null },
+    session: { fromPartition: () => null }
   },
   parent: null,
   children: [],
-  paths: [],
+  paths: []
 };
 
 const { createEngine } = require('../../src/main/automation/engine');
@@ -60,21 +60,44 @@ function makeSheetWc(id = SHEET_WCID) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    async capturePage() { return { toPNG: () => Buffer.from('PNG') }; },
-    async executeJavaScript() { return { url: 'file://sheet', title: '', html: '<html></html>' }; },
+    isDestroyed() {
+      return false;
+    },
+    async capturePage() {
+      return { toPNG: () => Buffer.from('PNG') };
+    },
+    async executeJavaScript() {
+      return { url: 'file://sheet', title: '', html: '<html></html>' };
+    },
     debugger: {
       attach() {},
       detach() {},
-      async sendCommand() { return { nodes: [] }; },
+      async sendCommand() {
+        return { nodes: [] };
+      }
     },
-    loadURL() {}, goBack() {}, goForward() {}, reload() {},
-    setZoomFactor() {}, getZoomFactor() { return 1; },
+    loadURL() {},
+    goBack() {},
+    goForward() {},
+    reload() {},
+    setZoomFactor() {},
+    getZoomFactor() {
+      return 1;
+    },
     sendInputEvent() {},
-    async printToPDF() { return Buffer.from('PDF'); },
-    findInPage() { return 1; }, stopFindInPage() {},
-    openDevTools() {}, closeDevTools() {}, isDevToolsOpened() { return false; },
-    focus() {},
+    async printToPDF() {
+      return Buffer.from('PDF');
+    },
+    findInPage() {
+      return 1;
+    },
+    stopFindInPage() {},
+    openDevTools() {},
+    closeDevTools() {},
+    isDevToolsOpened() {
+      return false;
+    },
+    focus() {}
   };
 }
 
@@ -91,14 +114,14 @@ function makeSheetWc(id = SHEET_WCID) {
 const VALID_ARGS = {
   closeTab: [],
   activateTab: [],
-  navigate: ['https://example.test/'],       // pre-resolve isSafeTabUrl check
+  navigate: ['https://example.test/'], // pre-resolve isSafeTabUrl check
   goBack: [],
   goForward: [],
   reload: [],
   click: [10, 10],
   typeText: ['hello'],
   scroll: [10, 10, 0, 100],
-  pressKey: ['Enter'],                        // pre-resolve keyEvents/normalizeModifier throw
+  pressKey: ['Enter'], // pre-resolve keyEvents/normalizeModifier throw
   captureScreenshot: [],
   readDom: [],
   readAxTree: [],
@@ -107,11 +130,14 @@ const VALID_ARGS = {
   openDevTools: [],
   closeDevTools: [],
   getZoom: [],
-  setZoom: [1.5],                             // pre-resolve factor validation
+  setZoom: [1.5], // pre-resolve factor validation
   printToPDF: [],
   findInPage: ['needle'],
   stopFindInPage: [],
-  dragPointer: [{ x: 1, y: 1 }, { x: 20, y: 20 }],   // pre-resolve dragEvents dereference
+  dragPointer: [
+    { x: 1, y: 1 },
+    { x: 20, y: 20 }
+  ] // pre-resolve dragEvents dereference
 };
 
 // The three dispatch entries in engine.js that pass `deps({ allowSheet: true })`.
@@ -120,9 +146,12 @@ const ADMITTED_OPS = ['captureScreenshot', 'readDom', 'readAxTree'];
 test('AC3: the valid-args table covers WCID_FIRST_OPS EXACTLY — an op added later fails loudly here', () => {
   const table = Object.keys(VALID_ARGS).sort();
   const ops = [...WCID_FIRST_OPS].sort();
-  assert.deepEqual(table, ops,
+  assert.deepEqual(
+    table,
+    ops,
     'every wcId-first op needs an entry with args valid enough to REACH resolveContents; ' +
-    'this assertion is the whole point of the sweep — a new op must be classified, not skipped');
+      'this assertion is the whole point of the sweep — a new op must be classified, not skipped'
+  );
   for (const op of ADMITTED_OPS) {
     assert.ok(WCID_FIRST_OPS.includes(op), op + ' must be a wcId-first op');
   }
@@ -136,7 +165,7 @@ test('AC3: every NON-admitted wcId-first op throws secret-sheet against the shee
     // OP half of the gate and nothing else.
     allowInternal: true,
     isSheetContents: (wc) => wc === sheetWc,
-    sheetMenuFor: (wc) => (wc === sheetWc ? { menuType: ADMITTED_MENU_TYPE, token: 11 } : null),
+    sheetMenuFor: (wc) => (wc === sheetWc ? { menuType: ADMITTED_MENU_TYPE, token: 11 } : null)
   });
 
   const refused = [];
@@ -162,18 +191,23 @@ test('AC3: EXACTLY the three admitted ops are not refused by the sheet gate', as
   const engine = createEngine(() => null, {
     allowInternal: true,
     isSheetContents: (wc) => wc === sheetWc,
-    sheetMenuFor: (wc) => (wc === sheetWc ? { menuType: ADMITTED_MENU_TYPE, token: 11 } : null),
+    sheetMenuFor: (wc) => (wc === sheetWc ? { menuType: ADMITTED_MENU_TYPE, token: 11 } : null)
   });
   for (const op of ADMITTED_OPS) {
     let err = null;
     try {
       await engine[op](SHEET_WCID, ...VALID_ARGS[op]);
-    } catch (e) { err = e; }
+    } catch (e) {
+      err = e;
+    }
     // They may still fail for unrelated reasons in this fixture (captureScreenshot's
     // foreground-to-act needs a chrome), but never with the sheet refusal.
     if (err) {
-      assert.doesNotMatch(String(err.message), /automation: secret-sheet/,
-        op + ' opted in with allowSheet and must not be refused by guard 3');
+      assert.doesNotMatch(
+        String(err.message),
+        /automation: secret-sheet/,
+        op + ' opted in with allowSheet and must not be refused by guard 3'
+      );
     }
   }
 });
@@ -183,7 +217,7 @@ test('AC3: the three admitted ops are refused again the moment the menuType leav
   const engine = createEngine(() => null, {
     allowInternal: true,
     isSheetContents: (wc) => wc === sheetWc,
-    sheetMenuFor: () => ({ menuType: 'vault-unlock', token: 11 }),
+    sheetMenuFor: () => ({ menuType: 'vault-unlock', token: 11 })
   });
   for (const op of ADMITTED_OPS) {
     await assert.rejects(
@@ -205,18 +239,20 @@ test('AC4 (façade layer): a sheet wcId through scopeEngine throws out-of-jar �
   // made, and it is why this leg widens the ADMIN TIER ONLY.
   const jarSession = { __partition: 'persist:container:personal' };
   const sheetSession = { __goldfinchInternal: false };
-  const sheet = { id: SHEET_WCID, session: sheetSession, isDestroyed() { return false; } };
-
-  const facade = scopeEngine(
-    { readDom: async () => ({ html: 'SHOULD NEVER BE REACHED' }) },
-    'personal',
-    {
-      jars: { list: () => [{ id: 'personal', partition: 'persist:container:personal' }] },
-      fromId: (id) => (id === SHEET_WCID ? sheet : null),
-      fromPartition: () => jarSession,
-      getChromeContents: () => null,
+  const sheet = {
+    id: SHEET_WCID,
+    session: sheetSession,
+    isDestroyed() {
+      return false;
     }
-  );
+  };
+
+  const facade = scopeEngine({ readDom: async () => ({ html: 'SHOULD NEVER BE REACHED' }) }, 'personal', {
+    jars: { list: () => [{ id: 'personal', partition: 'persist:container:personal' }] },
+    fromId: (id) => (id === SHEET_WCID ? sheet : null),
+    fromPartition: () => jarSession,
+    getChromeContents: () => null
+  });
 
   await assert.rejects(
     Promise.resolve().then(() => facade.readDom(SHEET_WCID)),
@@ -234,7 +270,7 @@ test('AC4 (engine layer): readDom on a sheet wcId against a JAR-TIER engine thro
     // No allowInternal — this is the jar tier. Guard 5 is live.
     isTabViewWcId: () => false,
     isSheetContents: (wc) => wc === sheetWc,
-    sheetMenuFor: () => ({ menuType: ADMITTED_MENU_TYPE, token: 11 }),
+    sheetMenuFor: () => ({ menuType: ADMITTED_MENU_TYPE, token: 11 })
   });
   await assert.rejects(
     Promise.resolve().then(() => jarEngine.readDom(SHEET_WCID)),
@@ -262,7 +298,7 @@ function observeDeps(wc, cell, extra = {}) {
     allowSheet: true,
     isSheetContents: (/** @type {any} */ c) => c === wc,
     sheetMenuFor: (/** @type {any} */ c) => (c === wc ? cell.menu : null),
-    ...extra,
+    ...extra
   };
 }
 
@@ -271,15 +307,17 @@ test('AC5 (captureScreenshot): a menu model-replaced mid-capture DISCARDS the pi
   const wc = {
     id: 71,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    async capturePage() {
-      cell.menu = { menuType: 'vault-unlock', token: 2 };   // model-replace mid-paint
-      return { toPNG: () => Buffer.from('PNG') };
+    isDestroyed() {
+      return false;
     },
+    async capturePage() {
+      cell.menu = { menuType: 'vault-unlock', token: 2 }; // model-replace mid-paint
+      return { toPNG: () => Buffer.from('PNG') };
+    }
   };
   await assert.rejects(
     captureScreenshot(71, observeDeps(wc, cell), { waitForPaint: async () => {} }),
-    /automation: sheet-menu-changed/,
+    /automation: sheet-menu-changed/
   );
 });
 
@@ -287,15 +325,19 @@ test('AC5 (captureScreenshot): null → null does NOT throw — an ordinary tab 
   const wc = {
     id: 72,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    async capturePage() { return { toPNG: () => Buffer.from('PNG') }; },
+    isDestroyed() {
+      return false;
+    },
+    async capturePage() {
+      return { toPNG: () => Buffer.from('PNG') };
+    }
   };
   // sheetMenuFor answers null for this wc both times, even though a menu is "open" somewhere.
   const deps = {
     fromId: (/** @type {number} */ id) => (id === 72 ? wc : null),
     chromeContents: null,
     allowSheet: true,
-    sheetMenuFor: () => null,
+    sheetMenuFor: () => null
   };
   const b64 = await captureScreenshot(72, deps, { waitForPaint: async () => {} });
   assert.equal(b64, Buffer.from('PNG').toString('base64'));
@@ -306,18 +348,17 @@ test('AC5 (readDom): a menu change across the executeJavaScript round trip DISCA
   const wc = {
     id: 73,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     async executeJavaScript() {
       // The round trip is main→renderer→main: what comes back is whatever the renderer had
       // rendered when the snippet ran, not what main believed at resolve time.
       cell.menu = { menuType: 'vault-recovery-show', token: 2 };
       return { url: 'x', title: 'y', html: '<html>SECRET</html>' };
-    },
+    }
   };
-  await assert.rejects(
-    readDom(73, observeDeps(wc, cell)),
-    /automation: sheet-menu-changed/,
-  );
+  await assert.rejects(readDom(73, observeDeps(wc, cell)), /automation: sheet-menu-changed/);
 });
 
 test('AC5 (readDom): an unchanged menu returns the snapshot normally', async () => {
@@ -325,8 +366,12 @@ test('AC5 (readDom): an unchanged menu returns the snapshot normally', async () 
   const wc = {
     id: 74,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    async executeJavaScript() { return { url: 'x', title: 'y', html: '<html>ok</html>' }; },
+    isDestroyed() {
+      return false;
+    },
+    async executeJavaScript() {
+      return { url: 'x', title: 'y', html: '<html>ok</html>' };
+    }
   };
   const out = await readDom(74, observeDeps(wc, cell));
   assert.equal(out.html, '<html>ok</html>');
@@ -337,11 +382,13 @@ test('AC5: a close-and-REOPEN of the SAME allowlisted menu also throws — token
   const wc = {
     id: 75,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
-    async executeJavaScript() {
-      cell.menu = { menuType: ADMITTED_MENU_TYPE, token: 2 };  // same menuType, NEW session
-      return { url: 'x', title: 'y', html: '<html/>' };
+    isDestroyed() {
+      return false;
     },
+    async executeJavaScript() {
+      cell.menu = { menuType: ADMITTED_MENU_TYPE, token: 2 }; // same menuType, NEW session
+      return { url: 'x', title: 'y', html: '<html/>' };
+    }
   };
   await assert.rejects(readDom(75, observeDeps(wc, cell)), /automation: sheet-menu-changed/);
 });
@@ -351,7 +398,9 @@ test('AC5 (readAxTree): a menu change across the debugger session DISCARDS the t
   const wc = {
     id: 76,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     debugger: {
       attach() {},
       detach() {},
@@ -361,8 +410,8 @@ test('AC5 (readAxTree): a menu change across the debugger session DISCARDS the t
           return { nodes: [{ nodeId: '1' }] };
         }
         return {};
-      },
-    },
+      }
+    }
   };
   await assert.rejects(readAxTree(76, observeDeps(wc, cell)), /automation: sheet-menu-changed/);
 });
@@ -372,15 +421,19 @@ test('AC5 (readAxTree): the re-check applies UNCONDITIONALLY, including on the d
   const wc = {
     id: 77,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     debugger: {
       attach() {
         cell.menu = { menuType: 'vault-unlock', token: 2 };
-        throw new Error('another client is attached');   // → { automation: 'debugger-unavailable' }
+        throw new Error('another client is attached'); // → { automation: 'debugger-unavailable' }
       },
       detach() {},
-      async sendCommand() { return {}; },
-    },
+      async sendCommand() {
+        return {};
+      }
+    }
   };
   await assert.rejects(readAxTree(77, observeDeps(wc, cell)), /automation: sheet-menu-changed/);
 });
@@ -390,13 +443,16 @@ test('AC5 (readAxTree): an unchanged menu returns the node array normally', asyn
   const wc = {
     id: 78,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     debugger: {
-      attach() {}, detach() {},
+      attach() {},
+      detach() {},
       async sendCommand(/** @type {string} */ cmd) {
         return cmd === 'Accessibility.getFullAXTree' ? { nodes: [{ nodeId: '1' }] } : {};
-      },
-    },
+      }
+    }
   };
   const nodes = await readAxTree(78, observeDeps(wc, cell));
   assert.deepEqual(nodes, [{ nodeId: '1' }]);

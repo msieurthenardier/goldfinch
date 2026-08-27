@@ -18,9 +18,15 @@ function makeFakeStore(startId = 1) {
   return {
     getNextId: () => nextId++,
     list: () => records.slice(),
-    append: (r) => { records.push(r); },
-    remove: (id) => { records = records.filter((r) => r.id !== id); },
-    clear: () => { records = []; },
+    append: (r) => {
+      records.push(r);
+    },
+    remove: (id) => {
+      records = records.filter((r) => r.id !== id);
+    },
+    clear: () => {
+      records = [];
+    },
     // test introspection
     _records: () => records,
     _peekNextId: () => nextId
@@ -74,7 +80,13 @@ test('update mutates the in-progress record and no-ops on unknown id', () => {
 test('finalize appends a terminal record and drops it from memory', () => {
   const store = makeFakeStore();
   const mgr = createManager(store);
-  const id = mgr.register({ url: 'https://e/x', filename: 'x.bin', savePath: '/tmp/x', startTime: 10, mime: 'application/octet-stream' });
+  const id = mgr.register({
+    url: 'https://e/x',
+    filename: 'x.bin',
+    savePath: '/tmp/x',
+    startTime: 10,
+    mime: 'application/octet-stream'
+  });
   mgr.update(id, { received: 100, total: 100 });
 
   mgr.finalize(id, { state: 'completed', savePath: '/dl/x.bin', endTime: 999 });
@@ -198,7 +210,9 @@ test('flushInterrupted appends each in-progress record as interrupted', () => {
 
 test('flushInterrupted tolerates a store.append throw (best-effort)', () => {
   const store = makeFakeStore();
-  store.append = () => { throw new Error('disk full'); };
+  store.append = () => {
+    throw new Error('disk full');
+  };
   const mgr = createManager(store);
   mgr.register({ filename: 'a.bin' });
   assert.doesNotThrow(() => mgr.flushInterrupted(), 'a throwing append must not propagate');

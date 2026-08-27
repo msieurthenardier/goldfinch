@@ -1,9 +1,22 @@
 /** @param {any} deps */
 export function createWindowController(deps) {
   const {
-    window, document, ctx, els, tabs, orderedTabIds, releaseTabWidths,
-    keyboardMove, commitTabMove, activateTab, closeTab, activeTab,
-    setHomePage, setSearchEngine, updateAutomationKeyState, sendActiveBounds
+    window,
+    document,
+    ctx,
+    els,
+    tabs,
+    orderedTabIds,
+    releaseTabWidths,
+    keyboardMove,
+    commitTabMove,
+    activateTab,
+    closeTab,
+    activeTab,
+    setHomePage,
+    setSearchEngine,
+    updateAutomationKeyState,
+    sendActiveBounds
   } = deps;
   // --- custom window controls (win+linux frameless; hidden on macOS) ---
   els.winMin.addEventListener('click', () => window.goldfinch.windowMinimize());
@@ -35,7 +48,8 @@ export function createWindowController(deps) {
     if (!ids.length) return;
     // Cast the closest() RESULT (Element|null) to HTMLElement so `.dataset` typechecks —
     // `.closest()` returns Element regardless of receiver, and `.dataset` is HTMLElement-only.
-    const cur = /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || ctx.activeTabId;
+    const cur =
+      /** @type {HTMLElement|null} */ (document.activeElement?.closest('.tab'))?.dataset.id || ctx.activeTabId;
 
     // Reorder (M09 F2 DD3): Ctrl+Shift+ArrowLeft/Right moves the FOCUSED tab one slot.
     // Checked BEFORE the plain-arrow branch below so a modified arrow never falls
@@ -86,7 +100,10 @@ export function createWindowController(deps) {
     els.toggleDevtools.classList.toggle('hidden', !pins.devtools);
   }
 
-  window.goldfinch.settingsGet('toolbarPins').then(applyToolbarPins).catch(() => {});
+  window.goldfinch
+    .settingsGet('toolbarPins')
+    .then(applyToolbarPins)
+    .catch(() => {});
 
   // Bookmarks bar visibility (M15 F1 Leg 3, DD8; composed with activation-
   // class suppression M15 F2 Leg 3 L3-DD-C) — the applyToolbarPins sibling.
@@ -117,19 +134,28 @@ export function createWindowController(deps) {
     barEnabled = !!enabled;
     applyBarVisibility();
   }
-  window.goldfinch.settingsGet('bookmarksBarEnabled').then(applyBookmarksBar).catch(() => {});
+  window.goldfinch
+    .settingsGet('bookmarksBarEnabled')
+    .then(applyBookmarksBar)
+    .catch(() => {});
 
   // searchEngineCache boot seed (M16 F1 Leg 2, DD4 — the toolbarPins/
   // bookmarksBarEnabled idiom above): without this, a window opened after a
   // preference change would search on the hardcoded/default engine until an
   // unrelated broadcast happened to land in it.
-  window.goldfinch.settingsGet('searchEngine').then(setSearchEngine).catch(() => {});
+  window.goldfinch
+    .settingsGet('searchEngine')
+    .then(setSearchEngine)
+    .catch(() => {});
   // homePageCache boot seed (M16 F2 Leg 1, DD4 — squawk 0005 CLOSED): the
   // SAME idiom, now applied to homePageCache too — it no longer has a
   // distinct unseeded shape. Without this, a window opened after a home-page
   // change would fall back to the welcome surface/stale value until an
   // unrelated broadcast happened to land in it.
-  window.goldfinch.settingsGet('homePage').then(setHomePage).catch(() => {});
+  window.goldfinch
+    .settingsGet('homePage')
+    .then(setHomePage)
+    .catch(() => {});
 
   /** Activation-class suppression input (M15 F2 Leg 3 L3-DD-C): renderer.js's
    * `refreshBookmarksSurfaces(tab)` computes burner-or-internal and calls
@@ -155,8 +181,6 @@ export function createWindowController(deps) {
     // (mint/revoke/admin-mint/admin-revoke all fire this channel).
     if (all) updateAutomationKeyState(all);
   });
-
-
 
   return { setMaximized, announceTabStatus, applyToolbarPins, applyBookmarksBar, setBarSuppressed };
 }

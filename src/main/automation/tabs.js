@@ -40,10 +40,14 @@ const { resolveContents, isInternalContents } = require('./resolve');
 function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
   const out = [];
   for (const t of rawTabs || []) {
-    if (typeof t.wcId !== 'number') continue;        // not yet at dom-ready
+    if (typeof t.wcId !== 'number') continue; // not yet at dom-ready
     let wc;
-    try { wc = fromId(t.wcId); } catch { continue; }
-    if (!wc || wc.isDestroyed?.()) continue;          // gone / destroyed
+    try {
+      wc = fromId(t.wcId);
+    } catch {
+      continue;
+    }
+    if (!wc || wc.isDestroyed?.()) continue; // gone / destroyed
     if (!allowInternal && isInternalContents(wc)) continue; // DD5/DD6: internal dropped unless admin
     out.push({ wcId: t.wcId, url: t.url, title: t.title, jarId: t.jarId, active: !!t.active });
   }
@@ -98,7 +102,7 @@ function mapEnumeratedTabs(rawTabs, { fromId, allowInternal = false }) {
 async function enumerateTabs(deps) {
   // M14 F2 L2: popup rows ride BOTH assembly paths (they come from the main-side
   // registry, not from any chrome round-trip — popups are chrome-invisible).
-  const popupRows = typeof deps.listPopups === 'function' ? (deps.listPopups() || []) : [];
+  const popupRows = typeof deps.listPopups === 'function' ? deps.listPopups() || [] : [];
   // Fallback is gated on listWindows ALONE in practice: executeInChrome is built
   // UNCONDITIONALLY in engine.js's deps() (:107, a plain object-literal property),
   // NOT via the conditional-spread idiom listWindows/chromeForTab use — so it can
@@ -120,7 +124,8 @@ async function enumerateTabs(deps) {
   }
 
   const out = [];
-  for (const w of deps.listWindows()) {           // registry insertion order
+  for (const w of deps.listWindows()) {
+    // registry insertion order
     // A mid-boot window contributes ZERO rows and gets NO round-trip. Its adopted
     // tab (a move-created window's) is already in rec.tabViews BEFORE its chrome
     // boots, so it is invisible for that interval — that is exactly what DD2's
@@ -130,11 +135,12 @@ async function enumerateTabs(deps) {
     try {
       raw = await deps.executeInChrome(w.chrome, 'window.__goldfinchAutomation.listTabs()');
     } catch {
-      continue;   // one window's failure never fails the census (e.g. a window closing mid-census)
+      continue; // one window's failure never fails the census (e.g. a window closing mid-census)
     }
-    for (const t of mapEnumeratedTabs(raw, deps)) {  // per window, UNCHANGED
-      if (!w.ownsTab(t.wcId)) continue;             // the registry-authoritative filter
-      out.push({ ...t, windowId: w.windowId });     // windowId stamped HERE, from the registry
+    for (const t of mapEnumeratedTabs(raw, deps)) {
+      // per window, UNCHANGED
+      if (!w.ownsTab(t.wcId)) continue; // the registry-authoritative filter
+      out.push({ ...t, windowId: w.windowId }); // windowId stamped HERE, from the registry
     }
   }
   // Popup rows LAST (after every window's tab rows), in registration order —
@@ -266,7 +272,9 @@ async function activateTab(wcId, deps) {
   if (!ok) {
     // The registry says this window owns the tab, but its chrome's tabs Map
     // disagrees — a real desync. NEVER a silent no-op again (DD6).
-    throw new Error('automation: activate-refused — wcId ' + wcId + ' is owned by a window whose chrome could not activate it');
+    throw new Error(
+      'automation: activate-refused — wcId ' + wcId + ' is owned by a window whose chrome could not activate it'
+    );
   }
   // Raise AFTER dispatch, so the window comes forward already showing the right tab;
   // and a refusal raises nothing (we threw first).

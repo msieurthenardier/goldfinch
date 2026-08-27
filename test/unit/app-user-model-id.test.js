@@ -72,7 +72,7 @@ test('the AppUserModelID claim is guarded to win32 only', () => {
   assert.match(
     guardSlice,
     /if \(\s*process\.platform === 'win32'\s*\)\s*\{\s*$/,
-    'expected the immediately-enclosing guard to be `if (process.platform === \'win32\') {`'
+    "expected the immediately-enclosing guard to be `if (process.platform === 'win32') {`"
   );
 });
 
@@ -96,10 +96,7 @@ test('the AppUserModelID claim runs before app-lifecycle wiring (and so before a
   // Sanity guard against a vacuous pass: prove the comparison has teeth by
   // confirming app-lifecycle.js itself creates the first window inside whenReady,
   // downstream of registerAppLifecycle's call site above (not some unrelated hit).
-  const lifecycleSrc = fs.readFileSync(
-    path.join(REPO_ROOT, 'src', 'main', 'app-lifecycle.js'),
-    'utf8'
-  );
+  const lifecycleSrc = fs.readFileSync(path.join(REPO_ROOT, 'src', 'main', 'app-lifecycle.js'), 'utf8');
   assert.match(
     lifecycleSrc,
     /app\.whenReady\(\)\.then\(/,

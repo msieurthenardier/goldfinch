@@ -58,12 +58,7 @@ function isIpLiteral(hostname) {
 // stop being the bare suffix (see the `safe === suffix` guard in
 // registrableDomain below) and this supplement stops firing on its own —
 // PSL always wins once it has a more specific answer.
-const SUPPLEMENT_SUFFIX = new Set([
-  'amazonaws.com',
-  'netlify.com',
-  'surge.sh',
-  'glitch.me'
-]);
+const SUPPLEMENT_SUFFIX = new Set(['amazonaws.com', 'netlify.com', 'surge.sh', 'glitch.me']);
 
 function registrableDomain(hostname) {
   if (!hostname) return '';

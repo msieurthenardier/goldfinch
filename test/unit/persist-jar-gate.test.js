@@ -14,7 +14,7 @@ const { resolvePersistJar } = require('../../src/main/persist-jar-gate');
 
 const JARS = [
   { id: 'work', partition: 'persist:jar-work' },
-  { id: 'play', partition: 'persist:jar-play' },
+  { id: 'play', partition: 'persist:jar-play' }
 ];
 
 test('resolves a registered-partition non-trusted tab to its jar (the positive direction)', () => {

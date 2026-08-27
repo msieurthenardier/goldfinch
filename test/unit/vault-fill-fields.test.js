@@ -9,7 +9,12 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { findLoginFields, findAllLoginFields, fillLoginForm, isLivePasswordField } = require('../../src/preload/vault-fill-fields');
+const {
+  findLoginFields,
+  findAllLoginFields,
+  fillLoginForm,
+  isLivePasswordField
+} = require('../../src/preload/vault-fill-fields');
 
 class FakeInput {
   // `type` omitted models a no-type input (a real <input>.type is 'text').
@@ -45,7 +50,7 @@ function makeDoc(forms) {
       if (selector === 'input[type=password]') return all.filter((i) => i.type === 'password');
       if (selector === 'input') return all.slice();
       return [];
-    },
+    }
   };
 }
 
@@ -61,11 +66,11 @@ test('fills both fields and dispatches input+change on a normal login form', () 
   assert.equal(pass.value, 's3cr3t!');
   assert.deepEqual(user.events, [
     { type: 'input', bubbles: true },
-    { type: 'change', bubbles: true },
+    { type: 'change', bubbles: true }
   ]);
   assert.deepEqual(pass.events, [
     { type: 'input', bubbles: true },
-    { type: 'change', bubbles: true },
+    { type: 'change', bubbles: true }
   ]);
 });
 
@@ -103,10 +108,10 @@ test('multiple forms → the password-bearing form supplies the username', () =>
 
 test('username heuristic is deterministic: LAST text/email/tel/no-type input PRECEDING the password', () => {
   const olderEmail = new FakeInput('email', 'contact-email'); // qualifies, but earlier
-  const remember = new FakeInput('checkbox', 'remember');     // skipped (not a text type)
-  const noType = new FakeInput(undefined, 'username');        // no-type → models as text; LAST qualifying before pw
+  const remember = new FakeInput('checkbox', 'remember'); // skipped (not a text type)
+  const noType = new FakeInput(undefined, 'username'); // no-type → models as text; LAST qualifying before pw
   const pass = new FakeInput('password', 'password');
-  const trailing = new FakeInput('text', 'coupon');           // AFTER the password → never chosen
+  const trailing = new FakeInput('text', 'coupon'); // AFTER the password → never chosen
   const doc = makeDoc([new FakeForm([olderEmail, remember, noType, pass, trailing])]);
 
   const fields = findLoginFields(doc);
@@ -140,7 +145,7 @@ function makeMixedDoc(forms, loose = []) {
       if (selector === 'input[type=password]') return all.filter((i) => i.type === 'password');
       if (selector === 'input') return all.slice();
       return [];
-    },
+    }
   };
 }
 
@@ -279,6 +284,7 @@ test('top-frame guard: never fills inside an iframe (window.top !== window)', ()
     assert.equal(user.value, '', 'iframe fill is refused');
     assert.equal(pass.value, '');
   } finally {
-    if (saved === undefined) delete global.window; else global.window = saved;
+    if (saved === undefined) delete global.window;
+    else global.window = saved;
   }
 });

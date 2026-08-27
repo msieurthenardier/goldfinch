@@ -8,16 +8,15 @@ test('tear-off overlay uses the per-window manager and is torn down in lifecycle
   const h = createHarness();
   const rec = h.factory.createWindow();
   assert.equal(rec.tearoffOverlay, h.managers.tearoff, 'record owns the manager instance');
-  assert.equal(typeof h.managerDeps.tearoff.createOverlayView, 'function', 'manager receives the lazy view constructor');
+  assert.equal(
+    typeof h.managerDeps.tearoff.createOverlayView,
+    'function',
+    'manager receives the lazy view constructor'
+  );
 
   h.log.length = 0;
   rec.win.emit('close');
-  assert.deepEqual(h.log.slice(0, 4), [
-    'find-teardown',
-    'tearoff-teardown',
-    'sheet-close:teardown',
-    'sheet-teardown'
-  ]);
+  assert.deepEqual(h.log.slice(0, 4), ['find-teardown', 'tearoff-teardown', 'sheet-close:teardown', 'sheet-teardown']);
   assert.equal(rec.tearoffOverlay, null, 'record path is nulled across close to closed');
 });
 

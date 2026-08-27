@@ -11,26 +11,33 @@ async function makeHarness() {
   const bridge = {
     jarsList: async () => [{ id: 'personal', name: 'Personal', color: '#123', partition: 'persist:personal' }],
     jarsGetDefault: async () => ({ id: '__burner__' }),
-    onJarsChanged: (fn) => { callbacks.changed = fn; },
-    onJarWiped: (fn) => { callbacks.wiped = fn; },
+    onJarsChanged: (fn) => {
+      callbacks.changed = fn;
+    },
+    onJarWiped: (fn) => {
+      callbacks.wiped = fn;
+    }
   };
   const client = createJarsClient({
-    bridge, ctx,
+    bridge,
+    ctx,
     burner: { id: '__burner__', name: 'Burner', color: '#999' },
     isWebTab: (tab) => !tab.trusted,
     isInternalTab: (tab) => !!(tab && tab.trusted),
-    activateTab: (id) => { events.push(['activate', id]); ctx.activeTabId = id; },
+    activateTab: (id) => {
+      events.push(['activate', id]);
+      ctx.activeTabId = id;
+    },
     closeTab: (id) => events.push(['close', id]),
     updateAutomationIndicator: (snap) => events.push(['indicator', snap]),
     getAutomationSnapshot: () => ({ sessions: [] }),
-    inheritContainerDecision: (container, internal) => internal
-      ? { container: null, freshBurner: false }
-      : { container, freshBurner: !container },
+    inheritContainerDecision: (container, internal) =>
+      internal ? { container: null, freshBurner: false } : { container, freshBurner: !container },
     inheritFromPartition: (partition, containers) => ({
       container: containers.find((entry) => entry.partition === partition) || null,
       freshBurner: partition && partition.startsWith('burner:')
     }),
-    random: () => 0.25,
+    random: () => 0.25
   });
   return { callbacks, events, ctx, client };
 }
@@ -50,7 +57,10 @@ test('jars-changed refreshes survivors and closes active orphans without interme
   const dot = { style: {}, title: '' };
   const orphan = { id: 'orphan', trusted: false, container: { id: 'gone' }, wcId: 1 };
   const survivor = {
-    id: 'survivor', trusted: false, container: { id: 'personal' }, wcId: 2,
+    id: 'survivor',
+    trusted: false,
+    container: { id: 'personal' },
+    wcId: 2,
     btn: { querySelector: () => dot }
   };
   h.ctx.tabs.set(orphan.id, orphan);
@@ -60,7 +70,10 @@ test('jars-changed refreshes survivors and closes active orphans without interme
     containers: [{ id: 'personal', name: 'Renamed', color: '#abc', partition: 'persist:personal' }],
     defaultId: 'personal'
   });
-  assert.deepEqual(h.events.slice(0, 2), [['activate', 'survivor'], ['close', 'orphan']]);
+  assert.deepEqual(h.events.slice(0, 2), [
+    ['activate', 'survivor'],
+    ['close', 'orphan']
+  ]);
   assert.equal(survivor.container.name, 'Renamed');
   assert.equal(dot.style.background, '#abc');
 });
@@ -75,7 +88,11 @@ test('jar-wiped activates a non-matching survivor before ordered close', async (
   for (const tab of [first, second, survivor]) h.ctx.tabs.set(tab.id, tab);
   h.ctx.activeTabId = first.id;
   h.callbacks.wiped({ id: 'personal' });
-  assert.deepEqual(h.events, [['activate', 'c'], ['close', 'a'], ['close', 'b']]);
+  assert.deepEqual(h.events, [
+    ['activate', 'c'],
+    ['close', 'a'],
+    ['close', 'b']
+  ]);
 });
 
 test('DD7 regression pin (M15 F2 Leg 3, flight non-blocking suggestion): refreshOpenTabJars matches a tab to its fresh container strictly by id — a REFERENCE REFRESH, never a re-home', async () => {
@@ -83,7 +100,13 @@ test('DD7 regression pin (M15 F2 Leg 3, flight non-blocking suggestion): refresh
   await h.client.boot;
   h.events.length = 0;
   const originalContainer = { id: 'personal', name: 'Personal', color: '#123', partition: 'persist:personal' };
-  const tab = { id: 'tab-1', trusted: false, container: originalContainer, wcId: 1, btn: { querySelector: () => null } };
+  const tab = {
+    id: 'tab-1',
+    trusted: false,
+    container: originalContainer,
+    wcId: 1,
+    btn: { querySelector: () => null }
+  };
   h.ctx.tabs.set(tab.id, tab);
   h.ctx.activeTabId = tab.id;
 
@@ -109,6 +132,10 @@ test('routing helpers preserve persistent jars and mint fresh burner identities'
   assert.equal(persistent.id, 'personal');
   const burner = h.client.inheritContainerFromPartition('burner:old');
   assert.deepEqual(burner, {
-    id: 'burner-250000000', name: 'Burner', color: '#999', partition: 'burner:250000000', burner: true
+    id: 'burner-250000000',
+    name: 'Burner',
+    color: '#999',
+    partition: 'burner:250000000',
+    burner: true
   });
 });

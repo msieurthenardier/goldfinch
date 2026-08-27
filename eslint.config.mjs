@@ -2,7 +2,16 @@ import js from '@eslint/js';
 import globals from 'globals';
 import eslintConfigPrettier from 'eslint-config-prettier';
 export default [
-  { ignores: ['node_modules/**', 'dist/**', 'build/**', 'tests/behavior/fixtures/**', 'eslint.config.mjs', 'src/preload/webview-preload.bundle.js'] }, // standalone — ONLY the ignores key
+  {
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'build/**',
+      'tests/behavior/fixtures/**',
+      'eslint.config.mjs',
+      'src/preload/webview-preload.bundle.js'
+    ]
+  }, // standalone — ONLY the ignores key
   js.configs.recommended,
   {
     // find-overlay-preload.js and menu-overlay-preload.js are chrome-class (M05 F7 DD1 /
@@ -14,7 +23,21 @@ export default [
     // the src/shared/** module block below ignores them so this binding survives
     // later-wins — that keeps the lint parse guard (an `export` in a preload-reachable
     // file must FAIL lint, the leg-1 blocker class).
-    files: ['src/main/**', 'src/shared/automation-dev.js', 'src/shared/internal-page.js', 'src/shared/dev-profile.js', 'src/shared/guest-forward-allowlist.js', 'src/shared/reserved-ids.js', 'src/shared/vault-item-schema.js', 'src/shared/origin-match.js', 'src/preload/chrome-preload.js', 'src/preload/find-overlay-preload.js', 'src/preload/menu-overlay-preload.js', 'test/**', '*.config.{js,mjs}'],
+    files: [
+      'src/main/**',
+      'src/shared/automation-dev.js',
+      'src/shared/internal-page.js',
+      'src/shared/dev-profile.js',
+      'src/shared/guest-forward-allowlist.js',
+      'src/shared/reserved-ids.js',
+      'src/shared/vault-item-schema.js',
+      'src/shared/origin-match.js',
+      'src/preload/chrome-preload.js',
+      'src/preload/find-overlay-preload.js',
+      'src/preload/menu-overlay-preload.js',
+      'test/**',
+      '*.config.{js,mjs}'
+    ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
@@ -41,9 +64,10 @@ export default [
       'no-restricted-syntax': [
         'error',
         {
-          selector: "CallExpression[callee.property.name=/^(on|once)$/][arguments.0.value='closed'] > :matches(ArrowFunctionExpression, FunctionExpression) MemberExpression[object.name='win']",
+          selector:
+            "CallExpression[callee.property.name=/^(on|once)$/][arguments.0.value='closed'] > :matches(ArrowFunctionExpression, FunctionExpression) MemberExpression[object.name='win']",
           message:
-            "Destroyed-window rule (CLAUDE.md): a `closed` handler must not read through `win` — a destroyed BaseWindow property access throws and wedges the native close path. Capture what you need at registration time; use onWindowClosed(win, handler) (main.js), which passes the captured winId."
+            'Destroyed-window rule (CLAUDE.md): a `closed` handler must not read through `win` — a destroyed BaseWindow property access throws and wedges the native close path. Capture what you need at registration time; use onWindowClosed(win, handler) (main.js), which passes the captured winId.'
         }
       ]
     }
@@ -107,7 +131,13 @@ export default [
     // vault-card-fields.js (issue #152) is the payment-card twin of
     // vault-fill-fields.js — same main-world context, same CJS-required-by-the-preload
     // shape, so it carries the identical globals.
-    files: ['src/preload/webview-preload.js', 'src/preload/vault-fill-fields.js', 'src/preload/vault-card-fields.js', 'src/preload/vault-fill-icon.js', 'src/preload/guest-bookmark-drop.js'],
+    files: [
+      'src/preload/webview-preload.js',
+      'src/preload/vault-fill-fields.js',
+      'src/preload/vault-card-fields.js',
+      'src/preload/vault-fill-icon.js',
+      'src/preload/guest-bookmark-drop.js'
+    ],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] }
   },

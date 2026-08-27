@@ -36,10 +36,16 @@ test('constructs platform chrome and lazy overlay views with exact trust options
   const sheet = h.managerDeps.sheet.createSheetView();
   const tearoff = h.managerDeps.tearoff.createOverlayView();
   assert.deepEqual(find.opts.webPreferences, {
-    preload: '/app/preload/find-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: true
+    preload: '/app/preload/find-overlay-preload.js',
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true
   });
   assert.deepEqual(sheet.opts.webPreferences, {
-    preload: '/app/preload/menu-overlay-preload.js', contextIsolation: true, nodeIntegration: false, sandbox: true
+    preload: '/app/preload/menu-overlay-preload.js',
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true
   });
   assert.deepEqual(tearoff.opts.webPreferences, { contextIsolation: true, nodeIntegration: false, sandbox: true });
   assert.deepEqual(find.webContents.loadedFiles, ['/app/renderer/find-overlay.html']);
@@ -117,7 +123,10 @@ test('close tears down overlays before capture/snapshot and destroys every guest
     `remove-view:${guest.webContents.id}`,
     `destroy-wc:${guest.webContents.id}`
   ];
-  assert.deepEqual(h.log.filter((entry) => ordered.includes(entry)), ordered);
+  assert.deepEqual(
+    h.log.filter((entry) => ordered.includes(entry)),
+    ordered
+  );
   assert.equal(rec.findOverlay, null);
   assert.equal(rec.tearoffOverlay, null);
   assert.equal(rec.sheet, null);
@@ -137,7 +146,11 @@ test('missing record during close still tears down every overlay', () => {
 test('snapshot errors are isolated and do not abort guest destruction', () => {
   const h = createHarness({
     settings: { get: () => true },
-    sessionStore: { write() { throw new Error('disk full'); } }
+    sessionStore: {
+      write() {
+        throw new Error('disk full');
+      }
+    }
   });
   const rec = h.factory.createWindow();
   const guest = new h.FakeWebContentsView({});
@@ -169,13 +182,14 @@ function authWiredHarness() {
   const authChallenges = {
     notifyWindowFocused: (record) => events.push(['focused', record.win.id]),
     notifySheetClosed: (record, menuType, reason) => events.push(['sheet-closed', record.win.id, menuType, reason]),
-    cancelForWindow: (record) => events.push([
-      'cancel-window',
-      record.win.id,
-      // ordering probe: the sheet's 'teardown' close must NOT have run yet —
-      // cancelForWindow empties the queue FIRST (load-bearing, leg AC).
-      h.log.includes('sheet-close:teardown'),
-    ]),
+    cancelForWindow: (record) =>
+      events.push([
+        'cancel-window',
+        record.win.id,
+        // ordering probe: the sheet's 'teardown' close must NOT have run yet —
+        // cancelForWindow empties the queue FIRST (load-bearing, leg AC).
+        h.log.includes('sheet-close:teardown')
+      ])
   };
   h = createHarness({ authChallenges });
   return { h, events };
@@ -228,18 +242,19 @@ test('window close runs popupRegistry.closeAllForRecord AFTER the auth cancel (p
   const authChallenges = {
     notifyWindowFocused: () => {},
     notifySheetClosed: () => {},
-    cancelForWindow: (record) => events.push(['cancel-window', record.win.id]),
+    cancelForWindow: (record) => events.push(['cancel-window', record.win.id])
   };
   const popupRegistry = {
-    closeAllForRecord: (record) => events.push([
-      'close-popups',
-      record.win.id,
-      // ordering probes: the window-wide auth cancel already ran (DD1f rides
-      // BEHIND the unit-pinned cancelForWindow-first invariant), and no
-      // overlay teardown has run yet.
-      events.some((e) => e[0] === 'cancel-window'),
-      h.log.includes('find-teardown') || h.log.includes('sheet-close:teardown'),
-    ]),
+    closeAllForRecord: (record) =>
+      events.push([
+        'close-popups',
+        record.win.id,
+        // ordering probes: the window-wide auth cancel already ran (DD1f rides
+        // BEHIND the unit-pinned cancelForWindow-first invariant), and no
+        // overlay teardown has run yet.
+        events.some((e) => e[0] === 'cancel-window'),
+        h.log.includes('find-teardown') || h.log.includes('sheet-close:teardown')
+      ])
   };
   h = createHarness({ authChallenges, popupRegistry });
   const rec = h.factory.createWindow();

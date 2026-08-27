@@ -9,7 +9,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isInternalContents, classifyContents, resolveContents, resolveContentsForJar, AUTOMATABLE_MENU_TYPES } = require('../../src/main/automation/resolve');
+const {
+  isInternalContents,
+  classifyContents,
+  resolveContents,
+  resolveContentsForJar,
+  AUTOMATABLE_MENU_TYPES
+} = require('../../src/main/automation/resolve');
 
 // M15 F3 L1 (AC1) — the allowlist is IMPORTED, never retyped, so a member renamed in
 // resolve.js cannot leave these tests passing against a string that no longer exists.
@@ -30,7 +36,7 @@ function sheetDeps(sheet, { menu = null, allowSheet = false, wireReader = true, 
     isSheetContents: (/** @type {any} */ wc) => wc === sheet,
     ...(allowInternal ? { allowInternal: true } : {}),
     ...(allowSheet ? { allowSheet: true } : {}),
-    ...(wireReader ? { sheetMenuFor: (/** @type {any} */ wc) => (wc === sheet ? menu : null) } : {}),
+    ...(wireReader ? { sheetMenuFor: (/** @type {any} */ wc) => (wc === sheet ? menu : null) } : {})
   };
 }
 
@@ -51,7 +57,7 @@ test('isInternalContents: session.__goldfinchInternal === 1 (truthy-but-not-true
 });
 
 test('isInternalContents: missing session → false', () => {
-  assert.equal(isInternalContents({ }), false);
+  assert.equal(isInternalContents({}), false);
 });
 
 test('isInternalContents: null wc → false', () => {
@@ -97,7 +103,9 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; }
+    isDestroyed() {
+      return false;
+    }
   };
 }
 
@@ -108,7 +116,9 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; }
+    isDestroyed() {
+      return false;
+    }
   };
 }
 
@@ -119,13 +129,15 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; }
+    isDestroyed() {
+      return true;
+    }
   };
 }
 
 test('resolveContents: valid guest wcId → returns the webContents', () => {
   const wc = makeGuestWc(10);
-  const fromId = (id) => id === 10 ? wc : null;
+  const fromId = (id) => (id === 10 ? wc : null);
   const result = resolveContents(10, { fromId, chromeContents: null });
   assert.equal(result, wc);
 });
@@ -145,19 +157,22 @@ test('resolveContents: the vault SECRET SHEET wc is refused at every tier for an
   // Non-admin (no allowInternal), no allowSheet: refused.
   assert.throws(
     () => resolveContents(50, { fromId, chromeContents: null, isSheetContents, sheetMenuFor }),
-    /automation: secret-sheet/,
+    /automation: secret-sheet/
   );
   // ADMIN (allowInternal:true) — the relaxation that lifts internal-session + non-tab-contents
   // does NOT lift this: without the op opt-in the sheet stays undrivable, so it can never be
   // keylogged and no non-admitted op can read it, allowlisted menuType or not.
   assert.throws(
     () => resolveContents(50, { fromId, chromeContents: null, allowInternal: true, isSheetContents, sheetMenuFor }),
-    /automation: secret-sheet/,
+    /automation: secret-sheet/
   );
   // A normal guest tab is unaffected by the predicate.
   const tab = makeGuestWc(51);
   const fromId2 = (id) => (id === 51 ? tab : null);
-  assert.equal(resolveContents(51, { fromId: fromId2, chromeContents: null, isSheetContents: (wc) => wc === sheet }), tab);
+  assert.equal(
+    resolveContents(51, { fromId: fromId2, chromeContents: null, isSheetContents: (wc) => wc === sheet }),
+    tab
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -185,8 +200,12 @@ test('sheet gate (AC1): an opted-in op is STILL refused under a non-allowlisted 
   );
   // A menuType invented by a future flight is refused by DEFAULT — it did nothing to be admitted.
   assert.throws(
-    () => resolveContents(61, sheetDeps(sheet, { menu: { menuType: 'some-future-menu', token: 1 }, allowSheet: true, allowInternal: true })),
-    /automation: secret-sheet/,
+    () =>
+      resolveContents(
+        61,
+        sheetDeps(sheet, { menu: { menuType: 'some-future-menu', token: 1 }, allowSheet: true, allowInternal: true })
+      ),
+    /automation: secret-sheet/
   );
 });
 
@@ -197,7 +216,9 @@ test('sheet gate (AC1): the predicate is FAIL-CLOSED IN SHAPE — an absent shee
   let err;
   try {
     resolveContents(62, sheetDeps(sheet, { allowSheet: true, wireReader: false }));
-  } catch (e) { err = e; }
+  } catch (e) {
+    err = e;
+  }
   assert.ok(err instanceof Error, 'a refusal, not a crash');
   assert.ok(!(err instanceof TypeError), 'a TypeError from inside a live security guard is NOT a refusal');
   assert.match(err.message, /automation: secret-sheet/);
@@ -219,7 +240,7 @@ test('sheet gate (AC1/AC2): a menu record with no menuType field refuses (no und
   const sheet = makeGuestWc(64);
   assert.throws(
     () => resolveContents(64, sheetDeps(sheet, { menu: { token: 4 }, allowSheet: true })),
-    /automation: secret-sheet/,
+    /automation: secret-sheet/
   );
 });
 
@@ -230,16 +251,25 @@ test('sheet gate: the gate applies to the SHEET ONLY — an ordinary tab resolve
       fromId: (id) => (id === 65 ? tab : null),
       chromeContents: null,
       isSheetContents: () => false,
-      allowSheet: true,
+      allowSheet: true
     }),
     tab
   );
-  assert.ok(SECOND_ADMITTED_MENU_TYPE, 'the allowlist seeds at least two menuTypes (bookmarks-overflow + bookmark-edit)');
+  assert.ok(
+    SECOND_ADMITTED_MENU_TYPE,
+    'the allowlist seeds at least two menuTypes (bookmarks-overflow + bookmark-edit)'
+  );
 });
 
 test('resolveContents: valid chrome wcId → returns the webContents (classifyContents can then identify it)', () => {
-  const chromeContents = { id: 1, session: { __goldfinchInternal: false }, isDestroyed() { return false; } };
-  const fromId = (id) => id === 1 ? chromeContents : null;
+  const chromeContents = {
+    id: 1,
+    session: { __goldfinchInternal: false },
+    isDestroyed() {
+      return false;
+    }
+  };
+  const fromId = (id) => (id === 1 ? chromeContents : null);
   const result = resolveContents(1, { fromId, chromeContents });
   assert.equal(result, chromeContents);
   // Verify classifier identifies it correctly
@@ -250,7 +280,7 @@ test('resolveContents: internal-session wcId (direct supply) → throws internal
   // This is the load-bearing security test: a directly-supplied internal-guest
   // wcId must be rejected at resolve-time, not merely filtered from enumerate.
   const internalWc = makeInternalWc(99);
-  const fromId = (id) => id === 99 ? internalWc : null;
+  const fromId = (id) => (id === 99 ? internalWc : null);
   assert.throws(
     () => resolveContents(99, { fromId, chromeContents: null }),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -294,7 +324,7 @@ test('resolveContents: non-number wcId (null) → throws bad-handle', () => {
 test('resolveContents: destroyed webContents → throws no-such-contents', () => {
   // A resolved-but-destroyed contents is treated as gone (AC6, edge cases).
   const destroyedWc = makeDestroyedWc(55);
-  const fromId = (id) => id === 55 ? destroyedWc : null;
+  const fromId = (id) => (id === 55 ? destroyedWc : null);
   assert.throws(
     () => resolveContents(55, { fromId, chromeContents: null }),
     (err) => err instanceof Error && err.message.includes('automation: no-such-contents')
@@ -307,7 +337,7 @@ test('resolveContents: destroyed webContents → throws no-such-contents', () =>
 
 test('resolveContents: allowInternal:true SKIPS the internal-session throw (admin relaxation)', () => {
   const internalWc = makeInternalWc(99);
-  const fromId = (id) => id === 99 ? internalWc : null;
+  const fromId = (id) => (id === 99 ? internalWc : null);
   const result = resolveContents(99, { fromId, chromeContents: null, allowInternal: true });
   assert.equal(result, internalWc);
 });
@@ -329,7 +359,7 @@ test('resolveContents: allowInternal:true STILL throws no-such-contents (cap is 
 
 test('resolveContents: allowInternal:false (explicit) still throws internal-session', () => {
   const internalWc = makeInternalWc(99);
-  const fromId = (id) => id === 99 ? internalWc : null;
+  const fromId = (id) => (id === 99 ? internalWc : null);
   assert.throws(
     () => resolveContents(99, { fromId, chromeContents: null, allowInternal: false }),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -344,21 +374,28 @@ test('resolveContents: allowInternal:false (explicit) still throws internal-sess
 function makeSessionWorld() {
   const sessions = new Map();
   const sessionFor = (partition) => {
-    if (!sessions.has(partition)) sessions.set(partition, { __partition: partition, __goldfinchInternal: partition === 'goldfinch-internal' });
+    if (!sessions.has(partition))
+      sessions.set(partition, { __partition: partition, __goldfinchInternal: partition === 'goldfinch-internal' });
     return sessions.get(partition);
   };
   return { sessionFor, fromPartition: (p) => sessionFor(p) };
 }
 
 function makeWcInPartition(id, partition, world) {
-  return { id, session: world.sessionFor(partition), isDestroyed() { return false; } };
+  return {
+    id,
+    session: world.sessionFor(partition),
+    isDestroyed() {
+      return false;
+    }
+  };
 }
 
 test('resolveContentsForJar: wc whose session === jar session → returns the wc', () => {
   const world = makeSessionWorld();
   const jar = { id: 'personal', partition: 'persist:container:personal' };
   const wc = makeWcInPartition(10, jar.partition, world);
-  const deps = { fromId: (id) => id === 10 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = { fromId: (id) => (id === 10 ? wc : null), chromeContents: null, fromPartition: world.fromPartition };
   assert.equal(resolveContentsForJar(10, jar, deps), wc);
 });
 
@@ -367,7 +404,7 @@ test('resolveContentsForJar: wc in a DIFFERENT jar session → throws out-of-jar
   const personal = { id: 'personal', partition: 'persist:container:personal' };
   // wc belongs to 'work' session, but we ask for 'personal'.
   const wc = makeWcInPartition(11, 'persist:container:work', world);
-  const deps = { fromId: (id) => id === 11 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = { fromId: (id) => (id === 11 ? wc : null), chromeContents: null, fromPartition: world.fromPartition };
   assert.throws(
     () => resolveContentsForJar(11, personal, deps),
     (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
@@ -378,7 +415,7 @@ test('resolveContentsForJar: burner session (matches no jar) → throws out-of-j
   const world = makeSessionWorld();
   const personal = { id: 'personal', partition: 'persist:container:personal' };
   const wc = makeWcInPartition(12, 'burner:1', world);
-  const deps = { fromId: (id) => id === 12 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = { fromId: (id) => (id === 12 ? wc : null), chromeContents: null, fromPartition: world.fromPartition };
   assert.throws(
     () => resolveContentsForJar(12, personal, deps),
     (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
@@ -388,7 +425,7 @@ test('resolveContentsForJar: burner session (matches no jar) → throws out-of-j
 test('resolveContentsForJar: null jar → throws out-of-jar (a key bound to no jar drives nothing)', () => {
   const world = makeSessionWorld();
   const wc = makeWcInPartition(13, 'persist:container:personal', world);
-  const deps = { fromId: (id) => id === 13 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = { fromId: (id) => (id === 13 ? wc : null), chromeContents: null, fromPartition: world.fromPartition };
   assert.throws(
     () => resolveContentsForJar(13, null, deps),
     (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
@@ -412,7 +449,11 @@ test('resolveContentsForJar: bad/dead/internal still throw via resolveContents F
   );
   // internal-session: jar deps carry no allowInternal → internal throws before membership
   const internalWc = makeWcInPartition(50, 'goldfinch-internal', world);
-  const internalDeps = { fromId: (id) => id === 50 ? internalWc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const internalDeps = {
+    fromId: (id) => (id === 50 ? internalWc : null),
+    chromeContents: null,
+    fromPartition: world.fromPartition
+  };
   assert.throws(
     () => resolveContentsForJar(50, jar, internalDeps),
     (err) => err instanceof Error && err.message.includes('automation: internal-session')
@@ -426,7 +467,7 @@ test('resolveContentsForJar: LAZY fromPartition compare picks up a RUNTIME jars-
   const world = makeSessionWorld();
   const newJar = { id: 'just-added', partition: 'persist:container:just-added' };
   const wc = makeWcInPartition(20, newJar.partition, world);
-  const deps = { fromId: (id) => id === 20 ? wc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = { fromId: (id) => (id === 20 ? wc : null), chromeContents: null, fromPartition: world.fromPartition };
   assert.equal(resolveContentsForJar(20, newJar, deps), wc);
 });
 
@@ -443,20 +484,25 @@ test('resolveContentsForJar: wc === deps.chromeContents AND session matches the 
   const jar = { id: 'default', partition: 'persist:goldfinch' };
   // Build a wc whose session matches the jar AND also IS the chromeContents reference.
   const sharedSession = world.sessionFor(jar.partition);
-  const wc = { id: 42, session: sharedSession, isDestroyed() { return false; } };
+  const wc = {
+    id: 42,
+    session: sharedSession,
+    isDestroyed() {
+      return false;
+    }
+  };
   // chromeContents IS the same object — object identity match.
   const deps = {
-    fromId: (id) => id === 42 ? wc : null,
+    fromId: (id) => (id === 42 ? wc : null),
     chromeContents: wc,
-    fromPartition: world.fromPartition,
+    fromPartition: world.fromPartition
   };
   // Must throw out-of-jar with the chrome-renderer message — NOT pass through to the
   // session check (which would also refuse, but for the wrong reason).
   assert.throws(
     () => resolveContentsForJar(42, jar, deps),
-    (err) => err instanceof Error
-      && err.message.includes('automation: out-of-jar')
-      && err.message.includes('chrome renderer'),
+    (err) =>
+      err instanceof Error && err.message.includes('automation: out-of-jar') && err.message.includes('chrome renderer'),
     'chrome-exclusion guard must fire before the session check'
   );
 });
@@ -468,9 +514,9 @@ test('resolveContentsForJar: nullish deps.chromeContents → guard is a no-op, n
   const jar = { id: 'personal', partition: 'persist:container:personal' };
   const wc = makeWcInPartition(10, jar.partition, world);
   const deps = {
-    fromId: (id) => id === 10 ? wc : null,
+    fromId: (id) => (id === 10 ? wc : null),
     chromeContents: null, // explicitly null
-    fromPartition: world.fromPartition,
+    fromPartition: world.fromPartition
   };
   // Should NOT throw — the null guard (!= null) prevents the guard from firing.
   assert.equal(resolveContentsForJar(10, jar, deps), wc);
@@ -481,9 +527,9 @@ test('resolveContentsForJar: undefined deps.chromeContents → guard is a no-op'
   const jar = { id: 'personal', partition: 'persist:container:personal' };
   const wc = makeWcInPartition(11, jar.partition, world);
   const deps = {
-    fromId: (id) => id === 11 ? wc : null,
+    fromId: (id) => (id === 11 ? wc : null),
     // chromeContents absent (undefined)
-    fromPartition: world.fromPartition,
+    fromPartition: world.fromPartition
   };
   assert.equal(resolveContentsForJar(11, jar, deps), wc);
 });
@@ -501,7 +547,11 @@ test('DD8 baseline: jar tier refuses a chrome-class non-tab wcId with OUT-OF-JAR
   const world = makeSessionWorld();
   const jar = { id: 'personal', partition: 'persist:container:personal' };
   const sheetWc = makeWcInPartition(70, 'chrome-default', world); // matches no jar
-  const deps = { fromId: (id) => id === 70 ? sheetWc : null, chromeContents: null, fromPartition: world.fromPartition };
+  const deps = {
+    fromId: (id) => (id === 70 ? sheetWc : null),
+    chromeContents: null,
+    fromPartition: world.fromPartition
+  };
   assert.throws(
     () => resolveContentsForJar(70, jar, deps),
     (err) => err instanceof Error && err.message.includes('automation: out-of-jar')
@@ -531,7 +581,11 @@ test('DD8: the predicate does NOT refuse tab views or the chrome contents', () =
     isTabViewWcId: (id) => id === 42
   };
   assert.equal(resolveContents(42, deps), tabWc, 'tabViews member resolves');
-  assert.equal(resolveContents(1, deps), chromeContents, 'the chrome contents resolves (wc === chromeContents exemption)');
+  assert.equal(
+    resolveContents(1, deps),
+    chromeContents,
+    'the chrome contents resolves (wc === chromeContents exemption)'
+  );
 });
 
 test('DD8: admin (allowInternal:true) is UNAFFECTED — overlay wcIds resolve with the predicate present', () => {
@@ -580,15 +634,21 @@ test('resolveContents: error messages are distinguishable per guard', () => {
   try {
     // @ts-expect-error — intentionally passing wrong type
     resolveContents('x', { fromId: () => null, chromeContents: null });
-  } catch (e) { badHandleMsg = e.message; }
+  } catch (e) {
+    badHandleMsg = e.message;
+  }
 
   try {
     resolveContents(2, { fromId: () => null, chromeContents: null });
-  } catch (e) { noSuchMsg = e.message; }
+  } catch (e) {
+    noSuchMsg = e.message;
+  }
 
   try {
-    resolveContents(1, { fromId: (id) => id === 1 ? internalWc : null, chromeContents: guestWc });
-  } catch (e) { internalSessionMsg = e.message; }
+    resolveContents(1, { fromId: (id) => (id === 1 ? internalWc : null), chromeContents: guestWc });
+  } catch (e) {
+    internalSessionMsg = e.message;
+  }
 
   assert.ok(badHandleMsg.includes('bad-handle'), 'bad-handle path must say bad-handle');
   assert.ok(noSuchMsg.includes('no-such-contents'), 'no-such path must say no-such-contents');
@@ -612,8 +672,8 @@ test('popup widening: isPopupWcId exempts a popup wcId from non-tab-contents at 
   const deps = {
     fromId: (id) => (id === 701 ? popupWc : id === 1 ? chromeContents : null),
     chromeContents,
-    isTabViewWcId: (id) => id === 42,       // 701 is not a tab view…
-    isPopupWcId: (id) => id === 701,        // …but IS a popup — resolves
+    isTabViewWcId: (id) => id === 42, // 701 is not a tab view…
+    isPopupWcId: (id) => id === 701 // …but IS a popup — resolves
   };
   assert.equal(resolveContents(701, deps), popupWc, 'popup wcId resolves at the jar-capable tier');
 });
@@ -625,7 +685,7 @@ test('popup widening: a wcId that is NEITHER tab NOR popup still throws non-tab-
     fromId: (id) => (id === 70 ? sheetWc : null),
     chromeContents,
     isTabViewWcId: (id) => id === 42,
-    isPopupWcId: (id) => id === 701,
+    isPopupWcId: (id) => id === 701
   };
   assert.throws(
     () => resolveContents(70, deps),
@@ -662,19 +722,28 @@ test('popup widening: the secret-sheet gate is UNAFFECTED — isPopupWcId can ne
     chromeContents: null,
     isSheetContents: (wc) => wc === sheet,
     isTabViewWcId: () => false,
-    isPopupWcId: () => true, // even a (hypothetically) lying predicate
+    isPopupWcId: () => true // even a (hypothetically) lying predicate
   };
   assert.throws(() => resolveContents(50, deps), /automation: secret-sheet/);
   // Still refused with the op opt-in when the menuType is not allowlisted — guard 3 runs
   // BEFORE the popup-widened guard 5, so the popup predicate never gets a say.
   assert.throws(
-    () => resolveContents(50, { ...deps, allowSheet: true, sheetMenuFor: () => ({ menuType: SECRET_MENU_TYPE, token: 1 }) }),
-    /automation: secret-sheet/,
+    () =>
+      resolveContents(50, {
+        ...deps,
+        allowSheet: true,
+        sheetMenuFor: () => ({ menuType: SECRET_MENU_TYPE, token: 1 })
+      }),
+    /automation: secret-sheet/
   );
   // And when the sheet IS admitted, it is the sheet gate that admitted it — guard 5 is
   // reached and satisfied by the popup predicate, so this asserts guard ORDER, not luck.
   assert.equal(
-    resolveContents(50, { ...deps, allowSheet: true, sheetMenuFor: () => ({ menuType: ADMITTED_MENU_TYPE, token: 1 }) }),
+    resolveContents(50, {
+      ...deps,
+      allowSheet: true,
+      sheetMenuFor: () => ({ menuType: ADMITTED_MENU_TYPE, token: 1 })
+    }),
     sheet
   );
 });
@@ -685,7 +754,7 @@ test('popup widening: internal-session still throws before the widened guard (a 
     fromId: (id) => (id === 99 ? internalWc : null),
     chromeContents: null,
     isTabViewWcId: () => false,
-    isPopupWcId: (id) => id === 99,
+    isPopupWcId: (id) => id === 99
   };
   assert.throws(
     () => resolveContents(99, deps),
@@ -696,9 +765,15 @@ test('popup widening: internal-session still throws before the widened guard (a 
 test('DD7 source-scan pin: no partition-string comparison in resolve.js or tabs.js (membership is session identity; census jarId maps main-side)', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  for (const rel of [['src', 'main', 'automation', 'resolve.js'], ['src', 'main', 'automation', 'tabs.js']]) {
+  for (const rel of [
+    ['src', 'main', 'automation', 'resolve.js'],
+    ['src', 'main', 'automation', 'tabs.js']
+  ]) {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', ...rel), 'utf8');
-    assert.equal(/partition\s*[!=]==?\s*|[!=]==?\s*[\w.]*partition\b/.test(src), false,
-      rel.join('/') + ' must never compare partition strings (DD7 discipline)');
+    assert.equal(
+      /partition\s*[!=]==?\s*|[!=]==?\s*[\w.]*partition\b/.test(src),
+      false,
+      rel.join('/') + ' must never compare partition strings (DD7 discipline)'
+    );
   }
 });

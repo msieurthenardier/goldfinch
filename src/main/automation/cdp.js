@@ -36,8 +36,7 @@ const attached = new Set();
  * @param {'locked' | 'attach-failed'} reason
  * @returns {{ automation: 'debugger-unavailable', reason: string, wcId: number }}
  */
-const debuggerUnavailable = (wcId, reason) =>
-  ({ automation: 'debugger-unavailable', reason, wcId });
+const debuggerUnavailable = (wcId, reason) => ({ automation: 'debugger-unavailable', reason, wcId });
 
 /**
  * Acquire the single-client lock for `wcId`, attach the CDP debugger, run
@@ -63,20 +62,24 @@ const debuggerUnavailable = (wcId, reason) =>
  */
 async function withDebuggerSession(wcId, wc, fn) {
   if (attached.has(wcId)) return debuggerUnavailable(wcId, 'locked'); // sync check…
-  attached.add(wcId);                                                  // …+ add (no await between)
+  attached.add(wcId); // …+ add (no await between)
   try {
     try {
       wc.debugger.attach('1.3');
     } catch {
-      return debuggerUnavailable(wcId, 'attach-failed');  // another CDP client holds it (DD8)
+      return debuggerUnavailable(wcId, 'attach-failed'); // another CDP client holds it (DD8)
     }
     try {
       return await fn(wc);
     } finally {
-      try { wc.debugger.detach(); } catch { /* already detached — don't mask the outcome */ }
+      try {
+        wc.debugger.detach();
+      } catch {
+        /* already detached — don't mask the outcome */
+      }
     }
   } finally {
-    attached.delete(wcId);  // release lock even on attach-throw or fn() throw/return
+    attached.delete(wcId); // release lock even on attach-throw or fn() throw/return
   }
 }
 

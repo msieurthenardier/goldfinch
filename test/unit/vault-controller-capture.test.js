@@ -21,8 +21,12 @@ function fakeVaultIndicatorEl() {
   /** @type {Record<string, Function>} */
   const listeners = {};
   return {
-    addEventListener(type, fn) { listeners[type] = fn; },
-    fire(type, evt) { listeners[type] && listeners[type](evt); },
+    addEventListener(type, fn) {
+      listeners[type] = fn;
+    },
+    fire(type, evt) {
+      listeners[type] && listeners[type](evt);
+    }
   };
 }
 
@@ -35,29 +39,35 @@ function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = n
   const toolbarContextMenuCalls = [];
   /** @type {Record<string, Function>} */
   const on = {};
-  const goldfinch = new Proxy({
-    getVaultLockState: () => Promise.resolve({ setUp: true, unlocked }),
-    vaultCaptureDismiss: (id) => { dismissed.push(id); return Promise.resolve(); },
-    vaultCaptureFinalize: (id) => {
-      finalized.push(id);
-      return finalizeResult instanceof Error
-        ? Promise.reject(finalizeResult)
-        : Promise.resolve(finalizeResult);
-    },
-    vaultLock: () => {
-      vaultLockCalls.push(true);
-      return vaultLockRejects ? Promise.reject(new Error('ipc gone')) : Promise.resolve({ ok: true });
-    },
-  }, {
-    get(target, prop) {
-      if (prop in target) return target[prop];
-      // Every onVault* subscription: record the callback under its channel name.
-      if (typeof prop === 'string' && prop.startsWith('on')) {
-        return (cb) => { on[prop] = cb; };
+  const goldfinch = new Proxy(
+    {
+      getVaultLockState: () => Promise.resolve({ setUp: true, unlocked }),
+      vaultCaptureDismiss: (id) => {
+        dismissed.push(id);
+        return Promise.resolve();
+      },
+      vaultCaptureFinalize: (id) => {
+        finalized.push(id);
+        return finalizeResult instanceof Error ? Promise.reject(finalizeResult) : Promise.resolve(finalizeResult);
+      },
+      vaultLock: () => {
+        vaultLockCalls.push(true);
+        return vaultLockRejects ? Promise.reject(new Error('ipc gone')) : Promise.resolve({ ok: true });
       }
-      return () => {};
     },
-  });
+    {
+      get(target, prop) {
+        if (prop in target) return target[prop];
+        // Every onVault* subscription: record the callback under its channel name.
+        if (typeof prop === 'string' && prop.startsWith('on')) {
+          return (cb) => {
+            on[prop] = cb;
+          };
+        }
+        return () => {};
+      }
+    }
+  );
   const controller = createVaultController({
     els: { vaultIndicator: vaultIndicatorEl },
     goldfinch,
@@ -69,7 +79,7 @@ function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = n
       opens.push({ menuType, model, opts });
       return true;
     },
-    toast: (title, body) => toasts.push([title, body]),
+    toast: (title, body) => toasts.push([title, body])
   });
   return { controller, on, opens, dismissed, finalized, toasts, vaultLockCalls, toolbarContextMenuCalls };
 }
@@ -78,7 +88,7 @@ function harness({ unlocked = false, finalizeResult = null, vaultIndicatorEl = n
 function offerLocked(h, captureId = 'abc123') {
   h.on.onVaultCaptureOffer({
     captureId,
-    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' },
+    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' }
   });
   return captureId;
 }
@@ -89,12 +99,15 @@ test('a LOCKED capture raises the unlock prompt with the keep-focus opt-in', () 
   const h = harness({ unlocked: false });
   h.on.onVaultCaptureOffer({
     captureId: 'abc123',
-    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' },
+    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' }
   });
   assert.equal(h.opens.length, 1);
   assert.equal(h.opens[0].menuType, 'vault-unlock');
-  assert.deepEqual(h.opens[0].opts, { keepFocus: true },
-    'the prompt must survive the submit navigation that spawned it');
+  assert.deepEqual(
+    h.opens[0].opts,
+    { keepFocus: true },
+    'the prompt must survive the submit navigation that spawned it'
+  );
 });
 
 test('an UNLOCKED capture opens the save sheet, untouched by the keep-focus branch', () => {
@@ -102,9 +115,12 @@ test('an UNLOCKED capture opens the save sheet, untouched by the keep-focus bran
   h.on.onVaultCaptureOffer({
     captureId: 'abc123',
     model: {
-      origin: 'https://example.com', username: 'someone', mode: 'save',
-      defaultVaultId: 'global', choices: ['global'],
-    },
+      origin: 'https://example.com',
+      username: 'someone',
+      mode: 'save',
+      defaultVaultId: 'global',
+      choices: ['global']
+    }
   });
   assert.equal(h.opens.length, 1);
   assert.equal(h.opens[0].menuType, 'vault-capture');
@@ -116,7 +132,7 @@ test('the unlock prompt still drops the held credential when it is genuinely dis
   const h = harness({ unlocked: false });
   h.on.onVaultCaptureOffer({
     captureId: 'abc123',
-    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' },
+    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' }
   });
   // Still locked → the operator declined (Escape / Cancel / X / backdrop / app-switch).
   // Keep-focus changes which closes can happen, never what a real close means.
@@ -128,7 +144,7 @@ test('a successful unlock finalizes the held capture instead of dropping it', ()
   const h = harness({ unlocked: false });
   h.on.onVaultCaptureOffer({
     captureId: 'abc123',
-    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' },
+    model: { origin: 'https://example.com', username: 'someone', mode: 'locked' }
   });
   h.on.onVaultLockState({ setUp: true, unlocked: true });
   assert.deepEqual(h.finalized, ['abc123']);
@@ -164,7 +180,7 @@ test('each finalize reason produces its own operator-visible message', async () 
     ['expired', 'Password not saved'],
     ['tab-changed', 'Password not saved'],
     ['locked', 'Password not saved'],
-    [undefined, 'Password not saved'], // an unrecognized/absent reason still speaks
+    [undefined, 'Password not saved'] // an unrecognized/absent reason still speaks
   ];
   for (const [reason, title] of cases) {
     const h = harness({ unlocked: false, finalizeResult: reason ? { reason } : {} });
@@ -194,9 +210,19 @@ test('a rejected finalize invoke speaks too, instead of failing silently', async
 });
 
 test('a successful finalize opens the save sheet and says nothing', async () => {
-  const h = harness({ unlocked: false, finalizeResult: {
-    captureId: 'abc123', model: { origin: 'https://example.com', username: 'someone', mode: 'save', defaultVaultId: 'work', choices: ['work', 'global'] },
-  } });
+  const h = harness({
+    unlocked: false,
+    finalizeResult: {
+      captureId: 'abc123',
+      model: {
+        origin: 'https://example.com',
+        username: 'someone',
+        mode: 'save',
+        defaultVaultId: 'work',
+        choices: ['work', 'global']
+      }
+    }
+  });
   offerLocked(h);
   h.on.onVaultLockState({ setUp: true, unlocked: true });
   await settle();
@@ -214,7 +240,11 @@ test('right-click on the vault indicator opens the toolbar-mode sheet via openTo
   const indicator = fakeVaultIndicatorEl();
   const h = harness({ unlocked: true, vaultIndicatorEl: indicator });
   let prevented = false;
-  indicator.fire('contextmenu', { preventDefault: () => { prevented = true; } });
+  indicator.fire('contextmenu', {
+    preventDefault: () => {
+      prevented = true;
+    }
+  });
   assert.ok(prevented, 'the native OS context menu is suppressed');
   assert.deepEqual(h.toolbarContextMenuCalls, [{ item: 'vault', anchorEl: indicator }]);
 });
@@ -238,7 +268,7 @@ test('lockNow() calls the existing explicit vault-lock bridge path (goldfinch.va
   assert.deepEqual(h.vaultLockCalls, [true]);
 });
 
-test('a rejected lockNow() invoke never throws (fire-and-forget, like the vault page\'s own Lock now button)', async () => {
+test("a rejected lockNow() invoke never throws (fire-and-forget, like the vault page's own Lock now button)", async () => {
   const h = harness({ unlocked: true, vaultLockRejects: true });
   assert.doesNotThrow(() => h.controller.lockNow());
   await settle();

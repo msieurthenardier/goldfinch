@@ -46,8 +46,11 @@ test('AC1: the sheet is a drop target AND (Leg 5b) a gated drag source', () => {
   // there is a single place to audit rather than a scattering of `draggable`s.
   const attach = code.slice(code.indexOf('function attachOverflowDragSource'));
   assert.match(attach.slice(0, attach.indexOf('\n  }\n')), /btn\.draggable = true/);
-  assert.equal((code.match(/\.draggable = /g) || []).length, 1,
-    'exactly one place in the sheet ever makes a node draggable');
+  assert.equal(
+    (code.match(/\.draggable = /g) || []).length,
+    1,
+    'exactly one place in the sheet ever makes a node draggable'
+  );
 });
 
 test('AC1 (Leg 5b): the drag source is gated to `bookmarks-overflow` — renderMenu serves five menuTypes', () => {
@@ -56,31 +59,45 @@ test('AC1 (Leg 5b): the drag source is gated to `bookmarks-overflow` — renderM
   // ungated `draggable = true` here would make every kebab / container /
   // page-context / tab-context row in the app a drag source.
   assert.match(code, /if \(isOverflowMenu\(\)\) attachOverflowDragSource\(btn, item\.id\);/);
-  assert.equal((code.match(/attachOverflowDragSource\(/g) || []).length, 2,
-    'one definition, one call site — nothing may attach it by another route');
+  assert.equal(
+    (code.match(/attachOverflowDragSource\(/g) || []).length,
+    2,
+    'one definition, one call site — nothing may attach it by another route'
+  );
   // …and that call site is nested inside the pre-existing bookmarks-overflow
   // row branch, so the row-id family is gated too (a `sug:`/`tab:` id can never
   // reach it).
   const rowBranch = code.indexOf("if (menuType === 'bookmarks-overflow' && item.id.startsWith('bookmark:'))");
   assert.notEqual(rowBranch, -1);
-  assert.ok(code.indexOf('attachOverflowDragSource(btn, item.id)') > rowBranch,
-    'the drag source attaches inside the bookmarks-overflow row branch');
+  assert.ok(
+    code.indexOf('attachOverflowDragSource(btn, item.id)') > rowBranch,
+    'the drag source attaches inside the bookmarks-overflow row branch'
+  );
 });
 
 test('AC2 (Leg 5b): the sheet-sourced payload carries the SNAPSHOT INDEX — no id, no url', () => {
   const code = readMasked(SHEET_JS);
   const attach = code.slice(code.indexOf('function attachOverflowDragSource'));
   const body = attach.slice(0, attach.indexOf('\n  }\n'));
-  assert.match(body, /dt\.setData\(BOOKMARK_DND_MIME, String\(index\)\)/,
-    'the custom type carries the snapshot index — the sheet is a dumb renderer and knows no id (DD9)');
+  assert.match(
+    body,
+    /dt\.setData\(BOOKMARK_DND_MIME, String\(index\)\)/,
+    'the custom type carries the snapshot index — the sheet is a dumb renderer and knows no id (DD9)'
+  );
   // The recorded asymmetry, pinned so it cannot be quietly half-fixed: an
   // overflow-sourced drag populates NEITHER standard type, so dragging a row out
   // of the menu onto a PAGE (leg 4's path) does nothing. Bar-sourced drags still
   // carry all three.
-  assert.equal(/text\/uri-list|text\/plain/.test(body), false,
-    'AC2: no url types from the sheet — that is the decision, and its cost');
-  assert.match(readMasked('src/renderer/chrome/bookmarks-bar.js'), /dt\.setData\('text\/uri-list'/,
-    'the BAR source is unaffected — it still carries the url for DD5\'s page-wins case');
+  assert.equal(
+    /text\/uri-list|text\/plain/.test(body),
+    false,
+    'AC2: no url types from the sheet — that is the decision, and its cost'
+  );
+  assert.match(
+    readMasked('src/renderer/chrome/bookmarks-bar.js'),
+    /dt\.setData\('text\/uri-list'/,
+    "the BAR source is unaffected — it still carries the url for DD5's page-wins case"
+  );
 });
 
 test('AC3 (Leg 5b): the lifecycle signals ride their own channel, and the token is captured at dragstart', () => {
@@ -89,15 +106,20 @@ test('AC3 (Leg 5b): the lifecycle signals ride their own channel, and the token 
   const body = attach.slice(0, attach.indexOf('\n  }\n'));
   assert.match(body, /window\.menuOverlay\.sheetDrag\?\.\(\{ token, phase: 'start', index \}\)/);
   assert.match(body, /window\.menuOverlay\.sheetDrag\?\.\(\{ token, phase: 'end' \}\)/);
-  assert.equal(/sendActivatedOnce|sendActivated|overflowDrop/.test(body), false,
-    'a drag lifecycle is not an activation and not a drop report — three separate concerns, three channels');
+  assert.equal(
+    /sendActivatedOnce|sendActivated|overflowDrop/.test(body),
+    false,
+    'a drag lifecycle is not an activation and not a drop report — three separate concerns, three channels'
+  );
   // ⚠ The token MUST be captured at dragstart: the sheet is blur-closed the
   // instant the drag begins and main's close-reset runs report.silence(), so
   // `report.token` is already null by dragend. Re-reading it there would send an
   // `end` the chrome could never match, leaving the bar latched until the timer.
   assert.match(body, /const token = dragToken;/);
-  assert.match(readMasked('src/preload/menu-overlay-preload.js'),
-    /sheetDrag: \(payload\) => ipcRenderer\.send\('menu-overlay:sheet-drag', payload\)/);
+  assert.match(
+    readMasked('src/preload/menu-overlay-preload.js'),
+    /sheetDrag: \(payload\) => ipcRenderer\.send\('menu-overlay:sheet-drag', payload\)/
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -108,26 +130,38 @@ test('AC3a: every sheet-side drag affordance is gated to `bookmarks-overflow`', 
   const code = readMasked(SHEET_JS);
   // The gate is a single named predicate, so the three handlers cannot drift
   // apart the way five separately-written conditions would.
-  assert.match(code, /isOverflowMenu\s*=\s*\(\)\s*=>\s*menuNode\.dataset\.menuType === 'bookmarks-overflow'/,
-    'one gate, reading the menuType renderMenu itself stamps');
+  assert.match(
+    code,
+    /isOverflowMenu\s*=\s*\(\)\s*=>\s*menuNode\.dataset\.menuType === 'bookmarks-overflow'/,
+    'one gate, reading the menuType renderMenu itself stamps'
+  );
   // …and it is consulted before anything else happens, in the shared helper both
   // handlers call.
   const gateBody = /function overflowDragEvent\(e\) \{\s*if \(!isOverflowMenu\(\)\) return null;/;
-  assert.match(code, gateBody,
+  assert.match(
+    code,
+    gateBody,
     'the menuType check is the FIRST thing the shared drag gate does — kebab / container / ' +
-    'page-context / tab-context must never acquire a drop target');
+      'page-context / tab-context must never acquire a drop target'
+  );
   // The MIME half: without it the sheet preventDefaults every drag crossing it,
   // including native file and link drags (the DD2 mistake, guest-side).
   assert.match(code, /types\.includes\(BOOKMARK_DND_MIME\)/);
-  assert.match(code, /import \{[^}]*BOOKMARK_DND_MIME[^}]*\} from '\.\.\/shared\/bookmark-drag\.js'/,
-    'the MIME literal is imported, never re-typed');
+  assert.match(
+    code,
+    /import \{[^}]*BOOKMARK_DND_MIME[^}]*\} from '\.\.\/shared\/bookmark-drag\.js'/,
+    'the MIME literal is imported, never re-typed'
+  );
 });
 
 test('AC3a: the indicator is parented to #menu-root, NOT to the menu node renderMenu wipes', () => {
   const code = readMasked(SHEET_JS);
-  assert.match(code, /overflowIndicator\.className = 'sheet-drop-indicator hidden';\s*root\.appendChild\(overflowIndicator\);/,
-    'renderMenu opens with `menuNode.textContent = \'\'`, so an indicator inside #sheet-menu ' +
-    'is wiped on every render — it must hang off #menu-root');
+  assert.match(
+    code,
+    /overflowIndicator\.className = 'sheet-drop-indicator hidden';\s*root\.appendChild\(overflowIndicator\);/,
+    "renderMenu opens with `menuNode.textContent = ''`, so an indicator inside #sheet-menu " +
+      'is wiped on every render — it must hang off #menu-root'
+  );
   assert.equal(/menuNode\.appendChild\(overflowIndicator\)/.test(code), false);
   // …and renderMenu retracts it, since the rows it pointed between are gone.
   assert.match(code, /menuNode\.textContent = '';\s*hideOverflowIndicator\(\);/);
@@ -137,9 +171,16 @@ test('AC3a: #sheet-menu keeps `position: absolute` — adding `relative` would b
   const css = read(SHEET_CSS);
   const rule = css.slice(css.indexOf('#sheet-menu {'), css.indexOf('}', css.indexOf('#sheet-menu {')));
   assert.ok(rule.length > 0, '#sheet-menu must exist');
-  assert.match(rule, /position:\s*absolute/, 'it is ALREADY absolute — leg 3 needed to ADD relative to its container, this one must not');
-  assert.equal(/position:\s*relative/.test(rule), false,
-    'positionNode writes inline left/right/top on this node; a relative containing block would re-base them');
+  assert.match(
+    rule,
+    /position:\s*absolute/,
+    'it is ALREADY absolute — leg 3 needed to ADD relative to its container, this one must not'
+  );
+  assert.equal(
+    /position:\s*relative/.test(rule),
+    false,
+    'positionNode writes inline left/right/top on this node; a relative containing block would re-base them'
+  );
 });
 
 test('AC3: the indicator is out of flow and never animates', () => {
@@ -167,8 +208,11 @@ test('AC3: the sheet delegates its drop-index and indicator geometry to the pure
   // No inline midpoint arithmetic, on either axis. This is the exact shape both
   // prior debriefs name as this codebase's recurring defect source: a
   // hand-mirrored pair with no differential test.
-  assert.equal(/height \/ 2|width \/ 2/.test(code), false,
-    'the midpoint rule must not be re-derived in the sheet — it is imported (via overflowDropIndexY)');
+  assert.equal(
+    /height \/ 2|width \/ 2/.test(code),
+    false,
+    'the midpoint rule must not be re-derived in the sheet — it is imported (via overflowDropIndexY)'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -177,17 +221,25 @@ test('AC3: the sheet delegates its drop-index and indicator geometry to the pure
 
 test('AC8: the drop index rides its OWN channel, never channel-4 sendActivated', () => {
   const code = readMasked(SHEET_JS);
-  assert.match(code, /window\.menuOverlay\.overflowDrop\?\.\(\{ token, index \}\)/,
-    'the dedicated channel carries the index and the open token, and nothing else');
+  assert.match(
+    code,
+    /window\.menuOverlay\.overflowDrop\?\.\(\{ token, index \}\)/,
+    'the dedicated channel carries the index and the open token, and nothing else'
+  );
   // ⚠ channel 4 is disqualified by a SIDE EFFECT, not by payload size:
   // `menu-overlay:activated` closes the sheet AND dispatches — and for a
   // `bookmark:<i>` id that dispatch NAVIGATES the current tab.
   const dropHandler = code.slice(code.indexOf("menuNode.addEventListener('drop'"));
   const body = dropHandler.slice(0, dropHandler.indexOf('\n  });'));
-  assert.equal(/sendActivatedOnce|sendActivated/.test(body), false,
-    'a drop is not an activation: channel 4 would navigate the tab and consume the one-report-per-token budget');
-  assert.match(readMasked('src/preload/menu-overlay-preload.js'),
-    /overflowDrop: \(payload\) => ipcRenderer\.send\('menu-overlay:overflow-drop', payload\)/);
+  assert.equal(
+    /sendActivatedOnce|sendActivated/.test(body),
+    false,
+    'a drop is not an activation: channel 4 would navigate the tab and consume the one-report-per-token budget'
+  );
+  assert.match(
+    readMasked('src/preload/menu-overlay-preload.js'),
+    /overflowDrop: \(payload\) => ipcRenderer\.send\('menu-overlay:overflow-drop', payload\)/
+  );
 });
 
 test('AC8b: the main-side handler names all THREE guards, the menuType one included', () => {
@@ -197,9 +249,12 @@ test('AC8b: the main-side handler names all THREE guards, the menuType one inclu
   const body = code.slice(start, code.indexOf('\n  });', start));
   assert.match(body, /recordForSheetSender\(event\.sender\)/, 'guard 1 — sender identity');
   assert.match(body, /token !== current\.token/, 'guard 2 — open-token freshness');
-  assert.match(body, /current\.menuType !== 'bookmarks-overflow'/,
+  assert.match(
+    body,
+    /current\.menuType !== 'bookmarks-overflow'/,
     'guard 3 — WITHOUT THIS a drop index is accepted while vault-unlock is on screen. ' +
-    'This flight has recorded four findings of exactly that shape; the predicate is named, not inherited.');
+      'This flight has recorded four findings of exactly that shape; the predicate is named, not inherited.'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -216,14 +271,23 @@ test('AC9: the three drop surfaces have three separate handlers in three separat
   const sheet = readMasked(SHEET_JS);
 
   assert.match(bar, /document\.addEventListener\('drop'/, 'the bar owns the CHROME document');
-  assert.equal(/menuNode|sheet-menu|menu-overlay/.test(bar), false,
-    'the bar must not reach into the sheet\'s DOM — its only channel to the sheet is overlayMenuClient');
+  assert.equal(
+    /menuNode|sheet-menu|menu-overlay/.test(bar),
+    false,
+    "the bar must not reach into the sheet's DOM — its only channel to the sheet is overlayMenuClient"
+  );
 
-  assert.match(guest, /window\.addEventListener\('drop', bookmarkDrop\.handleDrop\)/,
-    'the guest preload owns the PAGE\'s own window');
+  assert.match(
+    guest,
+    /window\.addEventListener\('drop', bookmarkDrop\.handleDrop\)/,
+    "the guest preload owns the PAGE's own window"
+  );
   assert.equal(/menuNode|sheet-menu/.test(guest), false);
 
   assert.match(sheet, /menuNode\.addEventListener\('drop'/, 'the sheet owns its own menu node — and ONLY that node');
-  assert.equal(/document\.addEventListener\('drop'/.test(sheet), false,
-    'a document-wide sheet drop handler would claim the whole guest region for the overflow menu');
+  assert.equal(
+    /document\.addEventListener\('drop'/.test(sheet),
+    false,
+    'a document-wide sheet drop handler would claim the whole guest region for the overflow menu'
+  );
 });

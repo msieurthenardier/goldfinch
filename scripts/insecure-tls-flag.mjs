@@ -30,6 +30,6 @@ export function decideInsecureTlsFixtures(argv) {
   }
   return {
     forwardArgs: args.filter((a) => a !== INSECURE_TLS_FLAG),
-    electronSwitches: ['--ignore-certificate-errors'],
+    electronSwitches: ['--ignore-certificate-errors']
   };
 }

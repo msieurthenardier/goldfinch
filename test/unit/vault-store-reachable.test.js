@@ -22,11 +22,18 @@ const JARS = [{ id: 'work' }, { id: 'personal' }];
 const A = 'https://a.example';
 const B = 'https://b.example';
 
-function tmpDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-reach-')); }
-function rm(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-reach-'));
+}
+function rm(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 function makeStore(dir, overrides = {}) {
   return vs.load(dir, {
-    scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS, ...overrides,
+    scryptParams: FAST_SCRYPT,
+    getAutoLockMinutes: () => 10,
+    listJars: () => JARS,
+    ...overrides
   });
 }
 function login(over = {}) {
@@ -42,7 +49,10 @@ test('merges global + that jar only, exact-origin filtered, source-tagged, metad
     const g = store.saveItem('global', login({ username: 'g@a', origin: A }));
     store.saveItem('global', login({ username: 'g@b', origin: B }));
     // work: one A-origin login (match) with a TOTP
-    const w = store.saveItem('work', login({ username: 'w@a', origin: A, totp: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP' }));
+    const w = store.saveItem(
+      'work',
+      login({ username: 'w@a', origin: A, totp: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP' })
+    );
     // personal (a SIBLING jar): an A-origin login that must NEVER appear for 'work'
     store.saveItem('personal', login({ username: 'sibling@a', origin: A }));
 
@@ -68,17 +78,16 @@ test('merges global + that jar only, exact-origin filtered, source-tagged, metad
     // METADATA ONLY — exactly these keys, never a password / totp secret. `widened`
     // (M12 F4 Leg 4 / DD5) rides every row (false for an exact match).
     for (const r of rows) {
-      assert.deepEqual(
-        Object.keys(r).sort(),
-        ['hasTotp', 'id', 'origin', 'title', 'username', 'vaultId', 'widened'],
-      );
+      assert.deepEqual(Object.keys(r).sort(), ['hasTotp', 'id', 'origin', 'title', 'username', 'vaultId', 'widened']);
       assert.ok(!('password' in r), 'no password key');
       assert.ok(!('totp' in r), 'no totp secret key');
       assert.equal(r.widened, false, 'an exact-origin match is never widened');
     }
     // Belt-and-suspenders: the stored password never appears anywhere in the payload.
     assert.ok(!JSON.stringify(rows).includes('hunter2'), 'no password value in the model');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('returns [] (never throws) when the store is LOCKED', async () => {
@@ -90,7 +99,9 @@ test('returns [] (never throws) when the store is LOCKED', async () => {
     store.lockNow();
     assert.equal(store.isUnlocked(), false);
     assert.deepEqual(store.reachableLoginItems('work', A), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('returns [] for a BURNER / non-persistent tab (null jarId) — global not reached', async () => {
@@ -102,7 +113,9 @@ test('returns [] for a BURNER / non-persistent tab (null jarId) — global not r
     // A burner tab carries no persistent jar → the caller passes null → [] (DD9):
     // the global vault is NOT reachable via the picker for a burner tab.
     assert.deepEqual(store.reachableLoginItems(null, A), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('an UNCREATED jar vault contributes nothing (no throw); global matches still returned', async () => {
@@ -116,7 +129,9 @@ test('an UNCREATED jar vault contributes nothing (no throw); global matches stil
     assert.equal(rows.length, 1);
     assert.equal(rows[0].id, g.id);
     assert.equal(rows[0].vaultId, 'global');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('an UNKNOWN / non-persistent jarId does not throw — only global contributes', async () => {
@@ -130,7 +145,9 @@ test('an UNKNOWN / non-persistent jarId does not throw — only global contribut
     const rows = store.reachableLoginItems('ghost', A);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].vaultId, 'global');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('widen:true surfaces a registrable-domain item on a matched subdomain, badged widened', async () => {
@@ -139,7 +156,10 @@ test('widen:true surfaces a registrable-domain item on a matched subdomain, badg
     const store = makeStore(dir);
     await store.setup({ masterPassword: MASTER });
     // A registrable-domain login stored at the eTLD+1 apex.
-    store.saveItem('global', login({ username: 'rd@ex', origin: 'https://example.com', matchMode: 'registrable-domain' }));
+    store.saveItem(
+      'global',
+      login({ username: 'rd@ex', origin: 'https://example.com', matchMode: 'registrable-domain' })
+    );
 
     // On a subdomain, the picker (widen:true) surfaces it, flagged widened.
     const sub = store.reachableLoginItems('work', 'https://accounts.example.com', { widen: true });
@@ -154,7 +174,9 @@ test('widen:true surfaces a registrable-domain item on a matched subdomain, badg
 
     // widen:false (the capture-disposition default) does NOT surface the subdomain match.
     assert.deepEqual(store.reachableLoginItems('work', 'https://accounts.example.com'), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('widen:true REFUSES a registrable-domain item across a registry sibling / tenant / scheme', async () => {
@@ -171,7 +193,9 @@ test('widen:true REFUSES a registrable-domain item across a registry sibling / t
     assert.deepEqual(store.reachableLoginItems('work', 'https://bob.github.io', { widen: true }), []);
     // Scheme mismatch — refused even for a registrable-domain item (the MITM guard).
     assert.deepEqual(store.reachableLoginItems('work', 'http://a.co.id', { widen: true }), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('widen:true does NOT widen a legacy/exact item (no matchMode) — exact only', async () => {
@@ -185,7 +209,9 @@ test('widen:true does NOT widen a legacy/exact item (no matchMode) — exact onl
     const apex = store.reachableLoginItems('work', 'https://example.com', { widen: true });
     assert.equal(apex.length, 1);
     assert.equal(apex[0].widened, false);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('empty origin-match set returns [] (a valid, non-throwing state)', async () => {
@@ -196,5 +222,7 @@ test('empty origin-match set returns [] (a valid, non-throwing state)', async ()
     store.saveItem('global', login({ origin: A }));
     store.saveItem('work', login({ origin: A }));
     assert.deepEqual(store.reachableLoginItems('work', 'https://nomatch.example'), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

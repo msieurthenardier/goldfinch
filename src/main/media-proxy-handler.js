@@ -49,9 +49,7 @@ function createMediaProxyHandler({ getTabContents, isInternalContents, parseMedi
     /** @type {Record<string, string>} */
     const forwardHeaders = {};
     for (const name of FORWARDED_REQUEST_HEADERS) {
-      const value = request.headers && typeof request.headers.get === 'function'
-        ? request.headers.get(name)
-        : null;
+      const value = request.headers && typeof request.headers.get === 'function' ? request.headers.get(name) : null;
       if (value != null) forwardHeaders[name] = value;
     }
 
@@ -65,9 +63,7 @@ function createMediaProxyHandler({ getTabContents, isInternalContents, parseMedi
     /** @type {Record<string, string>} */
     const responseHeaders = {};
     for (const name of ALLOWED_RESPONSE_HEADERS) {
-      const value = upstream.headers && typeof upstream.headers.get === 'function'
-        ? upstream.headers.get(name)
-        : null;
+      const value = upstream.headers && typeof upstream.headers.get === 'function' ? upstream.headers.get(name) : null;
       if (value != null) responseHeaders[name] = value;
     }
 

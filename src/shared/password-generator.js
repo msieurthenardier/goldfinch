@@ -22,7 +22,7 @@ const CLASSES = {
   lower: 'abcdefghijklmnopqrstuvwxyz',
   upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
   digits: '0123456789',
-  symbols: '!@#$%^&*()-_=+[]{};:,.?',
+  symbols: '!@#$%^&*()-_=+[]{};:,.?'
 };
 
 /** The class option names, in a stable order. */
@@ -93,13 +93,7 @@ function shuffle(arr) {
  * @returns {string}
  */
 function generatePassword(opts = {}) {
-  const {
-    length = 20,
-    lower = true,
-    upper = true,
-    digits = true,
-    symbols = true,
-  } = opts || {};
+  const { length = 20, lower = true, upper = true, digits = true, symbols = true } = opts || {};
 
   if (!Number.isInteger(length) || length < 1) {
     throw new RangeError(`password-generator: length must be a positive integer (got ${length})`);

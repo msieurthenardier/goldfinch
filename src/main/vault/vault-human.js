@@ -195,9 +195,10 @@ function createVaultHuman(deps) {
     const logins = store
       .reachableLoginItems(jar.id, origin, { widen: true })
       .map((/** @type {any} */ row) => ({ ...row, type: 'login' }));
-    const cards = typeof store.reachableCardItems === 'function'
-      ? store.reachableCardItems(jar.id).map((/** @type {any} */ row) => ({ ...row, type: 'card' }))
-      : [];
+    const cards =
+      typeof store.reachableCardItems === 'function'
+        ? store.reachableCardItems(jar.id).map((/** @type {any} */ row) => ({ ...row, type: 'card' }))
+        : [];
     return logins.concat(cards);
   }
 
@@ -263,8 +264,8 @@ function createVaultHuman(deps) {
           number: item.number,
           cardholder: item.cardholder,
           expiry: item.expiry,
-          cvv: item.cvv,
-        },
+          cvv: item.cvv
+        }
       });
       return { filled: true };
     }
@@ -340,7 +341,13 @@ function createVaultHuman(deps) {
     }
     rec.mode = 'save';
     rec.choices = [rec.jarId, 'global'];
-    return { origin: rec.origin, username: rec.username, mode: 'save', defaultVaultId: rec.jarId, choices: [rec.jarId, 'global'] };
+    return {
+      origin: rec.origin,
+      username: rec.username,
+      mode: 'save',
+      defaultVaultId: rec.jarId,
+      choices: [rec.jarId, 'global']
+    };
   }
 
   function capture({ wcId, username, passwordBytes }) {
@@ -380,7 +387,7 @@ function createVaultHuman(deps) {
       mode: 'save', // provisional — set by disposeCapture (unlocked) or 'locked' below.
       choices: [],
       timer: null,
-      capturedAt: _now(),
+      capturedAt: _now()
     };
     rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
     if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref();
@@ -397,7 +404,10 @@ function createVaultHuman(deps) {
     // UNLOCKED: compute the disposition now. An UNCHANGED login (disposeCapture → null)
     // has nothing to save — drop the held record and make no offer.
     const model = disposeCapture(rec);
-    if (!model) { dropCapture(captureId); return null; }
+    if (!model) {
+      dropCapture(captureId);
+      return null;
+    }
     return { captureId, model };
   }
 
@@ -452,14 +462,15 @@ function createVaultHuman(deps) {
       kind: 'card',
       origin: rec.origin,
       brand: rec.brand,
-      last4: rec.last4,
+      last4: rec.last4
     };
 
     if (match) {
       const cvv = rec.cvv.toString('utf8');
-      const unchanged = String(match.item.cvv ?? '') === cvv
-        && String(match.item.expiry ?? '') === String(rec.expiry ?? '')
-        && String(match.item.cardholder ?? '') === String(rec.cardholder ?? '');
+      const unchanged =
+        String(match.item.cvv ?? '') === cvv &&
+        String(match.item.expiry ?? '') === String(rec.expiry ?? '') &&
+        String(match.item.cardholder ?? '') === String(rec.cardholder ?? '');
       if (unchanged) return null; // nothing to update → no offer
       rec.mode = 'update';
       rec.vaultId = match.vaultId;
@@ -534,7 +545,7 @@ function createVaultHuman(deps) {
       mode: 'save',
       choices: [],
       timer: null,
-      capturedAt: _now(),
+      capturedAt: _now()
     };
     wipe(); // the incoming deserialized arrays are separate allocations
     rec.timer = _setTimeout(() => dropCapture(captureId), CAPTURE_DROP_MS);
@@ -545,12 +556,15 @@ function createVaultHuman(deps) {
       rec.mode = 'locked';
       return {
         captureId,
-        model: { kind: 'card', origin, brand: rec.brand, last4: rec.last4, mode: 'locked' },
+        model: { kind: 'card', origin, brand: rec.brand, last4: rec.last4, mode: 'locked' }
       };
     }
 
     const model = disposeCardCapture(rec);
-    if (!model) { dropCapture(captureId); return null; }
+    if (!model) {
+      dropCapture(captureId);
+      return null;
+    }
     return { captureId, model };
   }
 
@@ -635,9 +649,7 @@ function createVaultHuman(deps) {
       let cardItem;
       if (rec.mode === 'update') {
         cardTarget = /** @type {string} */ (rec.vaultId);
-        const existing = store
-          .listItems(cardTarget)
-          .find((/** @type {any} */ i) => i.id === rec.itemId);
+        const existing = store.listItems(cardTarget).find((/** @type {any} */ i) => i.id === rec.itemId);
         if (!existing) {
           dropCapture(captureId);
           return { saved: false };
@@ -649,7 +661,7 @@ function createVaultHuman(deps) {
           expiry: rec.expiry,
           cardholder: rec.cardholder ?? existing.cardholder,
           brand: rec.brand ?? existing.brand,
-          last4: rec.last4 ?? existing.last4,
+          last4: rec.last4 ?? existing.last4
         };
       } else {
         if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
@@ -666,7 +678,7 @@ function createVaultHuman(deps) {
           last4: rec.last4,
           number,
           cvv: rec.cvv.toString('utf8'),
-          expiry: rec.expiry,
+          expiry: rec.expiry
         };
       }
       try {
@@ -683,9 +695,7 @@ function createVaultHuman(deps) {
       target = /** @type {string} */ (rec.vaultId);
       // Read the existing item and MERGE — a bare rewrite would drop totp / custom title
       // / notes (saveItem wholesale-replaces on update, keeping only createdAt).
-      const existing = store
-        .listItems(target)
-        .find((/** @type {any} */ i) => i.id === rec.itemId);
+      const existing = store.listItems(target).find((/** @type {any} */ i) => i.id === rec.itemId);
       // The item vanished between the offer and the save (deleted elsewhere) — nothing to
       // update. Drop the held record so the captured password never lingers.
       if (!existing) {
@@ -696,7 +706,7 @@ function createVaultHuman(deps) {
         ...existing,
         origin: rec.origin,
         username: rec.username,
-        password: rec.password.toString('utf8'),
+        password: rec.password.toString('utf8')
       };
     } else {
       if (typeof vaultId !== 'string' || !rec.choices.includes(vaultId)) {
@@ -715,7 +725,7 @@ function createVaultHuman(deps) {
         title,
         origin: rec.origin,
         username: rec.username,
-        password: rec.password.toString('utf8'),
+        password: rec.password.toString('utf8')
       };
     }
 

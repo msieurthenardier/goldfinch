@@ -30,19 +30,42 @@
  */
 export function createTabController(deps) {
   const {
-    window, document, requestAnimationFrame, ResizeObserver,
-    ctx, els, tabs, jarsClient,
-    blankPrivacy, escapeHtml, isSafeColor, openTabContextMenu, currentHomePage,
+    window,
+    document,
+    requestAnimationFrame,
+    ResizeObserver,
+    ctx,
+    els,
+    tabs,
+    jarsClient,
+    blankPrivacy,
+    escapeHtml,
+    isSafeColor,
+    openTabContextMenu,
+    currentHomePage,
     currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences
-    isInternalPageUrl, isSafeTabUrl, resolveNewTabContainer, classifyDragPoint,
-    announceTabStatus, updateNavButtons, refreshZoomControl, refreshStar, fetchCookies,
-    closeSuggestions, resetSuggestionsForActivation, updateAddressChip,
-    renderMedia, renderPrivacy, setDevtoolsPressed, refreshBookmarksSurfaces,
+    isInternalPageUrl,
+    isSafeTabUrl,
+    resolveNewTabContainer,
+    classifyDragPoint,
+    announceTabStatus,
+    updateNavButtons,
+    refreshZoomControl,
+    refreshStar,
+    fetchCookies,
+    closeSuggestions,
+    resetSuggestionsForActivation,
+    updateAddressChip,
+    renderMedia,
+    renderPrivacy,
+    setDevtoolsPressed,
+    refreshBookmarksSurfaces,
     // M16 F2 Leg 1 (DD1/DD7): the welcome panel is owned by welcome-controller.js;
     // this controller only toggles it on activation-class events (late-bound
     // forwarding functions — welcome-controller.js is constructed after this
     // one, the renderer.js `let controller` idiom).
-    showWelcomePanel, hideWelcomePanel
+    showWelcomePanel,
+    hideWelcomePanel
   } = deps;
   // Trusted-tab pseudo-jar display name (Leg 3, ownership ruling from the Leg 1
   // design review — folded into DD3): every trusted internal tab used to hardcode
@@ -169,7 +192,10 @@ export function createTabController(deps) {
       const dt = e.dataTransfer;
       // wcId gate: a tab whose guest view has not been provisioned yet cannot be
       // identified across the IPC — refuse the drag rather than ship a null wcId.
-      if (tab.wcId == null || !dt) { e.preventDefault(); return; }
+      if (tab.wcId == null || !dt) {
+        e.preventDefault();
+        return;
+      }
       activateTab(id); // Chrome parity: dragging a background tab activates it
       // DD2 provenance (Leg 3): declare the drag main-side — the cross-window adopt
       // refuses a payload the source never declared. Bookended by tabDragEnded below.
@@ -177,9 +203,16 @@ export function createTabController(deps) {
       // Identity payload — the EXACT shape validateMoveTabPayload + requestTearOff use
       // ({ wcId, url, title, favicon, container }); burner container + favicon are
       // renderer-only facts, so main cannot rebuild them from the wcId.
-      dt.setData(TAB_DND_MIME, JSON.stringify({
-        wcId: tab.wcId, url: tab.url, title: tab.title, favicon: tab.favicon, container: tab.container
-      }));
+      dt.setData(
+        TAB_DND_MIME,
+        JSON.stringify({
+          wcId: tab.wcId,
+          url: tab.url,
+          title: tab.title,
+          favicon: tab.favicon,
+          container: tab.container
+        })
+      );
       dt.effectAllowed = 'move';
       // Cursor-follow (DD3/DD4): the tab ITSELF is the drag image, offset to the grab point —
       // the OS-native image is the out-of-window feedback, so it must be snapshotted NOW,
@@ -206,7 +239,7 @@ export function createTabController(deps) {
         stripRect: { left: sr.left, top: sr.top, right: sr.right, bottom: sr.bottom },
         currentDropIndex: null,
         tearOff: false,
-        dropHandled: false,
+        dropHandled: false
       };
       // The opacity hole goes on the NEXT frame: setDragImage snapshots the element at the
       // end of the dragstart dispatch, so adding `.dragging` synchronously would capture an
@@ -234,7 +267,10 @@ export function createTabController(deps) {
       const releaseZone = classifyDragPoint(
         /** @type {{left:number,top:number,right:number,bottom:number}} */ (dnd.stripRect),
         /** @type {{left:number,width:number}[]} */ (dnd.slotRects),
-        e.clientX, e.clientY, dnd.draggedIndex);
+        e.clientX,
+        e.clientY,
+        dnd.draggedIndex
+      );
       const doTearOff = !dnd.dropHandled && (dnd.tearOff || releaseZone.zone === 'tearOff');
       clearDragVisuals();
       dnd = null; // SYNCHRONOUS — the tear-off request the session outlives must never read a live `dnd`
@@ -267,7 +303,11 @@ export function createTabController(deps) {
   // step 4); `title` is read HERE (renderer-side only, stripped of no further
   // meaning to main) to seed the initial strip title. `insertAt` lands the tab at
   // its ORIGINAL strip position via the existing commitTabMove machinery (F2 DD1).
-  function createTab(url, container = null, { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false, background = false } = {}) {
+  function createTab(
+    url,
+    container = null,
+    { trusted = false, restoreHistory = null, insertAt = null, scriptOpened = false, background = false } = {}
+  ) {
     // Defensive drag-cancel (M09 F2 Leg 2 Edge Case): the only tab-list mutation paths are
     // closeTab/createTab; either one invalidates a live drag's slotRects snapshot mid-gesture.
     if (dnd) cancelDnd();
@@ -294,9 +334,8 @@ export function createTabController(deps) {
       url,
       jar,
       trusted,
-      title: restoreHistory && typeof restoreHistory.title === 'string' && restoreHistory.title
-        ? restoreHistory.title
-        : null
+      title:
+        restoreHistory && typeof restoreHistory.title === 'string' && restoreHistory.title ? restoreHistory.title : null
     });
     // Renderer-local provenance for the window.close() gate (issue #119): true
     // only for tabs born from a page's window.open (the onOpenTab path). Not
@@ -325,9 +364,11 @@ export function createTabController(deps) {
     // restoreHistory (M09 F4 Leg 2, DD2 step 3/4, additive/optional) rides straight
     // through to main — main's tab-create handler branches on its presence to skip
     // loadURL and call navigationHistory.restore() instead.
-    window.goldfinch.tabCreate({ url, partition: jar.partition, trusted, ...(restoreHistory ? { restoreHistory } : {}) }).then((wcId) => {
-      onViewCreated(tab, wcId);
-    });
+    window.goldfinch
+      .tabCreate({ url, partition: jar.partition, trusted, ...(restoreHistory ? { restoreHistory } : {}) })
+      .then((wcId) => {
+        onViewCreated(tab, wcId);
+      });
 
     // background: true (M15 F1 DD10, Leg 1 AC): skip self-activation for this
     // create ONLY — every existing call site (which never passes it) keeps the
@@ -420,7 +461,8 @@ export function createTabController(deps) {
     // cannot race a live drag session in practice — keeping the pinned FIVE
     // cancelDnd() call sites (AC7, tab-drag-invariants.test.js) exact.
     const id = `tab-${++ctx.tabSeq}`;
-    const jar = container || resolveNewTabContainer(jarsClient.containers, jarsClient.defaultId) || jarsClient.makeBurner();
+    const jar =
+      container || resolveNewTabContainer(jarsClient.containers, jarsClient.defaultId) || jarsClient.makeBurner();
     const tab = buildStripRecord({ id, url: '', jar, trusted: false, title: 'Welcome to Goldfinch' });
     tab.welcome = { reasons: new Set(reasons), pendingQuery };
     activateTab(id);
@@ -434,7 +476,10 @@ export function createTabController(deps) {
   // URL survives, applied via tabNavigate once the first attach's wcId lands.
   function attachView(tab, url) {
     if (!tab || tab.wcId != null) return; // already has a view — nothing to attach
-    if (tab.attaching) { tab.pendingUrl = url; return; } // queue the latest only
+    if (tab.attaching) {
+      tab.pendingUrl = url;
+      return;
+    } // queue the latest only
     if (!isSafeTabUrl(url)) return;
     tab.attaching = true;
     tab.welcome = null;
@@ -582,9 +627,10 @@ export function createTabController(deps) {
     const { tabId, startOrder, slotRects, draggedIndex } = dnd;
     const remainingIds = startOrder.filter((_, i) => i !== draggedIndex);
     const refId = remainingIds[targetIndex];
-    const finalOrder = refId != null
-      ? [...remainingIds.slice(0, targetIndex), tabId, ...remainingIds.slice(targetIndex)]
-      : [...remainingIds, tabId];
+    const finalOrder =
+      refId != null
+        ? [...remainingIds.slice(0, targetIndex), tabId, ...remainingIds.slice(targetIndex)]
+        : [...remainingIds, tabId];
     finalOrder.forEach((tid, finalIdx) => {
       if (tid === tabId) return; // the dragged tab is the native drag image; its slot is the `.dragging` opacity hole
       const t = tabs.get(tid);
@@ -630,12 +676,11 @@ export function createTabController(deps) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move'; // MANDATORY (spike probe3) — else the drop is silently rejected
     if (!dnd) return; // not this window's own drag — no zone work for a foreign one
-    const zone = classifyDragPoint(
-      dnd.stripRect, dnd.slotRects,
-      e.clientX, e.clientY, dnd.draggedIndex);
+    const zone = classifyDragPoint(dnd.stripRect, dnd.slotRects, e.clientX, e.clientY, dnd.draggedIndex);
     const tab = tabs.get(dnd.tabId);
     if (zone.zone === 'tearOff') {
-      if (!dnd.tearOff) { // latch once per zone entry — the class add + close-ranks are idempotent per entry
+      if (!dnd.tearOff) {
+        // latch once per zone entry — the class add + close-ranks are idempotent per entry
         dnd.tearOff = true;
         dnd.currentDropIndex = null; // force a displacement recompute on the way back into the strip
         if (tab && tab.btn) tab.btn.classList.add('detaching');
@@ -721,23 +766,29 @@ export function createTabController(deps) {
     if (!tab || tab.wcId == null) return; // nothing to move — the strip mutated under the drag
     const seq = ++dropSeq;
     pendingDrop = { dropSeq: seq, tabId };
-    window.goldfinch.tabTearOff({
-      wcId: tab.wcId, url: tab.url, title: tab.title, favicon: tab.favicon, container: tab.container
-    }).then((result) => {
-      // Still ours? A newer drop, or a strip mutation under us, invalidated this reply.
-      if (!pendingDrop || pendingDrop.dropSeq !== seq) return;
-      pendingDrop = null;
-      // Adopted-elsewhere signature (Leg 3, leg DD4): a successful cross-window drop
-      // reads `no-tab` here — the target's adopt moved the tab before this tear-off
-      // dispatched, and `tab-moved-away` (sent during the adopt, earlier on this same
-      // ordered pipe) has already emptied the local map. The TARGET announced the
-      // outcome, so this is suppressed — a `no-tab` with the tab STILL PRESENT is a
-      // true anomaly and stays announced.
-      if (result && result.ok === false && result.reason === 'no-tab' && !tabs.has(tabId)) return;
-      // DD5: EVERY outcome is announced. On success `tab-moved-away` has already removed the
-      // tab, so this announcement is all that is left to do either way.
-      announceTabStatus(moveOutcomeMessage(result, 'a new window'));
-    });
+    window.goldfinch
+      .tabTearOff({
+        wcId: tab.wcId,
+        url: tab.url,
+        title: tab.title,
+        favicon: tab.favicon,
+        container: tab.container
+      })
+      .then((result) => {
+        // Still ours? A newer drop, or a strip mutation under us, invalidated this reply.
+        if (!pendingDrop || pendingDrop.dropSeq !== seq) return;
+        pendingDrop = null;
+        // Adopted-elsewhere signature (Leg 3, leg DD4): a successful cross-window drop
+        // reads `no-tab` here — the target's adopt moved the tab before this tear-off
+        // dispatched, and `tab-moved-away` (sent during the adopt, earlier on this same
+        // ordered pipe) has already emptied the local map. The TARGET announced the
+        // outcome, so this is suppressed — a `no-tab` with the tab STILL PRESENT is a
+        // true anomaly and stays announced.
+        if (result && result.ok === false && result.reason === 'no-tab' && !tabs.has(tabId)) return;
+        // DD5: EVERY outcome is announced. On success `tab-moved-away` has already removed the
+        // tab, so this announcement is all that is left to do either way.
+        announceTabStatus(moveOutcomeMessage(result, 'a new window'));
+      });
   }
 
   /**
@@ -766,10 +817,14 @@ export function createTabController(deps) {
   function moveOutcomeMessage(result, dest) {
     if (result && result.ok === false) {
       switch (result.reason) {
-        case 'no-target': return 'That window is no longer open — the tab was not moved';
-        case 'sole-tab': return `Cannot move the only tab to ${dest}`;
-        case 'internal': return `This tab cannot be moved to ${dest}`;
-        default: return `Move to ${dest} failed`;
+        case 'no-target':
+          return 'That window is no longer open — the tab was not moved';
+        case 'sole-tab':
+          return `Cannot move the only tab to ${dest}`;
+        case 'internal':
+          return `This tab cannot be moved to ${dest}`;
+        default:
+          return `Move to ${dest} failed`;
       }
     }
     if (result && result.ok) return `Tab moved to ${dest}`;
@@ -832,7 +887,8 @@ export function createTabController(deps) {
     // Welcome-panel toggle (M16 F2 Leg 1, DD1/DD7): driven from every
     // activation-class event, mirrors onViewCreated's own toggle so the panel
     // never lags a tab switch.
-    if (tab.welcome) showWelcomePanel(tab); else hideWelcomePanel();
+    if (tab.welcome) showWelcomePanel(tab);
+    else hideWelcomePanel();
 
     els.address.value = tab.url || '';
     updateAddressChip(tab);
@@ -899,8 +955,11 @@ export function createTabController(deps) {
     // guards the async isDevtoolsOpen promise against a fast double-switch painting the
     // wrong tab's state. Internal / no-wcId tabs force pressed false (button is inert there).
     if (!isInternalTab(tab) && tab.wcId != null) {
-      window.goldfinch.isDevtoolsOpen({ webContentsId: tab.wcId })
-        .then((open) => { if (ctx.activeTabId === tab.id) setDevtoolsPressed(!!open); })
+      window.goldfinch
+        .isDevtoolsOpen({ webContentsId: tab.wcId })
+        .then((open) => {
+          if (ctx.activeTabId === tab.id) setDevtoolsPressed(!!open);
+        })
         .catch(() => {});
     } else {
       setDevtoolsPressed(false);
@@ -923,7 +982,9 @@ export function createTabController(deps) {
   }
 
   /** @param {Tab|null} tab @returns {boolean} */
-  function isWebTab(tab) { return !isInternalTab(tab); }
+  function isWebTab(tab) {
+    return !isInternalTab(tab);
+  }
 
   // Is `id` the last (rightmost) tab in DOM order? A pointer-close of the last tab must
   // NOT freeze widths (issue #97): with no right neighbour to slide into the vacated slot,
@@ -1026,7 +1087,10 @@ export function createTabController(deps) {
     if (typeof payload.favicon === 'string' && payload.favicon) {
       tab.favicon = payload.favicon;
       const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
-      if (img) { img.src = payload.favicon; img.classList.remove('hidden'); }
+      if (img) {
+        img.src = payload.favicon;
+        img.classList.remove('hidden');
+      }
     }
     // Focus rules: the moved tab is this window's active tab (Chrome parity).
     // activateTab sends tab-set-active with THIS window's measured slot bounds —
@@ -1050,7 +1114,10 @@ export function createTabController(deps) {
     // outcome. Clear WITHOUT the Move-canceled announce (the defensive cancel below then
     // no-ops on the null session). NOTE this region sits past the maskComments regex
     // blind spot (see sole-tab-move-close-source.test.js) — keep this comment quote-free.
-    if (dnd && dnd.wcId === payload.wcId) { clearDragVisuals(); dnd = null; }
+    if (dnd && dnd.wcId === payload.wcId) {
+      clearDragVisuals();
+      dnd = null;
+    }
     if (dnd) cancelDnd();
     // DD6 narrowed (see the pendingDrop note): this fires on the tear-off SUCCESS path, for the
     // pending tab, BEFORE its reply lands — clearing here would silence our own success.
@@ -1083,10 +1150,9 @@ export function createTabController(deps) {
   window.goldfinch.onTriggerSendBounds(() => {
     // Force a fresh measurement, bypassing the rAF coalescing guard.
     // Re-schedule a rAF-based send too for the settled-layout measurement.
-    ctx.rafGeometryPending = false;  // cancel any pending rAF (it was reading stale bounds)
-    sendActiveBounds();          // reschedule with fresh pending
+    ctx.rafGeometryPending = false; // cancel any pending rAF (it was reading stale bounds)
+    sendActiveBounds(); // reschedule with fresh pending
   });
-
 
   /* --------------------------------------------------------- automation hook */
 
@@ -1105,11 +1171,11 @@ export function createTabController(deps) {
   window.__goldfinchAutomation = {
     listTabs() {
       return [...tabs.values()].map((t) => ({
-        wcId: t.wcId,                      // null until dom-ready
+        wcId: t.wcId, // null until dom-ready
         url: t.url,
         title: t.title,
         jarId: t.container ? t.container.id : null,
-        active: t.id === ctx.activeTabId,
+        active: t.id === ctx.activeTabId
       }));
     },
     openTab(url, jarId) {
@@ -1119,17 +1185,24 @@ export function createTabController(deps) {
         // Unknown jarId → REFUSE (DD3): do NOT silently fall back to the resolved default.
         if (!container) throw new Error('automation: unknown-jar — no container ' + jarId);
       }
-      const tab = createTab(url, container);   // null container → createTab resolves the current default jar (or a fresh burner when Burner holds the flag)
-      if (!tab) return null;               // URL rejected
+      const tab = createTab(url, container); // null container → createTab resolves the current default jar (or a fresh burner when Burner holds the flag)
+      if (!tab) return null; // URL rejected
       if (tab.wcId != null) return tab.wcId;
       // All tabs (web + internal) are WebContentsViews (Leg 3): wait for wcId to be set
       // via the tabCreate IPC promise resolving. The old trusted-webview dom-ready poll
       // branch is removed — internal tabs no longer have a <webview> element.
       return new Promise((resolve) => {
         const check = setInterval(() => {
-          if (tab.wcId != null) { clearInterval(check); clearTimeout(timeout); resolve(tab.wcId); }
+          if (tab.wcId != null) {
+            clearInterval(check);
+            clearTimeout(timeout);
+            resolve(tab.wcId);
+          }
         }, 20);
-        const timeout = setTimeout(() => { clearInterval(check); resolve(tab.wcId ?? null); }, OPEN_TAB_TIMEOUT_MS);
+        const timeout = setTimeout(() => {
+          clearInterval(check);
+          resolve(tab.wcId ?? null);
+        }, OPEN_TAB_TIMEOUT_MS);
       });
     },
     closeTabByWcId(wcId) {
@@ -1143,9 +1216,8 @@ export function createTabController(deps) {
       if (!tab) return false;
       activateTab(tab.id);
       return true;
-    },
+    }
   };
-
 
   function findTabByWcId(id) {
     for (const tab of tabs.values()) if (tab.wcId === id) return tab;

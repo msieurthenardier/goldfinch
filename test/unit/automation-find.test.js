@@ -58,7 +58,9 @@ function makeFakeWc(id, { internal = false } = {}) {
   const wc = Object.assign(ee, {
     id,
     session: { __goldfinchInternal: internal },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _finds: /** @type {Array<{text: string, opts: object}>} */ ([]),
     _stops: /** @type {string[]} */ ([]),
     _reqId: 0,
@@ -70,7 +72,7 @@ function makeFakeWc(id, { internal = false } = {}) {
     /** @param {string} action */
     stopFindInPage(action) {
       this._stops.push(action);
-    },
+    }
   });
   return wc;
 }
@@ -82,12 +84,16 @@ function makeFakeWc(id, { internal = false } = {}) {
  * @param {{ requestId: number, activeMatchOrdinal?: number, matches?: number, finalUpdate?: boolean }} result
  */
 function emitFound(wc, result) {
-  wc.emit('found-in-page', {}, {
-    requestId: result.requestId,
-    activeMatchOrdinal: result.activeMatchOrdinal ?? 0,
-    matches: result.matches ?? 0,
-    finalUpdate: result.finalUpdate ?? false,
-  });
+  wc.emit(
+    'found-in-page',
+    {},
+    {
+      requestId: result.requestId,
+      activeMatchOrdinal: result.activeMatchOrdinal ?? 0,
+      matches: result.matches ?? 0,
+      finalUpdate: result.finalUpdate ?? false
+    }
+  );
 }
 
 /** Build a fake fromId lookup backed by a map of id → fake wc. */
@@ -103,7 +109,7 @@ test('findInPage: resolves activeMatchOrdinal and matches from a matching-reques
   const wc = makeFakeWc(1);
   const deps = {
     fromId: makeFakeFromId({ 1: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   // After findInPage is called it will attach a found-in-page listener and call
@@ -123,11 +129,11 @@ test('findInPage: zero-matches result returned cleanly (not an error)', async (t
   const wc = makeFakeWc(2);
   const deps = {
     fromId: makeFakeFromId({ 2: wc }),
-    findTimeoutMs: 100, // short timeout — no matching event, resolves last={0,0}
+    findTimeoutMs: 100 // short timeout — no matching event, resolves last={0,0}
   };
 
   const p = findInPage(2, 'missing', deps);
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   t.mock.timers.tick(100);
   const result = await p;
   assert.deepEqual(result, { activeMatchOrdinal: 0, matches: 0 });
@@ -141,7 +147,7 @@ test('findInPage: ignores found-in-page event with a foreign requestId', async (
   const wc = makeFakeWc(3);
   const deps = {
     fromId: makeFakeFromId({ 3: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -152,8 +158,11 @@ test('findInPage: ignores found-in-page event with a foreign requestId', async (
   });
 
   const result = await findInPage(3, 'term', deps);
-  assert.deepEqual(result, { activeMatchOrdinal: 2, matches: 4 },
-    'must resolve from the matching requestId, not the foreign one');
+  assert.deepEqual(
+    result,
+    { activeMatchOrdinal: 2, matches: 4 },
+    'must resolve from the matching requestId, not the foreign one'
+  );
 });
 
 test('findInPage: exactly one found-in-page listener during a find (listener hygiene)', async () => {
@@ -161,7 +170,7 @@ test('findInPage: exactly one found-in-page listener during a find (listener hyg
   let listenerCountDuringFind = 0;
   const deps = {
     fromId: makeFakeFromId({ 4: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -183,30 +192,33 @@ test('findInPage: cold-start — finalUpdate:true,matches:0 does not resolve; re
   const wc = makeFakeWc(5);
   const deps = {
     fromId: makeFakeFromId({ 5: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   // Step 1: emit spurious cold-start event for requestId=1 (finalUpdate:true, matches:0)
   // Step 2: tick the mocked clock past the retry interval (RETRY=500ms) and emit
   // a real event for requestId=2
   const p = findInPage(5, 'word', deps);
-  await new Promise(r => setImmediate(r)); // let the initial issue land
+  await new Promise((r) => setImmediate(r)); // let the initial issue land
 
   // Spurious cold-start event — must NOT resolve
   emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
 
   // At this point wc._finds.length should still be 1 (not yet retried)
   t.mock.timers.tick(500); // fires the retry interval (replaces the real 520ms sleep)
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   assert.ok(wc._finds.length >= 2, 'a re-issue must happen after the cold-start spurious event');
 
   // Emit the real result for the re-issue (requestId=2)
   emitFound(wc, { requestId: 2, activeMatchOrdinal: 1, matches: 3, finalUpdate: true });
 
   const result = await p;
-  assert.deepEqual(result, { activeMatchOrdinal: 1, matches: 3 },
-    'must resolve the real count from the re-issued find');
+  assert.deepEqual(
+    result,
+    { activeMatchOrdinal: 1, matches: 3 },
+    'must resolve the real count from the re-issued find'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -218,16 +230,19 @@ test('findInPage: timeout fallback — resolves last when no qualifying event ar
   const wc = makeFakeWc(6);
   const deps = {
     fromId: makeFakeFromId({ 6: wc }),
-    findTimeoutMs: 100, // very short timeout
+    findTimeoutMs: 100 // very short timeout
   };
 
   // No event emitted — timeout fires, resolves last={0,0}
   const p = findInPage(6, 'ghost', deps);
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   t.mock.timers.tick(100);
   const result = await p;
-  assert.deepEqual(result, { activeMatchOrdinal: 0, matches: 0 },
-    'timeout fallback must resolve {0,0} for a genuine no-match');
+  assert.deepEqual(
+    result,
+    { activeMatchOrdinal: 0, matches: 0 },
+    'timeout fallback must resolve {0,0} for a genuine no-match'
+  );
 });
 
 test('findInPage: timeout fallback resolves last nonzero count if a non-final event arrived first', async (t) => {
@@ -235,7 +250,7 @@ test('findInPage: timeout fallback resolves last nonzero count if a non-final ev
   const wc = makeFakeWc(7);
   const deps = {
     fromId: makeFakeFromId({ 7: wc }),
-    findTimeoutMs: 100,
+    findTimeoutMs: 100
   };
 
   // Emit a non-finalUpdate event to update `last`, then let timeout fire
@@ -244,7 +259,7 @@ test('findInPage: timeout fallback resolves last nonzero count if a non-final ev
   });
 
   const p = findInPage(7, 'partial', deps);
-  await new Promise(r => setImmediate(r)); // let the non-final event land
+  await new Promise((r) => setImmediate(r)); // let the non-final event land
   t.mock.timers.tick(100);
   const result = await p;
   // last was updated to {1,2} but not resolved (finalUpdate:false), timeout resolves last
@@ -259,7 +274,7 @@ test('findInPage: listener cleanup after resolve — listenerCount is 0', async 
   const wc = makeFakeWc(8);
   const deps = {
     fromId: makeFakeFromId({ 8: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -267,8 +282,7 @@ test('findInPage: listener cleanup after resolve — listenerCount is 0', async 
   });
 
   await findInPage(8, 'clean', deps);
-  assert.equal(wc.listenerCount('found-in-page'), 0,
-    'found-in-page listener must be removed after resolve');
+  assert.equal(wc.listenerCount('found-in-page'), 0, 'found-in-page listener must be removed after resolve');
 });
 
 test('findInPage: listener cleanup after timeout — listenerCount is 0', async (t) => {
@@ -276,15 +290,14 @@ test('findInPage: listener cleanup after timeout — listenerCount is 0', async 
   const wc = makeFakeWc(9);
   const deps = {
     fromId: makeFakeFromId({ 9: wc }),
-    findTimeoutMs: 80,
+    findTimeoutMs: 80
   };
 
   const p = findInPage(9, 'timed-out', deps);
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   t.mock.timers.tick(80);
   await p;
-  assert.equal(wc.listenerCount('found-in-page'), 0,
-    'found-in-page listener must be removed after timeout');
+  assert.equal(wc.listenerCount('found-in-page'), 0, 'found-in-page listener must be removed after timeout');
 });
 
 // ---------------------------------------------------------------------------
@@ -295,7 +308,7 @@ test('findInPage: public new-search default maps to Electron findNext:true', asy
   const wc = makeFakeWc(10);
   const deps = {
     fromId: makeFakeFromId({ 10: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -310,7 +323,7 @@ test('findInPage: public forward step maps to Electron findNext:false', async ()
   const wc = makeFakeWc(11);
   const deps = {
     fromId: makeFakeFromId({ 11: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -325,7 +338,7 @@ test('findInPage: public backward step maps to Electron findNext:false', async (
   const wc = makeFakeWc(12);
   const deps = {
     fromId: makeFakeFromId({ 12: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -340,7 +353,7 @@ test('findInPage: matchCase:true threaded to wc.findInPage', async () => {
   const wc = makeFakeWc(13);
   const deps = {
     fromId: makeFakeFromId({ 13: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   setImmediate(() => {
@@ -361,14 +374,14 @@ test('findInPage: MAX-retry exhaustion resolves last immediately without waiting
   // Long timeout so we know resolution came from MAX exhaustion, not timeout
   const deps = {
     fromId: makeFakeFromId({ 50: wc }),
-    findTimeoutMs: 10000,
+    findTimeoutMs: 10000
   };
 
   // We send cold-start spurious events for each retry requestId so the op keeps
   // re-issuing. After MAX=5 retries, the interval's `attempts >= MAX` branch
   // fires finish(last) before the timeout.
   const p = findInPage(50, 'retry-exhaust', deps);
-  await new Promise(r => setImmediate(r)); // let the initial issue land
+  await new Promise((r) => setImmediate(r)); // let the initial issue land
 
   // Emit spurious cold-start events for each issued requestId so the listener
   // records them (updates last) but doesn't resolve (matches===0), then tick
@@ -378,9 +391,9 @@ test('findInPage: MAX-retry exhaustion resolves last immediately without waiting
     for (let i = 1; i <= wc._reqId; i++) {
       emitFound(wc, { requestId: i, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
     }
-    await new Promise(r => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
     t.mock.timers.tick(500);
-    await new Promise(r => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
   }
 
   const result = await p;
@@ -398,23 +411,23 @@ test('findInPage: retry issues reuse the translated new-search opts', async (t) 
   const wc = makeFakeWc(51);
   const deps = {
     fromId: makeFakeFromId({ 51: wc }),
-    findTimeoutMs: 3000,
+    findTimeoutMs: 3000
   };
 
   // Emit two cold-start spurious events (req 1 and 2) then a real one (req 3),
   // ticking the retry interval one 500ms step at a time with drains between.
   const p = findInPage(51, 'retry-opts', deps, { forward: false, findNext: false, matchCase: true });
-  await new Promise(r => setImmediate(r)); // let the initial issue (req 1) land
+  await new Promise((r) => setImmediate(r)); // let the initial issue (req 1) land
 
   emitFound(wc, { requestId: 1, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   t.mock.timers.tick(500); // re-issue → req 2
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
 
   emitFound(wc, { requestId: 2, activeMatchOrdinal: 0, matches: 0, finalUpdate: true });
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
   t.mock.timers.tick(500); // re-issue → req 3
-  await new Promise(r => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
 
   emitFound(wc, { requestId: 3, activeMatchOrdinal: 1, matches: 2, finalUpdate: true });
 
@@ -423,8 +436,11 @@ test('findInPage: retry issues reuse the translated new-search opts', async (t) 
   // Every retry remains a new Electron find session. The public false means
   // new search, while Electron's option uses true for that same intent.
   for (const call of wc._finds) {
-    assert.deepEqual(call.opts, { forward: false, findNext: true, matchCase: true },
-      'retry must preserve the translated new-search options');
+    assert.deepEqual(
+      call.opts,
+      { forward: false, findNext: true, matchCase: true },
+      'retry must preserve the translated new-search options'
+    );
   }
   assert.deepEqual(result, { activeMatchOrdinal: 1, matches: 2 });
 });
@@ -439,14 +455,13 @@ test('findInPage: refuses internal wc even when deps.allowInternal === true (op-
   const deps = {
     fromId: makeFakeFromId({ 40: wc }),
     allowInternal: true, // admin relaxation — resolveContents would let internal through
-    activate: async (id) => { activateCalls.push(id); },
-    findTimeoutMs: 500,
+    activate: async (id) => {
+      activateCalls.push(id);
+    },
+    findTimeoutMs: 500
   };
 
-  await assert.rejects(
-    () => findInPage(40, 'hello', deps),
-    /automation: findInPage — internal-session excluded/,
-  );
+  await assert.rejects(() => findInPage(40, 'hello', deps), /automation: findInPage — internal-session excluded/);
   assert.equal(activateCalls.length, 0, 'internal wc must be refused BEFORE activate is attempted');
   assert.equal(wc._finds.length, 0, 'wc.findInPage must NOT be called for internal-session');
 });
@@ -467,7 +482,9 @@ test('findInPage: guest tab — activate called before wc.findInPage; re-resolve
     resolved += 1;
     return resolved === 1 ? preWc : postWc;
   };
-  const activate = async () => { callLog.push('activate'); };
+  const activate = async () => {
+    callLog.push('activate');
+  };
 
   const deps = { fromId, chromeContents: null, activate, findTimeoutMs: 3000 };
 
@@ -479,8 +496,10 @@ test('findInPage: guest tab — activate called before wc.findInPage; re-resolve
 
   const result = await findInPage(20, 'test', deps);
 
-  assert.ok(callLog.indexOf('activate') < callLog.indexOf('findInPage-issued'),
-    'activate runs before wc.findInPage is issued');
+  assert.ok(
+    callLog.indexOf('activate') < callLog.indexOf('findInPage-issued'),
+    'activate runs before wc.findInPage is issued'
+  );
   assert.deepEqual(result, { activeMatchOrdinal: 1, matches: 1 });
   assert.equal(resolved, 2, 'resolveContents called twice: once before activate, once after (re-resolve discipline)');
   assert.equal(postWc._finds.length, 1, 'find must be issued on the post-activate re-resolved wc');
@@ -493,18 +512,12 @@ test('findInPage: guest tab — activate called before wc.findInPage; re-resolve
 
 test('findInPage: bad-handle — non-number wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}), findTimeoutMs: 100 };
-  await assert.rejects(
-    () => findInPage(/** @type {any} */ ('nope'), 'hello', deps),
-    /automation: bad-handle/,
-  );
+  await assert.rejects(() => findInPage(/** @type {any} */ ('nope'), 'hello', deps), /automation: bad-handle/);
 });
 
 test('findInPage: no-such-contents — unknown wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}), findTimeoutMs: 100 };
-  await assert.rejects(
-    () => findInPage(999, 'hello', deps),
-    /automation: no-such-contents/,
-  );
+  await assert.rejects(() => findInPage(999, 'hello', deps), /automation: no-such-contents/);
 });
 
 // ---------------------------------------------------------------------------
@@ -514,7 +527,7 @@ test('findInPage: no-such-contents — unknown wcId rejects via resolveContents'
 test('stopFindInPage: calls wc.stopFindInPage with clearSelection and returns {ok:true}', async () => {
   const wc = makeFakeWc(30);
   const deps = {
-    fromId: makeFakeFromId({ 30: wc }),
+    fromId: makeFakeFromId({ 30: wc })
   };
 
   const result = await stopFindInPage(30, deps);
@@ -532,13 +545,10 @@ test('stopFindInPage: refuses internal wc even when deps.allowInternal === true 
   const wc = makeFakeWc(41, { internal: true });
   const deps = {
     fromId: makeFakeFromId({ 41: wc }),
-    allowInternal: true, // admin relaxation
+    allowInternal: true // admin relaxation
   };
 
-  await assert.rejects(
-    () => stopFindInPage(41, deps),
-    /automation: stopFindInPage — internal-session excluded/,
-  );
+  await assert.rejects(() => stopFindInPage(41, deps), /automation: stopFindInPage — internal-session excluded/);
   assert.equal(wc._stops.length, 0, 'wc.stopFindInPage must NOT be called for internal-session');
 });
 
@@ -548,16 +558,10 @@ test('stopFindInPage: refuses internal wc even when deps.allowInternal === true 
 
 test('stopFindInPage: bad-handle — non-number wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}) };
-  await assert.rejects(
-    () => stopFindInPage(/** @type {any} */ ('nope'), deps),
-    /automation: bad-handle/,
-  );
+  await assert.rejects(() => stopFindInPage(/** @type {any} */ ('nope'), deps), /automation: bad-handle/);
 });
 
 test('stopFindInPage: no-such-contents — unknown wcId rejects via resolveContents', async () => {
   const deps = { fromId: makeFakeFromId({}) };
-  await assert.rejects(
-    () => stopFindInPage(999, deps),
-    /automation: no-such-contents/,
-  );
+  await assert.rejects(() => stopFindInPage(999, deps), /automation: no-such-contents/);
 });

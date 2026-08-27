@@ -15,8 +15,13 @@ const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/chrome/
 
 class El {
   constructor() {
-    this.listeners = new Map(); this.attributes = new Map(); this.value = ''; this.textContent = '';
-    this.disabled = false; this.readOnly = false; this.blurred = false;
+    this.listeners = new Map();
+    this.attributes = new Map();
+    this.value = '';
+    this.textContent = '';
+    this.disabled = false;
+    this.readOnly = false;
+    this.blurred = false;
     this.classList = {
       values: new Set(),
       add: (x) => this.classList.values.add(x),
@@ -24,56 +29,109 @@ class El {
       contains: (x) => this.classList.values.has(x),
       toggle: (x, force) => {
         const on = force === undefined ? !this.classList.values.has(x) : !!force;
-        if (on) this.classList.values.add(x); else this.classList.values.delete(x);
+        if (on) this.classList.values.add(x);
+        else this.classList.values.delete(x);
         return on;
       }
     };
   }
-  addEventListener(name, fn) { this.listeners.set(name, fn); }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  removeAttribute(name) { this.attributes.delete(name); }
-  focus() { this.focused = true; }
-  select() { this.selected = true; }
-  blur() { this.blurred = true; }
+  addEventListener(name, fn) {
+    this.listeners.set(name, fn);
+  }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+  focus() {
+    this.focused = true;
+  }
+  select() {
+    this.selected = true;
+  }
+  blur() {
+    this.blurred = true;
+  }
 }
 
 function harness() {
-  const names = ['address', 'addressChip', 'star', 'back', 'forward', 'reload', 'newTab', 'zoomControl', 'zoomPercent', 'zoomOut', 'zoomIn', 'zoomReset', 'lightbox'];
+  const names = [
+    'address',
+    'addressChip',
+    'star',
+    'back',
+    'forward',
+    'reload',
+    'newTab',
+    'zoomControl',
+    'zoomPercent',
+    'zoomOut',
+    'zoomIn',
+    'zoomReset',
+    'lightbox'
+  ];
   const els = Object.fromEntries(names.map((name) => [name, new El()]));
   els.lightbox.classList.add('hidden');
   // M16 F1 Leg 2: searchEngine defaults to null (unset) here — the harness
   // exercises toUrl's `currentSearchEngine() || 'google'` coalescing site
   // directly; individual tests set h.state.searchEngine to pin a chosen engine.
-  const state = { active: null, suggestions: { open: false, token: 0 }, openedModels: [], calls: [], searchEngine: null };
+  const state = {
+    active: null,
+    suggestions: { open: false, token: 0 },
+    openedModels: [],
+    calls: [],
+    searchEngine: null
+  };
   const callbacks = {};
   let suggestResolve;
   let suggestReject;
   let bookmarksSuggestResolve;
   let bookmarksSuggestReject;
   let zoomResolve;
-  const window = { goldfinch: {
-    tabNavigate: (payload) => state.calls.push(['navigate', payload]),
-    historySuggest: (payload) => {
-      state.calls.push(['historySuggest', payload]);
-      return new Promise((resolve, reject) => { suggestResolve = resolve; suggestReject = reject; });
-    },
-    // M15 F1 Leg 4 (DD11): queried alongside historySuggest via Promise.allSettled.
-    bookmarksSuggest: (payload) => {
-      state.calls.push(['bookmarksSuggest', payload]);
-      return new Promise((resolve, reject) => { bookmarksSuggestResolve = resolve; bookmarksSuggestReject = reject; });
-    },
-    getZoom: () => new Promise((resolve) => { zoomResolve = resolve; }),
-    zoomApply: (payload) => state.calls.push(['zoom', payload]),
-    findOverlayOpen: (payload) => state.calls.push(['find', payload]),
-    onZoomChanged: (fn) => { callbacks.zoomChanged = fn; },
-    onOpenFind: (fn) => { callbacks.openFind = fn; },
-    onOpenDownloads: (fn) => { callbacks.openDownloads = fn; }
-  } };
+  const window = {
+    goldfinch: {
+      tabNavigate: (payload) => state.calls.push(['navigate', payload]),
+      historySuggest: (payload) => {
+        state.calls.push(['historySuggest', payload]);
+        return new Promise((resolve, reject) => {
+          suggestResolve = resolve;
+          suggestReject = reject;
+        });
+      },
+      // M15 F1 Leg 4 (DD11): queried alongside historySuggest via Promise.allSettled.
+      bookmarksSuggest: (payload) => {
+        state.calls.push(['bookmarksSuggest', payload]);
+        return new Promise((resolve, reject) => {
+          bookmarksSuggestResolve = resolve;
+          bookmarksSuggestReject = reject;
+        });
+      },
+      getZoom: () =>
+        new Promise((resolve) => {
+          zoomResolve = resolve;
+        }),
+      zoomApply: (payload) => state.calls.push(['zoom', payload]),
+      findOverlayOpen: (payload) => state.calls.push(['find', payload]),
+      onZoomChanged: (fn) => {
+        callbacks.zoomChanged = fn;
+      },
+      onOpenFind: (fn) => {
+        callbacks.openFind = fn;
+      },
+      onOpenDownloads: (fn) => {
+        callbacks.openDownloads = fn;
+      }
+    }
+  };
   const document = { activeElement: els.address };
   const ctx = { activeTabId: null };
   const bookmarks = new Set();
   const deps = {
-    window, document, ctx, els,
+    window,
+    document,
+    ctx,
+    els,
     activeTab: () => state.active,
     isInternalTab: (tab) => !!tab?.internal,
     isWebTab: (tab) => !!tab && !tab.internal,
@@ -92,7 +150,7 @@ function harness() {
     // is enough for these star tests); ensureJar calls are tracked so
     // refreshStar's "prime the cache" behavior is pinned.
     bookmarksClient: {
-      findByUrl: (jarId, url) => bookmarks.has(url) ? { id: 'bm', url } : null,
+      findByUrl: (jarId, url) => (bookmarks.has(url) ? { id: 'bm', url } : null),
       ensureJar: (jarId) => state.calls.push(['ensureJar', jarId])
     },
     // M16 F1 Leg 2: the real buildSearchUrl (imported above) + a live read of
@@ -112,15 +170,25 @@ function harness() {
       ...bookmarkRows.map((r) => ({ ...r, kind: 'bookmark' })),
       ...historyRows.map((r) => ({ ...r, kind: 'history' }))
     ],
-    moveSelection: (index, delta, length) => length ? Math.max(0, Math.min(length - 1, index + delta)) : -1,
+    moveSelection: (index, delta, length) => (length ? Math.max(0, Math.min(length - 1, index + delta)) : -1),
     acceptSuggestResponse: ({ requestSeq, currentSeq, gateNow }) => requestSeq === currentSeq && gateNow,
     suggestionsState: () => state.suggestions,
-    closeOverlayMenu: () => { state.suggestions.open = false; },
-    openOverlayMenu: (_type, model) => { state.suggestions.open = true; state.openedModels.push(model); },
+    closeOverlayMenu: () => {
+      state.suggestions.open = false;
+    },
+    openOverlayMenu: (_type, model) => {
+      state.suggestions.open = true;
+      state.openedModels.push(model);
+    },
     leftAnchorOf: () => ({ x: 0, y: 0 })
   };
   return {
-    deps, state, els, ctx, callbacks, bookmarks,
+    deps,
+    state,
+    els,
+    ctx,
+    callbacks,
+    bookmarks,
     resolveSuggest: (value) => suggestResolve(value),
     rejectSuggest: (err) => suggestReject(err),
     resolveBookmarksSuggest: (value) => bookmarksSuggestResolve(value),
@@ -248,7 +316,10 @@ test('a search with no engine on a WEB tab opens a new welcome record beside it,
     { container: tab.container, reasons: ['search'], pendingQuery: 'hello world' }
   ]);
   // The original tab is untouched — no tabNavigate, no attachView against it.
-  assert.equal(h.state.calls.some(([name]) => name === 'navigate' || name === 'attachView'), false);
+  assert.equal(
+    h.state.calls.some(([name]) => name === 'navigate' || name === 'attachView'),
+    false
+  );
 });
 
 // M16 F2 Leg 2 (DD3): the null-before-attach ordering — attachView(tab, null)
@@ -264,7 +335,10 @@ test('a search with no engine on an ACTIVE welcome record adds the reason and qu
   assert.ok(tab.welcome.reasons.has('search'));
   assert.equal(tab.welcome.pendingQuery, 'hello world');
   assert.deepEqual(h.state.calls.pop(), ['refreshWelcome', 'w']);
-  assert.equal(h.state.calls.some(([name]) => name === 'attachView' || name === 'openWelcomeTab'), false);
+  assert.equal(
+    h.state.calls.some(([name]) => name === 'attachView' || name === 'openWelcomeTab'),
+    false
+  );
 });
 
 // A URL typed on a welcome record still attaches (DD3's stated invariant —
@@ -311,9 +385,17 @@ test('DD11: both historySuggest and bookmarksSuggest are queried on input, merge
   h.els.address.listeners.get('input')();
   await new Promise((resolve) => setTimeout(resolve, 110));
 
-  assert.ok(h.state.calls.some(([name, payload]) => name === 'historySuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'));
+  assert.ok(
+    h.state.calls.some(
+      ([name, payload]) => name === 'historySuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'
+    )
+  );
   // M15 F2 Leg 3: bookmarksSuggest is jar-addressed too, beside historySuggest's own.
-  assert.ok(h.state.calls.some(([name, payload]) => name === 'bookmarksSuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'));
+  assert.ok(
+    h.state.calls.some(
+      ([name, payload]) => name === 'bookmarksSuggest' && payload.query === 'exa' && payload.jarId === 'jar-a'
+    )
+  );
 
   h.resolveSuggest({ ok: true, suggestions: [{ url: 'https://history.example/', title: 'History Row' }] });
   h.resolveBookmarksSuggest({ ok: true, suggestions: [{ url: 'https://bm.example/', title: 'Bookmark Row' }] });
@@ -322,8 +404,14 @@ test('DD11: both historySuggest and bookmarksSuggest are queried on input, merge
 
   assert.equal(h.state.suggestions.open, true);
   const model = h.state.openedModels.at(-1);
-  assert.deepEqual(model.items.map((i) => i.kind), ['bookmark', 'history']);
-  assert.deepEqual(model.items.map((i) => i.url), ['https://bm.example/', 'https://history.example/']);
+  assert.deepEqual(
+    model.items.map((i) => i.kind),
+    ['bookmark', 'history']
+  );
+  assert.deepEqual(
+    model.items.map((i) => i.url),
+    ['https://bm.example/', 'https://history.example/']
+  );
 });
 
 test('DD11: a bookmarksSuggest rejection degrades that source to [] — history results still paint', async () => {
@@ -342,7 +430,10 @@ test('DD11: a bookmarksSuggest rejection degrades that source to [] — history 
 
   assert.equal(h.state.suggestions.open, true);
   const model = h.state.openedModels.at(-1);
-  assert.deepEqual(model.items.map((i) => i.url), ['https://history.example/']);
+  assert.deepEqual(
+    model.items.map((i) => i.url),
+    ['https://history.example/']
+  );
 });
 
 test('DD11: a historySuggest rejection degrades that source to [] — bookmark results still paint', async () => {
@@ -361,7 +452,10 @@ test('DD11: a historySuggest rejection degrades that source to [] — bookmark r
 
   assert.equal(h.state.suggestions.open, true);
   const model = h.state.openedModels.at(-1);
-  assert.deepEqual(model.items.map((i) => i.url), ['https://bm.example/']);
+  assert.deepEqual(
+    model.items.map((i) => i.url),
+    ['https://bm.example/']
+  );
 });
 
 test('DD11: an {ok:false} bookmarksSuggest response also degrades to [] (not just a rejection)', async () => {
@@ -379,7 +473,10 @@ test('DD11: an {ok:false} bookmarksSuggest response also degrades to [] (not jus
   await Promise.resolve();
 
   const model = h.state.openedModels.at(-1);
-  assert.deepEqual(model.items.map((i) => i.url), ['https://history.example/']);
+  assert.deepEqual(
+    model.items.map((i) => i.url),
+    ['https://history.example/']
+  );
 });
 
 test('zoom readback drops a result after TOCTOU tab switch and find restores saved text', async () => {
@@ -387,19 +484,25 @@ test('zoom readback drops a result after TOCTOU tab switch and find restores sav
   const controller = await create(h);
   const a = { id: 'a', wcId: 10, internal: false, findText: 'needle', findOpen: false };
   const b = { id: 'b', wcId: 11, internal: false };
-  h.state.active = a; h.ctx.activeTabId = a.id;
+  h.state.active = a;
+  h.ctx.activeTabId = a.id;
   const pending = controller.refreshZoomControl(a);
-  h.state.active = b; h.ctx.activeTabId = b.id;
+  h.state.active = b;
+  h.ctx.activeTabId = b.id;
   h.resolveZoom(1.5);
   await pending;
   assert.equal(h.els.zoomPercent.textContent, '');
 
-  h.state.active = a; h.ctx.activeTabId = a.id;
+  h.state.active = a;
+  h.ctx.activeTabId = a.id;
   controller.openFind(a);
   assert.equal(a.findOpen, true);
   assert.deepEqual(h.state.calls.pop(), ['find', { wcId: 10, findText: 'needle' }]);
   controller.openFind({ id: 'internal', wcId: 12, internal: true });
-  assert.equal(h.state.calls.some(([name, payload]) => name === 'find' && payload.wcId === 12), false);
+  assert.equal(
+    h.state.calls.some(([name, payload]) => name === 'find' && payload.wcId === 12),
+    false
+  );
 });
 
 test('refreshStar: hidden on internal tabs / burner tabs / no live wcId; synchronous jar-scoped cache-driven aria-pressed + .starred otherwise (M15 F1 Leg 2; jar-aware + burner M15 F2 Leg 3)', async () => {
@@ -409,17 +512,35 @@ test('refreshStar: hidden on internal tabs / burner tabs / no live wcId; synchro
   controller.refreshStar(null);
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
-  controller.refreshStar({ id: 'internal', internal: true, wcId: 1, url: 'goldfinch://settings', container: { id: 'internal' } });
+  controller.refreshStar({
+    id: 'internal',
+    internal: true,
+    wcId: 1,
+    url: 'goldfinch://settings',
+    container: { id: 'internal' }
+  });
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
   controller.refreshStar({ id: 'no-wc', internal: false, wcId: null, url: 'https://x/', container: { id: 'jar-a' } });
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
   // L3-DD-C/D: burner tabs also hide the star, alongside internal.
-  controller.refreshStar({ id: 'burner', internal: false, wcId: 2, url: 'https://x/', container: { id: 'burner-1', burner: true } });
+  controller.refreshStar({
+    id: 'burner',
+    internal: false,
+    wcId: 2,
+    url: 'https://x/',
+    container: { id: 'burner-1', burner: true }
+  });
   assert.equal(h.els.star.classList.contains('hidden'), true);
 
-  const unbookmarked = { id: 'a', internal: false, wcId: 5, url: 'https://unbookmarked.test/', container: { id: 'jar-a' } };
+  const unbookmarked = {
+    id: 'a',
+    internal: false,
+    wcId: 5,
+    url: 'https://unbookmarked.test/',
+    container: { id: 'jar-a' }
+  };
   controller.refreshStar(unbookmarked);
   assert.equal(h.els.star.classList.contains('hidden'), false);
   assert.equal(h.els.star.attributes.get('aria-pressed'), 'false');

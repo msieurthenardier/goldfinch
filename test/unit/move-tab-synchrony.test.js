@@ -288,7 +288,7 @@ test('no suspension point separates the tabViews delete from the set in the move
     `the ${DELETE_MARKER}…) / ${SET_MARKER}…) pair is no longer inside ${ANCHOR} ` +
       `(delete found: ${h.deleteFound}, set found: ${h.setFound}, in order: ` +
       `${h.deleteFound && h.setFound}). If the move core was factored again, RE-ANCHOR THIS ` +
-      'PIN to the pair\'s new home — do not delete this test. The invariant did not move.'
+      "PIN to the pair's new home — do not delete this test. The invariant did not move."
   );
 
   // Vacuity guard (c) — reachability. The core is only worth pinning if the shipped IPC
@@ -363,8 +363,8 @@ test('a nested async thunk is NOT a violation — it is not a suspension point o
   // this and generate false positives against code a later leg will plausibly write.
   const real = realSource();
   const mutated = real.replace(
-    'queueChromeSend(target, () => [\'adopt-tab\', buildAdoptPayload(p, wc)]);',
-    'queueChromeSend(target, async () => [\'adopt-tab\', await buildAdoptPayload(p, wc)]);'
+    "queueChromeSend(target, () => ['adopt-tab', buildAdoptPayload(p, wc)]);",
+    "queueChromeSend(target, async () => ['adopt-tab', await buildAdoptPayload(p, wc)]);"
   );
   assertMutated(real, mutated, 'nested-async-thunk');
 
@@ -387,8 +387,9 @@ test('the pin FAILS a suspension point between the delete and the set', () => {
       'async function moveTabIntoWindow(source, p, resolveTarget, allowSoleTab = false) {'
     )
     .replace(
-      '  source.tabViews.delete(p.wcId);\n  target.tabViews.set(p.wcId, entry);',
-      '  source.tabViews.delete(p.wcId);\n  await Promise.resolve();\n  target.tabViews.set(p.wcId, entry);'
+      /(\s*)source\.tabViews\.delete\(p\.wcId\);\s*\n(\s*)target\.tabViews\.set\(p\.wcId, entry\);/,
+      (_m, indentA, indentB) =>
+        `${indentA}source.tabViews.delete(p.wcId);\n${indentB}await Promise.resolve();\n${indentB}target.tabViews.set(p.wcId, entry);`
     );
   assertMutated(real, mutated, 'await-between');
   // The mutated source must be REACHABLE — it parses.
@@ -396,7 +397,10 @@ test('the pin FAILS a suspension point between the delete and the set', () => {
 
   const res = scanSource(mutated, 'main.js');
   assert.equal(res.core.awaitBetween, true, 'mutated → a suspension point between the pair');
-  assert.equal(res.core.violations.some((v) => /suspension point/.test(v)), true);
+  assert.equal(
+    res.core.violations.some((v) => /suspension point/.test(v)),
+    true
+  );
 });
 
 test('guard (a) FAILS a renamed core rather than passing on nothing', () => {
@@ -435,7 +439,10 @@ test('guard (c) FAILS a renamed channel rather than passing on nothing', () => {
   const real = realSource();
   assert.equal(scanSource(real, 'main.js').channels, 1, 'real → exactly one channel anchor');
 
-  const mutated = real.replace("ipcMain.handle('tab-move-to-new-window',", "ipcMain.handle('tab-move-to-other-window',");
+  const mutated = real.replace(
+    "ipcMain.handle('tab-move-to-new-window',",
+    "ipcMain.handle('tab-move-to-other-window',"
+  );
   assertMutated(real, mutated, 'renamed-channel');
 
   const res = scanSource(mutated, 'main.js');
@@ -478,7 +485,10 @@ test('a core-shaped mention inside a COMMENT is not picked up as the definition'
   assert.equal(res.core, null, 'no definition is found — comment mentions are not code');
 
   // The same text UNCOMMENTED is a violation — otherwise the reading above is vacuous.
-  const live = commented.split('\n').map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
+  const live = commented
+    .split('\n')
+    .map((l) => l.replace(/^\/\/ ?/, ''))
+    .join('\n');
   const liveRes = scanSource(live, 'fake.js');
   assert.equal(liveRes.anchors, 1, 'uncommented → the anchor is real code');
   assert.equal(liveRes.core.asyncFn, true);

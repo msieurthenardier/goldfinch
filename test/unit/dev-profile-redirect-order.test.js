@@ -46,10 +46,7 @@ const EXPECTED_CALL = "app.setPath('userData', devUserDataPath(app.getPath('user
 
 test('main.js redirects userData to the dev path via devUserDataPath', () => {
   const masked = readMaskedMain();
-  assert.ok(
-    masked.includes(EXPECTED_CALL),
-    `expected main.js to call ${EXPECTED_CALL}`
-  );
+  assert.ok(masked.includes(EXPECTED_CALL), `expected main.js to call ${EXPECTED_CALL}`);
 });
 
 test('the dev-profile userData redirect is guarded to unpackaged runs only', () => {
@@ -89,10 +86,7 @@ test('the dev-profile userData redirect runs before app-lifecycle wiring (and so
   // Sanity guard against a vacuous pass: prove the comparison has teeth by confirming
   // app-lifecycle.js itself calls initProfileAndStores inside whenReady, downstream of
   // registerAppLifecycle's call site above (not some unrelated hit).
-  const lifecycleSrc = fs.readFileSync(
-    path.join(REPO_ROOT, 'src', 'main', 'app-lifecycle.js'),
-    'utf8'
-  );
+  const lifecycleSrc = fs.readFileSync(path.join(REPO_ROOT, 'src', 'main', 'app-lifecycle.js'), 'utf8');
   assert.match(
     lifecycleSrc,
     /app\.whenReady\(\)\.then\(/,

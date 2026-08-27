@@ -73,8 +73,7 @@ const WHENREADY = 'const ready = app.whenReady().then(() => {';
 const BEFORE_QUIT = "app.on('before-quit', () => {";
 const BOOT_CONFIG = "ipcMain.handle('window-boot-config', (event) => {";
 const REBUILD_BRANCH = 'if (restoreSnapshot) {';
-const RENDERER_BRANCH =
-  'if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {';
+const RENDERER_BRANCH = 'if (bootConfig && Array.isArray(bootConfig.restoreTabs) && bootConfig.restoreTabs.length) {';
 
 const GUARD = "settings.get('restoreSession')";
 const LOAD_STMT = 'sessionStore.load(userDataPath);';
@@ -101,10 +100,7 @@ test('AC2: sessionStore.load is NOT settings-gated — real → ungated, wrappin
 
   // Wrap the load in a setting guard (the exact AC6-violating mutation): its preceding window
   // now carries the guard, so the "ungated" reading flips.
-  const mutated = mainSource().replace(
-    LOAD_STMT,
-    "if (settings.get('restoreSession') === true) " + LOAD_STMT
-  );
+  const mutated = mainSource().replace(LOAD_STMT, "if (settings.get('restoreSession') === true) " + LOAD_STMT);
   assertMutated(mainSource(), mutated, 'load-gated');
   const mutPre = precedingWindow(bodyAfter(maskComments(mutated), WHENREADY), 'sessionStore.load(');
   assert.equal(mutPre.includes('restoreSession'), true, 'mutated → load() is now gated and this pin FAILS');
@@ -187,7 +183,7 @@ test('AC4: window-boot-config returns restoreTabs — real → present, stripped
   assert.equal(realBody.includes('restoreTabs'), true, 'real → boot-config serves restoreTabs to the renderer');
 
   const mutated = mainSource().replace(
-    "return rec.restoreTabs\n      ? { bootTab: false, restoreTabs: rec.restoreTabs }\n      : { bootTab: !rec.noBootTab };",
+    /return rec\.restoreTabs\s*\?\s*\{\s*bootTab:\s*false,\s*restoreTabs:\s*rec\.restoreTabs\s*\}\s*:\s*\{\s*bootTab:\s*!rec\.noBootTab\s*\};/,
     'return { bootTab: !rec.noBootTab };'
   );
   assertMutated(mainSource(), mutated, 'boot-config-restoreTabs-stripped');
@@ -246,7 +242,11 @@ test('AC5: the restore branch calls resolveRestoreContainer + createTab and drop
 
 test('AC5: the restore branch references NO restoreHistory and NO inheritContainerFromPartition (masked)', () => {
   const realBody = bodyAfter(maskComments(rendererSource()), RENDERER_BRANCH);
-  assert.equal(realBody.includes('restoreHistory'), false, 'real (masked) → no restoreHistory on the restore path (DD5)');
+  assert.equal(
+    realBody.includes('restoreHistory'),
+    false,
+    'real (masked) → no restoreHistory on the restore path (DD5)'
+  );
   assert.equal(
     realBody.includes('inheritContainerFromPartition'),
     false,

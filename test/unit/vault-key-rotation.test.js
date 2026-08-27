@@ -33,7 +33,7 @@ function makeStore(dir, overrides = {}) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     listJars: () => JARS,
-    ...overrides,
+    ...overrides
   });
 }
 function vaultPath(dir, id) {
@@ -82,10 +82,16 @@ test('rotateRecovery: new recovery unlocks, old fails; only manager.mrk.recovery
     // The NEW recovery key unlocks; the OLD one no longer does.
     let s = makeStore(dir);
     s.unlockWithRecovery(newRecovery);
-    assert.deepEqual(s.listItems('global').map((i) => i.title), ['Kept']);
+    assert.deepEqual(
+      s.listItems('global').map((i) => i.title),
+      ['Kept']
+    );
 
     s = makeStore(dir);
-    assert.throws(() => s.unlockWithRecovery(oldRecovery), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s.unlockWithRecovery(oldRecovery),
+      (e) => e instanceof vs.VaultAuthError
+    );
     assert.equal(s.isUnlocked(), false);
 
     // The master password still unlocks (unchanged).
@@ -121,10 +127,7 @@ test('rotateRecovery: while LOCKED throws VaultLockedError (route to unlock)', a
     const store = makeStore(dir);
     await store.setup({ masterPassword: MASTER });
     store.lockNow();
-    await assert.rejects(
-      store.rotateRecovery({ masterPassword: MASTER }),
-      (e) => e instanceof vs.VaultLockedError
-    );
+    await assert.rejects(store.rotateRecovery({ masterPassword: MASTER }), (e) => e instanceof vs.VaultLockedError);
   } finally {
     rm(dir);
   }
@@ -155,7 +158,10 @@ test('changeMasterPassword: new master unlocks, old fails; only manager.mrk.mast
     // NEW master unlocks; OLD master rejected; recovery still valid (not rotated).
     let s = makeStore(dir);
     await s.unlock('brand-new-master');
-    assert.deepEqual(s.listItems('global').map((i) => i.title), ['Kept']);
+    assert.deepEqual(
+      s.listItems('global').map((i) => i.title),
+      ['Kept']
+    );
 
     s = makeStore(dir);
     await assert.rejects(s.unlock(MASTER), (e) => e instanceof vs.VaultAuthError);
@@ -197,7 +203,7 @@ test('changeMasterPassword: accepts Buffer old + new passwords (the sheet submit
 
     await store.changeMasterPassword({
       oldMasterPassword: Buffer.from(MASTER, 'utf8'),
-      newMasterPassword: Buffer.from('buffer-new-master', 'utf8'),
+      newMasterPassword: Buffer.from('buffer-new-master', 'utf8')
     });
 
     const s = makeStore(dir);
@@ -239,11 +245,15 @@ test('recoverMasterPassword: valid recovery from LOCKED → unlocked + new maste
 
     store.lockNow();
     await store.recoverMasterPassword({
-      recoveryDisplay: recoveryKeyDisplay, newMasterPassword: 'recovered-master',
+      recoveryDisplay: recoveryKeyDisplay,
+      newMasterPassword: 'recovered-master'
     });
     // The user ends UNLOCKED (they recovered) and can immediately read items.
     assert.equal(store.isUnlocked(), true, 'recover installs the MRK — the user ends unlocked');
-    assert.deepEqual(store.listItems('global').map((i) => i.title), ['Kept']);
+    assert.deepEqual(
+      store.listItems('global').map((i) => i.title),
+      ['Kept']
+    );
 
     const after = readManager(dir);
     assert.notDeepEqual(after.mrk.master, before.mrk.master, 'master slot rewrapped');
@@ -304,7 +314,8 @@ test('recoverMasterPassword: accepts a Buffer new master password', async () => 
     const { recoveryKeyDisplay } = await store.setup({ masterPassword: MASTER });
     store.lockNow();
     await store.recoverMasterPassword({
-      recoveryDisplay: recoveryKeyDisplay, newMasterPassword: Buffer.from('buffer-recovered', 'utf8'),
+      recoveryDisplay: recoveryKeyDisplay,
+      newMasterPassword: Buffer.from('buffer-recovered', 'utf8')
     });
     const s = makeStore(dir);
     await s.unlock('buffer-recovered');
@@ -331,7 +342,7 @@ test('concurrent rotateRecovery + rotateAdminKey both take effect (no lost slot 
     // the SAME master (neither changes it), so both legitimately succeed.
     const [newRecovery, newAdminPriv] = await Promise.all([
       store.rotateRecovery({ masterPassword: MASTER }),
-      store.rotateAdminKey({ masterPassword: MASTER }),
+      store.rotateAdminKey({ masterPassword: MASTER })
     ]);
 
     // BOTH slot updates survived a cold reload: the NEW recovery unlocks AND the NEW admin key unlocks.
@@ -345,7 +356,10 @@ test('concurrent rotateRecovery + rotateAdminKey both take effect (no lost slot 
 
     // The OLD recovery no longer works (it was genuinely rotated, not clobbered back by admin's write).
     const s3 = makeStore(dir);
-    assert.throws(() => s3.unlockWithRecovery(recoveryKeyDisplay), (e) => e instanceof vs.VaultAuthError);
+    assert.throws(
+      () => s3.unlockWithRecovery(recoveryKeyDisplay),
+      (e) => e instanceof vs.VaultAuthError
+    );
   } finally {
     rm(dir);
   }

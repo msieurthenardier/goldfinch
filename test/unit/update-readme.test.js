@@ -14,11 +14,7 @@ test('README updater emits the electron-builder Windows asset name', (t) => {
     'before\n<!-- DOWNLOADS:START -->\nold\n<!-- DOWNLOADS:END -->\nafter\n'
   );
 
-  execFileSync(
-    process.execPath,
-    [path.join(__dirname, '../../scripts/update-readme.mjs'), '1.2.3'],
-    { cwd: workdir }
-  );
+  execFileSync(process.execPath, [path.join(__dirname, '../../scripts/update-readme.mjs'), '1.2.3'], { cwd: workdir });
 
   const readme = readFileSync(path.join(workdir, 'README.md'), 'utf8');
   assert.match(readme, /Goldfinch-Setup-1\.2\.3\.exe/);

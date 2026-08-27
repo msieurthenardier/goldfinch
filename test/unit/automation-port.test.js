@@ -97,7 +97,9 @@ test('resolvePort — out-of-range setting falls through to default', () => {
 
 test('resolvePort — settings accessor that throws falls through to default', () => {
   withEnv(undefined, () => {
-    const throwing = () => { throw new Error('settings unavailable'); };
+    const throwing = () => {
+      throw new Error('settings unavailable');
+    };
     assert.equal(resolvePort(throwing), 49707);
   });
 });
@@ -163,7 +165,9 @@ test('start() — fallback mode binds a DIFFERENT free port when the preferred i
   let wroteAutomationPort = false;
   const getSettings = () => ({
     get: (k) => (k === 'automationPort' ? occupied.port : undefined),
-    set: (k) => { if (k === 'automationPort') wroteAutomationPort = true; },
+    set: (k) => {
+      if (k === 'automationPort') wroteAutomationPort = true;
+    }
   });
   // No explicit opts.port and no env → the setting is the source → FALLBACK mode.
   // Setting === the occupied ephemeral port so start() must fall back.
@@ -234,7 +238,10 @@ test('freePortInRange — skips an occupied port and returns the next free one',
     // (port+1 is very likely free; the assertion tolerates the rare collision by
     // accepting any free port > port within the 2-wide range.)
     const result = await freePortInRange(port, port + 1);
-    assert.ok(result === null || result === port + 1, 'should skip the occupied port and return the next (or null if port+1 also raced)');
+    assert.ok(
+      result === null || result === port + 1,
+      'should skip the occupied port and return the next (or null if port+1 also raced)'
+    );
   } finally {
     await new Promise((resolve) => srv.close(resolve));
   }

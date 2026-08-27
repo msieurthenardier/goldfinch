@@ -46,7 +46,7 @@ const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/ser
 const {
   ListToolsRequestSchema,
   CallToolRequestSchema,
-  isInitializeRequest,
+  isInitializeRequest
 } = require('@modelcontextprotocol/sdk/types.js');
 const { isAllowed } = require('./origin-guard');
 const { buildToolRegistry } = require('./mcp-tools');
@@ -246,7 +246,7 @@ const SERVER_INSTRUCTIONS =
   'capture screenshots, read the live DOM and accessibility tree, and evaluate JavaScript in ' +
   'the page. Use it for web browsing, web-page testing, and UI verification against real ' +
   'rendered pages. Tabs are addressed by wcId (from enumerateTabs/openTab) and live in ' +
-  'isolated cookie-jar containers; a jar-scoped key sees only its own jar\'s tabs, while an ' +
+  "isolated cookie-jar containers; a jar-scoped key sees only its own jar's tabs, while an " +
   'admin key can also target the browser chrome itself (getChromeTarget).';
 
 // DD9: cap request-body accumulation at 1 MiB. Over-cap → 413, do not buffer
@@ -293,10 +293,12 @@ function resolvePort(getSettings, { honorEnv = true } = {}) {
     if (Number.isInteger(envN) && envN > 0) return envN;
   }
   try {
-    const s = (typeof getSettings === 'function' ? getSettings() : require('../settings-store'));
+    const s = typeof getSettings === 'function' ? getSettings() : require('../settings-store');
     const p = s && typeof s.get === 'function' ? s.get('automationPort') : undefined;
     if (Number.isInteger(p) && p >= 1024 && p <= 65535) return p; // setting is range-bound (matches its validator)
-  } catch { /* settings unavailable — fall through */ }
+  } catch {
+    /* settings unavailable — fall through */
+  }
   return DEFAULT_PORT;
 }
 
@@ -406,9 +408,12 @@ function createMcpServer(opts = {}) {
   // (never a null-deref). buildToolRegistry catches the throw inside callTool.
   // Now takes an options bag ({ allowInternal }) forwarded to createEngine so the
   // per-session admin Server builds an allowInternal engine (DD6 / Leg 2).
-  const getEngine = typeof opts.getEngine === 'function'
-    ? opts.getEngine
-    : () => { throw new Error('automation: engine unavailable'); };
+  const getEngine =
+    typeof opts.getEngine === 'function'
+      ? opts.getEngine
+      : () => {
+          throw new Error('automation: engine unavailable');
+        };
 
   // Jar-scoping context (Leg 2). Injected from main.js; absent in some tests that
   // only exercise the gate. scopeEngine needs it only for jar identities (admin
@@ -417,18 +422,19 @@ function createMcpServer(opts = {}) {
 
   // Live settings accessor, read PER REQUEST by the auth gate. Default to the
   // settings-store singleton; tests inject a stub to toggle enabled/hashes.
-  const getSettings = typeof opts.getSettings === 'function'
-    ? opts.getSettings
-    : () => require('../settings-store');
+  const getSettings = typeof opts.getSettings === 'function' ? opts.getSettings : () => require('../settings-store');
 
   // In-memory dev-enable override (DD3/DD4). Normalize boolean | (() => boolean)
   // | falsy → a () => boolean reader. Read PER REQUEST by the auth gate so the
   // override is live. The override satisfies the auth gate's enable check WITHOUT
   // writing `automationEnabled`, keeping the human-only persisted invariant — but
   // it does NOT waive the Bearer-key requirement.
-  const devEnableOverride = typeof opts.devEnableOverride === 'function'
-    ? opts.devEnableOverride
-    : (opts.devEnableOverride ? () => true : () => false);
+  const devEnableOverride =
+    typeof opts.devEnableOverride === 'function'
+      ? opts.devEnableOverride
+      : opts.devEnableOverride
+        ? () => true
+        : () => false;
 
   let version = opts.version;
   if (!version) {
@@ -472,18 +478,15 @@ function createMcpServer(opts = {}) {
   // M14 F1 L2 (DD3): auth-answer twins of fillDelegate below. Left undefined
   // when not injected — vault-context installs its own throwing stub / null
   // read, so engine-only tests need nothing.
-  const answerAuthDelegate = typeof opts.answerAuthDelegate === 'function'
-    ? opts.answerAuthDelegate
-    : undefined;
-  const getPendingChallenge = typeof opts.getPendingChallenge === 'function'
-    ? opts.getPendingChallenge
-    : undefined;
-  const fillDelegate = typeof opts.fillDelegate === 'function'
-    ? opts.fillDelegate
-    : () => { throw new Error('automation: vault-fill-not-wired — the main→preload fill delegate lands in Leg 4'); };
-  const getVaultAutoLockMinutes = typeof opts.getAutoLockMinutes === 'function'
-    ? opts.getAutoLockMinutes
-    : () => 10;
+  const answerAuthDelegate = typeof opts.answerAuthDelegate === 'function' ? opts.answerAuthDelegate : undefined;
+  const getPendingChallenge = typeof opts.getPendingChallenge === 'function' ? opts.getPendingChallenge : undefined;
+  const fillDelegate =
+    typeof opts.fillDelegate === 'function'
+      ? opts.fillDelegate
+      : () => {
+          throw new Error('automation: vault-fill-not-wired — the main→preload fill delegate lands in Leg 4');
+        };
+  const getVaultAutoLockMinutes = typeof opts.getAutoLockMinutes === 'function' ? opts.getAutoLockMinutes : () => 10;
 
   // ONE audit log per server (shared across all per-session Servers). Its onChange
   // fires the injected broadcast with the fresh snapshot on every mutation — one
@@ -547,7 +550,7 @@ function createMcpServer(opts = {}) {
         vaultCtx.fill(identity, target, scopeCtx || {}),
       // M14 F1 L2 (DD3): the auth-answer twin — same identity + membership deps.
       answerAuth: (/** @type {{ wcId: number, itemId: string, vaultId?: string }} */ target) =>
-        vaultCtx.answerAuth(identity, target, scopeCtx || {}),
+        vaultCtx.answerAuth(identity, target, scopeCtx || {})
     };
     const registry = buildToolRegistry(
       () => scopeEngine(getEngine({ allowInternal: identity === 'admin' }), identity, scopeCtx),
@@ -575,7 +578,7 @@ function createMcpServer(opts = {}) {
         targetWcId: args?.wcId ?? null,
         outcome: isError ? 'error' : 'ok',
         errorCode,
-        detail: deriveAuditDetail(name, args, result),
+        detail: deriveAuditDetail(name, args, result)
       });
       return result;
     });
@@ -629,7 +632,10 @@ function createMcpServer(opts = {}) {
       });
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8');
-        if (!raw) { settle(undefined); return; }
+        if (!raw) {
+          settle(undefined);
+          return;
+        }
         try {
           settle(JSON.parse(raw));
         } catch {
@@ -661,13 +667,18 @@ function createMcpServer(opts = {}) {
    * @param {string} message
    */
   function sendJsonRpcError(res, status, message) {
-    if (res.headersSent) { res.end(); return; }
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
     res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      jsonrpc: '2.0',
-      error: { code: -32000, message },
-      id: null,
-    }));
+    res.end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32000, message },
+        id: null
+      })
+    );
   }
 
   /**
@@ -713,7 +724,7 @@ function createMcpServer(opts = {}) {
       return validateKey(token, {
         keyHashes: settings.get('automationKeyHashes'),
         adminKeyHash: settings.get('automationAdminKeyHash'),
-        adminEnabled,
+        adminEnabled
       });
     } catch {
       return null;
@@ -732,7 +743,7 @@ function createMcpServer(opts = {}) {
     const allowed = isAllowed({
       host: req.headers.host,
       origin: req.headers.origin,
-      peerAddress: req.socket.remoteAddress,
+      peerAddress: req.socket.remoteAddress
     });
     if (!allowed) {
       res.writeHead(403);
@@ -774,9 +785,7 @@ function createMcpServer(opts = {}) {
    */
   async function routeRequest(req, res, identity) {
     const sessionId = /** @type {string | undefined} */ (
-      Array.isArray(req.headers['mcp-session-id'])
-        ? req.headers['mcp-session-id'][0]
-        : req.headers['mcp-session-id']
+      Array.isArray(req.headers['mcp-session-id']) ? req.headers['mcp-session-id'][0] : req.headers['mcp-session-id']
     );
 
     // Existing session → route straight to its transport (handles POST/GET/DELETE,
@@ -808,7 +817,11 @@ function createMcpServer(opts = {}) {
             if (sessions.has(sessionId)) {
               // transport.close() fires onclose → sessions.delete + noteSessionClose
               // (idempotent), so a concurrent/prior teardown is a clean no-op.
-              try { entry.transport.close(); } catch { /* already closing */ }
+              try {
+                entry.transport.close();
+              } catch {
+                /* already closing */
+              }
             }
           });
         }
@@ -878,7 +891,7 @@ function createMcpServer(opts = {}) {
       // vault-context degrades cleanly).
       answerAuthDelegate,
       getPendingChallenge,
-      getAutoLockMinutes: getVaultAutoLockMinutes,
+      getAutoLockMinutes: getVaultAutoLockMinutes
     });
 
     // Create a NEW session: fresh transport + Server scoped to this identity,
@@ -896,14 +909,18 @@ function createMcpServer(opts = {}) {
         sessions.set(sid, { server, transport, identity, vaultCtx });
         // Mark the session active (Leg 3 / DD8) — fires the broadcast.
         auditLog.noteSessionOpen(sid, identity);
-      },
+      }
     });
     transport.onclose = () => {
       // Session-scoped zeroization (M12 F1 Leg 3): .fill(0) + clear this session's
       // vault key Buffers BEFORE eviction. The SAME reference the tools used, so a
       // fresh session must vaultUnlock again. Idempotent (also fired by the idle
       // backstop), so a double-teardown is a clean no-op.
-      try { vaultCtx.zeroize(); } catch { /* already zeroized */ }
+      try {
+        vaultCtx.zeroize();
+      } catch {
+        /* already zeroized */
+      }
       if (transport.sessionId) {
         sessions.delete(transport.sessionId);
         // Close-tracking is wired into onclose ONLY (stop() cascades through here),
@@ -969,22 +986,23 @@ function createMcpServer(opts = {}) {
     // Attempt to listen once on `attemptPort`. Resolves the bound port on success,
     // or resolves a discriminated EADDRINUSE marker, or rejects on other errors.
     // A failed attempt's server never bound, so it is simply discarded (no close).
-    const tryListen = (/** @type {number} */ attemptPort) => new Promise((resolve, reject) => {
-      const srv = http.createServer(onRequest);
-      const onError = (/** @type {NodeJS.ErrnoException} */ err) => {
-        if (err && err.code === 'EADDRINUSE') {
-          resolve({ inUse: true });
-        } else {
-          reject(err);
-        }
-      };
-      srv.once('error', onError);
-      // Bind LOOPBACK ONLY — 127.0.0.1, never 0.0.0.0 / :: (SC7).
-      srv.listen(attemptPort, '127.0.0.1', () => {
-        srv.removeListener('error', onError);
-        resolve({ inUse: false, server: srv, port: attemptPort });
+    const tryListen = (/** @type {number} */ attemptPort) =>
+      new Promise((resolve, reject) => {
+        const srv = http.createServer(onRequest);
+        const onError = (/** @type {NodeJS.ErrnoException} */ err) => {
+          if (err && err.code === 'EADDRINUSE') {
+            resolve({ inUse: true });
+          } else {
+            reject(err);
+          }
+        };
+        srv.once('error', onError);
+        // Bind LOOPBACK ONLY — 127.0.0.1, never 0.0.0.0 / :: (SC7).
+        srv.listen(attemptPort, '127.0.0.1', () => {
+          srv.removeListener('error', onError);
+          resolve({ inUse: false, server: srv, port: attemptPort });
+        });
       });
-    });
 
     // Reset state so a later retry / stop() / rebind still works.
     const resetAndReject = (/** @type {Error} */ err) => {
@@ -1061,8 +1079,12 @@ function createMcpServer(opts = {}) {
       return 'automation: no free port found near ' + attemptPort + where;
     }
     if (envUsed) {
-      return 'automation: MCP port ' + attemptPort + ' is in use — free the port '
-        + 'or change GOLDFINCH_MCP_PORT (it must bind exactly when set)';
+      return (
+        'automation: MCP port ' +
+        attemptPort +
+        ' is in use — free the port ' +
+        'or change GOLDFINCH_MCP_PORT (it must bind exactly when set)'
+      );
     }
     return 'automation: MCP port ' + attemptPort + ' is in use';
   }
@@ -1112,7 +1134,14 @@ function createMcpServer(opts = {}) {
   // port in fallback mode, and consumers (main.js's post-start capture,
   // currentAutomationStatus) must read the bound port. Callers MUST NOT destructure
   // `mcpServer.port` — that would snapshot the getter at the pre-start value.
-  return { start, stop, get port() { return boundPort; }, getActivity };
+  return {
+    start,
+    stop,
+    get port() {
+      return boundPort;
+    },
+    getActivity
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1230,5 +1259,5 @@ module.exports = {
   revokeJarKey,
   revokeAdminKey,
   deriveAuditDetail,
-  redactUrlForAudit,
+  redactUrlForAudit
 };

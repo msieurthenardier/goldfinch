@@ -16,7 +16,10 @@ const {
 function deferred() {
   let resolve;
   let reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
@@ -31,7 +34,10 @@ function fakeResponse({ ok = true, contentType = 'image/png', body = 'x' } = {})
 test('rejects non-http(s), non-data: schemes without ever fetching', async () => {
   const fetcher = createFaviconFetcher();
   let fetchCalls = 0;
-  const fetchImpl = async () => { fetchCalls++; return fakeResponse(); };
+  const fetchImpl = async () => {
+    fetchCalls++;
+    return fakeResponse();
+  };
   for (const url of ['javascript:alert(1)', 'goldfinch://internal/icon.png', 'file:///etc/passwd']) {
     const result = await fetcher.request({ wcId: 1, favicons: [url], fetchImpl });
     assert.equal(result, null, `must reject ${url}`);
@@ -42,7 +48,10 @@ test('rejects non-http(s), non-data: schemes without ever fetching', async () =>
 test('a page-declared data:image/... favicon passes through unchanged with no fetch', async () => {
   const fetcher = createFaviconFetcher();
   let fetchCalls = 0;
-  const fetchImpl = async () => { fetchCalls++; return fakeResponse(); };
+  const fetchImpl = async () => {
+    fetchCalls++;
+    return fakeResponse();
+  };
   const dataUrl = 'data:image/png;base64,AAAA';
   const result = await fetcher.request({ wcId: 1, favicons: [dataUrl], fetchImpl });
   assert.equal(result, dataUrl);
@@ -68,7 +77,10 @@ test('an oversized data: favicon is rejected', async () => {
 test('a non-image data: URL (e.g. data:text/html) is rejected', async () => {
   const fetcher = createFaviconFetcher();
   let fetchCalls = 0;
-  const fetchImpl = async () => { fetchCalls++; return fakeResponse(); };
+  const fetchImpl = async () => {
+    fetchCalls++;
+    return fakeResponse();
+  };
   const result = await fetcher.request({
     wcId: 1,
     favicons: ['data:text/html,<script>evil()<' + '/script>'],
@@ -146,7 +158,9 @@ test('a thrown/rejected fetchImpl resolves to null and never throws', async () =
   const result = await fetcher.request({
     wcId: 1,
     favicons: ['https://example.test/favicon.ico'],
-    fetchImpl: async () => { throw new Error('network down'); }
+    fetchImpl: async () => {
+      throw new Error('network down');
+    }
   });
   assert.equal(result, null);
 });
@@ -154,7 +168,10 @@ test('a thrown/rejected fetchImpl resolves to null and never throws', async () =
 test('empty favicons array or a falsy favicons[0] resolves to null without fetching', async () => {
   const fetcher = createFaviconFetcher();
   let fetchCalls = 0;
-  const fetchImpl = async () => { fetchCalls++; return fakeResponse(); };
+  const fetchImpl = async () => {
+    fetchCalls++;
+    return fakeResponse();
+  };
   assert.equal(await fetcher.request({ wcId: 1, favicons: [], fetchImpl }), null);
   assert.equal(await fetcher.request({ wcId: 1, favicons: [''], fetchImpl }), null);
   assert.equal(await fetcher.request({ wcId: 1, favicons: null, fetchImpl }), null);
@@ -166,10 +183,14 @@ test('latest-wins: a slow first fetch resolving after a fast second is dropped',
   const slow = deferred();
   const fast = deferred();
   const slowPromise = fetcher.request({
-    wcId: 1, favicons: ['https://example.test/slow.ico'], fetchImpl: () => slow.promise
+    wcId: 1,
+    favicons: ['https://example.test/slow.ico'],
+    fetchImpl: () => slow.promise
   });
   const fastPromise = fetcher.request({
-    wcId: 1, favicons: ['https://example.test/fast.ico'], fetchImpl: () => fast.promise
+    wcId: 1,
+    favicons: ['https://example.test/fast.ico'],
+    fetchImpl: () => fast.promise
   });
 
   fast.resolve(fakeResponse({ contentType: 'image/png', body: 'fast' }));
@@ -184,11 +205,15 @@ test('latest-wins: a slow first fetch resolving after a fast second is dropped',
 test('forget clears per-tab state so a reused wcId starts clean', async () => {
   const fetcher = createFaviconFetcher();
   await fetcher.request({
-    wcId: 1, favicons: ['data:image/png;base64,AAAA'], fetchImpl: async () => fakeResponse()
+    wcId: 1,
+    favicons: ['data:image/png;base64,AAAA'],
+    fetchImpl: async () => fakeResponse()
   });
   fetcher.forget(1);
   const result = await fetcher.request({
-    wcId: 1, favicons: ['data:image/png;base64,BBBB'], fetchImpl: async () => fakeResponse()
+    wcId: 1,
+    favicons: ['data:image/png;base64,BBBB'],
+    fetchImpl: async () => fakeResponse()
   });
   assert.equal(result, 'data:image/png;base64,BBBB');
 });

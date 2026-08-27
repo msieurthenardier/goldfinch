@@ -106,7 +106,7 @@ function createWindowRegistry() {
       // in flight in this window", which is all the forward is allowed to know.
       // Cleared by a grace timer at dragend, or CONSUMED by the first successful
       // forward (register-tab-ipc.js owns both). Dies with the record.
-      bookmarkDragActive: false,
+      bookmarkDragActive: false
     };
     windows.set(win.id, record);
     lastFocusedId = win.id;
@@ -284,7 +284,7 @@ function createWindowRegistry() {
     isTabViewWcId,
     isChromeContents,
     isSheetContents,
-    sheetMenuFor,
+    sheetMenuFor
   };
 }
 

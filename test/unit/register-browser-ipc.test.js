@@ -13,7 +13,7 @@ function makeHarness(options = {}) {
   const webSession = {
     cookies: { get: async () => [], remove: async () => {} },
     clearStorageData: async (opts) => events.push(['clear-storage', opts]),
-    clearCache: async () => events.push(['clear-cache']),
+    clearCache: async () => events.push(['clear-cache'])
   };
   const internalSession = { __goldfinchInternal: true };
   const wc = {
@@ -25,10 +25,13 @@ function makeHarness(options = {}) {
     isDevToolsOpened: () => true,
     focus: () => events.push(['focus']),
     replaceMisspelling: (word) => events.push(['correct', word]),
-    cut: () => events.push(['cut']), copy: () => events.push(['copy']), paste: () => events.push(['paste']),
-    undo: () => events.push(['undo']), redo: () => events.push(['redo']),
+    cut: () => events.push(['cut']),
+    copy: () => events.push(['copy']),
+    paste: () => events.push(['paste']),
+    undo: () => events.push(['undo']),
+    redo: () => events.push(['redo']),
     send: (...args) => events.push(['guest-send', ...args]),
-    print: () => events.push(['print']),
+    print: () => events.push(['print'])
   };
   const chrome = { send: (...args) => events.push(['chrome-send', ...args]) };
   // Vault fill-icon native-menu delegate capture (I8): the owning window + recorded calls.
@@ -37,38 +40,57 @@ function makeHarness(options = {}) {
   // Leg 4 (capture-save): a fake human whose capture() returns a settable offer (or
   // null when the gate drops) and records the dismiss ids.
   const human = {
-    captures: [], dismissed: [], nextOffer: null,
-    capture(arg) { human.captures.push(arg); return human.nextOffer; },
-    captureDismiss(id) { human.dismissed.push(id); },
+    captures: [],
+    dismissed: [],
+    nextOffer: null,
+    capture(arg) {
+      human.captures.push(arg);
+      return human.nextOffer;
+    },
+    captureDismiss(id) {
+      human.dismissed.push(id);
+    }
   };
   registerBrowserIpc({
     ipcMain: {
       handle: (channel, fn) => handlers.set(channel, fn),
-      on: (channel, fn) => listeners.set(channel, fn),
+      on: (channel, fn) => listeners.set(channel, fn)
     },
-    webContents: { fromId: (id) => id === 5 ? wc : id === 6 ? { ...wc, session: internalSession } : null },
+    webContents: { fromId: (id) => (id === 5 ? wc : id === 6 ? { ...wc, session: internalSession } : null) },
     chromeForTab: () => chrome,
-    getTabContents: (id) => id === 5 ? wc : null,
+    getTabContents: (id) => (id === 5 ? wc : null),
     applyZoom: (_wc, action) => events.push(['zoom', action]),
     isInternalContents: (target) => target.session.__goldfinchInternal === true,
-    toggleDevTools: () => { events.push(['devtools']); return true; },
+    toggleDevTools: () => {
+      events.push(['devtools']);
+      return true;
+    },
     registerInternalHandler: (_ipc, channel, fn) => internal.set(channel, fn),
     jars: {
       list: () => [{ id: 'personal', partition: 'persist:personal' }],
-      add: (name) => ({ id: 'new', name }),
+      add: (name) => ({ id: 'new', name })
     },
     registry: {
-      getWindowForChrome: (sender) => sender === chromeSender
-        ? { win: { id: 17, isMaximized: () => false, minimize: () => events.push(['minimize']), maximize: () => events.push(['maximize']), close: () => events.push(['close']) } }
-        : null,
+      getWindowForChrome: (sender) =>
+        sender === chromeSender
+          ? {
+              win: {
+                id: 17,
+                isMaximized: () => false,
+                minimize: () => events.push(['minimize']),
+                maximize: () => events.push(['maximize']),
+                close: () => events.push(['close'])
+              }
+            }
+          : null,
       // Guest sender → owning window record (used by the vault fill-icon native menu path).
-      getWindowForGuest: (id) => id === 5 ? { win: iconMenuWin } : null,
+      getWindowForGuest: (id) => (id === 5 ? { win: iconMenuWin } : null)
     },
     createWindow: () => ({ win: { id: 23 } }),
     broadcastJarsChanged: () => events.push(['jars-changed']),
     isSafeTabUrl: (url) => typeof url === 'string' && url.startsWith('https://'),
     getChromeContents: () => chrome,
-    session: { fromPartition: (partition) => partition === 'internal' ? internalSession : webSession },
+    session: { fromPartition: (partition) => (partition === 'internal' ? internalSession : webSession) },
     registrableDomain: (host) => host,
     hostnameOf: (url) => new URL(url).hostname,
     shields: { active: () => true },
@@ -80,35 +102,38 @@ function makeHarness(options = {}) {
     // optional (offline suites that omit it exercise the optional-chain).
     popupRegistry: options.popupRegistry,
     random: () => 0.5,
-    logger: { warn: (...args) => events.push(['warn', ...args]) },
+    logger: { warn: (...args) => events.push(['warn', ...args]) }
   });
   return { handlers, listeners, internal, events, wc, chrome, chromeSender, human, iconMenuCalls, iconMenuWin };
 }
 
 test('browser registrar preserves channel inventory and owner-routed media forwarding', () => {
   const h = makeHarness();
-  assert.deepEqual([...h.internal.keys()], [
-    // M12 F3 Leg 4 (first-run-setup): the cross-renderer setup/unlock request triggers
-    // (registered alongside the other guest-vault-* handlers, ahead of open-tab-in-jar).
-    'internal-vault-request-setup',
-    'internal-vault-request-unlock',
-    // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
-    // non-secret target), registered alongside the other request triggers.
-    'internal-vault-request-mint',
-    // M12 F5 HAT (I14, import split): the BARE vault-request-import forward (beginImportUnlock) is
-    // UNCONDITIONAL — it needs only chromeForTab. The pickImportFile + clearPendingImport channels
-    // are GATED on their injections (this harness omits them), so only this one appears here.
-    'internal-vault-begin-import-unlock',
-    // M12 F4 Leg 2 (key-rotation): the cross-renderer rotate-recovery / change-master / recover
-    // triggers (bare, no secret), registered alongside the other request triggers.
-    'internal-vault-request-rotate-recovery',
-    // M12 F4 Leg 3 (admin-key-provision): the cross-renderer rotate-admin trigger (bare, no secret),
-    // registered immediately after rotate-recovery.
-    'internal-vault-request-rotate-admin',
-    'internal-vault-request-change-master',
-    'internal-vault-request-recover',
-    'internal-open-tab-in-jar',
-  ]);
+  assert.deepEqual(
+    [...h.internal.keys()],
+    [
+      // M12 F3 Leg 4 (first-run-setup): the cross-renderer setup/unlock request triggers
+      // (registered alongside the other guest-vault-* handlers, ahead of open-tab-in-jar).
+      'internal-vault-request-setup',
+      'internal-vault-request-unlock',
+      // M12 F3 Leg 5 (access-keys): the cross-renderer access-key MINT trigger (carries the
+      // non-secret target), registered alongside the other request triggers.
+      'internal-vault-request-mint',
+      // M12 F5 HAT (I14, import split): the BARE vault-request-import forward (beginImportUnlock) is
+      // UNCONDITIONAL — it needs only chromeForTab. The pickImportFile + clearPendingImport channels
+      // are GATED on their injections (this harness omits them), so only this one appears here.
+      'internal-vault-begin-import-unlock',
+      // M12 F4 Leg 2 (key-rotation): the cross-renderer rotate-recovery / change-master / recover
+      // triggers (bare, no secret), registered alongside the other request triggers.
+      'internal-vault-request-rotate-recovery',
+      // M12 F4 Leg 3 (admin-key-provision): the cross-renderer rotate-admin trigger (bare, no secret),
+      // registered immediately after rotate-recovery.
+      'internal-vault-request-rotate-admin',
+      'internal-vault-request-change-master',
+      'internal-vault-request-recover',
+      'internal-open-tab-in-jar'
+    ]
+  );
   assert.equal(h.handlers.has('privacy-cookies'), true);
   assert.equal(h.listeners.has('guest-media-list'), true);
   h.listeners.get('guest-media-list')({ sender: { id: 5 } }, ['song']);
@@ -127,11 +152,17 @@ test('window actions derive authority from the sender and container creation bro
   assert.equal(await h.handlers.get('new-container-create')({}, null), null);
   // Leg 2 (F3 DD2, AC2/AC5): INVERTED — a bare `{}` sender (no chrome identity)
   // now refuses. This was the succeeds-with-{}-sender pin the leg exists to close.
-  assert.equal(await h.handlers.get('new-container-create')({}, { name: 'Work' }), null,
-    'a non-chrome sender is refused, even with a well-formed payload');
+  assert.equal(
+    await h.handlers.get('new-container-create')({}, { name: 'Work' }),
+    null,
+    'a non-chrome sender is refused, even with a well-formed payload'
+  );
   assert.deepEqual(h.events, [], 'no jars-changed broadcast on a refused create');
   // The legitimate chrome sender still succeeds (AC6 — no regression).
-  assert.deepEqual(await h.handlers.get('new-container-create')({ sender: h.chromeSender }, { name: 'Work' }), { id: 'new', name: 'Work' });
+  assert.deepEqual(await h.handlers.get('new-container-create')({ sender: h.chromeSender }, { name: 'Work' }), {
+    id: 'new',
+    name: 'Work'
+  });
   assert.deepEqual(h.events, [['jars-changed']]);
 });
 
@@ -149,10 +180,12 @@ test('browser target guards and page-context allowlist refuse malformed/internal
   assert.deepEqual(h.events, [['copy']]);
 
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, null), {
-    ok: false, error: 'open-tab-in-jar — malformed-payload'
+    ok: false,
+    error: 'open-tab-in-jar — malformed-payload'
   });
   assert.deepEqual(await h.internal.get('internal-open-tab-in-jar')({}, { jarId: 'personal', url: 'javascript:bad' }), {
-    ok: false, error: 'open-tab-in-jar — bad-args'
+    ok: false,
+    error: 'open-tab-in-jar — bad-args'
   });
 });
 
@@ -162,8 +195,11 @@ test('browser target guards and page-context allowlist refuse malformed/internal
 // the refusal is attributable to the sender gate and not to a bad target.
 test('AC2/AC5: a non-chrome sender is refused across the browser chrome-trust channels', async () => {
   const h = makeHarness();
-  assert.equal(await h.handlers.get('get-zoom')({}, { webContentsId: 5 }), null,
-    'a valid external target is still refused without a chrome sender');
+  assert.equal(
+    await h.handlers.get('get-zoom')({}, { webContentsId: 5 }),
+    null,
+    'a valid external target is still refused without a chrome sender'
+  );
   assert.equal(await h.handlers.get('toggle-devtools')({}, { webContentsId: 5 }), false);
   await h.handlers.get('page-context-action')({}, { webContentsId: 5, action: 'copy' });
   assert.deepEqual(h.events, [], 'a non-chrome sender cannot dispatch a page-context action against a valid target');
@@ -183,10 +219,19 @@ test('vault capture: an offer forwards to the owning chrome (no password on the 
   assert.deepEqual(h.events, [], 'no forward when the gate drops (null offer)');
 
   // OFFER: capture() returns { captureId, model } → forwarded to the owning chrome.
-  h.human.nextOffer = { captureId: 'cap123', model: { origin: 'https://a.example', username: 'me@a', mode: 'save', defaultVaultId: 'personal', choices: ['personal', 'global'] } };
+  h.human.nextOffer = {
+    captureId: 'cap123',
+    model: {
+      origin: 'https://a.example',
+      username: 'me@a',
+      mode: 'save',
+      defaultVaultId: 'personal',
+      choices: ['personal', 'global']
+    }
+  };
   h.listeners.get('guest-vault-capture')({ sender: { id: 5 } }, { username: 'me@a', password: passwordBytes });
   assert.deepEqual(h.events, [
-    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }],
+    ['chrome-send', 'vault-capture-offer', { captureId: 'cap123', model: h.human.nextOffer.model }]
   ]);
   // The forwarded payload never carries a password (grep the whole event stream).
   assert.ok(!JSON.stringify(h.events).includes('typed-secret'), 'no captured password crosses to chrome');
@@ -230,12 +275,22 @@ test('vault capture dismiss: the chrome-invoked drop reaches the human ops', () 
 test('privacy channels retain their exact empty/no-tab return shapes', async () => {
   const h = makeHarness();
   assert.deepEqual(await h.handlers.get('privacy-cookies')({}, { webContentsId: 999 }), {
-    firstParty: null, first: 0, third: 0, total: 0, list: []
+    firstParty: null,
+    first: 0,
+    third: 0,
+    total: 0,
+    list: []
   });
-  assert.deepEqual(await h.handlers.get('privacy-clear-cookies')({}, { webContentsId: 6, scope: 'all' }), { removed: 0 });
-  assert.deepEqual(await h.handlers.get('privacy-clear-storage')({}, { webContentsId: 999, url: 'https://example.com' }), {
-    ok: false, error: 'no-tab'
+  assert.deepEqual(await h.handlers.get('privacy-clear-cookies')({}, { webContentsId: 6, scope: 'all' }), {
+    removed: 0
   });
+  assert.deepEqual(
+    await h.handlers.get('privacy-clear-storage')({}, { webContentsId: 999, url: 'https://example.com' }),
+    {
+      ok: false,
+      error: 'no-tab'
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -246,14 +301,27 @@ test('privacy channels retain their exact empty/no-tab return shapes', async () 
 
 test('guest-window-close from a POPUP destroys its BrowserWindow and never reaches the tab path', () => {
   const destroys = [];
-  const popupWin = { destroyed: false, isDestroyed() { return this.destroyed; }, destroy() { this.destroyed = true; destroys.push('popup'); } };
+  const popupWin = {
+    destroyed: false,
+    isDestroyed() {
+      return this.destroyed;
+    },
+    destroy() {
+      this.destroyed = true;
+      destroys.push('popup');
+    }
+  };
   const h = makeHarness({
     popupRegistry: { getByWcId: (id) => (id === 42 ? { popupWcId: 42, win: popupWin } : null) }
   });
 
   h.listeners.get('guest-window-close')({ sender: { id: 42 } }, { historyLength: 1 });
   assert.deepEqual(destroys, ['popup'], 'the popup BrowserWindow is destroyed');
-  assert.deepEqual(h.events, [], 'no tab-self-close send for a popup sender — the silent no-op is replaced by a real close');
+  assert.deepEqual(
+    h.events,
+    [],
+    'no tab-self-close send for a popup sender — the silent no-op is replaced by a real close'
+  );
 
   // Idempotent against an already-destroyed window (double window.close()).
   assert.doesNotThrow(() => h.listeners.get('guest-window-close')({ sender: { id: 42 } }, {}));

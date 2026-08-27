@@ -7,12 +7,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  isAllowed,
-  isLoopbackHostname,
-  bareHost,
-  originHost,
-} = require('../../src/main/automation/origin-guard');
+const { isAllowed, isLoopbackHostname, bareHost, originHost } = require('../../src/main/automation/origin-guard');
 
 // Convenience: a fully-loopback request the matrix mutates one field at a time.
 const LOOPBACK_REQ = { host: '127.0.0.1:7777', origin: 'http://127.0.0.1:7777', peerAddress: '127.0.0.1' };
@@ -131,11 +126,17 @@ describe('isAllowed — DD3 reject/pass matrix', () => {
   });
 
   it('allows localhost host/origin', () => {
-    assert.equal(isAllowed({ host: 'localhost:7777', origin: 'http://localhost:7777', peerAddress: '127.0.0.1' }), true);
+    assert.equal(
+      isAllowed({ host: 'localhost:7777', origin: 'http://localhost:7777', peerAddress: '127.0.0.1' }),
+      true
+    );
   });
 
   it('allows an IPv6-mapped-IPv4 loopback peer (::ffff:127.0.0.1)', () => {
-    assert.equal(isAllowed({ host: '127.0.0.1:7777', origin: 'http://127.0.0.1:7777', peerAddress: '::ffff:127.0.0.1' }), true);
+    assert.equal(
+      isAllowed({ host: '127.0.0.1:7777', origin: 'http://127.0.0.1:7777', peerAddress: '::ffff:127.0.0.1' }),
+      true
+    );
   });
 
   it('ALLOWS a deliberate Host-port mismatch — DD3 keys on loopback-ness, not port', () => {
@@ -147,7 +148,10 @@ describe('isAllowed — DD3 reject/pass matrix', () => {
 
   it('denies a non-loopback Host', () => {
     assert.equal(isAllowed({ host: 'evil.example', peerAddress: '127.0.0.1' }), false);
-    assert.equal(isAllowed({ host: 'evil.example:7777', origin: 'http://127.0.0.1:7777', peerAddress: '127.0.0.1' }), false);
+    assert.equal(
+      isAllowed({ host: 'evil.example:7777', origin: 'http://127.0.0.1:7777', peerAddress: '127.0.0.1' }),
+      false
+    );
   });
 
   it('fails closed on a MISSING Host header', () => {
@@ -157,10 +161,7 @@ describe('isAllowed — DD3 reject/pass matrix', () => {
   });
 
   it('denies a present non-loopback Origin even with a loopback Host (the DNS-rebinding / hostile-page case)', () => {
-    assert.equal(
-      isAllowed({ host: '127.0.0.1:7777', origin: 'http://evil.example', peerAddress: '127.0.0.1' }),
-      false
-    );
+    assert.equal(isAllowed({ host: '127.0.0.1:7777', origin: 'http://evil.example', peerAddress: '127.0.0.1' }), false);
     assert.equal(
       isAllowed({ host: '127.0.0.1:7777', origin: 'https://evil.example:7777', peerAddress: '127.0.0.1' }),
       false

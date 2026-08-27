@@ -87,10 +87,7 @@ test('AC2: the move core gates its sole-tab guard on allowSoleTab — masked, re
 
   // Ungate it (revert to the F8 unconditional refusal). A sole tab could then never
   // consolidate, AC1/AC2's whole reversal gone.
-  const mutated = real.replace(
-    'if (!allowSoleTab && source.tabViews.size <= 1)',
-    'if (source.tabViews.size <= 1)'
-  );
+  const mutated = real.replace('if (!allowSoleTab && source.tabViews.size <= 1)', 'if (source.tabViews.size <= 1)');
   assertMutated(real, mutated, 'ungate-guard');
   assert.equal(count(coreBody(mutated), GATED_GUARD), 0, 'mutated → the gate is gone and this pin FAILS');
 });
@@ -122,8 +119,16 @@ test('AC2: the core closes an emptied source (size === 0 → win.close()) — ma
 test('AC3: ONLY the existing-window consolidate paths pass allowSoleTab true — masked, consolidate calls present, new-window calls not', () => {
   const real = realMain();
   const masked = maskComments(real);
-  assert.equal(count(masked, CONSOLIDATE_CALL), 2, 'real → exactly two () => target, true calls (tab-move-to-window + tab-adopt-by-drop; was 1 before F11 Leg 3)');
-  assert.equal(count(masked, NEWWINDOW_TRUE), 0, 'real → no newWindowForMove caller passes true (sole-tab → new window stays refused)');
+  assert.equal(
+    count(masked, CONSOLIDATE_CALL),
+    2,
+    'real → exactly two () => target, true calls (tab-move-to-window + tab-adopt-by-drop; was 1 before F11 Leg 3)'
+  );
+  assert.equal(
+    count(masked, NEWWINDOW_TRUE),
+    0,
+    'real → no newWindowForMove caller passes true (sole-tab → new window stays refused)'
+  );
 
   // Leak allowSoleTab into a new-window caller. This would make a sole-tab tear-off /
   // move-to-new-window succeed as a no-op window swap — the AC3 regression.
@@ -132,7 +137,11 @@ test('AC3: ONLY the existing-window consolidate paths pass allowSoleTab true —
     'moveTabIntoWindow(source, p, () => newWindowForMove(source), true);'
   );
   assertMutated(real, mutated, 'leak-allowSoleTab');
-  assert.equal(count(maskComments(mutated), NEWWINDOW_TRUE), 1, 'mutated → a new-window caller now passes true and this pin FAILS');
+  assert.equal(
+    count(maskComments(mutated), NEWWINDOW_TRUE),
+    1,
+    'mutated → a new-window caller now passes true and this pin FAILS'
+  );
 });
 
 // ---------------------------------------------------------------------------

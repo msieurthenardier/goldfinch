@@ -160,7 +160,7 @@ export function badgeLabelFor(item) {
   const vaultId = item && item.vaultId;
   if (vaultId === 'global') return 'Global';
   const label = item && item.badgeLabel;
-  return String(label != null && label !== '' ? label : (vaultId != null ? vaultId : ''));
+  return String(label != null && label !== '' ? label : vaultId != null ? vaultId : '');
 }
 
 /**
@@ -344,9 +344,14 @@ export function renderVaultPickerRows(document, card, model) {
     title.className = 'vault-picker-title';
     // Fall back through: explicit title → the secondary line → a type-appropriate
     // generic, so a row is never blank.
-    const titleText = item && item.title != null && item.title !== ''
-      ? item.title
-      : (secondary !== '' ? secondary : (isCard ? 'Card' : 'Login'));
+    const titleText =
+      item && item.title != null && item.title !== ''
+        ? item.title
+        : secondary !== ''
+          ? secondary
+          : isCard
+            ? 'Card'
+            : 'Login';
     title.textContent = String(titleText);
     text.appendChild(title);
 

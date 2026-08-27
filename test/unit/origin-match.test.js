@@ -45,9 +45,15 @@ test('widen:true + registrable-domain: matches across a subdomain (same scheme)'
   const item = wideItem('https://example.com');
   assert.equal(originMatches(item, 'https://accounts.example.com', { widen: true }), true);
   assert.equal(originMatches(item, 'https://example.com', { widen: true }), true); // exact still matches
-  assert.equal(originMatches(wideItem('https://accounts.example.com'), 'https://billing.example.com', { widen: true }), true);
+  assert.equal(
+    originMatches(wideItem('https://accounts.example.com'), 'https://billing.example.com', { widen: true }),
+    true
+  );
   // Port need not match across subdomains in registrable-domain mode.
-  assert.equal(originMatches(wideItem('https://example.com'), 'https://accounts.example.com:8443', { widen: true }), true);
+  assert.equal(
+    originMatches(wideItem('https://example.com'), 'https://accounts.example.com:8443', { widen: true }),
+    true
+  );
 });
 
 /* ------------------------------------------------------------- widen:true REFUSES */
@@ -66,7 +72,10 @@ test('widen:true REFUSES a scheme mismatch even in registrable-domain mode (MITM
 
 test('widen:true fails CLOSED when the PSL misses EITHER host', () => {
   // item host unknown TLD → registrableDomainSafe null → exact fallback (no match).
-  assert.equal(originMatches(wideItem('https://example.madeupzzztld'), 'https://a.example.madeupzzztld', { widen: true }), false);
+  assert.equal(
+    originMatches(wideItem('https://example.madeupzzztld'), 'https://a.example.madeupzzztld', { widen: true }),
+    false
+  );
   // tab host unknown TLD.
   assert.equal(originMatches(wideItem('https://example.com'), 'https://foo.madeupzzztld', { widen: true }), false);
 });
@@ -85,7 +94,10 @@ test('widen:true fails CLOSED on an unparseable origin (falls back to exact)', (
 });
 
 test('widen:true does NOT widen a legacy item (no matchMode) — positive test only', () => {
-  assert.equal(originMatches(legacyItem('https://example.com'), 'https://accounts.example.com', { widen: true }), false);
+  assert.equal(
+    originMatches(legacyItem('https://example.com'), 'https://accounts.example.com', { widen: true }),
+    false
+  );
   assert.equal(originMatches(legacyItem('https://example.com'), 'https://example.com', { widen: true }), true); // exact still matches
   // An explicit 'exact' item likewise never widens.
   assert.equal(originMatches(exactItem('https://example.com'), 'https://accounts.example.com', { widen: true }), false);

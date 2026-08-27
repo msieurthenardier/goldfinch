@@ -36,7 +36,12 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   font-size: 14px;
   line-height: 1.5;
   display: flex;
@@ -51,7 +56,7 @@ body {
 }
 
 /* ── Left nav (sticky sidebar) — the jars rail, mirrored (M12 F5 HAT hat-page-sidebar) ── */
-nav[aria-label="Secrets"] {
+nav[aria-label='Secrets'] {
   flex: 0 0 var(--nav-w);
   position: sticky;
   top: var(--nav-top);
@@ -65,17 +70,17 @@ nav[aria-label="Secrets"] {
   flex-direction: column;
 }
 
-nav[aria-label="Secrets"] ul {
+nav[aria-label='Secrets'] ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-nav[aria-label="Secrets"] li {
+nav[aria-label='Secrets'] li {
   margin: 0;
 }
 
-nav[aria-label="Secrets"] a {
+nav[aria-label='Secrets'] a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -84,21 +89,23 @@ nav[aria-label="Secrets"] a {
   text-decoration: none;
   font-size: 13px;
   border-left: 3px solid transparent;
-  transition: background 0.1s, color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s;
 }
 
-nav[aria-label="Secrets"] a:hover {
+nav[aria-label='Secrets'] a:hover {
   background: var(--bg-3);
   color: var(--fg);
 }
 
-nav[aria-label="Secrets"] a:focus-visible {
+nav[aria-label='Secrets'] a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 /* Active section highlight (set by the scroll-spy in vault-nav-controller.js). */
-nav[aria-label="Secrets"] a[aria-current="true"] {
+nav[aria-label='Secrets'] a[aria-current='true'] {
   color: var(--accent);
   border-left-color: var(--accent);
   background: var(--bg-3);
@@ -272,7 +279,9 @@ main {
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.1s, filter 0.1s;
+  transition:
+    border-color 0.1s,
+    filter 0.1s;
 }
 
 .vault-btn:not(:disabled):hover {
@@ -469,7 +478,10 @@ main {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s,
+    border-color 0.1s;
 }
 .vault-icon-btn:hover {
   background: var(--bg-3);
@@ -804,7 +816,10 @@ textarea.vault-input {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s,
+    border-color 0.1s;
 }
 .vault-kebab-btn:hover {
   background: var(--bg-3);

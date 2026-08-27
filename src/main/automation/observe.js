@@ -82,7 +82,7 @@ const DEFAULT_PAINT_DELAY_MS = 80;
  * @returns {{ menuType: string, token: number } | null}
  */
 function sheetMenuSnapshot(wc, deps) {
-  return typeof deps.sheetMenuFor === 'function' ? (deps.sheetMenuFor(wc) || null) : null;
+  return typeof deps.sheetMenuFor === 'function' ? deps.sheetMenuFor(wc) || null : null;
 }
 
 /**
@@ -111,14 +111,20 @@ function sheetMenuSnapshot(wc, deps) {
  */
 function assertSheetMenuStable(wc, deps, before, op) {
   const after = sheetMenuSnapshot(wc, deps);
-  const same = before === null
-    ? after === null
-    : (after !== null && after.menuType === before.menuType && after.token === before.token);
+  const same =
+    before === null
+      ? after === null
+      : after !== null && after.menuType === before.menuType && after.token === before.token;
   if (!same) {
     throw new Error(
-      'automation: sheet-menu-changed — ' + op + ' result discarded: the overlay sheet\'s menu changed ' +
-      'during the op (' + (before ? before.menuType + '#' + before.token : 'null') + ' → ' +
-      (after ? after.menuType + '#' + after.token : 'null') + ')'
+      'automation: sheet-menu-changed — ' +
+        op +
+        " result discarded: the overlay sheet's menu changed " +
+        'during the op (' +
+        (before ? before.menuType + '#' + before.token : 'null') +
+        ' → ' +
+        (after ? after.menuType + '#' + after.token : 'null') +
+        ')'
     );
   }
 }
@@ -198,11 +204,11 @@ async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPain
   // M15 F3 L1 (DD1b): snapshot immediately after the FIRST resolve — where wc is in hand.
   const sheetMenu = sheetMenuSnapshot(wc, deps);
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                                       // DD1/DD5 foreground-to-act (guest only)
+    await activate(wcId); // DD1/DD5 foreground-to-act (guest only)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and
     // re-resolving re-applies the DD6 guard post-activation (the Flight-1 discipline).
     wc = resolveContents(wcId, deps);
-    await waitForPaint(wc, { delayMs });                        // paint-settle after foregrounding
+    await waitForPaint(wc, { delayMs }); // paint-settle after foregrounding
   }
   // F7 DD7 (recon S3): capturePage() is a Promise in Electron ^42 — and on a
   // DETACHED-but-live view it NEVER settles, wedging the request forever with no
@@ -222,7 +228,8 @@ async function captureScreenshot(wcId, deps, { waitForPaint = defaultWaitForPain
 // `document.documentElement ? … : ""` guard handles the rare no-documentElement case (e.g. a
 // non-HTML response) so the read resolves with an empty html string rather than throwing a
 // renderer-side TypeError. Full outerHTML, no trimming (DD4).
-const READ_DOM_SNIPPET = '(() => ({' +
+const READ_DOM_SNIPPET =
+  '(() => ({' +
   ' url: location.href,' +
   ' title: document.title,' +
   ' html: document.documentElement ? document.documentElement.outerHTML : "" ' +
@@ -386,13 +393,14 @@ async function captureWindow({ grabWindow }, { windowId } = {}) {
  * @returns {Promise<Array<object> | { automation: 'debugger-unavailable', reason: string, wcId: number }>}
  */
 async function readAxTree(wcId, deps, { depth, properties } = {}) {
-  void depth; void properties;                  // DD4 Flight-9 stub — accepted, unimplemented in v1
+  void depth;
+  void properties; // DD4 Flight-9 stub — accepted, unimplemented in v1
   const { chromeContents, isChromeContents, activate } = deps;
-  let wc = resolveContents(wcId, deps);   // throws bad/dead/internal (DD6); allowInternal forwarded
+  let wc = resolveContents(wcId, deps); // throws bad/dead/internal (DD6); allowInternal forwarded
   // M15 F3 L1 (DD1b): snapshot immediately after the FIRST resolve.
   const sheetMenu = sheetMenuSnapshot(wc, deps);
   if (classifyContents(wc, chromeContents, isChromeContents) === 'guest' && typeof activate === 'function') {
-    await activate(wcId);                        // DD5 foreground-to-act (await BEFORE the lock)
+    await activate(wcId); // DD5 foreground-to-act (await BEFORE the lock)
     // Re-resolve AFTER the async activate: the pre-activate handle may be stale, and re-resolving
     // re-applies the DD6 guard post-activation (the Flight-1 discipline).
     wc = resolveContents(wcId, deps);
@@ -413,7 +421,7 @@ async function readAxTree(wcId, deps, { depth, properties } = {}) {
   const result = await withDebuggerSession(wcId, wc, async (/** @type {any} */ w) => {
     await w.debugger.sendCommand('Accessibility.enable');
     const res = await w.debugger.sendCommand('Accessibility.getFullAXTree');
-    return res && Array.isArray(res.nodes) ? res.nodes : [];          // empty = valid success (DD4)
+    return res && Array.isArray(res.nodes) ? res.nodes : []; // empty = valid success (DD4)
   });
   // Post-await re-check AFTER withDebuggerSession returns (never between its entry and its
   // internal detach — see the no-re-resolve note above; `wc` is still the same handle).
@@ -532,7 +540,7 @@ async function injectScript(wcId, script, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: injectScript — internal-session excluded');
   }
-  await wc.executeJavaScript(script);          // void contract → returns undefined
+  await wc.executeJavaScript(script); // void contract → returns undefined
 }
 
 /**
@@ -577,7 +585,7 @@ async function openDevTools(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: openDevTools — internal-session excluded');
   }
-  setDevTools(wc, true);                         // shared helper: wc.openDevTools({mode:'detach'}); void contract → undefined
+  setDevTools(wc, true); // shared helper: wc.openDevTools({mode:'detach'}); void contract → undefined
 }
 
 /**
@@ -606,7 +614,16 @@ async function closeDevTools(wcId, deps) {
   if (isInternalContents(wc)) {
     throw new Error('automation: closeDevTools — internal-session excluded');
   }
-  setDevTools(wc, false);                        // shared helper: wc.closeDevTools(); idempotent no-op when not open; void contract
+  setDevTools(wc, false); // shared helper: wc.closeDevTools(); idempotent no-op when not open; void contract
 }
 
-module.exports = { captureScreenshot, readDom, captureWindow, readAxTree, evaluate, injectScript, openDevTools, closeDevTools };
+module.exports = {
+  captureScreenshot,
+  readDom,
+  captureWindow,
+  readAxTree,
+  evaluate,
+  injectScript,
+  openDevTools,
+  closeDevTools
+};

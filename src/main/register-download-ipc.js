@@ -23,7 +23,7 @@ function registerDownloadIpc({
   registerInternalHandler,
   getChromeContents,
   now = Date.now,
-  logger = console,
+  logger = console
 }) {
   const pendingDownloads = new Map();
   const approvedDownloadDirs = new Set();
@@ -72,10 +72,11 @@ function registerDownloadIpc({
 
   ipcMain.handle('choose-download-dir', async (event) => {
     const rec = registry.getWindowForChrome(event.sender) || registry.getLastFocused();
-    const opts = { title: 'Choose a folder to download all media into', properties: ['openDirectory', 'createDirectory'] };
-    const result = rec
-      ? await dialog.showOpenDialog(rec.win, opts)
-      : await dialog.showOpenDialog(opts);
+    const opts = {
+      title: 'Choose a folder to download all media into',
+      properties: ['openDirectory', 'createDirectory']
+    };
+    const result = rec ? await dialog.showOpenDialog(rec.win, opts) : await dialog.showOpenDialog(opts);
     if (result.canceled || !result.filePaths.length) return null;
     const chosen = result.filePaths[0];
     approvedDownloadDirs.add(path.resolve(chosen));
@@ -128,8 +129,10 @@ function registerDownloadIpc({
     // complete": an in-flight record already carries a savePath, so opening by id
     // must confirm completion or it would launch a partially-written file.
     if (!record || record.state !== 'completed' || !record.savePath) return { ok: false };
-    return Promise.resolve(shell.openPath(record.savePath))
-      .then((error) => ({ ok: !error, error: error || undefined }));
+    return Promise.resolve(shell.openPath(record.savePath)).then((error) => ({
+      ok: !error,
+      error: error || undefined
+    }));
   });
 
   ipcMain.handle('reveal-downloaded-file', (_event, id) => {
@@ -146,9 +149,9 @@ function registerDownloadIpc({
       const url = item.getURL();
       const meta = pendingDownloads.get(url);
       const suggested = (meta && meta.suggestedName) || item.getFilename() || 'download';
-      item.setSavePath(meta && meta.saveDir
-        ? uniquePath(meta.saveDir, suggested)
-        : uniquePath(getDownloadsPath(), suggested));
+      item.setSavePath(
+        meta && meta.saveDir ? uniquePath(meta.saveDir, suggested) : uniquePath(getDownloadsPath(), suggested)
+      );
 
       const manager = getDownloadsManager();
       const record = buildRegisterRecord(item, { url, startTime: now() });
@@ -177,9 +180,7 @@ function registerDownloadIpc({
     });
   }
 
-  registerInternalHandler(ipcMain, 'internal-downloads-list', () =>
-    getDownloadsManager()?.listAll() || []
-  );
+  registerInternalHandler(ipcMain, 'internal-downloads-list', () => getDownloadsManager()?.listAll() || []);
 
   registerInternalHandler(ipcMain, 'internal-downloads-action', (_event, payload) => {
     const id = payload && payload.id;
@@ -216,8 +217,7 @@ function registerDownloadIpc({
     } else if (action === 'open') {
       const savePath = record ? record.savePath : null;
       if (!savePath) return { ok: false };
-      return Promise.resolve(shell.openPath(savePath))
-        .then((error) => ({ ok: !error, error: error || undefined }));
+      return Promise.resolve(shell.openPath(savePath)).then((error) => ({ ok: !error, error: error || undefined }));
     } else if (action === 'show') {
       const savePath = record ? record.savePath : null;
       if (savePath) shell.showItemInFolder(savePath);

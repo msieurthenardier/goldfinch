@@ -132,8 +132,16 @@ const ACCEPTED = [
   // exceptions (cf. the committed nested-interactive disable). Confirmed live
   // 2026-06-07; targets verified against src/renderer/index.html ids.
   { id: 'region', selector: '#tabs', reason: 'app-shell tab strip sits outside a landmark; accepted chrome exception' },
-  { id: 'region', selector: '#brand', reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception' },
-  { id: 'region', selector: '#address-wrap', reason: 'app-shell address bar sits outside a landmark; accepted chrome exception' },
+  {
+    id: 'region',
+    selector: '#brand',
+    reason: 'app-shell brand pill sits outside a landmark; accepted chrome exception'
+  },
+  {
+    id: 'region',
+    selector: '#address-wrap',
+    reason: 'app-shell address bar sits outside a landmark; accepted chrome exception'
+  },
   // NOTE (M05 F8 cutover): the old chrome `#page-context-menu` region entry was
   // retired with the chrome-DOM menus — the page-context state now audits the
   // menu-overlay SHEET document. The three state-scoped `#sheet-menu` entries
@@ -144,21 +152,65 @@ const ACCEPTED = [
   // #tabs/#brand). The `info-popup` (site-info) and `input-dialog`
   // (new-container) templates raise NO findings (role="dialog" content is
   // outside the region rule's scope) — no entries needed for them.
-  { id: 'region', selector: '#sheet-menu', state: 'sheet:kebab', reason: 'transient role="menu" sheet overlay (kebab); floating menu needs no landmark — chrome #page-context-menu precedent. Menuitem roles/names/keyboard nav raise no violations.' },
-  { id: 'region', selector: '#sheet-menu', state: 'sheet:container', reason: 'transient role="menu" sheet overlay (container picker); floating menu needs no landmark — chrome #page-context-menu precedent.' },
-  { id: 'region', selector: '#sheet-menu', state: 'sheet:page-context', reason: 'transient role="menu" sheet overlay (page context); floating menu needs no landmark — direct successor of the retired chrome #page-context-menu entry.' },
-  { id: 'region', selector: '#sheet-menu', state: 'sheet:tab-context', reason: 'transient role="menu" sheet overlay (tab context menu, M09 Flight 5 Leg 1); same accepted-chrome-exception class as the other menu-template sheet states.' },
+  {
+    id: 'region',
+    selector: '#sheet-menu',
+    state: 'sheet:kebab',
+    reason:
+      'transient role="menu" sheet overlay (kebab); floating menu needs no landmark — chrome #page-context-menu precedent. Menuitem roles/names/keyboard nav raise no violations.'
+  },
+  {
+    id: 'region',
+    selector: '#sheet-menu',
+    state: 'sheet:container',
+    reason:
+      'transient role="menu" sheet overlay (container picker); floating menu needs no landmark — chrome #page-context-menu precedent.'
+  },
+  {
+    id: 'region',
+    selector: '#sheet-menu',
+    state: 'sheet:page-context',
+    reason:
+      'transient role="menu" sheet overlay (page context); floating menu needs no landmark — direct successor of the retired chrome #page-context-menu entry.'
+  },
+  {
+    id: 'region',
+    selector: '#sheet-menu',
+    state: 'sheet:tab-context',
+    reason:
+      'transient role="menu" sheet overlay (tab context menu, M09 Flight 5 Leg 1); same accepted-chrome-exception class as the other menu-template sheet states.'
+  },
   // The two `html` entries below are deliberately STATE-UNSCOPED: they match the
   // chrome document in every chrome state AND the sheet document in the sheet
   // states (the sheet is a transient popup layer, not a document with main/h1).
-  { id: 'landmark-one-main', selector: 'html', reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception' },
-  { id: 'page-has-heading-one', selector: 'html', reason: 'browser chrome shell has no document <h1>; accepted app-shell exception' },
+  {
+    id: 'landmark-one-main',
+    selector: 'html',
+    reason: 'browser chrome shell has no single <main> landmark; accepted app-shell exception'
+  },
+  {
+    id: 'page-has-heading-one',
+    selector: 'html',
+    reason: 'browser chrome shell has no document <h1>; accepted app-shell exception'
+  },
   // 2× serious scrollable-region-focusable (WCAG 2.1.1) — mission Known Issue: a
   // scroll container that isn't keyboard-focusable. Not reproduced by the gate's
   // current (no-overflow) privacy-panel/lightbox states as of 2026-06-07; kept
   // pre-accepted so a future overflow-state audit doesn't flag them as NEW.
-  { id: 'scrollable-region-focusable', selector: '#privacy-body', state: 'privacy-panel', reason: 'privacy-panel scroll body not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' },
-  { id: 'scrollable-region-focusable', selector: '#lightbox-stage', state: 'lightbox', reason: 'lightbox scroll stage not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)' }
+  {
+    id: 'scrollable-region-focusable',
+    selector: '#privacy-body',
+    state: 'privacy-panel',
+    reason:
+      'privacy-panel scroll body not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)'
+  },
+  {
+    id: 'scrollable-region-focusable',
+    selector: '#lightbox-stage',
+    state: 'lightbox',
+    reason:
+      'lightbox scroll stage not keyboard-focusable; mission Known Issue (not gate-reproduced w/o overflow content)'
+  }
 ];
 
 // ---------- pick the renderer target (chrome mode, admin) ----------
@@ -236,8 +288,7 @@ async function findSheetWcId(client) {
     // Prefer the window actually SHOWING a sheet; else any window that has ever
     // instantiated one (sheetWcId present but hidden). An ABSENT sheetWcId means the
     // sheet was never created in that window (lazy — DD5), which is not a candidate.
-    const row = wins.find((w) => w.sheetVisible && w.sheetWcId != null)
-      || wins.find((w) => w.sheetWcId != null);
+    const row = wins.find((w) => w.sheetVisible && w.sheetWcId != null) || wins.find((w) => w.sheetWcId != null);
     if (row) return row.sheetWcId;
   }
   fail(
@@ -256,7 +307,23 @@ async function findSheetWcId(client) {
 // The dialog-style sheet template node ids (menu / popup / input-dialog + the M12 F3
 // first-run-setup vault-set / vault-recovery-show cards). Kept in sync with the
 // SHEET_STATES below — a state whose node id is absent here would never dismiss/close-check.
-const SHEET_NODE_IDS = ['sheet-menu', 'sheet-popup', 'sheet-dialog', 'sheet-downloads', 'sheet-vault-set', 'sheet-vault-recovery', 'sheet-vault-stepup', 'sheet-vault-accesskey', 'sheet-vault-import', 'sheet-vault-change-master', 'sheet-vault-recover', 'sheet-vault-adminkey', 'sheet-auth-basic', 'sheet-cert-picker', 'sheet-bookmark-edit'];
+const SHEET_NODE_IDS = [
+  'sheet-menu',
+  'sheet-popup',
+  'sheet-dialog',
+  'sheet-downloads',
+  'sheet-vault-set',
+  'sheet-vault-recovery',
+  'sheet-vault-stepup',
+  'sheet-vault-accesskey',
+  'sheet-vault-import',
+  'sheet-vault-change-master',
+  'sheet-vault-recover',
+  'sheet-vault-adminkey',
+  'sheet-auth-basic',
+  'sheet-cert-picker',
+  'sheet-bookmark-edit'
+];
 const SHEET_DISMISS_EXPR = `(() => {
   const ids = ${JSON.stringify(SHEET_NODE_IDS)};
   const open = ids.map((id) => document.getElementById(id)).find((el) => el && !el.classList.contains('hidden'));
@@ -380,7 +447,11 @@ async function main() {
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'privacy-panel')));
 
       // 4) Lightbox open on a fixture image (dialog + transport controls render).
-      await evaluate(client, wcId, `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`);
+      await evaluate(
+        client,
+        wcId,
+        `openLightbox({ url: ${JSON.stringify(fixtureImageUrl)}, name: 'fixture', label: 'fixture' })`
+      );
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'lightbox')));
 
@@ -403,7 +474,7 @@ async function main() {
       // default pin map afterward — harmless, since the client closes immediately below.
       await evaluate(client, wcId, 'closeLightbox()');
       await sleep(200);
-      await evaluate(client, wcId, "applyToolbarPins({ media: true, shields: true, devtools: true })");
+      await evaluate(client, wcId, 'applyToolbarPins({ media: true, shields: true, devtools: true })');
       await sleep(400);
       allViolations.push(...(await runAxe(client, wcId, axeSource, 'devtools-button')));
 
@@ -517,8 +588,7 @@ async function main() {
         // The product's 900x600 minimum reaches this naturally; the audit rig's
         // current window is taller and would otherwise leave all 25 rows unscrolled.
         if (state.label === 'sheet:downloads') {
-          await evaluate(client, sheetWcId,
-            "document.getElementById('sheet-downloads').style.maxHeight = '320px'");
+          await evaluate(client, sheetWcId, "document.getElementById('sheet-downloads').style.maxHeight = '320px'");
         }
         allViolations.push(...(await runAxe(client, sheetWcId, axeSource, state.label)));
         const dismissed = await evaluate(client, sheetWcId, SHEET_DISMISS_EXPR);
@@ -548,10 +618,7 @@ async function main() {
     for (const selector of v.nodes) {
       const pair = { id: v.id, selector, state: v.state, impact: v.impact, help: v.help };
       const isAccepted = ACCEPTED.some(
-        (e) =>
-          e.id === v.id &&
-          e.selector === selector &&
-          (e.state === undefined || e.state === v.state)
+        (e) => e.id === v.id && e.selector === selector && (e.state === undefined || e.state === v.state)
       );
       (isAccepted ? accepted : newPairs).push(pair);
     }

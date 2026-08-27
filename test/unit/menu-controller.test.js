@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
 // point at a fake item.
 const documentStub = {
   addEventListener() {},
-  /** @type {any} */ activeElement: null,
+  /** @type {any} */ activeElement: null
 };
 globalThis.document = /** @type {any} */ (documentStub);
 globalThis.window = /** @type {any} */ ({ addEventListener() {} });
@@ -42,7 +42,7 @@ function makeNode() {
     },
     focus() {
       this.focusCalls++;
-    },
+    }
   };
 }
 
@@ -79,7 +79,7 @@ function makeFakeEntry(opts = {}) {
         tabIndex: -1,
         focus() {
           it.focusCalls++;
-        },
+        }
       };
       items.push(it);
     }
@@ -90,7 +90,7 @@ function makeFakeEntry(opts = {}) {
     trigger,
     menu,
     onOpen,
-    onClose,
+    onClose
   };
   if (opts.withItems) entry.items = () => items;
   if (focusReturn) entry.focusReturn = focusReturn;
@@ -260,7 +260,13 @@ test('menu keydown ArrowUp from item 0 wraps to the last item', () => {
 // ---------------------------------------------------------------------------
 test('focusItem wraps negative and overflow indices', () => {
   const items = [0, 1, 2].map(() => {
-    const it = { focusCalls: 0, tabIndex: -1, focus() { it.focusCalls++; } };
+    const it = {
+      focusCalls: 0,
+      tabIndex: -1,
+      focus() {
+        it.focusCalls++;
+      }
+    };
     return it;
   });
   focusItem(/** @type {any} */ (items), -1);

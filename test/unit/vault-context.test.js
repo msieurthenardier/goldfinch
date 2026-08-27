@@ -30,7 +30,7 @@ const MASTER = 'correct horse battery staple';
 // Jars carry `partition` (scope.js membership needs it); vault-store reads only `id`.
 const JARS = [
   { id: 'work', partition: 'persist:container:work' },
-  { id: 'personal', partition: 'persist:container:personal' },
+  { id: 'personal', partition: 'persist:container:personal' }
 ];
 // A well-known base32 TOTP secret (bare secret → parseOtpauth defaults SHA1/6/30).
 const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
@@ -45,7 +45,7 @@ function makeStore(dir) {
   return vs.load(dir, {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
-    listJars: () => JARS,
+    listJars: () => JARS
   });
 }
 
@@ -56,9 +56,31 @@ async function buildFixture() {
   const dir = tmpDir();
   const setup = makeStore(dir);
   const { adminPrivateKeyB64 } = await setup.setup({ masterPassword: MASTER });
-  setup.saveItem('global', { id: 'g1', type: 'login', title: 'Global', origin: 'https://global.example', username: 'guser', password: 'gpass' });
-  setup.saveItem('work', { id: 'w1', type: 'login', title: 'Work', origin: 'https://work.example', username: 'wuser', password: 'wpass', totp: TOTP_SECRET });
-  setup.saveItem('personal', { id: 'p1', type: 'login', title: 'Personal', origin: 'https://personal.example', username: 'puser', password: 'ppass' });
+  setup.saveItem('global', {
+    id: 'g1',
+    type: 'login',
+    title: 'Global',
+    origin: 'https://global.example',
+    username: 'guser',
+    password: 'gpass'
+  });
+  setup.saveItem('work', {
+    id: 'w1',
+    type: 'login',
+    title: 'Work',
+    origin: 'https://work.example',
+    username: 'wuser',
+    password: 'wpass',
+    totp: TOTP_SECRET
+  });
+  setup.saveItem('personal', {
+    id: 'p1',
+    type: 'login',
+    title: 'Personal',
+    origin: 'https://personal.example',
+    username: 'puser',
+    password: 'ppass'
+  });
   const work = await setup.mintAccessKey('work', { masterPassword: MASTER });
   const personal = await setup.mintAccessKey('personal', { masterPassword: MASTER });
   setup.lockNow(); // human store locked — the automation path is stateless.
@@ -76,13 +98,20 @@ function makeWorld() {
   const tabs = [
     { wcId: 10, partition: 'persist:container:work', url: 'https://work.example/login' },
     { wcId: 20, partition: 'persist:container:personal', url: 'https://personal.example/login' },
-    { wcId: 30, partition: 'persist:container:work', url: 'https://evil.example/phish' }, // work session, WRONG origin
+    { wcId: 30, partition: 'persist:container:work', url: 'https://evil.example/phish' } // work session, WRONG origin
   ];
   const byWcId = new Map(tabs.map((t) => [t.wcId, t]));
   const fromId = (wcId) => {
     const t = byWcId.get(wcId);
     if (!t) return null;
-    return { id: wcId, session: sessionFor(t.partition), getURL: () => t.url, isDestroyed() { return false; } };
+    return {
+      id: wcId,
+      session: sessionFor(t.partition),
+      getURL: () => t.url,
+      isDestroyed() {
+        return false;
+      }
+    };
   };
   return { fromId, fromPartition: sessionFor };
 }
@@ -92,23 +121,39 @@ function fillDeps(world) {
     jars: { list: () => JARS },
     fromId: world.fromId,
     fromPartition: world.fromPartition,
-    getChromeContents: () => ({ id: 0 }),
+    getChromeContents: () => ({ id: 0 })
   };
 }
 
 function makeFill() {
   const calls = [];
-  return { fn: (arg) => { calls.push(arg); }, calls };
+  return {
+    fn: (arg) => {
+      calls.push(arg);
+    },
+    calls
+  };
 }
 
 // A manual timer harness for the idle-lock backstop.
 function fakeTimers() {
   let armed = null;
   return {
-    setTimeout: (fn, ms) => { armed = { fn, ms }; return { unref() {} }; },
-    clearTimeout: () => { armed = null; },
-    fire() { const a = armed; armed = null; if (a) a.fn(); },
-    get armed() { return armed; },
+    setTimeout: (fn, ms) => {
+      armed = { fn, ms };
+      return { unref() {} };
+    },
+    clearTimeout: () => {
+      armed = null;
+    },
+    fire() {
+      const a = armed;
+      armed = null;
+      if (a) a.fn();
+    },
+    get armed() {
+      return armed;
+    }
   };
 }
 
@@ -140,8 +185,24 @@ test('duplicate item id across vaults: fill/totp refuse to guess; vaultId disamb
   const { adminPrivateKeyB64 } = await setup.setup({ masterPassword: MASTER });
   // The SAME item id in two vaults (as an identical bundle imported into both would produce),
   // each bound to a DIFFERENT origin + TOTP.
-  setup.saveItem('global', { id: 'dup', type: 'login', title: 'G', origin: 'https://global.example', username: 'guser', password: 'gpass', totp: TOTP_SECRET });
-  setup.saveItem('work', { id: 'dup', type: 'login', title: 'W', origin: 'https://work.example', username: 'wuser', password: 'wpass', totp: TOTP_SECRET });
+  setup.saveItem('global', {
+    id: 'dup',
+    type: 'login',
+    title: 'G',
+    origin: 'https://global.example',
+    username: 'guser',
+    password: 'gpass',
+    totp: TOTP_SECRET
+  });
+  setup.saveItem('work', {
+    id: 'dup',
+    type: 'login',
+    title: 'W',
+    origin: 'https://work.example',
+    username: 'wuser',
+    password: 'wpass',
+    totp: TOTP_SECRET
+  });
   setup.lockNow();
   try {
     const store = makeStore(dir);
@@ -151,10 +212,10 @@ test('duplicate item id across vaults: fill/totp refuse to guess; vaultId disamb
     const world = makeWorld(); // wcId 10 = work.example, origin-matching the work 'dup'
 
     // Bare itemId is AMBIGUOUS across the two unlocked vaults → refuse (never guess).
-    assert.deepEqual(
-      ctx.fill('admin', { wcId: 10, itemId: 'dup' }, fillDeps(world)),
-      { filled: false, reason: 'ambiguous' }
-    );
+    assert.deepEqual(ctx.fill('admin', { wcId: 10, itemId: 'dup' }, fillDeps(world)), {
+      filled: false,
+      reason: 'ambiguous'
+    });
     assert.equal(fill.calls.length, 0, 'no credential handed to the delegate on an ambiguous fill');
     // totp is likewise fail-closed (no wrong code) without a vaultId.
     assert.deepEqual(ctx.totp('dup'), { id: 'dup', code: null });
@@ -162,7 +223,11 @@ test('duplicate item id across vaults: fill/totp refuse to guess; vaultId disamb
     // vaultId selects the intended one: work's 'dup' matches the work.example tab origin.
     const ok = ctx.fill('admin', { wcId: 10, itemId: 'dup', vaultId: 'work' }, fillDeps(world));
     assert.deepEqual(ok, { filled: true, id: 'dup', origin: 'https://work.example' });
-    assert.deepEqual(fill.calls[0].credential, { username: 'wuser', password: 'wpass' }, 'the WORK credential is filled, not global');
+    assert.deepEqual(
+      fill.calls[0].credential,
+      { username: 'wuser', password: 'wpass' },
+      'the WORK credential is filled, not global'
+    );
 
     // Selecting global's 'dup' at the work tab is a normal origin-mismatch (never the wrong fill).
     const mism = ctx.fill('admin', { wcId: 10, itemId: 'dup', vaultId: 'global' }, fillDeps(world));
@@ -176,18 +241,30 @@ test('duplicate item id across vaults: fill/totp refuse to guess; vaultId disamb
   }
 });
 
-test('revoking a live session\'s access key drops its vault on the NEXT op (PR#112 finding 2)', async () => {
+test("revoking a live session's access key drops its vault on the NEXT op (PR#112 finding 2)", async () => {
   const dir = tmpDir();
   const setup = makeStore(dir);
   await setup.setup({ masterPassword: MASTER });
-  setup.saveItem('work', { id: 'w1', type: 'login', title: 'W', origin: 'https://work.example', username: 'wuser', password: 'wpass', totp: TOTP_SECRET });
+  setup.saveItem('work', {
+    id: 'w1',
+    type: 'login',
+    title: 'W',
+    origin: 'https://work.example',
+    username: 'wuser',
+    password: 'wpass',
+    totp: TOTP_SECRET
+  });
   const { secret, keyId } = await setup.mintAccessKey('work', { masterPassword: MASTER });
   try {
     const store = makeStore(dir); // the automation-side stateless reader
     const fill = makeFill();
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
     assert.deepEqual(ctx.unlock('work', secret).unlocked, ['work']);
-    assert.deepEqual(ctx.list().map((r) => r.id), ['w1'], 'the live session lists its item while the key is valid');
+    assert.deepEqual(
+      ctx.list().map((r) => r.id),
+      ['w1'],
+      'the live session lists its item while the key is valid'
+    );
 
     // Revoke the access key (its `access` envelope is deleted) via the still-unlocked setup store.
     assert.equal(setup.revokeAccessKey('work', keyId), true);
@@ -196,7 +273,10 @@ test('revoking a live session\'s access key drops its vault on the NEXT op (PR#1
     assert.deepEqual(ctx.list(), [], 'the revoked session no longer lists (not lingering to teardown/idle)');
     assert.deepEqual(ctx.totp('w1'), { id: 'w1', code: null });
     const world = makeWorld();
-    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)), { filled: false, reason: 'locked' });
+    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)), {
+      filled: false,
+      reason: 'locked'
+    });
     assert.equal(fill.calls.length, 0, 'no fill after revocation');
   } finally {
     rm(dir);
@@ -207,7 +287,14 @@ test('rotating the admin key drops a live ADMIN session on the NEXT op (finding 
   const dir = tmpDir();
   const setup = makeStore(dir);
   const { adminPrivateKeyB64 } = await setup.setup({ masterPassword: MASTER });
-  setup.saveItem('global', { id: 'g1', type: 'login', title: 'G', origin: 'https://global.example', username: 'guser', password: 'gpass' });
+  setup.saveItem('global', {
+    id: 'g1',
+    type: 'login',
+    title: 'G',
+    origin: 'https://global.example',
+    username: 'guser',
+    password: 'gpass'
+  });
   try {
     const store = makeStore(dir);
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
@@ -420,7 +507,10 @@ test('list/totp/fill BEFORE unlock are normal empty/locked results (empty ctx)',
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: fill.fn });
     assert.deepEqual(ctx.list(), []);
     assert.deepEqual(ctx.totp('w1'), { id: 'w1', code: null });
-    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)), { filled: false, reason: 'locked' });
+    assert.deepEqual(ctx.fill('work', { wcId: 10, itemId: 'w1' }, fillDeps(world)), {
+      filled: false,
+      reason: 'locked'
+    });
     assert.equal(fill.calls.length, 0);
   } finally {
     rm(fx.dir);
@@ -440,12 +530,22 @@ test('two sessions unlocking the SAME vault hold independent contexts — zeroiz
     const ctxB = createVaultContext({ vaultStore: storeB, fillDelegate: makeFill().fn });
     ctxA.unlock('work', fx.workSecret);
     ctxB.unlock('work', fx.workSecret);
-    assert.deepEqual(ctxA.list().map((r) => r.id), ['w1']);
-    assert.deepEqual(ctxB.list().map((r) => r.id), ['w1']);
+    assert.deepEqual(
+      ctxA.list().map((r) => r.id),
+      ['w1']
+    );
+    assert.deepEqual(
+      ctxB.list().map((r) => r.id),
+      ['w1']
+    );
     // Tear down A — B must keep working (its own fresh-buffer copy).
     ctxA.zeroize();
     assert.deepEqual(ctxA.list(), [], 'A is empty after zeroize');
-    assert.deepEqual(ctxB.list().map((r) => r.id), ['w1'], 'B still holds its own key');
+    assert.deepEqual(
+      ctxB.list().map((r) => r.id),
+      ['w1'],
+      'B still holds its own key'
+    );
   } finally {
     rm(fx.dir);
   }
@@ -466,7 +566,10 @@ test('zeroize (transport.onclose) clears the session — a fresh vaultUnlock is 
     assert.deepEqual(ctx.list(), [], 'nothing unlocked after zeroize');
     // Re-unlock restores the session.
     ctx.unlock('work', fx.workSecret);
-    assert.deepEqual(ctx.list().map((r) => r.id), ['w1']);
+    assert.deepEqual(
+      ctx.list().map((r) => r.id),
+      ['w1']
+    );
   } finally {
     rm(fx.dir);
   }
@@ -486,7 +589,11 @@ test('no singleton coupling: an MCP unlock NEVER changes the vault-store human l
     assert.equal(store.isUnlocked(), false, 'a jar automation unlock leaves the human store locked');
     ctx.zeroize();
     ctx.unlock('admin', fx.adminPrivateKeyB64);
-    assert.equal(store.isUnlocked(), false, 'an admin automation unlock leaves the human store locked (openAllWithAdminKey never installs the MRK)');
+    assert.equal(
+      store.isUnlocked(),
+      false,
+      'an admin automation unlock leaves the human store locked (openAllWithAdminKey never installs the MRK)'
+    );
   } finally {
     rm(fx.dir);
   }
@@ -499,7 +606,11 @@ test('no singleton coupling: vault-store.lockNow() NEVER empties a live MCP sess
     const ctx = createVaultContext({ vaultStore: store, fillDelegate: makeFill().fn });
     ctx.unlock('work', fx.workSecret);
     store.lockNow(); // a concurrent human "Lock now"
-    assert.deepEqual(ctx.list().map((r) => r.id), ['w1'], 'the MCP session keeps working after a human lock');
+    assert.deepEqual(
+      ctx.list().map((r) => r.id),
+      ['w1'],
+      'the MCP session keeps working after a human lock'
+    );
   } finally {
     rm(fx.dir);
   }
@@ -522,7 +633,10 @@ test('openAllWithAdminKey opens every vault into FRESH buffers with NO singleton
     assert.equal(store.vaultKeys.size, 0);
     // The returned buffers are usable to decrypt items (stateless read path).
     const items = store.readVaultItems('work', map.get('work'));
-    assert.deepEqual(items.map((i) => i.id), ['w1']);
+    assert.deepEqual(
+      items.map((i) => i.id),
+      ['w1']
+    );
   } finally {
     rm(fx.dir);
   }
@@ -542,7 +656,7 @@ test('the per-session idle timer zeroizes the ctx on fire; each vault op resets 
       fillDelegate: makeFill().fn,
       getAutoLockMinutes: () => 5,
       setTimeout: timers.setTimeout,
-      clearTimeout: timers.clearTimeout,
+      clearTimeout: timers.clearTimeout
     });
     ctx.unlock('work', fx.workSecret);
     assert.ok(timers.armed, 'unlock arms the idle timer');
@@ -575,7 +689,12 @@ test('deriveAuditDetail NEVER emits a secret for vault ops (both accessKey types
     assert.equal(deriveAuditDetail('vaultFill', { wcId: 10, itemId: 'w1' }), 'item=w1');
     assert.equal(deriveAuditDetail('vaultTotp', { itemId: 'w1' }), 'item=w1');
     for (const op of ['vaultUnlock', 'vaultList', 'vaultTotp', 'vaultFill']) {
-      const detail = deriveAuditDetail(op, { accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, itemId: 'w1', wcId: 10 });
+      const detail = deriveAuditDetail(op, {
+        accessKey: fx.workSecret,
+        adminKey: fx.adminPrivateKeyB64,
+        itemId: 'w1',
+        wcId: 10
+      });
       const s = String(detail);
       for (const secret of [fx.workSecret, fx.adminPrivateKeyB64, 'wpass', TOTP_SECRET]) {
         assert.equal(s.includes(secret), false, op + ' audit detail must not leak ' + secret);
@@ -588,12 +707,21 @@ test('deriveAuditDetail NEVER emits a secret for vault ops (both accessKey types
     // the unlock COUNT may surface; no secret substring may appear.
     const mkResult = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
     const hostile = mkResult({
-      filled: true, id: 'w1', origin: 'https://work.example',
-      password: 'wpass', accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, totp: TOTP_SECRET,
-      unlocked: [fx.workSecret, fx.adminPrivateKeyB64],
+      filled: true,
+      id: 'w1',
+      origin: 'https://work.example',
+      password: 'wpass',
+      accessKey: fx.workSecret,
+      adminKey: fx.adminPrivateKeyB64,
+      totp: TOTP_SECRET,
+      unlocked: [fx.workSecret, fx.adminPrivateKeyB64]
     });
     for (const op of ['vaultUnlock', 'vaultList', 'vaultTotp', 'vaultFill']) {
-      const detail = deriveAuditDetail(op, { accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, itemId: 'w1', wcId: 10 }, hostile);
+      const detail = deriveAuditDetail(
+        op,
+        { accessKey: fx.workSecret, adminKey: fx.adminPrivateKeyB64, itemId: 'w1', wcId: 10 },
+        hostile
+      );
       const s = String(detail);
       for (const secret of [fx.workSecret, fx.adminPrivateKeyB64, 'wpass', TOTP_SECRET]) {
         assert.equal(s.includes(secret), false, op + ' result-aware audit detail must not leak ' + secret);
@@ -620,11 +748,14 @@ function makeAnswerWorld({ challengeUrl = 'https://work.example/protected' } = {
   const answers = [];
   const challenges = new Map([
     // wcId 10 (work tab) has a pending challenge whose URL origin matches w1.
-    [10, { wcId: 10, host: 'work.example', port: 443, realm: 'fixture', url: challengeUrl }],
+    [10, { wcId: 10, host: 'work.example', port: 443, realm: 'fixture', url: challengeUrl }]
   ]);
   const deps = {
-    answerAuthDelegate: (arg) => { answers.push(arg); return { answered: true }; },
-    getPendingChallenge: (wcId) => challenges.get(wcId) || null,
+    answerAuthDelegate: (arg) => {
+      answers.push(arg);
+      return { answered: true };
+    },
+    getPendingChallenge: (wcId) => challenges.get(wcId) || null
   };
   return { world, answers, challenges, deps };
 }
@@ -730,7 +861,14 @@ test('answerAuth ambiguous item id (same id in two unlocked vaults, no vaultId) 
     // Duplicate w1's id into the personal vault so an admin session sees both.
     const seed = makeStore(fx.dir);
     await seed.unlock(MASTER);
-    seed.saveItem('personal', { id: 'w1', type: 'login', title: 'Dup', origin: 'https://work.example', username: 'dupuser', password: 'duppass' });
+    seed.saveItem('personal', {
+      id: 'w1',
+      type: 'login',
+      title: 'Dup',
+      origin: 'https://work.example',
+      username: 'dupuser',
+      password: 'duppass'
+    });
     seed.lockNow();
     const store = makeStore(fx.dir);
     const aw = makeAnswerWorld();
@@ -763,7 +901,9 @@ test('answerAuth: a delegate reporting failure (challenge vanished mid-answer) d
 });
 
 test('deriveAuditDetail(vaultAnswerAuth) records item id + resolved origin from the result — never a credential', () => {
-  const okResult = { content: [{ text: JSON.stringify({ answered: true, id: 'w1', origin: 'https://work.example' }) }] };
+  const okResult = {
+    content: [{ text: JSON.stringify({ answered: true, id: 'w1', origin: 'https://work.example' }) }]
+  };
   assert.equal(
     deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }, okResult),
     'item=w1 origin=https://work.example'
@@ -771,5 +911,9 @@ test('deriveAuditDetail(vaultAnswerAuth) records item id + resolved origin from 
   const noResult = { content: [{ text: JSON.stringify({ answered: false, reason: 'locked' }) }] };
   assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }, noResult), 'item=w1');
   assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10 }, okResult), null, 'no itemId → null');
-  assert.equal(deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }), 'item=w1', '2-arg call keeps args-only detail');
+  assert.equal(
+    deriveAuditDetail('vaultAnswerAuth', { wcId: 10, itemId: 'w1' }),
+    'item=w1',
+    '2-arg call keeps args-only detail'
+  );
 });

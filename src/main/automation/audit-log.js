@@ -31,9 +31,7 @@ const DEFAULT_CAPACITY = 500;
  * @returns {{ kind: 'admin' | 'jar', jarId: string | null }}
  */
 function classifyIdentity(identity) {
-  return identity === 'admin'
-    ? { kind: 'admin', jarId: null }
-    : { kind: 'jar', jarId: identity };
+  return identity === 'admin' ? { kind: 'admin', jarId: null } : { kind: 'jar', jarId: identity };
 }
 
 /**
@@ -54,9 +52,7 @@ function classifyIdentity(identity) {
  * }}
  */
 function createAuditLog(opts = {}) {
-  const capacity = Number.isInteger(opts.capacity) && opts.capacity > 0
-    ? opts.capacity
-    : DEFAULT_CAPACITY;
+  const capacity = Number.isInteger(opts.capacity) && opts.capacity > 0 ? opts.capacity : DEFAULT_CAPACITY;
   const now = typeof opts.now === 'function' ? opts.now : () => Date.now();
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 
@@ -109,7 +105,7 @@ function createAuditLog(opts = {}) {
       targetWcId: e.targetWcId ?? null,
       outcome: e.outcome,
       errorCode: e.errorCode ?? null,
-      detail: e.detail ?? null,
+      detail: e.detail ?? null
     });
     while (ring.length > capacity) ring.shift();
     fire();

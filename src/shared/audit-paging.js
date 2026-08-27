@@ -63,7 +63,7 @@ export function windowPage(activeLog, page, pageSize) {
     showingFrom,
     showingTo,
     hasPrev: page > 1,
-    hasNext: page * pageSize < total,
+    hasNext: page * pageSize < total
   };
 }
 
@@ -140,8 +140,12 @@ export function pageList(total, pageSize, currentPage, opts) {
   // Collect the set of page numbers to show explicitly.
   const show = new Set();
   for (let p = 1; p <= edge && p <= count; p += 1) show.add(p);
-  for (let p = count - edge + 1; p <= count; p += 1) { if (p >= 1) show.add(p); }
-  for (let p = cur - around; p <= cur + around; p += 1) { if (p >= 1 && p <= count) show.add(p); }
+  for (let p = count - edge + 1; p <= count; p += 1) {
+    if (p >= 1) show.add(p);
+  }
+  for (let p = cur - around; p <= cur + around; p += 1) {
+    if (p >= 1 && p <= count) show.add(p);
+  }
 
   const pages = [...show].sort((a, b) => a - b);
   /** @type {Array<number|'…'>} */

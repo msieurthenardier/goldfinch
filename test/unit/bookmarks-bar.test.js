@@ -15,7 +15,7 @@ const {
   partitionOverflow,
   overflowSheetModel,
   resolveOverflowRowId,
-  createBookmarksBar,
+  createBookmarksBar
 } = require('../../src/renderer/chrome/bookmarks-bar.js');
 
 // Squawk 0024: the file's ~2s of extra wall time was NOT the repeated
@@ -81,7 +81,7 @@ test('partitionOverflow — window too narrow for even one item: all collapse (E
   assert.deepEqual(partitionOverflow([80, 40], 50, 24, 2), { visibleCount: 0, overflowing: true });
 });
 
-test('partitionOverflow — gap defaults to the bar\'s own 2px when omitted', async () => {
+test("partitionOverflow — gap defaults to the bar's own 2px when omitted", async () => {
   // Pins the default: 3×33 = 99 fits a 100 run only with gaps ignored;
   // with the real gaps (99 + 4 = 103) it does not.
   assert.deepEqual(partitionOverflow([33, 33, 33], 100), { visibleCount: 2, overflowing: true });
@@ -96,7 +96,7 @@ test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the no-overflow branch pr
   // 1: 25 +2+24 = 51 ✓ | 2: 25+2+25 = 52, +2+24 = 78 ✓ | 3: 79, +2+24 = 105 ✗.
 });
 
-test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the chevron\'s footprint stays inside the bar on a full row', async () => {
+test("partitionOverflow — REGRESSION (M15 F2 Leg 4): the chevron's footprint stays inside the bar on a full row", async () => {
   // The shipped defect at its observed scale: a 1398px bar (content run 1386
   // after 2×6px padding) on a full row. The OLD math summed raw item widths
   // against a `availableWidth - chevron` budget and never paid for the 2px
@@ -115,9 +115,10 @@ test('partitionOverflow — REGRESSION (M15 F2 Leg 4): the chevron\'s footprint 
   // The invariant the defect broke, asserted directly rather than by number:
   // the row's REAL laid-out width — items, the gaps between them, the gap
   // before the chevron, and the chevron — must fit the available run.
-  const laidOut = widths.slice(0, visibleCount).reduce((a, b) => a + b, 0)
-    + 2 * visibleCount // (visibleCount - 1) inter-item gaps + 1 before the chevron
-    + 24;
+  const laidOut =
+    widths.slice(0, visibleCount).reduce((a, b) => a + b, 0) +
+    2 * visibleCount + // (visibleCount - 1) inter-item gaps + 1 before the chevron
+    24;
   assert.ok(laidOut <= available, `chevron would be clipped: ${laidOut} > ${available}`);
   // …and it is a TIGHT fit — admitting one more item would have clipped it.
   assert.ok(laidOut + 2 + widths[visibleCount] > available, 'partition is not maximal');
@@ -127,14 +128,18 @@ test('overflowSheetModel — snapshot-local index ids, label falls back to url',
   const model = overflowSheetModel([{ title: 'A', url: 'https://a.test/' }, { url: 'https://b.test/' }]);
   assert.deepEqual(model, [
     { id: 'bookmark:0', label: 'A' },
-    { id: 'bookmark:1', label: 'https://b.test/' },
+    { id: 'bookmark:1', label: 'https://b.test/' }
   ]);
 });
 
 test('resolveOverflowRowId — VALIDATED-NO-OP: malformed/out-of-range ids resolve null, never throw', async () => {
   const snapshot = [{ url: 'https://a.test/' }, { url: 'https://b.test/' }];
   assert.deepEqual(resolveOverflowRowId('bookmark:0', snapshot), { kind: 'bookmark', index: 0, bookmark: snapshot[0] });
-  assert.deepEqual(resolveOverflowRowId('bookmark-edit:1', snapshot), { kind: 'bookmark-edit', index: 1, bookmark: snapshot[1] });
+  assert.deepEqual(resolveOverflowRowId('bookmark-edit:1', snapshot), {
+    kind: 'bookmark-edit',
+    index: 1,
+    bookmark: snapshot[1]
+  });
   assert.equal(resolveOverflowRowId('bookmark:2', snapshot), null); // out of bounds
   assert.equal(resolveOverflowRowId('bookmark:-1', snapshot), null);
   assert.equal(resolveOverflowRowId('sug:0', snapshot), null); // foreign id family
@@ -148,13 +153,22 @@ test('resolveOverflowRowId — VALIDATED-NO-OP: malformed/out-of-range ids resol
 // ---------------------------------------------------------------------------
 
 class FakeClassList {
-  constructor() { this.values = new Set(); }
-  add(...names) { names.forEach((n) => this.values.add(n)); }
-  remove(...names) { names.forEach((n) => this.values.delete(n)); }
-  contains(n) { return this.values.has(n); }
+  constructor() {
+    this.values = new Set();
+  }
+  add(...names) {
+    names.forEach((n) => this.values.add(n));
+  }
+  remove(...names) {
+    names.forEach((n) => this.values.delete(n));
+  }
+  contains(n) {
+    return this.values.has(n);
+  }
   toggle(n, force) {
     const next = force === undefined ? !this.values.has(n) : !!force;
-    if (next) this.values.add(n); else this.values.delete(n);
+    if (next) this.values.add(n);
+    else this.values.delete(n);
     return next;
   }
 }
@@ -176,16 +190,30 @@ class FakeElement {
     this.textContent = '';
     this.style = {};
   }
-  set className(value) { value.split(/\s+/).filter(Boolean).forEach((n) => this.classList.add(n)); }
-  addEventListener(name, fn) { this.listeners.set(name, fn); }
-  appendChild(el) { el.parent = this; this.children.push(el); return el; }
+  set className(value) {
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .forEach((n) => this.classList.add(n));
+  }
+  addEventListener(name, fn) {
+    this.listeners.set(name, fn);
+  }
+  appendChild(el) {
+    el.parent = this;
+    this.children.push(el);
+    return el;
+  }
   insertBefore(el, ref) {
     el.parent = this;
     const idx = ref ? this.children.indexOf(ref) : -1;
-    if (idx === -1) this.children.push(el); else this.children.splice(idx, 0, el);
+    if (idx === -1) this.children.push(el);
+    else this.children.splice(idx, 0, el);
     return el;
   }
-  remove() { if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); }
+  remove() {
+    if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this);
+  }
   getBoundingClientRect() {
     // display:none reads as a ZERO-WIDTH rect AT LEFT 0 — the exact browser
     // behaviour the drag's hidden-item filtering exists for (DD3), reproduced
@@ -195,14 +223,26 @@ class FakeElement {
     const width = hidden ? 0 : this._width;
     return { left, width, top: this._top, height: this._height, right: left + width, bottom: this._top + this._height };
   }
-  fire(name, evt = {}) { const fn = this.listeners.get(name); if (fn) fn({ preventDefault() {}, ...evt }); }
+  fire(name, evt = {}) {
+    const fn = this.listeners.get(name);
+    if (fn) fn({ preventDefault() {}, ...evt });
+  }
 }
 
 class FakeDocument {
-  constructor() { this.listeners = new Map(); }
-  createElement(tag) { return new FakeElement(tag); }
-  addEventListener(name, fn) { this.listeners.set(name, fn); }
-  fire(name, evt = {}) { const fn = this.listeners.get(name); if (fn) fn({ preventDefault() {}, ...evt }); }
+  constructor() {
+    this.listeners = new Map();
+  }
+  createElement(tag) {
+    return new FakeElement(tag);
+  }
+  addEventListener(name, fn) {
+    this.listeners.set(name, fn);
+  }
+  fire(name, evt = {}) {
+    const fn = this.listeners.get(name);
+    if (fn) fn({ preventDefault() {}, ...evt });
+  }
 }
 
 /** A minimal `dataTransfer` that records what dragstart wrote and answers
@@ -214,17 +254,28 @@ function fakeDataTransfer(seed = {}) {
     data,
     effectAllowed: null,
     dropEffect: null,
-    setData(type, value) { data[type] = value; },
-    getData(type) { return data[type] || ''; },
-    get types() { return Object.keys(data); },
+    setData(type, value) {
+      data[type] = value;
+    },
+    getData(type) {
+      return data[type] || '';
+    },
+    get types() {
+      return Object.keys(data);
+    }
   };
 }
 
 const BOOKMARK_MIME = 'application/x-goldfinch-bookmark';
 
 class FakeResizeObserver {
-  constructor(cb) { this.cb = cb; FakeResizeObserver.instances.push(this); }
-  observe(el) { this.target = el; }
+  constructor(cb) {
+    this.cb = cb;
+    FakeResizeObserver.instances.push(this);
+  }
+  observe(el) {
+    this.target = el;
+  }
 }
 FakeResizeObserver.instances = [];
 
@@ -252,26 +303,38 @@ function harness({ list = [] } = {}) {
     // M15 F3 Leg 3: the drag commit lives in bookmarks-client.js (DD12's budget
     // discipline); the bar only calls it. Recorded, never executed here —
     // bookmarks-client.test.js owns the DD6b fresh-read behaviour.
-    commitReorder: (...args) => { calls.push(['commitReorder', ...args]); return Promise.resolve(true); },
+    commitReorder: (...args) => {
+      calls.push(['commitReorder', ...args]);
+      return Promise.resolve(true);
+    },
     // M15 F3 Leg 5a: the bar → overflow commit. Recorded, never executed —
     // bookmarks-client.test.js owns the ruled index formula's literal-order pins.
-    commitOverflowDrop: (...args) => { calls.push(['commitOverflowDrop', ...args]); return Promise.resolve(true); },
+    commitOverflowDrop: (...args) => {
+      calls.push(['commitOverflowDrop', ...args]);
+      return Promise.resolve(true);
+    }
   };
   const overlayMenuState = { open: false };
   const overlayMenuClient = {
     open: (...args) => calls.push(['open', ...args]),
     close: (reason) => calls.push(['close', reason]),
-    trigger: (menuType, openFn) => { calls.push(['trigger', menuType]); openFn(); },
+    trigger: (menuType, openFn) => {
+      calls.push(['trigger', menuType]);
+      openFn();
+    }
   };
   const activeContainer = { id: 'active-jar' };
   const clock = { t: 0 };
 
   const deps = {
-    document, ResizeObserver: FakeResizeObserver, els,
+    document,
+    ResizeObserver: FakeResizeObserver,
+    els,
     bookmarksClient,
     navigate: (url) => calls.push(['navigate', url]),
     createTab: (...args) => calls.push(['createTab', ...args]),
-    openBookmarkEditOverlay: (bookmark, anchorEl, jarId) => calls.push(['edit', bookmark, anchorEl === bookmarksOverflow ? 'chevron' : 'item', jarId]),
+    openBookmarkEditOverlay: (bookmark, anchorEl, jarId) =>
+      calls.push(['edit', bookmark, anchorEl === bookmarksOverflow ? 'chevron' : 'item', jarId]),
     activeContainer: () => activeContainer,
     overlayMenuClient,
     overlayMenuState,
@@ -283,14 +346,23 @@ function harness({ list = [] } = {}) {
     bookmarkDragEnded: (...args) => calls.push(['bookmarkDragEnded', ...args]),
     // M15 F3 Leg 5a: the spring-load dwell's injected clock — advanced explicitly
     // by `clock.t`, so the dwell is pinned by arithmetic rather than by a sleep.
-    now: () => clock.t,
+    now: () => clock.t
   };
 
   return {
-    els, calls, bookmarksClient, overlayMenuState, activeContainer, list, deps, clock,
+    els,
+    calls,
+    bookmarksClient,
+    overlayMenuState,
+    activeContainer,
+    list,
+    deps,
+    clock,
     /** Swap what the cache answers, WITHOUT re-rendering — the mid-drag
      * broadcast-updated-cache case (`render()` is suppressed by dragActive). */
-    setLive(next) { live = next; },
+    setLive(next) {
+      live = next;
+    }
   };
 }
 
@@ -299,10 +371,12 @@ async function create(h) {
 }
 
 test('render() builds one button per bookmark, ahead of the chevron, in list order', async () => {
-  const h = harness({ list: [
-    { id: 'b1', title: 'Alpha', url: 'https://alpha.test/', icon: null },
-    { id: 'b2', title: 'Beta', url: 'https://beta.test/', icon: 'data:image/png;base64,AAAA' },
-  ] });
+  const h = harness({
+    list: [
+      { id: 'b1', title: 'Alpha', url: 'https://alpha.test/', icon: null },
+      { id: 'b2', title: 'Beta', url: 'https://beta.test/', icon: 'data:image/png;base64,AAAA' }
+    ]
+  });
   h.els.bookmarksBar._width = 1000; // roomy — default 0-width fake items trivially fit
   const bar = await create(h);
   bar.render('jar-a'); // M15 F2 Leg 3: render() takes the jarId to render for
@@ -313,8 +387,14 @@ test('render() builds one button per bookmark, ahead of the chevron, in list ord
   assert.equal(items[0].title, 'Alpha\nhttps://alpha.test/');
   assert.equal(items[1].title, 'Beta\nhttps://beta.test/');
   // Icon vs monogram fallback.
-  assert.equal(items[0].children.some((c) => c.tag === 'img'), false);
-  assert.equal(items[1].children.some((c) => c.tag === 'img'), true);
+  assert.equal(
+    items[0].children.some((c) => c.tag === 'img'),
+    false
+  );
+  assert.equal(
+    items[1].children.some((c) => c.tag === 'img'),
+    true
+  );
   assert.equal(h.els.bookmarksOverflow.classList.contains('hidden'), true, 'everything fits — chevron stays hidden');
 });
 
@@ -327,11 +407,13 @@ test('render() with zero bookmarks: no items, chevron stays hidden (Edge Case)',
 });
 
 test('overflow: trailing items collapse behind the chevron when the bar narrows', async () => {
-  const h = harness({ list: [
-    { id: 'b1', title: 'One', url: 'https://one.test/' },
-    { id: 'b2', title: 'Two', url: 'https://two.test/' },
-    { id: 'b3', title: 'Three', url: 'https://three.test/' },
-  ] });
+  const h = harness({
+    list: [
+      { id: 'b1', title: 'One', url: 'https://one.test/' },
+      { id: 'b2', title: 'Two', url: 'https://two.test/' },
+      { id: 'b3', title: 'Three', url: 'https://three.test/' }
+    ]
+  });
   h.els.bookmarksBar._width = 1000; // roomy at first — render() fits everything
   const bar = await create(h);
   bar.render();
@@ -351,12 +433,14 @@ test('overflow: trailing items collapse behind the chevron when the bar narrows'
   assert.equal(h.els.bookmarksOverflow.classList.contains('hidden'), false, 'chevron appears once anything overflows');
 });
 
-test('overflow REGRESSION (M15 F2 Leg 4): the bar\'s own horizontal padding is excluded from the budget', async () => {
-  const h = harness({ list: [
-    { id: 'b1', title: 'One', url: 'https://one.test/' },
-    { id: 'b2', title: 'Two', url: 'https://two.test/' },
-    { id: 'b3', title: 'Three', url: 'https://three.test/' },
-  ] });
+test("overflow REGRESSION (M15 F2 Leg 4): the bar's own horizontal padding is excluded from the budget", async () => {
+  const h = harness({
+    list: [
+      { id: 'b1', title: 'One', url: 'https://one.test/' },
+      { id: 'b2', title: 'Two', url: 'https://two.test/' },
+      { id: 'b3', title: 'Three', url: 'https://three.test/' }
+    ]
+  });
   h.els.bookmarksBar._width = 1000;
   const bar = await create(h);
   bar.render();
@@ -378,10 +462,12 @@ test('overflow REGRESSION (M15 F2 Leg 4): the bar\'s own horizontal padding is e
 });
 
 test('chevron click opens the overflow sheet with the overflowed-items snapshot; row dispatch navigates', async () => {
-  const h = harness({ list: [
-    { id: 'b1', title: 'One', url: 'https://one.test/' },
-    { id: 'b2', title: 'Two', url: 'https://two.test/' },
-  ] });
+  const h = harness({
+    list: [
+      { id: 'b1', title: 'One', url: 'https://one.test/' },
+      { id: 'b2', title: 'Two', url: 'https://two.test/' }
+    ]
+  });
   h.els.bookmarksBar._width = 1000;
   const bar = await create(h);
   bar.render();
@@ -427,7 +513,7 @@ test('DD9 cache freshness: closeOverflowIfOpen only closes when the sheet state 
   assert.deepEqual(h.calls.at(-1), ['close', 'superseded']);
 });
 
-test('item click: plain click navigates; Ctrl/Cmd+click and middle-click open a BACKGROUND tab via the three-arg createTab form, IN THE ACTIVE TAB\'S CONTAINER', async () => {
+test("item click: plain click navigates; Ctrl/Cmd+click and middle-click open a BACKGROUND tab via the three-arg createTab form, IN THE ACTIVE TAB'S CONTAINER", async () => {
   const h = harness({ list: [{ id: 'b1', title: 'One', url: 'https://one.test/' }] });
   const bar = await create(h);
   bar.render('jar-a');
@@ -467,7 +553,7 @@ async function dragHarness({ overflowTail = 0 } = {}) {
   const list = [
     { id: 'b1', title: 'One', url: 'https://one.test/' },
     { id: 'b2', title: 'Two', url: 'https://two.test/' },
-    { id: 'b3', title: 'Three', url: 'https://three.test/' },
+    { id: 'b3', title: 'Three', url: 'https://three.test/' }
   ];
   for (let i = 0; i < overflowTail; i++) {
     list.push({ id: `x${i}`, title: `Extra ${i}`, url: `https://extra${i}.test/` });
@@ -480,7 +566,12 @@ async function dragHarness({ overflowTail = 0 } = {}) {
   const bar = await create(h);
   bar.render('jar-a');
   const items = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'));
-  items.forEach((el, i) => { el._width = 100; el._left = i * 100; el._top = 100; el._height = 24; });
+  items.forEach((el, i) => {
+    el._width = 100;
+    el._left = i * 100;
+    el._top = 100;
+    el._height = 24;
+  });
   // The overflow tail is display:none — the fake reports it zero-width at
   // left 0, exactly as a browser does.
   for (let i = 0; i < overflowTail; i++) items[3 + i].classList.add('hidden');
@@ -495,11 +586,15 @@ function startDrag(item, dt = fakeDataTransfer()) {
 
 test('AC3: bar items are draggable and dragstart writes the DD2 three-type payload', async () => {
   const { h, items } = await dragHarness();
-  assert.equal(items[0].draggable, true, 'this is the codebase\'s FIRST draggable <button> — buttons are not draggable by default');
+  assert.equal(
+    items[0].draggable,
+    true,
+    "this is the codebase's FIRST draggable <button> — buttons are not draggable by default"
+  );
   assert.ok(items.every((el) => el.draggable === true));
 
   const dt = startDrag(items[0]);
-  assert.equal(dt.getData(BOOKMARK_MIME), 'b1', 'the custom type carries the bookmark ID — the chrome\'s dispatch key');
+  assert.equal(dt.getData(BOOKMARK_MIME), 'b1', "the custom type carries the bookmark ID — the chrome's dispatch key");
   assert.equal(dt.getData('text/uri-list'), 'https://one.test/');
   assert.equal(dt.getData('text/plain'), 'https://one.test/');
   assert.equal(dt.effectAllowed, 'move');
@@ -515,24 +610,47 @@ test('AC3: bar items are draggable and dragstart writes the DD2 three-type paylo
 test('AC3: dragstart REFUSES rather than arming a session it could never commit', async () => {
   const { h, items } = await dragHarness();
   let prevented = false;
-  items[0].fire('dragstart', { dataTransfer: null, preventDefault() { prevented = true; } });
+  items[0].fire('dragstart', {
+    dataTransfer: null,
+    preventDefault() {
+      prevented = true;
+    }
+  });
   assert.equal(prevented, true, 'no dataTransfer — refuse');
   // …and with no session armed, a drop is inert.
-  h.deps.document.fire('drop', { dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: 'b1' }), clientX: 250, clientY: 115 });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  h.deps.document.fire('drop', {
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: 'b1' }),
+    clientX: 250,
+    clientY: 115
+  });
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('dragover: dropEffect is MANDATORY, and a foreign drag is ignored entirely', async () => {
   const { h, items } = await dragHarness();
   const dt = startDrag(items[0]);
   h.deps.document.fire('dragover', { dataTransfer: dt, clientX: 150, clientY: 115 });
-  assert.equal(dt.dropEffect, 'move', 'without dropEffect the drop is SILENTLY rejected (tab-controller.js "spike probe3")');
+  assert.equal(
+    dt.dropEffect,
+    'move',
+    'without dropEffect the drop is SILENTLY rejected (tab-controller.js "spike probe3")'
+  );
 
   // A drag carrying neither of our types must not be preventDefaulted or
   // previewed — otherwise every file/link drag on the chrome gets swallowed.
   const foreign = fakeDataTransfer({ 'text/html': '<b>x</b>' });
   let prevented = false;
-  h.deps.document.fire('dragover', { dataTransfer: foreign, clientX: 150, clientY: 115, preventDefault() { prevented = true; } });
+  h.deps.document.fire('dragover', {
+    dataTransfer: foreign,
+    clientX: 150,
+    clientY: 115,
+    preventDefault() {
+      prevented = true;
+    }
+  });
   assert.equal(prevented, false);
   assert.equal(foreign.dropEffect, null);
 });
@@ -542,7 +660,11 @@ test('AC5: the insertion indicator tracks the drop position, is NOT a flex item,
   const indicator = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-drop-indicator'));
   assert.ok(indicator, 'the indicator exists');
   assert.equal(indicator.classList.contains('hidden'), true, 'hidden until a drag');
-  assert.equal(h.els.bookmarksBar.children.at(-1), h.els.bookmarksOverflow, 'the chevron is still the bar\'s LAST child');
+  assert.equal(
+    h.els.bookmarksBar.children.at(-1),
+    h.els.bookmarksOverflow,
+    "the chevron is still the bar's LAST child"
+  );
   assert.equal(items.includes(indicator), false, 'itemEls() never sees it — the partition math is unaffected');
 
   const dt = startDrag(items[0]);
@@ -592,7 +714,10 @@ test('AC8: Escape mid-drag folds into dragend with NO drop — no commit, order 
   const dt = startDrag(items[0]);
   h.deps.document.fire('dragover', { dataTransfer: dt, clientX: 260, clientY: 115 });
   items[0].fire('dragend'); // the browser aborts an Escape-cancelled drag straight into dragend
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
   const after = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item')).map((el) => el.title);
   assert.deepEqual(after, before);
   const indicator = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-drop-indicator'));
@@ -603,7 +728,10 @@ test('a drop OUTSIDE the bar issues no reorder (drag-onto-page owns that zone, E
   const { h, items } = await dragHarness();
   const dt = startDrag(items[0]);
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 260, clientY: 500 }); // over the guest region
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('AC2 integration: an OVERFLOWED tail never inflates the drop index', async () => {
@@ -634,7 +762,11 @@ test('AC7: BOTH rebuild paths are suppressed mid-session, with a SINGLE flush on
   // rebuilds nothing but re-hides items, moving the geometry under the session.
   h.els.bookmarksBar._width = 100;
   FakeResizeObserver.instances[0].cb();
-  assert.equal(during.every((el) => !el.classList.contains('hidden')), true, 're-partition suppressed too');
+  assert.equal(
+    during.every((el) => !el.classList.contains('hidden')),
+    true,
+    're-partition suppressed too'
+  );
 
   // The flush: exactly one rebuild, and it reconciles the suppressed resize.
   h.els.bookmarksBar._width = 400;
@@ -655,8 +787,11 @@ test('AC7 + DD13: a jar switch mid-drag is recorded but not painted; the commit 
   assert.equal(during[0], source, 'suppressed — the live drag source survives');
 
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 260, clientY: 115 });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b1', 2],
-    'the jar is captured at dragstart (the DD13 TOCTOU discipline), never resolved at drop time');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b1', 2],
+    'the jar is captured at dragstart (the DD13 TOCTOU discipline), never resolved at drop time'
+  );
 
   // …and the dragend flush paints the CURRENT jar, not the captured one.
   source.fire('dragend');
@@ -666,7 +801,7 @@ test('AC7 + DD13: a jar switch mid-drag is recorded but not painted; the commit 
   assert.deepEqual(h.calls.at(-1), ['edit', h.list[0], 'item', 'jar-b']);
 });
 
-test('AC9: NO click-suppression flag — the bar item\'s click handler stays unconditional', async () => {
+test("AC9: NO click-suppression flag — the bar item's click handler stays unconditional", async () => {
   const { h, items } = await dragHarness();
   const dt = startDrag(items[0]);
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 260, clientY: 115 });
@@ -682,31 +817,44 @@ test('AC9: NO click-suppression flag — the bar item\'s click handler stays unc
 test('AC9: the source carries no drag-suppression flag reachable from the click path', () => {
   const fs = require('node:fs');
   const { maskComments } = require('../helpers/source-scan.js');
-  const code = maskComments(fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/bookmarks-bar.js'), 'utf8'));
-  assert.equal(/suppressClick|clickSuppress|justDragged|wasDragged|ignoreNextClick/.test(code), false,
-    'AC9: native DnD fires no trailing click — a suppression flag here is dead code that reads as load-bearing');
+  const code = maskComments(
+    fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/bookmarks-bar.js'), 'utf8')
+  );
+  assert.equal(
+    /suppressClick|clickSuppress|justDragged|wasDragged|ignoreNextClick/.test(code),
+    false,
+    'AC9: native DnD fires no trailing click — a suppression flag here is dead code that reads as load-bearing'
+  );
   // The click handler's body must not consult the drag session at all.
   const clickBody = /addEventListener\('click',[\s\S]*?\n {4}\}\);/.exec(code);
   assert.ok(clickBody, 'the click handler is still there');
   assert.equal(/dnd|dragActive|dropHandled/.test(clickBody[0]), false, 'the click handler is unconditional');
 });
 
-test('AC11: on a suppressed (burner/internal) tab the STALE items remain in the DOM — the bar\'s own .hidden is what makes no drag source reachable', async () => {
+test("AC11: on a suppressed (burner/internal) tab the STALE items remain in the DOM — the bar's own .hidden is what makes no drag source reachable", async () => {
   const { h, items } = await dragHarness();
   // refreshBookmarksSurfaces SKIPS render() when suppressed, so the previous
   // jar's .bm-item children are still here. A test asserting "no .bm-item
   // exists on a burner tab" would be asserting something false.
   h.els.bookmarksBar.classList.add('hidden'); // what window-controller.js's applyBarVisibility does
   const still = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'));
-  assert.equal(still.length, 3, 'items are NOT cleared — the operative claim is the bar\'s .hidden, not their absence');
+  assert.equal(still.length, 3, "items are NOT cleared — the operative claim is the bar's .hidden, not their absence");
   assert.equal(h.els.bookmarksBar.classList.contains('hidden'), true);
-  assert.ok(items.every((el) => el.draggable === true), 'they are still draggable elements — just inside a display:none row');
+  assert.ok(
+    items.every((el) => el.draggable === true),
+    'they are still draggable elements — just inside a display:none row'
+  );
   // No extra guard was added for this: no new inertness branch exists in the bar.
   const fs = require('node:fs');
   const { maskComments } = require('../helpers/source-scan.js');
-  const code = maskComments(fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/bookmarks-bar.js'), 'utf8'));
-  assert.equal(/burner|isInternal/.test(code), false,
-    'AC11: no new suppression guard belongs here — window-controller.js already hides the whole row');
+  const code = maskComments(
+    fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/bookmarks-bar.js'), 'utf8')
+  );
+  assert.equal(
+    /burner|isInternal/.test(code),
+    false,
+    'AC11: no new suppression guard belongs here — window-controller.js already hides the whole row'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -726,11 +874,14 @@ test('AC7 (the PRIMARY path): dragend fires BEFORE the drop signal and the navig
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar, items } = await dragHarness();
   startDrag(items[0]);
-  items[0].fire('dragend');            // …the chrome tears its session down first
+  items[0].fire('dragend'); // …the chrome tears its session down first
   bar.handleDropSignal({ targetWcId: 77 }); // …and only then does the signal land
 
-  assert.deepEqual(navCalls(h), [['tabNavigate', { wcId: 77, verb: 'loadURL', args: ['https://one.test/'] }]],
-    'without the holder this resolves to nothing — INTERMITTENTLY, the worst available failure shape');
+  assert.deepEqual(
+    navCalls(h),
+    [['tabNavigate', { wcId: 77, verb: 'loadURL', args: ['https://one.test/'] }]],
+    'without the holder this resolves to nothing — INTERMITTENTLY, the worst available failure shape'
+  );
 });
 
 test('AC7: the hold is BOUNDED — a signal arriving after the window navigates nothing', async (t) => {
@@ -752,10 +903,13 @@ test('AC9: the navigation targets the wcId MAIN named — the guest that receive
   assert.deepEqual(navCalls(h), [['tabNavigate', { wcId: 404, verb: 'loadURL', args: ['https://two.test/'] }]]);
   // …and it rides the per-wcId form of the untrusted path, never the
   // active-tab-only `navigate` dep (which is what contradicted AC9).
-  assert.equal(h.calls.some((c) => c[0] === 'navigate'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'navigate'),
+    false
+  );
 });
 
-test('AC5/DD6: the url comes from the chrome\'s OWN session — nothing in the signal payload can aim it', async (t) => {
+test("AC5/DD6: the url comes from the chrome's OWN session — nothing in the signal payload can aim it", async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar, items } = await dragHarness();
   startDrag(items[0]);
@@ -781,7 +935,7 @@ test('AC6b (chrome half): the hold is CONSUMED on the first navigation — one n
   bar.handleDropSignal({ targetWcId: 77 });
   bar.handleDropSignal({ targetWcId: 77 });
   bar.handleDropSignal({ targetWcId: 88 }); // a different tab, same drag
-  assert.equal(navCalls(h).length, 1, 'main consumes its declaration on the same forward; this is the chrome\'s half');
+  assert.equal(navCalls(h).length, 1, "main consumes its declaration on the same forward; this is the chrome's half");
 });
 
 test('the drop signal is VALIDATED-NO-OP on every malformed payload', async (t) => {
@@ -803,25 +957,37 @@ test('AC10: a drop on the BAR reorders and does NOT also navigate — no double-
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 260, clientY: 115 }); // inside the bar
   items[0].fire('dragend');
   assert.equal(h.calls.filter((c) => c[0] === 'commitReorder').length, 1);
-  assert.deepEqual(navCalls(h), [],
-    'the guest is a separate WebContentsView — it never sees this drop, so AC10 holds by construction');
+  assert.deepEqual(
+    navCalls(h),
+    [],
+    'the guest is a separate WebContentsView — it never sees this drop, so AC10 holds by construction'
+  );
 });
 
 test('the bookend sends are BARE and bracket the gesture', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, items } = await dragHarness();
   startDrag(items[0]);
-  assert.deepEqual(h.calls.filter((c) => c[0].startsWith('bookmarkDrag')), [['bookmarkDragStarted']],
-    'the declaration says a bookmark drag is in flight and NOTHING else — no id, no url');
+  assert.deepEqual(
+    h.calls.filter((c) => c[0].startsWith('bookmarkDrag')),
+    [['bookmarkDragStarted']],
+    'the declaration says a bookmark drag is in flight and NOTHING else — no id, no url'
+  );
   items[0].fire('dragend');
-  assert.deepEqual(h.calls.filter((c) => c[0].startsWith('bookmarkDrag')), [['bookmarkDragStarted'], ['bookmarkDragEnded']]);
+  assert.deepEqual(
+    h.calls.filter((c) => c[0].startsWith('bookmarkDrag')),
+    [['bookmarkDragStarted'], ['bookmarkDragEnded']]
+  );
 });
 
 test('a refused dragstart declares nothing — no session, no hold, no navigation', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar, items } = await dragHarness();
   items[0].fire('dragstart', { dataTransfer: null, preventDefault() {} });
-  assert.deepEqual(h.calls.filter((c) => c[0].startsWith('bookmarkDrag')), []);
+  assert.deepEqual(
+    h.calls.filter((c) => c[0].startsWith('bookmarkDrag')),
+    []
+  );
   bar.handleDropSignal({ targetWcId: 77 });
   assert.deepEqual(navCalls(h), []);
 });
@@ -843,19 +1009,25 @@ test('AC8: a hostile url reaches the gate UNCHANGED — the chrome deliberately 
   const item = h.els.bookmarksBar.children.find((el) => el.classList.contains('bm-item'));
   startDrag(item);
   bar.handleDropSignal({ targetWcId: 77 });
-  assert.deepEqual(navCalls(h), [['tabNavigate', { wcId: 77, verb: 'loadURL', args: ['javascript:alert(1)'] }]],
-    'it rides the SAME untrusted path a bar click rides, and dies where that path is actually gated');
+  assert.deepEqual(
+    navCalls(h),
+    [['tabNavigate', { wcId: 77, verb: 'loadURL', args: ['javascript:alert(1)'] }]],
+    'it rides the SAME untrusted path a bar click rides, and dies where that path is actually gated'
+  );
 });
 
 test('Edge Case: a bookmark deleted mid-drag still navigates to what the operator dragged', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { h, bar, items, list } = await dragHarness();
   startDrag(items[0]);
-  list.shift();          // another window removed it…
+  list.shift(); // another window removed it…
   items[0].fire('dragend'); // …and the dragend flush re-renders without it
   bar.handleDropSignal({ targetWcId: 77 });
-  assert.deepEqual(navCalls(h)[0][1].args, ['https://one.test/'],
-    'the url is captured at dragstart — they asked for that page');
+  assert.deepEqual(
+    navCalls(h)[0][1].args,
+    ['https://one.test/'],
+    'the url is captured at dragstart — they asked for that page'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -878,7 +1050,9 @@ test('Edge Case: a bookmark deleted mid-drag still navigates to what the operato
  */
 async function overflowDragHarness() {
   const list = [1, 2, 3, 4, 5, 6].map((n) => ({
-    id: `b${n}`, title: `Item ${n}`, url: `https://item${n}.test/`,
+    id: `b${n}`,
+    title: `Item ${n}`,
+    url: `https://item${n}.test/`
   }));
   const h = harness({ list });
   h.els.bookmarksBar._left = 0;
@@ -930,14 +1104,20 @@ test('Leg 5a AC4: the partition stores visibleCount ALONGSIDE the snapshot, and 
   assert.equal(items.filter((el) => !el.classList.contains('hidden')).length, 3);
   h.els.bookmarksOverflow.fire('click');
   const openCall = h.calls.find((c) => c[0] === 'open');
-  assert.deepEqual(openCall[2].map((r) => r.label), ['Item 4', 'Item 5', 'Item 6'],
-    'three overflow rows — enough to exercise the clamp at k=last');
+  assert.deepEqual(
+    openCall[2].map((r) => r.label),
+    ['Item 4', 'Item 5', 'Item 6'],
+    'three overflow rows — enough to exercise the clamp at k=last'
+  );
 
   startDrag(items[0]);
   items[0].fire('dragend');
   bar.handleOverflowDrop({ index: 1 });
-  assert.deepEqual(h.calls.at(-1), ['commitOverflowDrop', 'jar-a', 'b1', 3, 1],
-    'visibleCount 3 rides the hold — the value paired with the snapshot the sheet rendered');
+  assert.deepEqual(
+    h.calls.at(-1),
+    ['commitOverflowDrop', 'jar-a', 'b1', 3, 1],
+    'visibleCount 3 rides the hold — the value paired with the snapshot the sheet rendered'
+  );
 });
 
 test('Leg 5a AC4: visibleCount is STORED, so a cache that grows mid-drag cannot shift it (the deleted derive option)', async () => {
@@ -959,10 +1139,16 @@ test('Leg 5a AC4b: `dragend` fires FIRST — the default case — and the commit
   const { h, bar, items } = await overflowDragHarness();
   startDrag(items[0]);
   items[0].fire('dragend'); // leg 4 measured that this wins on virtually every drop
-  assert.equal(h.calls.some((c) => c[0] === 'commitOverflowDrop'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitOverflowDrop'),
+    false
+  );
   bar.handleOverflowDrop({ index: 2 });
-  assert.deepEqual(h.calls.at(-1), ['commitOverflowDrop', 'jar-a', 'b1', 3, 2],
-    'the bookmark id, the jar AND the snapshot\'s visibleCount all survived dragend');
+  assert.deepEqual(
+    h.calls.at(-1),
+    ['commitOverflowDrop', 'jar-a', 'b1', 3, 2],
+    "the bookmark id, the jar AND the snapshot's visibleCount all survived dragend"
+  );
 });
 
 test('Leg 5a AC4b: the hold is BOUNDED and CONSUMED once', async (t) => {
@@ -986,10 +1172,13 @@ test('Leg 5a AC4b: ONE shared hold — whichever surface consumes the release, t
   const { h, bar, items } = await overflowDragHarness();
   startDrag(items[0]);
   items[0].fire('dragend');
-  bar.handleOverflowDrop({ index: 0 });          // the sheet won this release
-  bar.handleDropSignal({ targetWcId: 77 });      // …so leg 4's consumer finds nothing
-  assert.equal(h.calls.filter((c) => c[0] === 'tabNavigate').length, 0,
-    'a single physical release produces a single outcome — the invariant is structural, not commented');
+  bar.handleOverflowDrop({ index: 0 }); // the sheet won this release
+  bar.handleDropSignal({ targetWcId: 77 }); // …so leg 4's consumer finds nothing
+  assert.equal(
+    h.calls.filter((c) => c[0] === 'tabNavigate').length,
+    0,
+    'a single physical release produces a single outcome — the invariant is structural, not commented'
+  );
 });
 
 test('Leg 5a AC4b: the overflow drop report is VALIDATED-NO-OP on every malformed payload', async () => {
@@ -1017,21 +1206,35 @@ test('Leg 5a AC2: the chevron springs the menu only after the DWELL, and via `op
   startDrag(items[0]);
   h.calls.length = 0;
 
-  h.clock.t = 1000; dragOver(h, ON_CHEVRON);            // first sighting — arms the dwell
+  h.clock.t = 1000;
+  dragOver(h, ON_CHEVRON); // first sighting — arms the dwell
   assert.equal(h.calls.length, 0, 'no open on arrival');
-  h.clock.t = 1200; dragOver(h, ON_CHEVRON);            // 200ms < 250ms
+  h.clock.t = 1200;
+  dragOver(h, ON_CHEVRON); // 200ms < 250ms
   assert.equal(h.calls.length, 0, 'still dwelling');
-  h.clock.t = 1260; dragOver(h, ON_CHEVRON);            // 260ms >= 250ms
-  assert.deepEqual(h.calls.map((c) => c[0]), ['open'], 'sprung');
+  h.clock.t = 1260;
+  dragOver(h, ON_CHEVRON); // 260ms >= 250ms
+  assert.deepEqual(
+    h.calls.map((c) => c[0]),
+    ['open'],
+    'sprung'
+  );
   assert.equal(h.calls[0][1], 'bookmarks-overflow');
-  assert.deepEqual(h.calls[0][2].map((r) => r.label), ['Item 4', 'Item 5', 'Item 6']);
+  assert.deepEqual(
+    h.calls[0][2].map((r) => r.label),
+    ['Item 4', 'Item 5', 'Item 6']
+  );
   // ⚠ `trigger` refuses to re-open within BLUR_REOPEN_SUPPRESS_MS of a blur
   // close, and the sheet is blur-closed at drag start — so the chevron's own
   // CLICK path is the wrong thing to copy and would silently never spring.
-  assert.equal(h.calls.some((c) => c[0] === 'trigger'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'trigger'),
+    false
+  );
 
   h.overlayMenuState.open = true;
-  h.clock.t = 2000; dragOver(h, ON_CHEVRON);
+  h.clock.t = 2000;
+  dragOver(h, ON_CHEVRON);
   assert.equal(h.calls.filter((c) => c[0] === 'open').length, 1, 'already open — no second spring');
 });
 
@@ -1039,14 +1242,25 @@ test('Leg 5a AC2 (Edge Case): a drag PASSING OVER the chevron never springs it �
   const { h, items } = await overflowDragHarness();
   startDrag(items[0]);
   h.calls.length = 0;
-  h.clock.t = 1000; dragOver(h, ON_CHEVRON);
-  h.clock.t = 1100; dragOver(h, ON_BAR);      // passed through
-  h.clock.t = 1200; dragOver(h, ON_CHEVRON);  // 200ms since re-entry, 1200 since first sighting
-  h.clock.t = 1400; dragOver(h, ON_CHEVRON);  // 200ms since re-entry — still under the dwell
-  assert.equal(h.calls.some((c) => c[0] === 'open'), false,
-    'the dwell measures continuous residence, not total time in the gesture');
-  h.clock.t = 1500; dragOver(h, ON_CHEVRON);  // now 300ms since re-entry
-  assert.equal(h.calls.some((c) => c[0] === 'open'), true);
+  h.clock.t = 1000;
+  dragOver(h, ON_CHEVRON);
+  h.clock.t = 1100;
+  dragOver(h, ON_BAR); // passed through
+  h.clock.t = 1200;
+  dragOver(h, ON_CHEVRON); // 200ms since re-entry, 1200 since first sighting
+  h.clock.t = 1400;
+  dragOver(h, ON_CHEVRON); // 200ms since re-entry — still under the dwell
+  assert.equal(
+    h.calls.some((c) => c[0] === 'open'),
+    false,
+    'the dwell measures continuous residence, not total time in the gesture'
+  );
+  h.clock.t = 1500;
+  dragOver(h, ON_CHEVRON); // now 300ms since re-entry
+  assert.equal(
+    h.calls.some((c) => c[0] === 'open'),
+    true
+  );
 });
 
 test('Leg 5a AC2 (Edge Case): a hidden chevron / empty overflow is INERT, not an error', async () => {
@@ -1054,9 +1268,15 @@ test('Leg 5a AC2 (Edge Case): a hidden chevron / empty overflow is INERT, not an
   const { h, items } = await dragHarness();
   startDrag(items[0]);
   h.calls.length = 0;
-  for (const t of [1000, 1500, 2000]) { h.clock.t = t; dragOver(h, { clientX: 0, clientY: 0 }); }
-  assert.equal(h.calls.some((c) => c[0] === 'open'), false,
-    'a zero-area rect never hits — the viewport origin must not spring an empty menu');
+  for (const t of [1000, 1500, 2000]) {
+    h.clock.t = t;
+    dragOver(h, { clientX: 0, clientY: 0 });
+  }
+  assert.equal(
+    h.calls.some((c) => c[0] === 'open'),
+    false,
+    'a zero-area rect never hits — the viewport origin must not spring an empty menu'
+  );
 });
 
 test('Leg 5a AC2a: over the chevron the BAR indicator retracts — never two contradictory indicators', async () => {
@@ -1067,9 +1287,13 @@ test('Leg 5a AC2a: over the chevron the BAR indicator retracts — never two con
   dragOver(h, ON_BAR);
   assert.equal(indicator.classList.contains('hidden'), false, 'inside the bar run, the bar indicator draws');
 
-  h.clock.t = 1000; dragOver(h, ON_CHEVRON);
-  assert.equal(indicator.classList.contains('hidden'), true,
-    'the chevron sits INSIDE barRect, so without the rule leg 3 would paint over it while the sheet springs');
+  h.clock.t = 1000;
+  dragOver(h, ON_CHEVRON);
+  assert.equal(
+    indicator.classList.contains('hidden'),
+    true,
+    'the chevron sits INSIDE barRect, so without the rule leg 3 would paint over it while the sheet springs'
+  );
 });
 
 test('Leg 5a (Edge Case): a release ON the chevron writes nothing — nothing was drawn for it', async () => {
@@ -1077,9 +1301,15 @@ test('Leg 5a (Edge Case): a release ON the chevron writes nothing — nothing wa
   startDrag(items[0]);
   h.calls.length = 0;
   h.deps.document.fire('drop', { dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: 'b1' }), ...ON_CHEVRON });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false,
-    'leg 3 would classify this `reorder` (the chevron is inside barRect) and commit an unpreviewed move');
-  assert.equal(h.calls.some((c) => c[0] === 'commitOverflowDrop'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false,
+    'leg 3 would classify this `reorder` (the chevron is inside barRect) and commit an unpreviewed move'
+  );
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitOverflowDrop'),
+    false
+  );
 });
 
 test('Leg 5a AC6: a RESIZE that changes the snapshot closes the open sheet — the pre-existing desync', async () => {
@@ -1106,12 +1336,15 @@ test('Leg 5a AC6: a re-partition that lands on the SAME snapshot does NOT close 
   // A width change that does not move the visible/overflow boundary.
   h.els.bookmarksBar._width = 420; // 408px run — still exactly 3 visible
   FakeResizeObserver.instances[0].cb();
-  assert.equal(h.calls.some((c) => c[0] === 'close'), false,
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    false,
     'lockstep is about the snapshot, not about every pass — an unconditional close would ' +
-    'race the sheet\'s in-flight drop report and refuse the operator\'s own drop');
+      "race the sheet's in-flight drop report and refuse the operator's own drop"
+  );
 });
 
-test('Leg 5a AC6b: `dragend`\'s render() closes a sheet it would otherwise leave over a rewritten snapshot', async () => {
+test("Leg 5a AC6b: `dragend`'s render() closes a sheet it would otherwise leave over a rewritten snapshot", async () => {
   const { h, items, list } = await overflowDragHarness();
   startDrag(items[0]);
   h.overlayMenuState.open = true; // sprung mid-drag
@@ -1121,17 +1354,23 @@ test('Leg 5a AC6b: `dragend`\'s render() closes a sheet it would otherwise leave
   // snapshot — with no close partner of its own before this leg.
   h.setLive(list.slice(0, 5));
   items[0].fire('dragend');
-  assert.equal(h.calls.some((c) => c[0] === 'close'), true,
-    'the sheet cannot be left rendering rows against a snapshot render() just replaced');
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    true,
+    'the sheet cannot be left rendering rows against a snapshot render() just replaced'
+  );
 });
 
-test('Leg 5a AC6b: the HAPPY path\'s dragend leaves the sprung sheet alone — no close to race the drop', async () => {
+test("Leg 5a AC6b: the HAPPY path's dragend leaves the sprung sheet alone — no close to race the drop", async () => {
   const { h, bar, items } = await overflowDragHarness();
   startDrag(items[0]);
   h.overlayMenuState.open = true;
   h.calls.length = 0;
   items[0].fire('dragend'); // nothing changed — the store mutation has not landed yet
-  assert.equal(h.calls.some((c) => c[0] === 'close'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    false
+  );
   bar.handleOverflowDrop({ index: 0 });
   assert.equal(h.calls.at(-1)[0], 'commitOverflowDrop', 'the drop report still resolves');
 });
@@ -1143,15 +1382,21 @@ test('Leg 5a AC7: closeOverflowIfOpen is SUPPRESSED mid-drag and FLUSHED at drag
   h.calls.length = 0;
 
   bar.closeOverflowIfOpen(); // the cache's onChanged, mid-gesture
-  assert.equal(h.calls.some((c) => c[0] === 'close'), false,
-    'closing here would destroy the spring-loaded DROP TARGET — leg 3\'s render() problem, other end');
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    false,
+    "closing here would destroy the spring-loaded DROP TARGET — leg 3's render() problem, other end"
+  );
 
   items[0].fire('dragend');
-  assert.equal(h.calls.some((c) => c[0] === 'close'), true,
-    'the flush is the deferred CLOSE, not only the deferred render()');
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    true,
+    'the flush is the deferred CLOSE, not only the deferred render()'
+  );
 });
 
-test('Leg 5a AC9: a release below the bar (the sheet\'s region) is handled by NEITHER chrome-document commit', async () => {
+test("Leg 5a AC9: a release below the bar (the sheet's region) is handled by NEITHER chrome-document commit", async () => {
   const { h, items } = await overflowDragHarness();
   startDrag(items[0]);
   h.calls.length = 0;
@@ -1161,10 +1406,18 @@ test('Leg 5a AC9: a release below the bar (the sheet\'s region) is handled by NE
   // is assertable offline is the complement: this document's own handler treats
   // that region as `outside` and writes nothing.
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: 'b1' }), clientX: 150, clientY: 400,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: 'b1' }),
+    clientX: 150,
+    clientY: 400
   });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
-  assert.equal(h.calls.some((c) => c[0] === 'commitOverflowDrop'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitOverflowDrop'),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1193,7 +1446,9 @@ test('Leg 5b AC4/AC5/AC8: an overflow row dropped on the bar reorders to the dro
 
   sheetDragStart(bar, 0); // snapshot row 0 = Item 4 = b4
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 150,
+    clientY: 115
   });
 
   const commits = h.calls.filter((c) => c[0] === 'commitReorder');
@@ -1205,7 +1460,10 @@ test('Leg 5b AC4/AC5/AC8: an overflow row dropped on the bar reorders to the dro
   // …and it is the ORDINARY commit path, so DD6b's fresh read and the
   // moveIndex/same-reference no-op come along unchanged (bookmarks-client.test.js
   // owns those). No second client entry point exists for this direction.
-  assert.equal(h.calls.some((c) => c[0] === 'commitOverflowDrop'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitOverflowDrop'),
+    false
+  );
 });
 
 test('Leg 5b AC5: the CLAMP — a release past the last visible slot lands ON the bar, where the indicator drew', async () => {
@@ -1216,10 +1474,15 @@ test('Leg 5b AC5: the CLAMP — a release past the last visible slot lands ON th
   // is full-list position 3 — the first OVERFLOW row, i.e. the item would not
   // join the bar at all and the gesture would read as "nothing happened".
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '1' }), clientX: 350, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '1' }),
+    clientX: 350,
+    clientY: 115
   });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b5', 2],
-    'clamped to the last VISIBLE position — DD4\'s boundary displacement, and what the indicator showed');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b5', 2],
+    "clamped to the last VISIBLE position — DD4's boundary displacement, and what the indicator showed"
+  );
 });
 
 test('Leg 5b AC4: the foreign session filters the HIDDEN tail — a six-item bar does not inflate the index', async () => {
@@ -1229,10 +1492,15 @@ test('Leg 5b AC4: the foreign session filters the HIDDEN tail — a six-item bar
   // Three of the six items are display:none, reading zero-width AT LEFT 0. Feed
   // all six rects in and every index past the bar's left edge gains exactly 3.
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '2' }), clientX: 10, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '2' }),
+    clientX: 10,
+    clientY: 115
   });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b6', 0],
-    'index 0, not 3');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b6', 0],
+    'index 0, not 3'
+  );
 });
 
 test('Leg 5b AC6: the bar DOES draw a drop indicator for the reverse direction', async (t) => {
@@ -1269,15 +1537,23 @@ test('Leg 5b: the chevron SWALLOWS a foreign release too, and never springs for 
   sheetDragStart(bar, 0);
   h.calls.length = 0;
 
-  h.clock.t = 1000; dragOver(h, ON_CHEVRON);
-  h.clock.t = 5000; dragOver(h, ON_CHEVRON); // well past SPRING_DWELL_MS
-  assert.equal(h.calls.some((c) => c[0] === 'open'), false,
-    'spring-loading is the bar -> overflow direction only: this drag is coming OUT of that menu');
+  h.clock.t = 1000;
+  dragOver(h, ON_CHEVRON);
+  h.clock.t = 5000;
+  dragOver(h, ON_CHEVRON); // well past SPRING_DWELL_MS
+  assert.equal(
+    h.calls.some((c) => c[0] === 'open'),
+    false,
+    'spring-loading is the bar -> overflow direction only: this drag is coming OUT of that menu'
+  );
   assert.equal(indicator.classList.contains('hidden'), true, 'and no indicator is drawn over the chevron');
 
   h.deps.document.fire('drop', { dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), ...ON_CHEVRON });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false,
-    'a write with no preview is exactly what the forward direction refuses here too');
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false,
+    'a write with no preview is exactly what the forward direction refuses here too'
+  );
 });
 
 test('Leg 5b AC7: BOTH rebuild paths and the overflow close are suppressed for the foreign drag, and FLUSHED at `end`', async () => {
@@ -1289,22 +1565,34 @@ test('Leg 5b AC7: BOTH rebuild paths and the overflow close are suppressed for t
 
   // (1) render() — another window's edit, or the sheet's own close re-deriving.
   bar.render('jar-a');
-  assert.deepEqual(h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item')), during,
-    'render() must not rebuild the bar the foreign session measured');
+  assert.deepEqual(
+    h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item')),
+    during,
+    'render() must not rebuild the bar the foreign session measured'
+  );
   // (2) the ResizeObserver re-partition — the path that moves the geometry.
   h.els.bookmarksBar._width = 212;
   FakeResizeObserver.instances[0].cb();
-  assert.equal(during.every((el, i) => el.classList.contains('hidden') === (i >= 3)), true,
-    're-partition suppressed too — the slot rects stay the ones the session snapshotted');
+  assert.equal(
+    during.every((el, i) => el.classList.contains('hidden') === i >= 3),
+    true,
+    're-partition suppressed too — the slot rects stay the ones the session snapshotted'
+  );
   // (3) the deferred CLOSE.
   bar.closeOverflowIfOpen();
-  assert.equal(h.calls.some((c) => c[0] === 'close'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    false
+  );
 
   bar.handleSheetDrag({ phase: 'end', token: 11 });
   const after = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'));
   assert.notEqual(after[0], during[0], 'the single flush ran one real rebuild');
-  assert.equal(h.calls.some((c) => c[0] === 'close'), true,
-    'and the flush is the deferred CLOSE, not only the deferred render()');
+  assert.equal(
+    h.calls.some((c) => c[0] === 'close'),
+    true,
+    'and the flush is the deferred CLOSE, not only the deferred render()'
+  );
 });
 
 test('Leg 5b AC3: the gate is TIMER-BOUNDED — a session whose `end` NEVER arrives cannot latch the bar', async (t) => {
@@ -1320,15 +1608,23 @@ test('Leg 5b AC3: the gate is TIMER-BOUNDED — a session whose `end` NEVER arri
   // overflow close — for the rest of the session, with no way back.
   t.mock.timers.tick(15000);
   bar.render('jar-a');
-  assert.notEqual(h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'))[0], during[0],
-    'the bar rebuilds again — the suppression expired with the session');
+  assert.notEqual(
+    h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'))[0],
+    during[0],
+    'the bar rebuilds again — the suppression expired with the session'
+  );
 
   // …and the expiry is NON-DESTRUCTIVE: a drop arriving after it commits nothing.
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 150,
+    clientY: 115
   });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('Leg 5b AC3: `end` is token-matched CHROME-SIDE — main cannot check it, so a stale one must not cancel a live session', async () => {
@@ -1337,19 +1633,29 @@ test('Leg 5b AC3: `end` is token-matched CHROME-SIDE — main cannot check it, s
   bar.handleSheetDrag({ phase: 'end', token: 10 }); // a previous gesture's token
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 150,
+    clientY: 115
   });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b4', 1],
-    'the stale `end` was ignored — the session is still live');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b4', 1],
+    'the stale `end` was ignored — the session is still live'
+  );
 
   // …and the MATCHING one ends it, so a later drop resolves to nothing.
   sheetDragStart(bar, 0, 12);
   bar.handleSheetDrag({ phase: 'end', token: 12 });
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 150,
+    clientY: 115
   });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('Leg 5b AC8 + DD13: a jar switch mid-foreign-drag is recorded but not painted; the commit uses the jar captured at START', async () => {
@@ -1358,19 +1664,27 @@ test('Leg 5b AC8 + DD13: a jar switch mid-foreign-drag is recorded but not paint
   bar.render('jar-b'); // a tab switch mid-gesture, via refreshBookmarksSurfaces
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 10, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 10,
+    clientY: 115
   });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b4', 0],
-    'never resolved at drop time');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b4', 0],
+    'never resolved at drop time'
+  );
 });
 
 test('Leg 5b: ONE outcome per release — the session is CONSUMED at commit', async () => {
   const { h, bar } = await overflowDragHarness();
   sheetDragStart(bar, 0);
   h.calls.length = 0;
-  const drop = () => h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
-  });
+  const drop = () =>
+    h.deps.document.fire('drop', {
+      dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+      clientX: 150,
+      clientY: 115
+    });
   drop();
   drop();
   bar.handleSheetDrag({ phase: 'end', token: 11 }); // the real ending, arriving after
@@ -1381,12 +1695,20 @@ test('Leg 5b: `handleSheetDrag` is VALIDATED-NO-OP on every malformed payload an
   const { h, bar } = await overflowDragHarness();
   const before = h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'));
   for (const bad of [
-    undefined, null, {}, { phase: 'start' }, { token: 11 }, { phase: 'start', token: '11', index: 0 },
-    { phase: 'start', token: 11 }, { phase: 'start', token: 11, index: -1 },
-    { phase: 'start', token: 11, index: 1.5 }, { phase: 'start', token: 11, index: '0' },
+    undefined,
+    null,
+    {},
+    { phase: 'start' },
+    { token: 11 },
+    { phase: 'start', token: '11', index: 0 },
+    { phase: 'start', token: 11 },
+    { phase: 'start', token: 11, index: -1 },
+    { phase: 'start', token: 11, index: 1.5 },
+    { phase: 'start', token: 11, index: '0' },
     { phase: 'start', token: 11, index: 3 }, // one past the live snapshot's last row
     { phase: 'start', token: 11, index: 99 },
-    { phase: 'cancel', token: 11 }, { phase: 0, token: 11 },
+    { phase: 'cancel', token: 11 },
+    { phase: 0, token: 11 }
   ]) {
     bar.handleSheetDrag(/** @type {any} */ (bad));
   }
@@ -1396,9 +1718,14 @@ test('Leg 5b: `handleSheetDrag` is VALIDATED-NO-OP on every malformed payload an
   // …and a drop resolves to nothing.
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 150, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 150,
+    clientY: 115
   });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('Leg 5b: with NO overflow snapshot (nothing overflowing) a `start` arms nothing', async () => {
@@ -1411,15 +1738,20 @@ test('Leg 5b: with NO overflow snapshot (nothing overflowing) a `start` arms not
   bar.handleSheetDrag({ phase: 'start', token: 11, index: 0 });
   h.calls.length = 0;
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 10, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 10,
+    clientY: 115
   });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('Leg 5b: a LOCAL drag owns the gate — a `start` cannot clobber it, and a latched foreign session cannot survive one', async () => {
   const { h, bar, items } = await overflowDragHarness();
   const dt = startDrag(items[0]); // a bar item is being dragged
-  sheetDragStart(bar, 2);         // …and a sheet `start` arrives anyway
+  sheetDragStart(bar, 2); // …and a sheet `start` arrives anyway
   h.calls.length = 0;
   h.deps.document.fire('drop', { dataTransfer: dt, clientX: 150, clientY: 115 });
   // Index 0, not 1 — and the difference is the assertion. A LOCAL session
@@ -1427,8 +1759,11 @@ test('Leg 5b: a LOCAL drag owns the gate — a `start` cannot clobber it, and a 
   // midpoint of the only preceding remaining slot and resolves "before"; the
   // FOREIGN session excludes nothing and would have answered 1. The number
   // itself names which session drove the commit.
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b1', 0],
-    'the LOCAL session committed — the foreign `start` was refused, not merged');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b1', 0],
+    'the LOCAL session committed — the foreign `start` was refused, not merged'
+  );
   items[0].fire('dragend');
 
   // The other order: a foreign session latched (its `end` lost) must not share
@@ -1438,12 +1773,18 @@ test('Leg 5b: a LOCAL drag owns the gate — a `start` cannot clobber it, and a 
   const dt2 = startDrag(fresh[0]);
   h.calls.length = 0;
   h.deps.document.fire('drop', { dataTransfer: dt2, clientX: 150, clientY: 115 });
-  assert.deepEqual(h.calls.find((c) => c[0] === 'commitReorder'), ['commitReorder', 'jar-a', 'b1', 0],
-    'the local session again — the latched foreign one was discarded, not consulted');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'commitReorder'),
+    ['commitReorder', 'jar-a', 'b1', 0],
+    'the local session again — the latched foreign one was discarded, not consulted'
+  );
   fresh[0].fire('dragend');
   bar.render('jar-a');
-  assert.notEqual(h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'))[0], fresh[0],
-    'the local dragend lifted the gate for good — no latched foreign session left holding it');
+  assert.notEqual(
+    h.els.bookmarksBar.children.filter((el) => el.classList.contains('bm-item'))[0],
+    fresh[0],
+    'the local dragend lifted the gate for good — no latched foreign session left holding it'
+  );
 });
 
 test('Leg 5b (Edge Case): a drop that never happens leaves the store untouched — no commit without a release on the bar', async () => {
@@ -1454,17 +1795,25 @@ test('Leg 5b (Edge Case): a drop that never happens leaves the store untouched �
   // sheet's own document and this one never sees a `drop` at all — only the
   // lifecycle `end`. A no-op, not a reorder-to-self.
   bar.handleSheetDrag({ phase: 'end', token: 11 });
-  assert.equal(h.calls.some((c) => c[0] === 'commitReorder'), false);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'commitReorder'),
+    false
+  );
 });
 
 test('Leg 5b (Edge Case/DD4): the reverse commit displaces the last visible item into overflow', async () => {
   const { h, bar, list } = await overflowDragHarness();
   h.els.bookmarksOverflow.fire('click');
-  assert.deepEqual(h.calls.find((c) => c[0] === 'open')[2].map((r) => r.label), ['Item 4', 'Item 5', 'Item 6']);
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'open')[2].map((r) => r.label),
+    ['Item 4', 'Item 5', 'Item 6']
+  );
 
   sheetDragStart(bar, 0); // Item 4
   h.deps.document.fire('drop', {
-    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }), clientX: 10, clientY: 115,
+    dataTransfer: fakeDataTransfer({ [BOOKMARK_MIME]: '0' }),
+    clientX: 10,
+    clientY: 115
   });
   // The store round trip the commit issues, played back through the cache the way
   // the `bookmarks-changed` broadcast does: Item 4 to position 0.
@@ -1472,15 +1821,25 @@ test('Leg 5b (Edge Case/DD4): the reverse commit displaces the last visible item
   h.setLive(next);
   bar.render('jar-a');
 
-  const visible = h.els.bookmarksBar.children
-    .filter((el) => el.classList.contains('bm-item') && !el.classList.contains('hidden'));
-  assert.deepEqual(visible.map((el) => el.title.split('\n')[0]), ['Item 4', 'Item 1', 'Item 2'],
-    'the dragged row is on the bar, at the slot the indicator drew');
+  const visible = h.els.bookmarksBar.children.filter(
+    (el) => el.classList.contains('bm-item') && !el.classList.contains('hidden')
+  );
+  assert.deepEqual(
+    visible.map((el) => el.title.split('\n')[0]),
+    ['Item 4', 'Item 1', 'Item 2'],
+    'the dragged row is on the bar, at the slot the indicator drew'
+  );
   // The bar\'s capacity did not change, so something had to go — DD4\'s
   // consequence, correct and (per the flight) surprising the first time.
   h.calls.length = 0;
   h.els.bookmarksOverflow.fire('click');
-  assert.deepEqual(h.calls.find((c) => c[0] === 'open')[2].map((r) => r.label), ['Item 3', 'Item 5', 'Item 6']);
-  assert.equal(h.els.bookmarksOverflow.classList.contains('hidden'), false,
-    'the chevron\'s visibility follows the re-partition, as it does on every render');
+  assert.deepEqual(
+    h.calls.find((c) => c[0] === 'open')[2].map((r) => r.label),
+    ['Item 3', 'Item 5', 'Item 6']
+  );
+  assert.equal(
+    h.els.bookmarksOverflow.classList.contains('hidden'),
+    false,
+    "the chevron's visibility follows the re-partition, as it does on every render"
+  );
 });

@@ -66,8 +66,7 @@ function originMatches(item, tabOrigin, { widen = false } = {}) {
   const itemOrigin = item && item.origin != null ? String(item.origin) : null;
   // Exact = two non-empty origin strings that are byte-for-byte equal (a null/empty on
   // either side never matches — preserves the fill sites' `!itemOrigin`/`!tabOrigin` guards).
-  const exact =
-    typeof itemOrigin === 'string' && itemOrigin !== '' && itemOrigin === tabOrigin;
+  const exact = typeof itemOrigin === 'string' && itemOrigin !== '' && itemOrigin === tabOrigin;
 
   if (!widen) return exact;
   // POSITIVE test: only an explicit opt-in widens; absent/legacy/exact all stay exact.

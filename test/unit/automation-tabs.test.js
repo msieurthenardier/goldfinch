@@ -9,13 +9,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  mapEnumeratedTabs,
-  enumerateTabs,
-  openTab,
-  closeTab,
-  activateTab,
-} = require('../../src/main/automation/tabs');
+const { mapEnumeratedTabs, enumerateTabs, openTab, closeTab, activateTab } = require('../../src/main/automation/tabs');
 
 // ---------------------------------------------------------------------------
 // Helpers — build fake wc objects and deps
@@ -25,7 +19,9 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    }
   };
 }
 
@@ -33,7 +29,9 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    }
   };
 }
 
@@ -41,7 +39,9 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; },
+    isDestroyed() {
+      return true;
+    }
   };
 }
 
@@ -65,7 +65,10 @@ function makeFixedExecute(returnValue) {
  */
 function makeRecordingExecute(returnValue) {
   const calls = [];
-  const fn = async (code) => { calls.push(code); return returnValue; };
+  const fn = async (code) => {
+    calls.push(code);
+    return returnValue;
+  };
   fn.calls = calls;
   return fn;
 }
@@ -129,7 +132,7 @@ test('mapEnumeratedTabs: mixes valid and filtered entries — only valid survive
     { wcId: null, url: 'about:blank', title: 'New tab', jarId: 'default', active: false }, // not-yet-ready
     { wcId: 2, url: 'https://b.com', title: 'B', jarId: 'work', active: false },
     { wcId: 3, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: false }, // internal
-    { wcId: 999, url: 'https://gone.com', title: 'Gone', jarId: 'default', active: false }, // unresolvable
+    { wcId: 999, url: 'https://gone.com', title: 'Gone', jarId: 'default', active: false } // unresolvable
   ];
   const result = mapEnumeratedTabs(rawTabs, { fromId, chromeContents: null });
   assert.equal(result.length, 2);
@@ -164,7 +167,7 @@ test('mapEnumeratedTabs: fromId throwing (not returning null) drops that entry a
   };
   const rawTabs = [
     { wcId: 1, url: 'https://a.com', title: 'A', jarId: 'default', active: false },
-    { wcId: 2, url: 'https://b.com', title: 'B', jarId: 'default', active: true },
+    { wcId: 2, url: 'https://b.com', title: 'B', jarId: 'default', active: true }
   ];
   const result = mapEnumeratedTabs(rawTabs, { fromId, chromeContents: null });
   assert.equal(result.length, 1);
@@ -181,7 +184,7 @@ test('enumerateTabs: calls listTabs() and filters through mapEnumeratedTabs', as
   const fromId = makeFakeFromId({ 10: guestWc, 99: internalWc });
   const rawList = [
     { wcId: 10, url: 'https://example.com', title: 'Example', jarId: 'default', active: true },
-    { wcId: 99, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: false },
+    { wcId: 99, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: false }
   ];
   const exec = makeFixedExecute(rawList);
   const result = await enumerateTabs({ executeInRenderer: exec, fromId, chromeContents: null });
@@ -193,9 +196,7 @@ test('enumerateTabs: calls listTabs() and filters through mapEnumeratedTabs', as
 test('enumerateTabs: internal settings tab absent even when present in renderer raw list (DD5 enumerate filter)', async () => {
   const internalWc = makeInternalWc(50);
   const fromId = makeFakeFromId({ 50: internalWc });
-  const rawList = [
-    { wcId: 50, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: true },
-  ];
+  const rawList = [{ wcId: 50, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: true }];
   const exec = makeFixedExecute(rawList);
   const result = await enumerateTabs({ executeInRenderer: exec, fromId, chromeContents: null });
   assert.equal(result.length, 0);
@@ -268,7 +269,10 @@ test('openTab: with undefined jarId, generated call string is single-arg', async
   const exec = makeRecordingExecute(1);
   await openTab('https://example.com', undefined, { executeInRenderer: exec });
   const code = exec.calls[0];
-  assert.ok(code.endsWith('openTab("https://example.com")'), 'undefined jarId must produce single-arg call; got: ' + code);
+  assert.ok(
+    code.endsWith('openTab("https://example.com")'),
+    'undefined jarId must produce single-arg call; got: ' + code
+  );
 });
 
 test('openTab: with jarId, generated call string is two-arg (JSON url, JSON jarId)', async () => {
@@ -297,7 +301,8 @@ test('closeTab: internal-session wcId throws before dispatching (DD5 targeted-op
   const internalWc = makeInternalWc(99);
   const exec = makeRecordingExecute(true);
   await assert.rejects(
-    async () => closeTab(99, { executeInRenderer: exec, fromId: makeFakeFromId({ 99: internalWc }), chromeContents: null }),
+    async () =>
+      closeTab(99, { executeInRenderer: exec, fromId: makeFakeFromId({ 99: internalWc }), chromeContents: null }),
     (err) => err instanceof Error && err.message.includes('internal-session')
   );
   assert.equal(exec.calls.length, 0, 'no dispatch for internal target');
@@ -350,7 +355,8 @@ test('activateTab: internal-session wcId throws before dispatching (DD5 targeted
   const internalWc = makeInternalWc(99);
   const exec = makeRecordingExecute(true);
   await assert.rejects(
-    async () => activateTab(99, { executeInRenderer: exec, fromId: makeFakeFromId({ 99: internalWc }), chromeContents: null }),
+    async () =>
+      activateTab(99, { executeInRenderer: exec, fromId: makeFakeFromId({ 99: internalWc }), chromeContents: null }),
     (err) => err instanceof Error && err.message.includes('internal-session')
   );
   assert.equal(exec.calls.length, 0, 'no dispatch for internal target');
@@ -409,7 +415,14 @@ test('activateTab: destroyed webContents throws no-such-contents', async () => {
 // A fake chrome webContents that records what was dispatched INTO it. The point of the
 // S1 fix is WHICH chrome receives the code, so the fake must be identifiable.
 function makeFakeChrome(label, result = true) {
-  return { label, calls: [], async executeJavaScript(code) { this.calls.push(code); return result; } };
+  return {
+    label,
+    calls: [],
+    async executeJavaScript(code) {
+      this.calls.push(code);
+      return result;
+    }
+  };
 }
 
 // The engine's executeInChrome seam (engine.js deps()): dispatch onto a SPECIFIC chrome.
@@ -432,8 +445,8 @@ test('[F7 DD6/AC2] activateTab: chromeForTab → null ⇒ returns false, NO rais
     executeInChrome,
     fromId: makeFakeFromId({ 42: overlayWc }),
     chromeContents: null,
-    chromeForTab: () => null,                    // not a registry-owned tab
-    raiseWindowForTab: (id) => raises.push(id),
+    chromeForTab: () => null, // not a registry-owned tab
+    raiseWindowForTab: (id) => raises.push(id)
   });
 
   assert.equal(result, false, 'the honest answer: "this wcId is not a registry-owned tab" — the same false as pre-F7');
@@ -441,12 +454,12 @@ test('[F7 DD6/AC2] activateTab: chromeForTab → null ⇒ returns false, NO rais
   assert.equal(exec.calls.length, 0, 'and it does NOT fall back to the last-focused dispatch either');
 });
 
-test('[F7 DD6/AC2] activateTab: dispatch goes to the OWNING window\'s chrome, NOT executeInRenderer\'s last-focused one (the S1 fix)', async () => {
+test("[F7 DD6/AC2] activateTab: dispatch goes to the OWNING window's chrome, NOT executeInRenderer's last-focused one (the S1 fix)", async () => {
   // The heart of S1: inject a chromeForTab returning a DIFFERENT fake than the
   // last-focused executeInRenderer, and assert WHICH one received the code.
   const tabWc = makeGuestWc(77);
-  const lastFocused = makeRecordingExecute(true);          // window A's chrome (WRONG target)
-  const owningChrome = makeFakeChrome('window-B-chrome');  // window B's chrome (RIGHT target)
+  const lastFocused = makeRecordingExecute(true); // window A's chrome (WRONG target)
+  const owningChrome = makeFakeChrome('window-B-chrome'); // window B's chrome (RIGHT target)
   const raises = [];
 
   const result = await activateTab(77, {
@@ -455,20 +468,30 @@ test('[F7 DD6/AC2] activateTab: dispatch goes to the OWNING window\'s chrome, NO
     fromId: makeFakeFromId({ 77: tabWc }),
     chromeContents: null,
     chromeForTab: (id) => (id === 77 ? owningChrome : null),
-    raiseWindowForTab: (id) => raises.push(id),
+    raiseWindowForTab: (id) => raises.push(id)
   });
 
   assert.equal(result, true);
-  assert.equal(owningChrome.calls.length, 1, 'the OWNING window\'s chrome must receive the dispatch');
+  assert.equal(owningChrome.calls.length, 1, "the OWNING window's chrome must receive the dispatch");
   assert.ok(owningChrome.calls[0].includes('activateTabByWcId(77)'), 'with the right wcId');
-  assert.equal(lastFocused.calls.length, 0,
-    'the LAST-FOCUSED chrome must NOT be dispatched to — that is the whole of S1');
+  assert.equal(
+    lastFocused.calls.length,
+    0,
+    'the LAST-FOCUSED chrome must NOT be dispatched to — that is the whole of S1'
+  );
 });
 
 test('[F7 DD6/AC4] activateTab: dispatch true ⇒ raiseWindowForTab called EXACTLY once, AFTER the dispatch, returns true', async () => {
   const tabWc = makeGuestWc(78);
   const order = [];
-  const owningChrome = { calls: [], async executeJavaScript(code) { order.push('dispatch'); this.calls.push(code); return true; } };
+  const owningChrome = {
+    calls: [],
+    async executeJavaScript(code) {
+      order.push('dispatch');
+      this.calls.push(code);
+      return true;
+    }
+  };
 
   const result = await activateTab(78, {
     executeInRenderer: makeRecordingExecute(true),
@@ -476,12 +499,15 @@ test('[F7 DD6/AC4] activateTab: dispatch true ⇒ raiseWindowForTab called EXACT
     fromId: makeFakeFromId({ 78: tabWc }),
     chromeContents: null,
     chromeForTab: () => owningChrome,
-    raiseWindowForTab: (id) => order.push('raise:' + id),
+    raiseWindowForTab: (id) => order.push('raise:' + id)
   });
 
   assert.equal(result, true);
-  assert.deepEqual(order, ['dispatch', 'raise:78'],
-    'the raise happens AFTER the dispatch, so the window comes forward already showing the right tab');
+  assert.deepEqual(
+    order,
+    ['dispatch', 'raise:78'],
+    'the raise happens AFTER the dispatch, so the window comes forward already showing the right tab'
+  );
 });
 
 test('[F7 DD6/AC3] activateTab: dispatch false on an OWNED tab ⇒ THROWS the named refusal, and raiseWindowForTab is called ZERO times', async () => {
@@ -489,19 +515,20 @@ test('[F7 DD6/AC3] activateTab: dispatch false on an OWNED tab ⇒ THROWS the na
   // real desync. A THROW, not a returned refusal object: a returned object would still be
   // DISCARDED at all seven raise sites, re-creating the exact silent no-op S1 is.
   const tabWc = makeGuestWc(79);
-  const owningChrome = makeFakeChrome('desynced-chrome', false);  // dispatch returns false
+  const owningChrome = makeFakeChrome('desynced-chrome', false); // dispatch returns false
   const raises = [];
 
   await assert.rejects(
-    () => activateTab(79, {
-      executeInRenderer: makeRecordingExecute(true),
-      executeInChrome,
-      fromId: makeFakeFromId({ 79: tabWc }),
-      chromeContents: null,
-      chromeForTab: () => owningChrome,
-      raiseWindowForTab: (id) => raises.push(id),
-    }),
-    (err) => err instanceof Error && /^automation: activate-refused — /.test(err.message),
+    () =>
+      activateTab(79, {
+        executeInRenderer: makeRecordingExecute(true),
+        executeInChrome,
+        fromId: makeFakeFromId({ 79: tabWc }),
+        chromeContents: null,
+        chromeForTab: () => owningChrome,
+        raiseWindowForTab: (id) => raises.push(id)
+      }),
+    (err) => err instanceof Error && /^automation: activate-refused — /.test(err.message)
   );
 
   assert.equal(owningChrome.calls.length, 1, 'the dispatch was attempted');
@@ -520,7 +547,7 @@ test('[F7 DD6/AC6] activateTab: ABSENT chromeForTab ⇒ pre-F7 executeInRenderer
     executeInRenderer: exec,
     fromId: makeFakeFromId({ 80: tabWc }),
     chromeContents: null,
-    raiseWindowForTab: (id) => raises.push(id),   // present, but must not fire
+    raiseWindowForTab: (id) => raises.push(id) // present, but must not fire
   });
 
   assert.equal(result, true, 'the executeInRenderer result passes through as pre-F7');
@@ -538,23 +565,30 @@ test('[F7 DD6] activateTab: resolve-time refusals still throw BEFORE any owner l
     executeInChrome,
     fromId: makeFakeFromId(map),
     chromeContents: null,
-    chromeForTab: (i) => { lookups.push(i); return makeFakeChrome('c'); },
-    raiseWindowForTab: (i) => raises.push(i),
+    chromeForTab: (i) => {
+      lookups.push(i);
+      return makeFakeChrome('c');
+    },
+    raiseWindowForTab: (i) => raises.push(i)
   });
 
   await assert.rejects(
     () => activateTab(99, mkDeps({ 99: makeInternalWc(99) })),
-    (err) => err.message.includes('internal-session'));
+    (err) => err.message.includes('internal-session')
+  );
   await assert.rejects(
     () => activateTab(998, mkDeps({})),
-    (err) => err.message.includes('no-such-contents'));
+    (err) => err.message.includes('no-such-contents')
+  );
   await assert.rejects(
     () => activateTab(55, mkDeps({ 55: makeDestroyedWc(55) })),
-    (err) => err.message.includes('no-such-contents'));
+    (err) => err.message.includes('no-such-contents')
+  );
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => activateTab('10', mkDeps({})),
-    (err) => err.message.includes('bad-handle'));
+    (err) => err.message.includes('bad-handle')
+  );
 
   assert.deepEqual(lookups, [], 'chromeForTab must not even be consulted for a target that fails resolve');
   assert.deepEqual(raises, [], 'and nothing is raised');
@@ -576,10 +610,10 @@ test('[F7 DD6] activateTab: resolve-time refusals still throw BEFORE any owner l
 function makeWindow({ windowId, tabs = [], owns = null, booted = true }) {
   return {
     windowId,
-    chrome: { __chromeFor: windowId },   // an opaque handle; only executeInChrome sees it
+    chrome: { __chromeFor: windowId }, // an opaque handle; only executeInChrome sees it
     booted,
     ownsTab: (wcId) => (owns ?? tabs.map((t) => t.wcId)).includes(wcId),
-    __tabs: tabs,
+    __tabs: tabs
   };
 }
 
@@ -601,13 +635,17 @@ function makeChromeExecute(windows, { throwFor = [] } = {}) {
 test('enumerateTabs (DD1): two booted windows → rows from BOTH, insertion order, each stamped with its OWN windowId', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10), 11: makeGuestWc(11), 20: makeGuestWc(20) });
   const windows = [
-    makeWindow({ windowId: 1, tabs: [
-      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
-      { wcId: 11, url: 'https://b.example', title: 'B', jarId: 'default', active: false },
-    ] }),
-    makeWindow({ windowId: 2, tabs: [
-      { wcId: 20, url: 'https://c.example', title: 'C', jarId: 'default', active: true },
-    ] }),
+    makeWindow({
+      windowId: 1,
+      tabs: [
+        { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
+        { wcId: 11, url: 'https://b.example', title: 'B', jarId: 'default', active: false }
+      ]
+    }),
+    makeWindow({
+      windowId: 2,
+      tabs: [{ wcId: 20, url: 'https://c.example', title: 'C', jarId: 'default', active: true }]
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -615,9 +653,16 @@ test('enumerateTabs (DD1): two booted windows → rows from BOTH, insertion orde
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => [t.wcId, t.windowId]), [[10, 1], [11, 1], [20, 2]]);
+  assert.deepEqual(
+    result.map((t) => [t.wcId, t.windowId]),
+    [
+      [10, 1],
+      [11, 1],
+      [20, 2]
+    ]
+  );
 });
 
 test('enumerateTabs (DD1): a row the renderer reports but the registry does NOT own is DROPPED', async () => {
@@ -629,10 +674,10 @@ test('enumerateTabs (DD1): a row the renderer reports but the registry does NOT 
       windowId: 1,
       tabs: [
         { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
-        { wcId: 66, url: 'https://ghost.example', title: 'Ghost', jarId: 'default', active: false },
+        { wcId: 66, url: 'https://ghost.example', title: 'Ghost', jarId: 'default', active: false }
       ],
-      owns: [10],   // the registry owns 10 only
-    }),
+      owns: [10] // the registry owns 10 only
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -640,9 +685,12 @@ test('enumerateTabs (DD1): a row the renderer reports but the registry does NOT 
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10]);
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10]
+  );
 });
 
 test('enumerateTabs (DD1): a tab owned by B but REPORTED by A appears ONCE, under B — the anti-double-count pin', async () => {
@@ -652,8 +700,8 @@ test('enumerateTabs (DD1): a tab owned by B but REPORTED by A appears ONCE, unde
   const fromId = makeFakeFromId({ 30: makeGuestWc(30) });
   const roamer = { wcId: 30, url: 'https://moved.example', title: 'Moved', jarId: 'default', active: true };
   const windows = [
-    makeWindow({ windowId: 1, tabs: [roamer], owns: [] }),      // A still reports it; A no longer owns it
-    makeWindow({ windowId: 2, tabs: [roamer], owns: [30] }),    // B owns it
+    makeWindow({ windowId: 1, tabs: [roamer], owns: [] }), // A still reports it; A no longer owns it
+    makeWindow({ windowId: 2, tabs: [roamer], owns: [30] }) // B owns it
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -661,7 +709,7 @@ test('enumerateTabs (DD1): a tab owned by B but REPORTED by A appears ONCE, unde
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
   assert.equal(result.length, 1, 'reported twice, stamped once');
   assert.deepEqual([result[0].wcId, result[0].windowId], [30, 2]);
@@ -682,7 +730,7 @@ test('enumerateTabs (DD1): booted:false ⇒ ZERO rows AND no round-trip attempte
     executeInChrome: midExec.exec,
     listWindows: () => midBoot,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
   assert.deepEqual(absent, [], 'a mid-boot window contributes zero rows');
   assert.deepEqual(midExec.calls, [], 'and NO round-trip was attempted against it');
@@ -695,27 +743,40 @@ test('enumerateTabs (DD1): booted:false ⇒ ZERO rows AND no round-trip attempte
     executeInChrome: bootedExec.exec,
     listWindows: () => booted,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(present.map((t) => [t.wcId, t.windowId]), [[40, 9]], 'the SAME fixture DOES yield rows when booted');
+  assert.deepEqual(
+    present.map((t) => [t.wcId, t.windowId]),
+    [[40, 9]],
+    'the SAME fixture DOES yield rows when booted'
+  );
   assert.deepEqual(bootedExec.calls, [9], 'and the round-trip DID happen');
 });
 
 test('enumerateTabs (DD1): a window whose round-trip THROWS contributes zero rows; the census still returns the others', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10), 20: makeGuestWc(20) });
   const windows = [
-    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] }),
-    makeWindow({ windowId: 2, tabs: [{ wcId: 20, url: 'https://b.example', title: 'B', jarId: 'default', active: true }] }),
+    makeWindow({
+      windowId: 1,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }]
+    }),
+    makeWindow({
+      windowId: 2,
+      tabs: [{ wcId: 20, url: 'https://b.example', title: 'B', jarId: 'default', active: true }]
+    })
   ];
-  const { exec } = makeChromeExecute(windows, { throwFor: [1] });   // window 1 closes mid-census
+  const { exec } = makeChromeExecute(windows, { throwFor: [1] }); // window 1 closes mid-census
   const result = await enumerateTabs({
     executeInRenderer: makeFixedExecute([]),
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => [t.wcId, t.windowId]), [[20, 2]]);
+  assert.deepEqual(
+    result.map((t) => [t.wcId, t.windowId]),
+    [[20, 2]]
+  );
 });
 
 test('enumerateTabs (DD1/AC2): the return is a PLAIN ARRAY with no own properties beyond indices', async () => {
@@ -723,14 +784,19 @@ test('enumerateTabs (DD1/AC2): the return is a PLAIN ARRAY with no own propertie
   // wrapper and SILENTLY DROPS an own property (Array.prototype.filter does not copy
   // own props) — so a jar caller would under-read with no signal.
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
-  const windows = [makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] })];
+  const windows = [
+    makeWindow({
+      windowId: 1,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }]
+    })
+  ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
     executeInRenderer: makeFixedExecute([]),
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
 
   const isPlainArray = (v) => Array.isArray(v) && Object.keys(v).every((k) => String(Number(k)) === k);
@@ -748,9 +814,10 @@ test('enumerateTabs (DD1): windowId is stamped from the REGISTRY — a bogus ren
   // The renderer never learns windowId. If it invents one, the registry's stamp wins.
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
   const windows = [
-    makeWindow({ windowId: 7, tabs: [
-      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true, windowId: 999 },
-    ] }),
+    makeWindow({
+      windowId: 7,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true, windowId: 999 }]
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -758,7 +825,7 @@ test('enumerateTabs (DD1): windowId is stamped from the REGISTRY — a bogus ren
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
   assert.equal(result[0].windowId, 7);
 });
@@ -772,10 +839,10 @@ test('enumerateTabs (DD1): mapEnumeratedTabs still runs PER WINDOW — the inter
         { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
         { wcId: 99, url: 'goldfinch://settings', title: 'Settings', jarId: 'internal', active: false },
         { wcId: null, url: 'https://booting.example', title: '', jarId: 'default', active: false },
-        { wcId: 12, url: 'https://d.example', title: 'D', jarId: 'default', active: false },
+        { wcId: 12, url: 'https://d.example', title: 'D', jarId: 'default', active: false }
       ],
-      owns: [10, 99, 12],
-    }),
+      owns: [10, 99, 12]
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -783,9 +850,13 @@ test('enumerateTabs (DD1): mapEnumeratedTabs still runs PER WINDOW — the inter
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10, 12], 'internal dropped (DD5), pre-dom-ready dropped');
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10, 12],
+    'internal dropped (DD5), pre-dom-ready dropped'
+  );
 });
 
 test('enumerateTabs (AC4): absent listWindows → the pre-F7 single-window path, and NO windowId is emitted', async () => {
@@ -794,23 +865,29 @@ test('enumerateTabs (AC4): absent listWindows → the pre-F7 single-window path,
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
   const result = await enumerateTabs({
     executeInRenderer: makeFixedExecute([
-      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
+      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }
     ]),
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10]);
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10]
+  );
   assert.equal('windowId' in result[0], false, 'no windowId on the pre-F7 path');
 });
 
 test('enumerateTabs (DD1): zero registered windows → empty array, and executeInRenderer is never called', async () => {
   let rendererCalls = 0;
   const result = await enumerateTabs({
-    executeInRenderer: async () => { rendererCalls++; return []; },
+    executeInRenderer: async () => {
+      rendererCalls++;
+      return [];
+    },
     executeInChrome: async () => [],
     listWindows: () => [],
     fromId: makeFakeFromId({}),
-    chromeContents: null,
+    chromeContents: null
   });
   assert.deepEqual(result, []);
   assert.equal(rendererCalls, 0, 'the census path never falls back to the last-focused chrome');
@@ -827,10 +904,21 @@ test('enumerateTabs (DD1): zero registered windows → empty array, and executeI
 test('enumerateTabs (popup merge): popup rows append AFTER all tab rows, verbatim, on the multi-window path', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10), 20: makeGuestWc(20) });
   const windows = [
-    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'personal', active: true }] }),
-    makeWindow({ windowId: 2, tabs: [{ wcId: 20, url: 'https://c.example', title: 'C', jarId: 'work', active: true }] }),
+    makeWindow({
+      windowId: 1,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'personal', active: true }]
+    }),
+    makeWindow({ windowId: 2, tabs: [{ wcId: 20, url: 'https://c.example', title: 'C', jarId: 'work', active: true }] })
   ];
-  const popupRow = { wcId: 701, url: 'https://popup.example/', title: 'P', jarId: 'personal', active: false, windowId: 1, popup: true };
+  const popupRow = {
+    wcId: 701,
+    url: 'https://popup.example/',
+    title: 'P',
+    jarId: 'personal',
+    active: false,
+    windowId: 1,
+    popup: true
+  };
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
     executeInRenderer: makeFixedExecute([]),
@@ -838,16 +926,27 @@ test('enumerateTabs (popup merge): popup rows append AFTER all tab rows, verbati
     listWindows: () => windows,
     listPopups: () => [popupRow],
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10, 20, 701], 'popup rows last');
-  assert.deepEqual(result[2], popupRow, 'the main-built row rides untouched (jarId mapped main-side, popup: true, owner windowId)');
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10, 20, 701],
+    'popup rows last'
+  );
+  assert.deepEqual(
+    result[2],
+    popupRow,
+    'the main-built row rides untouched (jarId mapped main-side, popup: true, owner windowId)'
+  );
 });
 
 test('enumerateTabs (popup merge): absent listPopups → no popup rows (house absent-dep idiom)', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
   const windows = [
-    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] }),
+    makeWindow({
+      windowId: 1,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }]
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -855,30 +954,51 @@ test('enumerateTabs (popup merge): absent listPopups → no popup rows (house ab
     executeInChrome: exec,
     listWindows: () => windows,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10], 'no popup rows without the seam');
-  assert.equal(result.some((t) => t.popup), false);
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10],
+    'no popup rows without the seam'
+  );
+  assert.equal(
+    result.some((t) => t.popup),
+    false
+  );
 });
 
 test('enumerateTabs (popup merge): the pre-F7 fallback path also appends popup rows', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
-  const popupRow = { wcId: 701, url: 'https://popup.example/', title: 'P', jarId: null, active: false, windowId: 1, popup: true };
+  const popupRow = {
+    wcId: 701,
+    url: 'https://popup.example/',
+    title: 'P',
+    jarId: null,
+    active: false,
+    windowId: 1,
+    popup: true
+  };
   const result = await enumerateTabs({
     executeInRenderer: makeFixedExecute([
-      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true },
+      { wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }
     ]),
     listPopups: () => [popupRow],
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10, 701]);
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10, 701]
+  );
 });
 
 test('enumerateTabs (popup merge): a null/empty listPopups return contributes nothing (defensive)', async () => {
   const fromId = makeFakeFromId({ 10: makeGuestWc(10) });
   const windows = [
-    makeWindow({ windowId: 1, tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }] }),
+    makeWindow({
+      windowId: 1,
+      tabs: [{ wcId: 10, url: 'https://a.example', title: 'A', jarId: 'default', active: true }]
+    })
   ];
   const { exec } = makeChromeExecute(windows);
   const result = await enumerateTabs({
@@ -887,9 +1007,12 @@ test('enumerateTabs (popup merge): a null/empty listPopups return contributes no
     listWindows: () => windows,
     listPopups: () => null,
     fromId,
-    chromeContents: null,
+    chromeContents: null
   });
-  assert.deepEqual(result.map((t) => t.wcId), [10]);
+  assert.deepEqual(
+    result.map((t) => t.wcId),
+    [10]
+  );
 });
 
 test('activateTab on a POPUP wcId returns false — chromeForTab misses popups; no raise, no dispatch, no throw (M14 F2 L2)', async () => {
@@ -898,14 +1021,21 @@ test('activateTab on a POPUP wcId returns false — chromeForTab misses popups; 
   let raised = 0;
   let dispatched = 0;
   const result = await activateTab(701, {
-    executeInRenderer: async () => { throw new Error('must not take the fallback path'); },
-    executeInChrome: async () => { dispatched++; return true; },
-    chromeForTab: () => null,               // popups are in no window's tabViews
-    raiseWindowForTab: () => { raised++; },
+    executeInRenderer: async () => {
+      throw new Error('must not take the fallback path');
+    },
+    executeInChrome: async () => {
+      dispatched++;
+      return true;
+    },
+    chromeForTab: () => null, // popups are in no window's tabViews
+    raiseWindowForTab: () => {
+      raised++;
+    },
     fromId,
     chromeContents: null,
-    isTabViewWcId: () => false,             // not a tab…
-    isPopupWcId: (id) => id === 701,        // …but resolves via the popup widening
+    isTabViewWcId: () => false, // not a tab…
+    isPopupWcId: (id) => id === 701 // …but resolves via the popup widening
   });
   assert.equal(result, false, 'the honest "not a registry-owned tab" answer');
   assert.equal(dispatched, 0, 'no chrome dispatch');

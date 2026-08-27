@@ -100,7 +100,7 @@ function load(userDataPath, opts = {}) {
   dir = userDataPath;
   codec = {
     serialize: opts.serialize ?? defaultSerialize,
-    deserialize: opts.deserialize ?? defaultDeserialize,
+    deserialize: opts.deserialize ?? defaultDeserialize
   };
 
   // Resolve the document store and read the row OUTSIDE the catch-all below:

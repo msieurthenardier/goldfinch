@@ -15,9 +15,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createDocument } = require('./helpers/jars-page-dom');
 
-const moduleUrl = pathToFileURL(
-  path.join(__dirname, '../../src/renderer/pages/jars-confirm-modal.js')
-).href;
+const moduleUrl = pathToFileURL(path.join(__dirname, '../../src/renderer/pages/jars-confirm-modal.js')).href;
 
 const DELETE_COPY = 'Deletes this jar and wipes its data.';
 const DELETE_VAULT_COPY = 'This jar has a saved password vault — deleting it is permanent and unrecoverable.';
@@ -78,7 +76,10 @@ test('vault-bearing delete confirm renders the "Export vault first" button with 
   assert.ok(exportBtn, 'the Export button is rendered');
   // The permanence copy replaces the static copy.
   let descText = null;
-  const visit = (n) => { if (n.id === 'jars-confirm-desc') descText = n.textContent; n.children.forEach(visit); };
+  const visit = (n) => {
+    if (n.id === 'jars-confirm-desc') descText = n.textContent;
+    n.children.forEach(visit);
+  };
   visit(backdrop);
   assert.equal(descText, DELETE_VAULT_COPY);
 });
@@ -90,11 +91,11 @@ test('the Export button is in the confirm focus cycle (3-element, keyboard-reach
   const cancelBtn = findButton(backdrop, 'Cancel');
   // update() default-focuses Cancel (destructive-safe). Tab cycles [export, confirm, cancel].
   assert.equal(document.activeElement, cancelBtn, 'Cancel focused by default');
-  pressTab(backdrop);                                   // cancel -> export (wraps to index 0)
+  pressTab(backdrop); // cancel -> export (wraps to index 0)
   assert.equal(document.activeElement, exportBtn, 'Tab reaches the Export button');
-  pressTab(backdrop);                                   // export -> confirm
+  pressTab(backdrop); // export -> confirm
   assert.equal(document.activeElement, confirmBtn);
-  pressTab(backdrop);                                   // confirm -> cancel
+  pressTab(backdrop); // confirm -> cancel
   assert.equal(document.activeElement, cancelBtn);
 });
 
@@ -108,7 +109,10 @@ test('the Export button reuses exportVault WITHOUT closing the modal and surface
   await new Promise((r) => setImmediate(r));
   assert.ok(!backdrop.hidden, 'the modal stays open after an export attempt');
   let noteFound = false;
-  const visit = (n) => { if (typeof n.textContent === 'string' && n.textContent.includes('Unlock the vault')) noteFound = true; n.children.forEach(visit); };
+  const visit = (n) => {
+    if (typeof n.textContent === 'string' && n.textContent.includes('Unlock the vault')) noteFound = true;
+    n.children.forEach(visit);
+  };
   visit(backdrop);
   assert.ok(noteFound, 'a locked vault surfaces "unlock the vault to export", never a faked success');
 });
@@ -120,7 +124,10 @@ test('no-vault delete confirm is the unchanged 2-element [confirm, cancel] modal
   const cancelBtn = findButton(backdrop, 'Cancel');
   // Static copy (unchanged).
   let descText = null;
-  const visit = (n) => { if (n.id === 'jars-confirm-desc') descText = n.textContent; n.children.forEach(visit); };
+  const visit = (n) => {
+    if (n.id === 'jars-confirm-desc') descText = n.textContent;
+    n.children.forEach(visit);
+  };
   visit(backdrop);
   assert.equal(descText, DELETE_COPY);
   // 2-element cycle: cancel -> confirm -> cancel.

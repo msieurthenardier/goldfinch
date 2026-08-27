@@ -68,7 +68,8 @@ const menuController = (() => {
       } else if (e.key === 'Tab') {
         e.preventDefault();
         closeEntry(entry);
-        if (entry.focusReturn) entry.focusReturn(); // Tab/Shift+Tab close the menu and return focus
+        if (entry.focusReturn)
+          entry.focusReturn(); // Tab/Shift+Tab close the menu and return focus
         else entry.trigger.focus();
       } else {
         // Arrow/Home/End require items; guard before calling focusItem (wrap formula

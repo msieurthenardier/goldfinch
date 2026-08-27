@@ -30,7 +30,7 @@ describe('unwrap (callTool result → { value, isError })', () => {
   it('parses {"ok":true} (the void-op shape)', () => {
     assert.deepEqual(mod.unwrap({ content: [{ type: 'text', text: '{"ok":true}' }] }), {
       value: { ok: true },
-      isError: false,
+      isError: false
     });
   });
 
@@ -60,8 +60,8 @@ describe('unwrap (callTool result → { value, isError })', () => {
     const r = mod.unwrap({
       content: [
         { type: 'image', mimeType: 'image/png', data: 'AAAA' },
-        { type: 'text', text: '42' },
-      ],
+        { type: 'text', text: '42' }
+      ]
     });
     assert.deepEqual(r, { value: 42, isError: false });
   });
@@ -77,7 +77,7 @@ describe('parseDevMintLine (AUTOMATION_DEV_MINT stdout scrape)', () => {
     const out = [
       '[1234:0617/...:INFO:CONSOLE] some electron chatter',
       'AUTOMATION_DEV_MINT {"key":"jar123","adminKey":null}',
-      '[1234:0617/...:INFO] more chatter after',
+      '[1234:0617/...:INFO] more chatter after'
     ].join('\n');
     assert.deepEqual(mod.parseDevMintLine(out), { key: 'jar123', adminKey: null });
   });
@@ -95,7 +95,7 @@ describe('parseDevMintLine (AUTOMATION_DEV_MINT stdout scrape)', () => {
   it('keeps scanning past a noisy line that merely contains the prefix substring', () => {
     const out = [
       'log mentioning AUTOMATION_DEV_MINT but not JSON',
-      'AUTOMATION_DEV_MINT {"key":"real","adminKey":null}',
+      'AUTOMATION_DEV_MINT {"key":"real","adminKey":null}'
     ].join('\n');
     assert.deepEqual(mod.parseDevMintLine(out), { key: 'real', adminKey: null });
   });
@@ -122,7 +122,10 @@ describe('defaultKey (env precedence)', () => {
 
 describe('resolveEndpoint (URL / port / default)', () => {
   it('honors a full GOLDFINCH_MCP_URL', () => {
-    assert.equal(mod.resolveEndpoint({ GOLDFINCH_MCP_URL: 'http://127.0.0.1:9001/mcp' }).href, 'http://127.0.0.1:9001/mcp');
+    assert.equal(
+      mod.resolveEndpoint({ GOLDFINCH_MCP_URL: 'http://127.0.0.1:9001/mcp' }).href,
+      'http://127.0.0.1:9001/mcp'
+    );
   });
 
   it('composes from GOLDFINCH_MCP_PORT', () => {

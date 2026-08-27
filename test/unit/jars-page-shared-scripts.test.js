@@ -76,7 +76,10 @@ function isSharedSrc(src) {
 }
 
 test('jars.html script load order is non-empty (guards against a silent parse regression)', () => {
-  assert.ok(jarsScriptTags().length >= 4, 'expected burner.js, jar-data-classes.js, safe-color.js, jar-page-model.js, and jars.js in jars.html');
+  assert.ok(
+    jarsScriptTags().length >= 4,
+    'expected burner.js, jar-data-classes.js, safe-color.js, jar-page-model.js, and jars.js in jars.html'
+  );
 });
 
 test('jars.html pins DD3: once any script is a module, every classic script tag carries defer', () => {
@@ -95,7 +98,10 @@ test('jars.html pins DD3: once any script is a module, every classic script tag 
 
 test('every script jars.html loads resolves to a real file on disk', () => {
   for (const { src } of jarsScriptTags()) {
-    assert.doesNotThrow(() => resolveScriptFile(src), `"${src}" should resolve under src/shared/ or src/renderer/pages/`);
+    assert.doesNotThrow(
+      () => resolveScriptFile(src),
+      `"${src}" should resolve under src/shared/ or src/renderer/pages/`
+    );
   }
 });
 

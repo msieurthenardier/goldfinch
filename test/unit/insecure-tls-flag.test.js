@@ -25,7 +25,11 @@ test('no flag → argv forwarded untouched (fresh copy) and NO electron switches
 
 test('flag present → flag STRIPPED from the forwarded argv and exactly the ignore-certificate-errors switch unlocked', () => {
   const res = decideInsecureTlsFixtures(['--automation-dev', INSECURE_TLS_FLAG, '--foo']);
-  assert.deepEqual(res.forwardArgs, ['--automation-dev', '--foo'], 'the flag never reaches Electron (unknown-switch noise)');
+  assert.deepEqual(
+    res.forwardArgs,
+    ['--automation-dev', '--foo'],
+    'the flag never reaches Electron (unknown-switch noise)'
+  );
   assert.deepEqual(res.electronSwitches, ['--ignore-certificate-errors']);
 });
 
@@ -34,7 +38,10 @@ test('duplicate flags are all stripped; empty/absent argv is tolerated', () => {
   assert.deepEqual(res.forwardArgs, []);
   assert.deepEqual(res.electronSwitches, ['--ignore-certificate-errors']);
   assert.deepEqual(decideInsecureTlsFixtures([]), { forwardArgs: [], electronSwitches: [] });
-  assert.deepEqual(decideInsecureTlsFixtures(/** @type {any} */ (undefined)), { forwardArgs: [], electronSwitches: [] });
+  assert.deepEqual(decideInsecureTlsFixtures(/** @type {any} */ (undefined)), {
+    forwardArgs: [],
+    electronSwitches: []
+  });
 });
 
 test('source pin: the switch literal lives ONLY in the helper — dev-launch.mjs has no independent path to it, and no production code carries it', () => {

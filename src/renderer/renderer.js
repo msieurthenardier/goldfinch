@@ -16,7 +16,13 @@ import { pageContextModel } from '../shared/page-context-model.js';
 import { tabContextModel } from '../shared/tab-context-model.js';
 import { resolveNewTabContainer } from '../shared/default-routing.js';
 import { inheritContainerDecision, inheritFromPartition } from '../shared/inherit-container.js';
-import { shouldQuery, buildSuggestionModel, mergeSuggestionSources, moveSelection, acceptSuggestResponse } from '../shared/omnibox-suggest-model.js';
+import {
+  shouldQuery,
+  buildSuggestionModel,
+  mergeSuggestionSources,
+  moveSelection,
+  acceptSuggestResponse
+} from '../shared/omnibox-suggest-model.js';
 import { keyboardMove } from '../shared/tab-order.js';
 import { classifyDragPoint } from '../shared/tab-drag-zone.js'; // the drag's reorder/tear-off zone decision (pure, window-local)
 import { createPushCache } from '../shared/push-cache.js';
@@ -49,12 +55,18 @@ import {
 // SHAPE below — boot-seeded, raw setter, no coalescing; null routes openNewTab
 // to the welcome surface. The removed home-page constant is gone with it.
 let homePageCache = null;
-function currentHomePage() { return homePageCache; }
+function currentHomePage() {
+  return homePageCache;
+}
 
 // searchEngineCache (M16 F1 Leg 2, DD4; pre-seed null'd M16 F2 Leg 2, DD5 [high] — a placeholder would route a pre-seed search to an unchosen provider).
 let searchEngineCache = null;
-function setSearchEngine(value) { searchEngineCache = value; }
-function currentSearchEngine() { return searchEngineCache; }
+function setSearchEngine(value) {
+  searchEngineCache = value;
+}
+function currentSearchEngine() {
+  return searchEngineCache;
+}
 
 const ctx = createChromeContext({ document, goldfinch: window.goldfinch });
 const { els, tabs } = ctx;
@@ -150,7 +162,8 @@ tabController = createTabController({
   tabs,
   jarsClient,
   blankPrivacy,
-  escapeHtml, isSafeColor, // squawk 0020: jar-color innerHTML sink guard
+  escapeHtml,
+  isSafeColor, // squawk 0020: jar-color innerHTML sink guard
   openTabContextMenu: (id, anchorEl) => openTabContextMenu(id, anchorEl),
   currentHomePage,
   currentSearchEngine, // M16 F2 Leg 2 (DD7): openNewTab's reasons rule needs both preferences
@@ -176,7 +189,9 @@ tabController = createTabController({
 
 const {
   createTab,
-  openWelcomeTab, attachView, openNewTab, // M16 F2 Leg 1
+  openWelcomeTab,
+  attachView,
+  openNewTab, // M16 F2 Leg 1
   welcomeReasons, // M16 F2 Leg 2 (DD7): shared by the boot path below
   closeTab,
   activateTab,
@@ -191,16 +206,36 @@ const {
   measureWebviewsSlotDIP,
   sendActiveBounds
 } = tabController;
-function showWelcomePanel(tab) { return welcomeController.show(tab); } // M16 F2 Leg 1
-function hideWelcomePanel() { return welcomeController.hide(); } // M16 F2 Leg 1
-function updateAddressChip(tab) { return navigationController.updateAddressChip(tab); }
-function updateNavButtons() { return navigationController.updateNavButtons(); }
-function navigate(input) { return navigationController.navigate(input); }
-function toUrl(input) { return navigationController.toUrl(input); }
-function closeSuggestions(reason) { return navigationController.closeSuggestions(reason); }
-function resetSuggestionsForActivation() { return navigationController.resetSuggestionsForActivation(); }
-function refreshZoomControl(tab) { return navigationController.refreshZoomControl(tab); }
-function refreshStar(tab) { return navigationController.refreshStar(tab); }
+function showWelcomePanel(tab) {
+  return welcomeController.show(tab);
+} // M16 F2 Leg 1
+function hideWelcomePanel() {
+  return welcomeController.hide();
+} // M16 F2 Leg 1
+function updateAddressChip(tab) {
+  return navigationController.updateAddressChip(tab);
+}
+function updateNavButtons() {
+  return navigationController.updateNavButtons();
+}
+function navigate(input) {
+  return navigationController.navigate(input);
+}
+function toUrl(input) {
+  return navigationController.toUrl(input);
+}
+function closeSuggestions(reason) {
+  return navigationController.closeSuggestions(reason);
+}
+function resetSuggestionsForActivation() {
+  return navigationController.resetSuggestionsForActivation();
+}
+function refreshZoomControl(tab) {
+  return navigationController.refreshZoomControl(tab);
+}
+function refreshStar(tab) {
+  return navigationController.refreshStar(tab);
+}
 // M15 F2 Leg 3 (L3-DD-C): the activation-class bar-suppression + bar-render
 // closure — called from tab-controller.js's two activation-class sites
 // (wcId arrival, activateTab body) alongside refreshStar above. Suppressed
@@ -216,30 +251,78 @@ function refreshBookmarksSurfaces(tab) {
     bookmarksBarController.render(tab.container.id);
   }
 }
-function openFind(tab) { return navigationController.openFind(tab); }
-function togglePanel(force) { return mediaController.togglePanel(force); }
-function renderMedia() { return mediaController.renderMedia(); }
-function openLightbox(item) { return mediaController.openLightbox(item); }
-function closeLightbox() { return mediaController.closeLightbox(); }
-function toast(title, body) { return mediaController.toast(title, body); }
-function blankPrivacy() { return privacyController.blankPrivacy(); }
-function closePrivacyPanel() { return privacyController.closePrivacyPanel(); }
-function togglePrivacy(force) { return privacyController.togglePrivacy(force); }
-function setDevtoolsPressed(open) { return privacyController.setDevtoolsPressed(open); }
-function fetchCookies() { return privacyController.fetchCookies(); }
-function updateAutomationIndicator(snap) { return privacyController.updateAutomationIndicator(snap); }
-function updateAutomationKeyState(all) { return privacyController.updateAutomationKeyState(all); }
-function newIdentity() { return privacyController.newIdentity(); }
-function renderPrivacy() { return privacyController.renderPrivacy(); }
-function announceTabStatus(text) { return windowController.announceTabStatus(text); }
-function applyToolbarPins(pins) { return windowController.applyToolbarPins(pins); }
-function dispatchChromeAction(action) { return shortcutController.dispatchChromeAction(action); }
-function openDownloads() { return pageActions.openDownloads(); }
-function openJarsPage() { return pageActions.openJarsPage(); }
-function openVaultPage() { return pageActions.openVaultPage(); }
-function openSiteSettingsTab() { return pageActions.openSiteSettingsTab(); }
-function siteInfoModel(tab) { return pageActions.siteInfoModel(tab); }
-function createContainerAndOpenTab(rawName) { return pageActions.createContainerAndOpenTab(rawName); }
+function openFind(tab) {
+  return navigationController.openFind(tab);
+}
+function togglePanel(force) {
+  return mediaController.togglePanel(force);
+}
+function renderMedia() {
+  return mediaController.renderMedia();
+}
+function openLightbox(item) {
+  return mediaController.openLightbox(item);
+}
+function closeLightbox() {
+  return mediaController.closeLightbox();
+}
+function toast(title, body) {
+  return mediaController.toast(title, body);
+}
+function blankPrivacy() {
+  return privacyController.blankPrivacy();
+}
+function closePrivacyPanel() {
+  return privacyController.closePrivacyPanel();
+}
+function togglePrivacy(force) {
+  return privacyController.togglePrivacy(force);
+}
+function setDevtoolsPressed(open) {
+  return privacyController.setDevtoolsPressed(open);
+}
+function fetchCookies() {
+  return privacyController.fetchCookies();
+}
+function updateAutomationIndicator(snap) {
+  return privacyController.updateAutomationIndicator(snap);
+}
+function updateAutomationKeyState(all) {
+  return privacyController.updateAutomationKeyState(all);
+}
+function newIdentity() {
+  return privacyController.newIdentity();
+}
+function renderPrivacy() {
+  return privacyController.renderPrivacy();
+}
+function announceTabStatus(text) {
+  return windowController.announceTabStatus(text);
+}
+function applyToolbarPins(pins) {
+  return windowController.applyToolbarPins(pins);
+}
+function dispatchChromeAction(action) {
+  return shortcutController.dispatchChromeAction(action);
+}
+function openDownloads() {
+  return pageActions.openDownloads();
+}
+function openJarsPage() {
+  return pageActions.openJarsPage();
+}
+function openVaultPage() {
+  return pageActions.openVaultPage();
+}
+function openSiteSettingsTab() {
+  return pageActions.openSiteSettingsTab();
+}
+function siteInfoModel(tab) {
+  return pageActions.siteInfoModel(tab);
+}
+function createContainerAndOpenTab(rawName) {
+  return pageActions.createContainerAndOpenTab(rawName);
+}
 
 // Preserve the FD-approved evaluate seam's stable callable name while the
 // implementation and its mutable jar state live in the extracted client.
@@ -297,7 +380,10 @@ const KEBAB_ACTIONS = {
 
 let overlayMenuClient;
 const downloadsController = createDownloadsController({
-  els, goldfinch: window.goldfinch, openDownloadsPage: openDownloads, rightSheetAnchor,
+  els,
+  goldfinch: window.goldfinch,
+  openDownloadsPage: openDownloads,
+  rightSheetAnchor,
   openOverlayMenu: (...args) => overlayMenuClient.open(...args),
   closeOverlayMenu: (reason) => overlayMenuClient.close(reason),
   triggerOverlayMenu: (menuType, open) => overlayMenuClient.trigger(menuType, open)
@@ -316,7 +402,8 @@ const vaultController = createVaultController({
   goldfinch: window.goldfinch,
   jarsClient,
   isSafeColor,
-  openVaultPage, openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl), // squawk 0038
+  openVaultPage,
+  openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl), // squawk 0038
   openOverlayMenu: (...args) => overlayMenuClient.open(...args),
   // Late-bound like the bookmarks-client's: `toast` is a hoisted function declaration
   // here, but the wrapper keeps this construction independent of definition order.
@@ -348,7 +435,10 @@ const overlayMenus = {
   // no NODE_OF_ENTRY addition, per the leg's audit-seam AC).
   'bookmarks-overflow': fixedTriggerMenu(() => els.bookmarksOverflow),
   'page-context': {
-    open: false, token: 0, blurClosedAt: -Infinity, ariaTarget: () => null,
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => null,
     refocus(reason) {
       const ret = pageCtx.returnFocus;
       pageCtx.returnFocus = null;
@@ -358,7 +448,10 @@ const overlayMenus = {
     }
   },
   'tab-context': {
-    open: false, token: 0, blurClosedAt: -Infinity, ariaTarget: () => null,
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
+    ariaTarget: () => null,
     refocus(reason) {
       const ret = tabCtx.returnFocus;
       tabCtx.returnFocus = null;
@@ -368,7 +461,9 @@ const overlayMenus = {
     }
   },
   suggestions: {
-    open: false, token: 0, blurClosedAt: -Infinity,
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
     ariaTarget: () => els.address,
     refocus() {}
   },
@@ -378,7 +473,9 @@ const overlayMenus = {
   // lifecycle bucket (resolve vs re-present) is mapped MAIN-SIDE by the store's
   // manager close-observer; the chrome only opens.
   'auth-basic': {
-    open: false, token: 0, blurClosedAt: -Infinity,
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
     ariaTarget: () => null,
     refocus() {}
   },
@@ -386,7 +483,9 @@ const overlayMenus = {
   // raised from main's pending-challenge store (cert-challenge-present), no
   // chrome trigger element, close buckets mapped MAIN-SIDE by the store.
   'cert-picker': {
-    open: false, token: 0, blurClosedAt: -Infinity,
+    open: false,
+    token: 0,
+    blurClosedAt: -Infinity,
     ariaTarget: () => null,
     refocus() {}
   },
@@ -406,7 +505,8 @@ overlayMenuClient = createOverlayMenus({
   states: overlayMenus,
   now: () => performance.now(),
   onActivated: (payload) => {
-    if (!downloadsController.handleActivation(payload) && !vaultController.handleActivation(payload)) dispatchOverlayActivation(payload);
+    if (!downloadsController.handleActivation(payload) && !vaultController.handleActivation(payload))
+      dispatchOverlayActivation(payload);
   },
   onClosed: handleOverlayClosed
 });
@@ -432,18 +532,26 @@ navigationController = createNavigationController({
   isInternalTab,
   isWebTab,
   createTab,
-  openNewTab, attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
-  openWelcomeTab, refreshWelcome: showWelcomePanel, openDownloads, // M16 F2 Leg 2 (DD3): the search handoff
+  openNewTab,
+  attachView, // M16 F2 Leg 1: the `+` pill (DD4) / navigate() on a welcome tab (DD2)
+  openWelcomeTab,
+  refreshWelcome: showWelcomePanel,
+  openDownloads, // M16 F2 Leg 2 (DD3): the search handoff
   bookmarksClient,
   isInternalPageUrl,
-  buildSearchUrl, currentSearchEngine, capPendingQuery, normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's engine lookup + live cache read + the pending-query cap + the shared domain-normalize rule (HAT item 5)
+  buildSearchUrl,
+  currentSearchEngine,
+  capPendingQuery,
+  normalizeHomePageInput, // M16 F1 Leg 2 / F2 Leg 2 / F3 Leg 2: toUrl's engine lookup + live cache read + the pending-query cap + the shared domain-normalize rule (HAT item 5)
   shouldQuery,
-  buildSuggestionModel, mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
+  buildSuggestionModel,
+  mergeSuggestionSources, // M15 F1 Leg 4, DD11 — line-budget discipline
   moveSelection,
   acceptSuggestResponse,
   suggestionsState: () => overlayMenus.suggestions,
   closeOverlayMenu: (reason) => overlayMenuClient.close(reason),
-  openOverlayMenu: (menuType, model, anchor, startIndex, opts) => overlayMenuClient.open(menuType, model, anchor, startIndex, opts),
+  openOverlayMenu: (menuType, model, anchor, startIndex, opts) =>
+    overlayMenuClient.open(menuType, model, anchor, startIndex, opts),
   leftAnchorOf: (el) => leftAnchorOf(el)
 });
 
@@ -456,7 +564,8 @@ mediaController = createMediaController({
   isInternalTab,
   closePrivacyPanel: () => closePrivacyPanel(),
   sendActiveBounds,
-  isSafePosterUrl, toMediaProxyUrl,
+  isSafePosterUrl,
+  toMediaProxyUrl,
   escapeHtml,
   openToolbarContextMenu: (item, anchorEl) => openToolbarContextMenu(item, anchorEl),
   createTab
@@ -495,7 +604,9 @@ windowController = createWindowController({
   activateTab,
   closeTab,
   activeTab,
-  setHomePage: (value) => { homePageCache = value; }, // M16 F2 Leg 1 (DD4): raw setter, the removed home-page constant is gone
+  setHomePage: (value) => {
+    homePageCache = value;
+  }, // M16 F2 Leg 1 (DD4): raw setter, the removed home-page constant is gone
   setSearchEngine, // M16 F1 Leg 2: boot seed + settings-changed handler both write through this
   updateAutomationKeyState,
   sendActiveBounds
@@ -503,10 +614,16 @@ windowController = createWindowController({
 
 // M16 F2 Leg 1 (DD1/DD7): the welcome panel's own controller (chrome DOM in #webviews).
 welcomeController = createWelcomeController({
-  document, els, attachView,
+  document,
+  els,
+  attachView,
   welcomeSetPreference: window.goldfinch.welcomeSetPreference,
   onSettingsChanged: window.goldfinch.onSettingsChanged,
-  SEARCH_ENGINES, buildSearchUrl, currentSearchEngine, currentHomePage, normalizeHomePageInput // M16 F2 Leg 2 (DD7) / F3 Leg 2 (HAT item 5): engine block data + attach/gating reads + the domain-normalize rule
+  SEARCH_ENGINES,
+  buildSearchUrl,
+  currentSearchEngine,
+  currentHomePage,
+  normalizeHomePageInput // M16 F2 Leg 2 (DD7) / F3 Leg 2 (HAT item 5): engine block data + attach/gating reads + the domain-normalize rule
 });
 
 shortcutController = createShortcutController({
@@ -575,7 +692,10 @@ bookmarksBarController = createBookmarksBar({
   // M15 F2 Leg 3 DD7b: the active tab's container, for the bar's two
   // open-in-new-tab paths — a `null` container would resolve the current
   // DEFAULT jar instead of the bookmark's own.
-  activeContainer: () => { const t = activeTab(); return t ? t.container : null; },
+  activeContainer: () => {
+    const t = activeTab();
+    return t ? t.container : null;
+  },
   overlayMenuClient,
   overlayMenuState: overlayMenus['bookmarks-overflow'],
   rightAnchorOf, // Leg 5 HAT fix — right-anchor the far-right chevron (kebab idiom)
@@ -624,7 +744,12 @@ const openKebabOverlay = (startIndex) => openOverlayMenu('kebab', buildKebabMode
 // buildContainerModel (src/shared/container-menu.js).
 /** @param {number} startIndex */
 const openContainerOverlay = (startIndex) =>
-  openOverlayMenu('container', buildContainerModel(jarsClient.containers, jarsClient.defaultId), containerAnchor(), startIndex);
+  openOverlayMenu(
+    'container',
+    buildContainerModel(jarsClient.containers, jarsClient.defaultId),
+    containerAnchor(),
+    startIndex
+  );
 // Site-info model derived from the active tab via the shared deriveSiteInfo
 // (the one derivation source). startIndex is meaningless for the no-items
 // popup — the sheet focuses the "Site settings →" action.
@@ -643,7 +768,12 @@ const openAuthBasicOverlayForAudit = () =>
 // certificate object) so the roving list + Cancel row render. Same
 // leg-authorized evaluate-seam precedent as openAuthBasicOverlayForAudit.
 const openCertPickerOverlayForAudit = () =>
-  openOverlayMenu('cert-picker', [{ subject: 'CN=Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }], null, 0);
+  openOverlayMenu(
+    'cert-picker',
+    [{ subject: 'CN=Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }],
+    null,
+    0
+  );
 // Bookmark-edit popover opener (M15 F1 Leg 2, flight DD4/AC "Anchored
 // positioning attempt"; anchor PARAMETERIZED leg 3 — bar/overflow right-click
 // reuse this same opener anchored at their own trigger element instead of the
@@ -663,9 +793,9 @@ function openBookmarkEditOverlay(bookmark, anchorEl = els.star, jarId = null) {
   // accidental render). menu-overlay-manager.js retains it on the current-menu
   // record; register-overlay-ipc.js's submit handler reads it back to consult
   // the store BEFORE closing the sheet.
-  openOverlayMenu(
-    'bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0, { jarId }
-  );
+  openOverlayMenu('bookmark-edit', bookmarkEntryToEditModel(bookmark), chromePointToSheet(r.left, r.bottom), 0, {
+    jarId
+  });
 }
 // The ONE shared handler for star click / Ctrl+D / page-context "Bookmark
 // this page" (AC "Star click / Ctrl+D behavior"): bookmarksClient.activateStar
@@ -714,7 +844,16 @@ const openPageContextOverlaySheet = (anchor) => {
   const srcTab = pageCtx.wcId != null ? findTabByWcId(pageCtx.wcId) : null;
   const isBookmarked = !!(srcTab && srcTab.container && bookmarksClient.findByUrl(srcTab.container.id, srcTab.url));
   const canBookmark = !!(srcTab && !isInternalTab(srcTab) && !(srcTab.container && srcTab.container.burner));
-  openOverlayMenu('page-context', pageContextModel(pageCtx.params, pageCtx.toolbarItem, { isBookmarked, canBookmark, vaultLocked: vaultController.isVaultLocked() }), anchor, 0); // squawk 0038
+  openOverlayMenu(
+    'page-context',
+    pageContextModel(pageCtx.params, pageCtx.toolbarItem, {
+      isBookmarked,
+      canBookmark,
+      vaultLocked: vaultController.isVaultLocked()
+    }),
+    anchor,
+    0
+  ); // squawk 0038
 };
 
 // Generic trigger-click toggle (kebab pattern, Leg-3 shared): open → channel-2
@@ -882,7 +1021,7 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         if (typeof p.linkURL === 'string' && p.linkURL) window.goldfinch.clipboardWriteText(p.linkURL);
       } else if (id === 'image:open' || id === 'image:copy' || id === 'image:save') {
         // Same srcURL || imageURL preference + mediaType gate as the builder.
-        const imgSrc = p.mediaType === 'image' ? (p.srcURL || p.imageURL) : null;
+        const imgSrc = p.mediaType === 'image' ? p.srcURL || p.imageURL : null;
         if (typeof imgSrc === 'string' && imgSrc) {
           if (id === 'image:open') {
             createTab(imgSrc, srcContainer);
@@ -894,18 +1033,22 @@ function dispatchOverlayActivation({ menuType, id, value }) {
               url: imgSrc,
               suggestedName: basenameFromUrl(imgSrc)
             });
-            Promise.resolve(r).then((res) => {
-              if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
-            }).catch(() => toast('Download failed', 'Unknown error'));
+            Promise.resolve(r)
+              .then((res) => {
+                if (!res || !res.ok) toast('Download failed', (res && res.error) || 'Unknown error');
+              })
+              .catch(() => toast('Download failed', 'Unknown error'));
           }
         }
       } else if (id === 'sel:copy') {
         if (typeof p.selectionText === 'string' && p.selectionText) {
           window.goldfinch.clipboardWriteText(p.selectionText);
         }
-      } else if (id === 'sel:search') { // M16 F2 Leg 2 (DD3): shares the address bar's null-engine handoff
+      } else if (id === 'sel:search') {
+        // M16 F2 Leg 2 (DD3): shares the address bar's null-engine handoff
         if (typeof p.selectionText === 'string' && p.selectionText) {
-          const q = capPendingQuery(p.selectionText), u = toUrl(q); // Capture site 2/2: capped to PENDING_QUERY_MAX
+          const q = capPendingQuery(p.selectionText),
+            u = toUrl(q); // Capture site 2/2: capped to PENDING_QUERY_MAX
           if (u == null) openWelcomeTab({ container: srcContainer, reasons: ['search'], pendingQuery: q });
           else createTab(u, srcContainer);
         }
@@ -918,7 +1061,8 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         if (
           p.isEditable &&
           ['cut', 'copy', 'paste', 'undo', 'redo'].includes(action) &&
-          p.editFlags && p.editFlags[/** @type {'canCut'|'canCopy'|'canPaste'|'canUndo'|'canRedo'} */ (flagKey)]
+          p.editFlags &&
+          p.editFlags[/** @type {'canCut'|'canCopy'|'canPaste'|'canUndo'|'canRedo'} */ (flagKey)]
         ) {
           window.goldfinch.pageContextAction({ webContentsId: wcId, action });
         }
@@ -930,8 +1074,10 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         const i = Number.parseInt(id.slice('spell:'.length), 10);
         const sugg = p.dictionarySuggestions;
         if (
-          Number.isInteger(i) && i >= 0 &&
-          Array.isArray(sugg) && i < Math.min(sugg.length, 8) &&
+          Number.isInteger(i) &&
+          i >= 0 &&
+          Array.isArray(sugg) &&
+          i < Math.min(sugg.length, 8) &&
           typeof sugg[i] === 'string'
         ) {
           window.goldfinch.correctMisspelling({ webContentsId: wcId, word: sugg[i] });
@@ -953,7 +1099,9 @@ function dispatchOverlayActivation({ menuType, id, value }) {
           // (page-context stays escape-only).
           els.address.focus();
         }
-      } else if (id === 'action:vault-lock') { vaultController.lockNow(); } // squawk 0038: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
+      } else if (id === 'action:vault-lock') {
+        vaultController.lockNow();
+      } // squawk 0038: anchor never hides (locked↔unlocked only) — no refocus override needed, unlike unpin above
       break;
     }
     case 'tab-context': {
@@ -978,9 +1126,7 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         const ids = orderedTabIds();
         const anchorIndex = ids.indexOf(tabId);
         if (anchorIndex === -1) break; // vanished — no-op
-        const targetIds = id === 'tab:close-others'
-          ? ids.filter((i) => i !== tabId)
-          : ids.slice(anchorIndex + 1);
+        const targetIds = id === 'tab:close-others' ? ids.filter((i) => i !== tabId) : ids.slice(anchorIndex + 1);
         if (!targetIds.length) break;
         if (targetIds.includes(ctx.activeTabId)) activateTab(tabId);
         for (const t of targetIds) closeTab(t);
@@ -1036,18 +1182,20 @@ function dispatchOverlayActivation({ menuType, id, value }) {
         if (!target || target.wcId == null) break;
         const windowId = Number(id.slice('tab:move-window:'.length));
         if (!Number.isInteger(windowId)) break;
-        window.goldfinch.tabMoveToWindow({
-          wcId: target.wcId,
-          url: target.url,
-          title: target.title,
-          favicon: target.favicon,
-          container: target.container,
-          windowId
-        }).then((result) => {
-          // DD5: every outcome is announced. On success `tab-moved-away` has
-          // already removed the strip entry, so this is all that is left either way.
-          announceTabStatus(moveOutcomeMessage(result, 'another window'));
-        });
+        window.goldfinch
+          .tabMoveToWindow({
+            wcId: target.wcId,
+            url: target.url,
+            title: target.title,
+            favicon: target.favicon,
+            container: target.container,
+            windowId
+          })
+          .then((result) => {
+            // DD5: every outcome is announced. On success `tab-moved-away` has
+            // already removed the strip entry, so this is all that is left either way.
+            announceTabStatus(moveOutcomeMessage(result, 'another window'));
+          });
       } else if (id === 'tab:reopen-closed') {
         // The EXISTING dispatchChromeAction('reopen-closed-tab') case (dispatch
         // reuse, DD2) — its jar-fallback/positional-reopen decisions ride along
@@ -1115,8 +1263,7 @@ function handleOverlayClosed({ menuType, reason }) {
 // target captured at open. Acted-on wcId is the one captured at right-click
 // (TOCTOU — never re-resolved via activeTab() for dispatch).
 /** @type {{ wcId: number|null, params: any, returnFocus: HTMLElement|null, toolbarItem: ('media'|'shields'|'devtools'|'vault'|null) }} */
-const pageCtx = { wcId: null, params: null, returnFocus: null,
-  toolbarItem: null };  // 'media' | 'shields' | 'devtools' | 'vault' | null  (null = page-content mode)
+const pageCtx = { wcId: null, params: null, returnFocus: null, toolbarItem: null }; // 'media' | 'shields' | 'devtools' | 'vault' | null  (null = page-content mode)
 
 /** Derive a download filename from a media URL's basename (mirrors media-panel naming). */
 function basenameFromUrl(url) {
@@ -1150,8 +1297,8 @@ window.goldfinch.onPageContextMenu(({ wcId, params }) => {
   pageCtx.toolbarItem = null;
   pageCtx.returnFocus = /** @type {HTMLElement|null} */ (document.activeElement);
   openPageContextOverlaySheet({
-    x: (params && typeof params.x === 'number') ? params.x : 0,
-    y: (params && typeof params.y === 'number') ? params.y : 0
+    x: params && typeof params.x === 'number' ? params.x : 0,
+    y: params && typeof params.y === 'number' ? params.y : 0
   }); // 1:1 — no translation
 });
 
@@ -1167,7 +1314,13 @@ document.addEventListener('keydown', (e) => {
   if (!target || target === document.body) return;
   // Gate: toolbar pin buttons + the vault indicator (squawk 0038, same shape) fire both
   // contextmenu AND this keydown — their own contextmenu listeners already open the sheet.
-  if (target === els.toggleMedia || target === els.togglePrivacy || target === els.toggleDevtools || target === els.vaultIndicator) return;
+  if (
+    target === els.toggleMedia ||
+    target === els.togglePrivacy ||
+    target === els.toggleDevtools ||
+    target === els.vaultIndicator
+  )
+    return;
   // Gate (M09 F5 Leg 1, DD2 integration point): a focused tab fires both a native
   // `contextmenu` event (handled by the tab's own listener, wired at creation —
   // opens the TAB menu) AND this generic keydown — same double-fire shape as the
@@ -1327,7 +1480,14 @@ function openTabContextMenuForAudit() {
   // (seven since M09 F8: tab:move-new-window — F6 — plus one tab:move-window:<id>),
   // per the a11y checkpoint.
   const moveTargets = [{ windowId: 0, label: 'Another window' }];
-  const model = tabContextModel({ tabId: id || 'audit', isLastTab: false, tabsToRight: 1, stackSize: 1, isInternal: false, moveTargets });
+  const model = tabContextModel({
+    tabId: id || 'audit',
+    isLastTab: false,
+    tabsToRight: 1,
+    stackSize: 1,
+    isInternal: false,
+    moveTargets
+  });
   openOverlayMenu('tab-context', model, chromePointToSheet(r.left, r.bottom), 0);
 }
 
@@ -1420,7 +1580,10 @@ window.goldfinch.onTabFavicon(({ wcId, favicons }) => {
   if (!fav) return;
   tab.favicon = fav;
   const img = /** @type {HTMLImageElement|null} */ (tab.btn.querySelector('.tab-fav'));
-  if (img) { img.src = fav; img.classList.remove('hidden'); }
+  if (img) {
+    img.src = fav;
+    img.classList.remove('hidden');
+  }
   // Icon passive refresh (M15 F1 Leg 2, DD6; jar-resolved M15 F2 Leg 3,
   // L3-DD-H/DD7b): resolves the DELIVERING tab's jar — never the active
   // tab's, this fires for background tabs too. A cache miss for that jar is
@@ -1488,7 +1651,16 @@ window.goldfinch.onAuthChallengePresent(({ host, realm, popup }) => {
 // issuer} rows + the requesting host (the sheet's site-attribution subtitle,
 // M14 F3 HAT fix); selection resolves MAIN-SIDE from the channel-4 index.
 window.goldfinch.onCertChallengePresent(({ certs, host, popup }) => {
-  openOverlayMenu('cert-picker', { certs: Array.isArray(certs) ? certs : [], ...(typeof host === 'string' && host ? { host } : {}), ...(popup === true ? { popup: true } : {}) }, null, 0);
+  openOverlayMenu(
+    'cert-picker',
+    {
+      certs: Array.isArray(certs) ? certs : [],
+      ...(typeof host === 'string' && host ? { host } : {}),
+      ...(popup === true ? { popup: true } : {})
+    },
+    null,
+    0
+  );
 });
 
 // Find-overlay per-tab state sync (DD9 + the two Leg-3 channels). Text arrives on
@@ -1544,7 +1716,12 @@ Promise.all([
   // and jarsClient's own default id is unknowable until jarsClient.boot
   // resolves.
   bookmarksClient.boot,
-  window.goldfinch.windowBootConfig().catch(() => (/** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({ bootTab: true })))
+  window.goldfinch.windowBootConfig().catch(
+    () =>
+      /** @type {{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }} */ ({
+        bootTab: true
+      })
+  )
 ]).then(([url, engine, , , bootConfig]) => {
   // Session restore (M09 F9 / DD4 / AC5; REWRITTEN M15 F1 DD10 Leg 1): CREATE each
   // saved tab FRESH in its saved jar — never adopt; MINUS restoreHistory/insertAt

@@ -43,7 +43,7 @@ export function createVaultController({
   openToolbarContextMenu = () => {},
   // Chrome toast surface (the bookmarks-client `toast` precedent). Optional so an
   // offline unit harness constructs without one; the no-op then simply says nothing.
-  toast = () => {},
+  toast = () => {}
 }) {
   // Human vault flow state machine (M12 F2 Leg 3 pick-and-fill, DD5/DD6). A TRUSTED
   // lock-icon gesture arrives as { wcId } (main-derived, no secret). From there:
@@ -133,7 +133,7 @@ export function createVaultController({
       unchanged: ['Nothing to save', 'That password is already saved in your vault.'],
       expired: ['Password not saved', 'The request expired before the vault was unlocked. Sign in again to save it.'],
       'tab-changed': ['Password not saved', 'The tab changed before the password could be saved.'],
-      locked: ['Password not saved', 'The vault is locked.'],
+      locked: ['Password not saved', 'The vault is locked.']
     }[String(reason)] || ['Password not saved', 'The saved-password prompt could not be opened.'];
     toast(copy[0], copy[1]);
   }
@@ -146,9 +146,7 @@ export function createVaultController({
     el.classList.toggle('hidden', !model.visible);
     el.classList.toggle('vault-locked', model.visible && model.state === 'locked');
     el.classList.toggle('vault-unlocked', model.visible && model.state === 'unlocked');
-    const label = model.visible && model.state === 'unlocked'
-      ? 'Password manager unlocked'
-      : 'Password manager locked';
+    const label = model.visible && model.state === 'unlocked' ? 'Password manager unlocked' : 'Password manager locked';
     el.setAttribute('aria-label', label);
   }
 
@@ -221,7 +219,9 @@ export function createVaultController({
   goldfinch.onVaultRecoveryShow(({ recoveryKey, replacing }) => {
     // `replacing` (rotate-recovery only; setup omits it) reveals the sheet's "this replaces
     // your previous recovery key" line — the rotation kills the old key (HAT I9). Non-secret.
-    openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, { dismissible: false });
+    openOverlayMenu('vault-recovery-show', { recoveryKey, replacing: replacing === true }, null, 0, {
+      dismissible: false
+    });
   });
 
   // Access-key mint cross-renderer triggers (M12 F3 Leg 5 access-keys, DD5). The vault page's
@@ -335,7 +335,10 @@ export function createVaultController({
       pendingCaptureUnlock = null;
       Promise.resolve(goldfinch.vaultCaptureFinalize(captureId))
         .then((/** @type {any} */ offer) => {
-          if (offer && offer.model) { openCaptureSheet(offer.captureId, offer.model); return; }
+          if (offer && offer.model) {
+            openCaptureSheet(offer.captureId, offer.model);
+            return;
+          }
           // No sheet to open — SAY SO. The operator typed their master password expressly to
           // save this password; the pre-existing silent return made a correct no-op ("already
           // saved") indistinguishable from a dropped credential, which is how a real failure
@@ -345,8 +348,12 @@ export function createVaultController({
         .catch(() => reportNoCaptureOffer('error'));
     }
   });
-  goldfinch.getVaultLockState()
-    .then((/** @type {{ setUp: boolean, unlocked: boolean }} */ state) => { lockState = state; if (!vaultStatePushed) renderVaultIndicator(state); })
+  goldfinch
+    .getVaultLockState()
+    .then((/** @type {{ setUp: boolean, unlocked: boolean }} */ state) => {
+      lockState = state;
+      if (!vaultStatePushed) renderVaultIndicator(state);
+    })
     .catch(() => {});
 
   // The 11 vault sheet overlay-menu states (the `downloads:` single-entry precedent
@@ -360,12 +367,16 @@ export function createVaultController({
     // chrome-unlock leg added the vault-unlock TEMPLATE + secret handler; the pick-and-
     // fill leg wired its trigger→open here alongside the new picker.
     'vault-unlock': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
     'vault-picker': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -374,7 +385,9 @@ export function createVaultController({
     // target and no trigger refocus (the guest owns focus). handleClosed drops the
     // held record on a non-save close.
     'vault-capture': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -384,12 +397,16 @@ export function createVaultController({
     // is the master-password entry; vault-recovery-show is the DISMISS-DISABLED one-time key
     // display (opened with { dismissible: false }).
     'vault-set': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
     'vault-recovery-show': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -399,12 +416,16 @@ export function createVaultController({
     // is the master-password re-auth; vault-accesskey-show is the DISMISS-DISABLED one-time
     // minted-secret display (opened with { dismissible: false }).
     'vault-stepup': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
     'vault-accesskey-show': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -414,7 +435,9 @@ export function createVaultController({
     // refocus. The destination target + the bundle are held main-side; the sheet collects only the
     // secret + secretKind over the dedicated Buffer channel.
     'vault-import-unlock': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -425,12 +448,16 @@ export function createVaultController({
     // (reachable from the LOCKED page). Recovery rotation's master-password step-up REUSES the
     // vault-stepup sheet above (mode 'rotate-recovery'), so it needs no entry of its own.
     'vault-change-master': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
     'vault-recover': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     },
@@ -440,7 +467,9 @@ export function createVaultController({
     // DISMISS-DISABLED one-time admin-private-key display (opened with { dismissible: false }); the
     // master-password step-up REUSES the vault-stepup sheet (mode 'rotate-admin'), so it needs no entry.
     'vault-adminkey-show': {
-      open: false, token: 0, blurClosedAt: -Infinity,
+      open: false,
+      token: 0,
+      blurClosedAt: -Infinity,
       ariaTarget: () => null,
       refocus() {}
     }
@@ -527,9 +556,12 @@ export function createVaultController({
     // tab. Guarded on the phase + still-locked state: a SUCCESSFUL unlock closes this
     // sheet too, but by then onVaultLockState has advanced the phase to 'picking' and
     // lockState.unlocked is true, so this clear is correctly skipped.
-    if (menuType === 'vault-unlock'
-      && pendingVaultFlow && pendingVaultFlow.phase === 'unlocking'
-      && !lockState.unlocked) {
+    if (
+      menuType === 'vault-unlock' &&
+      pendingVaultFlow &&
+      pendingVaultFlow.phase === 'unlocking' &&
+      !lockState.unlocked
+    ) {
       pendingVaultFlow = null;
     }
     // Unlock-to-save abandoned: the unlock prompt raised for a locked-vault capture was
@@ -575,7 +607,9 @@ export function createVaultController({
   // M09 F5 openTabContextMenuForAudit precedent.
   const openVaultSetOverlayForAudit = () => openOverlayMenu('vault-set', [], null, 0);
   const openVaultRecoveryShowOverlayForAudit = () =>
-    openOverlayMenu('vault-recovery-show', { recoveryKey: 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX' }, null, 0, { dismissible: false });
+    openOverlayMenu('vault-recovery-show', { recoveryKey: 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX' }, null, 0, {
+      dismissible: false
+    });
   // M12 F3 Leg 5 (access-keys, DD5/DD9): a11y SHEET_STATES hooks for the two new access-key
   // sheets. vault-stepup opens with a synthetic NON-SECRET target; vault-accesskey-show opens
   // with a synthetic NON-SECRET placeholder secret+keyId so its read-only display + Copy +
@@ -583,7 +617,13 @@ export function createVaultController({
   // it). Same evaluate-seam precedent as leg 4's openVault{Set,RecoveryShow}OverlayForAudit.
   const openVaultStepupOverlayForAudit = () => openOverlayMenu('vault-stepup', { target: 'global' }, null, 0);
   const openVaultAccessKeyShowOverlayForAudit = () =>
-    openOverlayMenu('vault-accesskey-show', { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' }, null, 0, { dismissible: false });
+    openOverlayMenu(
+      'vault-accesskey-show',
+      { secret: 'ACCESS-SECRET-PLACEHOLDER', keyId: 'KEYID-PLACEHOLDER' },
+      null,
+      0,
+      { dismissible: false }
+    );
   // M12 F4 Leg 1 (export-import, DD9): a11y SHEET_STATES hook for the vault-import-unlock sheet.
   // Opens with an empty array model (the destination target + bundle are held main-side); the sheet
   // renders the secretKind radios + the secret field + Import/Cancel (dialog-style, Escape-dismissible).
@@ -600,7 +640,9 @@ export function createVaultController({
   // acknowledge render (opened dismiss-disabled, so the audit acknowledges rather than Escapes it).
   // Same evaluate-seam precedent as leg-5's openVaultAccessKeyShowOverlayForAudit.
   const openVaultAdminKeyShowOverlayForAudit = () =>
-    openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, { dismissible: false });
+    openOverlayMenu('vault-adminkey-show', { adminPrivateKey: 'ADMIN-PRIVATE-KEY-PLACEHOLDER' }, null, 0, {
+      dismissible: false
+    });
 
   return {
     overlayStates,

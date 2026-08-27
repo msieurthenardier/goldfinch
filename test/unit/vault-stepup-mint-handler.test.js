@@ -20,8 +20,12 @@ function makeIpc() {
   return {
     handlers,
     listeners,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -36,7 +40,7 @@ function makeHarness({ mintResult, mintThrows } = {}) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType: 'vault-stepup' }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
@@ -56,11 +60,12 @@ function makeHarness({ mintResult, mintThrows } = {}) {
   };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    vaultMintAccessKey,
+    vaultMintAccessKey
   });
 
   const handler = ipcMain.handlers.get('menu-overlay:vault-stepup-mint');
@@ -70,9 +75,11 @@ function makeHarness({ mintResult, mintThrows } = {}) {
 test('the mint handler is GATED on the vaultMintAccessKey injection (offline overlay tests omit it)', () => {
   const ipcMain = makeIpc();
   registerOverlayIpc({
-    ipcMain, registry: { records: () => [], getWindowForChrome: () => null },
-    chromeForAttachment: () => null, chromeForTab: () => null,
-    sanitizeActivatedValue: () => undefined,
+    ipcMain,
+    registry: { records: () => [], getWindowForChrome: () => null },
+    chromeForAttachment: () => null,
+    chromeForTab: () => null,
+    sanitizeActivatedValue: () => undefined
     // no vaultMintAccessKey
   });
   assert.equal(ipcMain.handlers.has('menu-overlay:vault-stepup-mint'), false);
@@ -90,8 +97,14 @@ test('valid step-up → { ok:true }; Buffer + target hand-off; BOTH arrays zeroe
   assert.equal(captured.bytes, 'hunter2hunter2');
   assert.equal(captured.target, 'work', 'the NON-SECRET target is forwarded to the delegate');
   // DUAL-zeroize: both the copied Buffer AND the incoming Uint8Array are cleared.
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   // Sheet closed 'activated'; chrome told to open accesskey-show with the minted secret+keyId.
   assert.deepEqual(closeCalls, [['activated', 7]]);
   assert.equal(chromeSends.length, 1);
@@ -110,8 +123,14 @@ test('WRONG step-up password → { ok:false }: NOTHING minted-shown (no accesske
   assert.deepEqual(chromeSends, [], 'no accesskey-show on a refused mint');
   assert.deepEqual(closeCalls, [], 'the sheet stays open to re-prompt');
   // Dual-zeroize still runs on the { ok:false } path.
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on refusal');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized on refusal');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized on refusal'
+  );
 });
 
 test('a delegate THROW (non-auth error) rejects the invoke but still zeroizes both arrays; no accesskey-show', async () => {
@@ -121,8 +140,14 @@ test('a delegate THROW (non-auth error) rejects the invoke but still zeroizes bo
 
   await assert.rejects(handler({ sender: sheetSender }, { token: 7, secret, target: 'work' }), /no vault for/);
 
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized even on throw');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized even on throw');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized even on throw'
+  );
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized even on throw'
+  );
   assert.deepEqual(closeCalls, [], 'sheet not closed on failure');
   assert.deepEqual(chromeSends, [], 'no accesskey-show on failure');
 });
@@ -130,7 +155,10 @@ test('a delegate THROW (non-auth error) rejects the invoke but still zeroizes bo
 test('wrong sender → { ok:false }, mint never called', async () => {
   const { handler, captured, chromeSends } = makeHarness();
   const secret = new TextEncoder().encode('hunter2hunter2');
-  const res = await handler({ sender: { isDestroyed: () => false } /* not the sheet */ }, { token: 7, secret, target: 'work' });
+  const res = await handler(
+    { sender: { isDestroyed: () => false } /* not the sheet */ },
+    { token: 7, secret, target: 'work' }
+  );
   assert.deepEqual(res, { ok: false });
   assert.equal(captured.called, 0, 'mint never called for a foreign sender');
   assert.deepEqual(chromeSends, []);

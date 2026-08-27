@@ -46,16 +46,23 @@ function withCaptureTimeout(capture, label, { timeoutMs = CAPTURE_TIMEOUT_MS } =
     const settle = (/** @type {() => void} */ act) => {
       if (done) return;
       done = true;
-      if (timer !== null) clearTimeout(timer);   // no dangling handle on the happy path
+      if (timer !== null) clearTimeout(timer); // no dangling handle on the happy path
       timer = null;
       act();
     };
 
     timer = setTimeout(() => {
-      settle(() => reject(new Error(
-        'automation: capture-timeout — ' + label + ' did not settle within ' + timeoutMs +
-        'ms (the view may be detached)'
-      )));
+      settle(() =>
+        reject(
+          new Error(
+            'automation: capture-timeout — ' +
+              label +
+              ' did not settle within ' +
+              timeoutMs +
+              'ms (the view may be detached)'
+          )
+        )
+      );
     }, timeoutMs);
 
     // Promise.race semantics, written out so the done guard covers BOTH arms:

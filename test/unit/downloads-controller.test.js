@@ -15,17 +15,25 @@ function fakeElement(initialClasses = []) {
       toggle(name, force) {
         if (force === undefined ? !classes.has(name) : force) classes.add(name);
         else classes.delete(name);
-      },
+      }
     },
     attrs: new Map(),
     textContent: '',
     title: '',
     focused: false,
-    setAttribute(name, value) { this.attrs.set(name, String(value)); },
-    addEventListener(name, handler) { listeners.set(name, handler); },
-    dispatch(name, event = {}) { listeners.get(name)?.(event); },
-    focus() { this.focused = true; },
-    getBoundingClientRect: () => ({ left: 0, right: 100, top: 0, bottom: 20 }),
+    setAttribute(name, value) {
+      this.attrs.set(name, String(value));
+    },
+    addEventListener(name, handler) {
+      listeners.set(name, handler);
+    },
+    dispatch(name, event = {}) {
+      listeners.get(name)?.(event);
+    },
+    focus() {
+      this.focused = true;
+    },
+    getBoundingClientRect: () => ({ left: 0, right: 100, top: 0, bottom: 20 })
   };
 }
 
@@ -42,14 +50,14 @@ function harness(snapshot = []) {
     downloadsIndicator: indicator,
     downloadsIndicatorBadge: fakeElement(['hidden']),
     webviews: fakeElement(),
-    address: fakeElement(),
+    address: fakeElement()
   };
   const bridge = {
     downloadsSnapshot: async () => snapshot,
     onDownloadProgress: (cb) => progressHandlers.push(cb),
     onDownloadDone: (cb) => doneHandlers.push(cb),
     openDownloadedFile() {},
-    revealDownloadedFile() {},
+    revealDownloadedFile() {}
   };
   let controller;
   controller = createDownloadsController({
@@ -66,15 +74,30 @@ function harness(snapshot = []) {
     },
     openDownloadsPage() {},
     rightSheetAnchor: () => ({ alignRight: 100, y: 0 }),
-    requestAnimationFrame: (cb) => { frames.push(cb); return frames.length; },
+    requestAnimationFrame: (cb) => {
+      frames.push(cb);
+      return frames.length;
+    },
     cancelAnimationFrame() {},
-    scheduleTimeout: (cb, delay) => { timers.push({ cb, delay }); return timers.length; },
+    scheduleTimeout: (cb, delay) => {
+      timers.push({ cb, delay });
+      return timers.length;
+    },
     cancelTimeout() {},
-    now: () => clock,
+    now: () => clock
   });
   return {
-    controller, indicator, progressHandlers, doneHandlers, frames, timers, opens, closes,
-    setNow: (value) => { clock = value; },
+    controller,
+    indicator,
+    progressHandlers,
+    doneHandlers,
+    frames,
+    timers,
+    opens,
+    closes,
+    setNow: (value) => {
+      clock = value;
+    }
   };
 }
 
@@ -86,13 +109,19 @@ const flushPromises = async () => {
 test('a new window hydrates app-scoped active and recent download state', async () => {
   const h = harness([
     { id: 1, filename: 'active.bin', state: 'progressing', active: true },
-    { id: 2, filename: 'recent.bin', state: 'completed', active: false, endTime: 999_999 },
+    { id: 2, filename: 'recent.bin', state: 'completed', active: false, endTime: 999_999 }
   ]);
   await flushPromises();
   assert.equal(h.indicator.classList.contains('hidden'), false);
   assert.equal(h.indicator.attrs.get('aria-label'), 'Downloading — 1 in progress');
   h.indicator.dispatch('click');
-  assert.deepEqual(h.opens.at(-1).model.map((row) => [row.id, row.completed]), [[1, false], [2, true]]);
+  assert.deepEqual(
+    h.opens.at(-1).model.map((row) => [row.id, row.completed]),
+    [
+      [1, false],
+      [2, true]
+    ]
+  );
 });
 
 test('download-done schedules an open popup repaint and makes the row actionable', async () => {

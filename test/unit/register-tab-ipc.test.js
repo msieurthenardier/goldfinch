@@ -6,11 +6,22 @@ const assert = require('node:assert/strict');
 const { registerTabIpc } = require('../../src/main/register-tab-ipc');
 
 class FakeIpc {
-  constructor() { this.handles = new Map(); this.listeners = new Map(); }
-  handle(channel, fn) { this.handles.set(channel, fn); }
-  on(channel, fn) { this.listeners.set(channel, fn); }
-  invoke(channel, sender, ...args) { return this.handles.get(channel)({ sender }, ...args); }
-  send(channel, sender, ...args) { return this.listeners.get(channel)({ sender }, ...args); }
+  constructor() {
+    this.handles = new Map();
+    this.listeners = new Map();
+  }
+  handle(channel, fn) {
+    this.handles.set(channel, fn);
+  }
+  on(channel, fn) {
+    this.listeners.set(channel, fn);
+  }
+  invoke(channel, sender, ...args) {
+    return this.handles.get(channel)({ sender }, ...args);
+  }
+  send(channel, sender, ...args) {
+    return this.listeners.get(channel)({ sender }, ...args);
+  }
 }
 
 class FakeContents extends EventEmitter {
@@ -24,26 +35,61 @@ class FakeContents extends EventEmitter {
     this.navigationHistory = {
       getAllEntries: () => [{ url: this.url }],
       getActiveIndex: () => 0,
-      restore: (value) => { log.push(['restore', id, value]); return Promise.resolve(); },
+      restore: (value) => {
+        log.push(['restore', id, value]);
+        return Promise.resolve();
+      },
       canGoBack: () => true,
       canGoForward: () => false,
-      goBack: () => { this.log.push(['back', this.id]); },
-      goForward: () => { this.log.push(['forward', this.id]); }
+      goBack: () => {
+        this.log.push(['back', this.id]);
+      },
+      goForward: () => {
+        this.log.push(['forward', this.id]);
+      }
     };
   }
-  isDestroyed() { return this.destroyed; }
-  destroy() { this.destroyed = true; this.log.push(['destroy', this.id]); }
-  getURL() { return this.url; }
-  getTitle() { return `Tab ${this.id}`; }
-  isFocused() { return this.focused; }
-  focus() { this.log.push(['focus-wc', this.id]); }
-  send(channel, payload) { this.log.push(['send', this.id, channel, payload]); }
-  loadURL(url) { this.log.push(['load', this.id, url]); return Promise.resolve(); }
-  reload() { this.log.push(['reload', this.id]); }
-  stop() { this.log.push(['stop', this.id]); }
-  findInPage(text, options) { this.log.push(['find', this.id, text, options]); }
-  stopFindInPage(action) { this.log.push(['stop-find', this.id, action]); }
-  setWebRTCIPHandlingPolicy(policy) { this.log.push(['webrtc-policy', this.id, policy]); }
+  isDestroyed() {
+    return this.destroyed;
+  }
+  destroy() {
+    this.destroyed = true;
+    this.log.push(['destroy', this.id]);
+  }
+  getURL() {
+    return this.url;
+  }
+  getTitle() {
+    return `Tab ${this.id}`;
+  }
+  isFocused() {
+    return this.focused;
+  }
+  focus() {
+    this.log.push(['focus-wc', this.id]);
+  }
+  send(channel, payload) {
+    this.log.push(['send', this.id, channel, payload]);
+  }
+  loadURL(url) {
+    this.log.push(['load', this.id, url]);
+    return Promise.resolve();
+  }
+  reload() {
+    this.log.push(['reload', this.id]);
+  }
+  stop() {
+    this.log.push(['stop', this.id]);
+  }
+  findInPage(text, options) {
+    this.log.push(['find', this.id, text, options]);
+  }
+  stopFindInPage(action) {
+    this.log.push(['stop-find', this.id, action]);
+  }
+  setWebRTCIPHandlingPolicy(policy) {
+    this.log.push(['webrtc-policy', this.id, policy]);
+  }
 }
 
 class FakeView {
@@ -54,9 +100,17 @@ class FakeView {
     this.bounds = { x: 0, y: 80, width: 1000, height: 700 };
     this.visible = false;
   }
-  setBounds(bounds) { this.bounds = { ...bounds }; this.log.push(['bounds', this.webContents.id, bounds]); }
-  getBounds() { return { ...this.bounds }; }
-  setVisible(value) { this.visible = value; this.log.push(['visible', this.webContents.id, value]); }
+  setBounds(bounds) {
+    this.bounds = { ...bounds };
+    this.log.push(['bounds', this.webContents.id, bounds]);
+  }
+  getBounds() {
+    return { ...this.bounds };
+  }
+  setVisible(value) {
+    this.visible = value;
+    this.log.push(['visible', this.webContents.id, value]);
+  }
 }
 
 function setup() {
@@ -89,9 +143,14 @@ function setup() {
           removeChildView: (view) => log.push(['remove-view', id, view.webContents.id])
         },
         getContentBounds: () => ({ width: 1200, height: 800 }),
-        isDestroyed() { return this.destroyed; },
+        isDestroyed() {
+          return this.destroyed;
+        },
         focus: () => log.push(['raise', id]),
-        close() { this.closed = true; log.push(['close-window', id]); }
+        close() {
+          this.closed = true;
+          log.push(['close-window', id]);
+        }
       },
       chromeView: { webContents: chrome },
       tabViews: new Map(),
@@ -123,17 +182,30 @@ function setup() {
   }
   function addTab(record, wcId = nextWcId++, trusted = false) {
     const view = new FakeView({}, log, wcId);
-    record.tabViews.set(wcId, { view, partition: trusted ? 'goldfinch-internal' : 'persist:jar-a', trusted, active: false });
+    record.tabViews.set(wcId, {
+      view,
+      partition: trusted ? 'goldfinch-internal' : 'persist:jar-a',
+      trusted,
+      active: false
+    });
     return view;
   }
-  const webContents = { fromId: (id) => records.flatMap((r) => [...r.tabViews.values()]).find((e) => e.view.webContents.id === id)?.view.webContents || null };
+  const webContents = {
+    fromId: (id) =>
+      records.flatMap((r) => [...r.tabViews.values()]).find((e) => e.view.webContents.id === id)?.view.webContents ||
+      null
+  };
   const timers = [];
   const closed = [];
   const history = [];
   const faviconForgotten = [];
   const views = [];
   class WebContentsView {
-    constructor(opts) { const view = new FakeView(opts, log, nextWcId++); views.push(view); return view; }
+    constructor(opts) {
+      const view = new FakeView(opts, log, nextWcId++);
+      views.push(view);
+      return view;
+    }
   }
   let nextWindowId = 50;
   // M14 F1 L1: fullscreen module FAKE mirroring the real contract's mutations
@@ -191,7 +263,15 @@ function setup() {
     authChallenges,
     wireGuestContents: (wc) => log.push(['wire-guest', wc.id]),
     wireTabViewEvents: (_view, id, partition) => log.push(['wire-tab', id, partition]),
-    captureClosedTabEntry: ({ tabEntry, stripIndex, windowId }) => ({ url: tabEntry.view.webContents.url, title: 'x', jarId: 'jar-a', stripIndex, windowId, navEntries: [], navIndex: 0 }),
+    captureClosedTabEntry: ({ tabEntry, stripIndex, windowId }) => ({
+      url: tabEntry.view.webContents.url,
+      title: 'x',
+      jarId: 'jar-a',
+      stripIndex,
+      windowId,
+      navEntries: [],
+      navIndex: 0
+    }),
     jars: { list: () => [{ id: 'jar-a', partition: 'persist:jar-a' }] },
     APPEND_SENTINEL: -1,
     closedTabStack: { push: (entry) => closed.push(entry), pop: () => closed.pop() || null, size: () => closed.length },
@@ -200,45 +280,90 @@ function setup() {
     faviconFetcher: { forget: (id) => faviconForgotten.push(id) },
     isSafeTabUrl: (url) => url.startsWith('https://'),
     isInternalPageUrl: (url) => url.startsWith('goldfinch://'),
-    reopenStripIndex: (entry, winId) => entry.windowId === winId ? entry.stripIndex : -1,
+    reopenStripIndex: (entry, winId) => (entry.windowId === winId ? entry.stripIndex : -1),
     webContents,
     isInternalContents: (wc) => wc.internal === true,
-    buildMoveTargets: (all, source) => all.filter((record) => record !== source).map((record) => ({ windowId: record.win.id })),
+    buildMoveTargets: (all, source) =>
+      all.filter((record) => record !== source).map((record) => ({ windowId: record.win.id })),
     createWindow: () => makeRecord(nextWindowId++),
-    validateMoveTabPayload: (payload) => payload && typeof payload.wcId === 'number' ? payload : null,
+    validateMoveTabPayload: (payload) => (payload && typeof payload.wcId === 'number' ? payload : null),
     buildAdoptPayload: (payload, wc) => ({ ...payload, url: wc.getURL(), title: wc.getTitle() }),
     broadcastMoveTargetsChanged: () => log.push(['broadcast-targets']),
     getTabContents: (id) => webContents.fromId(id),
     popupRegistry,
-    schedule: (fn, ms) => { const token = { fn, ms }; timers.push(token); return token; },
-    cancelScheduled: (token) => { const i = timers.indexOf(token); if (i >= 0) timers.splice(i, 1); },
+    schedule: (fn, ms) => {
+      const token = { fn, ms };
+      timers.push(token);
+      return token;
+    },
+    cancelScheduled: (token) => {
+      const i = timers.indexOf(token);
+      if (i >= 0) timers.splice(i, 1);
+    },
     logger: { warn() {}, error() {} }
   };
   registerTabIpc(deps);
-  return { ipcMain, log, records, registry, makeRecord, addTab, views, timers, closed, history, faviconForgotten, authCalls, popupRekeys, popupEntries };
+  return {
+    ipcMain,
+    log,
+    records,
+    registry,
+    makeRecord,
+    addTab,
+    views,
+    timers,
+    closed,
+    history,
+    faviconForgotten,
+    authCalls,
+    popupRekeys,
+    popupEntries
+  };
 }
 
 test('registers the complete tab/move channel set exactly once', () => {
   const h = setup();
-  assert.deepEqual([...h.ipcMain.handles.keys()].sort(), [
-    'closed-tab-stack-size', 'move-targets', 'tab-adopt-by-drop', 'tab-create',
-    'tab-history-snapshot', 'tab-move-to-new-window', 'tab-move-to-window',
-    'tab-reopen', 'tab-tear-off'
-  ].sort());
-  assert.deepEqual([...h.ipcMain.listeners.keys()].sort(), [
-    // M15 F3 Leg 4: the bookmark-drag bookend (chrome-sender) + the guest's bare
-    // drop signal (guest-sender) — three new one-way channels.
-    'bookmark-drag-ended', 'bookmark-drag-started', 'guest-bookmark-drop',
-    'tab-close', 'tab-drag-ended', 'tab-drag-started', 'tab-find', 'tab-hide',
-    'tab-navigate', 'tab-set-active', 'tab-set-bounds'
-  ].sort());
+  assert.deepEqual(
+    [...h.ipcMain.handles.keys()].sort(),
+    [
+      'closed-tab-stack-size',
+      'move-targets',
+      'tab-adopt-by-drop',
+      'tab-create',
+      'tab-history-snapshot',
+      'tab-move-to-new-window',
+      'tab-move-to-window',
+      'tab-reopen',
+      'tab-tear-off'
+    ].sort()
+  );
+  assert.deepEqual(
+    [...h.ipcMain.listeners.keys()].sort(),
+    [
+      // M15 F3 Leg 4: the bookmark-drag bookend (chrome-sender) + the guest's bare
+      // drop signal (guest-sender) — three new one-way channels.
+      'bookmark-drag-ended',
+      'bookmark-drag-started',
+      'guest-bookmark-drop',
+      'tab-close',
+      'tab-drag-ended',
+      'tab-drag-started',
+      'tab-find',
+      'tab-hide',
+      'tab-navigate',
+      'tab-set-active',
+      'tab-set-bounds'
+    ].sort()
+  );
 });
 
 test('tab-create preserves trusted/untrusted construction and wires before navigation', async () => {
   const h = setup();
   const source = h.makeRecord(1);
   const webId = await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
-    url: 'https://example.test/', partition: 'persist:jar-a', trusted: false
+    url: 'https://example.test/',
+    partition: 'persist:jar-a',
+    trusted: false
   });
   assert.equal(source.tabViews.has(webId), true);
   assert.equal(h.views[0].opts.webPreferences.contextIsolation, false);
@@ -261,14 +386,23 @@ test('tab-create preserves trusted/untrusted construction and wires before navig
   assert.ok(h.log.findIndex((x) => x[0] === 'wire-tab') < h.log.findIndex((x) => x[0] === 'load'));
 
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
-    url: 'goldfinch://settings', partition: 'ignored', trusted: true
+    url: 'goldfinch://settings',
+    partition: 'ignored',
+    trusted: true
   });
   assert.deepEqual(h.views[1].opts.webPreferences, {
-    preload: '/preload/internal.js', contextIsolation: true, sandbox: true,
-    nodeIntegration: false, partition: 'goldfinch-internal', spellcheck: false
+    preload: '/preload/internal.js',
+    contextIsolation: true,
+    sandbox: true,
+    nodeIntegration: false,
+    partition: 'goldfinch-internal',
+    spellcheck: false
   });
-  assert.equal('plugins' in h.views[1].opts.webPreferences, false,
-    'internal branch webPreferences must not carry a plugins key (DD5 scopes the relaxation to web guests)');
+  assert.equal(
+    'plugins' in h.views[1].opts.webPreferences,
+    false,
+    'internal branch webPreferences must not carry a plugins key (DD5 scopes the relaxation to web guests)'
+  );
 });
 
 // Squawk 0036 (#104 carve-out): burner tabs must not leak LAN/public IPs via
@@ -281,7 +415,9 @@ test('tab-create sets the disable_non_proxied_udp WebRTC policy for a burner par
   const source = h.makeRecord(1);
 
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
-    url: 'https://example.test/', partition: 'burner:42', trusted: false
+    url: 'https://example.test/',
+    partition: 'burner:42',
+    trusted: false
   });
   assert.deepEqual(
     h.log.filter((x) => x[0] === 'webrtc-policy'),
@@ -290,13 +426,18 @@ test('tab-create sets the disable_non_proxied_udp WebRTC policy for a burner par
   );
 
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
-    url: 'https://example.test/', partition: 'persist:jar-a', trusted: false
+    url: 'https://example.test/',
+    partition: 'persist:jar-a',
+    trusted: false
   });
   await h.ipcMain.invoke('tab-create', source.chromeView.webContents, {
-    url: 'goldfinch://settings', partition: 'ignored', trusted: true
+    url: 'goldfinch://settings',
+    partition: 'ignored',
+    trusted: true
   });
   assert.equal(
-    h.log.filter((x) => x[0] === 'webrtc-policy').length, 1,
+    h.log.filter((x) => x[0] === 'webrtc-policy').length,
+    1,
     'a normal-jar web guest and an internal guest never receive the burner-only policy call'
   );
 });
@@ -312,7 +453,9 @@ test('move-to-window derives source from sender, treats windowId as a destinatio
   previous.visible = true;
 
   const result = h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, {
-    wcId: 101, windowId: 2, sourceWindowId: 999
+    wcId: 101,
+    windowId: 2,
+    sourceWindowId: 999
   });
   assert.deepEqual(result, { ok: true, windowId: 2 });
   assert.equal(source.tabViews.has(101), false);
@@ -326,10 +469,22 @@ test('move refusals are discriminated and never return a bare null on physical/c
   const source = h.makeRecord(1);
   const target = h.makeRecord(2);
   h.addTab(source, 101);
-  assert.deepEqual(h.ipcMain.invoke('tab-move-to-window', {}, { wcId: 101, windowId: 2 }), { ok: false, reason: 'no-source' });
-  assert.deepEqual(h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, {}), { ok: false, reason: 'bad-payload' });
-  assert.deepEqual(h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 999 }), { ok: false, reason: 'no-target' });
-  assert.deepEqual(h.ipcMain.invoke('tab-tear-off', source.chromeView.webContents, { wcId: 101 }), { ok: false, reason: 'sole-tab' });
+  assert.deepEqual(h.ipcMain.invoke('tab-move-to-window', {}, { wcId: 101, windowId: 2 }), {
+    ok: false,
+    reason: 'no-source'
+  });
+  assert.deepEqual(h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, {}), {
+    ok: false,
+    reason: 'bad-payload'
+  });
+  assert.deepEqual(
+    h.ipcMain.invoke('tab-move-to-window', source.chromeView.webContents, { wcId: 101, windowId: 999 }),
+    { ok: false, reason: 'no-target' }
+  );
+  assert.deepEqual(h.ipcMain.invoke('tab-tear-off', source.chromeView.webContents, { wcId: 101 }), {
+    ok: false,
+    reason: 'sole-tab'
+  });
   assert.equal(target.tabViews.size, 0);
 });
 
@@ -349,7 +504,10 @@ test('drop adoption requires sender-derived target plus source drag provenance a
   const target = h.makeRecord(2);
   h.addTab(source, 101);
   h.addTab(source, 102);
-  assert.deepEqual(h.ipcMain.invoke('tab-adopt-by-drop', target.chromeView.webContents, { wcId: 101 }), { ok: false, reason: 'not-dragging' });
+  assert.deepEqual(h.ipcMain.invoke('tab-adopt-by-drop', target.chromeView.webContents, { wcId: 101 }), {
+    ok: false,
+    reason: 'not-dragging'
+  });
   h.ipcMain.send('tab-drag-started', source.chromeView.webContents, 101);
   const result = h.ipcMain.invoke('tab-adopt-by-drop', target.chromeView.webContents, { wcId: 101 });
   assert.equal(result.ok, true);
@@ -365,7 +523,8 @@ test('tab activation conditionally rearms page focus after visibility and view i
   outgoing.webContents.focused = true;
   h.log.length = 0;
   h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
-    wcId: 102, bounds: { x: 1.2, y: 2.2, width: 900.8, height: 700.1 }
+    wcId: 102,
+    bounds: { x: 1.2, y: 2.2, width: 900.8, height: 700.1 }
   });
   const add = h.log.findIndex((x) => x[0] === 'add-view' && x[2] === 102);
   const focus = h.log.findIndex((x) => x[0] === 'focus-wc' && x[1] === 102);
@@ -382,13 +541,15 @@ test('remaining lifecycle channels execute through captured handlers with their 
   source.activeTabWcId = 101;
 
   assert.deepEqual(h.ipcMain.invoke('tab-history-snapshot', source.chromeView.webContents, { webContentsId: 101 }), {
-    entries: [{ url: first.webContents.url }], index: 0
+    entries: [{ url: first.webContents.url }],
+    index: 0
   });
   assert.deepEqual(h.ipcMain.invoke('move-targets', source.chromeView.webContents), [{ windowId: 2 }]);
   h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'reload' });
   h.ipcMain.send('tab-find', source.chromeView.webContents, { wcId: 101, text: 'needle', options: { forward: true } });
   h.ipcMain.send('tab-set-bounds', source.chromeView.webContents, {
-    wcId: 101, bounds: { x: 1.4, y: 2.4, width: 900.6, height: 700.6 }
+    wcId: 101,
+    bounds: { x: 1.4, y: 2.4, width: 900.6, height: 700.6 }
   });
   h.ipcMain.send('tab-hide', source.chromeView.webContents, 101);
   assert.equal(first.visible, false);
@@ -401,11 +562,18 @@ test('remaining lifecycle channels execute through captured handlers with their 
   h.timers[0].fn();
   assert.equal(source.dragWcId, null);
 
-  assert.equal(h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 999 }), null,
-    'menu move keeps its historical null refusal shape');
+  assert.equal(
+    h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 999 }),
+    null,
+    'menu move keeps its historical null refusal shape'
+  );
   h.ipcMain.send('tab-close', source.chromeView.webContents, 102, 1);
   assert.equal(h.history.includes(102), true);
-  assert.equal(h.faviconForgotten.includes(102), true, 'favicon fetcher forgets the closed tab beside the history recorder');
+  assert.equal(
+    h.faviconForgotten.includes(102),
+    true,
+    'favicon fetcher forgets the closed tab beside the history recorder'
+  );
   assert.equal(h.ipcMain.invoke('closed-tab-stack-size', source.chromeView.webContents), 1);
   const reopened = h.ipcMain.invoke('tab-reopen', source.chromeView.webContents);
   assert.equal(reopened.url, 'https://tab-102.test/');
@@ -434,15 +602,25 @@ test('fullscreen: tab-set-bounds defers the fullscreen tab (no apply, no overlay
   h.log.length = 0;
 
   h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
-    wcId: 101, bounds: { x: 0, y: 80.4, width: 1000.2, height: 700.4 }
+    wcId: 101,
+    bounds: { x: 0, y: 80.4, width: 1000.2, height: 700.4 }
   });
-  assert.deepEqual(record.htmlFullscreen.pendingBounds, { x: 0, y: 80, width: 1000, height: 700 }, 'rounded rect stored as pending');
+  assert.deepEqual(
+    record.htmlFullscreen.pendingBounds,
+    { x: 0, y: 80, width: 1000, height: 700 },
+    'rounded rect stored as pending'
+  );
   assert.deepEqual(fsView.bounds, { x: 0, y: 0, width: 1200, height: 800 }, 'the expanded guest is never shrunk');
-  assert.equal(h.log.some((x) => x[0] === 'sync-find' || x[0] === 'sync-menu'), false, 'overlay syncBounds fan-out skipped');
+  assert.equal(
+    h.log.some((x) => x[0] === 'sync-find' || x[0] === 'sync-menu'),
+    false,
+    'overlay syncBounds fan-out skipped'
+  );
 
   // A DIFFERENT (background) tab's bounds still apply normally.
   h.ipcMain.send('tab-set-bounds', record.chromeView.webContents, {
-    wcId: 102, bounds: { x: 0, y: 80, width: 990, height: 690 }
+    wcId: 102,
+    bounds: { x: 0, y: 80, width: 990, height: 690 }
   });
   assert.deepEqual(other.bounds, { x: 0, y: 80, width: 990, height: 690 });
 });
@@ -460,10 +638,14 @@ test('fullscreen: activating a DIFFERENT tab force-exits BEFORE the swap; the re
   h.log.length = 0;
 
   h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
-    wcId: 102, bounds: { x: 0, y: 80, width: 1000, height: 700 }
+    wcId: 102,
+    bounds: { x: 0, y: 80, width: 1000, height: 700 }
   });
   assert.equal(record.htmlFullscreen, null);
-  assert.deepEqual(h.log.find((x) => x[0] === 'force-exit'), ['force-exit', 1, 101]);
+  assert.deepEqual(
+    h.log.find((x) => x[0] === 'force-exit'),
+    ['force-exit', 1, 101]
+  );
   assert.deepEqual(fsView.bounds, saved, 'old holder restored by the force-exit');
   const exitIdx = h.log.findIndex((x) => x[0] === 'force-exit');
   const raiseIdx = h.log.findIndex((x) => x[0] === 'add-view' && x[2] === 102);
@@ -486,13 +668,30 @@ test('fullscreen: same-tab tab-set-active is a geometry no-op — bounds deferre
   h.log.length = 0;
 
   h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
-    wcId: 101, bounds: { x: 0, y: 80, width: 1000, height: 700 }
+    wcId: 101,
+    bounds: { x: 0, y: 80, width: 1000, height: 700 }
   });
-  assert.deepEqual(fsView.bounds, { x: 0, y: 0, width: 1200, height: 800 }, 'MCP activateTab must not shrink the fullscreen guest');
+  assert.deepEqual(
+    fsView.bounds,
+    { x: 0, y: 0, width: 1200, height: 800 },
+    'MCP activateTab must not shrink the fullscreen guest'
+  );
   assert.deepEqual(record.htmlFullscreen.pendingBounds, { x: 0, y: 80, width: 1000, height: 700 });
-  assert.equal(h.log.some((x) => x[0] === 'show-find' || x[0] === 'sync-find'), false, 'find restore branch skipped');
-  assert.equal(h.log.some((x) => x[0] === 'sync-menu'), false, 'sheet syncBounds skipped');
-  assert.equal(h.log.some((x) => x[0] === 'force-exit'), false, 'same-tab activation is NOT an exit edge');
+  assert.equal(
+    h.log.some((x) => x[0] === 'show-find' || x[0] === 'sync-find'),
+    false,
+    'find restore branch skipped'
+  );
+  assert.equal(
+    h.log.some((x) => x[0] === 'sync-menu'),
+    false,
+    'sheet syncBounds skipped'
+  );
+  assert.equal(
+    h.log.some((x) => x[0] === 'force-exit'),
+    false,
+    'same-tab activation is NOT an exit edge'
+  );
 });
 
 test('fullscreen: tab-hide of the holding tab force-exits first', () => {
@@ -536,7 +735,10 @@ test('fullscreen: closing a NON-holding tab leaves the mode armed', () => {
 
   h.ipcMain.send('tab-close', record.chromeView.webContents, 102, -1);
   assert.deepEqual(record.htmlFullscreen && record.htmlFullscreen.wcId, 101);
-  assert.equal(h.log.some((x) => x[0] === 'force-exit'), false);
+  assert.equal(
+    h.log.some((x) => x[0] === 'force-exit'),
+    false
+  );
 });
 
 test('fullscreen: moveTabIntoWindow force-exits BEFORE the geometry capture — the target seeds the RESTORED rect', () => {
@@ -579,11 +781,18 @@ test('AC1: owning-chrome checks refuse non-chrome and cross-window senders on wc
   // getWindowForChrome, but that record does not equal getWindowForGuest(101) —
   // refused all the same.
   h.ipcMain.send('tab-hide', other.chromeView.webContents, 101);
-  assert.equal(tab.visible, true, 'a different window\'s chrome cannot hide this tab');
+  assert.equal(tab.visible, true, "a different window's chrome cannot hide this tab");
   assert.equal(source.tabViews.get(101).active, true);
 
-  h.ipcMain.send('tab-set-active', other.chromeView.webContents, { wcId: 101, bounds: { x: 0, y: 0, width: 10, height: 10 } });
-  assert.equal(other.activeTabWcId, null, 'cross-window tab-set-active is refused, not just a no-op on the wrong record');
+  h.ipcMain.send('tab-set-active', other.chromeView.webContents, {
+    wcId: 101,
+    bounds: { x: 0, y: 0, width: 10, height: 10 }
+  });
+  assert.equal(
+    other.activeTabWcId,
+    null,
+    'cross-window tab-set-active is refused, not just a no-op on the wrong record'
+  );
 
   // A non-chrome sender is also refused on the chrome-required (not owning-
   // scoped) tab-history-snapshot handle.
@@ -598,34 +807,61 @@ test('AC1: owning-chrome checks refuse non-chrome and cross-window senders on wc
 // tab's trust — never an unconditional isSafeTabUrl. This is the HIGH-regression
 // guard: openSiteSettingsTab navigates an EXISTING INTERNAL tab to
 // goldfinch://settings/#privacy, which isSafeTabUrl alone would reject outright.
-test('AC3: tab-navigate loadURL is gated on the target tab\'s trust — unsafe web URL refused, internal goldfinch:// allowed', () => {
+test("AC3: tab-navigate loadURL is gated on the target tab's trust — unsafe web URL refused, internal goldfinch:// allowed", () => {
   const h = setup();
   const source = h.makeRecord(1);
   h.addTab(source, 101, false);
   h.addTab(source, 102, true);
 
   // WEB tab: an unsafe URL is refused — no loadURL call reaches the guest.
-  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: ['javascript:alert(1)'] });
-  assert.equal(h.log.some((x) => x[0] === 'load' && x[1] === 101), false);
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['javascript:alert(1)']
+  });
+  assert.equal(
+    h.log.some((x) => x[0] === 'load' && x[1] === 101),
+    false
+  );
 
   // WEB tab: a safe https URL still loads (no regression on the common case).
-  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 101, verb: 'loadURL', args: ['https://example.test/'] });
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 101,
+    verb: 'loadURL',
+    args: ['https://example.test/']
+  });
   assert.ok(h.log.some((x) => x[0] === 'load' && x[1] === 101 && x[2] === 'https://example.test/'));
 
   // INTERNAL tab: goldfinch://settings/#privacy is ALLOWED — the regression this
   // leg exists to avoid (openSiteSettingsTab must keep working).
-  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 102, verb: 'loadURL', args: ['goldfinch://settings/#privacy'] });
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 102,
+    verb: 'loadURL',
+    args: ['goldfinch://settings/#privacy']
+  });
   assert.ok(h.log.some((x) => x[0] === 'load' && x[1] === 102 && x[2] === 'goldfinch://settings/#privacy'));
 
   // INTERNAL tab: a web URL is refused — isInternalPageUrl (not isSafeTabUrl) governs
   // the internal branch, and it rejects a non-goldfinch: URL.
-  h.ipcMain.send('tab-navigate', source.chromeView.webContents, { wcId: 102, verb: 'loadURL', args: ['https://evil.test/'] });
-  assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 102).length, 1, 'the internal tab only ever loaded the one allowed URL');
+  h.ipcMain.send('tab-navigate', source.chromeView.webContents, {
+    wcId: 102,
+    verb: 'loadURL',
+    args: ['https://evil.test/']
+  });
+  assert.equal(
+    h.log.filter((x) => x[0] === 'load' && x[1] === 102).length,
+    1,
+    'the internal tab only ever loaded the one allowed URL'
+  );
 
   // A non-chrome sender is refused outright by the owning-chrome check, before
   // the URL gate is even reached.
   h.ipcMain.send('tab-navigate', {}, { wcId: 101, verb: 'loadURL', args: ['https://example.test/'] });
-  assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'an unowned sender adds no further loads');
+  assert.equal(
+    h.log.filter((x) => x[0] === 'load' && x[1] === 101).length,
+    1,
+    'an unowned sender adds no further loads'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -648,7 +884,10 @@ test('a cross-window move cancels the moved tab pending auth challenges at move 
   h.addTab(source, 101);
   const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.authCalls.filter((c) => c[0] === 'cancel-tab'), [['cancel-tab', 100, 'moved']]);
+  assert.deepEqual(
+    h.authCalls.filter((c) => c[0] === 'cancel-tab'),
+    [['cancel-tab', 100, 'moved']]
+  );
 });
 
 test('a REFUSED move (sole tab) cancels nothing — the guards run before the cancel', () => {
@@ -664,7 +903,10 @@ test('tab-set-active notifies the auth store AFTER activeTabWcId is written (re-
   const h = setup();
   const record = h.makeRecord(1);
   h.addTab(record, 100);
-  h.ipcMain.send('tab-set-active', record.chromeView.webContents, { wcId: 100, bounds: { x: 0, y: 80, width: 1000, height: 700 } });
+  h.ipcMain.send('tab-set-active', record.chromeView.webContents, {
+    wcId: 100,
+    bounds: { x: 0, y: 80, width: 1000, height: 700 }
+  });
   assert.deepEqual(h.authCalls, [['notify-activated', 1, 100]]);
   assert.equal(record.activeTabWcId, 100, 'the eligibility read (activeTabWcId) is already current');
 });
@@ -680,8 +922,11 @@ test('a committed move re-keys the moved tab popups to the DESTINATION record (M
   h.addTab(source, 101);
   const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
   assert.equal(result.ok, true);
-  assert.deepEqual(h.popupRekeys, [[100, result.windowId]],
-    'popups opened by the moved tab now belong to the destination window (DD1f closes with the CURRENT owner)');
+  assert.deepEqual(
+    h.popupRekeys,
+    [[100, result.windowId]],
+    'popups opened by the moved tab now belong to the destination window (DD1f closes with the CURRENT owner)'
+  );
 });
 
 test('a REFUSED move re-keys nothing — the guards run before the re-key', () => {
@@ -707,11 +952,15 @@ test('cancel-on-rekey (M14 F2 L2, FD ruling): a committed move cancels the MOVED
   const result = h.ipcMain.invoke('tab-move-to-new-window', source.chromeView.webContents, { wcId: 100 });
   assert.equal(result.ok, true);
   const cancels = h.authCalls.filter((c) => c[0] === 'cancel-tab');
-  assert.deepEqual(cancels, [
-    ['cancel-tab', 100, 'moved'],            // the tab contract (F1 DD2 ruling)
-    ['cancel-tab', 701, 'moved'],            // its popups — byte-consistent reason
-    ['cancel-tab', 702, 'moved'],
-  ], 'moved-opener popups cancel; the staying tab popup (703) is untouched — no hung callback across a re-key');
+  assert.deepEqual(
+    cancels,
+    [
+      ['cancel-tab', 100, 'moved'], // the tab contract (F1 DD2 ruling)
+      ['cancel-tab', 701, 'moved'], // its popups — byte-consistent reason
+      ['cancel-tab', 702, 'moved']
+    ],
+    'moved-opener popups cancel; the staying tab popup (703) is untouched — no hung callback across a re-key'
+  );
 });
 
 test('cancel-on-rekey: a REFUSED move cancels no popup challenges (guards precede the hook)', () => {
@@ -751,7 +1000,7 @@ test('AC6: main REFUSES a guest drop signal with no bookmark drag declared — n
   assert.equal(record.bookmarkDragActive, false);
 });
 
-test('AC9: with a declaration, the signal forwards the SENDER\'s wcId — resolving tab-switch-mid-drag by construction', () => {
+test("AC9: with a declaration, the signal forwards the SENDER's wcId — resolving tab-switch-mid-drag by construction", () => {
   const h = setup();
   const record = h.makeRecord(1);
   h.addTab(record, 101);
@@ -799,7 +1048,7 @@ test('AC6b: a successful forward CONSUMES the declaration — one navigation, in
   assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1, 'exactly one forward per declared drag');
 });
 
-test('AC6: the bookmark declaration lives on its OWN field — an in-flight TAB drag\'s dragWcId is untouched', () => {
+test("AC6: the bookmark declaration lives on its OWN field — an in-flight TAB drag's dragWcId is untouched", () => {
   const h = setup();
   const record = h.makeRecord(1);
   h.addTab(record, 101);
@@ -813,7 +1062,7 @@ test('AC6: the bookmark declaration lives on its OWN field — an in-flight TAB 
   assert.equal(record.bookmarkDragActive, true, 'the bookmark clear is on a grace timer, never synchronous');
 });
 
-test('the bookmark declaration clears on a GRACE TIMER, at the tab bookend\'s 1500 ms', () => {
+test("the bookmark declaration clears on a GRACE TIMER, at the tab bookend's 1500 ms", () => {
   const h = setup();
   const record = h.makeRecord(1);
   const guest = h.addTab(record, 101);
@@ -847,7 +1096,7 @@ test('a fresh declaration CANCELS a pending grace clear rather than being erased
   h.ipcMain.send('bookmark-drag-ended', record.chromeView.webContents);
   const stale = h.timers.at(-1);
   h.ipcMain.send('bookmark-drag-started', record.chromeView.webContents); // second drag starts
-  assert.equal(h.timers.includes(stale), false, 'the previous drag\'s clear was cancelled');
+  assert.equal(h.timers.includes(stale), false, "the previous drag's clear was cancelled");
   h.ipcMain.send('guest-bookmark-drop', guest.webContents);
   assert.equal(chromeSends(h, record, 'bookmark-drop').length, 1);
 });
@@ -863,7 +1112,7 @@ test('a NON-CHROME sender cannot declare a bookmark drag (the bookend is chrome-
   assert.deepEqual(chromeSends(h, record, 'bookmark-drop'), []);
 });
 
-test('CROSS-WINDOW drop: a drag declared in window A, released on window B\'s guest, is refused (deliberate no-op)', () => {
+test("CROSS-WINDOW drop: a drag declared in window A, released on window B's guest, is refused (deliberate no-op)", () => {
   const h = setup();
   const a = h.makeRecord(1);
   const b = h.makeRecord(2);
@@ -874,7 +1123,7 @@ test('CROSS-WINDOW drop: a drag declared in window A, released on window B\'s gu
   h.ipcMain.send('guest-bookmark-drop', bGuest.webContents);
   assert.deepEqual(chromeSends(h, b, 'bookmark-drop'), [], 'B never declared a drag');
   assert.deepEqual(chromeSends(h, a, 'bookmark-drop'), [], 'and the signal is never re-routed to A');
-  assert.equal(a.bookmarkDragActive, true, 'A\'s own declaration survives — its drag has not ended');
+  assert.equal(a.bookmarkDragActive, true, "A's own declaration survives — its drag has not ended");
 });
 
 test('a signal from a wcId that is not a tab in any window is refused', () => {
@@ -888,7 +1137,7 @@ test('a signal from a wcId that is not a tab in any window is refused', () => {
   assert.equal(record.bookmarkDragActive, true, 'a refused signal consumes nothing');
 });
 
-test('AC8: the drop navigation dies at the REAL gate — tab-navigate\'s trust-branched URL check', () => {
+test("AC8: the drop navigation dies at the REAL gate — tab-navigate's trust-branched URL check", () => {
   // ⚠ The enforcement point is `tab-navigate`, NOT `will-navigate`: Electron does
   // not emit will-navigate for a programmatic loadURL, so guest-wiring's guardNav
   // never runs on this path. This test drives the exact channel the drop
@@ -905,10 +1154,17 @@ test('AC8: the drop navigation dies at the REAL gate — tab-navigate\'s trust-b
   for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'goldfinch://settings/#privacy']) {
     h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: target, verb: 'loadURL', args: [url] });
   }
-  assert.deepEqual(h.log.filter((x) => x[0] === 'load' && x[1] === 101), [],
-    'a web guest gets isSafeTabUrl — goldfinch:// included, so the drop path can never reach an internal page');
+  assert.deepEqual(
+    h.log.filter((x) => x[0] === 'load' && x[1] === 101),
+    [],
+    'a web guest gets isSafeTabUrl — goldfinch:// included, so the drop path can never reach an internal page'
+  );
 
-  h.ipcMain.send('tab-navigate', record.chromeView.webContents, { wcId: target, verb: 'loadURL', args: ['https://example.test/'] });
+  h.ipcMain.send('tab-navigate', record.chromeView.webContents, {
+    wcId: target,
+    verb: 'loadURL',
+    args: ['https://example.test/']
+  });
   assert.equal(h.log.filter((x) => x[0] === 'load' && x[1] === 101).length, 1, 'the legitimate bookmark url loads');
   void guest;
 });

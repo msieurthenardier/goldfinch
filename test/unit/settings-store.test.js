@@ -41,9 +41,7 @@ function removeTempDir(dir) {
 function readRow(dir) {
   const check = new DatabaseSync(path.join(dir, 'app.db'));
   try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('settings')
-    );
+    const row = /** @type {any} */ (check.prepare('SELECT payload FROM documents WHERE store = ?1').get('settings'));
     return row ? row.payload : null;
   } finally {
     check.close();
@@ -798,10 +796,10 @@ test('automationKeyHashes — set throws on non-hex / wrong-length / non-string 
     const bads = [
       { work: 'not-a-hash' },
       { work: HEX_A.toUpperCase() }, // uppercase rejected (lowercase only)
-      { work: HEX_A.slice(0, 63) },  // too short
-      { work: HEX_A + 'a' },         // too long
-      { work: 123 },                 // non-string
-      { ok: HEX_A, bad: 'xyz' },     // one bad value rejects the whole map
+      { work: HEX_A.slice(0, 63) }, // too short
+      { work: HEX_A + 'a' }, // too long
+      { work: 123 }, // non-string
+      { ok: HEX_A, bad: 'xyz' } // one bad value rejects the whole map
     ];
     for (const bad of bads) {
       assert.throws(
@@ -1028,7 +1026,11 @@ test('spellcheck — config written before this leg (no spellcheck key) loads wi
   appDb.open(dir);
   try {
     // Simulate a pre-leg settings file that predates the spellcheck key entirely.
-    const preLeg = JSON.stringify({ version: 1, homePage: 'https://www.google.com', toolbarPins: { media: true, shields: true, devtools: false } });
+    const preLeg = JSON.stringify({
+      version: 1,
+      homePage: 'https://www.google.com',
+      toolbarPins: { media: true, shields: true, devtools: false }
+    });
     fs.writeFileSync(path.join(dir, 'settings.json'), preLeg, 'utf8');
 
     const store = freshStore();
@@ -1162,7 +1164,11 @@ test('bookmarksBarEnabled — config written before this leg (no bookmarksBarEna
   appDb.open(dir);
   try {
     // Simulate a pre-leg settings file that predates the bookmarksBarEnabled key entirely.
-    const preLeg = JSON.stringify({ version: 2, homePage: 'https://www.google.com', toolbarPins: { media: true, shields: true, devtools: false } });
+    const preLeg = JSON.stringify({
+      version: 2,
+      homePage: 'https://www.google.com',
+      toolbarPins: { media: true, shields: true, devtools: false }
+    });
     fs.writeFileSync(path.join(dir, 'settings.json'), preLeg, 'utf8');
 
     const store = freshStore();
@@ -1458,7 +1464,7 @@ test('pin-on-load idempotency: a pinned v3 row is not redundantly rewritten in a
     store2.load(dir); // row now present and already v3 — must not be re-migrated
     const afterSecond = JSON.parse(/** @type {string} */ (readRow(dir)));
 
-    assert.deepEqual(afterSecond, afterFirst, 'repeat load does not change the pinned row\'s content');
+    assert.deepEqual(afterSecond, afterFirst, "repeat load does not change the pinned row's content");
     assert.equal(afterSecond.version, 3);
     // RENAMED (M16 F2 L2 / DD5 — was 'google'): the pinned default is null now.
     assert.equal(afterSecond.searchEngine, null);
@@ -1616,7 +1622,11 @@ test('v2 row migrates to v3 (searchEngine pinned explicit), restoreSession:false
     const store = freshStore();
     const result = store.load(dir);
 
-    assert.equal(result.restoreSession, false, 'a v2 opt-out is respected forever — the v1→v2 transform does not re-run on a v2 row');
+    assert.equal(
+      result.restoreSession,
+      false,
+      'a v2 opt-out is respected forever — the v1→v2 transform does not re-run on a v2 row'
+    );
     assert.equal(result.version, 3);
     // RENAMED (M16 F2 L2 / DD5 — was 'google'): fills from DEFAULTS.searchEngine, now null.
     assert.equal(result.searchEngine, null, 'absent on the v2 row — fills from DEFAULTS');

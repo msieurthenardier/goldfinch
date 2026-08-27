@@ -13,7 +13,7 @@ function desc(over) {
     meta: false,
     shift: false,
     lightboxOpen: false,
-    ...over,
+    ...over
   };
 }
 
@@ -319,5 +319,8 @@ test('unshifted Ctrl+b -> null — only the shifted chord is assigned', () => {
 });
 
 test('Ctrl+Shift+B with lightbox open -> toggle-bookmarks-bar (NOT lightbox-gated)', () => {
-  assert.equal(keydownToAction(desc({ key: 'B', ctrl: true, shift: true, lightboxOpen: true })), 'toggle-bookmarks-bar');
+  assert.equal(
+    keydownToAction(desc({ key: 'B', ctrl: true, shift: true, lightboxOpen: true })),
+    'toggle-bookmarks-bar'
+  );
 });

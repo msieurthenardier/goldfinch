@@ -28,7 +28,7 @@ function makeStore(dir, overrides = {}) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     listJars: () => [{ id: 'work' }],
-    ...overrides,
+    ...overrides
   });
 }
 
@@ -39,7 +39,11 @@ test('onUnlock fires from _installMrk for master, recovery, AND admin unlock', a
     const { recoveryKeyDisplay, adminPrivateKeyB64 } = await setupStore.setup({ masterPassword: MASTER });
 
     let calls = 0;
-    const s = makeStore(dir, { onUnlock: () => { calls += 1; } });
+    const s = makeStore(dir, {
+      onUnlock: () => {
+        calls += 1;
+      }
+    });
 
     // (a) master
     await s.unlock(MASTER);
@@ -67,7 +71,11 @@ test('a wrong master password never fires onUnlock (no _installMrk, store stays 
     await setupStore.setup({ masterPassword: MASTER });
 
     let calls = 0;
-    const s = makeStore(dir, { onUnlock: () => { calls += 1; } });
+    const s = makeStore(dir, {
+      onUnlock: () => {
+        calls += 1;
+      }
+    });
 
     await assert.rejects(s.unlock('wrong-password'), (e) => e instanceof vs.VaultAuthError);
     assert.equal(s.isUnlocked(), false);
@@ -84,7 +92,9 @@ test('a throwing onUnlock hook is swallowed — unlock() still resolves and the 
     await setupStore.setup({ masterPassword: MASTER });
 
     const s = makeStore(dir, {
-      onUnlock: () => { throw new Error('broadcast blew up'); },
+      onUnlock: () => {
+        throw new Error('broadcast blew up');
+      }
     });
 
     // The guard around onUnlock (try/catch in _installMrk) must keep the throw

@@ -25,10 +25,18 @@ function makeBridge(byJar = {}) {
   const pending = {};
   return {
     calls,
-    fireBookmarksChanged(payload) { bookmarksChangedCb && bookmarksChangedCb(payload); },
-    fireJarsChanged(payload) { jarsChangedCb && jarsChangedCb(payload); },
-    onBookmarksChanged: (cb) => { bookmarksChangedCb = cb; },
-    onJarsChanged: (cb) => { jarsChangedCb = cb; },
+    fireBookmarksChanged(payload) {
+      bookmarksChangedCb && bookmarksChangedCb(payload);
+    },
+    fireJarsChanged(payload) {
+      jarsChangedCb && jarsChangedCb(payload);
+    },
+    onBookmarksChanged: (cb) => {
+      bookmarksChangedCb = cb;
+    },
+    onJarsChanged: (cb) => {
+      jarsChangedCb = cb;
+    },
     // Default: resolves immediately from the seeded byJar map. Tests that
     // need to control timing (in-flight de-dup, late-resolve-after-eviction)
     // overwrite this per-call via `pending`.
@@ -36,19 +44,42 @@ function makeBridge(byJar = {}) {
       calls.push(['get', payload]);
       const jarId = payload && payload.jarId;
       if (pending[jarId]) {
-        return new Promise((resolve, reject) => { pending[jarId] = { resolve, reject }; });
+        return new Promise((resolve, reject) => {
+          pending[jarId] = { resolve, reject };
+        });
       }
       return Promise.resolve(byJar[jarId] || []);
     },
     /** Arm jarId to return a controllable promise on its NEXT bookmarksGet call. */
-    armPending(jarId) { pending[jarId] = true; },
-    resolvePending(jarId, value) { pending[jarId].resolve(value); },
+    armPending(jarId) {
+      pending[jarId] = true;
+    },
+    resolvePending(jarId, value) {
+      pending[jarId].resolve(value);
+    },
     bookmarkAdd: async (payload) => {
       calls.push(['add', payload]);
-      return { ok: true, bookmark: { id: 'bm-new', jarId: payload.jarId, url: payload.url, title: payload.title, icon: payload.icon ?? null, addedAt: 1 }, created: true };
+      return {
+        ok: true,
+        bookmark: {
+          id: 'bm-new',
+          jarId: payload.jarId,
+          url: payload.url,
+          title: payload.title,
+          icon: payload.icon ?? null,
+          addedAt: 1
+        },
+        created: true
+      };
     },
-    bookmarkUpdate: async (payload) => { calls.push(['update', payload]); return { ok: true }; },
-    bookmarkRemove: async (payload) => { calls.push(['remove', payload]); return { ok: true }; },
+    bookmarkUpdate: async (payload) => {
+      calls.push(['update', payload]);
+      return { ok: true };
+    },
+    bookmarkRemove: async (payload) => {
+      calls.push(['remove', payload]);
+      return { ok: true };
+    }
   };
 }
 
@@ -77,9 +108,18 @@ test('boot is a no-op when the default jar id is undefined (no getDefaultJarId i
 
 test('boot prefetches the default jar once jarsBoot resolves, and it is then synchronously cached', async () => {
   let resolveJarsBoot;
-  const jarsBoot = new Promise((resolve) => { resolveJarsBoot = resolve; });
-  const bridge = makeBridge({ personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }] });
-  const client = createBookmarksClient({ bridge, isInternalTab: () => false, jarsBoot, getDefaultJarId: () => 'personal' });
+  const jarsBoot = new Promise((resolve) => {
+    resolveJarsBoot = resolve;
+  });
+  const bridge = makeBridge({
+    personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }]
+  });
+  const client = createBookmarksClient({
+    bridge,
+    isInternalTab: () => false,
+    jarsBoot,
+    getDefaultJarId: () => 'personal'
+  });
   assert.deepEqual(bridge.calls, [], 'must not fetch before jarsBoot resolves');
   resolveJarsBoot();
   await client.boot;
@@ -100,7 +140,8 @@ test('ensureJar fetches once per unseen jar; a second call before resolution de-
   client.ensureJar('work'); // in-flight de-dup — no second bookmarksGet call
   assert.deepEqual(bridge.calls, [['get', { jarId: 'work' }]]);
   bridge.resolvePending('work', [{ id: 'w', jarId: 'work', url: 'https://w/', title: 'W', icon: null, addedAt: 1 }]);
-  await Promise.resolve(); await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   assert.equal(client.findByUrl('work', 'https://w/').id, 'w');
   client.ensureJar('work'); // already cached — no further fetch
   assert.equal(bridge.calls.length, 1);
@@ -123,15 +164,25 @@ test('L3-DD-A2: a late-resolving ensureJar fetch for a jar evicted meanwhile is 
   // The jar is deleted (evicted) WHILE the fetch is still in flight.
   bridge.fireJarsChanged({ containers: [{ id: 'personal' }] });
   bridge.resolvePending('work', [{ id: 'w', jarId: 'work', url: 'https://w/', title: 'W', icon: null, addedAt: 1 }]);
-  await Promise.resolve(); await Promise.resolve();
-  assert.equal(client.findByUrl('work', 'https://w/'), null, 'the resolved list must never be stored for an evicted jar');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(
+    client.findByUrl('work', 'https://w/'),
+    null,
+    'the resolved list must never be stored for an evicted jar'
+  );
   // The in-flight marker was cleared on drop — a FUTURE ensureJar (recycled id) refetches fresh.
   client.ensureJar('work');
-  assert.deepEqual(bridge.calls, [['get', { jarId: 'work' }], ['get', { jarId: 'work' }]]);
+  assert.deepEqual(bridge.calls, [
+    ['get', { jarId: 'work' }],
+    ['get', { jarId: 'work' }]
+  ]);
 });
 
 test('L3-DD-A2 cold start: before the FIRST jars-changed broadcast ever arrives, a resolve is never dropped (fails open)', async () => {
-  const bridge = makeBridge({ personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }] });
+  const bridge = makeBridge({
+    personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }]
+  });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps('personal') });
   await client.boot; // the boot prefetch itself resolves before any jars-changed ever fired
   assert.equal(client.findByUrl('personal', 'https://x/').id, 'a');
@@ -144,7 +195,7 @@ test('L3-DD-A2 cold start: before the FIRST jars-changed broadcast ever arrives,
 test('a jars-changed broadcast evicts cached jars absent from its OWN containers array', async () => {
   const bridge = makeBridge({
     personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }],
-    work: [{ id: 'b', jarId: 'work', url: 'https://y/', title: 'Y', icon: null, addedAt: 1 }],
+    work: [{ id: 'b', jarId: 'work', url: 'https://y/', title: 'Y', icon: null, addedAt: 1 }]
   });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.boot;
@@ -158,8 +209,10 @@ test('a jars-changed broadcast evicts cached jars absent from its OWN containers
   assert.equal(client.findByUrl('personal', 'https://x/').id, 'a', 'a still-live jar is untouched');
 });
 
-test('recycled-id case: delete a jar, recreate the id, ensureJar re-fetches fresh (never the dead jar\'s rows)', async () => {
-  const bridge = makeBridge({ work: [{ id: 'old', jarId: 'work', url: 'https://old/', title: 'Old', icon: null, addedAt: 1 }] });
+test("recycled-id case: delete a jar, recreate the id, ensureJar re-fetches fresh (never the dead jar's rows)", async () => {
+  const bridge = makeBridge({
+    work: [{ id: 'old', jarId: 'work', url: 'https://old/', title: 'Old', icon: null, addedAt: 1 }]
+  });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.boot;
   await client.ensureJar('work');
@@ -176,7 +229,11 @@ test('recycled-id case: delete a jar, recreate the id, ensureJar re-fetches fres
   bridge.bookmarksGet = async () => [];
   await client.ensureJar('work');
   assert.deepEqual(client.listFor('work'), []);
-  assert.equal(client.findByUrl('work', 'https://old/'), null, 'the old jar\'s bookmark never resurfaces under the recycled id');
+  assert.equal(
+    client.findByUrl('work', 'https://old/'),
+    null,
+    "the old jar's bookmark never resurfaces under the recycled id"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -184,7 +241,9 @@ test('recycled-id case: delete a jar, recreate the id, ensureJar re-fetches fres
 // ---------------------------------------------------------------------------
 
 test('bookmarks-changed re-queries and replaces the cache ONLY for an already-cached jar (invalidation-not-snapshot)', async () => {
-  const bridge = makeBridge({ personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }] });
+  const bridge = makeBridge({
+    personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }]
+  });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.boot;
   await client.ensureJar('personal');
@@ -192,12 +251,16 @@ test('bookmarks-changed re-queries and replaces the cache ONLY for an already-ca
 
   // Uncached jar: no re-query at all (DD6 "nothing cached, nothing stale").
   bridge.fireBookmarksChanged({ jarId: 'work' });
-  await Promise.resolve(); await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   assert.deepEqual(bridge.calls, []);
 
-  bridge.bookmarksGet = async () => [{ id: 'b', jarId: 'personal', url: 'https://y/', title: 'Y', icon: null, addedAt: 2 }];
+  bridge.bookmarksGet = async () => [
+    { id: 'b', jarId: 'personal', url: 'https://y/', title: 'Y', icon: null, addedAt: 2 }
+  ];
   bridge.fireBookmarksChanged({ jarId: 'personal' });
-  await Promise.resolve(); await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
   assert.equal(client.findByUrl('personal', 'https://x/'), null);
   assert.equal(client.findByUrl('personal', 'https://y/').id, 'b');
 });
@@ -212,7 +275,9 @@ test('activateStar: unbookmarked page adds (title falls back when the tab still 
   await client.boot;
   const tab = { url: 'https://example.com/', title: 'New tab', favicon: null, wcId: 7, container: { id: 'personal' } };
   const bookmark = await client.activateStar(tab);
-  assert.deepEqual(bridge.calls, [['add', { jarId: 'personal', url: 'https://example.com/', title: 'https://example.com/', icon: undefined }]]);
+  assert.deepEqual(bridge.calls, [
+    ['add', { jarId: 'personal', url: 'https://example.com/', title: 'https://example.com/', icon: undefined }]
+  ]);
   assert.equal(bookmark.url, 'https://example.com/');
 });
 
@@ -220,13 +285,26 @@ test('activateStar: unbookmarked page with a REAL title uses it, never the liter
   const bridge = makeBridge({ personal: [] });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.boot;
-  const tab = { url: 'https://example.com/', title: 'Example Domain', favicon: 'data:image/png;base64,x', wcId: 7, container: { id: 'personal' } };
+  const tab = {
+    url: 'https://example.com/',
+    title: 'Example Domain',
+    favicon: 'data:image/png;base64,x',
+    wcId: 7,
+    container: { id: 'personal' }
+  };
   await client.activateStar(tab);
-  assert.deepEqual(bridge.calls, [['add', { jarId: 'personal', url: 'https://example.com/', title: 'Example Domain', icon: 'data:image/png;base64,x' }]]);
+  assert.deepEqual(bridge.calls, [
+    [
+      'add',
+      { jarId: 'personal', url: 'https://example.com/', title: 'Example Domain', icon: 'data:image/png;base64,x' }
+    ]
+  ]);
 });
 
 test('activateStar: bookmarked page resolves the EXISTING entry directly — no add call', async () => {
-  const bridge = makeBridge({ personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }] });
+  const bridge = makeBridge({
+    personal: [{ id: 'a', jarId: 'personal', url: 'https://x/', title: 'X', icon: null, addedAt: 1 }]
+  });
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.boot;
   await client.ensureJar('personal');
@@ -243,8 +321,15 @@ test('activateStar: inert (resolves null, no add call) on internal tabs / burner
   await client.boot;
   assert.equal(await client.activateStar(null), null);
   assert.equal(await client.activateStar({ url: 'https://x/', wcId: null, container: { id: 'personal' } }), null);
-  assert.equal(await client.activateStar({ url: 'https://x/', wcId: 7, internal: true, container: { id: 'personal' } }), null);
-  assert.equal(await client.activateStar({ url: 'https://x/', wcId: 7, container: { id: 'burner-1', burner: true } }), null, 'L3-DD-D: burner-inert');
+  assert.equal(
+    await client.activateStar({ url: 'https://x/', wcId: 7, internal: true, container: { id: 'personal' } }),
+    null
+  );
+  assert.equal(
+    await client.activateStar({ url: 'https://x/', wcId: 7, container: { id: 'burner-1', burner: true } }),
+    null,
+    'L3-DD-D: burner-inert'
+  );
   assert.equal(await client.activateStar({ url: 'https://x/', wcId: 7 }), null, 'no container at all');
   assert.equal(bridge.calls.length, 0);
 });
@@ -293,36 +378,47 @@ test('handleEditSubmit: captureEditJar(null) (no jar captured) still forwards �
 // is swallowed. Neither may throw, and the client takes no `toast` dependency.
 test('DD9: a resolved { ok:false } is an unhandled no-op — no toast dependency, no throw', async () => {
   const bridge = makeBridge();
-  bridge.bookmarkUpdate = async (p) => { bridge.calls.push(['update', p]); return { ok: false, reason: 'duplicate-url' }; };
-  bridge.bookmarkRemove = async (p) => { bridge.calls.push(['remove', p]); return { ok: false, reason: 'unknown-jar' }; };
+  bridge.bookmarkUpdate = async (p) => {
+    bridge.calls.push(['update', p]);
+    return { ok: false, reason: 'duplicate-url' };
+  };
+  bridge.bookmarkRemove = async (p) => {
+    bridge.calls.push(['remove', p]);
+    return { ok: false, reason: 'unknown-jar' };
+  };
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   client.captureEditJar('personal');
   client.handleEditSubmit({ id: 'a', action: 'save', name: 'N', url: 'https://x/' });
   client.handleEditSubmit({ id: 'a', action: 'remove' });
-  await Promise.resolve(); await Promise.resolve(); // must not throw
+  await Promise.resolve();
+  await Promise.resolve(); // must not throw
   assert.deepEqual(bridge.calls, [
     ['update', { id: 'a', title: 'N', url: 'https://x/', jarId: 'personal' }],
-    ['remove', { id: 'a', jarId: 'personal' }],
+    ['remove', { id: 'a', jarId: 'personal' }]
   ]);
 });
 
 test('DD9: a genuine IPC rejection stays swallowed by .catch(() => {})', async () => {
   const bridge = makeBridge();
-  bridge.bookmarkRemove = async () => { throw new Error('ipc down'); };
+  bridge.bookmarkRemove = async () => {
+    throw new Error('ipc down');
+  };
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   client.captureEditJar('personal');
   client.handleEditSubmit({ id: 'a', action: 'remove' });
-  await Promise.resolve(); await Promise.resolve(); // must not reject
+  await Promise.resolve();
+  await Promise.resolve(); // must not reject
 });
 
 test('DD9: surfaceRejection is gone from the module source', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const src = fs.readFileSync(
-    path.join(__dirname, '../../src/renderer/chrome/bookmarks-client.js'),
-    'utf8',
+  const src = fs.readFileSync(path.join(__dirname, '../../src/renderer/chrome/bookmarks-client.js'), 'utf8');
+  assert.equal(
+    /surfaceRejection/.test(src),
+    false,
+    'surfaceRejection must not survive anywhere in bookmarks-client.js'
   );
-  assert.equal(/surfaceRejection/.test(src), false, 'surfaceRejection must not survive anywhere in bookmarks-client.js');
 });
 
 // ---------------------------------------------------------------------------
@@ -333,24 +429,27 @@ test('DD9: surfaceRejection is gone from the module source', () => {
 // which reads model.name/model.url.
 // ---------------------------------------------------------------------------
 
-test('bookmarkEntryToEditModel: translates a store entry\'s title to the sheet model\'s name', () => {
+test("bookmarkEntryToEditModel: translates a store entry's title to the sheet model's name", () => {
   const entry = { id: 'a', jarId: 'personal', url: 'https://x/', title: 'X Site', icon: null, addedAt: 1 };
   assert.deepEqual(bookmarkEntryToEditModel(entry), { id: 'a', name: 'X Site', url: 'https://x/' });
 });
 
 test('bookmarkEntryToEditModel: a missing/empty/non-string title falls back to the url (never blank)', () => {
-  assert.deepEqual(
-    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: '' }),
-    { id: 'a', name: 'https://x/', url: 'https://x/' }
-  );
-  assert.deepEqual(
-    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/' }),
-    { id: 'a', name: 'https://x/', url: 'https://x/' }
-  );
-  assert.deepEqual(
-    bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: 42 }),
-    { id: 'a', name: 'https://x/', url: 'https://x/' }
-  );
+  assert.deepEqual(bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: '' }), {
+    id: 'a',
+    name: 'https://x/',
+    url: 'https://x/'
+  });
+  assert.deepEqual(bookmarkEntryToEditModel({ id: 'a', url: 'https://x/' }), {
+    id: 'a',
+    name: 'https://x/',
+    url: 'https://x/'
+  });
+  assert.deepEqual(bookmarkEntryToEditModel({ id: 'a', url: 'https://x/', title: 42 }), {
+    id: 'a',
+    name: 'https://x/',
+    url: 'https://x/'
+  });
 });
 
 test('bookmarkEntryToEditModel: a null/undefined entry degrades to an all-blank model, never throws', () => {
@@ -372,9 +471,18 @@ function reorderBridge(initial) {
   return {
     ...base,
     reorders,
-    setRows(next) { rows = next.slice(); },
-    bookmarksGet: (payload) => { base.calls.push(['get', payload]); return Promise.resolve(rows.slice()); },
-    bookmarkReorder: async (payload) => { reorders.push(payload); base.calls.push(['reorder', payload]); return { ok: true }; },
+    setRows(next) {
+      rows = next.slice();
+    },
+    bookmarksGet: (payload) => {
+      base.calls.push(['get', payload]);
+      return Promise.resolve(rows.slice());
+    },
+    bookmarkReorder: async (payload) => {
+      reorders.push(payload);
+      base.calls.push(['reorder', payload]);
+      return { ok: true };
+    }
   };
 }
 
@@ -401,16 +509,29 @@ test('commitReorder: THE DD6b DEFECT — a bookmark added by another window and 
   const bridge = reorderBridge([B('a'), B('b'), B('c')]);
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   await client.ensureJar('work');
-  assert.deepEqual(client.listFor('work').map((b) => b.id), ['a', 'b', 'c'], 'the cache is one round trip stale');
+  assert.deepEqual(
+    client.listFor('work').map((b) => b.id),
+    ['a', 'b', 'c'],
+    'the cache is one round trip stale'
+  );
 
   bridge.setRows([B('a'), B('b'), B('c'), B('d')]); // the un-broadcast write
   await client.commitReorder('work', 'a', 2);
 
-  assert.deepEqual(bridge.reorders[0].ids, ['b', 'c', 'a', 'd'],
-    "'d' rides along in its own position — it is neither omitted nor relocated");
+  assert.deepEqual(
+    bridge.reorders[0].ids,
+    ['b', 'c', 'a', 'd'],
+    "'d' rides along in its own position — it is neither omitted nor relocated"
+  );
   assert.equal(bridge.reorders[0].ids.includes('d'), true);
-  assert.equal(client.listFor('work').map((b) => b.id).includes('d'), false,
-    'and the commit demonstrably did NOT read through the cache, which still lacks it');
+  assert.equal(
+    client
+      .listFor('work')
+      .map((b) => b.id)
+      .includes('d'),
+    false,
+    'and the commit demonstrably did NOT read through the cache, which still lacks it'
+  );
 });
 
 test('commitReorder: a drop back into the original position issues NO call and no broadcast (AC4)', async () => {
@@ -426,7 +547,7 @@ test('commitReorder: the dragged bookmark vanished mid-drag -> skipped, never an
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   bridge.setRows([B('a'), B('c')]); // another window removed 'b' before this read
   const issued = await client.commitReorder('work', 'b', 0);
-  assert.equal(issued, false, "indexOf misses -> moveIndex returns the same reference -> no call");
+  assert.equal(issued, false, 'indexOf misses -> moveIndex returns the same reference -> no call');
   assert.deepEqual(bridge.reorders, []);
 });
 
@@ -449,7 +570,11 @@ test('commitReorder: degenerate arguments never reach the bridge', async () => {
   assert.equal(await client.commitReorder('work', 'a', -1), false, 'moveIndex no-ops on an out-of-range target');
   assert.equal(await client.commitReorder('work', 'a', 9), false);
   assert.deepEqual(bridge.reorders, []);
-  assert.equal(bridge.calls.some((c) => c[0] === 'get'), true, 'the fresh read still happened for the in-range-arg cases');
+  assert.equal(
+    bridge.calls.some((c) => c[0] === 'get'),
+    true,
+    'the fresh read still happened for the in-range-arg cases'
+  );
 });
 
 test('commitReorder: a rejected read or write is swallowed — the cache re-derives to truth independently', async () => {
@@ -465,7 +590,10 @@ test('commitReorder: a rejected read or write is swallowed — the cache re-deri
 
 test('commitReorder: a resolved { ok:false, unknown-jar } (jar deleted mid-drag) is a SILENT no-op', async () => {
   const bridge = reorderBridge([B('a'), B('b')]);
-  bridge.bookmarkReorder = async (payload) => { bridge.reorders.push(payload); return { ok: false, reason: 'unknown-jar' }; };
+  bridge.bookmarkReorder = async (payload) => {
+    bridge.reorders.push(payload);
+    return { ok: false, reason: 'unknown-jar' };
+  };
   const client = createBookmarksClient({ bridge, isInternalTab: () => false, ...bootDeps() });
   // Consistent with DD9's disposition of the residual-race feedback: no throw,
   // no operator surface, no unhandled rejection.
@@ -507,10 +635,12 @@ async function overflowClient() {
 test('Leg 5a AC4: k=0 — the item lands at the TOP of the overflow run, and I is promoted onto the bar', async () => {
   const { bridge, client } = await overflowClient();
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 0), true);
-  assert.deepEqual(bridge.reorders, [{
-    jarId: 'work',
-    ids: ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'A', 'J', 'K', 'L'],
-  }]);
+  assert.deepEqual(bridge.reorders, [
+    {
+      jarId: 'work',
+      ids: ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'A', 'J', 'K', 'L']
+    }
+  ]);
   // Read back the way the operator sees it: positions 8.. are the overflow run.
   assert.deepEqual(bridge.reorders[0].ids.slice(8), ['A', 'J', 'K', 'L']);
 });
@@ -518,24 +648,21 @@ test('Leg 5a AC4: k=0 — the item lands at the TOP of the overflow run, and I i
 test('Leg 5a AC4: k=1', async () => {
   const { bridge, client } = await overflowClient();
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 1), true);
-  assert.deepEqual(bridge.reorders[0].ids,
-    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A', 'K', 'L']);
+  assert.deepEqual(bridge.reorders[0].ids, ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A', 'K', 'L']);
   assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'A', 'K', 'L']);
 });
 
 test('Leg 5a AC4: k=2', async () => {
   const { bridge, client } = await overflowClient();
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 2), true);
-  assert.deepEqual(bridge.reorders[0].ids,
-    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'A', 'L']);
+  assert.deepEqual(bridge.reorders[0].ids, ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'A', 'L']);
   assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'A', 'L']);
 });
 
 test('Leg 5a AC4: k=last (3) — the bottom of the rendered rows', async () => {
   const { bridge, client } = await overflowClient();
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 3), true);
-  assert.deepEqual(bridge.reorders[0].ids,
-    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
+  assert.deepEqual(bridge.reorders[0].ids, ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
   assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'L', 'A']);
 });
 
@@ -545,8 +672,7 @@ test('Leg 5a AC4: k PAST the last row — the CLAMP, which is what stops a SILEN
   // array reference, and this function reads that as "nothing moved" — a
   // deliberate gesture doing nothing at all, which the Edge Cases forbid.
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 4), true, 'it must NOT no-op');
-  assert.deepEqual(bridge.reorders[0].ids,
-    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
+  assert.deepEqual(bridge.reorders[0].ids, ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'A']);
   assert.deepEqual(bridge.reorders[0].ids.slice(8), ['J', 'K', 'L', 'A'], 'A last, same as k=last');
 });
 
@@ -557,14 +683,16 @@ test('Leg 5a AC4/DD6b: the clamp is evaluated against the FRESH order length, no
   // of range for moveIndex, so the drop would silently do nothing.
   bridge.setRows(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].map(B));
   assert.equal(await client.commitOverflowDrop('work', 'A', 8, 4), true);
-  assert.deepEqual(bridge.reorders[0].ids,
-    ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A']);
+  assert.deepEqual(bridge.reorders[0].ids, ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'A']);
 });
 
 test('Leg 5a AC10/DD6b: the commit re-reads through bookmarksGet for the CAPTURED jar', async () => {
   const { bridge, client } = await overflowClient();
   await client.commitOverflowDrop('work', 'A', 8, 0);
-  assert.deepEqual(bridge.calls.filter((c) => c[0] === 'get'), [['get', { jarId: 'work' }]]);
+  assert.deepEqual(
+    bridge.calls.filter((c) => c[0] === 'get'),
+    [['get', { jarId: 'work' }]]
+  );
 });
 
 test('Leg 5a AC4: degenerate arguments never reach the store', async () => {

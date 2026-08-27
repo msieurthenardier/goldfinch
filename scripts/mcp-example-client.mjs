@@ -48,8 +48,7 @@ if (!key) {
 // Resolve the endpoint: GOLDFINCH_MCP_URL (full URL) wins; else compose from GOLDFINCH_MCP_PORT
 // (the same env var mcp-server.js's resolvePort honors), defaulting to the documented :49707/mcp.
 const endpoint = new URL(
-  process.env.GOLDFINCH_MCP_URL ||
-    'http://127.0.0.1:' + (process.env.GOLDFINCH_MCP_PORT || 49707) + '/mcp'
+  process.env.GOLDFINCH_MCP_URL || 'http://127.0.0.1:' + (process.env.GOLDFINCH_MCP_PORT || 49707) + '/mcp'
 );
 
 // Print a tool's result, distinguishing the three content shapes the server emits:
@@ -80,7 +79,7 @@ async function main() {
   // Attach the per-jar Bearer key on the transport — required by the Flight-4+ key gate.
   // This is the exact pattern an external consumer copies (no internal helpers needed).
   const transport = new StreamableHTTPClientTransport(endpoint, {
-    requestInit: { headers: { Authorization: 'Bearer ' + key } },
+    requestInit: { headers: { Authorization: 'Bearer ' + key } }
   });
 
   console.log(`Connecting to ${endpoint.href} …`);
@@ -101,7 +100,7 @@ async function main() {
     console.log('\nDriving a short sequence:');
     const openResult = await client.callTool({
       name: 'openTab',
-      arguments: { url: 'https://example.com' },
+      arguments: { url: 'https://example.com' }
     });
     printResult('openTab', openResult);
 
@@ -119,10 +118,7 @@ async function main() {
     );
 
     // 4) Capture a screenshot — note this returns IMAGE content, not JSON text.
-    printResult(
-      'captureScreenshot',
-      await client.callTool({ name: 'captureScreenshot', arguments: { wcId } })
-    );
+    printResult('captureScreenshot', await client.callTool({ name: 'captureScreenshot', arguments: { wcId } }));
 
     // 5) Read the live DOM ({ url, title, html } as JSON text — truncated above for legibility).
     printResult('readDom', await client.callTool({ name: 'readDom', arguments: { wcId } }));

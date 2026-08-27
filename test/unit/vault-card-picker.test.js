@@ -14,7 +14,10 @@ const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
-  buildVaultPickerCard, renderVaultPickerRows, secondaryLineFor, parsePickIndex,
+  buildVaultPickerCard,
+  renderVaultPickerRows,
+  secondaryLineFor,
+  parsePickIndex
 } = require('../../src/shared/vault-picker-template.js');
 
 const textOf = (row) => row.children[1];

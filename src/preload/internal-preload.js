@@ -21,7 +21,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 // downloads + jars methods) is exposed to each. The downloads/jars methods are inert on
 // the settings page (it never calls them) and the main-side registerInternalHandler
 // origin check gates them regardless.
-const INTERNAL_ORIGINS = new Set(['goldfinch://settings', 'goldfinch://downloads', 'goldfinch://jars', 'goldfinch://vault']);
+const INTERNAL_ORIGINS = new Set([
+  'goldfinch://settings',
+  'goldfinch://downloads',
+  'goldfinch://jars',
+  'goldfinch://vault'
+]);
 
 // Only expose the bridge when this preload is running in a genuine internal page.
 // When the origin does not match, expose NOTHING — not even `version`.
@@ -713,7 +718,8 @@ if (INTERNAL_ORIGINS.has(location.origin)) {
      * @param {string} [handle]  the importHandle from pickImportFile.
      * @returns {Promise<{ ok: boolean }>}
      */
-    beginImportUnlock: (overwrite, handle) => ipcRenderer.invoke('internal-vault-begin-import-unlock', { overwrite: overwrite === true, handle }),
+    beginImportUnlock: (overwrite, handle) =>
+      ipcRenderer.invoke('internal-vault-begin-import-unlock', { overwrite: overwrite === true, handle }),
 
     /**
      * Drop the held import bundle (L1). Call on the Import modal's Cancel / Escape / backdrop

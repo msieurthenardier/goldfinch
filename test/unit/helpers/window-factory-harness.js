@@ -20,14 +20,25 @@ function createHarness(options = {}) {
       this.loadedFiles = [];
     }
 
-    isDestroyed() { return this.destroyed; }
-    destroy() { this.destroyed = true; log.push(`destroy-wc:${this.id}`); }
-    focus() { this.focused = true; log.push(`focus-wc:${this.id}`); }
+    isDestroyed() {
+      return this.destroyed;
+    }
+    destroy() {
+      this.destroyed = true;
+      log.push(`destroy-wc:${this.id}`);
+    }
+    focus() {
+      this.focused = true;
+      log.push(`focus-wc:${this.id}`);
+    }
     send(channel, payload) {
       chromeSends.push([channel, payload]);
       log.push(`send:${channel}`);
     }
-    loadFile(file) { this.loadedFiles.push(file); return Promise.resolve(); }
+    loadFile(file) {
+      this.loadedFiles.push(file);
+      return Promise.resolve();
+    }
   }
 
   class FakeWebContentsView {
@@ -39,9 +50,16 @@ function createHarness(options = {}) {
       viewOptions.push(opts);
     }
 
-    setBounds(bounds) { this.bounds = { ...bounds }; log.push(`bounds:${bounds.width}x${bounds.height}`); }
-    getBounds() { return this.bounds; }
-    setBackgroundColor(color) { this.backgroundColor = color; }
+    setBounds(bounds) {
+      this.bounds = { ...bounds };
+      log.push(`bounds:${bounds.width}x${bounds.height}`);
+    }
+    getBounds() {
+      return this.bounds;
+    }
+    setBackgroundColor(color) {
+      this.backgroundColor = color;
+    }
   }
 
   class FakeBaseWindow extends EventEmitter {
@@ -54,8 +72,14 @@ function createHarness(options = {}) {
       this.contentBounds = { width: opts.width, height: opts.height };
       this.children = [];
       this.contentView = {
-        addChildView: (view) => { this.children.push(view); log.push(`add-view:${view.webContents.id}`); },
-        removeChildView: (view) => { this.children = this.children.filter((v) => v !== view); log.push(`remove-view:${view.webContents.id}`); }
+        addChildView: (view) => {
+          this.children.push(view);
+          log.push(`add-view:${view.webContents.id}`);
+        },
+        removeChildView: (view) => {
+          this.children = this.children.filter((v) => v !== view);
+          log.push(`remove-view:${view.webContents.id}`);
+        }
       };
       windowOptions.push(opts);
     }
@@ -64,13 +88,20 @@ function createHarness(options = {}) {
       if (this.destroyed && options.throwOnDestroyedRead) throw new Error('Object has been destroyed');
       return this._id;
     }
-    isDestroyed() { return this.destroyed; }
-    setContentSize(width, height) { this.contentSize = { width, height }; this.contentBounds = { width, height }; }
+    isDestroyed() {
+      return this.destroyed;
+    }
+    setContentSize(width, height) {
+      this.contentSize = { width, height };
+      this.contentBounds = { width, height };
+    }
     getContentBounds() {
       if (this.destroyed && options.throwOnDestroyedRead) throw new Error('Object has been destroyed');
       return { ...this.contentBounds };
     }
-    focus() { this.emit('focus'); }
+    focus() {
+      this.emit('focus');
+    }
   }
 
   const records = new Map();
@@ -90,35 +121,67 @@ function createHarness(options = {}) {
       log.push(`registry-create:${win.id}`);
       return record;
     },
-    get(id) { return records.get(id) || null; },
-    remove(id) { records.delete(id); log.push(`registry-remove:${id}`); },
-    records() { return [...records.values()]; },
-    noteFocus(id) { log.push(`focus:${id}`); }
+    get(id) {
+      return records.get(id) || null;
+    },
+    remove(id) {
+      records.delete(id);
+      log.push(`registry-remove:${id}`);
+    },
+    records() {
+      return [...records.values()];
+    },
+    noteFocus(id) {
+      log.push(`focus:${id}`);
+    }
   };
 
   const managerDeps = {};
   const managers = {};
   function manager(kind, deps) {
     managerDeps[kind] = deps;
-    const instance = kind === 'sheet'
-      ? {
-          closeMenuOverlay(reason) { log.push(`sheet-close:${reason}`); },
-          teardown() { log.push('sheet-teardown'); }
-        }
-      : kind === 'find'
+    const instance =
+      kind === 'sheet'
         ? {
-            hide() {}, show() {}, getSessionTabWcId() { return null; },
-            teardown() { log.push('find-teardown'); }
+            closeMenuOverlay(reason) {
+              log.push(`sheet-close:${reason}`);
+            },
+            teardown() {
+              log.push('sheet-teardown');
+            }
           }
-        : { teardown() { log.push('tearoff-teardown'); } };
+        : kind === 'find'
+          ? {
+              hide() {},
+              show() {},
+              getSessionTabWcId() {
+                return null;
+              },
+              teardown() {
+                log.push('find-teardown');
+              }
+            }
+          : {
+              teardown() {
+                log.push('tearoff-teardown');
+              }
+            };
     managers[kind] = instance;
     return instance;
   }
 
   const jars = options.jars || { list: () => [{ id: 'default' }] };
   const settings = options.settings || { get: () => false };
-  const sessionStore = options.sessionStore || { write: () => { log.push('snapshot-write'); } };
-  const closedTabStack = { push: () => { log.push('stack-push'); } };
+  const sessionStore = options.sessionStore || {
+    write: () => {
+      log.push('snapshot-write');
+    }
+  };
+  const closedTabStack = {
+    push: () => {
+      log.push('stack-push');
+    }
+  };
 
   const factory = createWindowFactory({
     BaseWindow: FakeBaseWindow,
@@ -138,14 +201,19 @@ function createHarness(options = {}) {
     },
     registry,
     isAutomationEnabled: options.isAutomationEnabled || (() => false),
-    broadcastMoveTargetsChanged: () => { log.push('broadcast-move-targets'); },
+    broadcastMoveTargetsChanged: () => {
+      log.push('broadcast-move-targets');
+    },
     createFindOverlayManager: (deps) => manager('find', deps),
     createMenuOverlayManager: (deps) => manager('sheet', deps),
     createTearoffOverlayManager: (deps) => manager('tearoff', deps),
     // M14 F1 L1: resize/maximize/unmaximize call the fullscreen re-expand hook
     // with the in-scope record — logged for the ordering assertion.
-    htmlFullscreen: options.htmlFullscreen
-      || { handleWindowResize: (record) => { log.push(`fs-resize:${record.win.id}`); } },
+    htmlFullscreen: options.htmlFullscreen || {
+      handleWindowResize: (record) => {
+        log.push(`fs-resize:${record.win.id}`);
+      }
+    },
     // M14 F1 L2: the auth pending-challenge store (optional in production too —
     // window-factory optional-chains every call). Tests pass a recording fake.
     authChallenges: options.authChallenges,
@@ -160,18 +228,45 @@ function createHarness(options = {}) {
     isGuestActionAllowed: () => true,
     toggleDevTools: () => {},
     applyZoom: () => {},
-    captureWindowCloseEntries: options.captureWindowCloseEntries || (() => { log.push('capture-tabs'); return []; }),
+    captureWindowCloseEntries:
+      options.captureWindowCloseEntries ||
+      (() => {
+        log.push('capture-tabs');
+        return [];
+      }),
     jars,
     closedTabStack,
-    broadcastClosedTabStackChanged: () => { log.push('broadcast-stack'); },
+    broadcastClosedTabStackChanged: () => {
+      log.push('broadcast-stack');
+    },
     settings,
     isSessionQuitting: options.isSessionQuitting || (() => false),
     sessionStore,
-    buildSessionSnapshot: options.buildSessionSnapshot || (() => { log.push('build-snapshot'); return { version: 1 }; }),
-    getHistoryRecorder: options.getHistoryRecorder || (() => ({ forgetTab: (wcId) => { log.push(`forget:${wcId}`); } })),
-    faviconFetcher: options.faviconFetcher || { forget: (wcId) => { log.push(`favicon-forget:${wcId}`); } },
+    buildSessionSnapshot:
+      options.buildSessionSnapshot ||
+      (() => {
+        log.push('build-snapshot');
+        return { version: 1 };
+      }),
+    getHistoryRecorder:
+      options.getHistoryRecorder ||
+      (() => ({
+        forgetTab: (wcId) => {
+          log.push(`forget:${wcId}`);
+        }
+      })),
+    faviconFetcher: options.faviconFetcher || {
+      forget: (wcId) => {
+        log.push(`favicon-forget:${wcId}`);
+      }
+    },
     defer: options.defer || ((fn) => fn()),
-    logger: { warn() {}, error(message) { log.push(`error:${message}`); } }
+    logger: {
+      warn() {},
+      error(message) {
+        log.push(`error:${message}`);
+      }
+    }
   });
 
   return {

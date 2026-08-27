@@ -35,9 +35,15 @@ class FakeElement {
     this.isConnected = false;
     this._parent = null;
   }
-  setAttribute(name, value) { this.attributes[name] = String(value); }
-  getAttribute(name) { return name in this.attributes ? this.attributes[name] : null; }
-  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+  getAttribute(name) {
+    return name in this.attributes ? this.attributes[name] : null;
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] = this.listeners[type] || []).push(fn);
+  }
   appendChild(child) {
     this.children.push(child);
     child._parent = this;
@@ -69,7 +75,9 @@ class FakeInput extends FakeElement {
     this._rect = { top: 100, left: 200, width: 180, height: 24 };
     if (autocomplete != null) this.setAttribute('autocomplete', autocomplete);
   }
-  getBoundingClientRect() { return this._rect; }
+  getBoundingClientRect() {
+    return this._rect;
+  }
 }
 
 class FakeSelect extends FakeElement {
@@ -83,7 +91,9 @@ class FakeSelect extends FakeElement {
     this._rect = { top: 140, left: 200, width: 80, height: 24 };
     if (autocomplete != null) this.setAttribute('autocomplete', autocomplete);
   }
-  getBoundingClientRect() { return this._rect; }
+  getBoundingClientRect() {
+    return this._rect;
+  }
 }
 
 class FakeForm extends FakeElement {
@@ -106,14 +116,18 @@ function makeDoc(forms) {
   return {
     body,
     documentElement: body,
-    createElement(tag) { return new FakeElement(tag); },
-    createElementNS(ns, tag) { return new FakeElement(tag, ns); },
+    createElement(tag) {
+      return new FakeElement(tag);
+    },
+    createElementNS(ns, tag) {
+      return new FakeElement(tag, ns);
+    },
     querySelectorAll(selector) {
       if (selector === 'input[type=password]') return all.filter((i) => i.type === 'password');
       if (selector === 'input, select') return all.slice();
       if (selector === 'input') return all.filter((f) => f.tagName === 'input');
       return [];
-    },
+    }
   };
 }
 
@@ -126,7 +140,7 @@ function makeController(doc, sends, { withCards = true } = {}) {
     findAllLoginFields,
     ...(withCards ? { findAllCardFields } : {}),
     getEnabled: () => true,
-    getVaultLocked: () => false,
+    getVaultLocked: () => false
   });
 }
 
@@ -139,7 +153,7 @@ function makeCardForm() {
     number: new FakeInput({ autocomplete: 'cc-number', name: 'cardnumber' }),
     holder: new FakeInput({ autocomplete: 'cc-name', name: 'ccname' }),
     exp: new FakeInput({ autocomplete: 'cc-exp', name: 'ccexp' }),
-    csc: new FakeInput({ autocomplete: 'cc-csc', name: 'cvc' }),
+    csc: new FakeInput({ autocomplete: 'cc-csc', name: 'cvc' })
   };
 }
 

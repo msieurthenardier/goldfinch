@@ -58,8 +58,12 @@ import { createJarsCreatePanel } from './jars-create-controller.js';
   /** @type {ReturnType<typeof createJarsSections>} */
   let sectionsController;
 
-  const setPageError = (text) => { pageErrorEl.textContent = text; };
-  const clearPageError = () => { pageErrorEl.textContent = ''; };
+  const setPageError = (text) => {
+    pageErrorEl.textContent = text;
+  };
+  const clearPageError = () => {
+    pageErrorEl.textContent = '';
+  };
 
   const jarsNav = createJarsNav({
     document,
@@ -91,7 +95,9 @@ import { createJarsCreatePanel } from './jars-create-controller.js';
     createConfirmModal,
     getContainers: () => state.containers,
     getUi: () => ui,
-    setUi: (next) => { ui = next; },
+    setUi: (next) => {
+      ui = next;
+    },
     setPageError,
     clearPageError,
     requestRender: render
@@ -109,7 +115,9 @@ import { createJarsCreatePanel } from './jars-create-controller.js';
     createPanelModeKey,
     getContainers: () => state.containers,
     getUi: () => ui,
-    setUi: (next) => { ui = next; },
+    setUi: (next) => {
+      ui = next;
+    },
     getSectionRefs: (rowId) => sectionsController.getSectionRefs(rowId),
     requestRender: render
   });
@@ -159,13 +167,17 @@ import { createJarsCreatePanel } from './jars-create-controller.js';
     })
     .catch(() => {});
 
-  window.addEventListener('pagehide', () => {
-    bridge.offJarsChanged(jarsChangedHandle);
-    bridge.offHistoryChanged(historyChangedHandle);
-    bridge.offJarDataChanged(jarDataChangedHandle);
-    window.removeEventListener('hashchange', hashChanged);
-    createController.destroy?.();
-    sectionsController.destroy();
-    jarsNav.destroy();
-  }, { once: true });
+  window.addEventListener(
+    'pagehide',
+    () => {
+      bridge.offJarsChanged(jarsChangedHandle);
+      bridge.offHistoryChanged(historyChangedHandle);
+      bridge.offJarDataChanged(jarDataChangedHandle);
+      window.removeEventListener('hashchange', hashChanged);
+      createController.destroy?.();
+      sectionsController.destroy();
+      jarsNav.destroy();
+    },
+    { once: true }
+  );
 })();

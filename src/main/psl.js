@@ -152,7 +152,7 @@ const SNAPSHOT_MS = parseSnapshotMs(DAT_TEXT);
  * @returns {boolean}
  */
 function isPslStale(now = Date.now()) {
-  return SNAPSHOT_MS != null && (now - SNAPSHOT_MS) > PSL_MAX_AGE_MS;
+  return SNAPSHOT_MS != null && now - SNAPSHOT_MS > PSL_MAX_AGE_MS;
 }
 
 /**

@@ -144,7 +144,7 @@ const EXPLAINER_NOTE =
 // delete can succeed silently with nothing actually there.
 const KNOWN_GAP_NOTE =
   "This list may be incomplete: local storage isn't visible here, and origins never visited in this jar won't " +
-  "appear even if they hold third-party data. Clearing a “Visited” origin with no actual storage " +
+  'appear even if they hold third-party data. Clearing a “Visited” origin with no actual storage ' +
   'still succeeds silently.';
 
 /**

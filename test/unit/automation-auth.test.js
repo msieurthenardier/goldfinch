@@ -76,7 +76,7 @@ test('validateKey — returns the correct jarId among several', () => {
   const ctx = {
     keyHashes: { a: hashKey('ka'), b: hashKey('kb'), c: hashKey('kc') },
     adminKeyHash: '',
-    adminEnabled: false,
+    adminEnabled: false
   };
   assert.equal(validateKey('kb', ctx), 'b');
 });
@@ -123,7 +123,7 @@ test('validateKey — admin-disabled falls through to the jar check', () => {
   const ctx = {
     keyHashes: { team: hashKey(jarKey) },
     adminKeyHash: hashKey('admin-key'),
-    adminEnabled: false, // gate off → admin branch skipped, jar branch still runs
+    adminEnabled: false // gate off → admin branch skipped, jar branch still runs
   };
   assert.equal(validateKey(jarKey, ctx), 'team');
 });
@@ -134,7 +134,7 @@ test('validateKey — a jar key never resolves to admin', () => {
   const ctx = {
     keyHashes: { team: hashKey(jarKey) },
     adminKeyHash: hashKey('different-admin-key'),
-    adminEnabled: true,
+    adminEnabled: true
   };
   assert.equal(validateKey(jarKey, ctx), 'team');
 });

@@ -8,7 +8,14 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { windowPage, countNewer, activeLog, reduceAudit, pageList, pageCount } = require('../../src/shared/audit-paging');
+const {
+  windowPage,
+  countNewer,
+  activeLog,
+  reduceAudit,
+  pageList,
+  pageCount
+} = require('../../src/shared/audit-paging');
 
 // Build a newest-LAST log of N entries with ascending ts (ts === index+1), the
 // ring's natural append order.

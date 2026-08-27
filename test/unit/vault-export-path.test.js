@@ -26,7 +26,9 @@ test('accepts a .gfvaultbundle path in an existing writable dir → resolved abs
     const p = path.join(dir, 'vault-global.gfvaultbundle');
     const res = validateExportPath(p);
     assert.deepEqual(res, { ok: true, path: path.resolve(p) });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('accepts a .json path too (case-insensitive extension)', () => {
@@ -34,7 +36,9 @@ test('accepts a .json path too (case-insensitive extension)', () => {
   try {
     assert.equal(validateExportPath(path.join(dir, 'x.JSON')).ok, true);
     assert.equal(validateExportPath(path.join(dir, 'x.GfVaultBundle')).ok, true);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('rejects an empty / non-string path', () => {
@@ -51,7 +55,9 @@ test('rejects a disallowed extension (never an arbitrary target)', () => {
     assert.deepEqual(validateExportPath(path.join(dir, 'passwd')), { ok: false, reason: 'extension' });
     assert.deepEqual(validateExportPath(path.join(dir, 'x.txt')), { ok: false, reason: 'extension' });
     assert.deepEqual(validateExportPath(path.join(dir, '.bashrc')), { ok: false, reason: 'extension' });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('rejects a path whose parent directory does not exist (traversal into a missing tree)', () => {
@@ -62,7 +68,9 @@ test('rejects a path whose parent directory does not exist (traversal into a mis
     // A classic traversal string canonicalizes but still lands where the parent is missing.
     const trav = path.join(dir, '..', 'gf-does-not-exist-xyz', 'x.gfvaultbundle');
     assert.deepEqual(validateExportPath(trav), { ok: false, reason: 'no-parent' });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('rejects when the target itself is an existing directory', () => {
@@ -71,7 +79,9 @@ test('rejects when the target itself is an existing directory', () => {
     const sub = path.join(dir, 'sub.gfvaultbundle'); // valid extension, but it's a dir
     fs.mkdirSync(sub);
     assert.deepEqual(validateExportPath(sub), { ok: false, reason: 'is-directory' });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('rejects an existing regular file by default → reason exists (no silent clobber, PR#112 finding 7)', () => {
@@ -83,7 +93,9 @@ test('rejects an existing regular file by default → reason exists (no silent c
     assert.deepEqual(validateExportPath(p), { ok: false, reason: 'exists' });
     // The file is untouched by the validator.
     assert.equal(fs.readFileSync(p, 'utf8'), '{"name":"victim"}');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('allowOverwrite:true permits an existing regular file', () => {
@@ -94,7 +106,9 @@ test('allowOverwrite:true permits an existing regular file', () => {
     const res = validateExportPath(p, { allowOverwrite: true });
     assert.equal(res.ok, true);
     assert.equal(res.path, path.resolve(p));
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('rejects an existing symlink even with allowOverwrite (never write through a redirect)', () => {
@@ -108,7 +122,9 @@ test('rejects an existing symlink even with allowOverwrite (never write through 
     assert.deepEqual(validateExportPath(link, { allowOverwrite: true }), { ok: false, reason: 'symlink' });
     // The symlink's target is never written through.
     assert.equal(fs.readFileSync(realTarget, 'utf8'), 'secret');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the resolved path collapses traversal to a canonical absolute path when the parent exists', () => {
@@ -121,5 +137,7 @@ test('the resolved path collapses traversal to a canonical absolute path when th
     const res = validateExportPath(p);
     assert.equal(res.ok, true);
     assert.equal(res.path, path.join(dir, 'out.gfvaultbundle'));
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

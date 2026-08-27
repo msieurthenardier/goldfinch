@@ -20,8 +20,12 @@ function makeIpc() {
   return {
     handlers,
     listeners,
-    on(channel, fn) { listeners.set(channel, fn); },
-    handle(channel, fn) { handlers.set(channel, fn); },
+    on(channel, fn) {
+      listeners.set(channel, fn);
+    },
+    handle(channel, fn) {
+      handlers.set(channel, fn);
+    }
   };
 }
 
@@ -34,18 +38,19 @@ function baseHarness(extraInjections, menuType) {
   const sheet = {
     getView: () => ({ webContents: sheetSender }),
     getCurrentMenu: () => ({ token: 7, menuType }),
-    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token]),
+    closeMenuOverlay: (reason, token) => closeCalls.push([reason, token])
   };
   const rec = { sheet, win };
   const registry = { records: () => [rec], getWindowForChrome: () => null };
   const chrome = { send: (channel, payload) => chromeSends.push([channel, payload]) };
 
   registerOverlayIpc({
-    ipcMain, registry,
+    ipcMain,
+    registry,
     chromeForAttachment: (w) => (w === win ? chrome : null),
     chromeForTab: () => null,
     sanitizeActivatedValue: (v) => (typeof v === 'string' && v.length <= 24 ? v : undefined),
-    ...extraInjections,
+    ...extraInjections
   });
   return { ipcMain, sheetSender, closeCalls, chromeSends };
 }
@@ -76,8 +81,14 @@ test('rotate-admin: valid step-up → { ok:true }; Buffer hand-off; array zeroed
   assert.deepEqual(res, { ok: true }, 'the invoke reply carries { ok } only — never the new key');
   assert.equal(captured.isBuffer, true);
   assert.equal(captured.bytes, 'correct-master');
-  assert.ok(captured.buffer.every((b) => b === 0), 'copied Buffer zeroized in finally');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized in finally');
+  assert.ok(
+    captured.buffer.every((b) => b === 0),
+    'copied Buffer zeroized in finally'
+  );
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized in finally'
+  );
   assert.deepEqual(closeCalls, [['activated', 7]]);
   assert.deepEqual(chromeSends, [['vault-adminkey-show', { adminPrivateKey: 'NEW-ADMIN-PRIVATE-KEY-B64' }]]);
 });
@@ -93,16 +104,24 @@ test('rotate-admin: WRONG master → { ok:false }: no adminkey-show, sheet not c
   assert.deepEqual(res, { ok: false });
   assert.deepEqual(chromeSends, [], 'no adminkey-show on a refused rotation');
   assert.deepEqual(closeCalls, [], 'sheet stays open to re-prompt');
-  assert.ok(secret.every((b) => b === 0), 'incoming Uint8Array zeroized on refusal');
+  assert.ok(
+    secret.every((b) => b === 0),
+    'incoming Uint8Array zeroized on refusal'
+  );
 });
 
 test('rotate-admin: wrong sender / stale token / non-Uint8Array → { ok:false }, delegate never called', async () => {
   let called = 0;
-  const vaultRotateAdminKey = async () => { called += 1; return { ok: true, adminPrivateKeyB64: 'x' }; };
+  const vaultRotateAdminKey = async () => {
+    called += 1;
+    return { ok: true, adminPrivateKeyB64: 'x' };
+  };
   const { ipcMain, sheetSender } = baseHarness({ vaultRotateAdminKey }, 'vault-stepup');
   const handler = ipcMain.handlers.get('menu-overlay:vault-rotate-admin');
 
-  assert.deepEqual(await handler({ sender: { isDestroyed: () => false } }, { token: 7, secret: new Uint8Array([1]) }), { ok: false });
+  assert.deepEqual(await handler({ sender: { isDestroyed: () => false } }, { token: 7, secret: new Uint8Array([1]) }), {
+    ok: false
+  });
   assert.deepEqual(await handler({ sender: sheetSender }, { token: 6, secret: new Uint8Array([1]) }), { ok: false });
   assert.deepEqual(await handler({ sender: sheetSender }, { token: 7, secret: 'string' }), { ok: false });
   assert.equal(called, 0);

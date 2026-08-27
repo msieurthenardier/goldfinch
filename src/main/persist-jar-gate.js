@@ -17,7 +17,7 @@
  * @returns {{ id: string, partition: string } | null}
  */
 function resolvePersistJar(tabEntry, jarsList) {
-  return !tabEntry.trusted && jarsList.find((j) => j.partition === tabEntry.partition) || null;
+  return (!tabEntry.trusted && jarsList.find((j) => j.partition === tabEntry.partition)) || null;
 }
 
 module.exports = { resolvePersistJar };

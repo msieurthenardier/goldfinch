@@ -79,9 +79,8 @@ function resolveJarColor(jarId, containers) {
  */
 export function buildAutomationIndicatorModel(input) {
   const opts = input || {};
-  const jarKeyCount = Number.isInteger(opts.enabledJarKeyCount) && opts.enabledJarKeyCount > 0
-    ? opts.enabledJarKeyCount
-    : 0;
+  const jarKeyCount =
+    Number.isInteger(opts.enabledJarKeyCount) && opts.enabledJarKeyCount > 0 ? opts.enabledJarKeyCount : 0;
   const adminKeyEnabled = !!opts.adminKeyEnabled;
   const visible = jarKeyCount > 0 || adminKeyEnabled;
 
@@ -97,9 +96,7 @@ export function buildAutomationIndicatorModel(input) {
     return { visible: true, count: jarKeyCount, mode: 'admin', color: null };
   }
 
-  const distinctActive = [...new Set(
-    (opts.activeJarIds || []).filter((id) => typeof id === 'string' && id)
-  )];
+  const distinctActive = [...new Set((opts.activeJarIds || []).filter((id) => typeof id === 'string' && id))];
 
   if (distinctActive.length === 1) {
     const color = resolveJarColor(distinctActive[0], opts.containers);

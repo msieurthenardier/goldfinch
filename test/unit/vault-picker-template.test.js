@@ -12,7 +12,12 @@ const assert = require('node:assert/strict');
 
 const { createDocument } = require('./helpers/jars-page-dom');
 const {
-  buildVaultPickerCard, renderVaultPickerRows, pickId, parsePickIndex, badgeLabelFor, MANAGE_ID,
+  buildVaultPickerCard,
+  renderVaultPickerRows,
+  pickId,
+  parsePickIndex,
+  badgeLabelFor,
+  MANAGE_ID
 } = require('../../src/shared/vault-picker-template.js');
 
 // Row layout: [icon(svg), text(title+username), badges(chicklet [+ widened])].
@@ -53,7 +58,7 @@ test('renderVaultPickerRows: icon + stacked title/username + source-vault chickl
   const { list } = buildVaultPickerCard(document);
   const model = [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', hasTotp: false },
-    { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', hasTotp: true, badgeLabel: 'Work' },
+    { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', hasTotp: true, badgeLabel: 'Work' }
   ];
   const rows = renderVaultPickerRows(document, list, model);
 
@@ -99,7 +104,7 @@ test('renderVaultPickerRows: jar-colored chicklet when badgeColor is present, ne
   const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'work', id: 'i1', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#ff8800' },
     { vaultId: 'global', id: 'i2', title: 'GitHub', username: 'me@a' }, // Global → no color
-    { vaultId: 'evil', id: 'i3', title: 'X', username: 'x', badgeLabel: 'Evil', badgeColor: 'url(javascript:alert(1))' }, // unsafe → ignored
+    { vaultId: 'evil', id: 'i3', title: 'X', username: 'x', badgeLabel: 'Evil', badgeColor: 'url(javascript:alert(1))' } // unsafe → ignored
   ]);
 
   // Colored: the chicklet carries the -colored modifier and an inline-tinted dot.
@@ -125,7 +130,7 @@ test('renderVaultPickerRows: the widened (subdomain-match) badge still renders',
   const document = createDocument();
   const { list } = buildVaultPickerCard(document);
   const rows = renderVaultPickerRows(document, list, [
-    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', widened: true },
+    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a', widened: true }
   ]);
   const badges = badgesOf(rows[0]);
   // chicklet + widened badge.
@@ -139,7 +144,7 @@ test('renderVaultPickerRows: a separated, focusable "Manage passwords" footer is
   const document = createDocument();
   const { list } = buildVaultPickerCard(document);
   const rows = renderVaultPickerRows(document, list, [
-    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
+    { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' }
   ]);
   // The footer is the last returned focusable item (so roving reaches it by keyboard).
   const manage = manageBtn(rows);
@@ -192,7 +197,7 @@ test('row falls back to username, then "Login", when title is absent', () => {
   const { list } = buildVaultPickerCard(document);
   const rows = renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', username: 'only-user@a' },
-    { vaultId: 'global', id: 'i2' },
+    { vaultId: 'global', id: 'i2' }
   ]);
   assert.equal(titleOf(rows[0]).textContent, 'only-user@a');
   assert.equal(titleOf(rows[1]).textContent, 'Login');
@@ -203,11 +208,14 @@ test('NO password field anywhere in the rendered picker DOM', () => {
   const { node, list } = buildVaultPickerCard(document);
   renderVaultPickerRows(document, list, [
     { vaultId: 'global', id: 'i1', title: 'GitHub', username: 'me@a' },
-    { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#0a0' },
+    { vaultId: 'work', id: 'i2', title: 'Jira', username: 'w@a', badgeLabel: 'Work', badgeColor: '#0a0' }
   ]);
   // Walk the whole subtree; no input carries a password type, and no text/attr mentions
   // "password" (metadata only — the picker never holds a secret).
-  const walk = (el, visit) => { visit(el); el.children.forEach((c) => walk(c, visit)); };
+  const walk = (el, visit) => {
+    visit(el);
+    el.children.forEach((c) => walk(c, visit));
+  };
   walk(node, (el) => {
     assert.notEqual((el.attributes.get('type') || '').toLowerCase(), 'password');
     assert.equal(el.tagName === 'INPUT', false);

@@ -30,8 +30,11 @@ test('latch ordering: __goldfinchNavGuarded is the FIRST statement of wireGuestC
   // the pin loudly instead of letting it pass on a missing subject).
   const fnMatch = /(async\s+)?function\s+wireGuestContents\s*\(/.exec(masked);
   assert.ok(fnMatch, 'wireGuestContents must exist in src/main/guest-wiring.js');
-  assert.equal(fnMatch[1], undefined,
-    'wireGuestContents must not be async — an async body makes a pre-latch suspension point possible');
+  assert.equal(
+    fnMatch[1],
+    undefined,
+    'wireGuestContents must not be async — an async body makes a pre-latch suspension point possible'
+  );
 
   // Extract the function BODY: match the parameter list's parens, then the
   // body braces (both bracket walks skip string contents).
@@ -50,10 +53,13 @@ test('latch ordering: __goldfinchNavGuarded is the FIRST statement of wireGuestC
   const beforeLatch = body.slice(0, latchIdx);
   // THE PIN: nothing but whitespace (comments are already masked to spaces)
   // may precede the assignment — it is the first statement, full stop.
-  assert.equal(beforeLatch.trim(), '',
+  assert.equal(
+    beforeLatch.trim(),
+    '',
     'the latch assignment must be the FIRST statement of wireGuestContents — ' +
-    'code was found before it (a suspension point here reopens the ' +
-    'web-contents-created catch-all race)');
+      'code was found before it (a suspension point here reopens the ' +
+      'web-contents-created catch-all race)'
+  );
   // Redundant with the check above, but names the exact hazard if the
   // first-statement pin is ever loosened: no await may precede the latch.
   assert.equal(/\bawait\b/.test(beforeLatch), false, 'no await may precede the latch assignment');

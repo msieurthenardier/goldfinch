@@ -67,16 +67,27 @@ interface GoldfinchBridge {
    * windows. Serving it main-side releases the queued adopt-protocol sends.
    * M09 F9 / DD4: a restored window also carries its ordered saved tab list
    * (restoreTabs), served with bootTab:false — the renderer creates those fresh. */
-  windowBootConfig(): Promise<{ bootTab: boolean, restoreTabs?: Array<{ url: string, jarId: string, active: boolean }> }>;
+  windowBootConfig(): Promise<{
+    bootTab: boolean;
+    restoreTabs?: Array<{ url: string; jarId: string; active: boolean }>;
+  }>;
 
   // --- downloads ---
   downloadMedia(payload: any): Promise<any>;
   chooseDownloadDir(): Promise<string | null>;
   showItemInFolder(savePath: string): void;
-  downloadsSnapshot(): Promise<Array<{
-    id: number; filename: string; state?: string; received?: number; total?: number;
-    paused?: boolean; endTime: number | null; active: boolean;
-  }>>;
+  downloadsSnapshot(): Promise<
+    Array<{
+      id: number;
+      filename: string;
+      state?: string;
+      received?: number;
+      total?: number;
+      paused?: boolean;
+      endTime: number | null;
+      active: boolean;
+    }>
+  >;
   // M11 F1 Leg 1 chrome-trust file actions — resolve the actionable savePath
   // MAIN-SIDE by numeric id (never a path from the renderer).
   openDownloadedFile(id: number): Promise<{ ok: boolean; error?: string }>;
@@ -96,7 +107,7 @@ interface GoldfinchBridge {
   settingsGet(key?: string): Promise<any>;
   onSettingsChanged(cb: (all: any) => void): void;
   // welcomeSetPreference (M16 F2 Leg 1, DD1): the one chrome-initiated settings write.
-  welcomeSetPreference(payload: { key: string, value: any }): Promise<{ ok: boolean, error?: string }>;
+  welcomeSetPreference(payload: { key: string; value: any }): Promise<{ ok: boolean; error?: string }>;
 
   // --- history (chrome-trusted; M08 Flight 4 Leg 1 — the omnibox's first history bridge method) ---
   historySuggest(payload: any): Promise<any>;
@@ -105,27 +116,39 @@ interface GoldfinchBridge {
   // DD3 — sender-resolved, NO internal twin; JAR-ADDRESSED as of M15 Flight 2
   // "Jar-Scoped Bookmarks" — every channel below carries jarId) ---
   bookmarksGet(payload: { jarId: string }): Promise<Array<BookmarkEntry>>;
-  bookmarkAdd(payload: { jarId: string; url: string; title?: string; icon?: string | null }): Promise<
-    | { ok: true; bookmark: BookmarkEntry; created: boolean }
-    | { ok: false; reason: 'invalid-url' | 'unknown-jar' }
+  bookmarkAdd(payload: {
+    jarId: string;
+    url: string;
+    title?: string;
+    icon?: string | null;
+  }): Promise<
+    { ok: true; bookmark: BookmarkEntry; created: boolean } | { ok: false; reason: 'invalid-url' | 'unknown-jar' }
   >;
-  bookmarkUpdate(payload: { jarId: string; id: string; url?: string; title?: string; icon?: string | null }): Promise<
+  bookmarkUpdate(payload: {
+    jarId: string;
+    id: string;
+    url?: string;
+    title?: string;
+    icon?: string | null;
+  }): Promise<
     | { ok: true; bookmark: BookmarkEntry }
     | { ok: false; reason: 'not-found' | 'invalid-url' | 'duplicate-url' | 'unknown-jar' }
   >;
-  bookmarkRemove(payload: { jarId: string; id: string }): Promise<
-    | { ok: true; bookmark: BookmarkEntry }
-    | { ok: false; reason: 'not-found' | 'unknown-jar' }
-  >;
-  bookmarkReorder(payload: { jarId: string; ids: string[] }): Promise<
-    | { ok: true; bookmarks: BookmarkEntry[] }
-    | { ok: false; reason: 'unknown-jar' }
-  >;
+  bookmarkRemove(payload: {
+    jarId: string;
+    id: string;
+  }): Promise<{ ok: true; bookmark: BookmarkEntry } | { ok: false; reason: 'not-found' | 'unknown-jar' }>;
+  bookmarkReorder(payload: {
+    jarId: string;
+    ids: string[];
+  }): Promise<{ ok: true; bookmarks: BookmarkEntry[] } | { ok: false; reason: 'unknown-jar' }>;
   /** M15 F1 Leg 4 (DD11), jar-addressed as of M15 F2 Leg 3: per-jar omnibox
    * suggest source. Envelope mirrors historySuggest's {ok, suggestions} shape. */
-  bookmarksSuggest(payload: { jarId: string; query: string; limit?: number }): Promise<
-    { ok: true; suggestions: BookmarkEntry[] } | { ok: false; suggestions: [] }
-  >;
+  bookmarksSuggest(payload: {
+    jarId: string;
+    query: string;
+    limit?: number;
+  }): Promise<{ ok: true; suggestions: BookmarkEntry[] } | { ok: false; suggestions: [] }>;
   /** Fired after every bookmark mutation (add/update/remove/reorder) with
    * `{ jarId }` (M15 F2 Leg 2 DD5 — invalidation-not-snapshot). Subscribers
    * re-query via bookmarksGet({ jarId }). */
@@ -244,19 +267,21 @@ interface GoldfinchBridge {
    * every other template's flat item array (DD1). */
   menuOverlayOpen(payload: {
     menuType: string;
-    model: Array<{
-      id?: string;
-      label?: string;
-      color?: string;
-      variant?: string;
-      type?: 'item' | 'separator' | 'note' | 'row' | 'action';
-      text?: string;
-      value?: string;
-    }> | {
-      items: Array<{ primary?: string; secondary?: string }>;
-      selectedIndex: number;
-      emptyNote?: string;
-    };
+    model:
+      | Array<{
+          id?: string;
+          label?: string;
+          color?: string;
+          variant?: string;
+          type?: 'item' | 'separator' | 'note' | 'row' | 'action';
+          text?: string;
+          value?: string;
+        }>
+      | {
+          items: Array<{ primary?: string; secondary?: string }>;
+          selectedIndex: number;
+          emptyNote?: string;
+        };
     anchor: { alignRight?: number; alignLeft?: number; x?: number; y: number };
     startIndex: number;
     token: number;
@@ -273,7 +298,9 @@ interface GoldfinchBridge {
   }): void;
   /** Channel 2: programmatic close — reason allowlisted main-side ('toggle' | 'superseded' |
    * 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated'). */
-  menuOverlayClose(payload?: { reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated' }): void;
+  menuOverlayClose(payload?: {
+    reason?: 'toggle' | 'superseded' | 'escape' | 'blur' | 'navigation' | 'input-empty' | 'activated';
+  }): void;
   /** Channel 6: an item was activated on the sheet; chrome executes the action.
    * `value` (Leg 3) is the input-dialog's text — main-validated (string, ≤24). */
   onMenuOverlayActivated(cb: (d: { menuType: string; id: string; value?: string }) => void): void;
@@ -375,9 +402,26 @@ interface GoldfinchBridge {
    * source chrome's live tabDragStarted registration ('not-dragging' else). Sole-tab
    * drags consolidate (the emptied source window closes). Refusals discriminated (DD5). */
   tabAdoptByDrop(payload: {
-    wcId: number; url: string; title: string; favicon: string | null;
+    wcId: number;
+    url: string;
+    title: string;
+    favicon: string | null;
     container: { id: string; name: string; color: string; partition: string; burner?: boolean };
-  }): Promise<{ ok: true; windowId: number } | { ok: false; reason: 'no-source' | 'bad-payload' | 'no-tab' | 'same-window' | 'not-dragging' | 'internal' | 'sole-tab' | 'no-target' }>;
+  }): Promise<
+    | { ok: true; windowId: number }
+    | {
+        ok: false;
+        reason:
+          | 'no-source'
+          | 'bad-payload'
+          | 'no-tab'
+          | 'same-window'
+          | 'not-dragging'
+          | 'internal'
+          | 'sole-tab'
+          | 'no-target';
+      }
+  >;
   /** DD2 provenance bookends (M09 F11 Leg 3): fire-and-forget dragstart/dragend
    * declarations of the dragged wcId; main verifies sender ownership and clears the
    * registration on a grace timer (or consumes it on a successful adopt). */
@@ -396,13 +440,15 @@ interface GoldfinchBridge {
   /** adopt-tab (M09 F6 Leg 4, DD5 step 3): the TARGET chrome adopts an already-
    * live webContents — strip insertion WITHOUT createTab. Queued main-side
    * behind the window-boot-config barrier (review H1). */
-  onAdoptTab(cb: (d: {
-    wcId: number;
-    url: string;
-    title: string;
-    favicon: string | null;
-    container: { id: string; name: string; color: string; partition: string; burner?: boolean };
-  }) => void): void;
+  onAdoptTab(
+    cb: (d: {
+      wcId: number;
+      url: string;
+      title: string;
+      favicon: string | null;
+      container: { id: string; name: string; color: string; partition: string; burner?: boolean };
+    }) => void
+  ): void;
   /** tab-moved-away (M09 F6 Leg 4, DD5 step 3): the SOURCE chrome removes the
    * moved tab's strip entry WITHOUT destroy — the closeTab mirror minus stack
    * capture and the tabClose IPC. */
@@ -432,7 +478,9 @@ interface GoldfinchBridge {
 
   // --- tab event subscriptions (pushed from main) ---
   onTabDidNavigate(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
-  onTabDidNavigateInPage(cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void): void;
+  onTabDidNavigateInPage(
+    cb: (d: { wcId: number; url: string; canGoBack: boolean; canGoForward: boolean }) => void
+  ): void;
   onTabTitle(cb: (d: { wcId: number; title: string }) => void): void;
   onTabFavicon(cb: (d: { wcId: number; favicons: string[] }) => void): void;
   onTabLoading(cb: (d: { wcId: number; loading: boolean }) => void): void;
@@ -451,7 +499,9 @@ interface GoldfinchBridge {
   // strings only (never certificate objects); the chrome opens the cert-picker
   // sheet; the selection rides channel-4 as an index, resolved main-side.
   // `popup` (M14 F2 L2, DD5) as above — kind-agnostic marker.
-  onCertChallengePresent(cb: (d: { wcId: number; host: string; certs: Array<{ subject: string; issuer: string }>; popup?: boolean }) => void): void;
+  onCertChallengePresent(
+    cb: (d: { wcId: number; host: string; certs: Array<{ subject: string; issuer: string }>; popup?: boolean }) => void
+  ): void;
   // First-run setup cross-renderer triggers (M12 F3 Leg 4 first-run-setup, DD5). Main
   // forwards the vault page's requestSetup / requestUnlock as bare triggers; the
   // recovery-show carries the recovery key ONLY (admin key deferred to F4).
@@ -485,13 +535,47 @@ interface GoldfinchBridge {
   // Human pick-and-fill (M12 F2 Leg 3, DD5/DD6): the origin-filtered, metadata-only
   // picker read and the origin/scope-rechecked human fill dispatch. Neither carries
   // a password — it is resolved and sent to the guest ONLY in main.
-  vaultReachableItems(wcId: number): Promise<Array<{ vaultId: string; id: string; title: string | null; origin: string | null; username: string | null; hasTotp: boolean; widened: boolean }>>;
-  vaultFillHuman(payload: { wcId: number; vaultId: string; itemId: string }): Promise<{ filled: boolean; reason?: string }>;
+  vaultReachableItems(wcId: number): Promise<
+    Array<{
+      vaultId: string;
+      id: string;
+      title: string | null;
+      origin: string | null;
+      username: string | null;
+      hasTotp: boolean;
+      widened: boolean;
+    }>
+  >;
+  vaultFillHuman(payload: {
+    wcId: number;
+    vaultId: string;
+    itemId: string;
+  }): Promise<{ filled: boolean; reason?: string }>;
   // Capture-save (M12 F2 Leg 4, DD7): the save/update offer subscriber (model is
   // metadata only — never a password) + the dismiss-drop invoke. Both chrome-side.
-  onVaultCaptureOffer(cb: (d: { captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update' | 'locked'; defaultVaultId?: string; choices?: string[] } }) => void): void;
+  onVaultCaptureOffer(
+    cb: (d: {
+      captureId: string;
+      model: {
+        origin: string;
+        username: string | null;
+        mode: 'save' | 'update' | 'locked';
+        defaultVaultId?: string;
+        choices?: string[];
+      };
+    }) => void
+  ): void;
   vaultCaptureDismiss(captureId: string): Promise<void>;
-  vaultCaptureFinalize(captureId: string): Promise<{ captureId: string; model: { origin: string; username: string | null; mode: 'save' | 'update'; defaultVaultId: string; choices: string[] } } | null>;
+  vaultCaptureFinalize(captureId: string): Promise<{
+    captureId: string;
+    model: {
+      origin: string;
+      username: string | null;
+      mode: 'save' | 'update';
+      defaultVaultId: string;
+      choices: string[];
+    };
+  } | null>;
   onTabNavState(cb: (d: { wcId: number; canGoBack: boolean; canGoForward: boolean }) => void): void;
 }
 
@@ -509,11 +593,23 @@ interface GoldfinchInternalBridge {
   shieldsSet(patch: object): Promise<any>;
   onShieldsChanged(cb: (cfg: any) => void): number;
   offShieldsChanged(h: number): void;
-  automationGetStatus(): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
-  automationSetPort(port: number): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
+  automationGetStatus(): Promise<{
+    enabled: boolean;
+    host: string;
+    port: number;
+    bound: boolean;
+    error: string | null;
+  }>;
+  automationSetPort(
+    port: number
+  ): Promise<{ enabled: boolean; host: string; port: number; bound: boolean; error: string | null }>;
   automationFindFreePort(): Promise<{ port: number | null }>;
   clipboardWrite(text: string, opts?: { secret?: boolean }): Promise<{ ok: boolean }>;
-  automationListKeys(): Promise<{ jars: Array<{ id: string; name: string; color: string; hasKey: boolean }>; adminEnabled: boolean; adminKeySet: boolean }>;
+  automationListKeys(): Promise<{
+    jars: Array<{ id: string; name: string; color: string; hasKey: boolean }>;
+    adminEnabled: boolean;
+    adminKeySet: boolean;
+  }>;
   automationJarKeyMint(jarId: string): Promise<{ key: string }>;
   automationJarKeyRevoke(jarId: string): Promise<{ ok: boolean }>;
   automationAdminKeyMint(): Promise<{ key: string | null }>;
@@ -537,7 +633,10 @@ interface GoldfinchInternalBridge {
   onJarsChanged(cb: (payload: { containers: Array<object>; defaultId: string | null }) => void): number;
   offJarsChanged(h: number): void;
   // --- per-jar data controls (Flight 4, Leg 1/3) ---
-  jarsClearData(payload: { id: string; classes: string[] }): Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
+  jarsClearData(payload: {
+    id: string;
+    classes: string[];
+  }): Promise<{ ok: boolean; cleared?: string[]; error?: string }>;
   jarsWipe(payload: { id: string }): Promise<{ ok: boolean; error?: string }>;
   // --- per-jar retention edit (M08 Flight 3, Leg 1 / DD4) ---
   jarsSetRetention(payload: { id: string; days: number }): Promise<{ ok: boolean; container?: object; error?: string }>;
@@ -570,9 +669,9 @@ interface GoldfinchInternalBridge {
     domain: string;
     path: string;
   }): Promise<{ ok: boolean; value?: string; error?: string }>;
-  jarsSiteDataList(
-    payload: { id: string }
-  ): Promise<{ ok: boolean; origins?: Array<{ origin: string; tier: 'stored' | 'visited' }>; error?: string }>;
+  jarsSiteDataList(payload: {
+    id: string;
+  }): Promise<{ ok: boolean; origins?: Array<{ origin: string; tier: 'stored' | 'visited' }>; error?: string }>;
   jarsSiteDataRemoveOrigin(payload: { id: string; origin: string }): Promise<{ ok: boolean; error?: string }>;
   onJarDataChanged(cb: (payload: { jarId: string; classes: string[] }) => void): number;
   offJarDataChanged(h: number): void;
@@ -591,20 +690,34 @@ interface GoldfinchInternalBridge {
   /** Vault state: setup/lock flags + the vault list ('global' + each persistent jar).
    * Each row carries a metadata-only item `count` when UNLOCKED (omitted when locked);
    * never a secret. */
-  vaultState(): Promise<{ setUp: boolean; unlocked: boolean; vaults: Array<{ vaultId: string; label: string; count?: number }> }>;
+  vaultState(): Promise<{
+    setUp: boolean;
+    unlocked: boolean;
+    vaults: Array<{ vaultId: string; label: string; count?: number }>;
+  }>;
   /** Metadata-only item list for one vault (no secret, ever) — { items } or { locked }. */
   vaultList(vaultId: string): Promise<{ items?: Array<VaultItemMeta>; locked?: boolean }>;
   /** Explicit single-item reveal (full item incl. secrets) — { item } or { locked }. */
-  vaultReveal(payload: { vaultId: string; itemId: string }): Promise<{ item?: (Record<string, any> | null); locked?: boolean }>;
+  vaultReveal(payload: {
+    vaultId: string;
+    itemId: string;
+  }): Promise<{ item?: Record<string, any> | null; locked?: boolean }>;
   /** Preserving full-item save; unchangedSecrets names the masked-untouched fields.
    * Returns the saved item's METADATA (never a secret) — { item } or { locked }. */
-  vaultItemSave(payload: { vaultId: string; item: Record<string, any>; unchangedSecrets: string[] }): Promise<{ item?: VaultItemMeta; locked?: boolean }>;
+  vaultItemSave(payload: {
+    vaultId: string;
+    item: Record<string, any>;
+    unchangedSecrets: string[];
+  }): Promise<{ item?: VaultItemMeta; locked?: boolean }>;
   /** Delete an item by id — { deleted } (false on missing id) or { locked }. */
   vaultItemDelete(payload: { vaultId: string; itemId: string }): Promise<{ deleted?: boolean; locked?: boolean }>;
   /** Live TOTP code (M12 F3 Leg 3 / DD4): the current code + seconds-remaining
    * computed in main — NEVER the seed. { code, secondsRemaining }, { code: null }
    * (no totp), or { locked }. */
-  vaultTotpCode(payload: { vaultId: string; itemId: string }): Promise<{ code?: string | null; secondsRemaining?: number; locked?: boolean }>;
+  vaultTotpCode(payload: {
+    vaultId: string;
+    itemId: string;
+  }): Promise<{ code?: string | null; secondsRemaining?: number; locked?: boolean }>;
   // First-run setup + unlock triggers (M12 F3 Leg 4 / DD5). No secret crosses either — the
   // password lives only on the chrome-owned sheet + in main; the page reacts to the
   // vault-lock-state broadcast below.
@@ -633,7 +746,10 @@ interface GoldfinchInternalBridge {
   /** Export a vault to a portable bundle file. With `savePath` main writes directly (the page
    * modal); without one main runs the save dialog (the jars offer). { ok, path }, { canceled },
    * or { locked }. */
-  exportVault(target: string, savePath?: string): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
+  exportVault(
+    target: string,
+    savePath?: string
+  ): Promise<{ ok?: boolean; path?: string; canceled?: boolean; locked?: boolean; error?: string; reason?: string }>;
   /** Pick a save location for an export bundle — save dialog in main ONLY (no write). { path } or
    * { canceled }. */
   pickSavePath(target: string): Promise<{ path?: string; canceled?: boolean }>;
@@ -643,7 +759,9 @@ interface GoldfinchInternalBridge {
   /** Pick a bundle file for a destination target: open + read + HOLD the bundle main-side (no sheet
    * opened). { ok, path }, { canceled }, or { error }. The page re-picks if the destination changes
    * (H1). */
-  pickImportFile(destinationTarget: string): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
+  pickImportFile(
+    destinationTarget: string
+  ): Promise<{ ok?: boolean; path?: string; importHandle?: string; canceled?: boolean; error?: string }>;
   /** Open the chrome-owned vault-import-unlock secret sheet for the held bundle (Import modal
    * Continue). Bare trigger — no secret; the payload is `{ overwrite, handle }` (the Replace-existing
    * checkbox + the pickImportFile importHandle, PR#112 finding 5), bound onto the held record main-side. { ok }. */

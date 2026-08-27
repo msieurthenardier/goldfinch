@@ -66,13 +66,19 @@ test('the input containers array is not mutated', () => {
 
 test('persistent jars keep containers order; Burner always trails', () => {
   const rows = buildJarPageModel([work, personal], 'personal');
-  assert.deepEqual(rows.map((r) => r.id), ['work', 'personal', BURNER.id]);
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['work', 'personal', BURNER.id]
+  );
 });
 
 test('malformed entries (null, non-string id) are skipped, never thrown on', () => {
   assert.doesNotThrow(() => {
     const rows = buildJarPageModel(/** @type {any} */ ([null, { id: 42 }, personal]), 'personal');
-    assert.deepEqual(rows.map((r) => r.id), ['personal', BURNER.id]);
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ['personal', BURNER.id]
+    );
   });
 });
 
@@ -147,7 +153,10 @@ test('injected rng just under 1 picks the last unused palette entry', () => {
 test('a single remaining unused color is always chosen, regardless of rng', () => {
   const usedColors = PALETTE.slice(1); // every entry but PALETTE[0] is used
   for (const rng of [0, 0.25, 0.5, 0.75, 0.999999999]) {
-    assert.equal(pickNewJarColor(PALETTE, usedColors, () => rng), PALETTE[0]);
+    assert.equal(
+      pickNewJarColor(PALETTE, usedColors, () => rng),
+      PALETTE[0]
+    );
   }
 });
 
@@ -161,11 +170,20 @@ test('used colors are excluded from the pick across many rng draws', () => {
 
 test('when every palette entry is used, falls back to a uniformly random pick over the whole palette', () => {
   const usedColors = PALETTE.slice(); // copy — every entry used
-  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0), PALETTE[0]);
-  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0.999999999), PALETTE[PALETTE.length - 1]);
+  assert.equal(
+    pickNewJarColor(PALETTE, usedColors, () => 0),
+    PALETTE[0]
+  );
+  assert.equal(
+    pickNewJarColor(PALETTE, usedColors, () => 0.999999999),
+    PALETTE[PALETTE.length - 1]
+  );
   // still random over the full palette, not pinned to a single fallback entry
   const midIndex = Math.floor(PALETTE.length / 2);
-  assert.equal(pickNewJarColor(PALETTE, usedColors, () => 0.5), PALETTE[midIndex]);
+  assert.equal(
+    pickNewJarColor(PALETTE, usedColors, () => 0.5),
+    PALETTE[midIndex]
+  );
 });
 
 test('a non-array usedColors is treated as no used colors, never throws', () => {
@@ -177,13 +195,22 @@ test('a non-array usedColors is treated as no used colors, never throws', () => 
 
 test('an empty or invalid palette returns a safe fallback (PALETTE[0]), never throws', () => {
   assert.doesNotThrow(() => {
-    assert.equal(pickNewJarColor(/** @type {any} */ ([]), [], () => 0), PALETTE[0]);
+    assert.equal(
+      pickNewJarColor(/** @type {any} */ ([]), [], () => 0),
+      PALETTE[0]
+    );
   });
   assert.doesNotThrow(() => {
-    assert.equal(pickNewJarColor(/** @type {any} */ (null), [], () => 0), PALETTE[0]);
+    assert.equal(
+      pickNewJarColor(/** @type {any} */ (null), [], () => 0),
+      PALETTE[0]
+    );
   });
   assert.doesNotThrow(() => {
-    assert.equal(pickNewJarColor(/** @type {any} */ (undefined), /** @type {any} */ ('garbage'), () => 0), PALETTE[0]);
+    assert.equal(
+      pickNewJarColor(/** @type {any} */ (undefined), /** @type {any} */ ('garbage'), () => 0),
+      PALETTE[0]
+    );
   });
 });
 

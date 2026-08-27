@@ -8,12 +8,21 @@ test('createChromeContext performs one DOM lookup pass and owns shared mutable s
   const counts = new Map();
   const platformClasses = [];
   const document = {
-    getElementById(id) { counts.set(id, (counts.get(id) || 0) + 1); return { id }; },
-    querySelectorAll(selector) { assert.equal(selector, '.filter'); return [{ id: 'filter' }]; },
-    documentElement: { classList: { add: (name) => platformClasses.push(name) } },
+    getElementById(id) {
+      counts.set(id, (counts.get(id) || 0) + 1);
+      return { id };
+    },
+    querySelectorAll(selector) {
+      assert.equal(selector, '.filter');
+      return [{ id: 'filter' }];
+    },
+    documentElement: { classList: { add: (name) => platformClasses.push(name) } }
   };
   const ctx = createChromeContext({ document, goldfinch: { platform: 'darwin' } });
-  assert.equal([...counts.values()].every((count) => count === 1), true);
+  assert.equal(
+    [...counts.values()].every((count) => count === 1),
+    true
+  );
   assert.equal(counts.size > 50, true);
   assert.deepEqual(platformClasses, ['platform-darwin']);
   assert.equal(ctx.els.address.id, 'address');

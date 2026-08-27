@@ -20,7 +20,9 @@ test('create panel stays anchored before Burner and preserves focused draft DOM 
   const listeners = new Map();
   const window = {
     addEventListener: (name, fn) => listeners.set(name, fn),
-    removeEventListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name); }
+    removeEventListener: (name, fn) => {
+      if (listeners.get(name) === fn) listeners.delete(name);
+    }
   };
   let ui = { mode: 'create', rowId: null, action: null, draft: { name: 'Draft', color: '#111111' } };
   let controller;
@@ -37,11 +39,13 @@ test('create panel stays anchored before Burner and preserves focused draft DOM 
     isSafeColor: () => true,
     PALETTE: ['#111111', '#222222'],
     pickNewJarColor: () => '#111111',
-    createPanelModeKey: (value) => value.mode === 'create' ? 'create' : null,
+    createPanelModeKey: (value) => (value.mode === 'create' ? 'create' : null),
     getContainers: () => [{ id: 'work', color: '#111111' }],
     getUi: () => ui,
-    setUi: (next) => { ui = next; },
-    getSectionRefs: (id) => id === '__burner__' ? { root: burnerRoot } : { root: persistentRoot },
+    setUi: (next) => {
+      ui = next;
+    },
+    getSectionRefs: (id) => (id === '__burner__' ? { root: burnerRoot } : { root: persistentRoot }),
     requestRender: () => controller.render(rows)
   });
 

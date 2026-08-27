@@ -10,14 +10,16 @@ const assert = require('node:assert/strict');
 const { validateBookmarkEditFields } = require('../../src/main/bookmark-edit-validate');
 
 test('valid name + http(s) url passes through trimmed', () => {
-  assert.deepEqual(
-    validateBookmarkEditFields({ name: '  Example  ', url: '  https://example.com/  ' }),
-    { ok: true, name: 'Example', url: 'https://example.com/' }
-  );
-  assert.deepEqual(
-    validateBookmarkEditFields({ name: 'Example', url: 'http://example.com/' }),
-    { ok: true, name: 'Example', url: 'http://example.com/' }
-  );
+  assert.deepEqual(validateBookmarkEditFields({ name: '  Example  ', url: '  https://example.com/  ' }), {
+    ok: true,
+    name: 'Example',
+    url: 'https://example.com/'
+  });
+  assert.deepEqual(validateBookmarkEditFields({ name: 'Example', url: 'http://example.com/' }), {
+    ok: true,
+    name: 'Example',
+    url: 'http://example.com/'
+  });
 });
 
 test('empty/whitespace-only name is rejected', () => {
@@ -28,20 +30,24 @@ test('empty/whitespace-only name is rejected', () => {
 
 test('malformed/unsafe/internal urls are rejected — never widen past isSafeTabUrl', () => {
   for (const url of [
-    '', '   ', undefined, null, 42,
+    '',
+    '   ',
+    undefined,
+    null,
+    42,
     'not a url',
     'javascript:alert(1)',
     'file:///etc/passwd',
     'data:text/html,hi',
     'goldfinch://settings',
     'goldfinch://vault',
-    'chrome://settings',
+    'chrome://settings'
   ]) {
     assert.deepEqual(validateBookmarkEditFields({ name: 'Example', url }), { ok: false });
   }
 });
 
-test('about:blank is rejected (mirrors the store\'s own validUrl — never a bookmarkable url)', () => {
+test("about:blank is rejected (mirrors the store's own validUrl — never a bookmarkable url)", () => {
   for (const url of ['about:blank', 'ABOUT:BLANK', '  about:blank  ']) {
     assert.deepEqual(validateBookmarkEditFields({ name: 'Example', url }), { ok: false });
   }

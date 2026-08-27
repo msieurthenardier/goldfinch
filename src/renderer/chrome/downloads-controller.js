@@ -31,7 +31,7 @@ export function createDownloadsController({
   cancelAnimationFrame: cancelFrame = cancelAnimationFrame,
   scheduleTimeout = setTimeout,
   cancelTimeout = clearTimeout,
-  now = Date.now,
+  now = Date.now
 }) {
   let state = initialState();
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -84,7 +84,7 @@ export function createDownloadsController({
       received: undefined,
       total: undefined,
       paused: undefined,
-      active: false,
+      active: false
     }));
     return [...inFlight, ...recent];
   }
@@ -96,7 +96,7 @@ export function createDownloadsController({
       completed: entry.state === 'completed',
       received: entry.received,
       total: entry.total,
-      paused: entry.paused,
+      paused: entry.paused
     }));
     openIds.clear();
     for (const row of rows) openIds.add(row.id);
@@ -104,10 +104,7 @@ export function createDownloadsController({
   }
 
   function anchor() {
-    return rightSheetAnchor(
-      els.webviews.getBoundingClientRect(),
-      els.downloadsIndicator.getBoundingClientRect()
-    );
+    return rightSheetAnchor(els.webviews.getBoundingClientRect(), els.downloadsIndicator.getBoundingClientRect());
   }
 
   function openPopup() {
@@ -159,7 +156,7 @@ export function createDownloadsController({
       } else {
         els.address.focus();
       }
-    },
+    }
   };
 
   if (goldfinch && typeof goldfinch.onDownloadProgress === 'function') {
@@ -169,12 +166,14 @@ export function createDownloadsController({
     goldfinch.onDownloadDone((d) => applyEvent({ type: 'done', d, now: now() }));
   }
   if (goldfinch && typeof goldfinch.downloadsSnapshot === 'function') {
-    Promise.resolve(goldfinch.downloadsSnapshot()).then((rows) => {
-      state = reduce(state, { type: 'hydrate', d: rows, seen: observedIds, now: now() });
-      render();
-      scheduleExpiry();
-      schedulePopupPaint();
-    }).catch(() => {});
+    Promise.resolve(goldfinch.downloadsSnapshot())
+      .then((rows) => {
+        state = reduce(state, { type: 'hydrate', d: rows, seen: observedIds, now: now() });
+        render();
+        scheduleExpiry();
+        schedulePopupPaint();
+      })
+      .catch(() => {});
   }
 
   render();
@@ -210,7 +209,7 @@ export function createDownloadsController({
     applyEvent({
       type: 'done',
       d: { id: -1, filename: 'audit-sample.bin', state: 'completed', savePath: null },
-      now: now(),
+      now: now()
     });
   }
 
@@ -222,7 +221,7 @@ export function createDownloadsController({
       applyEvent({
         type: 'done',
         d: { id: -1 - i, filename: `audit-sample-${i + 1}.bin`, state: 'completed' },
-        now: now(),
+        now: now()
       });
     }
     openPopup();
@@ -232,6 +231,6 @@ export function createDownloadsController({
     overlayState,
     handleActivation,
     showDownloadsIndicatorForAudit,
-    openDownloadsOverlayForAudit,
+    openDownloadsOverlayForAudit
   };
 }

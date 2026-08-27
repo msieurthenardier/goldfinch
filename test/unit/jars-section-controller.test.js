@@ -18,9 +18,18 @@ test('sections patch stable nodes and count invalidation de-duplicates the activ
   const sectionsEl = document.createElement('main');
   const calls = { history: 0, cookies: 0, site: 0, cookieInvalidations: 0, siteInvalidations: 0 };
   const bridge = {
-    historyCount: async () => { calls.history++; return { ok: true, count: 7 }; },
-    jarsCookiesList: async () => { calls.cookies++; return { ok: true, cookies: [{}, {}] }; },
-    jarsSiteDataList: async () => { calls.site++; return { ok: true, origins: [{}, {}, {}] }; },
+    historyCount: async () => {
+      calls.history++;
+      return { ok: true, count: 7 };
+    },
+    jarsCookiesList: async () => {
+      calls.cookies++;
+      return { ok: true, cookies: [{}, {}] };
+    },
+    jarsSiteDataList: async () => {
+      calls.site++;
+      return { ok: true, origins: [{}, {}, {}] };
+    },
     jarsRename: async () => ({}),
     jarsSetDefault: async () => true,
     jarsSetRetention: async () => ({ ok: true }),
@@ -46,7 +55,9 @@ test('sections patch stable nodes and count invalidation de-duplicates the activ
       }
       return { tabsWrap, tabRefs };
     },
-    selectTab(refs, panelId) { refs.activeTab = panelId; }
+    selectTab(refs, panelId) {
+      refs.activeTab = panelId;
+    }
   });
   const noopPanel = () => ({ onExpanded() {}, onHistoryChanged() {}, onActivated() {}, refresh() {}, destroy() {} });
   let ui = { mode: null, rowId: null, action: null, draft: null };
@@ -61,22 +72,35 @@ test('sections patch stable nodes and count invalidation de-duplicates the activ
     isSafeColor: () => true,
     PALETTE: ['#123456'],
     JAR_PANELS: panels,
-    panelForDataClass: (id) => id === 'cookies' ? 'cookies' : id === 'storage' ? 'site-data' : null,
-    JAR_DATA_CLASSES: [{ id: 'cookies', label: 'Cookies' }, { id: 'storage', label: 'Storage' }],
+    panelForDataClass: (id) => (id === 'cookies' ? 'cookies' : id === 'storage' ? 'site-data' : null),
+    JAR_DATA_CLASSES: [
+      { id: 'cookies', label: 'Cookies' },
+      { id: 'storage', label: 'Storage' }
+    ],
     createHistoryPanel: noopPanel,
     createCookiesPanel: () => ({
-      onActivated() {}, refresh() {}, destroy() {},
-      onJarDataChanged() { calls.cookieInvalidations++; }
+      onActivated() {},
+      refresh() {},
+      destroy() {},
+      onJarDataChanged() {
+        calls.cookieInvalidations++;
+      }
     }),
     createSiteDataPanel: () => ({
-      onActivated() {}, refresh() {}, destroy() {},
-      onJarDataChanged() { calls.siteInvalidations++; }
+      onActivated() {},
+      refresh() {},
+      destroy() {},
+      onJarDataChanged() {
+        calls.siteInvalidations++;
+      }
     }),
     createJarTabs,
     createConfirmModal: () => ({ captureTrigger() {}, update() {} }),
     getContainers: () => containers,
     getUi: () => ui,
-    setUi: (next) => { ui = next; },
+    setUi: (next) => {
+      ui = next;
+    },
     setPageError() {},
     clearPageError() {},
     requestRender() {}
@@ -98,7 +122,10 @@ test('sections patch stable nodes and count invalidation de-duplicates the activ
   controller.render([{ ...rows[0], name: 'Renamed' }, rows[1]]);
   assert.equal(controller.getSectionRefs('work').root, originalRoot);
   assert.equal(refs.activeTab, 'cookies');
-  assert.deepEqual(Object.fromEntries(Array.from(refs.tabRefs, ([id, ref]) => [id, ref.countSpan.textContent])), counts);
+  assert.deepEqual(
+    Object.fromEntries(Array.from(refs.tabRefs, ([id, ref]) => [id, ref.countSpan.textContent])),
+    counts
+  );
 
   controller.handleJarDataChanged({ jarId: 'work', classes: ['cookies', 'storage'] });
   await tick();
@@ -182,7 +209,9 @@ test('every REAL JAR_DATA_CLASSES id has a non-"undefined" confirm-dialog copy A
       }
       return { tabsWrap, tabRefs };
     },
-    selectTab(refs, panelId) { refs.activeTab = panelId; }
+    selectTab(refs, panelId) {
+      refs.activeTab = panelId;
+    }
   });
   const noopPanel = () => ({ onExpanded() {}, onHistoryChanged() {}, onActivated() {}, refresh() {}, destroy() {} });
   let ui = { mode: null, rowId: null, action: null, draft: null };
@@ -219,10 +248,14 @@ test('every REAL JAR_DATA_CLASSES id has a non-"undefined" confirm-dialog copy A
     },
     getContainers: () => containers,
     getUi: () => ui,
-    setUi: (next) => { ui = next; },
+    setUi: (next) => {
+      ui = next;
+    },
     setPageError() {},
     clearPageError() {},
-    requestRender() { confirmModal.update(); }
+    requestRender() {
+      confirmModal.update();
+    }
   });
 
   const rows = [{ id: 'work', name: 'Work', color: '#123456', isDefault: false, isBurner: false }];
@@ -245,8 +278,10 @@ test('every REAL JAR_DATA_CLASSES id has a non-"undefined" confirm-dialog copy A
       `${action}: confirm-dialog copy must be a real string, not "${desc.textContent}"`
     );
 
-    const confirmBtn = findById(document.body, 'jars-confirm-backdrop').children
-      .flatMap(function flatten(n) { return [n, ...n.children.flatMap(flatten)]; })
+    const confirmBtn = findById(document.body, 'jars-confirm-backdrop')
+      .children.flatMap(function flatten(n) {
+        return [n, ...n.children.flatMap(flatten)];
+      })
       .find((n) => n.tagName === 'BUTTON' && n.textContent === 'Confirm');
     assert.ok(confirmBtn, `${action}: a Confirm button should render`);
     confirmBtn.dispatch('click');

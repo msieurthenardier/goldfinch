@@ -24,7 +24,7 @@ async function realVaultStore(t, dir) {
     scryptParams: FAST_SCRYPT,
     getAutoLockMinutes: () => 10,
     // The harness seeds jars 'personal' + 'work'; the store's allowlist must match.
-    listJars: () => [{ id: 'personal' }, { id: 'work' }],
+    listJars: () => [{ id: 'personal' }, { id: 'work' }]
   });
   await store.setup({ masterPassword: 'correct horse battery staple' });
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -82,7 +82,10 @@ test('internal-jars-add creates a jar observable via the chrome jars-list channe
   const h = makeHarness(t);
   const c = h.invokeInternal('internal-jars-add', { name: 'Banking', color: '#f5c518' });
   assert.equal(c.name, 'Banking');
-  assert.deepEqual(h.invoke('jars-list').map((x) => x.id), ['personal', 'work', 'banking']);
+  assert.deepEqual(
+    h.invoke('jars-list').map((x) => x.id),
+    ['personal', 'work', 'banking']
+  );
   const b = h.broadcasts();
   assert.equal(b.length, 1);
   assert.equal(b[0].channel, 'jars-changed');
@@ -116,14 +119,10 @@ test('internal-jars-remove composes the same delete pipeline as jars-remove', as
   const result = await h.invokeInternal('internal-jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(result.wiped, true);
-  assert.deepEqual(h.events.map((e) => e.fn), [
-    'clearStorageData',
-    'clearCache',
-    'rerollSeed',
-    'revokeJarKey',
-    'broadcast',
-    'broadcast'
-  ]);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearStorageData', 'clearCache', 'rerollSeed', 'revokeJarKey', 'broadcast', 'broadcast']
+  );
 });
 
 // jars-list — bare-array passthrough (DD7: renderer boot shape unchanged)
@@ -132,7 +131,10 @@ test('jars-list returns the live jars.list() array unchanged', (t) => {
   const h = makeHarness(t);
   const result = h.invoke('jars-list');
   assert.equal(result, h.jars.list()); // passthrough, no wrapping
-  assert.deepEqual(result.map((c) => c.id), ['personal', 'work']);
+  assert.deepEqual(
+    result.map((c) => c.id),
+    ['personal', 'work']
+  );
   assert.equal(h.broadcasts().length, 0); // reads never broadcast
 });
 
@@ -147,7 +149,10 @@ test('jars-add creates the jar and broadcasts jars-changed with { containers, de
   const b = h.broadcasts();
   assert.equal(b.length, 1);
   assert.equal(b[0].channel, 'jars-changed');
-  assert.deepEqual(b[0].payload.containers.map((x) => x.id), ['personal', 'work', 'banking']);
+  assert.deepEqual(
+    b[0].payload.containers.map((x) => x.id),
+    ['personal', 'work', 'banking']
+  );
   assert.equal(b[0].payload.defaultId, 'personal'); // string while jars exist
 });
 
@@ -165,7 +170,10 @@ test('jars-add into an empty store broadcasts a string defaultId (first jar beco
   const b = h.broadcasts();
   assert.equal(b.length, 1);
   assert.equal(b[0].payload.defaultId, c.id);
-  assert.deepEqual(b[0].payload.containers.map((x) => x.id), [c.id]);
+  assert.deepEqual(
+    b[0].payload.containers.map((x) => x.id),
+    [c.id]
+  );
 });
 
 test('jars-add with {} or a non-string name returns null with no broadcast', (t) => {
@@ -263,14 +271,10 @@ test('jars-remove composes remove → wipe → reroll → revoke → settings-ch
   assert.equal(result.removed.partition, 'persist:container:personal');
 
   // Exact composition order, from the single in-order event log.
-  assert.deepEqual(h.events.map((e) => e.fn), [
-    'clearStorageData',
-    'clearCache',
-    'rerollSeed',
-    'revokeJarKey',
-    'broadcast',
-    'broadcast'
-  ]);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['clearStorageData', 'clearCache', 'rerollSeed', 'revokeJarKey', 'broadcast', 'broadcast']
+  );
   // Wipe hit the removed jar's partition; reroll got the SAME session object.
   assert.equal(h.events[0].partition, 'persist:container:personal');
   assert.equal(h.events[1].partition, 'persist:container:personal');
@@ -285,7 +289,10 @@ test('jars-remove composes remove → wipe → reroll → revoke → settings-ch
   // …then jars-changed reflects the NEW default (the removed jar held the flag).
   assert.equal(h.events[5].channel, 'jars-changed');
   assert.equal(h.events[5].payload.defaultId, 'work');
-  assert.deepEqual(h.events[5].payload.containers.map((x) => x.id), ['work']);
+  assert.deepEqual(
+    h.events[5].payload.containers.map((x) => x.id),
+    ['work']
+  );
 });
 
 test('jars-remove of the last jar broadcasts containers: [] and defaultId: null; getDefault → BURNER', async (t) => {
@@ -316,22 +323,31 @@ test('jars-remove with a throwing wipe is fail-soft: { ok: true, wiped: false },
   // — clearStorageData threw before reaching rerollSeed, which now lives
   // INSIDE wipeJarData, after the session calls — a session throw skips it,
   // same as it always skipped the (new) history purge).
-  assert.deepEqual(h.events.map((e) => e.fn), ['revokeJarKey', 'broadcast', 'broadcast']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['revokeJarKey', 'broadcast', 'broadcast']
+  );
   assert.equal(h.events[0].jarId, 'personal');
   assert.equal(h.events[1].channel, 'settings-changed');
   assert.equal(h.events[2].channel, 'jars-changed');
-  assert.deepEqual(h.jars.list().map((c) => c.id), ['work']);
+  assert.deepEqual(
+    h.jars.list().map((c) => c.id),
+    ['work']
+  );
 });
 
 // M08 Flight 3, Leg 1 / DD2 — history purges on delete too (via wipeJarData).
-test('jars-remove purges the jar\'s history silently — no broadcast, handleRemove emits none', async (t) => {
+test("jars-remove purges the jar's history silently — no broadcast, handleRemove emits none", async (t) => {
   const h = makeHarness(t);
   h.historyStore.seed('personal', 1000);
   h.historyStore.seed('personal', 2000);
   const result = await h.invoke('jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(h.historyStore.count('personal'), 0, 'history purged');
-  assert.ok(h.broadcasts().every((b) => b.channel !== 'history-changed'), 'handleRemove never broadcasts history-changed');
+  assert.ok(
+    h.broadcasts().every((b) => b.channel !== 'history-changed'),
+    'handleRemove never broadcasts history-changed'
+  );
 });
 
 test('jars-remove session-throw-with-history-rows pin: fail-soft continues, but the purge is SKIPPED (it runs after the throwing session calls, inside wipeJarData)', async (t) => {
@@ -346,7 +362,7 @@ test('jars-remove session-throw-with-history-rows pin: fail-soft continues, but 
 // M10 Flight 2, Leg 3 / DD7 — bookkeeping dies with its jar on every
 // destructive path. jars-remove routes through wipeJarData, same as
 // jars-wipe (its own DD7 pin lives with the wipe tests below).
-test('jars-remove clears the jar\'s cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)', async (t) => {
+test("jars-remove clears the jar's cookie_seen bookkeeping (DD7 lifecycle, via wipeJarData)", async (t) => {
   const h = makeHarness(t);
   const cookieSeen = appDb.createCookieSeenStore();
   cookieSeen.insertIfAbsent('personal', 'sid', 'x.test', '/', 1000);
@@ -364,7 +380,11 @@ test('jars-remove session-throw pin: bookkeeping cleanup is SKIPPED too (it runs
   const result = await h.invoke('jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(result.wiped, false);
-  assert.equal(cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length, 1, 'bookkeeping survives — cleanup never ran');
+  assert.equal(
+    cookieSeen.selectExpired('personal', Number.MAX_SAFE_INTEGER).length,
+    1,
+    'bookkeeping survives — cleanup never ran'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -404,15 +424,10 @@ test('jars-remove deletes the vault FIRST (before freeing the id) and reports va
   assert.equal(result.vaultRemoved, true);
   // The vault is removed FIRST — the id is not freed until its secrets are gone —
   // then the partition wipe, revoke, and the two broadcasts.
-  assert.deepEqual(h.events.map((e) => e.fn), [
-    'deleteVault',
-    'clearStorageData',
-    'clearCache',
-    'rerollSeed',
-    'revokeJarKey',
-    'broadcast',
-    'broadcast'
-  ]);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['deleteVault', 'clearStorageData', 'clearCache', 'rerollSeed', 'revokeJarKey', 'broadcast', 'broadcast']
+  );
   assert.equal(h.events.find((e) => e.fn === 'deleteVault').jarId, 'personal');
 });
 
@@ -426,9 +441,18 @@ test('jars-remove is FAIL-CLOSED on a deleteVault throw: { ok:false }, the jar i
   assert.equal(result.ok, false);
   assert.equal(result.error, 'vault-delete-failed');
   // Only the (failed) vault-delete attempt ran; no wipe / revoke / broadcast.
-  assert.deepEqual(h.events.map((e) => e.fn), ['deleteVault']);
+  assert.deepEqual(
+    h.events.map((e) => e.fn),
+    ['deleteVault']
+  );
   // The jar (and its reusable id/partition) is retained so secrets never orphan under it.
-  assert.deepEqual(h.jars.list().map((c) => c.id).sort(), ['personal', 'work']);
+  assert.deepEqual(
+    h.jars
+      .list()
+      .map((c) => c.id)
+      .sort(),
+    ['personal', 'work']
+  );
 });
 
 test('jars-remove without a vault-store injection skips the step (vaultRemoved:false), delete still succeeds', async (t) => {
@@ -436,10 +460,13 @@ test('jars-remove without a vault-store injection skips the step (vaultRemoved:f
   const result = await h.invoke('jars-remove', { id: 'personal' });
   assert.equal(result.ok, true);
   assert.equal(result.vaultRemoved, false);
-  assert.ok(h.events.every((e) => e.fn !== 'deleteVault'), 'the step is skipped');
+  assert.ok(
+    h.events.every((e) => e.fn !== 'deleteVault'),
+    'the step is skipped'
+  );
 });
 
-test('jars-remove removes the deleted jar\'s .gfvault while the GLOBAL vault survives (real store)', async (t) => {
+test("jars-remove removes the deleted jar's .gfvault while the GLOBAL vault survives (real store)", async (t) => {
   const dir = tmpVaultDir();
   const store = await realVaultStore(t, dir);
   // Lazily create the personal jar's vault by saving into it.
@@ -452,7 +479,7 @@ test('jars-remove removes the deleted jar\'s .gfvault while the GLOBAL vault sur
 
   assert.equal(result.ok, true);
   assert.equal(result.vaultRemoved, true);
-  assert.ok(!fs.existsSync(vaultFile(dir, 'personal')), 'the deleted jar\'s vault is gone');
+  assert.ok(!fs.existsSync(vaultFile(dir, 'personal')), "the deleted jar's vault is gone");
   assert.ok(fs.existsSync(vaultFile(dir, 'global')), 'the GLOBAL vault survives a jar delete');
 });
 

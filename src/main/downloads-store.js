@@ -158,12 +158,8 @@ function applyStored(stored) {
   // nextId authority: the persisted nextId. The maxRecordId+1 term only repairs a
   // file that predates the field (or was hand-edited) — it never LOWERS a sane
   // persisted nextId. max(persistedNextId, maxRecordId+1, 1).
-  const persistedNextId =
-    Number.isInteger(stored.nextId) && stored.nextId >= 1 ? stored.nextId : 1;
-  const maxRecordId = records.reduce(
-    (m, r) => Math.max(m, /** @type {any} */ (r).id),
-    0
-  );
+  const persistedNextId = Number.isInteger(stored.nextId) && stored.nextId >= 1 ? stored.nextId : 1;
+  const maxRecordId = records.reduce((m, r) => Math.max(m, /** @type {any} */ (r).id), 0);
   nextId = Math.max(persistedNextId, maxRecordId + 1, 1);
 }
 

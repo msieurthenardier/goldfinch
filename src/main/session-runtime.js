@@ -104,17 +104,20 @@ function createSessionRuntime(deps) {
 
   function schedulePrivacySend(webContentsId) {
     if (privacySendTimers.has(webContentsId)) return;
-    privacySendTimers.set(webContentsId, schedule(() => {
-      privacySendTimers.delete(webContentsId);
-      const aggregate = privacyByTab.get(webContentsId);
-      const chrome = chromeForTab(webContentsId);
-      if (aggregate && chrome) {
-        chrome.send('privacy-net', {
-          webContentsId,
-          agg: serializeAggregate(aggregate)
-        });
-      }
-    }, 350));
+    privacySendTimers.set(
+      webContentsId,
+      schedule(() => {
+        privacySendTimers.delete(webContentsId);
+        const aggregate = privacyByTab.get(webContentsId);
+        const chrome = chromeForTab(webContentsId);
+        if (aggregate && chrome) {
+          chrome.send('privacy-net', {
+            webContentsId,
+            agg: serializeAggregate(aggregate)
+          });
+        }
+      }, 350)
+    );
   }
 
   function recordRequest(details, action) {
@@ -145,7 +148,8 @@ function createSessionRuntime(deps) {
       aggregate.thirdPartyDomains[classification.domain] =
         (aggregate.thirdPartyDomains[classification.domain] || 0) + 1;
       if (classification.tracker && aggregate.trackers[classification.tracker]) {
-        const entry = aggregate.trackers[classification.tracker][classification.domain] ||
+        const entry =
+          aggregate.trackers[classification.tracker][classification.domain] ||
           (aggregate.trackers[classification.tracker][classification.domain] = { blocked: false });
         if (action === 'block') entry.blocked = true;
       }
@@ -167,8 +171,7 @@ function createSessionRuntime(deps) {
     session.__goldfinchShields = true;
 
     session.webRequest.onBeforeRequest((details, callback) => {
-      const firstParty = tabFirstParty(details.webContentsId) ||
-        registrableDomain(hostnameOf(details.url));
+      const firstParty = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
       let action = 'allow';
       let response = {};
       if (details.resourceType !== 'mainFrame' && shields.active('block', firstParty)) {
@@ -194,8 +197,7 @@ function createSessionRuntime(deps) {
     });
 
     session.webRequest.onBeforeSendHeaders((details, callback) => {
-      const firstParty = tabFirstParty(details.webContentsId) ||
-        registrableDomain(hostnameOf(details.url));
+      const firstParty = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
       const headers = details.requestHeaders;
       if (shields.active('strip', firstParty) && headers.Referer) {
         try {
@@ -204,8 +206,7 @@ function createSessionRuntime(deps) {
           delete headers.Referer;
         }
       }
-      if (shields.active('isolate', firstParty) &&
-          details.resourceType !== 'mainFrame' && headers.Cookie) {
+      if (shields.active('isolate', firstParty) && details.resourceType !== 'mainFrame' && headers.Cookie) {
         const classification = classify(details.url, firstParty);
         if (classification.thirdParty) {
           delete headers.Cookie;
@@ -220,12 +221,13 @@ function createSessionRuntime(deps) {
     });
 
     session.webRequest.onHeadersReceived((details, callback) => {
-      const firstParty = tabFirstParty(details.webContentsId) ||
-        registrableDomain(hostnameOf(details.url));
+      const firstParty = tabFirstParty(details.webContentsId) || registrableDomain(hostnameOf(details.url));
       const headers = details.responseHeaders || {};
-      if (shields.active('isolate', firstParty) &&
-          details.resourceType !== 'mainFrame' &&
-          classify(details.url, firstParty).thirdParty) {
+      if (
+        shields.active('isolate', firstParty) &&
+        details.resourceType !== 'mainFrame' &&
+        classify(details.url, firstParty).thirdParty
+      ) {
         for (const key of Object.keys(headers)) {
           if (key.toLowerCase() === 'set-cookie') delete headers[key];
         }
@@ -240,8 +242,7 @@ function createSessionRuntime(deps) {
       chrome?.send('privacy-permission', { webContentsId, permission, granted });
       callback(granted);
     });
-    session.setPermissionCheckHandler((_webContents, permission) =>
-      ALLOWED_PERMISSIONS.has(permission));
+    session.setPermissionCheckHandler((_webContents, permission) => ALLOWED_PERMISSIONS.has(permission));
   }
 
   function onSessionCreated(session) {
@@ -273,13 +274,7 @@ function createSessionRuntime(deps) {
           if (action === 'delete') {
             cookieSeenStore.deleteByIdentity(jarId, cookie.name, cookie.domain, cookie.path);
           } else {
-            cookieSeenStore.insertIfAbsent(
-              jarId,
-              cookie.name,
-              cookie.domain,
-              cookie.path,
-              now()
-            );
+            cookieSeenStore.insertIfAbsent(jarId, cookie.name, cookie.domain, cookie.path, now());
           }
         } catch (err) {
           logger.error('[retention-sweep]', err);
@@ -293,15 +288,14 @@ function createSessionRuntime(deps) {
   function pruneAllJars() {
     try {
       const jarList = jars.list();
-      const retentionByJarId = Object.fromEntries(
-        jarList.map((jar) => [jar.id, jar.retentionDays])
-      );
+      const retentionByJarId = Object.fromEntries(jarList.map((jar) => [jar.id, jar.retentionDays]));
       const agedOutOriginsByJarId = retentionSweep.snapshotAgedOutOrigins(jarList);
       const deleted = historyStore.pruneExpired(retentionByJarId, now());
       for (const jarId of Object.keys(deleted)) {
         broadcast('history-changed', { jarId });
       }
-      retentionSweep.sweepAll(jarList, agedOutOriginsByJarId)
+      retentionSweep
+        .sweepAll(jarList, agedOutOriginsByJarId)
         .then((results) => {
           for (const jarId of Object.keys(results)) {
             const classes = results[jarId].classes;

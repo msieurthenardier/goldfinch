@@ -11,12 +11,7 @@
 const { GLOBAL_ID } = require('../shared/reserved-ids');
 const { metadataOf } = require('../shared/vault-item-schema');
 const { VaultLockedError } = require('./vault/vault-store');
-const {
-  parseOtpauth,
-  totp,
-  normalizeTotpField,
-  totpSecondsRemaining,
-} = require('./vault/vault-crypto');
+const { parseOtpauth, totp, normalizeTotpField, totpSecondsRemaining } = require('./vault/vault-crypto');
 
 // The manager-wide global vault's display label (the store keys it by GLOBAL_ID).
 const GLOBAL_LABEL = 'Global';
@@ -81,7 +76,14 @@ function normalizeTotpForSave(item, unchangedSecrets) {
  *        Only needs Electron `dialog`. Gated — offline tests that omit it skip
  *        `internal-vault-pick-save-path`.
  */
-function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jars, vaultSaveBundle, vaultPickSavePath }) {
+function registerVaultIpc({
+  ipcMain,
+  registerInternalHandler,
+  getVaultStore,
+  jars,
+  vaultSaveBundle,
+  vaultPickSavePath
+}) {
   // Page state: the manager-wide `global` vault followed by each persistent jar's
   // vault, as { vaultId, label }. When the store is UNLOCKED each row also carries
   // a metadata-only item `count` (via listItemsMeta — no secret, no plaintext); when
@@ -133,16 +135,24 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
 
   // Metadata-only item list for one vault (DD10). Returns { items } (no secret) or
   // the structured { locked: true }. `vaultId` is the row id from internal-vault-state.
-  registerInternalHandler(ipcMain, 'internal-vault-list', catchLocked((_event, vaultId) => {
-    return { items: getVaultStore().listItemsMeta(vaultId) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-list',
+    catchLocked((_event, vaultId) => {
+      return { items: getVaultStore().listItemsMeta(vaultId) };
+    })
+  );
 
   // Explicit single-item reveal (DD6). Returns the FULL item (incl. secrets) for the
   // requested id ONLY — { item } (item null when absent) — or { locked: true }.
-  registerInternalHandler(ipcMain, 'internal-vault-reveal', catchLocked((_event, payload) => {
-    const { vaultId, itemId } = payload || {};
-    return { item: getVaultStore().revealItem(vaultId, itemId) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-reveal',
+    catchLocked((_event, payload) => {
+      const { vaultId, itemId } = payload || {};
+      return { item: getVaultStore().revealItem(vaultId, itemId) };
+    })
+  );
 
   // Full-item save with the OUT-OF-BAND unchanged-secret signal (DD3/DD6):
   // { item, unchangedSecrets:[names] } → saveItemPreservingSecrets. Returns the saved
@@ -154,38 +164,50 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
   // pulls it from the existing item, so re-normalizing here would be wrong). A
   // malformed/out-of-range totp throws VaultFormatError (propagates as a rejected
   // invoke — nothing is stored), NOT caught by catchLocked (that's lock-only).
-  registerInternalHandler(ipcMain, 'internal-vault-item-save', catchLocked((_event, payload) => {
-    const { vaultId, item, unchangedSecrets } = payload || {};
-    const unchanged = unchangedSecrets || [];
-    const toSave = normalizeTotpForSave(item, unchanged);
-    const saved = getVaultStore().saveItemPreservingSecrets(vaultId, toSave, unchanged);
-    return { item: metadataOf(saved) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-item-save',
+    catchLocked((_event, payload) => {
+      const { vaultId, item, unchangedSecrets } = payload || {};
+      const unchanged = unchangedSecrets || [];
+      const toSave = normalizeTotpForSave(item, unchanged);
+      const saved = getVaultStore().saveItemPreservingSecrets(vaultId, toSave, unchanged);
+      return { item: metadataOf(saved) };
+    })
+  );
 
   // Live TOTP code (M12 F3 Leg 3 / DD4): MRK-gated single-item reveal → compute the
   // current code + seconds-remaining IN MAIN and return { code, secondsRemaining }
   // ONLY. The seed NEVER crosses this channel (the page's live display needs no
   // seed). { code: null } when the item has no totp (or is absent); { locked: true }
   // when the store is locked. The page polls per-period and counts down locally.
-  registerInternalHandler(ipcMain, 'internal-vault-totp-code', catchLocked((_event, payload) => {
-    const { vaultId, itemId } = payload || {};
-    // `totp` is a login-only field carried verbatim on the opaque item payload; the
-    // store's VaultItem typedef declares only the shared keys, so read it as `any`.
-    const item = /** @type {any} */ (getVaultStore().revealItem(vaultId, itemId));
-    if (!item || !item.totp) return { code: null };
-    const p = parseOtpauth(item.totp);
-    const nowMs = Date.now();
-    return {
-      code: totp(p.secret, p, nowMs),
-      secondsRemaining: totpSecondsRemaining(p.period, nowMs),
-    };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-totp-code',
+    catchLocked((_event, payload) => {
+      const { vaultId, itemId } = payload || {};
+      // `totp` is a login-only field carried verbatim on the opaque item payload; the
+      // store's VaultItem typedef declares only the shared keys, so read it as `any`.
+      const item = /** @type {any} */ (getVaultStore().revealItem(vaultId, itemId));
+      if (!item || !item.totp) return { code: null };
+      const p = parseOtpauth(item.totp);
+      const nowMs = Date.now();
+      return {
+        code: totp(p.secret, p, nowMs),
+        secondsRemaining: totpSecondsRemaining(p.period, nowMs)
+      };
+    })
+  );
 
   // Delete an item by id. Returns { deleted } (false on a missing id) or { locked: true }.
-  registerInternalHandler(ipcMain, 'internal-vault-item-delete', catchLocked((_event, payload) => {
-    const { vaultId, itemId } = payload || {};
-    return { deleted: getVaultStore().deleteItem(vaultId, itemId) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-item-delete',
+    catchLocked((_event, payload) => {
+      const { vaultId, itemId } = payload || {};
+      return { deleted: getVaultStore().deleteItem(vaultId, itemId) };
+    })
+  );
 
   // Access-key management (M12 F3 Leg 5, flight DD5 / mission durable-grant step-up).
   // These are the vault-store `access` ENVELOPES (mintAccessKey/revokeAccessKey), NOT
@@ -197,9 +219,13 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
   // List a vault's access-key grants by keyId ONLY (no secret — grep AC). MRK-gated →
   // structured { locked: true } via catchLocked; the store's listAccessKeys resolves the
   // target through _resolveTarget (burner/unknown rejected). `vaultId` is the row id.
-  registerInternalHandler(ipcMain, 'internal-vault-accesskey-list', catchLocked((_event, vaultId) => {
-    return { keys: getVaultStore().listAccessKeys(vaultId) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-accesskey-list',
+    catchLocked((_event, vaultId) => {
+      return { keys: getVaultStore().listAccessKeys(vaultId) };
+    })
+  );
 
   // Revoke an access key by keyId — immediate (envelope deletion). The store's
   // revokeAccessKey takes a RAW vaultId (unlike mint/list, which _resolveTarget
@@ -209,11 +235,15 @@ function registerVaultIpc({ ipcMain, registerInternalHandler, getVaultStore, jar
   // target) propagates as a rejected invoke; a LOCKED store surfaces { locked: true } via
   // catchLocked (revokeAccessKey's _requireMrk throws VaultLockedError). Returns
   // { revoked } (false for a stale keyId — the page refresh reflects reality).
-  registerInternalHandler(ipcMain, 'internal-vault-accesskey-revoke', catchLocked((_event, payload) => {
-    const { vaultId, keyId } = payload || {};
-    const store = getVaultStore();
-    return { revoked: store.revokeAccessKey(store.resolveTarget(vaultId), keyId) };
-  }));
+  registerInternalHandler(
+    ipcMain,
+    'internal-vault-accesskey-revoke',
+    catchLocked((_event, payload) => {
+      const { vaultId, keyId } = payload || {};
+      const store = getVaultStore();
+      return { revoked: store.revokeAccessKey(store.resolveTarget(vaultId), keyId) };
+    })
+  );
 
   // Portable EXPORT (M12 F4 Leg 1 / DD1 — Option A). Fully MAIN-SIDE: build the ciphertext-only
   // bundle from the store (exportVault requires unlocked → VaultLockedError → { locked: true }),

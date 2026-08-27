@@ -33,7 +33,11 @@ function makeCallback() {
   return cb;
 }
 
-const FIXTURE_CERT = { subjectName: 'CN=Goldfinch Fixture Client', issuerName: 'CN=Goldfinch Fixture Throwaway CA', data: 'PEM' };
+const FIXTURE_CERT = {
+  subjectName: 'CN=Goldfinch Fixture Client',
+  issuerName: 'CN=Goldfinch Fixture Throwaway CA',
+  data: 'PEM'
+};
 
 function makeHarness() {
   const guests = new Map(); // wcId -> record
@@ -41,14 +45,14 @@ function makeHarness() {
   const presents = []; // every auth-challenge-present / cert-challenge-present send
   const registry = { getWindowForGuest: (id) => guests.get(id) || null };
   const chromeForTab = (wcId) => ({
-    send: (channel, payload) => presents.push({ wcId, channel, payload }),
+    send: (channel, payload) => presents.push({ wcId, channel, payload })
   });
   const store = createAuthChallenges({
     registry,
     chromeForTab,
     // The main.js lazy-seam shape: getByWcId only.
     popupRegistry: { getByWcId: (id) => popupEntries.get(id) || null },
-    logger: { warn: () => {} },
+    logger: { warn: () => {} }
   });
 
   let nextWinId = 1;
@@ -57,28 +61,32 @@ function makeHarness() {
       win: { id: nextWinId++, isDestroyed: () => false },
       activeTabWcId: null,
       htmlFullscreen: null,
-      sheet: null,
+      sheet: null
     };
     // M14 F2 L2: popup presentation resolves the record's OWN chrome directly
     // (chromeForTab misses popups). Sends land in `presents` tagged via:'record'.
     record.chromeView = {
       webContents: {
         isDestroyed: () => false,
-        send: (channel, payload) => presents.push({ via: 'record', winId: record.win.id, channel, payload }),
-      },
+        send: (channel, payload) => presents.push({ via: 'record', winId: record.win.id, channel, payload })
+      }
     };
     const sheet = {
       menu: null, // { menuType, token }
       closeCalls: [],
-      isMenuOpen() { return this.menu != null; },
-      getCurrentMenu() { return this.menu; },
+      isMenuOpen() {
+        return this.menu != null;
+      },
+      getCurrentMenu() {
+        return this.menu;
+      },
       closeMenuOverlay(reason) {
         if (!this.menu) return; // idempotent, like the manager
         const closed = this.menu;
         this.menu = null;
         this.closeCalls.push(reason);
         if (wired) store.notifySheetClosed(record, closed.menuType, reason);
-      },
+      }
     };
     record.sheet = sheet;
     return record;
@@ -90,7 +98,11 @@ function makeHarness() {
   }
 
   // Enqueue a BASIC-AUTH challenge for `wcId` on `record`'s window; returns its callback.
-  function challenge(record, wcId, { url = 'http://127.0.0.1:8091/protected', realm = 'fixture', host = '127.0.0.1' } = {}) {
+  function challenge(
+    record,
+    wcId,
+    { url = 'http://127.0.0.1:8091/protected', realm = 'fixture', host = '127.0.0.1' } = {}
+  ) {
     const wc = addGuest(record, wcId);
     const cb = makeCallback();
     store.handleLogin(wc, { url }, { isProxy: false, host, port: 8091, scheme: 'basic', realm }, cb);
@@ -129,7 +141,10 @@ function makeHarness() {
     return { id: popupWcId, session: {} };
   }
   // Enqueue a BASIC-AUTH challenge arriving from popup contents.
-  function popupChallenge(popupWcId, { url = 'http://127.0.0.1:8091/protected', realm = 'fixture', host = '127.0.0.1' } = {}) {
+  function popupChallenge(
+    popupWcId,
+    { url = 'http://127.0.0.1:8091/protected', realm = 'fixture', host = '127.0.0.1' } = {}
+  ) {
     const cb = makeCallback();
     store.handleLogin(popupWc(popupWcId), { url }, { isProxy: false, host, port: 8091, scheme: 'basic', realm }, cb);
     return cb;
@@ -142,7 +157,21 @@ function makeHarness() {
     return cb;
   }
 
-  return { store, presents, makeRecord, addGuest, challenge, certChallenge, openAuthSheet, openCertSheet, guests, addPopup, popupChallenge, popupCertChallenge, popupEntries };
+  return {
+    store,
+    presents,
+    makeRecord,
+    addGuest,
+    challenge,
+    certChallenge,
+    openAuthSheet,
+    openCertSheet,
+    guests,
+    addPopup,
+    popupChallenge,
+    popupCertChallenge,
+    popupEntries
+  };
 }
 
 // The parametric kind table: shared-semantics tests run once per row (AC — the
@@ -161,7 +190,7 @@ const KINDS = [
     channel: 'auth-challenge-present',
     cancelArgs: [],
     enqueue: (h, record, wcId, opts) => h.challenge(record, wcId, opts),
-    openSheet: (h, record) => h.openAuthSheet(record),
+    openSheet: (h, record) => h.openAuthSheet(record)
   },
   {
     kind: 'client-cert',
@@ -169,8 +198,8 @@ const KINDS = [
     channel: 'cert-challenge-present',
     cancelArgs: [null],
     enqueue: (h, record, wcId, opts) => h.certChallenge(record, wcId, opts),
-    openSheet: (h, record) => h.openCertSheet(record),
-  },
+    openSheet: (h, record) => h.openCertSheet(record)
+  }
 ];
 
 // ---------------------------------------------------------------------------
@@ -208,13 +237,41 @@ test('basic-auth payload host formatting: non-default port shown, scheme-default
     return p.payload.host;
   };
 
-  assert.equal(presentedHost({ url: 'http://127.0.0.1:8091/x', host: '127.0.0.1', port: 8091 }), '127.0.0.1:8091', 'non-default http port shown');
-  assert.equal(presentedHost({ url: 'http://example.com/x', host: 'example.com', port: 80 }), 'example.com', 'default http port omitted');
-  assert.equal(presentedHost({ url: 'https://example.com/x', host: 'example.com', port: 443 }), 'example.com', 'default https port omitted');
-  assert.equal(presentedHost({ url: 'https://example.com:8443/x', host: 'example.com', port: 8443 }), 'example.com:8443', 'non-default https port shown');
-  assert.equal(presentedHost({ url: '', host: 'example.com', port: 443 }), 'example.com:443', 'unparseable URL keeps the port (fail-informative)');
-  assert.equal(presentedHost({ url: 'http://example.com/x', host: 'example.com', port: null }), 'example.com', 'no port → bare host');
-  assert.equal(presentedHost({ url: 'http://[::1]:8091/x', host: '::1', port: 8091 }), '[::1]:8091', 'IPv6 literal bracketed before the port');
+  assert.equal(
+    presentedHost({ url: 'http://127.0.0.1:8091/x', host: '127.0.0.1', port: 8091 }),
+    '127.0.0.1:8091',
+    'non-default http port shown'
+  );
+  assert.equal(
+    presentedHost({ url: 'http://example.com/x', host: 'example.com', port: 80 }),
+    'example.com',
+    'default http port omitted'
+  );
+  assert.equal(
+    presentedHost({ url: 'https://example.com/x', host: 'example.com', port: 443 }),
+    'example.com',
+    'default https port omitted'
+  );
+  assert.equal(
+    presentedHost({ url: 'https://example.com:8443/x', host: 'example.com', port: 8443 }),
+    'example.com:8443',
+    'non-default https port shown'
+  );
+  assert.equal(
+    presentedHost({ url: '', host: 'example.com', port: 443 }),
+    'example.com:443',
+    'unparseable URL keeps the port (fail-informative)'
+  );
+  assert.equal(
+    presentedHost({ url: 'http://example.com/x', host: 'example.com', port: null }),
+    'example.com',
+    'no port → bare host'
+  );
+  assert.equal(
+    presentedHost({ url: 'http://[::1]:8091/x', host: '::1', port: 8091 }),
+    '[::1]:8091',
+    'IPv6 literal bracketed before the port'
+  );
 });
 
 test('a client-cert challenge presents exactly once on the DEDICATED channel with DISPLAY STRINGS only (never certificate objects)', () => {
@@ -227,7 +284,7 @@ test('a client-cert challenge presents exactly once on the DEDICATED channel wit
   assert.deepEqual(h.presents[0].payload, {
     wcId: 10,
     host: '127.0.0.1:8493',
-    certs: [{ subject: 'CN=Goldfinch Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }],
+    certs: [{ subject: 'CN=Goldfinch Fixture Client', issuer: 'CN=Goldfinch Fixture Throwaway CA' }]
   });
   // The raw Certificate list never rides the payload (main-side only).
   assert.equal(h.presents[0].payload.certs[0].data, undefined);
@@ -235,7 +292,7 @@ test('a client-cert challenge presents exactly once on the DEDICATED channel wit
   assert.deepEqual(cb.calls, [], 'the callback stays pending while the chooser is up');
 });
 
-test("REGRESSION (M14 F3 HAT fix #7): cert attribution host derives from every live url form — bare host:port included — never a silent blank", () => {
+test('REGRESSION (M14 F3 HAT fix #7): cert attribution host derives from every live url form — bare host:port included — never a silent blank', () => {
   // Electron passes select-client-certificate's `url` as a BARE `host:port`
   // (live-verified). Naive `new URL()` on that form was a coin-flip: a
   // letter-leading host is a valid SCHEME token → parse "succeeds" with host
@@ -249,14 +306,18 @@ test("REGRESSION (M14 F3 HAT fix #7): cert attribution host derives from every l
     ['[::1]:8493', '[::1]:8493'], // IPv6 bracket form: threw → was right by luck
     ['example.com:443', 'example.com'], // default :443 stripped (displayHost parity); was ''
     ['https://localhost.:8493/', 'localhost.:8493'], // full-URL form still parses directly
-    ['not a url at all', 'not a url at all'], // unparseable both ways → raw string, never blank
+    ['not a url at all', 'not a url at all'] // unparseable both ways → raw string, never blank
   ];
   for (const [url, expected] of forms) {
     const h = makeHarness();
     const record = h.makeRecord();
     record.activeTabWcId = 10;
     h.certChallenge(record, 10, { url });
-    assert.equal(h.presents[0].payload.host, expected, `url ${JSON.stringify(url)} must present host ${JSON.stringify(expected)}`);
+    assert.equal(
+      h.presents[0].payload.host,
+      expected,
+      `url ${JSON.stringify(url)} must present host ${JSON.stringify(expected)}`
+    );
     assert.notEqual(h.presents[0].payload.host, '', 'a non-empty url must never yield a blank attribution host');
   }
 });
@@ -275,7 +336,12 @@ test('basic-auth silent cancels: proxy / contents-less / internal-session / non-
   assert.deepEqual(noneCb.calls, [[]]);
 
   const internalCb = makeCallback();
-  h.store.handleLogin({ id: 10, session: { __goldfinchInternal: true } }, { url: 'http://x/' }, { isProxy: false }, internalCb);
+  h.store.handleLogin(
+    { id: 10, session: { __goldfinchInternal: true } },
+    { url: 'http://x/' },
+    { isProxy: false },
+    internalCb
+  );
   assert.deepEqual(internalCb.calls, [[]]);
 
   const nonGuestCb = makeCallback();
@@ -296,7 +362,12 @@ test('client-cert silent cancels: contents-less / internal-session / non-guest e
   assert.deepEqual(noneCb.calls, [[null]]);
 
   const internalCb = makeCallback();
-  h.store.handleSelectClientCertificate({ id: 10, session: { __goldfinchInternal: true } }, 'https://x/', list, internalCb);
+  h.store.handleSelectClientCertificate(
+    { id: 10, session: { __goldfinchInternal: true } },
+    'https://x/',
+    list,
+    internalCb
+  );
   assert.deepEqual(internalCb.calls, [[null]]);
 
   const nonGuestCb = makeCallback();
@@ -551,7 +622,9 @@ for (const K of KINDS) {
     const h = makeHarness();
     const record = h.makeRecord();
     record.activeTabWcId = 10;
-    const bad = () => { throw new Error('native dispatch exploded'); };
+    const bad = () => {
+      throw new Error('native dispatch exploded');
+    };
     if (K.kind === 'client-cert') {
       h.store.handleSelectClientCertificate(h.addGuest(record, 10), 'https://x/', [FIXTURE_CERT], bad);
     } else {
@@ -651,7 +724,10 @@ test('answerWithCredential answers a HELD (unpresented) challenge too, without t
 
 test('answerWithCredential with no pending challenge → { answered:false, reason:no-challenge }', () => {
   const h = makeHarness();
-  assert.deepEqual(h.store.answerWithCredential(77, { username: 'u', password: 'p' }), { answered: false, reason: 'no-challenge' });
+  assert.deepEqual(h.store.answerWithCredential(77, { username: 'u', password: 'p' }), {
+    answered: false,
+    reason: 'no-challenge'
+  });
 });
 
 test('double answer (agent then sheet) resolves exactly once; the loser reports no-challenge', () => {
@@ -741,14 +817,28 @@ test('selectCertFromSheet refuses when nothing is presented, and when the presen
 // store against the full real shape so the fake can never mask a shape gap.
 const REAL_ELECTRON_CERT = {
   data: '-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----\n',
-  issuer: { commonName: 'Goldfinch Fixture Throwaway CA', organizations: [], organizationUnits: [], locality: '', state: '', country: '' },
+  issuer: {
+    commonName: 'Goldfinch Fixture Throwaway CA',
+    organizations: [],
+    organizationUnits: [],
+    locality: '',
+    state: '',
+    country: ''
+  },
   issuerName: 'Goldfinch Fixture Throwaway CA',
-  subject: { commonName: 'Goldfinch Fixture Client', organizations: [], organizationUnits: [], locality: '', state: '', country: '' },
+  subject: {
+    commonName: 'Goldfinch Fixture Client',
+    organizations: [],
+    organizationUnits: [],
+    locality: '',
+    state: '',
+    country: ''
+  },
   subjectName: 'Goldfinch Fixture Client',
   serialNumber: '0123456789abcdef',
   validStart: 1753000000,
   validExpiry: 1784536000,
-  fingerprint: 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  fingerprint: 'sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 };
 
 test('REGRESSION (M14 F3 HAT): a client-cert cancel invokes the callback with EXACTLY ONE argument, strictly null — never zero-arg (Electron 43 SIGSEGV)', () => {
@@ -769,7 +859,7 @@ test('REGRESSION (M14 F3 HAT): a client-cert cancel invokes the callback with EX
   // The real shape presents display strings only (subjectName/issuerName).
   assert.equal(h.presents.length, 1);
   assert.deepEqual(h.presents[0].payload.certs, [
-    { subject: 'Goldfinch Fixture Client', issuer: 'Goldfinch Fixture Throwaway CA' },
+    { subject: 'Goldfinch Fixture Client', issuer: 'Goldfinch Fixture Throwaway CA' }
   ]);
 
   // The live crash trigger: tab-close cancel of the presented cert challenge.
@@ -819,7 +909,11 @@ test('agent answers a QUEUED basic-auth challenge while a cert-picker is present
   assert.deepEqual(res, { answered: true });
   assert.deepEqual(basicCb.calls, [['u', 'p']], 'the queued basic-auth challenge is the agent target');
   assert.deepEqual(certCb.calls, [], 'the presented cert challenge is untouched');
-  assert.deepEqual(record.sheet.closeCalls, [], 'the visible chooser is not closed (state.presented early-return keeps it)');
+  assert.deepEqual(
+    record.sheet.closeCalls,
+    [],
+    'the visible chooser is not closed (state.presented early-return keeps it)'
+  );
   assert.equal(h.presents.length, 1, 'no second sheet while the chooser is up');
 });
 
@@ -832,7 +926,11 @@ test('getPendingChallenge skips client-cert challenges: only-cert → null; cert
   h.challenge(record, 10, { url: 'http://127.0.0.1:8091/protected', realm: 'fixture' });
   const pending = h.store.getPendingChallenge(10);
   assert.deepEqual(pending, {
-    wcId: 10, host: '127.0.0.1', port: 8091, realm: 'fixture', url: 'http://127.0.0.1:8091/protected',
+    wcId: 10,
+    host: '127.0.0.1',
+    port: 8091,
+    realm: 'fixture',
+    url: 'http://127.0.0.1:8091/protected'
   });
   assert.equal('callback' in pending, false);
   assert.equal('list' in pending, false);
@@ -882,7 +980,7 @@ const POPUP_KINDS = [
     channel: 'auth-challenge-present',
     cancelArgs: [],
     enqueue: (h, popupWcId, opts) => h.popupChallenge(popupWcId, opts),
-    openSheet: (h, record) => h.openAuthSheet(record),
+    openSheet: (h, record) => h.openAuthSheet(record)
   },
   {
     kind: 'client-cert',
@@ -890,8 +988,8 @@ const POPUP_KINDS = [
     channel: 'cert-challenge-present',
     cancelArgs: [null],
     enqueue: (h, popupWcId, opts) => h.popupCertChallenge(popupWcId, opts),
-    openSheet: (h, record) => h.openCertSheet(record),
-  },
+    openSheet: (h, record) => h.openCertSheet(record)
+  }
 ];
 
 for (const K of POPUP_KINDS) {
@@ -905,7 +1003,11 @@ for (const K of POPUP_KINDS) {
 
     assert.equal(h.presents.length, 1, 'presents immediately');
     const p = h.presents[0];
-    assert.equal(p.via, 'record', 'presentation resolves record.chromeView.webContents directly — never chromeForTab(popup)');
+    assert.equal(
+      p.via,
+      'record',
+      'presentation resolves record.chromeView.webContents directly — never chromeForTab(popup)'
+    );
     assert.equal(p.winId, record.win.id);
     assert.equal(p.channel, K.channel);
     assert.equal(p.payload.wcId, 701);
@@ -1100,8 +1202,11 @@ test('agent seams on popup challenges: getPendingChallenge reads the popup basic
   h.openAuthSheet(record);
 
   const pending = h.store.getPendingChallenge(701);
-  assert.deepEqual(pending, { wcId: 701, host: '127.0.0.1', port: 8091, realm: 'oauth', url: 'http://127.0.0.1:8091/oauth' },
-    'non-secret read seam works on a popup wcId (origin match input for vaultAnswerAuth)');
+  assert.deepEqual(
+    pending,
+    { wcId: 701, host: '127.0.0.1', port: 8091, realm: 'oauth', url: 'http://127.0.0.1:8091/oauth' },
+    'non-secret read seam works on a popup wcId (origin match input for vaultAnswerAuth)'
+  );
 
   const res = h.store.answerWithCredential(701, { username: 'user', password: 'pass' });
   assert.deepEqual(res, { answered: true });
@@ -1112,7 +1217,10 @@ test('agent seams on popup challenges: getPendingChallenge reads the popup basic
   h.addPopup(record, 702, { openerWcId: 900 });
   h.popupCertChallenge(702);
   assert.equal(h.store.getPendingChallenge(702), null, 'cert challenges invisible to the agent seams');
-  assert.deepEqual(h.store.answerWithCredential(702, { username: 'u', password: 'p' }), { answered: false, reason: 'no-challenge' });
+  assert.deepEqual(h.store.answerWithCredential(702, { username: 'u', password: 'p' }), {
+    answered: false,
+    reason: 'no-challenge'
+  });
 });
 
 test('a destroyed owning-record chrome makes the popup present a harmless no-op (guarded) — never a throw, callback still owned', () => {

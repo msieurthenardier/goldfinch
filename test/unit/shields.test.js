@@ -40,9 +40,7 @@ function freshStore() {
 function readRow(dir) {
   const check = new DatabaseSync(path.join(dir, 'app.db'));
   try {
-    const row = /** @type {any} */ (
-      check.prepare('SELECT payload FROM documents WHERE store = ?1').get('shields')
-    );
+    const row = /** @type {any} */ (check.prepare('SELECT payload FROM documents WHERE store = ?1').get('shields'));
     return row ? JSON.parse(row.payload) : null;
   } finally {
     check.close();
@@ -227,7 +225,7 @@ test('load() throws when app-db is not open (mis-ordered boot must propagate, no
   }
 });
 
-test('save(): not-loaded state is a silent no-op (no docStore yet, no throw) — today\'s pre-load semantics, unchanged', () => {
+test("save(): not-loaded state is a silent no-op (no docStore yet, no throw) — today's pre-load semantics, unchanged", () => {
   const shields = freshStore();
   assert.doesNotThrow(() => shields.set({ enabled: false }));
   assert.equal(shields.get().enabled, false, 'the in-memory mutation still applies even though nothing persists');

@@ -128,7 +128,11 @@ test('AC7: the enumeration names all five sites — the arity is not the whole c
   // listener, survives the rewrite. (A bare `resize` listener that only LOGS is fine — it must
   // not call cancelDnd.)
   assert.equal(/addEventListener\('pointercancel'/.test(masked), false, 'the pointercancel cancel site is gone');
-  assert.equal(/addEventListener\('resize'[\s\S]{0,120}?cancelDnd\(\)/.test(masked), false, 'the resize→cancelDnd site is gone');
+  assert.equal(
+    /addEventListener\('resize'[\s\S]{0,120}?cancelDnd\(\)/.test(masked),
+    false,
+    'the resize→cancelDnd site is gone'
+  );
 });
 
 test('AC7: every cancel site is gated on `dnd`, so none can fire during a pending drop', () => {
@@ -151,7 +155,8 @@ test('AC7: every cancel site is gated on `dnd`, so none can fire during a pendin
 // ---------------------------------------------------------------------------
 
 test('DD4: the drag path is pill-free — renderer.js never names the tearoff-overlay surface', () => {
-  const GHOST_RE = /tearoffOverlayShow|tearoffOverlayMove|tearoffOverlayHide|trackTearoffGhost|clearTearoffGhost|flushTearoffGhost/;
+  const GHOST_RE =
+    /tearoffOverlayShow|tearoffOverlayMove|tearoffOverlayHide|trackTearoffGhost|clearTearoffGhost|flushTearoffGhost/;
   const real = rendererSource();
   assert.equal(
     GHOST_RE.test(maskComments(real)),
@@ -220,13 +225,17 @@ test('AC4: the .dragging CSS rule is layout-neutral — real → clean, `width: 
   // rule anymore (the dragged tab it marks is already invisible; the visible tear-off
   // affordance is the siblings closing ranks), so the layout-neutral pin moved to the rule
   // that exists.
-  const LAYOUT_PROPS = /^\s*(width|height|display|margin|padding|border|flex|position|top|left|right|bottom|inset|gap|order)\b/;
+  const LAYOUT_PROPS =
+    /^\s*(width|height|display|margin|padding|border|flex|position|top|left|right|bottom|inset|gap|order)\b/;
 
   /** The declarations inside `.tab.dragging { … }`. @returns {string[]} */
   function draggingDecls(css) {
     const i = css.indexOf('.tab.dragging {');
     assert.notEqual(i, -1, 'the .tab.dragging rule is gone — re-anchor this scan');
-    return css.slice(css.indexOf('{', i) + 1, css.indexOf('}', i)).split(';').filter((d) => d.trim());
+    return css
+      .slice(css.indexOf('{', i) + 1, css.indexOf('}', i))
+      .split(';')
+      .filter((d) => d.trim());
   }
 
   const real = fs.readFileSync(STYLES_CSS, 'utf8');
@@ -271,13 +280,29 @@ test('AC5: `dnd` is nulled SYNCHRONOUSLY in dragend — no await precedes it, an
   );
   // dragend derives the release zone from the actual dragend coordinates via classifyDragPoint —
   // window-local clientX/clientY (DD16), NEVER screenX.
-  assert.match(body, /const releaseZone = classifyDragPoint\(/, 'dragend classifies the release point via classifyDragPoint');
-  assert.match(body, /e\.clientX, e\.clientY, dnd\.draggedIndex\);/, "release-point classification reads e.clientX/e.clientY (DD16), not screenX");
+  assert.match(
+    body,
+    /const releaseZone = classifyDragPoint\(/,
+    'dragend classifies the release point via classifyDragPoint'
+  );
+  assert.match(
+    body,
+    /e\.clientX,\s*e\.clientY,\s*dnd\.draggedIndex\s*\);/,
+    'release-point classification reads e.clientX/e.clientY (DD16), not screenX'
+  );
   // The removed viewport AND-gate must NOT come back — neither the derivation nor the read. (The
   // release-point classification delegates to classifyDragPoint, whose body reads isOutsideStrip
   // in tab-drag-zone.js; dragend itself never names isOutsideStrip or releaseInsideViewport.)
-  assert.equal(/releaseInsideViewport/.test(body), false, 'no viewport AND-gate: releaseInsideViewport is gone from dragend');
-  assert.equal(/isOutsideStrip/.test(body), false, 'dragend does not itself read isOutsideStrip — geometry is not conjoined as a viewport gate');
+  assert.equal(
+    /releaseInsideViewport/.test(body),
+    false,
+    'no viewport AND-gate: releaseInsideViewport is gone from dragend'
+  );
+  assert.equal(
+    /isOutsideStrip/.test(body),
+    false,
+    'dragend does not itself read isOutsideStrip — geometry is not conjoined as a viewport gate'
+  );
   // dnd is nulled BEFORE the tear-off fires — the no-await property made concrete.
   assert.ok(
     body.indexOf('dnd = null;') !== -1 && body.indexOf('dnd = null;') < body.indexOf('requestTearOff(tabId)'),
@@ -295,7 +320,7 @@ test('AC5: `dnd` is nulled SYNCHRONOUSLY in dragend — no await precedes it, an
   // corrected gate pin must no longer match, and the "no viewport gate" negative pin must fire.
   const withViewportGate = real.replace(
     GATE,
-    "const releaseInsideViewport = !isOutsideStrip(dnd.viewportRect, e.clientX, e.clientY);\n    const doTearOff = !dnd.dropHandled && dnd.tearOff && releaseInsideViewport;"
+    'const releaseInsideViewport = !isOutsideStrip(dnd.viewportRect, e.clientX, e.clientY);\n    const doTearOff = !dnd.dropHandled && dnd.tearOff && releaseInsideViewport;'
   );
   assertMutated(real, withViewportGate, 'reintroduced-viewport-gate');
   const bodyA = dragendBody(withViewportGate);
@@ -377,12 +402,11 @@ function messageMapBody(name) {
 test('AC10: every core refusal carries a reason, and the renderer maps every one', () => {
   // The two halves must agree, and neither file alone can show it. Reasons are read off
   // main.js's core; each renderer message map is required to be total over them.
-  const reasons = [...moveCoreBody(fs.readFileSync(MAIN_JS, 'utf8')).matchAll(/reason: '([a-z-]+)'/g)]
-    .map((m) => m[1]);
+  const reasons = [...moveCoreBody(fs.readFileSync(MAIN_JS, 'utf8')).matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]);
   assert.deepEqual(
     reasons,
     ['no-tab', 'internal', 'sole-tab', 'no-target'],
-    'the core refuses with exactly these reasons. `no-target` is LEG 4\'s: the core no longer ' +
+    "the core refuses with exactly these reasons. `no-target` is LEG 4's: the core no longer " +
       'creates its own target unconditionally, so "the destination is gone" became an outcome ' +
       'it can hit. Bump this list when the core gains a refusal — that is the point of reading ' +
       'it off the source instead of restating it.'
@@ -396,7 +420,7 @@ test('AC10: every core refusal carries a reason, and the renderer maps every one
   // TOTAL by construction — a default arm plus a final fallthrough, so no input reaches an
   // implicit `undefined` return. That totality, not the specific wording, is what makes
   // silence unreachable, so the arms are asserted to EXIST and the prose is not pinned.
-  assert.match(body, /default: return `[^`]+`;/, 'the message map has a non-empty default arm');
+  assert.match(body, /default:\s*return `[^`]+`;/, 'the message map has a non-empty default arm');
   // Every refusal the core can name, EXCEPT no-tab, has its own arm — including `no-target`,
   // which is AC4's whole subject (the window closed between menu build and dispatch, and the
   // user is owed those words rather than a generic failure).
@@ -417,7 +441,11 @@ test('AC10: every core refusal carries a reason, and the renderer maps every one
   // ALL callers pass a destination, so no arm can render "undefined" into an announcement.
   const masked = maskComments(rendererSource());
   const calls = masked.match(/moveOutcomeMessage\(result, '[^']+'\)/g) || [];
-  assert.equal(calls.length, 3, 'the tear-off, keyboard cross-window, and drop-adopt paths all announce through the one map (F11 Leg 3 bumped 2 → 3 for the target-side adopt announce)');
+  assert.equal(
+    calls.length,
+    3,
+    'the tear-off, keyboard cross-window, and drop-adopt paths all announce through the one map (F11 Leg 3 bumped 2 → 3 for the target-side adopt announce)'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -501,10 +529,12 @@ test('DD16: no src/** file reads a cross-window coordinate — real → 0, mutat
   assert.equal((maskComments(real).match(BANNED_RE) || []).length, 0, 'real renderer → 0');
   // The anchor carries the preceding argument line so it hits the DRAGOVER call specifically:
   // the bare `e.clientX…` line is a SUBSTRING of dragend's deeper-indented twin, and a
-  // one-line anchor would silently mutate whichever site comes first in the file.
-  const eScreen = real.replace(
-    '    dnd.stripRect, dnd.slotRects,\n    e.clientX, e.clientY, dnd.draggedIndex);',
-    '    dnd.stripRect, dnd.slotRects,\n    e.screenX, e.screenY, dnd.draggedIndex);'
+  // one-line anchor would silently mutate whichever site comes first in the file. Wrap-
+  // insensitive: Prettier collapsed this call onto one line (it now fits printWidth), so the
+  // anchor matches either the collapsed or a future re-wrapped shape.
+  const CALL_SITE_RE = /dnd\.stripRect,\s*dnd\.slotRects,\s*e\.clientX,\s*e\.clientY,\s*dnd\.draggedIndex\);/;
+  const eScreen = real.replace(CALL_SITE_RE, (matched) =>
+    matched.replace('e.clientX, e.clientY', 'e.screenX, e.screenY')
   );
   assertMutated(real, eScreen, 'dd16-e-screenX');
   assert.equal(
@@ -515,10 +545,13 @@ test('DD16: no src/** file reads a cross-window coordinate — real → 0, mutat
   );
 
   // And the module-level half of the ban, which the enumeration reduced to three methods.
-  const anyScreenMethod = real.replace(
-    '    dnd.stripRect, dnd.slotRects,\n    e.clientX, e.clientY, dnd.draggedIndex);',
-    '    dnd.stripRect, dnd.slotRects,\n    require(\'electron\').screen.getCursorScreenPoint().x, e.clientY, dnd.draggedIndex);'
+  const anyScreenMethod = real.replace(CALL_SITE_RE, (matched) =>
+    matched.replace('e.clientX,', "require('electron').screen.getCursorScreenPoint().x,")
   );
   assertMutated(real, anyScreenMethod, 'dd16-screen-module');
-  assert.equal((maskComments(anyScreenMethod).match(BANNED_RE) || []).length, 1, 'the `screen` MODULE is banned, not three of its methods');
+  assert.equal(
+    (maskComments(anyScreenMethod).match(BANNED_RE) || []).length,
+    1,
+    'the `screen` MODULE is banned, not three of its methods'
+  );
 });

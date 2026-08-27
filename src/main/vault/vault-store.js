@@ -170,8 +170,7 @@ function mrkEnvelopeAad(version) {
  * @returns {boolean}
  */
 function isNonEmptySecret(secret) {
-  return (typeof secret === 'string' && secret.length > 0)
-    || (Buffer.isBuffer(secret) && secret.length > 0);
+  return (typeof secret === 'string' && secret.length > 0) || (Buffer.isBuffer(secret) && secret.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -362,9 +361,7 @@ class VaultStore {
     try {
       doc = JSON.parse(text);
     } catch (err) {
-      throw new vc.VaultFormatError(
-        `manager.json: invalid JSON (${/** @type {Error} */ (err).message})`
-      );
+      throw new vc.VaultFormatError(`manager.json: invalid JSON (${/** @type {Error} */ (err).message})`);
     }
     if (!doc || typeof doc !== 'object') {
       throw new vc.VaultFormatError('manager.json: document is not an object');
@@ -386,8 +383,13 @@ class VaultStore {
     }
     for (const slot of ['master', 'recovery', 'admin']) {
       const env = doc.mrk[slot];
-      if (!env || typeof env !== 'object'
-        || typeof env.iv !== 'string' || typeof env.ct !== 'string' || typeof env.tag !== 'string') {
+      if (
+        !env ||
+        typeof env !== 'object' ||
+        typeof env.iv !== 'string' ||
+        typeof env.ct !== 'string' ||
+        typeof env.tag !== 'string'
+      ) {
         throw new vc.VaultFormatError(`manager.json: malformed mrk.${slot} envelope`);
       }
     }
@@ -429,7 +431,7 @@ class VaultStore {
       vaultId,
       kdf: parts.kdf,
       envelopes: parts.envelopes,
-      items: parts.items,
+      items: parts.items
     });
     writeFileAtomic(this._vaultPath(vaultId), Buffer.from(json, 'utf8'));
   }
@@ -523,10 +525,16 @@ class VaultStore {
    * @returns {Promise<T>}
    */
   _withManagerLock(fn) {
-    const result = this._managerLock.then(() => fn(), () => fn());
+    const result = this._managerLock.then(
+      () => fn(),
+      () => fn()
+    );
     // Advance the chain on both outcomes; swallow here so one failed op never poisons
     // the lock for the next (the caller still sees `result`'s rejection).
-    this._managerLock = result.then(() => {}, () => {});
+    this._managerLock = result.then(
+      () => {},
+      () => {}
+    );
     return result;
   }
 
@@ -541,9 +549,7 @@ class VaultStore {
    */
   _assertMrkGeneration(gen) {
     if (this.mrk === null || this._mrkGen !== gen) {
-      throw new VaultLockedError(
-        'vault-store: the manager was locked or re-keyed during the operation — retry'
-      );
+      throw new VaultLockedError('vault-store: the manager was locked or re-keyed during the operation — retry');
     }
   }
 
@@ -611,7 +617,7 @@ class VaultStore {
       version: MANAGER_VERSION,
       kdf: params,
       adminPublicKeyB64: admin.publicKeyB64,
-      mrk: { master: masterEnv, recovery: recoveryEnv, admin: adminEnv },
+      mrk: { master: masterEnv, recovery: recoveryEnv, admin: adminEnv }
     };
     this._writeManager(manager);
 
@@ -643,11 +649,11 @@ class VaultStore {
     const mrkEnv = {
       keyId: 'mrk',
       type: 'mrk',
-      ...vc.wrapVaultKey(vaultKey, mrk, mrkEnvelopeAad(vc.VERSION)),
+      ...vc.wrapVaultKey(vaultKey, mrk, mrkEnvelopeAad(vc.VERSION))
     };
     this._writeVault(vaultId, {
       envelopes: [mrkEnv],
-      items: vc.encryptItems(items, vaultKey),
+      items: vc.encryptItems(items, vaultKey)
     });
   }
 
@@ -663,7 +669,10 @@ class VaultStore {
    */
   async unlock(masterPassword) {
     const manager = this._readManager();
-    const mrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    const mrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
+      version: MANAGER_VERSION,
+      params: manager.kdf
+    });
     this._installMrk(mrk);
   }
 
@@ -693,9 +702,7 @@ class VaultStore {
     try {
       privateKey = vc.importAdminPrivateKey(adminPrivateKeyB64);
     } catch (err) {
-      throw new vc.VaultFormatError(
-        `admin private key: unreadable (${/** @type {Error} */ (err).message})`
-      );
+      throw new vc.VaultFormatError(`admin private key: unreadable (${/** @type {Error} */ (err).message})`);
     }
     const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: MANAGER_VERSION });
     this._installMrk(mrk);
@@ -752,10 +759,16 @@ class VaultStore {
       const manager = this._readManager();
       // Step-up re-auth: re-unwrap the master envelope with the OLD password. A wrong old
       // password throws VaultAuthError and rewrites NOTHING (the step-up precedes any write).
-      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, oldMasterPassword, {
+        version: MANAGER_VERSION,
+        params: manager.kdf
+      });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // locked/re-keyed during the step-up derive → refuse before using mrk.
-      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
+        version: MANAGER_VERSION,
+        params: manager.kdf
+      });
       this._assertMrkGeneration(gen); // and again before persisting.
       manager.mrk.master = newMasterEnv;
       this._writeManager(manager);
@@ -783,7 +796,10 @@ class VaultStore {
       const gen = this._mrkGen;
       const manager = this._readManager();
       // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
-      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
+        version: MANAGER_VERSION,
+        params: manager.kdf
+      });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       // finding 3: refuse if a lockNow fired during the derive — else wrapRecovery below
       // would seal a zeroized MRK into the recovery slot (the exact reproduced defect).
@@ -822,7 +838,10 @@ class VaultStore {
       const gen = this._mrkGen;
       const manager = this._readManager();
       // Step-up re-auth: re-unwrap the master envelope. Wrong password → VaultAuthError, no write.
-      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
+        version: MANAGER_VERSION,
+        params: manager.kdf
+      });
       stepUpMrk.fill(0); // zeroize the transient step-up buffer after the re-unwrap.
       this._assertMrkGeneration(gen); // finding 3: never seal a zeroized/replaced MRK to the new admin key.
       const admin = vc.generateAdminKeypair();
@@ -868,7 +887,10 @@ class VaultStore {
       this._installMrk(mrk); // the user ends UNLOCKED (they recovered); fires onUnlock — bumps the generation.
       const gen = this._mrkGen; // capture AFTER install so a lockNow during the wrap below is caught.
       // Rewrap the master envelope under the new password — the recovery proof authenticated it.
-      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+      const newMasterEnv = await vc.wrapMaster(mrk, newMasterPassword, {
+        version: MANAGER_VERSION,
+        params: manager.kdf
+      });
       this._assertMrkGeneration(gen); // finding 3: refuse if locked/re-keyed mid-derive.
       manager.mrk.master = newMasterEnv;
       this._writeManager(manager);
@@ -911,7 +933,7 @@ class VaultStore {
       // All THREE envelopes (review [HIGH]) — ciphertext only.
       mrk: { master: m.mrk.master, recovery: m.mrk.recovery, admin: m.mrk.admin },
       adminPublicKeyB64: m.adminPublicKeyB64,
-      vault: vaultDoc,
+      vault: vaultDoc
     };
   }
 
@@ -961,8 +983,13 @@ class VaultStore {
     }
     for (const slot of ['master', 'recovery', 'admin']) {
       const env = bundle.mrk[slot];
-      if (!env || typeof env !== 'object'
-        || typeof env.iv !== 'string' || typeof env.ct !== 'string' || typeof env.tag !== 'string') {
+      if (
+        !env ||
+        typeof env !== 'object' ||
+        typeof env.iv !== 'string' ||
+        typeof env.ct !== 'string' ||
+        typeof env.tag !== 'string'
+      ) {
         throw new vc.VaultFormatError(`vault-store: malformed bundle mrk.${slot} envelope`);
       }
     }
@@ -982,9 +1009,7 @@ class VaultStore {
     // The bundle round-trips through JSON on disk, so `bundle.vault` arrives as a parsed
     // OBJECT; re-serialize for parseVault (it takes a string/Buffer) to get the same strict
     // validation the load path uses. Tolerates a raw string too.
-    const vaultDoc = vc.parseVault(
-      typeof bundle.vault === 'string' ? bundle.vault : JSON.stringify(bundle.vault)
-    );
+    const vaultDoc = vc.parseVault(typeof bundle.vault === 'string' ? bundle.vault : JSON.stringify(bundle.vault));
     const mrkEnv = vaultDoc.envelopes.find((/** @type {any} */ e) => e.keyId === 'mrk');
     if (!mrkEnv) {
       throw new vc.VaultFormatError('vault-store: bundle vault missing mrk envelope');
@@ -1028,8 +1053,8 @@ class VaultStore {
           mrk: {
             master: bundle.mrk.master,
             recovery: bundle.mrk.recovery,
-            admin: bundle.mrk.admin,
-          },
+            admin: bundle.mrk.admin
+          }
         });
         this._installMrk(mrk); // leaves UNLOCKED, fires onUnlock; takes ownership of `mrk`.
         mrk = null; // INSTALLED — do NOT zeroize in the finally.
@@ -1082,8 +1107,7 @@ class VaultStore {
    */
   _resolveTarget(target) {
     if (target === GLOBAL_ID) return GLOBAL_ID;
-    if (typeof target !== 'string'
-      || !this.listJars().some((j) => j.id === target && j.id !== GLOBAL_ID)) {
+    if (typeof target !== 'string' || !this.listJars().some((j) => j.id === target && j.id !== GLOBAL_ID)) {
       throw new VaultStateError(`vault-store: unknown or non-persistent jar "${target}"`);
     }
     return target;
@@ -1195,20 +1219,16 @@ class VaultStore {
       throw new VaultStateError('vault-store: item must be an object');
     }
     if (!ITEM_TYPES.has(item.type)) {
-      throw new VaultStateError(
-        `vault-store: item.type must be one of login|card|note (got "${item.type}")`
-      );
+      throw new VaultStateError(`vault-store: item.type must be one of login|card|note (got "${item.type}")`);
     }
-    const id = typeof item.id === 'string' && item.id.length > 0
-      ? item.id
-      : crypto.randomBytes(8).toString('hex');
+    const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : crypto.randomBytes(8).toString('hex');
     const now = this._now();
     return {
       ...item,
       id,
       type: item.type,
       createdAt: existingCreatedAt ?? (typeof item.createdAt === 'number' ? item.createdAt : now),
-      updatedAt: now,
+      updatedAt: now
     };
   }
 
@@ -1247,9 +1267,7 @@ class VaultStore {
 
     const vaultKey = this._vaultKeyFromDoc(vaultId, doc);
     const items = /** @type {VaultItem[]} */ (vc.decryptItems(doc.items, vaultKey));
-    const idx = typeof item?.id === 'string'
-      ? items.findIndex((it) => it.id === item.id)
-      : -1;
+    const idx = typeof item?.id === 'string' ? items.findIndex((it) => it.id === item.id) : -1;
     const existingCreatedAt = idx >= 0 ? items[idx].createdAt : undefined;
     const normalized = this._normalizeItem(item, existingCreatedAt);
     if (idx >= 0) items[idx] = normalized;
@@ -1258,7 +1276,7 @@ class VaultStore {
     this._writeVault(vaultId, {
       kdf: doc.kdf,
       envelopes: doc.envelopes,
-      items: vc.encryptItems(items, vaultKey),
+      items: vc.encryptItems(items, vaultKey)
     });
     return normalized;
   }
@@ -1340,7 +1358,7 @@ class VaultStore {
     this._writeVault(vaultId, {
       kdf: doc.kdf,
       envelopes: doc.envelopes,
-      items: vc.encryptItems(kept, vaultKey),
+      items: vc.encryptItems(kept, vaultKey)
     });
     return true;
   }
@@ -1371,32 +1389,27 @@ class VaultStore {
       throw new VaultStateError('vault-store: item must be an object');
     }
     if (!ITEM_TYPES.has(item.type)) {
-      throw new VaultStateError(
-        `vault-store: item.type must be one of login|card|note (got "${item.type}")`
-      );
+      throw new VaultStateError(`vault-store: item.type must be one of login|card|note (got "${item.type}")`);
     }
     const unchanged = Array.isArray(unchangedFields) ? unchangedFields : [];
     const secret = new Set(secretFieldsFor(item.type));
     for (const name of unchanged) {
       if (!secret.has(name)) {
-        throw new VaultStateError(
-          `vault-store: "${name}" is not a secret field of ${item.type} — cannot preserve`
-        );
+        throw new VaultStateError(`vault-store: "${name}" is not a secret field of ${item.type} — cannot preserve`);
       }
     }
 
     // Find the existing record (read-merge source). listItems handles MRK/resolve/
     // uncreated-vault ([]); an unknown/burner jar throws VaultStateError here.
-    const existing = typeof item.id === 'string' && item.id.length > 0
-      ? this.listItems(target).find((it) => it.id === item.id)
-      : undefined;
+    const existing =
+      typeof item.id === 'string' && item.id.length > 0
+        ? this.listItems(target).find((it) => it.id === item.id)
+        : undefined;
 
     if (!existing) {
       // CREATE-DEFENSE: a new item has no existing secret to preserve.
       if (unchanged.length > 0) {
-        throw new VaultStateError(
-          'vault-store: cannot preserve secrets on a new item (create-defense)'
-        );
+        throw new VaultStateError('vault-store: cannot preserve secrets on a new item (create-defense)');
       }
       return this.saveItem(target, item);
     }
@@ -1467,7 +1480,7 @@ class VaultStore {
             // A match whose stored origin differs from the tab origin can only be a
             // registrable-domain widen (an exact match requires equality). false for
             // every exact match and for every row when widen is false.
-            widened: item.origin !== origin,
+            widened: item.origin !== origin
           });
         }
       }
@@ -1522,7 +1535,7 @@ class VaultStore {
             title: item.title ?? null,
             cardholder: item.cardholder ?? null,
             brand: item.brand ?? null,
-            last4: item.last4 ?? null,
+            last4: item.last4 ?? null
           });
         }
       }
@@ -1552,7 +1565,8 @@ class VaultStore {
     this._touch();
     const doc = this._readVault(vaultId);
     if (doc === null) return [];
-    return vc.listEnvelopeKeyIds(doc)
+    return vc
+      .listEnvelopeKeyIds(doc)
       .filter((keyId) => keyId !== 'mrk')
       .map((keyId) => ({ keyId }));
   }
@@ -1574,7 +1588,10 @@ class VaultStore {
     // Step-up re-auth: re-unwrap the master envelope with the supplied password.
     // A wrong password throws (VaultAuthError) and mints nothing.
     const manager = this._readManager();
-    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, { version: MANAGER_VERSION, params: manager.kdf });
+    const stepUpMrk = await vc.unwrapMaster(manager.mrk.master, masterPassword, {
+      version: MANAGER_VERSION,
+      params: manager.kdf
+    });
     stepUpMrk.fill(0); // zeroize the transient step-up buffer after the compare.
 
     const doc = this._readVault(vaultId);
@@ -1587,7 +1604,7 @@ class VaultStore {
     this._writeVault(vaultId, {
       kdf: doc.kdf,
       envelopes: [...doc.envelopes, accessEnv],
-      items: doc.items,
+      items: doc.items
     });
     return { secret, keyId };
   }
@@ -1684,9 +1701,7 @@ class VaultStore {
     try {
       privateKey = vc.importAdminPrivateKey(adminPrivateKeyB64);
     } catch (err) {
-      throw new vc.VaultFormatError(
-        `admin private key: unreadable (${/** @type {Error} */ (err).message})`
-      );
+      throw new vc.VaultFormatError(`admin private key: unreadable (${/** @type {Error} */ (err).message})`);
     }
     const mrk = vc.openAdminSeal(manager.mrk.admin, privateKey, { version: MANAGER_VERSION });
     /** @type {Map<string, Buffer>} */
@@ -1697,7 +1712,12 @@ class VaultStore {
       // review). A pre-existing `{ id: 'global' }` jar (mintable only before jars.js
       // reserved the id) must not double-visit global.gfvault or mis-map the `global`
       // Map slot onto a jar — the slot is always the manager-wide global vault.
-      const ids = [GLOBAL_ID, ...this.listJars().map((j) => j.id).filter((id) => id !== GLOBAL_ID)];
+      const ids = [
+        GLOBAL_ID,
+        ...this.listJars()
+          .map((j) => j.id)
+          .filter((id) => id !== GLOBAL_ID)
+      ];
       for (const vaultId of ids) {
         const doc = this._readVault(vaultId);
         if (doc === null) continue; // lazily-absent jar vault — skip
@@ -1744,9 +1764,7 @@ class VaultStore {
     if (doc === null) {
       throw new VaultStateError(`vault-store: no vault for "${vaultId}"`);
     }
-    const kept = doc.envelopes.filter(
-      (/** @type {any} */ e) => !(e.keyId === keyId && e.keyId !== 'mrk')
-    );
+    const kept = doc.envelopes.filter((/** @type {any} */ e) => !(e.keyId === keyId && e.keyId !== 'mrk'));
     const removed = kept.length !== doc.envelopes.length;
     if (removed) {
       this._writeVault(vaultId, { kdf: doc.kdf, envelopes: kept, items: doc.items });
@@ -1790,5 +1808,5 @@ module.exports = {
   // Import hardening validators (PR#112 finding 4) — exported so the bounded KDF
   // schema and the decrypted-item-array guard are unit-tested directly.
   validateImportedKdf,
-  validateImportedItems,
+  validateImportedItems
 };

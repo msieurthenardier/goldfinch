@@ -10,7 +10,7 @@ export function createJarsClient({
   getAutomationSnapshot,
   inheritContainerDecision,
   inheritFromPartition,
-  random = Math.random,
+  random = Math.random
 }) {
   const state = { containers: [], defaultId: undefined };
 
@@ -20,7 +20,10 @@ export function createJarsClient({
     for (const tab of snapshot) {
       if (tab.trusted || (tab.container && tab.container.burner)) continue;
       const fresh = state.containers.find((entry) => entry && tab.container && entry.id === tab.container.id);
-      if (!fresh) { orphans.push(tab); continue; }
+      if (!fresh) {
+        orphans.push(tab);
+        continue;
+      }
       tab.container = fresh;
       const dot = tab.btn && tab.btn.querySelector('.tab-jar');
       if (!dot) continue;
@@ -57,8 +60,8 @@ export function createJarsClient({
   bridge.onJarWiped((payload) => {
     if (!payload || typeof payload.id !== 'string') return;
     const snapshot = [...ctx.tabs.values()];
-    const matches = snapshot.filter((tab) =>
-      tab.container && tab.container.id === payload.id && isWebTab(tab) && tab.wcId != null
+    const matches = snapshot.filter(
+      (tab) => tab.container && tab.container.id === payload.id && isWebTab(tab) && tab.wcId != null
     );
     if (!matches.length) return;
     if (matches.some((tab) => tab.id === ctx.activeTabId)) {
@@ -99,7 +102,11 @@ export function createJarsClient({
     makeBurner,
     inheritContainerFrom,
     inheritContainerFromPartition,
-    get containers() { return state.containers; },
-    get defaultId() { return state.defaultId; },
+    get containers() {
+      return state.containers;
+    },
+    get defaultId() {
+      return state.defaultId;
+    }
   };
 }

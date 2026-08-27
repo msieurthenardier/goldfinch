@@ -88,7 +88,14 @@ test('left and right of the strip tear off', () => {
 });
 
 test('the strip rect is INCLUSIVE on every edge — ties resolve toward NOT tearing off', () => {
-  for (const [x, y] of [[0, 0], [800, 0], [0, 44], [800, 44], [250, 44], [250, 0]]) {
+  for (const [x, y] of [
+    [0, 0],
+    [800, 0],
+    [0, 44],
+    [800, 44],
+    [250, 44],
+    [250, 0]
+  ]) {
     assert.equal(classifyDragPoint(STRIP, SLOTS, x, y, 0).zone, 'reorder', `(${x},${y}) is on an edge`);
   }
 });

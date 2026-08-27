@@ -40,8 +40,7 @@ export function buildContainerModel(containers, defaultId) {
   // the list (dangling — jar deleted, stale value), Burner carries it instead. This
   // mirrors resolveNewTabContainer's fallback (default-routing.js), which routes to
   // burner for BOTH cases — the marker must never lie about where a new tab opens.
-  const holderIsBurner =
-    defaultId == null || !list.some((c) => c && typeof c.id === 'string' && c.id === defaultId);
+  const holderIsBurner = defaultId == null || !list.some((c) => c && typeof c.id === 'string' && c.id === defaultId);
   for (const c of list) {
     if (!c || typeof c.id !== 'string') continue;
     /** @type {{ id: string, label: string, color?: string, isDefault?: boolean }} */

@@ -144,7 +144,14 @@ const SEAM_COUNT = 34;
 // metric post-extraction; the budget is set to measured + ~123 headroom
 // (rounded to a clean number, ≤ 1700 per the leg's Outputs) for legs 2-3's
 // planned jar-scoped bookmark call-site growth in this same flight.
-const RENDERER_LINE_BUDGET = 1650;
+// Re-based 2026-08-27 (Flight 5, Prettier adoption): 1650 → 1827. Prettier's
+// whole-tree reformat under the existing .prettierrc (singleQuote,
+// trailingComma: none, printWidth: 120) expands one-line function bodies to
+// three lines and splits over-width import/dependency lists one per line,
+// growing the file. The budget is set to the file's measured post-format
+// line count by this test's own metric (source.split(/\r?\n/).length) —
+// zero headroom, same zero-headroom policy the pre-format 1650 carried.
+const RENDERER_LINE_BUDGET = 1827;
 
 // Bookmarks-bar line budget (squawk 0025, M15 debrief finding F25): bar/
 // overflow rendering, measurement, and dispatch business logic lives in
@@ -272,10 +279,7 @@ test('seam-contract: a11y-audit-driven identifiers are a subset of the renderer 
     tier1.length >= 6,
     `expected at least 6 tier-1 (direct evaluate literal) identifiers, found ${tier1.length}`
   );
-  assert.ok(
-    tier2.length >= 5,
-    `expected at least 5 tier-2 (SHEET_STATES open:) identifiers, found ${tier2.length}`
-  );
+  assert.ok(tier2.length >= 5, `expected at least 5 tier-2 (SHEET_STATES open:) identifiers, found ${tier2.length}`);
 
   const missing = findAuditIdentifiersMissingFromSeam([...tier1, ...tier2], seamIdentifiers);
   assert.deepEqual(

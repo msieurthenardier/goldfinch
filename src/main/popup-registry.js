@@ -153,7 +153,7 @@ function createPopupRegistry({ cancelChallengesForPopup = () => {}, logger = con
     isPopupWcId,
     listForRecord,
     rekeyForRecord,
-    closeAllForRecord,
+    closeAllForRecord
   };
 }
 

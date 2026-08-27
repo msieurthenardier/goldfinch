@@ -18,7 +18,12 @@ const path = require('node:path');
 
 const vs = require('../../src/main/vault/vault-store');
 const { createVaultHuman } = require('../../src/main/vault/vault-human');
-const { brandForNumber, last4Of, isPlausibleCardNumber, titleForNumber } = require('../../src/main/vault/card-identity');
+const {
+  brandForNumber,
+  last4Of,
+  isPlausibleCardNumber,
+  titleForNumber
+} = require('../../src/main/vault/card-identity');
 
 const FAST_SCRYPT = { algo: 'scrypt', N: 2 ** 12, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const MASTER = 'correct horse battery staple';
@@ -32,8 +37,12 @@ const AMEX = '378282246310005';
 
 const enc = (s) => new TextEncoder().encode(s);
 
-function tmpDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-cardcap-')); }
-function rm(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gf-cardcap-'));
+}
+function rm(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 async function makeHarness(dir) {
   const store = vs.load(dir, { scryptParams: FAST_SCRYPT, getAutoLockMinutes: () => 10, listJars: () => JARS });
@@ -41,7 +50,7 @@ async function makeHarness(dir) {
 
   const entries = new Map([
     [10, { partition: 'persist:container:work', trusted: false }],
-    [20, { partition: 'burner:1', trusted: false }],
+    [20, { partition: 'burner:1', trusted: false }]
   ]);
   const urls = { 10: SHOP + '/checkout', 20: SHOP + '/checkout' };
 
@@ -51,7 +60,7 @@ async function makeHarness(dir) {
     getTabEntry: (id) => entries.get(id),
     listJars: () => JARS,
     fillDelegate: () => {},
-    fillCardDelegate: () => {},
+    fillCardDelegate: () => {}
   });
   return { store, human };
 }
@@ -62,7 +71,7 @@ function submit(human, { wcId = 10, number = VISA, cvv = '123', cardholder = 'A 
     numberBytes: enc(number),
     cvvBytes: enc(cvv),
     cardholder,
-    expiry,
+    expiry
   });
 }
 
@@ -103,7 +112,9 @@ test('a submitted value that is not a plausible card raises NO offer', () => {
       assert.equal(submit(human, { number: 'not a card' }), null);
       assert.deepEqual(store.listItems('work'), [], 'nothing written to the vault');
     });
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a burner tab raises no card offer', async () => {
@@ -111,7 +122,9 @@ test('a burner tab raises no card offer', async () => {
   try {
     const { human } = await makeHarness(dir);
     assert.equal(submit(human, { wcId: 20 }), null);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- save ------------------------------------------------------------------
@@ -133,7 +146,9 @@ test('a fresh card offers a SAVE with both vault choices and no card data in the
     const json = JSON.stringify(offer.model);
     assert.ok(!json.includes(VISA), 'no PAN in the offer model');
     assert.ok(!json.includes('123'), 'no CVV in the offer model');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('saving writes a card item with a synthesized title and the derived descriptors', async () => {
@@ -153,7 +168,9 @@ test('saving writes a card item with a synthesized title and the derived descrip
     assert.equal(items[0].cardholder, 'A Lovelace');
     assert.equal(items[0].brand, 'Visa');
     assert.equal(items[0].last4, '4242');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('saving into the global vault is offered and honored', async () => {
@@ -164,7 +181,9 @@ test('saving into the global vault is offered and honored', async () => {
     assert.deepEqual(human.captureSave({ captureId: offer.captureId, vaultId: 'global' }), { saved: true });
     assert.equal(store.listItems('global').length, 1);
     assert.deepEqual(store.listItems('work'), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a vaultId outside the offered choices is refused', async () => {
@@ -172,11 +191,13 @@ test('a vaultId outside the offered choices is refused', async () => {
   try {
     const { human } = await makeHarness(dir);
     const offer = submit(human);
-    assert.deepEqual(
-      human.captureSave({ captureId: offer.captureId, vaultId: 'somewhere-else' }),
-      { saved: false, reason: 'invalid-vault' }
-    );
-  } finally { rm(dir); }
+    assert.deepEqual(human.captureSave({ captureId: offer.captureId, vaultId: 'somewhere-else' }), {
+      saved: false,
+      reason: 'invalid-vault'
+    });
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- update / no-op, keyed on the PAN -------------------------------------
@@ -189,7 +210,9 @@ test('re-submitting an UNCHANGED card raises no offer', async () => {
     human.captureSave({ captureId: first.captureId, vaultId: 'work' });
 
     assert.equal(submit(human), null, 'same PAN, CVV, expiry and cardholder → nothing to update');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a changed expiry on the SAME PAN offers an update against that item', async () => {
@@ -210,7 +233,9 @@ test('a changed expiry on the SAME PAN offers an update against that item', asyn
     assert.equal(after.length, 1, 'updated in place, not duplicated');
     assert.equal(after[0].id, stored.id);
     assert.equal(after[0].expiry, '01/30');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a DIFFERENT card sharing nothing is a fresh save, not an update', async () => {
@@ -224,7 +249,9 @@ test('a DIFFERENT card sharing nothing is a fresh save, not an update', async ()
     assert.equal(offer.model.mode, 'save');
     human.captureSave({ captureId: offer.captureId, vaultId: 'work' });
     assert.equal(store.listItems('work').length, 2, 'two distinct cards coexist');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('identity is the PAN, not the last4 — two cards ending 5556 stay distinct', async () => {
@@ -248,7 +275,9 @@ test('identity is the PAN, not the last4 — two cards ending 5556 stay distinct
     const items = store.listItems('work');
     assert.equal(items.length, 2);
     assert.deepEqual(items.map((i) => i.number).sort(), [a, b].sort());
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a stored PAN with formatting still matches an unformatted submit', async () => {
@@ -256,11 +285,19 @@ test('a stored PAN with formatting still matches an unformatted submit', async (
   try {
     const { store, human } = await makeHarness(dir);
     store.saveItem('work', {
-      type: 'card', title: 'Hand-entered', number: '4242 4242 4242 4242',
-      cvv: '123', expiry: '12/28', cardholder: 'A Lovelace', brand: 'Visa', last4: '4242',
+      type: 'card',
+      title: 'Hand-entered',
+      number: '4242 4242 4242 4242',
+      cvv: '123',
+      expiry: '12/28',
+      cardholder: 'A Lovelace',
+      brand: 'Visa',
+      last4: '4242'
     });
     assert.equal(submit(human), null, 'digits-compared identity → recognized as unchanged');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('an update MERGES, preserving the operator custom title and notes', async () => {
@@ -268,8 +305,15 @@ test('an update MERGES, preserving the operator custom title and notes', async (
   try {
     const { store, human } = await makeHarness(dir);
     store.saveItem('work', {
-      type: 'card', title: 'My travel card', notes: 'billing address is the office',
-      number: VISA, cvv: '123', expiry: '12/28', cardholder: 'A Lovelace', brand: 'Visa', last4: '4242',
+      type: 'card',
+      title: 'My travel card',
+      notes: 'billing address is the office',
+      number: VISA,
+      cvv: '123',
+      expiry: '12/28',
+      cardholder: 'A Lovelace',
+      brand: 'Visa',
+      last4: '4242'
     });
 
     const offer = submit(human, { cvv: '999' });
@@ -280,7 +324,9 @@ test('an update MERGES, preserving the operator custom title and notes', async (
     assert.equal(after.cvv, '999', 'the changed secret is written');
     assert.equal(after.title, 'My travel card', 'the custom title survives');
     assert.equal(after.notes, 'billing address is the office', 'notes survive');
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- locked-vault hold + finalize -----------------------------------------
@@ -303,7 +349,9 @@ test('a LOCKED vault holds the card and defers the disposition to finalize', asy
     assert.equal(finalized.model.mode, 'save');
     assert.deepEqual(human.captureSave({ captureId: offer.captureId, vaultId: 'work' }), { saved: true });
     assert.equal(store.listItems('work')[0].number, VISA);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 // --- record hygiene --------------------------------------------------------
@@ -317,7 +365,9 @@ test('dismiss drops the held record so a later save cannot resurrect it', async 
 
     assert.deepEqual(human.captureSave({ captureId: offer.captureId, vaultId: 'work' }), { saved: false });
     assert.deepEqual(store.listItems('work'), []);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('a re-submit on the same tab supersedes the prior held record', async () => {
@@ -335,7 +385,9 @@ test('a re-submit on the same tab supersedes the prior held record', async () =>
     );
     assert.deepEqual(human.captureSave({ captureId: second.captureId, vaultId: 'work' }), { saved: true });
     assert.equal(store.listItems('work').length, 1);
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });
 
 test('an idle lock between the offer and the save refuses rather than writing', async () => {
@@ -344,11 +396,13 @@ test('an idle lock between the offer and the save refuses rather than writing', 
     const { store, human } = await makeHarness(dir);
     const offer = submit(human);
     store.lockNow();
-    assert.deepEqual(
-      human.captureSave({ captureId: offer.captureId, vaultId: 'work' }),
-      { saved: false, reason: 'locked' }
-    );
-  } finally { rm(dir); }
+    assert.deepEqual(human.captureSave({ captureId: offer.captureId, vaultId: 'work' }), {
+      saved: false,
+      reason: 'locked'
+    });
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the incoming Uint8Arrays are zeroized by capture', async () => {
@@ -359,9 +413,17 @@ test('the incoming Uint8Arrays are zeroized by capture', async () => {
     const cvvBytes = enc('123');
     human.captureCard({ wcId: 10, numberBytes, cvvBytes, cardholder: 'A', expiry: '12/28' });
 
-    assert.ok(numberBytes.every((b) => b === 0), 'the PAN array is wiped');
-    assert.ok(cvvBytes.every((b) => b === 0), 'the CVV array is wiped');
-  } finally { rm(dir); }
+    assert.ok(
+      numberBytes.every((b) => b === 0),
+      'the PAN array is wiped'
+    );
+    assert.ok(
+      cvvBytes.every((b) => b === 0),
+      'the CVV array is wiped'
+    );
+  } finally {
+    rm(dir);
+  }
 });
 
 test('the incoming arrays are zeroized even when the offer is REFUSED', async () => {
@@ -372,7 +434,12 @@ test('the incoming arrays are zeroized even when the offer is REFUSED', async ()
     const cvvBytes = enc('123');
     assert.equal(human.captureCard({ wcId: 10, numberBytes, cvvBytes }), null);
 
-    assert.ok(numberBytes.every((b) => b === 0), 'a refused capture still wipes the PAN array');
+    assert.ok(
+      numberBytes.every((b) => b === 0),
+      'a refused capture still wipes the PAN array'
+    );
     assert.ok(cvvBytes.every((b) => b === 0));
-  } finally { rm(dir); }
+  } finally {
+    rm(dir);
+  }
 });

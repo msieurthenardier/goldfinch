@@ -136,9 +136,8 @@ export function renderVaultCaptureCard(document, refs, model) {
     const last4 = model && model.last4 != null && model.last4 !== '' ? `•••• ${model.last4}` : '';
     refs.usernameValue.textContent = [brand, last4].filter(Boolean).join('  ') || '(card)';
   } else {
-    refs.usernameValue.textContent = model && model.username != null && model.username !== ''
-      ? String(model.username)
-      : '(no username)';
+    refs.usernameValue.textContent =
+      model && model.username != null && model.username !== '' ? String(model.username) : '(no username)';
   }
   refs.error.textContent = '';
 
@@ -150,10 +149,17 @@ export function renderVaultCaptureCard(document, refs, model) {
     const list = Array.isArray(model && model.choices) ? model.choices : [];
     const def = model && model.defaultVaultId;
     list.forEach((c, i) => {
-      const vaultId = typeof c === 'string' ? c : (c && c.vaultId);
-      const labelText = typeof c === 'string'
-        ? (c === 'global' ? 'Global' : c)
-        : (c && c.label != null && c.label !== '' ? c.label : (c && c.vaultId === 'global' ? 'Global' : (c && c.vaultId)));
+      const vaultId = typeof c === 'string' ? c : c && c.vaultId;
+      const labelText =
+        typeof c === 'string'
+          ? c === 'global'
+            ? 'Global'
+            : c
+          : c && c.label != null && c.label !== ''
+            ? c.label
+            : c && c.vaultId === 'global'
+              ? 'Global'
+              : c && c.vaultId;
 
       const optLabel = document.createElement('label');
       optLabel.className = 'vault-capture-choice';

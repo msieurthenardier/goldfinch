@@ -142,7 +142,20 @@ function classifyContents(wc, chromeContents, isChromeContents) {
  * @returns {any} the live webContents
  * @throws {Error} with message prefixed 'automation: ' identifying which guard fired
  */
-function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, isTabViewWcId, isPopupWcId, isChromeContents, isSheetContents, allowSheet = false, sheetMenuFor }) {
+function resolveContents(
+  wcId,
+  {
+    fromId,
+    chromeContents,
+    allowInternal = false,
+    isTabViewWcId,
+    isPopupWcId,
+    isChromeContents,
+    isSheetContents,
+    allowSheet = false,
+    sheetMenuFor
+  }
+) {
   if (typeof wcId !== 'number') {
     throw new Error('automation: bad-handle — wcId must be a number, got ' + typeof wcId);
   }
@@ -195,11 +208,16 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
   // half-wired engine site) must REFUSE — never throw a TypeError from inside a live security
   // guard. Hence the explicit typeof check before the call.
   if (typeof isSheetContents === 'function' && isSheetContents(wc)) {
-    const admitted = allowSheet === true
-      && typeof sheetMenuFor === 'function'
-      && AUTOMATABLE_MENU_TYPES.has(sheetMenuFor(wc)?.menuType);
+    const admitted =
+      allowSheet === true &&
+      typeof sheetMenuFor === 'function' &&
+      AUTOMATABLE_MENU_TYPES.has(sheetMenuFor(wc)?.menuType);
     if (!admitted) {
-      throw new Error('automation: secret-sheet — wcId ' + wcId + ' is a chrome-owned secret/overlay sheet and is never automatable (any tier)');
+      throw new Error(
+        'automation: secret-sheet — wcId ' +
+          wcId +
+          ' is a chrome-owned secret/overlay sheet and is never automatable (any tier)'
+      );
     }
   }
 
@@ -213,7 +231,11 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
   // leave allowInternal false/undefined, so the internal session stays
   // ABSOLUTELY off-limits to them.
   if (!allowInternal && isInternalContents(wc)) {
-    throw new Error('automation: internal-session — wcId ' + wcId + ' belongs to the internal goldfinch://settings session and cannot be driven');
+    throw new Error(
+      'automation: internal-session — wcId ' +
+        wcId +
+        ' belongs to the internal goldfinch://settings session and cannot be driven'
+    );
   }
 
   // F8 DD8 (defense-in-depth): non-tab, non-chrome wcIds (chrome-class overlay
@@ -229,13 +251,18 @@ function resolveContents(wcId, { fromId, chromeContents, allowInternal = false, 
   // exclusion, chrome exclusion) applies to popups through the existing guards
   // untouched.
   if (
-    !allowInternal && typeof isTabViewWcId === 'function' &&
+    !allowInternal &&
+    typeof isTabViewWcId === 'function' &&
     wc !== chromeContents &&
     !(typeof isChromeContents === 'function' && isChromeContents(wc)) &&
     !isTabViewWcId(wcId) &&
     !(typeof isPopupWcId === 'function' && isPopupWcId(wcId))
   ) {
-    throw new Error('automation: non-tab-contents — wcId ' + wcId + ' is not a tab view (chrome-class overlay contents resolve only at the admin tier)');
+    throw new Error(
+      'automation: non-tab-contents — wcId ' +
+        wcId +
+        ' is not a tab view (chrome-class overlay contents resolve only at the admin tier)'
+    );
   }
 
   return wc;
@@ -294,15 +321,20 @@ function resolveContentsForJar(wcId, jar, deps) {
     (deps.chromeContents != null && wc === deps.chromeContents) ||
     (typeof deps.isChromeContents === 'function' && deps.isChromeContents(wc))
   ) {
-    throw new Error('automation: out-of-jar — wcId ' + wcId + ' is the chrome renderer and is not drivable by a jar key');
+    throw new Error(
+      'automation: out-of-jar — wcId ' + wcId + ' is the chrome renderer and is not drivable by a jar key'
+    );
   }
   if (!jar || wc.session !== deps.fromPartition(jar.partition)) {
-    throw new Error(
-      'automation: out-of-jar — wcId ' + wcId +
-      ' does not belong to jar ' + (jar ? jar.id : '(none)')
-    );
+    throw new Error('automation: out-of-jar — wcId ' + wcId + ' does not belong to jar ' + (jar ? jar.id : '(none)'));
   }
   return wc;
 }
 
-module.exports = { isInternalContents, classifyContents, resolveContents, resolveContentsForJar, AUTOMATABLE_MENU_TYPES };
+module.exports = {
+  isInternalContents,
+  classifyContents,
+  resolveContents,
+  resolveContentsForJar,
+  AUTOMATABLE_MENU_TYPES
+};

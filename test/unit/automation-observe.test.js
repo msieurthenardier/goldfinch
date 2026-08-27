@@ -18,14 +18,15 @@ const {
   evaluate,
   injectScript,
   openDevTools,
-  closeDevTools,
+  closeDevTools
 } = require('../../src/main/automation/observe');
 
 // The exact code string readDom is required to pass to executeJavaScript — kept in lockstep
 // with observe.js's module-level READ_DOM_SNIPPET const (a single-round-trip IIFE returning a
 // consistent { url, title, html } snapshot). Mirrored here byte-for-byte; the
 // 'snippet passed verbatim' test below asserts readDom evaluates this exact string.
-const EXPECTED_READ_DOM_SNIPPET = '(() => ({' +
+const EXPECTED_READ_DOM_SNIPPET =
+  '(() => ({' +
   ' url: location.href,' +
   ' title: document.title,' +
   ' html: document.documentElement ? document.documentElement.outerHTML : "" ' +
@@ -43,7 +44,11 @@ const CANNED_DOM = { url: 'https://example.test/page', title: 'Example', html: '
 // PNG bytes is deterministic — Buffer.from('PNGBYTES').toString('base64').
 const PNG_BYTES = 'PNGBYTES';
 function makeFakeImage() {
-  return { toPNG() { return Buffer.from(PNG_BYTES); } };
+  return {
+    toPNG() {
+      return Buffer.from(PNG_BYTES);
+    }
+  };
 }
 const EXPECTED_B64 = Buffer.from(PNG_BYTES).toString('base64');
 
@@ -51,18 +56,25 @@ function makeGuestWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     /** @type {number} */
     _captureCount: 0,
-    async capturePage() { this._captureCount += 1; return makeFakeImage(); },
+    async capturePage() {
+      this._captureCount += 1;
+      return makeFakeImage();
+    },
     // readDom fake: records the code string + counts calls, returns a canned snapshot.
     /** @type {number} */
     _execCount: 0,
     /** @type {string|null} */
     _lastExecCode: null,
     async executeJavaScript(/** @type {string} */ code) {
-      this._execCount += 1; this._lastExecCode = code; return { ...CANNED_DOM };
-    },
+      this._execCount += 1;
+      this._lastExecCode = code;
+      return { ...CANNED_DOM };
+    }
   };
 }
 
@@ -70,14 +82,21 @@ function makeInternalWc(id) {
   return {
     id,
     session: { __goldfinchInternal: true },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _captureCount: 0,
-    async capturePage() { this._captureCount += 1; return makeFakeImage(); },
+    async capturePage() {
+      this._captureCount += 1;
+      return makeFakeImage();
+    },
     _execCount: 0,
     _lastExecCode: null,
     async executeJavaScript(/** @type {string} */ code) {
-      this._execCount += 1; this._lastExecCode = code; return { ...CANNED_DOM };
-    },
+      this._execCount += 1;
+      this._lastExecCode = code;
+      return { ...CANNED_DOM };
+    }
   };
 }
 
@@ -85,14 +104,21 @@ function makeDestroyedWc(id) {
   return {
     id,
     session: { __goldfinchInternal: false },
-    isDestroyed() { return true; },
+    isDestroyed() {
+      return true;
+    },
     _captureCount: 0,
-    async capturePage() { this._captureCount += 1; return makeFakeImage(); },
+    async capturePage() {
+      this._captureCount += 1;
+      return makeFakeImage();
+    },
     _execCount: 0,
     _lastExecCode: null,
     async executeJavaScript(/** @type {string} */ code) {
-      this._execCount += 1; this._lastExecCode = code; return { ...CANNED_DOM };
-    },
+      this._execCount += 1;
+      this._lastExecCode = code;
+      return { ...CANNED_DOM };
+    }
   };
 }
 
@@ -118,23 +144,38 @@ const noopWaitForPaint = async () => {};
 function makeDebugger({ attachThrows = false, detachThrows = false, axNodes = [], sendImpl } = {}) {
   const log = [];
   return {
-    _log: log, _detached: 0, _attached: 0,
-    attach(/** @type {string} */ v) { log.push(['attach', v]); if (attachThrows) throw new Error('already attached'); this._attached++; },
-    detach() { log.push(['detach']); this._detached++; if (detachThrows) throw new Error('already detached'); },
-    isAttached() { return this._attached > this._detached; }, // parity with real API; unused by readAxTree (the Set is the lock)
+    _log: log,
+    _detached: 0,
+    _attached: 0,
+    attach(/** @type {string} */ v) {
+      log.push(['attach', v]);
+      if (attachThrows) throw new Error('already attached');
+      this._attached++;
+    },
+    detach() {
+      log.push(['detach']);
+      this._detached++;
+      if (detachThrows) throw new Error('already detached');
+    },
+    isAttached() {
+      return this._attached > this._detached;
+    }, // parity with real API; unused by readAxTree (the Set is the lock)
     sendCommand(/** @type {string} */ method, /** @type {any} */ params) {
       log.push(['send', method]);
       if (sendImpl) return sendImpl(method, params);
       if (method === 'Accessibility.getFullAXTree') return Promise.resolve({ nodes: axNodes });
       return Promise.resolve({});
-    },
+    }
   };
 }
 
 // A controllable deferred promise (for the concurrent-lock test's pending sendCommand).
 function makeDeferred() {
   let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
@@ -146,14 +187,19 @@ test('captureScreenshot: guest — activate called BEFORE capturePage (ordering 
   const guestWc = makeGuestWc(20);
   const callLog = [];
 
-  const activate = async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); };
+  const activate = async (/** @type {number} */ id) => {
+    callLog.push({ what: 'activate', id });
+  };
   const originalCapture = guestWc.capturePage.bind(guestWc);
-  guestWc.capturePage = async () => { callLog.push({ what: 'capturePage' }); return originalCapture(); };
+  guestWc.capturePage = async () => {
+    callLog.push({ what: 'capturePage' });
+    return originalCapture();
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 20: guestWc }),
-    chromeContents: null,  // guestWc is not === chromeContents → classified as guest
-    activate,
+    chromeContents: null, // guestWc is not === chromeContents → classified as guest
+    activate
   };
 
   const result = await captureScreenshot(20, deps, { waitForPaint: noopWaitForPaint });
@@ -169,12 +215,14 @@ test('captureScreenshot: guest — activate called BEFORE capturePage (ordering 
 test('captureScreenshot: guest — activate called exactly once with the wcId', async () => {
   const guestWc = makeGuestWc(21);
   const activateCalls = [];
-  const activate = async (/** @type {number} */ id) => { activateCalls.push(id); };
+  const activate = async (/** @type {number} */ id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 21: guestWc }),
     chromeContents: null,
-    activate,
+    activate
   };
 
   await captureScreenshot(21, deps, { waitForPaint: noopWaitForPaint });
@@ -201,7 +249,7 @@ test('captureScreenshot: RE-RESOLVE proof — the SECOND (post-activate) handle 
   const deps = {
     fromId,
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
   const result = await captureScreenshot(22, deps, { waitForPaint: noopWaitForPaint });
@@ -213,14 +261,16 @@ test('captureScreenshot: RE-RESOLVE proof — the SECOND (post-activate) handle 
 });
 
 test('captureScreenshot: chrome target — activate NOT called (chrome is always live)', async () => {
-  const chromeWc = makeGuestWc(1);  // this object will be chromeContents
+  const chromeWc = makeGuestWc(1); // this object will be chromeContents
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 1: chromeWc }),
-    chromeContents: chromeWc,  // classify as 'chrome'
-    activate,
+    chromeContents: chromeWc, // classify as 'chrome'
+    activate
   };
 
   const result = await captureScreenshot(1, deps, { waitForPaint: noopWaitForPaint });
@@ -256,12 +306,14 @@ test('captureScreenshot: dead (isDestroyed) wcId → throws no-such-contents, no
 test('captureScreenshot: internal-session wcId → throws, NEITHER activate NOR capturePage called', async () => {
   const internalWc = makeInternalWc(77);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 77: internalWc }),
     chromeContents: null,
-    activate,
+    activate
   };
 
   await assert.rejects(
@@ -281,7 +333,7 @@ test('captureScreenshot: returns the base64 of the PNG buffer', async () => {
   const deps = {
     fromId: makeFakeFromId({ 60: guestWc }),
     chromeContents: null,
-    activate: async () => {},
+    activate: async () => {}
   };
 
   const result = await captureScreenshot(60, deps, { waitForPaint: noopWaitForPaint });
@@ -303,18 +355,19 @@ test('captureScreenshot: capturePage that NEVER settles → REJECTS at the bound
   t.mock.timers.enable({ apis: ['setTimeout'] });
 
   const guestWc = makeGuestWc(70);
-  guestWc.capturePage = () => new Promise(() => {});   // never settles — the S3 model
+  guestWc.capturePage = () => new Promise(() => {}); // never settles — the S3 model
 
   const deps = { fromId: makeFakeFromId({ 70: guestWc }), chromeContents: null, activate: async () => {} };
 
   const p = captureScreenshot(70, deps, { waitForPaint: noopWaitForPaint });
   const assertion = assert.rejects(
     () => p,
-    (err) => err instanceof Error && /^automation: capture-timeout — wcId 70 did not settle within 3000ms/.test(err.message),
+    (err) =>
+      err instanceof Error && /^automation: capture-timeout — wcId 70 did not settle within 3000ms/.test(err.message)
   );
 
-  await new Promise((r) => setImmediate(r));   // let the op reach its await
-  t.mock.timers.tick(3000);                    // fire the bound
+  await new Promise((r) => setImmediate(r)); // let the op reach its await
+  t.mock.timers.tick(3000); // fire the bound
   await assertion;
 });
 
@@ -338,23 +391,28 @@ test('readDom: guest — activate is NEVER called, even when an activate dep IS 
   const guestWc = makeGuestWc(120);
   const callLog = [];
 
-  const activate = async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); };
+  const activate = async (/** @type {number} */ id) => {
+    callLog.push({ what: 'activate', id });
+  };
   guestWc.executeJavaScript = async (/** @type {string} */ code) => {
-    callLog.push({ what: 'executeJavaScript', code }); return { ...CANNED_DOM };
+    callLog.push({ what: 'executeJavaScript', code });
+    return { ...CANNED_DOM };
   };
 
   const deps = {
     fromId: makeFakeFromId({ 120: guestWc }),
-    chromeContents: null,  // guestWc is not === chromeContents → classified as guest
-    activate,
+    chromeContents: null, // guestWc is not === chromeContents → classified as guest
+    activate
   };
 
   const result = await readDom(120, deps);
 
-  assert.equal(callLog.filter((e) => e.what === 'activate').length, 0,
-    'activate must NOT be called: readDom reads a background guest without foregrounding it (DD6)');
-  assert.equal(callLog.filter((e) => e.what === 'executeJavaScript').length, 1,
-    'the read must still happen');
+  assert.equal(
+    callLog.filter((e) => e.what === 'activate').length,
+    0,
+    'activate must NOT be called: readDom reads a background guest without foregrounding it (DD6)'
+  );
+  assert.equal(callLog.filter((e) => e.what === 'executeJavaScript').length, 1, 'the read must still happen');
   assert.deepEqual(result, CANNED_DOM);
 });
 
@@ -389,14 +447,16 @@ test('readDom: chrome target — activate NOT called (chrome never classifies gu
   // rationale no longer operates — it now passes because readDom activates NOTHING. Kept
   // (not retired) as the chrome-target read regression, with the reason corrected so the
   // next reader is not misled about the mechanism.
-  const chromeWc = makeGuestWc(1);  // this object will be chromeContents
+  const chromeWc = makeGuestWc(1); // this object will be chromeContents
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 1: chromeWc }),
-    chromeContents: chromeWc,  // classify as 'chrome'
-    activate,
+    chromeContents: chromeWc, // classify as 'chrome'
+    activate
   };
 
   const result = await readDom(1, deps);
@@ -440,9 +500,11 @@ test('[F7 DD6] the observe read/act asymmetry: captureScreenshot + readAxTree AC
       wc,
       deps: {
         fromId: makeFakeFromId({ [id]: wc }),
-        chromeContents: null,                 // → classifies 'guest' for all four ops
-        activate: async (/** @type {number} */ i) => { calls[bucket].push(i); },
-      },
+        chromeContents: null, // → classifies 'guest' for all four ops
+        activate: async (/** @type {number} */ i) => {
+          calls[bucket].push(i);
+        }
+      }
     };
   };
 
@@ -491,12 +553,14 @@ test('readDom: dead (isDestroyed) wcId → throws no-such-contents, no read', as
 test('readDom: internal-session wcId → throws, NEITHER activate NOR executeJavaScript called', async () => {
   const internalWc = makeInternalWc(177);
   const activateCalls = [];
-  const activate = async (id) => { activateCalls.push(id); };
+  const activate = async (id) => {
+    activateCalls.push(id);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 177: internalWc }),
     chromeContents: null,
-    activate,
+    activate
   };
 
   await assert.rejects(
@@ -529,8 +593,11 @@ test('readDom: passes the exact READ_DOM_SNIPPET string to executeJavaScript', a
 
   await readDom(161, deps);
 
-  assert.equal(guestWc._lastExecCode, EXPECTED_READ_DOM_SNIPPET,
-    'readDom must pass the exact single-round-trip snapshot snippet to executeJavaScript');
+  assert.equal(
+    guestWc._lastExecCode,
+    EXPECTED_READ_DOM_SNIPPET,
+    'readDom must pass the exact single-round-trip snapshot snippet to executeJavaScript'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -539,7 +606,10 @@ test('readDom: passes the exact READ_DOM_SNIPPET string to executeJavaScript', a
 
 test('captureWindow: calls grabWindow() and returns its result', async () => {
   let called = false;
-  const grabWindow = async () => { called = true; return EXPECTED_B64; };
+  const grabWindow = async () => {
+    called = true;
+    return EXPECTED_B64;
+  };
   const result = await captureWindow({ grabWindow });
   assert.ok(called, 'grabWindow must be called');
   assert.equal(result, EXPECTED_B64);
@@ -574,10 +644,10 @@ test('captureWindow: grabWindow returning null → throws "automation: chrome wi
 // Canned AX nodes the happy-path fake returns (raw, no projection — DD4).
 const CANNED_AX_NODES = [
   { nodeId: '1', role: { value: 'RootWebArea' }, backendNodeId: 100 },
-  { nodeId: '2', role: { value: 'button' }, backendNodeId: 101 },
+  { nodeId: '2', role: { value: 'button' }, backendNodeId: 101 }
 ];
 
-test('readAxTree: happy path — attach(\'1.3\'), enable BEFORE getFullAXTree, returns nodes, detach in finally, lock released', async () => {
+test("readAxTree: happy path — attach('1.3'), enable BEFORE getFullAXTree, returns nodes, detach in finally, lock released", async () => {
   const dbg = makeDebugger({ axNodes: CANNED_AX_NODES });
   const guestWc = makeGuestWc(300);
   guestWc.debugger = dbg;
@@ -607,7 +677,11 @@ test('readAxTree: empty-tree success — { nodes: [] } returns [] (NOT a refusal
   const guestWc = makeGuestWc(301);
   guestWc.debugger = dbg;
 
-  const result = await readAxTree(301, { fromId: makeFakeFromId({ 301: guestWc }), chromeContents: null, activate: async () => {} });
+  const result = await readAxTree(301, {
+    fromId: makeFakeFromId({ 301: guestWc }),
+    chromeContents: null,
+    activate: async () => {}
+  });
 
   assert.ok(Array.isArray(result), 'empty tree must be an Array (a valid success), not a refusal object');
   assert.deepEqual(result, []);
@@ -616,14 +690,20 @@ test('readAxTree: empty-tree success — { nodes: [] } returns [] (NOT a refusal
 
 test('readAxTree: missing nodes ({}) returns [] (defensive empty-is-success)', async () => {
   // getFullAXTree resolves with no `nodes` key → defensive [] (empty is a valid success, DD4).
-  const dbg = makeDebugger({ sendImpl: (method) => {
-    if (method === 'Accessibility.getFullAXTree') return Promise.resolve({});
-    return Promise.resolve({});
-  } });
+  const dbg = makeDebugger({
+    sendImpl: (method) => {
+      if (method === 'Accessibility.getFullAXTree') return Promise.resolve({});
+      return Promise.resolve({});
+    }
+  });
   const guestWc = makeGuestWc(302);
   guestWc.debugger = dbg;
 
-  const result = await readAxTree(302, { fromId: makeFakeFromId({ 302: guestWc }), chromeContents: null, activate: async () => {} });
+  const result = await readAxTree(302, {
+    fromId: makeFakeFromId({ 302: guestWc }),
+    chromeContents: null,
+    activate: async () => {}
+  });
 
   assert.ok(Array.isArray(result));
   assert.deepEqual(result, []);
@@ -642,8 +722,11 @@ test('readAxTree: attach-throw refusal — returns { debugger-unavailable, attac
   assert.equal(dbg._detached, 0, 'never attached (attach threw) → never detached');
   // lock released — a subsequent call attempts attach again (and throws again → refusal)
   const second = await readAxTree(303, deps);
-  assert.deepEqual(second, { automation: 'debugger-unavailable', reason: 'attach-failed', wcId: 303 },
-    'lock must be released even on the attach-throw path');
+  assert.deepEqual(
+    second,
+    { automation: 'debugger-unavailable', reason: 'attach-failed', wcId: 303 },
+    'lock must be released even on the attach-throw path'
+  );
 });
 
 test('readAxTree: concurrent-lock refusal — second un-awaited call returns { locked }, attach called ONCE, lock released after', async () => {
@@ -651,17 +734,19 @@ test('readAxTree: concurrent-lock refusal — second un-awaited call returns { l
   // locked region. A second un-awaited call on the SAME wcId must hit the synchronous lock and
   // return the locked refusal WITHOUT a second attach.
   const deferred = makeDeferred();
-  const dbg = makeDebugger({ sendImpl: (method) => {
-    if (method === 'Accessibility.getFullAXTree') return deferred.promise;
-    return Promise.resolve({});
-  } });
+  const dbg = makeDebugger({
+    sendImpl: (method) => {
+      if (method === 'Accessibility.getFullAXTree') return deferred.promise;
+      return Promise.resolve({});
+    }
+  });
   const guestWc = makeGuestWc(304);
   guestWc.debugger = dbg;
 
   const deps = { fromId: makeFakeFromId({ 304: guestWc }), chromeContents: null, activate: async () => {} };
 
-  const firstP = readAxTree(304, deps);          // NOT awaited — parked on the deferred getFullAXTree
-  const second = await readAxTree(304, deps);    // hits the synchronous lock
+  const firstP = readAxTree(304, deps); // NOT awaited — parked on the deferred getFullAXTree
+  const second = await readAxTree(304, deps); // hits the synchronous lock
 
   assert.deepEqual(second, { automation: 'debugger-unavailable', reason: 'locked', wcId: 304 });
   const attachCount = dbg._log.filter((e) => e[0] === 'attach').length;
@@ -680,17 +765,22 @@ test('readAxTree: concurrent-lock refusal — second un-awaited call returns { l
 
 test('readAxTree: detach-on-sendCommand-error — getFullAXTree rejects → readAxTree REJECTS (propagates); detach ran; lock released', async () => {
   const boom = new Error('CDP getFullAXTree failed');
-  const dbg = makeDebugger({ sendImpl: (method) => {
-    if (method === 'Accessibility.getFullAXTree') return Promise.reject(boom);
-    return Promise.resolve({});
-  } });
+  const dbg = makeDebugger({
+    sendImpl: (method) => {
+      if (method === 'Accessibility.getFullAXTree') return Promise.reject(boom);
+      return Promise.resolve({});
+    }
+  });
   const guestWc = makeGuestWc(305);
   guestWc.debugger = dbg;
 
   const deps = { fromId: makeFakeFromId({ 305: guestWc }), chromeContents: null, activate: async () => {} };
 
   // post-attach sendCommand failure PROPAGATES (not a refusal — the debugger WAS available)
-  await assert.rejects(() => readAxTree(305, deps), (err) => err === boom);
+  await assert.rejects(
+    () => readAxTree(305, deps),
+    (err) => err === boom
+  );
   assert.equal(dbg._detached, 1, 'detach must run in the finally even when getFullAXTree rejects');
 
   // lock released — a subsequent (healthy) call succeeds
@@ -705,7 +795,11 @@ test('readAxTree: detach() throws on the happy path must not mask the result —
   const guestWc = makeGuestWc(306);
   guestWc.debugger = dbg;
 
-  const result = await readAxTree(306, { fromId: makeFakeFromId({ 306: guestWc }), chromeContents: null, activate: async () => {} });
+  const result = await readAxTree(306, {
+    fromId: makeFakeFromId({ 306: guestWc }),
+    chromeContents: null,
+    activate: async () => {}
+  });
 
   assert.deepEqual(result, CANNED_AX_NODES, 'a throwing detach() must not mask the success value');
   assert.equal(dbg._detached, 1, 'detach was attempted (and threw, but was swallowed)');
@@ -713,10 +807,13 @@ test('readAxTree: detach() throws on the happy path must not mask the result —
 
 test('readAxTree: detach() throws AND getFullAXTree rejects — the ORIGINAL sendCommand rejection propagates (not the detach error)', async () => {
   const boom = new Error('CDP getFullAXTree failed');
-  const dbg = makeDebugger({ detachThrows: true, sendImpl: (method) => {
-    if (method === 'Accessibility.getFullAXTree') return Promise.reject(boom);
-    return Promise.resolve({});
-  } });
+  const dbg = makeDebugger({
+    detachThrows: true,
+    sendImpl: (method) => {
+      if (method === 'Accessibility.getFullAXTree') return Promise.reject(boom);
+      return Promise.resolve({});
+    }
+  });
   const guestWc = makeGuestWc(307);
   guestWc.debugger = dbg;
 
@@ -724,7 +821,7 @@ test('readAxTree: detach() throws AND getFullAXTree rejects — the ORIGINAL sen
 
   await assert.rejects(
     () => readAxTree(307, deps),
-    (err) => err === boom,  // the ORIGINAL sendCommand rejection, NOT the detach 'already detached'
+    (err) => err === boom // the ORIGINAL sendCommand rejection, NOT the detach 'already detached'
   );
   assert.equal(dbg._detached, 1, 'detach was attempted in the finally');
 });
@@ -733,14 +830,19 @@ test('readAxTree: guest foreground — activate called BEFORE attach (ordering v
   const callLog = [];
   const dbg = makeDebugger({ axNodes: CANNED_AX_NODES });
   const origAttach = dbg.attach.bind(dbg);
-  dbg.attach = (v) => { callLog.push({ what: 'attach' }); origAttach(v); };
+  dbg.attach = (v) => {
+    callLog.push({ what: 'attach' });
+    origAttach(v);
+  };
   const guestWc = makeGuestWc(308);
   guestWc.debugger = dbg;
 
   const deps = {
     fromId: makeFakeFromId({ 308: guestWc }),
-    chromeContents: null,  // guestWc is not === chromeContents → classified as guest
-    activate: async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); },
+    chromeContents: null, // guestWc is not === chromeContents → classified as guest
+    activate: async (/** @type {number} */ id) => {
+      callLog.push({ what: 'activate', id });
+    }
   };
 
   await readAxTree(308, deps);
@@ -752,7 +854,7 @@ test('readAxTree: guest foreground — activate called BEFORE attach (ordering v
   assert.ok(activateIdx < attachIdx, 'activate must be called before attach');
 });
 
-test('readAxTree: RE-RESOLVE proof — the SECOND (post-activate) handle\'s debugger is the one attached', async () => {
+test("readAxTree: RE-RESOLVE proof — the SECOND (post-activate) handle's debugger is the one attached", async () => {
   // Counter-backed fromId returns a DISTINCT second handle on the re-resolve. The debugger that
   // attaches must be the SECOND handle's — proving the stale-handle re-resolve spans the lock.
   const firstHandle = makeGuestWc(309);
@@ -777,14 +879,16 @@ test('readAxTree: RE-RESOLVE proof — the SECOND (post-activate) handle\'s debu
 });
 
 test('readAxTree: chrome target — activate NOT called (chrome is always live)', async () => {
-  const chromeWc = makeGuestWc(1);  // this object will be chromeContents
+  const chromeWc = makeGuestWc(1); // this object will be chromeContents
   chromeWc.debugger = makeDebugger({ axNodes: CANNED_AX_NODES });
   const activateCalls = [];
 
   const deps = {
     fromId: makeFakeFromId({ 1: chromeWc }),
-    chromeContents: chromeWc,  // classify as 'chrome'
-    activate: async (id) => { activateCalls.push(id); },
+    chromeContents: chromeWc, // classify as 'chrome'
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   const result = await readAxTree(1, deps);
@@ -821,7 +925,9 @@ test('readAxTree: internal-session wcId → throws; NO attach AND the attached S
   const deps = {
     fromId: makeFakeFromId({ 377: internalWc }),
     chromeContents: null,
-    activate: async (id) => { activateCalls.push(id); },
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   await assert.rejects(
@@ -834,8 +940,16 @@ test('readAxTree: internal-session wcId → throws; NO attach AND the attached S
   // left holding 377; and a re-attempt on 377 still throws (never silently locked).
   const guestWc = makeGuestWc(378);
   guestWc.debugger = makeDebugger({ axNodes: CANNED_AX_NODES });
-  const ok = await readAxTree(378, { fromId: makeFakeFromId({ 378: guestWc }), chromeContents: null, activate: async () => {} });
-  assert.deepEqual(ok, CANNED_AX_NODES, 'a valid call after the internal-session reject still succeeds (lock untouched)');
+  const ok = await readAxTree(378, {
+    fromId: makeFakeFromId({ 378: guestWc }),
+    chromeContents: null,
+    activate: async () => {}
+  });
+  assert.deepEqual(
+    ok,
+    CANNED_AX_NODES,
+    'a valid call after the internal-session reject still succeeds (lock untouched)'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -854,13 +968,16 @@ function makeEvalGuestWc(id, retVal = { ok: 1 }, { internal = false } = {}) {
   return {
     id,
     session: { __goldfinchInternal: internal },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _execCount: 0,
     _lastExecCode: /** @type {string|null} */ (null),
     async executeJavaScript(/** @type {string} */ code) {
-      this._execCount += 1; this._lastExecCode = code;
+      this._execCount += 1;
+      this._lastExecCode = code;
       return typeof retVal === 'function' ? retVal(code) : retVal;
-    },
+    }
   };
 }
 
@@ -875,18 +992,26 @@ test('evaluate: guest — activate is NEVER called even when an activate dep IS 
   const guestWc = makeEvalGuestWc(400, { violations: 3 });
   const callLog = [];
   const origExec = guestWc.executeJavaScript.bind(guestWc);
-  guestWc.executeJavaScript = async (code) => { callLog.push({ what: 'exec', code }); return origExec(code); };
+  guestWc.executeJavaScript = async (code) => {
+    callLog.push({ what: 'exec', code });
+    return origExec(code);
+  };
 
   const deps = {
     fromId: makeFakeFromId({ 400: guestWc }),
     chromeContents: null,
-    activate: async (/** @type {number} */ id) => { callLog.push({ what: 'activate', id }); },
+    activate: async (/** @type {number} */ id) => {
+      callLog.push({ what: 'activate', id });
+    }
   };
 
   const result = await evaluate(400, 'axe.run(document)', deps);
 
-  assert.equal(callLog.filter((e) => e.what === 'activate').length, 0,
-    'activate must NOT be called: evaluate reads a background guest without foregrounding it (DD6)');
+  assert.equal(
+    callLog.filter((e) => e.what === 'activate').length,
+    0,
+    'activate must NOT be called: evaluate reads a background guest without foregrounding it (DD6)'
+  );
   assert.equal(callLog.filter((e) => e.what === 'exec').length, 1, 'the evaluation must still happen');
   assert.equal(guestWc._lastExecCode, 'axe.run(document)', 'the expression is passed verbatim');
   assert.deepEqual(result, { violations: 3 });
@@ -932,7 +1057,9 @@ test('evaluate: chrome target — activate NOT called (chrome never classifies g
   const deps = {
     fromId: makeFakeFromId({ 1: chromeWc }),
     chromeContents: chromeWc, // classify as chrome
-    activate: async (id) => { activateCalls.push(id); },
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   const result = await evaluate(1, 'x', deps);
@@ -951,16 +1078,21 @@ test('evaluate: non-JSON-serializable return → throws the EXACT DD2 message (n
 
   await assert.rejects(
     () => evaluate(403, 'x', deps),
-    (err) => err instanceof Error && err.message === 'automation: evaluate — return value is not JSON-serializable',
+    (err) => err instanceof Error && err.message === 'automation: evaluate — return value is not JSON-serializable'
   );
 });
 
 test('evaluate: in-page throw propagates (not swallowed)', async () => {
   const boom = new ReferenceError('axe is not defined');
-  const guestWc = makeEvalGuestWc(404, () => { throw boom; });
+  const guestWc = makeEvalGuestWc(404, () => {
+    throw boom;
+  });
   const deps = { fromId: makeFakeFromId({ 404: guestWc }), chromeContents: null, activate: async () => {} };
 
-  await assert.rejects(() => evaluate(404, 'axe.run(document)', deps), (err) => err === boom);
+  await assert.rejects(
+    () => evaluate(404, 'axe.run(document)', deps),
+    (err) => err === boom
+  );
 });
 
 test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
@@ -971,15 +1103,21 @@ test('[HIGH] evaluate: internal-session REFUSED even with allowInternal:true —
   const deps = {
     fromId: makeFakeFromId({ 405: internalWc }),
     chromeContents: null,
-    activate: async (id) => { activateCalls.push(id); },
-    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+    activate: async (id) => {
+      activateCalls.push(id);
+    },
+    allowInternal: true // admin relaxation — resolveContents would NOT throw
   };
 
   await assert.rejects(
     () => evaluate(405, 'document.title', deps),
-    (err) => err instanceof Error && err.message === 'automation: evaluate — internal-session excluded',
+    (err) => err instanceof Error && err.message === 'automation: evaluate — internal-session excluded'
   );
-  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run on the internal-session path (even for admin)');
+  assert.equal(
+    internalWc._execCount,
+    0,
+    'executeJavaScript must NOT run on the internal-session path (even for admin)'
+  );
   // F7 leg 2 / AC5 — THE GUARD DID NOT GO OUT WITH THE ACTIVATE BRANCH. DD6 deleted
   // evaluate's guest-activate block; this DD2-HIGH refusal was written to run "on the FINAL
   // wc, AFTER the (optional) activate branch", so a careless deletion could plausibly have
@@ -1008,7 +1146,9 @@ test('injectScript: does NOT call activate (intentional asymmetry vs evaluate) e
   const deps = {
     fromId: makeFakeFromId({ 411: guestWc }),
     chromeContents: null, // guest classification
-    activate: async (id) => { activateCalls.push(id); },
+    activate: async (id) => {
+      activateCalls.push(id);
+    }
   };
 
   await injectScript(411, 'x', deps);
@@ -1018,10 +1158,15 @@ test('injectScript: does NOT call activate (intentional asymmetry vs evaluate) e
 
 test('injectScript: in-page throw propagates (not swallowed)', async () => {
   const boom = new SyntaxError('bad script');
-  const guestWc = makeEvalGuestWc(412, () => { throw boom; });
+  const guestWc = makeEvalGuestWc(412, () => {
+    throw boom;
+  });
   const deps = { fromId: makeFakeFromId({ 412: guestWc }), chromeContents: null, activate: async () => {} };
 
-  await assert.rejects(() => injectScript(412, 'oops(', deps), (err) => err === boom);
+  await assert.rejects(
+    () => injectScript(412, 'oops(', deps),
+    (err) => err === boom
+  );
 });
 
 test('[HIGH] injectScript: internal-session REFUSED even with allowInternal:true — no executeJavaScript', async () => {
@@ -1029,14 +1174,18 @@ test('[HIGH] injectScript: internal-session REFUSED even with allowInternal:true
   const deps = {
     fromId: makeFakeFromId({ 413: internalWc }),
     chromeContents: null,
-    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+    allowInternal: true // admin relaxation — resolveContents would NOT throw
   };
 
   await assert.rejects(
     () => injectScript(413, 'window.x = 1;', deps),
-    (err) => err instanceof Error && err.message === 'automation: injectScript — internal-session excluded',
+    (err) => err instanceof Error && err.message === 'automation: injectScript — internal-session excluded'
   );
-  assert.equal(internalWc._execCount, 0, 'executeJavaScript must NOT run on the internal-session path (even for admin)');
+  assert.equal(
+    internalWc._execCount,
+    0,
+    'executeJavaScript must NOT run on the internal-session path (even for admin)'
+  );
 });
 
 test('injectScript: bad-handle (non-number wcId) → throws bad-handle, no exec', async () => {
@@ -1044,7 +1193,7 @@ test('injectScript: bad-handle (non-number wcId) → throws bad-handle, no exec'
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => injectScript('410', 'x', deps),
-    (err) => err instanceof Error && err.message.includes('automation: bad-handle'),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle')
   );
 });
 
@@ -1065,12 +1214,20 @@ function makeDevToolsWc(id, { internal = false } = {}) {
   return {
     id,
     session: { __goldfinchInternal: internal },
-    isDestroyed() { return false; },
+    isDestroyed() {
+      return false;
+    },
     _openCalls: /** @type {any[]} */ ([]),
     _closeCount: 0,
     devToolsOpen: false,
-    openDevTools(/** @type {any} */ opts) { this._openCalls.push(opts); this.devToolsOpen = true; },
-    closeDevTools() { this._closeCount += 1; this.devToolsOpen = false; },
+    openDevTools(/** @type {any} */ opts) {
+      this._openCalls.push(opts);
+      this.devToolsOpen = true;
+    },
+    closeDevTools() {
+      this._closeCount += 1;
+      this.devToolsOpen = false;
+    }
   };
 }
 
@@ -1091,7 +1248,9 @@ test('openDevTools: does NOT activate (DevTools attaches regardless of paint) �
   const deps = {
     fromId: makeFakeFromId({ 501: wc }),
     chromeContents: null, // guest classification
-    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+    activate: async (/** @type {number} */ id) => {
+      activateCalls.push(id);
+    }
   };
   await openDevTools(501, deps);
   assert.equal(activateCalls.length, 0, 'openDevTools must skip foreground-to-act — activate must NEVER be called');
@@ -1103,7 +1262,7 @@ test('openDevTools: bad-handle (non-number wcId) → throws bad-handle, no openD
   await assert.rejects(
     // @ts-expect-error — intentionally passing wrong type
     () => openDevTools('500', deps),
-    (err) => err instanceof Error && err.message.includes('automation: bad-handle'),
+    (err) => err instanceof Error && err.message.includes('automation: bad-handle')
   );
 });
 
@@ -1115,13 +1274,17 @@ test('[HIGH] openDevTools: internal-session REFUSED even with allowInternal:true
   const deps = {
     fromId: makeFakeFromId({ 502: internalWc }),
     chromeContents: null,
-    allowInternal: true, // admin relaxation — resolveContents would NOT throw
+    allowInternal: true // admin relaxation — resolveContents would NOT throw
   };
   await assert.rejects(
     () => openDevTools(502, deps),
-    (err) => err instanceof Error && err.message === 'automation: openDevTools — internal-session excluded',
+    (err) => err instanceof Error && err.message === 'automation: openDevTools — internal-session excluded'
   );
-  assert.equal(internalWc._openCalls.length, 0, 'openDevTools must NOT run on the internal-session path (even for admin)');
+  assert.equal(
+    internalWc._openCalls.length,
+    0,
+    'openDevTools must NOT run on the internal-session path (even for admin)'
+  );
 });
 
 // --- closeDevTools ---
@@ -1150,7 +1313,9 @@ test('closeDevTools: does NOT activate', async () => {
   const deps = {
     fromId: makeFakeFromId({ 512: wc }),
     chromeContents: null,
-    activate: async (/** @type {number} */ id) => { activateCalls.push(id); },
+    activate: async (/** @type {number} */ id) => {
+      activateCalls.push(id);
+    }
   };
   await closeDevTools(512, deps);
   assert.equal(activateCalls.length, 0, 'closeDevTools must skip foreground-to-act');
@@ -1161,11 +1326,11 @@ test('[HIGH] closeDevTools: internal-session REFUSED even with allowInternal:tru
   const deps = {
     fromId: makeFakeFromId({ 513: internalWc }),
     chromeContents: null,
-    allowInternal: true,
+    allowInternal: true
   };
   await assert.rejects(
     () => closeDevTools(513, deps),
-    (err) => err instanceof Error && err.message === 'automation: closeDevTools — internal-session excluded',
+    (err) => err instanceof Error && err.message === 'automation: closeDevTools — internal-session excluded'
   );
   assert.equal(internalWc._closeCount, 0, 'closeDevTools must NOT run on the internal-session path (even for admin)');
 });

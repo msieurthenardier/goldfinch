@@ -14,7 +14,13 @@ const assert = require('node:assert/strict');
 const { validateMoveTabPayload, buildAdoptPayload } = require('../../src/main/move-tab-payload');
 
 const CONTAINER = { id: 'work', name: 'Work', color: '#f00', partition: 'persist:work' };
-const GOOD = { wcId: 7, url: 'https://a.example/', title: 'A', favicon: 'https://a.example/f.ico', container: CONTAINER };
+const GOOD = {
+  wcId: 7,
+  url: 'https://a.example/',
+  title: 'A',
+  favicon: 'https://a.example/f.ico',
+  container: CONTAINER
+};
 
 // --- validateMoveTabPayload ---------------------------------------------------
 
@@ -25,7 +31,7 @@ test('a well-formed payload validates and normalizes to only the known fields', 
     url: 'https://a.example/',
     title: 'A',
     favicon: 'https://a.example/f.ico',
-    container: { id: 'work', name: 'Work', color: '#f00', partition: 'persist:work' },
+    container: { id: 'work', name: 'Work', color: '#f00', partition: 'persist:work' }
   });
   assert.equal('extra' in p, false);
 });
@@ -88,7 +94,7 @@ test('malformed payloads are refused with null, never a throw', () => {
     { ...GOOD, container: null },
     { ...GOOD, container: 'work' },
     { ...GOOD, container: { ...CONTAINER, partition: 42 } },
-    { ...GOOD, container: { id: 'work' } },
+    { ...GOOD, container: { id: 'work' } }
   ];
   for (const payload of bad) {
     assert.doesNotThrow(() => {
@@ -98,12 +104,7 @@ test('malformed payloads are refused with null, never a throw', () => {
 });
 
 test('an unsafe container color is refused (squawk 0020 — color rides into a chrome innerHTML style sink)', () => {
-  const unsafe = [
-    '"><script>alert(1)</script>',
-    'red;background:url(javascript:alert(1))',
-    'javascript:alert(1)',
-    '',
-  ];
+  const unsafe = ['"><script>alert(1)</script>', 'red;background:url(javascript:alert(1))', 'javascript:alert(1)', ''];
   for (const color of unsafe) {
     assert.equal(
       validateMoveTabPayload({ ...GOOD, container: { ...CONTAINER, color } }),
@@ -125,7 +126,7 @@ test('adopt payload takes MAIN-AUTHORITATIVE url/title from the live wc at send 
     url: 'https://a.example/deep',
     title: 'Deep A',
     favicon: 'https://a.example/f.ico',
-    container: p.container,
+    container: p.container
   });
 });
 

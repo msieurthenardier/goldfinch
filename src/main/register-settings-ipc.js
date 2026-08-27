@@ -23,11 +23,11 @@ function registerSettingsIpc({
   mintAdminKey,
   revokeAdminKey,
   getMcpServer,
-  adminEnabled,
+  adminEnabled
 }) {
   const broadcastSettings = () => broadcast('settings-changed', settings.getAll());
 
-  ipcMain.handle('settings-get', (_event, key) => key ? settings.get(key) : settings.getAll());
+  ipcMain.handle('settings-get', (_event, key) => (key ? settings.get(key) : settings.getAll()));
   ipcMain.handle('shields-get', () => shields.get());
   ipcMain.handle('shields-set', (_event, patch) => {
     const config = shields.set(patch || {});
@@ -123,7 +123,7 @@ function registerSettingsIpc({
         hasKey: !!hashes[jar.id]
       })),
       adminEnabled: !!adminEnabled(),
-      adminKeySet: (settings.get('automationAdminKeyHash') || '') !== '',
+      adminKeySet: (settings.get('automationAdminKeyHash') || '') !== ''
     };
   });
   registerInternalHandler(ipcMain, 'automation:jar-key-mint', (_event, jarId) => {

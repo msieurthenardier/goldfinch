@@ -105,9 +105,7 @@ test('show applies stored bounds, then addChildView, then setVisible(true)', () 
   assert.deepEqual(v.calls[0], ['setBounds', bounds], 'stored bounds applied on show');
   // Ordering: setBounds (view) → addChildView (contentView) → setVisible (view).
   // The contentView add must precede setVisible(true).
-  const setVisibleIdx = v.calls.findIndex(
-    (c) => c[0] === 'setVisible' && c[1] === true
-  );
+  const setVisibleIdx = v.calls.findIndex((c) => c[0] === 'setVisible' && c[1] === true);
   assert.ok(setVisibleIdx >= 0, 'setVisible(true) called');
   assert.equal(cv.calls.length, 1, 'one addChildView');
   assert.equal(cv.calls[0][0], 'addChildView');
@@ -262,11 +260,7 @@ test('teardown destroys the webContents, resets state; later show recreates', ()
   );
   assert.equal(mgr.getView(), null);
   assert.equal(mgr.isVisible(), false);
-  assert.equal(
-    cv.calls.filter((c) => c[0] === 'removeChildView').length,
-    1,
-    'removed from the stack while visible'
-  );
+  assert.equal(cv.calls.filter((c) => c[0] === 'removeChildView').length, 1, 'removed from the stack while visible');
   mgr.show();
   assert.equal(createdViews.length, 2, 'later show recreated the view');
 });
@@ -497,7 +491,16 @@ test('focusChrome runs for escape/activated/input-empty only (reason-resolved ma
     mgr.closeMenuOverlay(reason);
     assert.equal(focusChromeCalls, 1, `focusChrome ran for '${reason}'`);
   }
-  for (const reason of ['blur', 'toggle', 'outside-click', 'superseded', 'tab-switch', 'tab-hide', 'tab-close', 'teardown']) {
+  for (const reason of [
+    'blur',
+    'toggle',
+    'outside-click',
+    'superseded',
+    'tab-switch',
+    'tab-hide',
+    'tab-close',
+    'teardown'
+  ]) {
     setupProto();
     readySheet();
     mgr.openMenu(payloadFor(1));
@@ -514,7 +517,9 @@ test('input-empty closes the focused sheet and restores chrome WebContents focus
   assert.equal(mgr.isVisible(), false);
   assert.equal(focusChromeCalls, 1);
   assert.deepEqual(closes()[0][1], {
-    menuType: 'downloads', reason: 'input-empty', token: 9
+    menuType: 'downloads',
+    reason: 'input-empty',
+    token: 9
   });
 });
 
@@ -531,7 +536,18 @@ test('the DD5 hook receives EVERY close reason (the tab-lifecycle skip lives in 
     if (reason === 'tab-switch' || reason === 'tab-hide' || reason === 'tab-close') return;
     restores++; // stands in for `if (isFindOverlayActive(activeTabWcId)) showFindOverlay()`
   };
-  const allReasons = ['escape', 'outside-click', 'blur', 'toggle', 'activated', 'superseded', 'tab-switch', 'tab-hide', 'tab-close', 'teardown'];
+  const allReasons = [
+    'escape',
+    'outside-click',
+    'blur',
+    'toggle',
+    'activated',
+    'superseded',
+    'tab-switch',
+    'tab-hide',
+    'tab-close',
+    'teardown'
+  ];
   for (const reason of allReasons) {
     cv = makeFakeContentView();
     createdViews = [];
@@ -667,11 +683,7 @@ test('show() itself still never focuses the sheet — focus enters ONLY via open
   const focusesAfterOpen = v.calls.filter((c) => c[0] === 'focus').length;
   mgr.show(); // tab-set-active same-tab re-add path
   mgr.show();
-  assert.equal(
-    v.calls.filter((c) => c[0] === 'focus').length,
-    focusesAfterOpen,
-    're-add/show never adds focus calls'
-  );
+  assert.equal(v.calls.filter((c) => c[0] === 'focus').length, focusesAfterOpen, 're-add/show never adds focus calls');
 });
 
 // ===========================================================================
@@ -782,7 +794,11 @@ test('DD7: SAME-window model-replace does not detach/re-hide (no flicker regress
   const att = makeAttachment();
   mgr.openMenu(payloadFor(1, 'suggestions'), att);
   mgr.openMenu(payloadFor(2, 'suggestions'), { contentView: att.contentView, win: att.win, bounds: null });
-  assert.equal(att.contentView.calls.filter((c) => c[0] === 'removeChildView').length, 0, 'no detach on same-window replace');
+  assert.equal(
+    att.contentView.calls.filter((c) => c[0] === 'removeChildView').length,
+    0,
+    'no detach on same-window replace'
+  );
   assert.equal(hideFindCalls, 1, 'find-hide once per session (per-keystroke replaces stay cheap)');
 });
 
@@ -841,11 +857,17 @@ function setupObserved() {
 
 test('onClosed fires on the closeMenuOverlay path, after the channel-7 emit, with isMenuOpen already false', () => {
   let openAtObserve = null;
-  const events = setupObservedWithProbe((v) => { openAtObserve = v; });
+  const events = setupObservedWithProbe((v) => {
+    openAtObserve = v;
+  });
   mgr.openMenu({ menuType: 'auth-basic', model: [], anchor: null, token: 1 });
   mgr.closeMenuOverlay('escape');
   assert.deepEqual(events, [{ menuType: 'auth-basic', reason: 'escape' }]);
-  assert.equal(openAtObserve, false, 'currentMenu is already null when the observer runs — a re-open sees isMenuOpen false');
+  assert.equal(
+    openAtObserve,
+    false,
+    'currentMenu is already null when the observer runs — a re-open sees isMenuOpen false'
+  );
 });
 
 // Helper for the probe variant above: rebuild the manager with an observer that
@@ -874,8 +896,11 @@ test("onClosed fires on openMenu's model-replace branch with reason 'superseded'
   mgr.openMenu({ menuType: 'auth-basic', model: [], anchor: null, token: 1 });
   assert.deepEqual(closedEvents, [], 'no close yet');
   mgr.openMenu({ menuType: 'kebab', model: [], anchor: null, token: 2 });
-  assert.deepEqual(closedEvents, [{ menuType: 'auth-basic', reason: 'superseded' }],
-    'the superseded menu reaches the observer even though closeMenuOverlay never ran');
+  assert.deepEqual(
+    closedEvents,
+    [{ menuType: 'auth-basic', reason: 'superseded' }],
+    'the superseded menu reaches the observer even though closeMenuOverlay never ran'
+  );
   mgr.closeMenuOverlay('escape');
   assert.deepEqual(closedEvents.at(-1), { menuType: 'kebab', reason: 'escape' });
 });
@@ -934,12 +959,12 @@ test('DD1f: a SOFT dismiss that a dismissible:false card REFUSES does not scrub 
   setupProto();
   readySheet();
   mgr.openMenu({ ...payloadFor(1, 'vault-recovery-show'), dismissible: false });
-  mgr.closeMenuOverlay('escape');   // refused by the DD5 non-dismissible guard
+  mgr.closeMenuOverlay('escape'); // refused by the DD5 non-dismissible guard
   assert.equal(mgr.isMenuOpen(), true, 'the card is still open');
   assert.equal(scrubSends(createdViews[0]).length, 0, 'nothing closed, so nothing to scrub');
 });
 
-test('DD1f: the scrub is queued to the sheet BEFORE any subsequent open\'s init', () => {
+test("DD1f: the scrub is queued to the sheet BEFORE any subsequent open's init", () => {
   setupProto();
   readySheet();
   mgr.openMenu(payloadFor(1, 'vault-recovery-show'));
@@ -949,9 +974,11 @@ test('DD1f: the scrub is queued to the sheet BEFORE any subsequent open\'s init'
   const lastScrub = channels.lastIndexOf('menu-overlay:close');
   const secondInit = channels.lastIndexOf('menu-overlay:init');
   assert.ok(lastScrub !== -1 && secondInit !== -1, 'both messages were sent');
-  assert.ok(lastScrub < secondInit,
+  assert.ok(
+    lastScrub < secondInit,
     'the scrub must precede the next init on the wire — that ordering is what makes the ' +
-    'allowlisted-menuType admission sound');
+      'allowlisted-menuType admission sound'
+  );
 });
 
 test('DD1f: an idempotent no-op close (no menu open) sends no scrub', () => {

@@ -24,11 +24,11 @@ Module._cache[electronResolved] = {
   loaded: true,
   exports: {
     webContents: { fromId: () => null },
-    session: { fromPartition: () => null },
+    session: { fromPartition: () => null }
   },
   parent: null,
   children: [],
-  paths: [],
+  paths: []
 };
 
 const { createEngine } = require('../../src/main/automation/engine');
@@ -47,7 +47,7 @@ function makeAccessors({ known = ['personal', 'work'] } = {}) {
     search: (jarId, query, opts) => {
       calls.search.push([jarId, query, opts]);
       return [{ id: 2, jarId, url: 'https://match', query }];
-    },
+    }
   };
   const isKnownJar = (jarId) => known.includes(jarId);
   return { getHistoryReads, isKnownJar, calls };
@@ -56,7 +56,7 @@ function makeAccessors({ known = ['personal', 'work'] } = {}) {
 function makeEngine(accessors) {
   return createEngine(() => null, {
     getHistoryReads: accessors.getHistoryReads,
-    isKnownJar: accessors.isKnownJar,
+    isKnownJar: accessors.isKnownJar
   });
 }
 
@@ -105,7 +105,10 @@ test('getHistory: query present routes to search(jarId, query, { limit }) — be
   const res = engine.getHistory('personal', { query: 'hello', limit: 25 });
   assert.deepEqual(accessors.calls.search, [['personal', 'hello', { limit: 25 }]]);
   assert.equal(accessors.calls.listRecent.length, 0);
-  assert.deepEqual(res, { jarId: 'personal', visits: [{ id: 2, jarId: 'personal', url: 'https://match', query: 'hello' }] });
+  assert.deepEqual(res, {
+    jarId: 'personal',
+    visits: [{ id: 2, jarId: 'personal', url: 'https://match', query: 'hello' }]
+  });
 });
 
 test('getHistory: absent query routes to listRecent(jarId, { limit, before }) — before passthrough', () => {
@@ -132,7 +135,7 @@ test('getHistory: no opts arg at all defaults to a recent listing with limit/bef
   assert.deepEqual(accessors.calls.listRecent, [['personal', { limit: undefined, before: undefined }]]);
 });
 
-test('getHistory: result shape is always exactly { jarId, visits }, visits is the store\'s return verbatim', () => {
+test("getHistory: result shape is always exactly { jarId, visits }, visits is the store's return verbatim", () => {
   const accessors = makeAccessors();
   const engine = makeEngine(accessors);
   const res = engine.getHistory('personal', {});

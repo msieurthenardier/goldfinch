@@ -36,11 +36,13 @@ const { isBurnerPartition } = require('../shared/burner');
  * @returns {boolean}
  */
 function qualifiesAsPopupRequest({ url, frameName, features, disposition }, { isSafeTabUrl, isInternalOpener }) {
-  return disposition === 'new-window'
-    && ((typeof features === 'string' && features.length > 0)
-      || (typeof frameName === 'string' && frameName !== '' && frameName !== '_blank'))
-    && isSafeTabUrl(url)
-    && !isInternalOpener;
+  return (
+    disposition === 'new-window' &&
+    ((typeof features === 'string' && features.length > 0) ||
+      (typeof frameName === 'string' && frameName !== '' && frameName !== '_blank')) &&
+    isSafeTabUrl(url) &&
+    !isInternalOpener
+  );
 }
 
 /**
@@ -154,10 +156,12 @@ function createGuestWiring(deps) {
     contents.setWindowOpenHandler((details) => {
       const { url } = details;
       const { owner, popupEntry } = resolveOpenerOwner(contents);
-      const qualifies = owner != null && qualifiesAsPopupRequest(details, {
-        isSafeTabUrl,
-        isInternalOpener: !!contents.session?.__goldfinchInternal
-      });
+      const qualifies =
+        owner != null &&
+        qualifiesAsPopupRequest(details, {
+          isSafeTabUrl,
+          isInternalOpener: !!contents.session?.__goldfinchInternal
+        });
       if (qualifies) {
         return {
           action: 'allow',
@@ -185,9 +189,7 @@ function createGuestWiring(deps) {
         // Popup opener: forward to the owning window's chrome (chromeForTab
         // misses by construction — popups are not in tabViews) with the
         // partition captured at register time. Dead owner → plain deny.
-        const chrome = owner && !owner.chromeView.webContents.isDestroyed()
-          ? owner.chromeView.webContents
-          : null;
+        const chrome = owner && !owner.chromeView.webContents.isDestroyed() ? owner.chromeView.webContents : null;
         chrome?.send('open-tab', { url, openerPartition: popupEntry.partition });
         return { action: 'deny' };
       }
@@ -273,9 +275,7 @@ function createGuestWiring(deps) {
       // Partition captured EAGERLY (leg 2's census/attribution needs it after
       // the opener tab dies). Chained popups parent FLAT to the same
       // openerRecord and inherit its captured partition (named simplification).
-      const partition = parentEntry
-        ? parentEntry.partition
-        : openerRecord.tabViews.get(contents.id)?.partition;
+      const partition = parentEntry ? parentEntry.partition : openerRecord.tabViews.get(contents.id)?.partition;
       const popupWcId = popupWc.id;
 
       // Squawk 0036 (#104 carve-out, burner-hardening invariant): a popup
@@ -428,31 +428,55 @@ function createGuestWiring(deps) {
   function wireTabViewEvents(view, wcId, partition) {
     const wc = view.webContents;
     const sendToChrome = (channel, payload) => chromeForTab(wcId)?.send(channel, payload);
-    const guard = (fn) => (...args) => { if (!wc.isDestroyed()) fn(...args); };
+    const guard =
+      (fn) =>
+      (...args) => {
+        if (!wc.isDestroyed()) fn(...args);
+      };
 
     // M14 F1 L2 (DD2): navigation-away is a pending-auth-challenge RESOLUTION
     // trigger — main-frame, non-same-document navigations only (a hash change
     // or an in-page pushState must not cancel a live prompt; subframe
     // navigation is unrelated to the top-level challenge's fate). Max
     // challenge staleness is therefore one navigation.
-    wc.on('did-start-navigation', guard((e) => {
-      if (e.isMainFrame && !e.isSameDocument) authChallenges.cancelForTab(wcId, 'navigated');
-    }));
-    wc.on('did-navigate', guard(() => {
-      sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
-      getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
-    }));
-    wc.on('did-navigate-in-page', guard(() => {
-      sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
-      getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
-    }));
-    wc.on('page-title-updated', guard((_event, title) => {
-      sendToChrome('tab-title', { wcId, title });
-      getHistoryRecorder()?.handleTitleUpdated(wcId, title);
-      if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
-    }));
+    wc.on(
+      'did-start-navigation',
+      guard((e) => {
+        if (e.isMainFrame && !e.isSameDocument) authChallenges.cancelForTab(wcId, 'navigated');
+      })
+    );
+    wc.on(
+      'did-navigate',
+      guard(() => {
+        sendToChrome('tab-did-navigate', { wcId, url: wc.getURL() });
+        sendToChrome('tab-nav-state', {
+          wcId,
+          canGoBack: wc.navigationHistory.canGoBack(),
+          canGoForward: wc.navigationHistory.canGoForward()
+        });
+        getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
+      })
+    );
+    wc.on(
+      'did-navigate-in-page',
+      guard(() => {
+        sendToChrome('tab-did-navigate-in-page', { wcId, url: wc.getURL() });
+        sendToChrome('tab-nav-state', {
+          wcId,
+          canGoBack: wc.navigationHistory.canGoBack(),
+          canGoForward: wc.navigationHistory.canGoForward()
+        });
+        getHistoryRecorder()?.handleNavigation({ wcId, partition, url: wc.getURL() });
+      })
+    );
+    wc.on(
+      'page-title-updated',
+      guard((_event, title) => {
+        sendToChrome('tab-title', { wcId, title });
+        getHistoryRecorder()?.handleTitleUpdated(wcId, title);
+        if (registry.getWindowForGuest(wcId)?.activeTabWcId === wcId) broadcastMoveTargetsChanged();
+      })
+    );
     // Mission 13 Flight 1 / Leg 1 (DD1): favicons are fetched MAIN-SIDE in the
     // guest's own jar session (never the jar registry — burner partitions exist
     // only renderer-side) and delivered as a size-capped data: URL. Nothing
@@ -461,37 +485,59 @@ function createGuestWiring(deps) {
     // time; sendToChrome resolves the chrome at SEND time, so a tab closed
     // mid-fetch simply drops the send (forget(wcId) at teardown prevents the
     // per-tab sequence map from growing unbounded).
-    wc.on('page-favicon-updated', guard((_event, favicons) => {
-      faviconFetcher
-        .request({ wcId, favicons, fetchImpl: (url) => wc.session.fetch(url) })
-        .then((dataUrl) => {
-          if (dataUrl) sendToChrome('tab-favicon', { wcId, favicons: [dataUrl] });
-        })
-        .catch(() => {});
-    }));
-    wc.on('did-start-loading', guard(() => {
-      sendToChrome('tab-loading', { wcId, loading: true });
-    }));
-    wc.on('did-stop-loading', guard(() => {
-      sendToChrome('tab-loading', { wcId, loading: false });
-    }));
-    wc.on('did-finish-load', guard(() => {
-      sendToChrome('tab-did-finish-load', { wcId });
-      sendToChrome('tab-nav-state', { wcId, canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward() });
-    }));
-    wc.on('dom-ready', guard(() => {
-      sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
-    }));
-    wc.on('found-in-page', guard((_event, result) => {
-      const findOverlay = registry.getWindowForGuest(wcId)?.findOverlay;
-      if (!findOverlay || !findOverlay.isSessionActive(wcId)) return;
-      const overlayView = findOverlay.getView();
-      if (!overlayView || overlayView.webContents.isDestroyed()) return;
-      overlayView.webContents.send?.('find-overlay:count', {
-        activeMatchOrdinal: result.activeMatchOrdinal,
-        matches: result.matches
-      });
-    }));
+    wc.on(
+      'page-favicon-updated',
+      guard((_event, favicons) => {
+        faviconFetcher
+          .request({ wcId, favicons, fetchImpl: (url) => wc.session.fetch(url) })
+          .then((dataUrl) => {
+            if (dataUrl) sendToChrome('tab-favicon', { wcId, favicons: [dataUrl] });
+          })
+          .catch(() => {});
+      })
+    );
+    wc.on(
+      'did-start-loading',
+      guard(() => {
+        sendToChrome('tab-loading', { wcId, loading: true });
+      })
+    );
+    wc.on(
+      'did-stop-loading',
+      guard(() => {
+        sendToChrome('tab-loading', { wcId, loading: false });
+      })
+    );
+    wc.on(
+      'did-finish-load',
+      guard(() => {
+        sendToChrome('tab-did-finish-load', { wcId });
+        sendToChrome('tab-nav-state', {
+          wcId,
+          canGoBack: wc.navigationHistory.canGoBack(),
+          canGoForward: wc.navigationHistory.canGoForward()
+        });
+      })
+    );
+    wc.on(
+      'dom-ready',
+      guard(() => {
+        sendToChrome('tab-dom-ready', { wcId, tabWcId: wcId });
+      })
+    );
+    wc.on(
+      'found-in-page',
+      guard((_event, result) => {
+        const findOverlay = registry.getWindowForGuest(wcId)?.findOverlay;
+        if (!findOverlay || !findOverlay.isSessionActive(wcId)) return;
+        const overlayView = findOverlay.getView();
+        if (!overlayView || overlayView.webContents.isDestroyed()) return;
+        overlayView.webContents.send?.('find-overlay:count', {
+          activeMatchOrdinal: result.activeMatchOrdinal,
+          matches: result.matches
+        });
+      })
+    );
   }
 
   return { wireGuestContents, wireTabViewEvents };

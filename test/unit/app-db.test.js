@@ -145,9 +145,9 @@ test('open() on an empty temp dir creates app.db at user_version=3 with ALL THRE
       assert.equal(uv.user_version, 3, 'a fresh profile lands directly on CURRENT_VERSION, never pausing mid-ladder');
 
       const names = new Set(
-        /** @type {any[]} */ (
-          check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
-        ).map((r) => r.name)
+        /** @type {any[]} */ (check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).map(
+          (r) => r.name
+        )
       );
       assert.ok(names.has('documents'), 'sqlite_master should contain the documents table');
       assert.ok(names.has('cookie_seen'), 'sqlite_master should contain the cookie_seen table');
@@ -197,11 +197,11 @@ test('ladder: a hand-crafted v1 fixture (documents rows present, no cookie_seen/
     // test to actually exercise the ladder, not just round-trip it).
     const seed = new DatabaseSync(dbPath);
     seed.exec('PRAGMA journal_mode = WAL');
-    seed.exec(
-      'CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)'
-    );
+    seed.exec('CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)');
     seed.exec('PRAGMA user_version = 1');
-    seed.prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)').run('settings', '{"a":1}', 1000);
+    seed
+      .prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)')
+      .run('settings', '{"a":1}', 1000);
     seed.prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)').run('jars', '{"b":2}', 2000);
     seed.close();
 
@@ -239,7 +239,15 @@ test('ladder: a hand-crafted v1 fixture (documents rows present, no cookie_seen/
     assert.doesNotThrow(() => cookieSeen.insertIfAbsent('jarA', 'sid', 'example.com', '/', 5000));
     const bookmarks = store.createBookmarksStore();
     assert.doesNotThrow(() =>
-      bookmarks.insert({ id: 'bm-1', jarId: 'jarA', url: 'https://example.com/', title: 'T', icon: null, position: 0, addedAt: 1 })
+      bookmarks.insert({
+        id: 'bm-1',
+        jarId: 'jarA',
+        url: 'https://example.com/',
+        title: 'T',
+        icon: null,
+        position: 0,
+        addedAt: 1
+      })
     );
     store.close();
   } finally {
@@ -252,17 +260,13 @@ test('ladder: a hand-crafted v2 fixture (cookie_seen present, no bookmarks table
   try {
     const dbPath = path.join(dir, 'app.db');
     const seed = new DatabaseSync(dbPath);
-    seed.exec(
-      'CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)'
-    );
+    seed.exec('CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)');
     seed.exec(
       'CREATE TABLE cookie_seen (jar_id TEXT NOT NULL, name TEXT NOT NULL, domain TEXT NOT NULL, path TEXT NOT NULL, first_seen_ms INTEGER NOT NULL, PRIMARY KEY (jar_id, name, domain, path))'
     );
-    seed.prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)').run(
-      'bookmarks',
-      '{"version":1,"bookmarks":[{"id":"legacy","url":"https://legacy.example/"}]}',
-      1000
-    );
+    seed
+      .prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)')
+      .run('bookmarks', '{"version":1,"bookmarks":[{"id":"legacy","url":"https://legacy.example/"}]}', 1000);
     seed.prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)').run('settings', '{}', 1000);
     seed.exec('PRAGMA user_version = 2');
     seed.close();
@@ -294,7 +298,15 @@ test('ladder: an already-v3 file re-opens as a no-op (no re-create, no data loss
     store.open(dir);
     store.createDocumentStore('settings').write('{"kept":true}', 1000);
     store.createCookieSeenStore().insertIfAbsent('jarA', 'sid', 'example.com', '/', 5000);
-    store.createBookmarksStore().insert({ id: 'bm-1', jarId: 'jarA', url: 'https://example.com/', title: 'T', icon: null, position: 0, addedAt: 1 });
+    store.createBookmarksStore().insert({
+      id: 'bm-1',
+      jarId: 'jarA',
+      url: 'https://example.com/',
+      title: 'T',
+      icon: null,
+      position: 0,
+      addedAt: 1
+    });
     store.close();
 
     const store2 = freshStore();
@@ -354,7 +366,15 @@ test('ladder: in-memory mode ({ memory: true }) also runs the ladder from 0 stra
   store.createDocumentStore('settings').write('{}', 1); // exercise the doc store post-ladder
   // Bookmarks factory must be fully live in memory mode too (leg Edge Case).
   const bookmarks = store.createBookmarksStore();
-  bookmarks.insert({ id: 'bm-1', jarId: 'jarA', url: 'https://example.com/', title: 'T', icon: null, position: 0, addedAt: 1 });
+  bookmarks.insert({
+    id: 'bm-1',
+    jarId: 'jarA',
+    url: 'https://example.com/',
+    title: 'T',
+    icon: null,
+    position: 0,
+    addedAt: 1
+  });
   assert.equal(bookmarks.listByJar('jarA').length, 1);
   store.close();
 });
@@ -370,16 +390,16 @@ test('ladder step-failure resume: a v2 file whose v3 step fails (pre-seeded conf
   try {
     const dbPath = path.join(dir, 'app.db');
     const seed = new DatabaseSync(dbPath);
-    seed.exec(
-      'CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)'
-    );
+    seed.exec('CREATE TABLE documents (store TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)');
     seed.exec(
       'CREATE TABLE cookie_seen (jar_id TEXT NOT NULL, name TEXT NOT NULL, domain TEXT NOT NULL, path TEXT NOT NULL, first_seen_ms INTEGER NOT NULL, PRIMARY KEY (jar_id, name, domain, path))'
     );
     // A pre-existing, non-corrupt, incompatible `bookmarks` table — the v3
     // step's CREATE TABLE collides (errcode 1, SQLITE_ERROR — not 11/26).
     seed.exec('CREATE TABLE bookmarks (nope TEXT)');
-    seed.prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)').run('settings', '{"kept":true}', 1000);
+    seed
+      .prepare('INSERT INTO documents (store, payload, updated_at) VALUES (?, ?, ?)')
+      .run('settings', '{"kept":true}', 1000);
     seed.exec('PRAGMA user_version = 2');
     seed.close();
 
@@ -387,7 +407,11 @@ test('ladder step-failure resume: a v2 file whose v3 step fails (pre-seeded conf
     assert.throws(
       () => store.open(dir),
       (err) => {
-        assert.equal(/** @type {any} */ (err).appDbMigrationFailure, true, 'a non-corruption ladder throw must be tagged');
+        assert.equal(
+          /** @type {any} */ (err).appDbMigrationFailure,
+          true,
+          'a non-corruption ladder throw must be tagged'
+        );
         return true;
       }
     );
@@ -403,7 +427,9 @@ test('ladder step-failure resume: a v2 file whose v3 step fails (pre-seeded conf
     try {
       const uv = /** @type {any} */ (check.prepare('PRAGMA user_version').get());
       assert.equal(uv.user_version, 2, 'the file stays durably at its last committed version');
-      const settingsRow = /** @type {any} */ (check.prepare("SELECT payload FROM documents WHERE store = 'settings'").get());
+      const settingsRow = /** @type {any} */ (
+        check.prepare("SELECT payload FROM documents WHERE store = 'settings'").get()
+      );
       assert.equal(settingsRow.payload, '{"kept":true}', 'sibling data is untouched by the rolled-back step');
     } finally {
       check.close();
@@ -457,7 +483,10 @@ test('errcode pin: a garbage-bytes ("not a database") file throws errcode 26 and
     const store = freshStore();
     assert.doesNotThrow(() => store.open(dir));
     const entries = fs.readdirSync(dir);
-    assert.ok(entries.some((f) => f.startsWith('app.db.corrupt-')), 'errcode 26 is corruption-class — quarantines');
+    assert.ok(
+      entries.some((f) => f.startsWith('app.db.corrupt-')),
+      'errcode 26 is corruption-class — quarantines'
+    );
     store.close();
   } finally {
     removeTempDir(dir);
@@ -493,7 +522,10 @@ test('errcode pin: an inflated header page-count ("disk image is malformed") fil
     const store = freshStore();
     assert.doesNotThrow(() => store.open(dir));
     const entries = fs.readdirSync(dir);
-    assert.ok(entries.some((f) => f.startsWith('app.db.corrupt-')), 'errcode 11 is corruption-class — quarantines');
+    assert.ok(
+      entries.some((f) => f.startsWith('app.db.corrupt-')),
+      'errcode 11 is corruption-class — quarantines'
+    );
     store.close();
   } finally {
     removeTempDir(dir);
@@ -510,7 +542,11 @@ test('classification predicate: a table-collision-shaped error (errcode 1) is ta
     caught = err;
   }
   assert.ok(caught, 'the collision must throw');
-  assert.equal(/** @type {any} */ (caught).errcode, 1, 'errcode 1 (SQLITE_ERROR) is not in the corruption set {11, 26}');
+  assert.equal(
+    /** @type {any} */ (caught).errcode,
+    1,
+    'errcode 1 (SQLITE_ERROR) is not in the corruption set {11, 26}'
+  );
   inner.close();
 });
 
@@ -818,7 +854,10 @@ test('cookieSeen.deleteByIdentity: removes exactly the matching row; a non-match
     assert.equal(cookieSeen.deleteByIdentity('jarA', 'nope', 'example.com', '/'), false, 'no matching row');
     assert.equal(cookieSeen.deleteByIdentity('jarA', 'sid', 'example.com', '/'), true);
     assert.equal(cookieSeen.selectExpired('jarA', 5000).length, 0);
-    assert.doesNotThrow(() => cookieSeen.deleteByIdentity('jarA', 'sid', 'example.com', '/'), 'delete-again is a no-op');
+    assert.doesNotThrow(
+      () => cookieSeen.deleteByIdentity('jarA', 'sid', 'example.com', '/'),
+      'delete-again is a no-op'
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -888,7 +927,10 @@ test('bookmarks: methods throw "app db not open" before open()', () => {
   assert.throws(() => bookmarks.findByUrl('jarA', 'https://x/'), /app db not open/);
   assert.throws(() => bookmarks.countByJar('jarA'), /app db not open/);
   assert.throws(() => bookmarks.insert(makeRow()), /app db not open/);
-  assert.throws(() => bookmarks.update('jarA', 'bm-1', { url: 'https://x/', title: null, icon: null }), /app db not open/);
+  assert.throws(
+    () => bookmarks.update('jarA', 'bm-1', { url: 'https://x/', title: null, icon: null }),
+    /app db not open/
+  );
   assert.throws(() => bookmarks.remove('jarA', 'bm-1'), /app db not open/);
   assert.throws(() => bookmarks.reorderPositions('jarA', ['bm-1']), /app db not open/);
   assert.throws(() => bookmarks.clearJar('jarA'), /app db not open/);
@@ -904,8 +946,15 @@ test('bookmarks.listByJar: position-ordered (DD2), independent per jar', () => {
     b.insert(makeRow({ id: 'b', url: 'https://b.example/', position: 0 }));
     b.insert(makeRow({ id: 'other-jar', jarId: 'jarB', url: 'https://a.example/', position: 0 }));
 
-    assert.deepEqual(b.listByJar('jarA').map((r) => r.id), ['b', 'a'], 'ORDER BY position ASC');
-    assert.deepEqual(b.listByJar('jarB').map((r) => r.id), ['other-jar']);
+    assert.deepEqual(
+      b.listByJar('jarA').map((r) => r.id),
+      ['b', 'a'],
+      'ORDER BY position ASC'
+    );
+    assert.deepEqual(
+      b.listByJar('jarB').map((r) => r.id),
+      ['other-jar']
+    );
     assert.deepEqual(b.listByJar('unknown-jar'), []);
     store.close();
   } finally {
@@ -920,8 +969,14 @@ test('bookmarks: the (jar_id, url) unique index permits the SAME url in DIFFEREN
     store.open(dir);
     const b = store.createBookmarksStore();
     b.insert(makeRow({ id: 'a', jarId: 'jarA', url: 'https://same.example/' }));
-    assert.doesNotThrow(() => b.insert(makeRow({ id: 'b', jarId: 'jarB', url: 'https://same.example/' })), 'same url, different jar is legal — the feature\'s core claim');
-    assert.throws(() => b.insert(makeRow({ id: 'c', jarId: 'jarA', url: 'https://same.example/', position: 1 })), 'same url, same jar violates the unique index');
+    assert.doesNotThrow(
+      () => b.insert(makeRow({ id: 'b', jarId: 'jarB', url: 'https://same.example/' })),
+      "same url, different jar is legal — the feature's core claim"
+    );
+    assert.throws(
+      () => b.insert(makeRow({ id: 'c', jarId: 'jarA', url: 'https://same.example/', position: 1 })),
+      'same url, same jar violates the unique index'
+    );
     store.close();
   } finally {
     removeTempDir(dir);
@@ -945,7 +1000,7 @@ test('bookmarks.findById / findByUrl: jar-scoped — the id/url alone never auth
   }
 });
 
-test('bookmarks.countByJar counts only that jar\'s rows', () => {
+test("bookmarks.countByJar counts only that jar's rows", () => {
   const dir = makeTempDir();
   try {
     const store = freshStore();
@@ -970,11 +1025,18 @@ test('bookmarks.update: rewrites url/title/icon for the jar-scoped row; a wrong-
     store.open(dir);
     const b = store.createBookmarksStore();
     b.insert(makeRow({ id: 'a', jarId: 'jarA', url: 'https://a.example/', title: 'Old', icon: null }));
-    assert.equal(b.update('jarA', 'a', { url: 'https://a.example/', title: 'New', icon: 'data:image/png;base64,X' }), true);
+    assert.equal(
+      b.update('jarA', 'a', { url: 'https://a.example/', title: 'New', icon: 'data:image/png;base64,X' }),
+      true
+    );
     const row = b.findById('jarA', 'a');
     assert.equal(row.title, 'New');
     assert.equal(row.icon, 'data:image/png;base64,X');
-    assert.equal(b.update('jarB', 'a', { url: 'https://a.example/', title: 'Nope', icon: null }), false, 'wrong jar — no row matched');
+    assert.equal(
+      b.update('jarB', 'a', { url: 'https://a.example/', title: 'Nope', icon: null }),
+      false,
+      'wrong jar — no row matched'
+    );
   } finally {
     removeTempDir(dir);
   }
@@ -1007,8 +1069,15 @@ test('bookmarks.reorderPositions: rewrites positions in ONE transaction (L2-DD-A
     b.insert(makeRow({ id: 'c', jarId: 'jarA', url: 'https://c.example/', position: 2 }));
     b.reorderPositions('jarA', ['c', 'a', 'b']);
     const rows = b.listByJar('jarA');
-    assert.deepEqual(rows.map((r) => r.id), ['c', 'a', 'b']);
-    assert.deepEqual(rows.map((r) => r.position), [0, 1, 2], 'gap-free 0..n-1');
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ['c', 'a', 'b']
+    );
+    assert.deepEqual(
+      rows.map((r) => r.position),
+      [0, 1, 2],
+      'gap-free 0..n-1'
+    );
     store.close();
   } finally {
     removeTempDir(dir);
