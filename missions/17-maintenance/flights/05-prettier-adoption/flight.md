@@ -1,11 +1,11 @@
 # Flight: Prettier Adoption
 
-**Status**: in-flight
+**Status**: landed
 **Mission**: [Codebase Health — 2026-08-27 Maintenance](../../mission.md)
 
 ## Contributing to Criteria
 
-- [ ] Prettier is enforced in CI: `prettier --check .` is clean on `main` and runs in both CI definitions; the `renderer.js` line budget is re-based on the formatted size and both budgets still guard growth (criterion 7)
+- [x] Prettier is enforced in CI: `prettier --check .` is clean on `main` and runs in both CI definitions; the `renderer.js` line budget is re-based on the formatted size and both budgets still guard growth (criterion 7)
 
 ---
 
@@ -188,7 +188,7 @@ lint`/typecheck/test green.
       and 1040 → 1077 (pin metric) recorded in the flight log
 - [x] CP2: suite green at 3839/3839 (corrected baseline); all twelve pins
       neuter-verified, four independently by the Reviewer
-- [ ] CP3 (after Leg 1's PR merges): `format:check` wired in both CI
+- [x] CP3 (after Leg 1's PR merges): `format:check` wired in both CI
       definitions and passing in a Concourse task run; `ci/tasks/lint.yml`
       header, `ci/README.md` row, CLAUDE.md Commands + Patterns updated;
       `.git-blame-ignore-revs` carries Leg 1's squash sha
@@ -208,8 +208,9 @@ the pin's metric); a pin outside the Recon list needing the same treatment.
 - [x] `format-and-repin` - the reformat, the twelve matcher fixes, the
       renderer.js budget re-base (1650 → 1827); all gates green — landed
       2026-08-27
-- [ ] `ci-format-gate` - `format:check` script, both CI definitions,
-      `.git-blame-ignore-revs` scaffold, CLAUDE.md / docs
+- [x] `ci-format-gate` - `format:check` script, both CI definitions,
+      `.git-blame-ignore-revs` with Leg 1's squash sha, CLAUDE.md / docs —
+      landed 2026-08-27
 
 ---
 
@@ -217,13 +218,13 @@ the pin's metric); a pin outside the Recon list needing the same treatment.
 
 ### Completion Checklist
 
-- [ ] All legs completed
-- [ ] Code merged
-- [ ] Tests passing
-- [ ] Documentation updated
-- [ ] Both PR numbers recorded in the flight log; `.git-blame-ignore-revs`
-      holds Leg 1's squash sha (DD4)
-- [ ] Squawk 0039 disposition annotated with the landing PRs
+- [x] All legs completed
+- [x] Code merged
+- [x] Tests passing
+- [x] Documentation updated
+- [x] Both PR numbers recorded in the flight log (#182, Leg 2's on merge);
+      `.git-blame-ignore-revs` holds Leg 1's squash sha `339e808` (DD4)
+- [x] Squawk 0039 disposition annotated with the landing PRs
 
 ### Verification
 

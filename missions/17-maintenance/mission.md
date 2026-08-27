@@ -50,9 +50,9 @@ and are not part of this mission.
 - [ ] `manager.json` KDF parameters are validated on read with a ruled
       legacy-compat policy, and a fresh-profile bundle adopt forces recovery
       and admin key rotation before the profile is usable (F2, F8)
-- [ ] Prettier is enforced: `prettier --check .` is clean on `main` and runs in
+- [x] Prettier is enforced: `prettier --check .` is clean on `main` and runs in
       both CI definitions; the `renderer.js` line budget is re-based on the
-      formatted size and both budgets still guard growth (escalated from squawk 0039; Flight 5)
+      formatted size and both budgets still guard growth *(Flight 5, 2026-08-27)* (escalated from squawk 0039; Flight 5)
 - [ ] All existing gates stay green throughout (suite, typecheck, lint;
       `npm run a11y` where UI pages are touched)
 
@@ -117,7 +117,7 @@ and the next mission's crew. N/A beyond that.
 - [ ] Flight 4: **Vault trust-boundary hardening** — `validateImportedKdf`
       from `_readManager` with a legacy-compat ruling (F2); forced
       `rotateRecovery` + `rotateAdminKey` after a fresh adopt (F8)
-- [ ] Flight 5: **Prettier adoption** — one-time reformat under the existing
+- [x] Flight 5: **Prettier adoption** *(landed 2026-08-27 — PRs #182 + Leg 2)* — one-time reformat under the existing
       `.prettierrc`, `renderer.js` budget re-based 1650 → 1829 (measured by the
       pin's metric), the 12 broken source-text pins re-targeted without weakening, `format:check`
       wired into both CI definitions (escalated from squawk 0039; no

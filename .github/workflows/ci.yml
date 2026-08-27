@@ -47,6 +47,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Format check
+        run: npm run format:check
+
       # Audit-gate triage policy: a high here is actionable ONLY by updating the
       # offending dependency — never by lowering --audit-level or deleting this step.
       # Distinguish a high in the dev-only tree (e.g. electron-builder's transitive

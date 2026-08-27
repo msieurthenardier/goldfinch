@@ -1,0 +1,7 @@
+# Commits listed here are skipped by `git blame` so mechanical, no-semantic-
+# change commits (large reformats, mass renames) don't obscure the commit
+# that actually introduced a line. Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub also reads this file automatically for blame views on this repo.
+
+339e808f229d342c114467d0142499d8cffc3eb7 # flight/05 leg 1 — Prettier reformat (#182)

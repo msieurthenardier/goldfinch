@@ -44,3 +44,5 @@ A Developer ran `npm run format` on merged main `c1a6695`: all 318 files formatt
 What the flight has to decide: (a) tune `.prettierrc` toward the current house style (a larger `printWidth` would remove most of the rewrapping and likely keep the budgets intact — measure the delta first); or (b) keep Prettier defaults, re-base the two line budgets on the formatted sizes, and re-pin the 13 matchers. Either way the CI wiring (`format:check` script in `ci/tasks/lint.yml` and `.github/workflows/ci.yml`) is the same one-line addition and can ride along.
 
 → [Mission 17 Flight 5: Prettier Adoption](../missions/17-maintenance/flights/05-prettier-adoption/flight.md) — planned 2026-08-27. The flight's spike found option (a) not achievable (no Prettier setting preserves one-line function bodies; `printWidth` 100–160 all leave 318–355 files and `renderer.js` at 1774–1871 lines); operator chose (b). Operator ruling to enforce stands.
+
+**Landed**: Flight 5 flew 2026-08-27 — Leg 1 (reformat + re-pin) PR #182, squash `339e808`; Leg 2 (CI gate, `.git-blame-ignore-revs`, docs) in the following PR. `prettier --check .` is now a CI gate in both definitions.
