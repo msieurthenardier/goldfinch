@@ -117,7 +117,7 @@ and the next mission's crew. N/A beyond that.
 - [ ] Flight 4: **Vault trust-boundary hardening** — `validateImportedKdf`
       from `_readManager` with a legacy-compat ruling (F2); forced
       `rotateRecovery` + `rotateAdminKey` after a fresh adopt (F8)
-- [x] Flight 5: **Prettier adoption** *(landed 2026-08-27 — PRs #182 + Leg 2)* — one-time reformat under the existing
+- [x] Flight 5: **Prettier adoption** *(completed 2026-08-27 — PRs #182, #184; debriefed)* — one-time reformat under the existing
       `.prettierrc`, `renderer.js` budget re-based 1650 → 1829 (measured by the
       pin's metric), the 12 broken source-text pins re-targeted without weakening, `format:check`
       wired into both CI definitions (escalated from squawk 0039; no
